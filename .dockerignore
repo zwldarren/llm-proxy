@@ -1,0 +1,45 @@
+.git
+.gitignore
+.gitattributes
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+.coverage.*
+.pytest_cache
+.tox
+.venv
+env
+venv
+ENV
+env.bak
+venv.bak
+.DS_Store
+.idea
+.vscode
+
+# Secrets & local state
+.env
+.env.*
+!.env.example
+*.db
+*.swp
+*.swo
+*~
+
+# Docker
+Dockerfile
+docker-compose*.yaml
+
+# Documentation
+*.md
+!src/**/*.md
+!README.md
+
+# Frontend
+frontend/node_modules
+frontend/dist

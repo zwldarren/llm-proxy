@@ -1,0 +1,1921 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "vue-sonner/style.css";
+
+@plugin "@tailwindcss/typography";
+
+/* ========================================
+ * Font Fallback Metrics
+ * Minimize layout shift during font loading
+ * ======================================== */
+@font-face {
+  font-family: "Manrope Fallback";
+  src: local("Segoe UI"), local("Arial");
+  size-adjust: 103.5%;
+  ascent-override: 92%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Space Grotesk Fallback";
+  src: local("Segoe UI"), local("Arial");
+  size-adjust: 106%;
+  ascent-override: 88%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono Fallback";
+  src: local("Consolas"), local("Monaco");
+  size-adjust: 98%;
+  ascent-override: 94%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+}
+
+@custom-variant dark (&:is(.dark *));
+@custom-variant group-hover (&:is(:where(.group):hover *));
+@custom-variant group-focus (&:is(:where(.group):focus *));
+@custom-variant group-focus-within (&:is(:where(.group):focus-within *));
+@custom-variant group-active (&:is(:where(.group):active *));
+@custom-variant group-disabled (&:is(:where(.group):disabled *));
+@custom-variant group-data-disabled (&:is(:where(.group)[data-disabled] *));
+
+@theme {
+  /* ========================================
+	 * Typography Tokens
+	 * ======================================== */
+  /* Space Grotesk + Manrope + Noto Sans SC with metric-matched fallbacks */
+  --font-sans: "Manrope", "Manrope Fallback", "Noto Sans SC", "Segoe UI", sans-serif;
+  --font-mono:
+    "IBM Plex Mono", "IBM Plex Mono Fallback", "JetBrains Mono", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  --font-display: "Space Grotesk", "Space Grotesk Fallback", "Noto Sans SC", "Manrope", sans-serif;
+
+  /* ========================================
+	 * Typography Scale - Semantic Type System
+	 * ========================================
+	 * Using a modular scale with 1.25 ratio (Major Third)
+	 * Base: 16px (1rem)
+	 * App UI requires fixed rem-based scale for spatial predictability
+	 */
+
+  /* Font sizes - semantic naming */
+  --text-xs: 0.75rem;
+  /* 12px - Captions, metadata, badges */
+  --text-sm: 0.875rem;
+  /* 14px - Secondary text, labels */
+  --text-base: 1rem;
+  /* 16px - Body text (minimum for readability) */
+  --text-lg: 1.125rem;
+  /* 18px - Lead text, emphasized body */
+  --text-xl: 1.25rem;
+  /* 20px - Subheadings, large labels */
+  --text-2xl: 1.5rem;
+  /* 24px - Page headings */
+  --text-3xl: 2rem;
+  /* 32px - Display headlines */
+
+  /* Line heights - context appropriate */
+  /* Note: Dark mode adds 0.05-0.1 for light-on-dark readability */
+  --leading-none: 1;
+  /* Headings, single line text */
+  --leading-tight: 1.25;
+  /* Compact UI elements */
+  --leading-snug: 1.375;
+  /* Navigation, buttons */
+  --leading-normal: 1.5;
+  /* Body text default */
+  --leading-relaxed: 1.625;
+  /* Long-form reading */
+  --leading-loose: 1.75;
+  /* Very readable text */
+
+  /* Font weights - consistent naming (limit to 4 weights for performance) */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  /* Letter spacing */
+  --tracking-tight: -0.02em;
+  /* Display headlines */
+  --tracking-normal: 0;
+  /* Body text */
+  --tracking-wide: 0.02em;
+  /* Uppercase, small text */
+
+  /* ========================================
+	 * Opacity Tokens (for consistent color alphas)
+	 * ======================================== */
+  --opacity-subtle: 0.05;
+  --opacity-light: 0.1;
+  --opacity-medium: 0.15;
+  --opacity-strong: 0.2;
+  --opacity-focus: 0.3;
+  --opacity-muted: 0.5;
+  --opacity-semi: 0.7;
+  --opacity-overlay: 0.8;
+
+  /* Overlay color (black) - for modal/sheet backdrops */
+  --overlay: 0 0% 0%;
+
+  /* ========================================
+	 * Gradient Tokens (for consistent backgrounds)
+	 * ======================================== */
+  --gradient-primary-subtle: linear-gradient(
+    to bottom right,
+    hsl(var(--primary) / var(--opacity-medium)),
+    hsl(var(--primary) / var(--opacity-subtle))
+  );
+  --gradient-primary-light: linear-gradient(
+    to bottom right,
+    hsl(var(--primary) / var(--opacity-light)),
+    hsl(var(--primary) / var(--opacity-subtle))
+  );
+  --gradient-primary-fade: linear-gradient(
+    to right,
+    hsl(var(--primary) / var(--opacity-light)),
+    transparent
+  );
+
+  /* Action color gradients */
+  --gradient-action-blue: linear-gradient(
+    to bottom right,
+    hsl(var(--action-blue) / var(--opacity-medium)),
+    hsl(var(--action-blue) / var(--opacity-subtle))
+  );
+  --gradient-status-success: linear-gradient(
+    to bottom right,
+    hsl(var(--status-success) / var(--opacity-medium)),
+    hsl(var(--status-success) / var(--opacity-subtle))
+  );
+  --gradient-action-amber: linear-gradient(
+    to bottom right,
+    hsl(var(--action-amber) / var(--opacity-medium)),
+    hsl(var(--action-amber) / var(--opacity-subtle))
+  );
+  --gradient-action-rose: linear-gradient(
+    to bottom right,
+    hsl(var(--action-rose) / var(--opacity-medium)),
+    hsl(var(--action-rose) / var(--opacity-subtle))
+  );
+
+  /* ========================================
+	 * Ring/Border Tokens
+	 * ======================================== */
+  --ring-primary: hsl(var(--primary) / var(--opacity-strong));
+  --ring-primary-light: hsl(var(--primary) / var(--opacity-light));
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  /* Action colors */
+  --color-action-violet: hsl(var(--action-violet));
+  --color-action-blue: hsl(var(--action-blue));
+  --color-action-amber: hsl(var(--action-amber));
+  --color-action-rose: hsl(var(--action-rose));
+  --color-action-teal: hsl(var(--action-teal));
+
+  /* JSON and Syntax Highlighting colors */
+  --color-json-string: hsl(var(--json-string));
+  --color-json-number: hsl(var(--json-number));
+  --color-json-boolean: hsl(var(--json-boolean));
+  --color-json-null: hsl(var(--json-null));
+  --color-json-key: hsl(var(--json-key));
+  --color-json-keyword: hsl(var(--json-keyword));
+  --color-json-function: hsl(var(--json-function));
+
+  /* Code block colors */
+  --color-code-bg: hsl(var(--code-bg));
+  --color-code-header-bg: hsl(var(--code-header-bg));
+  --color-code-border: hsl(var(--code-border));
+
+  /* HTTP method colors */
+  --color-http-get: hsl(var(--http-get));
+  --color-http-post: hsl(var(--http-post));
+  --color-http-put: hsl(var(--http-put));
+  --color-http-delete: hsl(var(--http-delete));
+
+  /* Error colors */
+  --color-error-light: hsl(var(--error-light));
+  --color-error-dark: hsl(var(--error-dark));
+
+  /* Success colors */
+  --color-success-light: hsl(var(--success-light));
+  --color-success-dark: hsl(var(--success-dark));
+
+  /* Status colors */
+  --color-status-success: hsl(var(--status-success));
+  --color-status-warning: hsl(var(--status-warning));
+  --color-status-error: hsl(var(--status-error));
+  --color-status-unknown: hsl(var(--status-unknown));
+
+  /* Cache colors - grayscale */
+  --color-cache-creation: 0 0% 35%;
+  --color-cache-read: 0 0% 50%;
+}
+
+:root {
+  /*
+	 * Light Mode - Monochrome Editorial Theme
+	 * Crisp black & white with cool-neutral grays
+	 */
+  --background: 220 3% 98.5%;
+  --foreground: 220 8% 5%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 220 8% 5%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 8% 5%;
+
+  --primary: 220 8% 5%;
+  --primary-foreground: 0 0% 98.5%;
+
+  --secondary: 220 5% 96%;
+  --secondary-foreground: 220 6% 18%;
+
+  --muted: 220 4% 94%;
+  --muted-foreground: 220 4% 38%;
+
+  --accent: 220 5% 91%;
+  --accent-foreground: 220 6% 18%;
+
+  --destructive: 4 48% 46%;
+  --destructive-foreground: 0 0% 98.5%;
+
+  --border: 220 4% 88%;
+  --input: 220 4% 85%;
+  --ring: 220 8% 5%;
+
+  --radius: 0.75rem;
+
+  /* Sidebar - crisp light sidebar */
+  --sidebar: 220 5% 97.5%;
+  --sidebar-foreground: 220 6% 12%;
+  --sidebar-primary: 220 8% 5%;
+  --sidebar-primary-foreground: 0 0% 98.5%;
+  --sidebar-accent: 220 4% 93%;
+  --sidebar-accent-foreground: 220 6% 18%;
+  --sidebar-border: 220 4% 89%;
+  --sidebar-ring: 220 8% 5%;
+
+  /* Action colors - muted but perceptible hue tints (chroma raised so the
+   * semantic hues actually differentiate; lightness preserved for contrast).
+   * Low-saturation by design, no longer "barely perceptible". */
+  --action-violet: 260 22% 9%;
+  --action-blue: 210 22% 35%;
+  --action-amber: 35 24% 38%;
+  --action-rose: 350 26% 45%;
+  --action-teal: 180 24% 30%;
+
+  /* HTTP method colors - muted tinted hues mirroring the action palette */
+  --http-get: 210 22% 35%;
+  --http-post: 260 22% 9%;
+  --http-put: 35 24% 48%;
+  --http-delete: 350 26% 45%;
+
+  /* Error colors - desaturated but recognizable brick red */
+  --error-light: 4 45% 45%;
+  --error-dark: 4 48% 32%;
+
+  /* Success colors - desaturated but recognizable forest green */
+  --success-light: 150 42% 34%;
+  --success-dark: 150 45% 27%;
+
+  /* Status colors - muted but distinguishable */
+  --status-success: var(--success-light);
+  --status-warning: 32 42% 42%;
+  --status-error: var(--error-light);
+  --status-unknown: 220 3% 45%;
+
+  /* JSON syntax highlighting colors - subtle differentiation */
+  --json-string: 145 60% 34%;
+  --json-number: 210 65% 40%;
+  --json-boolean: 350 60% 44%;
+  --json-null: 220 15% 42%;
+  --json-key: 220 20% 25%;
+  --json-keyword: 260 60% 45%;
+  --json-function: 200 70% 38%;
+
+  /* Code block colors - progressive light grey theme */
+  --code-bg: 220 6% 96%;
+  --code-header-bg: 220 6% 92.5%;
+  --code-border: 220 8% 86%;
+}
+
+.dark {
+  /*
+	 * Dark Mode - Monochrome Editorial Theme
+	 * Deep cool-neutral dark tones with crisp whites
+	 */
+  --background: 220 12% 4%;
+  --foreground: 0 0% 96%;
+
+  --card: 220 10% 9%;
+  --card-foreground: 0 0% 96%;
+
+  --popover: 220 10% 9%;
+  --popover-foreground: 0 0% 96%;
+
+  --primary: 0 0% 98%;
+  --primary-foreground: 220 15% 8%;
+
+  --secondary: 220 10% 13%;
+  --secondary-foreground: 0 0% 93%;
+
+  --muted: 220 9% 15%;
+  --muted-foreground: 220 5% 62%;
+
+  --accent: 220 10% 18%;
+  --accent-foreground: 0 0% 93%;
+
+  --destructive: 4 52% 52%;
+  --destructive-foreground: 0 0% 98%;
+
+  --border: 220 10% 22%;
+  --input: 220 10% 22%;
+  --ring: 0 0% 98%;
+
+  /* Sidebar - deep dark with crisp text */
+  --sidebar: 220 14% 7%;
+  --sidebar-foreground: 0 0% 92%;
+  --sidebar-primary: 0 0% 98%;
+  --sidebar-primary-foreground: 220 15% 8%;
+  --sidebar-accent: 220 12% 15%;
+  --sidebar-accent-foreground: 0 0% 94%;
+  --sidebar-border: 220 12% 20%;
+  --sidebar-ring: 0 0% 98%;
+
+  /* Action colors - muted but perceptible hue tints (chroma raised so the
+   * semantic hues differentiate on dark surfaces while staying clearly muted). */
+  /* Verify WCAG contrast: these values must meet 4.5:1 against dark surfaces */
+  --action-violet: 260 24% 80%;
+  --action-blue: 210 26% 64%;
+  --action-amber: 35 28% 60%;
+  --action-rose: 350 28% 64%;
+  --action-teal: 180 26% 62%;
+
+  /* HTTP method colors (dark mode) - muted tinted lights mirroring the action palette */
+  --http-get: 210 26% 64%;
+  --http-post: 260 24% 80%;
+  --http-put: 35 28% 60%;
+  --http-delete: 350 28% 64%;
+
+  /* Error colors (dark mode) - desaturated but recognizable salmon/rose */
+  --error-light: 4 48% 62%;
+  --error-dark: 4 52% 72%;
+
+  /* Success colors (dark mode) - desaturated but recognizable mint/sage */
+  --success-light: 150 38% 48%;
+  --success-dark: 150 42% 58%;
+
+  /* Status colors (dark mode) - muted but distinguishable */
+  --status-success: var(--success-dark);
+  --status-warning: 32 42% 58%;
+  --status-error: var(--error-dark);
+  --status-unknown: 220 5% 58%;
+
+  /* JSON syntax highlighting colors (dark mode) - subtle differentiation */
+  --json-string: 145 55% 66%;
+  --json-number: 210 65% 68%;
+  --json-boolean: 350 70% 72%;
+  --json-null: 220 15% 58%;
+  --json-key: 220 20% 78%;
+  --json-keyword: 260 70% 76%;
+  --json-function: 200 75% 68%;
+
+  /* Code block colors (dark mode) - progressive deep dark theme */
+  --code-bg: 220 10% 8%;
+  --code-header-bg: 220 10% 11.5%;
+  --code-border: 220 10% 18%;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    position: relative;
+    min-height: 100vh;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Smooth theme transitions - scoped to theme-relevant properties */
+  :root,
+  .bg-background,
+  .bg-card,
+  .bg-muted,
+  .bg-sidebar,
+  .text-foreground,
+  .text-muted-foreground,
+  .border-border {
+    @apply transition-colors duration-200;
+  }
+
+  /* Exclude certain elements from theme transitions */
+  img,
+  video,
+  canvas,
+  svg,
+  .loading-spinner,
+  [class*="animate-"] {
+    transition: none !important;
+  }
+
+  /* Respect user's motion preferences */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Custom transition for theme-specific elements */
+  .theme-transition {
+    transition:
+      background-color 200ms ease,
+      border-color 200ms ease,
+      color 200ms ease;
+  }
+
+  /* Brand atmosphere layers - monochrome */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(circle at 6% -8%, hsl(var(--foreground) / 0.08) 0%, transparent 42%),
+      radial-gradient(circle at 92% 10%, hsl(var(--foreground) / 0.06) 0%, transparent 38%),
+      radial-gradient(circle at 50% 100%, hsl(var(--foreground) / 0.05) 0%, transparent 44%);
+    pointer-events: none;
+    z-index: -2;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, hsl(var(--foreground) / 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--foreground) / 0.035) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: radial-gradient(circle at 50% 30%, black 42%, transparent 92%);
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .dark body::before {
+    background:
+      radial-gradient(circle at 12% -10%, hsl(var(--foreground) / 0.12) 0%, transparent 46%),
+      radial-gradient(circle at 90% 0%, hsl(var(--foreground) / 0.08) 0%, transparent 40%),
+      radial-gradient(circle at 55% 100%, hsl(var(--foreground) / 0.06) 0%, transparent 48%);
+  }
+
+  .dark body::after {
+    background-image:
+      linear-gradient(to right, hsl(var(--foreground) / 0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--foreground) / 0.025) 1px, transparent 1px);
+    opacity: 0.45;
+  }
+
+  /* Dark mode typography adjustments - increase line-height for light-on-dark text */
+  .dark body {
+    line-height: 1.55;
+  }
+
+  .dark .text-body {
+    line-height: 1.6;
+  }
+
+  .dark .text-secondary {
+    line-height: 1.55;
+  }
+
+  .dark .text-caption {
+    line-height: 1.35;
+  }
+}
+
+/* Group utility for parent-child hover/focus states */
+@utility group {
+  --tw-group: 1;
+}
+
+/* Custom Utilities - Simplified */
+@utility glass {
+  @apply bg-card border border-border;
+}
+
+/* Settings Panel Animations */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes slide-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Settings panel slide animation classes with GPU acceleration */
+.settings-panel-enter-active {
+  animation: slide-in-right 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.settings-panel-leave-active {
+  animation: slide-out-right 0.25s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+  will-change: transform, opacity;
+}
+
+/* Settings panel overlay */
+.settings-overlay-enter-active {
+  animation: fade-in 0.25s ease-out forwards;
+  will-change: opacity;
+}
+
+.settings-overlay-leave-active {
+  animation: fade-out 0.15s ease-in forwards;
+  will-change: opacity;
+}
+
+/* Reusable Component Utilities */
+@layer components {
+  /* Card container - simplified hover with containment for performance */
+  .card-container {
+    @apply rounded-xl border border-border bg-card shadow-xs;
+    transition: border-color 0.15s ease;
+    contain: layout style;
+  }
+  .card-container:hover {
+    @apply border-border/80;
+  }
+
+  /* Form group layout */
+  .form-group {
+    @apply flex flex-col gap-2;
+  }
+
+  /* Loading state container */
+  .loading-state {
+    @apply flex flex-col items-center gap-2 py-12 text-muted-foreground;
+  }
+
+  /* Empty state container */
+  .empty-state {
+    @apply flex flex-col items-center gap-2 py-12 text-muted-foreground;
+  }
+
+  /* Page header title */
+  .page-title {
+    @apply text-2xl font-bold tracking-tight text-foreground;
+  }
+
+  /* Page header description */
+  .page-description {
+    @apply text-muted-foreground;
+  }
+
+  /* Table header cell with consistent styling */
+  .table-head-cell {
+    @apply font-medium text-foreground whitespace-nowrap;
+  }
+
+  /* Table cell with monospace font */
+  .table-cell-mono {
+    @apply font-mono text-xs text-muted-foreground;
+  }
+
+  /* Icon button in tables/lists */
+  .icon-btn-muted {
+    @apply text-muted-foreground hover:text-foreground;
+  }
+
+  /* Code/JSON textarea background */
+  .code-textarea {
+    @apply font-mono text-xs bg-muted/50;
+  }
+
+  /* Range slider — used by Smart Routing mode-weight sliders.
+     The input carries `appearance-none` (which strips the native thumb) plus
+     this class; the thumb/track are restyled here so the control isn't left
+     thumbless. Tokens are raw HSL channels, so wrap them in hsl() here. */
+  .range-thumb {
+    accent-color: hsl(var(--primary));
+  }
+  .range-thumb::-webkit-slider-runnable-track {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: hsl(var(--muted));
+  }
+  .range-thumb::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--background));
+    background: hsl(var(--primary));
+    box-shadow: 0 1px 2px color-mix(in srgb, hsl(var(--primary)) 40%, transparent);
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .range-thumb:hover::-webkit-slider-thumb {
+    transform: scale(1.12);
+  }
+  .range-thumb:active::-webkit-slider-thumb {
+    transform: scale(0.96);
+  }
+  .range-thumb:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 2px hsl(var(--background)),
+      0 0 0 4px hsl(var(--ring));
+  }
+  .range-thumb::-moz-range-track {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: hsl(var(--muted));
+  }
+  .range-thumb::-moz-range-thumb {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--background));
+    background: hsl(var(--primary));
+    box-shadow: 0 1px 2px color-mix(in srgb, hsl(var(--primary)) 40%, transparent);
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .range-thumb:hover::-moz-range-thumb {
+    transform: scale(1.12);
+  }
+  .range-thumb:active::-moz-range-thumb {
+    transform: scale(0.96);
+  }
+  .range-thumb:focus-visible::-moz-range-thumb {
+    box-shadow:
+      0 0 0 2px hsl(var(--background)),
+      0 0 0 4px hsl(var(--ring));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .range-thumb::-webkit-slider-thumb,
+    .range-thumb::-moz-range-thumb {
+      transition: none;
+    }
+    .range-thumb:hover::-webkit-slider-thumb,
+    .range-thumb:active::-webkit-slider-thumb,
+    .range-thumb:hover::-moz-range-thumb,
+    .range-thumb:active::-moz-range-thumb {
+      transform: none;
+    }
+  }
+
+  /* Base card styling - used by all card-based layouts */
+  .card-base {
+    @apply overflow-hidden rounded-xl border border-border bg-card shadow-xs;
+  }
+
+  /* ========================================
+	 * Design System Gradient Utilities
+	 * ======================================== */
+  /* Primary color gradient backgrounds */
+  .gradient-primary {
+    background: var(--gradient-primary-subtle);
+  }
+  .gradient-primary-light {
+    background: var(--gradient-primary-light);
+  }
+  .gradient-primary-fade {
+    background: var(--gradient-primary-fade);
+  }
+
+  /* Action color gradients */
+  .gradient-blue {
+    background: var(--gradient-action-blue);
+  }
+  .gradient-success {
+    background: var(--gradient-status-success);
+  }
+  .gradient-amber {
+    background: var(--gradient-action-amber);
+  }
+  .gradient-rose {
+    background: var(--gradient-action-rose);
+  }
+
+  /* Reusable action button style */
+  .btn-action {
+    @apply transition-[color,background-color,border-color,box-shadow] duration-200;
+  }
+
+  /* Icon button - standard size and hover effect */
+  .btn-icon {
+    @apply h-8 w-8;
+  }
+
+  /* Filter bar container */
+  .filter-bar {
+    @apply flex flex-col sm:flex-row gap-3 p-4 border-b bg-muted/30;
+  }
+
+  /* Page content section wrapper */
+  .page-section {
+    @apply space-y-4 md:space-y-6;
+  }
+
+  .brand-main-shell {
+    @apply bg-background;
+  }
+
+  .brand-panel {
+    @apply rounded-xl border border-border bg-card shadow-sm;
+  }
+
+  .brand-heading {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+
+  .brand-kicker {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-primary;
+  }
+
+  /* Error banner styling */
+  .error-banner {
+    @apply p-4 rounded-lg shadow-sm bg-error-light/10 dark:bg-error-dark/10 border border-error-light/20 dark:border-error-dark/30;
+  }
+
+  .error-title {
+    @apply text-sm font-bold mb-2 flex items-center gap-2 text-error-light/80 dark:text-error-dark/90;
+  }
+
+  .error-message {
+    @apply text-sm font-mono whitespace-pre-wrap text-error-light/70 dark:text-error-dark/80;
+  }
+
+  .error-detail-label {
+    @apply text-xs font-medium text-error-light/70 dark:text-error-dark/80;
+  }
+
+  .error-detail-value {
+    @apply text-xs font-mono text-error-light/60 dark:text-error-dark/70;
+  }
+
+  .error-border-top {
+    @apply mt-4 pt-4 border-t border-error-light/20 dark:border-error-dark/30;
+  }
+
+  .error-code-block {
+    @apply mt-1 overflow-x-auto p-2 rounded-md border bg-white dark:bg-black/20 border-error-light/15 dark:border-error-dark/20;
+  }
+
+  .pagination-bar {
+    @apply flex items-center justify-end space-x-2 py-4 pr-2;
+  }
+
+  .card-flat {
+    @apply bg-card border border-border rounded-xl overflow-hidden;
+  }
+
+  /* Shared select style for TTS model/voice dropdowns */
+
+  .icon-container {
+    @apply p-2.5 rounded-xl bg-linear-to-br from-primary/20 via-primary/10 to-action-blue/12 ring-1 ring-primary/30 min-h-11 min-w-11 flex items-center justify-center shadow-[inset_0_1px_0_hsl(var(--primary)/0.26)];
+  }
+
+  .table-row-hover {
+    @apply cursor-pointer hover:bg-muted/50 transition-colors;
+  }
+
+  .action-group {
+    @apply flex items-center gap-3;
+  }
+
+  .status-banner {
+    @apply p-4 rounded-lg shadow-sm border;
+  }
+
+  .input-with-icon {
+    @apply relative flex-1;
+  }
+
+  .input-icon {
+    @apply absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none;
+  }
+
+  .input-with-icon input {
+    @apply pl-9;
+  }
+
+  .section-header {
+    @apply pb-4 border-b border-border/50;
+  }
+
+  .table-scrollable {
+    @apply border rounded-xl overflow-hidden;
+  }
+
+  .table-scrollable-inner {
+    @apply overflow-auto max-h-[50vh];
+  }
+
+  .table-header-sticky {
+    @apply sticky top-0 bg-muted/95 backdrop-blur-sm;
+  }
+
+  /* Modern table styling */
+  .table-modern tbody tr {
+    @apply transition-colors duration-150;
+  }
+
+  .table-modern tbody tr:hover {
+    @apply bg-muted/50;
+  }
+
+  .table-modern tbody tr:last-child {
+    @apply border-b-0;
+  }
+
+  /* Console layout — management pages (Providers, API Keys, Models, MCP Servers)
+   * Sticky header bar + flush toolbar band + scrollable content area.
+   * Replaces the old "card wrapping card" outer Card shell.
+   *
+   * Surface treatment: one solid bg-background across header / toolbar / thead,
+   * separated only by hairline border-b/60 dividers. No competing translucency —
+   * the bars read as a single seamless surface, with table rows sitting on the
+   * faint page tint (bg-muted/5 on <main>). */
+  .config-header-bar {
+    @apply flex-none bg-background z-10 border-b border-border/60;
+  }
+
+  .config-toolbar {
+    @apply flex-none bg-background border-b border-border/60;
+  }
+
+  .config-content {
+    @apply flex-1 overflow-hidden;
+  }
+
+  /* Sticky table header for the flush console tables — pinned while body scrolls.
+   * Solid bg-background so it reads as the same surface as the header/toolbar.
+   * Header cells get a deliberate treatment: a muted band plus a stronger 2px
+   * bottom rule, so the label row reads as a distinct boundary above the data
+   * (clearer than the 1px row separators). Overrides the default TableHead cell
+   * styling via the data-slot selector for reliable specificity. */
+  .config-thead {
+    @apply sticky top-0 z-10 bg-background;
+  }
+
+  .config-thead [data-slot="table-head"] {
+    @apply bg-muted/50 border-b-2 border-border/70;
+  }
+
+  /* Scrollable wrapper used by the list view inside the console content area */
+  .config-scroll {
+    @apply h-full overflow-y-auto;
+  }
+
+  /* Compact list view container — flush and borderless, mirroring the table
+   * view's surface so the two modes read as one family. Rows carry their own
+   * border-b separators, the primary left-accent on hover, and the page gutter
+   * (px-4 sm:px-6); the container adds no chrome of its own. */
+  .config-list {
+    @apply bg-transparent;
+  }
+  .config-list > *:last-child {
+    @apply border-b-0;
+  }
+
+  /* List row entrance stagger — mirrors .row-stagger but targets direct
+   * children of any element (list rows are <article>/<div>, not <tr>, so a
+   * slight physical rise is safe here; table rows stay opacity-only). */
+  .list-stagger > * {
+    animation: list-item-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  .list-stagger > *:nth-child(1) {
+    animation-delay: 30ms;
+  }
+  .list-stagger > *:nth-child(2) {
+    animation-delay: 60ms;
+  }
+  .list-stagger > *:nth-child(3) {
+    animation-delay: 90ms;
+  }
+  .list-stagger > *:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .list-stagger > *:nth-child(5) {
+    animation-delay: 150ms;
+  }
+  .list-stagger > *:nth-child(6) {
+    animation-delay: 180ms;
+  }
+  .list-stagger > *:nth-child(7) {
+    animation-delay: 210ms;
+  }
+  .list-stagger > *:nth-child(8) {
+    animation-delay: 240ms;
+  }
+  .list-stagger > *:nth-child(n + 9) {
+    animation-delay: 270ms;
+  }
+
+  /* Console page entrance — coordinated fade+rise for the whole console block
+   * (header + toolbar + content). Re-triggered on each activation by AppLayout
+   * (onActivated), so revisiting a config page always animates instead of
+   * snapping in. The class is removed again on animationend to drop the
+   * transform and avoid a lingering containing block for descendants. */
+  .config-page-reveal {
+    animation: config-page-rise 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    will-change: transform, opacity;
+  }
+
+  @keyframes config-page-rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Table row entrance stagger — opacity-only fade on first render. Applied to
+   * <TableBody class="row-stagger">; targets direct <tr> children. First render
+   * only (KeepAlive'd rows don't remount on revisit). The global
+   * prefers-reduced-motion rule near the top of this file neutralizes it. */
+  .row-stagger > tr {
+    animation: row-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  .row-stagger > tr:nth-child(1) {
+    animation-delay: 30ms;
+  }
+  .row-stagger > tr:nth-child(2) {
+    animation-delay: 60ms;
+  }
+  .row-stagger > tr:nth-child(3) {
+    animation-delay: 90ms;
+  }
+  .row-stagger > tr:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .row-stagger > tr:nth-child(5) {
+    animation-delay: 150ms;
+  }
+  .row-stagger > tr:nth-child(6) {
+    animation-delay: 180ms;
+  }
+  .row-stagger > tr:nth-child(7) {
+    animation-delay: 210ms;
+  }
+  .row-stagger > tr:nth-child(8) {
+    animation-delay: 240ms;
+  }
+  .row-stagger > tr:nth-child(n + 9) {
+    animation-delay: 270ms;
+  }
+
+  @keyframes row-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes list-item-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Value swap — used by ValueSwap.vue for metric values that change in place
+   * (e.g. dashboard numbers after a date-range change). Exit is faster than
+   * entrance; both stay transform/opacity-only and are neutralized by the
+   * global prefers-reduced-motion rule. */
+  .value-swap-enter-active {
+    transition:
+      opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .value-swap-leave-active {
+    transition:
+      opacity 0.12s ease-in,
+      transform 0.12s ease-in;
+  }
+  .value-swap-enter-from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  .value-swap-leave-to {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  /* Responsive table - hide columns on mobile */
+  .table-responsive {
+    @apply w-full;
+  }
+
+  .table-responsive th,
+  .table-responsive td {
+    @apply whitespace-nowrap;
+  }
+
+  /* Hide less important columns on small screens */
+  .hide-on-mobile {
+    @apply hidden lg:table-cell;
+  }
+
+  .hide-on-tablet {
+    @apply hidden md:table-cell;
+  }
+
+  /* Touch-friendly table cells - 44px minimum for accessibility */
+  .table-cell-touch {
+    @apply min-h-11 min-w-11;
+  }
+
+  .number-display {
+    @apply text-2xl font-bold;
+  }
+
+  .card-grid-3 {
+    @apply grid grid-cols-1 md:grid-cols-3 gap-4;
+  }
+
+  .card-grid-2 {
+    @apply grid gap-4 md:gap-6 grid-cols-1 lg:grid-cols-2;
+  }
+
+  .card-grid-4 {
+    @apply grid gap-4 grid-cols-2 lg:grid-cols-4;
+  }
+
+  .loading-container {
+    @apply flex items-center justify-center py-12;
+  }
+
+  .loading-spinner {
+    @apply w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin;
+  }
+
+  .empty-container {
+    @apply flex items-center justify-center py-20 border border-dashed border-border rounded-xl;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border border-transparent;
+  }
+
+  /* Code/JSON content container - consistent styling for code blocks */
+  .code-container {
+    @apply bg-muted/50 rounded-lg border border-border overflow-x-auto;
+  }
+
+  /* Hover card with smooth transition and containment */
+  .hover-card {
+    @apply rounded-xl border border-border bg-card transition-all duration-200 hover:border-primary/40;
+    contain: layout style;
+  }
+
+  /* Navigation item base style - note: add 'group' class directly in HTML, not via @apply */
+  .nav-item {
+    @apply relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200;
+  }
+
+  .brand-stat-card {
+    @apply rounded-xl border border-border bg-background p-3;
+  }
+
+  /* Standardized border opacity for cards and containers */
+  .card-border {
+    @apply border border-border/50;
+  }
+
+  /* Standardized button sizes */
+  .btn-sm {
+    @apply h-8;
+  }
+
+  .btn-md {
+    @apply h-9;
+  }
+
+  .btn-lg {
+    @apply h-10;
+  }
+
+  /* Standardized card radius */
+  .card-radius {
+    @apply rounded-xl;
+  }
+
+  /* Standardized button radius */
+  .btn-radius {
+    @apply rounded-lg;
+  }
+
+  /* Keyboard navigation focus ring utility */
+  .focus-visible-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Dark mode: use lighter ring offset for visibility on dark backgrounds */
+  .dark .focus-visible-ring {
+    --tw-ring-offset-color: 0 0% 20%;
+  }
+
+  /* Text overflow prevention */
+  .wrap-break-word {
+    @apply wrap-break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* Flex item that can shrink below content size */
+  .flex-min-zero {
+    @apply min-w-0 min-h-0;
+  }
+
+  /* Multi-line text clamp with ellipsis
+   * Consider using Tailwind's native line-clamp utilities instead.
+   * Remove if @tailwindcss/line-clamp or Tailwind v3.3+ is available. */
+
+  /* DEPRECATED: Use Tailwind v4's built-in `hyphens-auto` utility instead.
+   * Remove after all usages are migrated. */
+  .hyphenate {
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    -ms-hyphens: auto;
+  }
+
+  /* DEPRECATED: Use Tailwind v4's built-in `min-w-0 min-h-0` utilities instead.
+   * Remove after all usages are migrated. */
+  .overflow-container {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* DEPRECATED: Use Tailwind v4's built-in `break-all` utility instead.
+   * Remove after all usages are migrated. */
+  .break-all-words {
+    word-break: break-all;
+    /* overflow-wrap: break-word is redundant when word-break: break-all is set */
+  }
+
+  /* ========================================
+	 * RTL / Logical Property Utilities
+	 * ======================================== */
+  [dir="rtl"] .rtl-mirror {
+    transform: scaleX(-1);
+  }
+
+  /* ========================================
+	 * Overlay Utilities
+	 * ======================================== */
+  /* Modal/sheet overlay backdrop */
+  .overlay-backdrop {
+    background-color: hsl(var(--overlay) / var(--opacity-overlay));
+  }
+
+  /* Lighter overlay for mobile panels */
+  .overlay-light {
+    background-color: hsl(var(--overlay) / var(--opacity-medium));
+  }
+
+  /* ========================================
+	 * Responsive Utilities
+	 * ======================================== */
+  /* Container query utilities for component-level responsiveness */
+  @container (min-width: 640px) {
+    .\@sm\:block {
+      display: block;
+    }
+    .\@sm\:hidden {
+      display: none;
+    }
+    .\@sm\:flex {
+      display: flex;
+    }
+    .\@sm\:grid {
+      display: grid;
+    }
+  }
+
+  @container (min-width: 768px) {
+    .\@md\:block {
+      display: block;
+    }
+    .\@md\:hidden {
+      display: none;
+    }
+    .\@md\:flex {
+      display: flex;
+    }
+    .\@md\:grid {
+      display: grid;
+    }
+  }
+
+  @container (min-width: 1024px) {
+    .\@lg\:block {
+      display: block;
+    }
+    .\@lg\:hidden {
+      display: none;
+    }
+    .\@lg\:flex {
+      display: flex;
+    }
+    .\@lg\:grid {
+      display: grid;
+    }
+  }
+
+  /* Mobile-first responsive text sizing */
+  .text-responsive-base {
+    @apply text-base sm:text-base md:text-lg;
+  }
+
+  .text-responsive-sm {
+    @apply text-sm sm:text-sm md:text-base;
+  }
+
+  .text-responsive-xs {
+    @apply text-xs sm:text-xs md:text-sm;
+  }
+
+  /* Responsive spacing */
+  .spacing-responsive-sm {
+    @apply gap-2 sm:gap-3 md:gap-4;
+  }
+
+  .spacing-responsive-md {
+    @apply gap-3 sm:gap-4 md:gap-6;
+  }
+
+  .spacing-responsive-lg {
+    @apply gap-4 sm:gap-6 md:gap-8;
+  }
+
+  /* Responsive padding */
+  .padding-responsive-sm {
+    @apply p-3 sm:p-4 md:p-5;
+  }
+
+  .padding-responsive-md {
+    @apply p-4 sm:p-5 md:p-6;
+  }
+
+  .padding-responsive-lg {
+    @apply p-5 sm:p-6 md:p-8;
+  }
+
+  /* Animation utilities using tw-animate-css with GPU acceleration */
+  .animate-fade-in {
+    animation: fade-in 0.25s ease-out;
+    will-change: opacity;
+  }
+
+  .animate-fade-out {
+    animation: fade-out 0.15s ease-in;
+    will-change: opacity;
+  }
+
+  .animate-slide-in-up {
+    animation: slide-in-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .animate-slide-in-down {
+    animation: slide-in-down 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .animate-slide-in-left {
+    animation: slide-in-left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .animate-zoom-in {
+    animation: zoom-in 0.15s ease-out;
+    will-change: transform, opacity;
+  }
+
+  .animate-zoom-out {
+    animation: zoom-out 0.15s ease-in;
+    will-change: transform, opacity;
+  }
+
+  .animate-spin-slow {
+    animation: spin 3s linear infinite;
+    will-change: transform;
+  }
+
+  .animate-pulse-soft {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    will-change: opacity;
+  }
+
+  /* ========================================
+	 * Staggered Animation Utilities
+	 * Apply to parent container for cascade effect
+	 * ======================================== */
+  .stagger-children {
+    contain: layout style;
+  }
+  .stagger-children > * {
+    animation: stagger-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    will-change: transform, opacity;
+  }
+  .stagger-children > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .stagger-children > *:nth-child(2) {
+    animation-delay: 50ms;
+  }
+  .stagger-children > *:nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .stagger-children > *:nth-child(4) {
+    animation-delay: 150ms;
+  }
+  .stagger-children > *:nth-child(5) {
+    animation-delay: 200ms;
+  }
+  .stagger-children > *:nth-child(6) {
+    animation-delay: 250ms;
+  }
+  .stagger-children > *:nth-child(7) {
+    animation-delay: 300ms;
+  }
+  .stagger-children > *:nth-child(8) {
+    animation-delay: 350ms;
+  }
+  .stagger-children > *:nth-child(9) {
+    animation-delay: 400ms;
+  }
+  .stagger-children > *:nth-child(10) {
+    animation-delay: 450ms;
+  }
+
+  /* Faster stagger for smaller elements */
+  .stagger-fast > * {
+    animation: stagger-fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    will-change: transform, opacity;
+  }
+  .stagger-fast > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .stagger-fast > *:nth-child(2) {
+    animation-delay: 30ms;
+  }
+  .stagger-fast > *:nth-child(3) {
+    animation-delay: 60ms;
+  }
+  .stagger-fast > *:nth-child(4) {
+    animation-delay: 90ms;
+  }
+  .stagger-fast > *:nth-child(5) {
+    animation-delay: 120ms;
+  }
+  .stagger-fast > *:nth-child(6) {
+    animation-delay: 150ms;
+  }
+
+  @keyframes stagger-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ========================================
+	 * Display Typography - Elegant headlines
+	 * ======================================== */
+  .text-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  .text-display-lg {
+    font-family: var(--font-display);
+    font-size: 3rem;
+    line-height: 1.1;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  .text-display-xl {
+    font-family: var(--font-display);
+    font-size: 4rem;
+    line-height: 1;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  /* Italic variant for visual interest */
+  .text-display-italic {
+    font-family: var(--font-display);
+    font-style: italic;
+  }
+
+  /* ========================================
+	 * Typography Utilities - Semantic Patterns
+	 * ======================================== */
+  /* Page/section headings - H1 */
+  .text-heading {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
+  }
+
+  /* Subheadings - H2 */
+  .text-subheading {
+    font-size: var(--text-xl);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-normal);
+    line-height: var(--leading-snug);
+  }
+
+  /* Card titles, form sections - H3 */
+  .text-title {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-normal);
+    line-height: var(--leading-snug);
+  }
+
+  /* Body text - primary reading */
+  .text-body {
+    font-size: var(--text-base);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-normal);
+    line-height: var(--leading-normal);
+  }
+
+  /* Secondary text, descriptions */
+  .text-secondary {
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-normal);
+    line-height: var(--leading-normal);
+  }
+
+  /* Captions, metadata, badges */
+  .text-caption {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    letter-spacing: var(--tracking-wide);
+    line-height: var(--leading-tight);
+  }
+
+  /* Code and technical values */
+  .text-code {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: 0;
+    line-height: var(--leading-normal);
+  }
+
+  .text-code-xs {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    letter-spacing: 0;
+    line-height: var(--leading-normal);
+  }
+
+  /* Data/numbers with tabular alignment */
+  .text-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    letter-spacing: 0;
+  }
+
+  /* Compact data readouts (telemetry chips, run specimens) — mono + tabular at the xs scale */
+  .text-data-xs {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    letter-spacing: 0;
+  }
+
+  /* Large numbers for stats/metrics */
+  .text-metric {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+
+  /* Label styling for form elements */
+  .text-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    letter-spacing: var(--tracking-normal);
+    line-height: var(--leading-tight);
+  }
+
+  /* Text measure constraint - optimal line length for readability */
+  .text-measure {
+    max-width: 65ch;
+  }
+
+  /* Prose container for long-form content */
+  .text-prose {
+    max-width: 70ch;
+    line-height: var(--leading-relaxed);
+  }
+
+  /* ========================================
+	 * Subtle Micro-interactions
+	 * ======================================== */
+  /* Button press effect - simplified */
+  .btn-press {
+    transition: transform 0.1s ease;
+  }
+  .btn-press:active {
+    transform: scale(0.98);
+  }
+
+  /* ========================================
+	 * Page-specific styles
+	 * ======================================== */
+  /* Login page background pattern */
+  .login-bg {
+    position: relative;
+  }
+  .login-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, hsl(var(--primary) / 0.09) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--primary) / 0.09) 1px, transparent 1px);
+    background-size: 34px 34px;
+    opacity: 0.45;
+    mask-image: radial-gradient(circle at 50% 20%, black 35%, transparent 90%);
+    pointer-events: none;
+  }
+  /* Soft ambient glow behind the auth mark */
+  .login-bg::after {
+    content: "";
+    position: absolute;
+    top: 18%;
+    left: 50%;
+    width: 620px;
+    height: 620px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(
+      circle,
+      hsl(var(--primary) / 0.12) 0%,
+      hsl(var(--action-blue) / 0.06) 38%,
+      transparent 68%
+    );
+    filter: blur(8px);
+    pointer-events: none;
+  }
+
+  /* Auth screen — containerless floating form */
+  .auth-mark {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--primary) / 0.16) 0%,
+      hsl(var(--primary) / 0.06) 52%,
+      hsl(var(--action-blue) / 0.12) 100%
+    );
+    box-shadow:
+      0 18px 36px -20px hsl(var(--primary) / 0.55),
+      inset 0 1px 0 hsl(var(--foreground) / 0.06);
+  }
+  .auth-input {
+    background-color: hsl(var(--card) / 0.62);
+    backdrop-filter: blur(10px);
+    border-color: hsl(var(--border) / 0.7);
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .auth-input::placeholder {
+    color: hsl(var(--muted-foreground) / 0.7);
+  }
+  .auth-input:hover:not(:disabled) {
+    border-color: hsl(var(--border));
+  }
+  .auth-input:focus {
+    background-color: hsl(var(--background) / 0.92);
+    border-color: hsl(var(--primary) / 0.55);
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.18);
+  }
+
+  /* Chat typing indicator - smooth exponential ease-out */
+  .typing-dot {
+    animation: typing-pulse 1.4s infinite cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+  .typing-dot:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-pulse {
+    0%,
+    60%,
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    30% {
+      transform: translateY(-4px);
+      opacity: 0.7;
+    }
+  }
+
+  /* Sidebar accent line */
+  .sidebar-accent::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      hsl(var(--sidebar-primary) / 0.42) 20%,
+      hsl(var(--sidebar-primary) / 0.72) 50%,
+      hsl(var(--sidebar-primary) / 0.42) 80%,
+      transparent
+    );
+  }
+
+  /* ========================================
+	 * Color-Enhanced Section Cards
+	 * ======================================== */
+  /* Primary/Cyan section - Overview, Usage, Logs */
+  .section-card-primary {
+    @apply rounded-xl border border-primary/20 bg-linear-to-br from-primary/8 via-card/95 to-card;
+    box-shadow: 0 8px 24px -16px hsl(var(--primary) / 0.25);
+  }
+
+  /* Action Blue section - Tools, Chat, Images */
+  .section-card-blue {
+    @apply rounded-xl border border-action-blue/20 bg-linear-to-br from-action-blue/8 via-card/95 to-card;
+    box-shadow: 0 8px 24px -16px hsl(var(--action-blue) / 0.25);
+  }
+
+  /* Action Amber section - Config, Settings */
+  .section-card-amber {
+    @apply rounded-xl border border-action-amber/20 bg-linear-to-br from-action-amber/8 via-card/95 to-card;
+    box-shadow: 0 8px 24px -16px hsl(var(--action-amber) / 0.2);
+  }
+
+  /* Success/Health section */
+  .section-card-success {
+    @apply rounded-xl border border-status-success/20 bg-linear-to-br from-status-success/8 via-card/95 to-card;
+    box-shadow: 0 8px 24px -16px hsl(var(--status-success) / 0.2);
+  }
+
+  /* ========================================
+	 * Color-Tinted Icon Containers
+	 * ======================================== */
+  .icon-container-primary {
+    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
+    background: linear-gradient(135deg, hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.05));
+    box-shadow: inset 0 1px 0 hsl(var(--primary) / 0.2);
+    ring-color: hsl(var(--primary) / 0.25);
+  }
+
+  .icon-container-blue {
+    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
+    background: linear-gradient(
+      135deg,
+      hsl(var(--action-blue) / 0.15),
+      hsl(var(--action-blue) / 0.05)
+    );
+    box-shadow: inset 0 1px 0 hsl(var(--action-blue) / 0.2);
+    ring-color: hsl(var(--action-blue) / 0.25);
+  }
+
+  .icon-container-amber {
+    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
+    background: linear-gradient(
+      135deg,
+      hsl(var(--action-amber) / 0.15),
+      hsl(var(--action-amber) / 0.05)
+    );
+    box-shadow: inset 0 1px 0 hsl(var(--action-amber) / 0.2);
+    ring-color: hsl(var(--action-amber) / 0.25);
+  }
+
+  .icon-container-success {
+    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
+    background: linear-gradient(
+      135deg,
+      hsl(var(--status-success) / 0.15),
+      hsl(var(--status-success) / 0.05)
+    );
+    box-shadow: inset 0 1px 0 hsl(var(--status-success) / 0.2);
+    ring-color: hsl(var(--status-success) / 0.25);
+  }
+
+  /* ========================================
+	 * Colored Metric Values
+	 * ======================================== */
+  .metric-primary {
+    @apply font-mono text-2xl font-bold text-primary tabular-nums;
+  }
+
+  .metric-blue {
+    @apply font-mono text-2xl font-bold text-action-blue tabular-nums;
+  }
+
+  .metric-amber {
+    @apply font-mono text-2xl font-bold text-action-amber tabular-nums;
+  }
+
+  .metric-success {
+    @apply font-mono text-2xl font-bold text-status-success tabular-nums;
+  }
+
+  .metric-rose {
+    @apply font-mono text-2xl font-bold text-action-rose tabular-nums;
+  }
+
+  /* ========================================
+	 * Colored Hover Glow Effects
+	 * ======================================== */
+  .hover-glow-primary {
+    @apply transition-all duration-200;
+  }
+
+  .hover-glow-primary:hover {
+    box-shadow: 0 0 20px -6px hsl(var(--primary) / 0.4);
+  }
+
+  .hover-glow-blue {
+    @apply transition-all duration-200;
+  }
+
+  .hover-glow-blue:hover {
+    box-shadow: 0 0 20px -6px hsl(var(--action-blue) / 0.4);
+  }
+
+  .hover-glow-amber {
+    @apply transition-all duration-200;
+  }
+
+  .hover-glow-amber:hover {
+    box-shadow: 0 0 20px -6px hsl(var(--action-amber) / 0.35);
+  }
+
+  .hover-glow-success {
+    @apply transition-all duration-200;
+  }
+
+  .hover-glow-success:hover {
+    box-shadow: 0 0 20px -6px hsl(var(--status-success) / 0.35);
+  }
+}
+
+/* Dark mode: invert mono icons so they remain visible on dark backgrounds */
+.dark .icon-mono {
+  filter: brightness(0) invert(1);
+}

@@ -1,0 +1,8 @@
+dist
+dist-ssr
+coverage
+node_modules
+components.d.ts
+*.min.js
+*.min.css
+bun.lock

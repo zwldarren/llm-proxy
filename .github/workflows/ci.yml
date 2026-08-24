@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  PYTEST_RUNNING: "1"
+  JWT_SECRET: "ci-test-jwt-secret-at-least-32-characters!!"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+      - name: Install Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync
+      - name: Ruff check
+        run: uv run ruff check
+      - name: Ruff format check
+        run: uv run ruff format --check
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+      - name: Install Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync
+      - name: Type check
+        run: uv run ty check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+      - name: Install Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync
+      - name: Run tests
+        run: uv run pytest

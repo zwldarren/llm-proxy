@@ -1,0 +1,214 @@
+"""Provider configuration API endpoints."""
+
+import asyncio
+from typing import Any
+
+from fastapi import APIRouter, Depends, Path, Request
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from llm_proxy.api.dependencies import get_async_session_dep, require_admin_role
+from llm_proxy.api.routers.config.helpers import (
+    _extract_metadata_fields,
+    commit_and_reload,
+    get_config_repository,
+)
+from llm_proxy.api.routers.config.models import model_record_to_read
+from llm_proxy.api.schemas.admin import (
+    ProviderCreate,
+    ProviderDetails,
+    ProviderRead,
+    ProviderTypeRead,
+    ProviderUpdate,
+)
+from llm_proxy.core.adapter import list_provider_types
+from llm_proxy.core.exceptions import ConflictError, NotFoundError, ValidationError
+from llm_proxy.http.client import validate_server_url
+from llm_proxy.observability.logger import get_logger
+
+logger = get_logger(__name__)
+
+router = APIRouter(
+    prefix="/providers", tags=["configuration"], dependencies=[Depends(require_admin_role)]
+)
+
+
+def provider_record_to_read(provider) -> ProviderRead:
+    """Convert a ProviderRecord to ProviderRead schema."""
+    remaining, extracted = _extract_metadata_fields(
+        provider.provider_metadata,
+        ["parameter_overrides", "endpoint_base_urls", "native_web_search"],
+    )
+
+    endpoint_base_urls = extracted.get("endpoint_base_urls")
+    endpoint_base_urls_typed = {}
+    if isinstance(endpoint_base_urls, dict):
+        endpoint_base_urls_typed = {
+            k: str(v) for k, v in endpoint_base_urls.items() if isinstance(v, str)
+        }
+
+    return ProviderRead(
+        id=provider.id,
+        name=provider.name,
+        type=provider.type,
+        base_url=provider.base_url,
+        api_key=provider.api_key or "",
+        api_version=provider.api_version,
+        timeout=provider.timeout,
+        rate_limit=provider.rate_limit,
+        custom_headers=provider.custom_headers or {},
+        provider_models=provider.provider_models or [],
+        enabled=provider.enabled,
+        priority=provider.priority,
+        provider_metadata=remaining or {},
+        parameter_overrides=extracted.get("parameter_overrides", {}),
+        endpoint_base_urls=endpoint_base_urls_typed,
+        native_web_search=extracted.get("native_web_search", False),
+        icon_url=provider.icon_url,
+    )
+
+
+def _validate_provider_urls(data: dict[str, Any]) -> None:
+    """Validate provider base_url, endpoint_base_urls, and icon_url for SSRF."""
+    base_url = data.get("base_url")
+    if base_url:
+        validate_server_url(base_url, label="provider base_url")
+
+    endpoint_base_urls = data.get("endpoint_base_urls")
+    if isinstance(endpoint_base_urls, dict):
+        for endpoint, url in endpoint_base_urls.items():
+            if url:
+                validate_server_url(
+                    str(url),
+                    label=f"endpoint base_url '{endpoint}'",
+                )
+
+    icon_url = data.get("icon_url")
+    if icon_url:
+        validate_server_url(icon_url, label="provider icon_url")
+
+
+async def _validate_provider_urls_async(data: dict[str, Any]) -> None:
+    """Async wrapper that runs SSRF validation in a thread.
+
+    DNS resolution is blocking, so offload it to avoid stalling the event loop
+    during infrequent admin configuration changes.
+    """
+    await asyncio.to_thread(_validate_provider_urls, data)
+
+
+@router.get("", response_model=list[ProviderRead])
+async def list_providers(
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+) -> list[ProviderRead]:
+    """List all providers."""
+    repo = get_config_repository(session)
+    providers = await repo.get_all_providers()
+    return [provider_record_to_read(p) for p in providers]
+
+
+@router.get("/provider-types", response_model=list[ProviderTypeRead])
+async def list_provider_types_endpoint(
+    request: Request,
+) -> list[ProviderTypeRead]:
+    """List available provider types with branding metadata.
+
+    Derived from the adapter registry (not from configured providers), so the
+    admin UI can render the create/edit type selector and the list filter
+    without a per-provider frontend list: adding a provider adapter is a
+    backend-only change.
+
+    Registered before the ``/{name:path}`` catch-all so the literal
+    ``provider-types`` path is not swallowed as a provider name.
+    """
+    return [ProviderTypeRead.model_validate(info) for info in list_provider_types()]
+
+
+@router.get("/{name:path}", response_model=ProviderDetails)
+async def get_provider(
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    name: str = Path(...),
+) -> ProviderDetails:
+    """Get a specific provider."""
+    repo = get_config_repository(session)
+    provider = await repo.get_provider_with_models(name)
+    if not provider:
+        raise NotFoundError(message=f"Provider '{name}' not found")
+
+    models_data = [model_record_to_read(m.model) for m in provider.model_provider_mappings]
+
+    return ProviderDetails(
+        **provider_record_to_read(provider).model_dump(),
+        models=models_data,
+    )
+
+
+@router.post("", response_model=ProviderRead)
+async def create_provider(
+    provider_data: ProviderCreate,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+) -> ProviderRead:
+    """Create a new provider."""
+    data = provider_data.model_dump()
+    await _validate_provider_urls_async(data)
+
+    repo = get_config_repository(session)
+    try:
+        provider = await repo.create_provider(**data)
+
+        await commit_and_reload(session, request)
+
+        return provider_record_to_read(provider)
+    except IntegrityError:
+        raise ConflictError(
+            message=(
+                f"Provider '{data.get('name')}' already exists. "
+                "Please use a unique name or update the existing provider."
+            ),
+        ) from None
+    except Exception as e:
+        logger.error(f"Failed to create provider '{data.get('name')}': {e}", exc_info=e)
+        raise ValidationError(
+            message=f"Failed to create provider: {e}",
+        ) from e
+
+
+@router.put("/{name:path}", response_model=ProviderRead)
+async def update_provider(
+    provider_data: ProviderUpdate,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    name: str = Path(...),
+) -> ProviderRead:
+    """Update a provider."""
+    data = provider_data.model_dump(exclude_unset=True)
+    await _validate_provider_urls_async(data)
+
+    repo = get_config_repository(session)
+    provider = await repo.update_provider(name, **data)
+    if not provider:
+        raise NotFoundError(message=f"Provider '{name}' not found")
+
+    await commit_and_reload(session, request)
+
+    return provider_record_to_read(provider)
+
+
+@router.delete("/{name:path}")
+async def delete_provider(
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    name: str = Path(...),
+) -> dict[str, str]:
+    """Delete a provider."""
+    repo = get_config_repository(session)
+    success = await repo.delete_provider(name)
+    if not success:
+        raise NotFoundError(message=f"Provider '{name}' not found")
+
+    await commit_and_reload(session, request)
+
+    return {"message": f"Provider '{name}' deleted successfully"}

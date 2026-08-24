@@ -1,0 +1,28 @@
+diff --git a/dist/FocusScope/FocusScope.cjs b/dist/FocusScope/FocusScope.cjs
+index f36ac084e072ab4e6f4afb6a78517f66569a189e..6a436f5a9f376d3ff586225316b9c90e4dfd749c 100644
+--- a/dist/FocusScope/FocusScope.cjs
++++ b/dist/FocusScope/FocusScope.cjs
+@@ -23,7 +23,8 @@ var FocusScope_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (0,
+ 		},
+ 		present: {
+ 			type: Boolean,
+-			required: false
++			required: false,
++			default: true
+ 		},
+ 		asChild: {
+ 			type: Boolean,
+diff --git a/dist/FocusScope/FocusScope.js b/dist/FocusScope/FocusScope.js
+index 5e4b68b991ba6a96272c33410284af22c0b4bf2e..2b1b781c3083138300e7ece7b7b2d21f68c3fba8 100644
+--- a/dist/FocusScope/FocusScope.js
++++ b/dist/FocusScope/FocusScope.js
+@@ -22,7 +22,8 @@ var FocusScope_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ def
+ 		},
+ 		present: {
+ 			type: Boolean,
+-			required: false
++			required: false,
++			default: true
+ 		},
+ 		asChild: {
+ 			type: Boolean,

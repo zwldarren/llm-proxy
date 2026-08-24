@@ -1,0 +1,101 @@
+"""Weighted ensemble over v2 signals with risk_tolerance control and optional calibration."""
+
+from typing import Protocol
+
+from llm_proxy.routing.types import EnsembleResult, TierVote
+
+
+class _Calibrator(Protocol):
+    """Minimal protocol for a Platt calibrator."""
+
+    def calibrate(self, raw: float) -> float: ...
+
+
+# When the ensemble predicts LOW with confidence below this threshold,
+# escalate to MID. Holdout retune: 0.55 was the best setting once
+# conditional Signal B activation was enabled for longer conversations.
+_LOW_ESCALATION_THRESHOLD = 0.55
+
+
+class Ensemble:
+    def __init__(
+        self,
+        weights: list[float],
+        risk_tolerance: float = 0.5,
+        direct_threshold: float = 0.55,
+        calibrator: _Calibrator | None = None,
+    ):
+        self._weights = weights
+        self._threshold = direct_threshold + (0.5 - risk_tolerance) * 0.3
+        self._calibrator = calibrator
+
+    def decide(self, votes: list[TierVote]) -> EnsembleResult:
+        if len(votes) != len(self._weights):
+            raise ValueError(f"Expected {len(self._weights)} votes, got {len(votes)}")
+        tier_scores = [0.0, 0.0, 0.0, 0.0]
+        total_weight = 0.0
+        confidence_weighted_sum = 0.0
+        confidence_nominal_weight = 0.0
+
+        for vote, weight in zip(votes, self._weights, strict=True):
+            if vote.tier_id is None:
+                continue
+            # Adaptive weighting: confidence² amplifies high-confidence signals
+            # A signal at 0.9 confidence gets 0.81 weight vs 0.49 at 0.7 (LENS 2025)
+            w = vote.confidence * vote.confidence * weight
+            tier_scores[vote.tier_id] += w
+            total_weight += w
+            confidence_weighted_sum += vote.confidence * weight
+            confidence_nominal_weight += weight
+
+        if total_weight == 0:
+            return EnsembleResult(
+                tier_id=None,
+                confidence=0.0,
+                raw_confidence=0.0,
+                method="abstain",
+                tier_scores=tier_scores,
+            )
+
+        normalized = [s / total_weight for s in tier_scores]
+        best_tier = max(range(4), key=lambda i: normalized[i])
+        signal_confidence = (
+            confidence_weighted_sum / confidence_nominal_weight
+            if confidence_nominal_weight > 0
+            else 0.0
+        )
+        raw_confidence = normalized[best_tier] * signal_confidence
+
+        # Apply calibration if available
+        confidence = raw_confidence
+        if self._calibrator is not None:
+            confidence = self._calibrator.calibrate(raw_confidence)
+
+        if confidence >= self._threshold:
+            # Low-confidence escalation: weaker LOW predictions are unreliable
+            # on ambiguous prompts. Bump to MID where a more capable model
+            # reduces hallucination risk.
+            if best_tier == 0 and confidence < _LOW_ESCALATION_THRESHOLD:
+                return EnsembleResult(
+                    tier_id=1,
+                    confidence=confidence,
+                    raw_confidence=raw_confidence,
+                    method="escalated",
+                    tier_scores=normalized,
+                )
+            return EnsembleResult(
+                tier_id=best_tier,
+                confidence=confidence,
+                raw_confidence=raw_confidence,
+                method="direct",
+                tier_scores=normalized,
+            )
+
+        safe_tier = min(best_tier + 1, 3)
+        return EnsembleResult(
+            tier_id=safe_tier,
+            confidence=confidence,
+            raw_confidence=raw_confidence,
+            method="conservative",
+            tier_scores=normalized,
+        )

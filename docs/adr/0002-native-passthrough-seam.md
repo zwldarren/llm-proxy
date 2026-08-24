@@ -1,0 +1,15 @@
+# Centralize native passthrough behind one seam
+
+"Can this request/stream be forwarded verbatim?" was decided independently in ~12 places across four layers (pipeline stages, core processing, provider adapters, provider serializers), with three names for one concept (`supports_native_request`, `supports_native_streaming`, `compatible_protocols`) and two hidden flags setattr-injected onto `InternalRequest` (`_disable_native_request`, `_previous_response_materialized`). Adding a new disabling feature meant finding and editing every site. We centralized the concept in `llm_proxy.core.passthrough`: one predicate per side — `request_passthrough_allowed` and `stream_passthrough_allowed` — plus the `NativePassthroughHandler` (native-stream bookkeeping for billing/persistence) living in the same module. Adapters declare capability as data (`native_protocols`) with a single request-scoped veto hook (`allows_native_request`); the two flags are explicit `InternalRequest` fields (`native_request_disabled`, `previous_response_materialized`).
+
+## Considered Options
+
+- **Decide once, stamp the verdict on the request, read it on all three sides**: rejected — the sides legitimately disagree. A request whose `previous_response_id` was materialized locally must have its body rebuilt (the upstream cannot resolve proxy-local ids), yet the upstream still speaks the Responses API, so the *stream* may still be native. One verdict cannot express "rebuilt request + native stream".
+- **Merge the serializer `compatible_protocols` fast path into the same mechanism**: rejected — the fast path is not verbatim passthrough: it rewrites `model`/`stream` and strips `None` fields. It is a wire-compatible rebuild shortcut, and merging would force the seam to serve two semantics. The distinction is pinned down in docstrings instead (`serialization/providers/base.py` ↔ `core/passthrough.py` cross-reference each other).
+- **Move protocol-specific native-SSE parsing into the protocol modules**: rejected — what the handler captures during native streams (usage for billing, response snapshots for persistence) is passthrough-lifecycle bookkeeping, not wire-shape conversion (which ADR-0001 already returned to the protocol modules). Centralizing keeps "what must be recorded while passing through" visible in one place.
+
+## Consequences
+
+- `BaseAdapter` gains `native_protocols: frozenset[str]` (default empty) and `allows_native_request()` (default True); the per-adapter `supports_native_request`/`supports_native_streaming` overrides collapse into data. `providers/base.py` no longer duck-types with `getattr`.
+- Pipeline stages that disable passthrough now write explicit request fields instead of injecting private attributes (`web_search` stage → `native_request_disabled`; `previous_response` stage → `previous_response_materialized`).
+- The `compatible_protocols` fast path is unchanged in behavior; only its docstring (and `core/passthrough.py`'s) now states the boundary between the two mechanisms.
