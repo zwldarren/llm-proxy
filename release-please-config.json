@@ -3,7 +3,14 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "bump-minor-pre-major": true
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        {
+          "path": "uv.lock",
+          "type": "toml",
+          "jsonpath": "$.package[?(@.name.value=='llm-proxy')].version"
+        }
+      ]
     }
   }
 }

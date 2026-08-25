@@ -29,4 +29,7 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run docker-publish.yml --ref ${{ steps.release.outputs.tag_name }}
+        # -R: the release-please-action leaves no git checkout, so gh cannot
+        # infer the repository from git remotes and would fail with
+        # "not a git repository".
+        run: gh workflow run -R ${{ github.repository }} docker-publish.yml --ref ${{ steps.release.outputs.tag_name }}
