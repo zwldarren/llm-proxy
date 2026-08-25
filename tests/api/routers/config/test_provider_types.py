@@ -1,5 +1,7 @@
 """Tests for the provider-type catalog endpoint (api/routers/config/providers.py)."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -7,7 +9,7 @@ from fastapi.testclient import TestClient
 # Populate the adapter registry, mirroring the app's startup import
 # (llm_proxy.api.__init__ imports llm_proxy.providers).
 import llm_proxy.providers  # noqa: F401
-from llm_proxy.api.dependencies import require_admin_role
+from llm_proxy.api.dependencies import get_async_session_dep, require_admin_role
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers.config.config import router as config_router
 from llm_proxy.core.adapter import list_provider_types
@@ -20,6 +22,9 @@ def app():
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[require_admin_role] = lambda: None
+    # The catch-all /providers/{name:path} route resolves a DB session; stub it
+    # so tests never touch a real database (CI has none).
+    app.dependency_overrides[get_async_session_dep] = lambda: AsyncMock()
     app.include_router(config_router)
     return app
 
@@ -67,7 +72,13 @@ class TestProviderTypesCatalog:
         assert isinstance(res.json(), list)
 
     def test_missing_provider_still_404s(self, client):
-        res = client.get("/api/config/providers/does-not-exist")
+        mock_repo = MagicMock()
+        mock_repo.get_provider_with_models = AsyncMock(return_value=None)
+        with patch(
+            "llm_proxy.api.routers.config.providers.get_config_repository",
+            return_value=mock_repo,
+        ):
+            res = client.get("/api/config/providers/does-not-exist")
         assert res.status_code == 404
 
     def test_non_admin_gets_403(self, app, client):
