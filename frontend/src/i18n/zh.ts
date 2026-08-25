@@ -1554,7 +1554,7 @@ export default {
     maxFallbackAttempts: "最大故障转移次数",
     maxFallbackAttemptsDescription: "单次请求中，最多尝试多少个备用服务商节点进行灾备切换",
   },
-  // About（版本与更新检查）
+  // About (version & update check)
   about: {
     title: "关于",
     description: "当前实例的版本信息与更新检查。",

@@ -87,10 +87,6 @@ const mcpServerStore = useMcpServerStore();
 const { state, isMobile, toggleSidebar } = useSidebar();
 const systemStore = useSystemStore();
 
-const updateAvailable = computed(
-  () => Boolean(systemStore.info?.update_available) && Boolean(systemStore.info?.latest_version)
-);
-
 const userInitials = computed(() => {
   if (!authStore.username) return "U";
   return authStore.username.slice(0, 2).toUpperCase();
@@ -356,13 +352,15 @@ const prefetchRoute = (href: string) => {
             class="flex shrink-0 items-center gap-1 rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/50 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
           >
             <span>v{{ systemStore.info.version }}</span>
-            <template v-if="updateAvailable">
-              <span
-                class="size-1.5 shrink-0 rounded-full bg-status-warning"
-                aria-hidden="true"
-              ></span>
-              <span class="sr-only">
-                {{ t("about.updateAvailable", { version: systemStore.info.latest_version }) }}
+            <template v-if="systemStore.updateAvailable">
+              <span role="status" class="flex items-center gap-1">
+                <span
+                  class="size-1.5 shrink-0 rounded-full bg-status-warning"
+                  aria-hidden="true"
+                ></span>
+                <span class="sr-only">
+                  {{ t("about.updateAvailable", { version: systemStore.info.latest_version }) }}
+                </span>
               </span>
             </template>
           </RouterLink>

@@ -32,10 +32,10 @@ class SystemInfoResponse(BaseModel):
 
     version: str
     update_check_enabled: bool
-    latest_version: str | None
-    update_available: bool
-    checked_at: datetime | None
-    check_failed: bool
+    latest_version: str | None = None
+    update_available: bool = False
+    checked_at: datetime | None = None
+    check_failed: bool = False
 
 
 @dataclass
@@ -167,14 +167,7 @@ async def get_system_info(request: Request, force: bool = False) -> SystemInfoRe
     "up to date".
     """
     if not get_settings().update_check.enabled:
-        return SystemInfoResponse(
-            version=get_version(),
-            update_check_enabled=False,
-            latest_version=None,
-            update_available=False,
-            checked_at=None,
-            check_failed=False,
-        )
+        return SystemInfoResponse(version=get_version(), update_check_enabled=False)
 
     client = await get_http_client(request)
     await _refresh_update_state(client, force=force)

@@ -27,10 +27,6 @@ const lastChecked = computed(() => {
   return date.toLocaleString(locale.value);
 });
 
-const updateAvailable = computed(
-  () => Boolean(info.value?.update_available) && Boolean(info.value?.latest_version)
-);
-
 // The store dedupes against AppLayout's app-load fetch; this only re-fetches
 // when that earlier call failed (info still null).
 onMounted(() => {
@@ -63,7 +59,18 @@ async function checkForUpdates() {
   <SettingsSection :title="t('about.title')" :icon="Info" :description="t('about.description')">
     <SettingsItem :title="t('about.currentVersion')">
       <template #action>
-        <span class="text-data text-sm">{{ info ? `v${info.version}` : "—" }}</span>
+        <a
+          v-if="info"
+          :href="RELEASES_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          :aria-label="t('about.viewReleases')"
+          class="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground"
+        >
+          <span class="text-data">v{{ info.version }}</span>
+          <ArrowUpRight class="size-3.5" aria-hidden="true" />
+        </a>
+        <span v-else class="text-data text-sm">—</span>
       </template>
     </SettingsItem>
 
@@ -82,7 +89,7 @@ async function checkForUpdates() {
       </template>
     </SettingsItem>
 
-    <SettingsItem v-if="updateAvailable" :title="t('about.status')">
+    <SettingsItem v-if="systemStore.updateAvailable" :title="t('about.status')">
       <template #action>
         <StatusBadge variant="status" status="warning">
           <span class="size-1.5 rounded-full bg-status-warning" aria-hidden="true"></span>

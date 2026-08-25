@@ -1,11 +1,16 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { SystemInfo } from "@/services/api/system";
 import { systemApi } from "@/services/api/system";
 
 export const useSystemStore = defineStore("system", () => {
   const info = ref<SystemInfo | null>(null);
   const loading = ref(false);
+
+  /** An update is only actionable when a newer version is known. */
+  const updateAvailable = computed(
+    () => Boolean(info.value?.update_available) && Boolean(info.value?.latest_version)
+  );
 
   /** In-flight request deduplication (AppLayout mounts once per page view). */
   let inFlight: Promise<SystemInfo> | null = null;
@@ -32,5 +37,5 @@ export const useSystemStore = defineStore("system", () => {
     return promise;
   }
 
-  return { info, loading, fetchSystemInfo };
+  return { info, loading, updateAvailable, fetchSystemInfo };
 });

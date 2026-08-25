@@ -22,33 +22,25 @@ from llm_proxy.core.exceptions import AuthenticationFailedError
 from llm_proxy.version import get_version
 
 
-class _TagsResponse:
-    """Minimal mock of the AsyncSession response wrapper for the GitHub tags call."""
-
-    def __init__(self, tags: object, status_code: int = 200):
-        self._tags = tags
-        self.status_code = status_code
-
-    def json(self) -> object:
-        return self._tags
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-
-def _mock_github_client(
-    tags: object = None,
-    status_code: int = 200,
-    side_effect: Exception | None = None,
-) -> MagicMock:
+@pytest.fixture
+def mock_github_client(mock_response_cls):
     """Build a mock AsyncSession whose ``get`` stands in for the GitHub tags call."""
-    client = MagicMock()
-    if side_effect is not None:
-        client.get = AsyncMock(side_effect=side_effect)
-    else:
-        client.get = AsyncMock(return_value=_TagsResponse(tags, status_code))
-    return client
+
+    def _build(
+        tags: object = None,
+        status_code: int = 200,
+        side_effect: Exception | None = None,
+    ) -> MagicMock:
+        client = MagicMock()
+        if side_effect is not None:
+            client.get = AsyncMock(side_effect=side_effect)
+        else:
+            client.get = AsyncMock(
+                return_value=mock_response_cls(json_data=tags, status_code=status_code)
+            )
+        return client
+
+    return _build
 
 
 def _use_update_check(enabled: bool) -> None:
@@ -86,9 +78,9 @@ def client(app):
 
 
 class TestUpdateCheckDisabled:
-    def test_short_circuits_without_outbound_call(self, app, client):
+    def test_short_circuits_without_outbound_call(self, app, client, mock_github_client):
         _use_update_check(False)
-        github = _mock_github_client(tags=[{"name": "v999.0.0"}])
+        github = mock_github_client(tags=[{"name": "v999.0.0"}])
         _mount_github_client(app, github)
 
         res = client.get("/api/system/info")
@@ -106,9 +98,9 @@ class TestUpdateCheckDisabled:
 
 
 class TestUpdateCheck:
-    def test_empty_tags_means_no_update_info(self, app, client):
+    def test_empty_tags_means_no_update_info(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(tags=[])
+        github = mock_github_client(tags=[])
         _mount_github_client(app, github)
 
         res = client.get("/api/system/info")
@@ -129,9 +121,9 @@ class TestUpdateCheck:
         assert kwargs["headers"]["User-Agent"]
         assert kwargs["timeout"] == 5.0
 
-    def test_newer_tag_marks_update_available(self, app, client):
+    def test_newer_tag_marks_update_available(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(
+        github = mock_github_client(
             tags=[
                 {"name": "0.1.0"},
                 {"name": "v999.0.0"},
@@ -149,9 +141,9 @@ class TestUpdateCheck:
         assert body["check_failed"] is False
         assert body["checked_at"] is not None
 
-    def test_current_is_latest(self, app, client):
+    def test_current_is_latest(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(tags=[{"name": f"v{get_version()}"}, {"name": "v0.0.1"}])
+        github = mock_github_client(tags=[{"name": f"v{get_version()}"}, {"name": "v0.0.1"}])
         _mount_github_client(app, github)
 
         body = client.get("/api/system/info").json()
@@ -160,9 +152,9 @@ class TestUpdateCheck:
         assert body["update_available"] is False
         assert body["check_failed"] is False
 
-    def test_outbound_exception_fails_silently(self, app, client):
+    def test_outbound_exception_fails_silently(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(side_effect=RuntimeError("boom"))
+        github = mock_github_client(side_effect=RuntimeError("boom"))
         _mount_github_client(app, github)
 
         res = client.get("/api/system/info")
@@ -174,9 +166,9 @@ class TestUpdateCheck:
         assert body["update_available"] is False
         assert body["checked_at"] is not None
 
-    def test_http_error_status_fails_silently(self, app, client):
+    def test_http_error_status_fails_silently(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(status_code=500)
+        github = mock_github_client(status_code=500)
         _mount_github_client(app, github)
 
         body = client.get("/api/system/info").json()
@@ -187,9 +179,9 @@ class TestUpdateCheck:
 
 
 class TestUpdateCheckCaching:
-    def test_second_request_uses_ttl_cache(self, app, client):
+    def test_second_request_uses_ttl_cache(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(tags=[{"name": "v999.0.0"}])
+        github = mock_github_client(tags=[{"name": "v999.0.0"}])
         _mount_github_client(app, github)
 
         first = client.get("/api/system/info").json()
@@ -199,9 +191,9 @@ class TestUpdateCheckCaching:
         assert second["checked_at"] == first["checked_at"]
         assert second["update_available"] is True
 
-    def test_force_within_cooldown_returns_cached_state(self, app, client):
+    def test_force_within_cooldown_returns_cached_state(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(tags=[{"name": "v999.0.0"}])
+        github = mock_github_client(tags=[{"name": "v999.0.0"}])
         _mount_github_client(app, github)
 
         client.get("/api/system/info")
@@ -210,9 +202,9 @@ class TestUpdateCheckCaching:
         assert github.get.await_count == 1
         assert forced["update_available"] is True
 
-    def test_force_after_cooldown_refetches(self, app, client):
+    def test_force_after_cooldown_refetches(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(tags=[{"name": "v999.0.0"}])
+        github = mock_github_client(tags=[{"name": "v999.0.0"}])
         _mount_github_client(app, github)
 
         client.get("/api/system/info")
@@ -222,9 +214,9 @@ class TestUpdateCheckCaching:
         assert github.get.await_count == 2
         assert forced["update_available"] is True
 
-    def test_stale_cache_triggers_refresh_without_force(self, app, client):
+    def test_stale_cache_triggers_refresh_without_force(self, app, client, mock_github_client):
         _use_update_check(True)
-        github = _mock_github_client(tags=[{"name": "v999.0.0"}])
+        github = mock_github_client(tags=[{"name": "v999.0.0"}])
         _mount_github_client(app, github)
 
         client.get("/api/system/info")

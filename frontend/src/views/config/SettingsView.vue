@@ -569,7 +569,12 @@ onUnmounted(() => {
             />
           </div>
 
-          <div v-show="activeSection === 'general'" id="about" class="space-y-6 mt-0 scroll-mt-20">
+          <div
+            v-if="authStore.isAdmin"
+            v-show="activeSection === 'general'"
+            id="about"
+            class="space-y-6 mt-0 scroll-mt-20"
+          >
             <AboutSection />
           </div>
 
