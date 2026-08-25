@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+  pull-requests: write
+  # Lets release-please open an issue when it needs attention (per official README).
+  issues: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # Config is read from release-please-config.json and
+      # .release-please-manifest.json at the repository root (default paths).
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+
+      # Tags created by release-please (via GITHUB_TOKEN) do not cascade-trigger
+      # other workflows, so dispatch the Docker workflow explicitly on the new tag.
+      - name: Trigger Docker build for new tag
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run docker-publish.yml --ref ${{ steps.release.outputs.tag_name }}
