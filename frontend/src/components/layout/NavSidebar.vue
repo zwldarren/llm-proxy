@@ -70,6 +70,7 @@ import { getErrorMessage } from "@/utils/error";
 import { useStorage } from "@vueuse/core";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { useAuthStore } from "@/stores/auth";
+import { useSystemStore } from "@/stores/system";
 import { useProviderStore } from "@/stores/providers";
 import { useModelStore } from "@/stores/models";
 import { useApiKeyStore } from "@/stores/apiKeys";
@@ -84,6 +85,11 @@ const modelStore = useModelStore();
 const apiKeyStore = useApiKeyStore();
 const mcpServerStore = useMcpServerStore();
 const { state, isMobile, toggleSidebar } = useSidebar();
+const systemStore = useSystemStore();
+
+const updateAvailable = computed(
+  () => Boolean(systemStore.info?.update_available) && Boolean(systemStore.info?.latest_version)
+);
 
 const userInitials = computed(() => {
   if (!authStore.username) return "U";
@@ -507,6 +513,22 @@ const prefetchRoute = (href: string) => {
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
+
+      <!-- Instance version — links to the About section in Settings. Renders
+           nothing while the info is loading or when the fetch failed. -->
+      <RouterLink
+        v-if="!isCollapsed && systemStore.info"
+        to="/config/settings"
+        class="mx-1 mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[11px] text-sidebar-foreground/50 transition-colors duration-200 hover:text-sidebar-foreground"
+      >
+        <span>v{{ systemStore.info.version }}</span>
+        <template v-if="updateAvailable">
+          <span class="size-1.5 shrink-0 rounded-full bg-status-warning" aria-hidden="true"></span>
+          <span class="sr-only">
+            {{ t("about.updateAvailable", { version: systemStore.info.latest_version }) }}
+          </span>
+        </template>
+      </RouterLink>
     </SidebarFooter>
 
     <SidebarRail />

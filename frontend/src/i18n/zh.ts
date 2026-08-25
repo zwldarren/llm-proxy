@@ -1554,4 +1554,22 @@ export default {
     maxFallbackAttempts: "最大故障转移次数",
     maxFallbackAttemptsDescription: "单次请求中，最多尝试多少个备用服务商节点进行灾备切换",
   },
+  // About（版本与更新检查）
+  about: {
+    title: "关于",
+    description: "当前实例的版本信息与更新检查。",
+    currentVersion: "当前版本",
+    latestVersion: "最新版本",
+    status: "状态",
+    updateAvailable: "有可用更新：v{version}",
+    upToDate: "已是最新版本",
+    lastChecked: "上次检查",
+    checkForUpdates: "检查更新",
+    checkForUpdatesDescription: "从 GitHub 查询 llm-proxy 的最新发布版本。",
+    checking: "正在检查…",
+    checkFailed: "无法检查更新",
+    retry: "重试",
+    updateChecksDisabled: "管理员已禁用更新检查。",
+    viewReleases: "在 GitHub 上查看发布页",
+  },
 };

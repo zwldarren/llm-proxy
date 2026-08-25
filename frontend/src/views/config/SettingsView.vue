@@ -22,6 +22,7 @@ import RateLimitsSection from "@/components/settings/sections/RateLimitsSection.
 import CorsSection from "@/components/settings/sections/CorsSection.vue";
 import CircuitBreakerSection from "@/components/settings/sections/CircuitBreakerSection.vue";
 import McpSecuritySection from "@/components/settings/sections/McpSecuritySection.vue";
+import AboutSection from "@/components/settings/sections/AboutSection.vue";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -566,6 +567,10 @@ onUnmounted(() => {
               :editor="tracing"
               @edit-provider="openProviderEditor"
             />
+          </div>
+
+          <div v-show="activeSection === 'general'" id="about" class="space-y-6 mt-0 scroll-mt-20">
+            <AboutSection />
           </div>
 
           <!-- Advanced tab -->

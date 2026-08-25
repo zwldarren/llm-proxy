@@ -1615,4 +1615,22 @@ export default {
     maxFallbackAttemptsDescription:
       "Maximum number of fallback provider cycles to attempt per request",
   },
+  // About (version & update check)
+  about: {
+    title: "About",
+    description: "Version information and update checks for this instance.",
+    currentVersion: "Current Version",
+    latestVersion: "Latest Version",
+    status: "Status",
+    updateAvailable: "Update available: v{version}",
+    upToDate: "You're up to date",
+    lastChecked: "Last Checked",
+    checkForUpdates: "Check for Updates",
+    checkForUpdatesDescription: "Query GitHub for the latest llm-proxy release.",
+    checking: "Checking...",
+    checkFailed: "Unable to check for updates",
+    retry: "Retry",
+    updateChecksDisabled: "Update checks are disabled by the administrator.",
+    viewReleases: "View releases on GitHub",
+  },
 };
