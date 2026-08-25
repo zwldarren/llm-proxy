@@ -340,13 +340,32 @@ const prefetchRoute = (href: string) => {
         class="flex h-full items-center w-full transition-opacity duration-200"
         :class="isCollapsed ? 'justify-center px-0' : 'justify-between px-4'"
       >
-        <div class="flex items-center gap-2.5 min-w-0">
+        <div class="flex items-center gap-2 min-w-0">
           <span
             v-if="!isCollapsed"
             class="brand-heading text-lg font-semibold tracking-tight truncate animate-in fade-in duration-200"
           >
             {{ t("home.title") }}
           </span>
+          <!-- Instance version badge — links to the About section in Settings.
+               Renders nothing while the info is loading or when the fetch failed. -->
+          <RouterLink
+            v-if="!isCollapsed && systemStore.info"
+            to="/config/settings"
+            :title="t('about.title')"
+            class="flex shrink-0 items-center gap-1 rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/50 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
+          >
+            <span>v{{ systemStore.info.version }}</span>
+            <template v-if="updateAvailable">
+              <span
+                class="size-1.5 shrink-0 rounded-full bg-status-warning"
+                aria-hidden="true"
+              ></span>
+              <span class="sr-only">
+                {{ t("about.updateAvailable", { version: systemStore.info.latest_version }) }}
+              </span>
+            </template>
+          </RouterLink>
         </div>
 
         <!-- Mobile close button -->
@@ -513,22 +532,6 @@ const prefetchRoute = (href: string) => {
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
-
-      <!-- Instance version — links to the About section in Settings. Renders
-           nothing while the info is loading or when the fetch failed. -->
-      <RouterLink
-        v-if="!isCollapsed && systemStore.info"
-        to="/config/settings"
-        class="mx-1 mt-1 flex items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-[11px] text-sidebar-foreground/50 transition-colors duration-200 hover:text-sidebar-foreground"
-      >
-        <span>v{{ systemStore.info.version }}</span>
-        <template v-if="updateAvailable">
-          <span class="size-1.5 shrink-0 rounded-full bg-status-warning" aria-hidden="true"></span>
-          <span class="sr-only">
-            {{ t("about.updateAvailable", { version: systemStore.info.latest_version }) }}
-          </span>
-        </template>
-      </RouterLink>
     </SidebarFooter>
 
     <SidebarRail />
