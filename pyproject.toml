@@ -31,6 +31,12 @@ dependencies = [
   "langfuse>=4.7.1,<5.0.0",
   "pydantic-settings>=2.14.1",
   "numpy>=2.5.1",
+]
+
+[project.optional-dependencies]
+# Embedding-based smart-routing signal (Signal C). Heavy ML stack; the core
+# proxy degrades gracefully to the built-in structural signals without it.
+smart-routing = [
   "scikit-learn>=1.9.0",
   "xgboost>=3.4.0",
   "transformers>=5.12.1",

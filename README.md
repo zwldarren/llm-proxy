@@ -34,7 +34,7 @@ Speak any client protocol; the proxy normalizes it to a unified internal model a
 
 ### 🧭 Smart Routing & Resilience
 
-- **Virtual models** — Route to `auto`, `fast`, or `best` and let the built-in keyword-free classifier (structural + Unicode + n-gram features, no LLM call) pick a real model by complexity, cost, and capability.
+- **Virtual models** — Route to `auto`, `fast`, or `best` and let the built-in keyword-free classifier (structural + Unicode + n-gram features, no LLM call) pick a real model by complexity, cost, and capability. An optional embedding-based signal (install with `uv sync --extra smart-routing`) sharpens tier prediction; without it, routing degrades gracefully to the structural signals.
 - **Cost-aware selection** — Routing tiers (`ECONOMY` / `BALANCED` / `PREMIUM`) with bandit-style exploration that learns from real outcomes.
 - **Fallback chains & circuit breakers** — Per-provider attempt tracking, automatic retries on failure, and breakers that stop hammering a sick upstream.
 - **Keepalive heartbeats** — Whitespace heartbeats keep slow non-streaming requests alive behind CDNs (avoids Cloudflare 524s).
@@ -113,11 +113,16 @@ git clone https://github.com/zwldarren/llm-proxy.git
 cd llm-proxy
 uv sync
 
+# Optional: enable the embedding-based smart-routing signal (adds the ML stack)
+uv sync --extra smart-routing
+
 # Build the frontend once, then run
 uv run llm-proxy --build-frontend
 ```
 
 The server starts on `http://localhost:8080` (override with `--host`/`--port`). SQLite is used by default; set `DATABASE_URL` for PostgreSQL.
+
+The core proxy installs without any ML dependencies. The `smart-routing` extra adds the embedding-based routing signal (transformers, ONNX Runtime, XGBoost); without it, routing automatically falls back to the built-in structural signals.
 
 ## Using the API
 
@@ -192,6 +197,16 @@ This starts:
 ```bash
 uv run ruff check --fix && uv run ruff format && uv run ty check && uv run pytest
 ```
+
+### Pre-commit
+
+The repo ships a `.pre-commit-config.yaml` that runs the same ruff and ty checks locally before each commit. After installing [pre-commit](https://pre-commit.com), just run:
+
+```bash
+pre-commit install
+```
+
+Hooks run via `uv run`, so tool versions stay locked to `pyproject.toml` and no network access is needed at hook runtime.
 
 ### Stack
 

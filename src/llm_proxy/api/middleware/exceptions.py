@@ -377,7 +377,7 @@ def _write_error_log_to_db(
         )
         usage_service.create_usage_background(usage_data)
     except Exception as e:
-        logger.debug(f"Failed to write error log to database: {e}")
+        logger.warning(f"Failed to write error log to database: {e}", exc_info=True)
 
 
 async def recursion_error_handler(request: Request, exc: RecursionError) -> JSONResponse:

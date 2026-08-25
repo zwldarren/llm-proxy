@@ -9,10 +9,11 @@ from fastapi.testclient import TestClient
 
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.middleware.rate_limiting import RateLimitManager
+from llm_proxy.api.middleware.security import BaseLockoutManager
 from llm_proxy.api.routers.auth import router
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.database import get_async_session
-from llm_proxy.security.passwords import hash_password
+from llm_proxy.security.passwords import hash_password, verify_admin_password
 
 TEST_SECRET = "test-secret-at-least-32-characters-long-aaaaaa"
 
@@ -233,6 +234,31 @@ class TestLogin:
 
         assert response.status_code == 401
 
+    def test_login_unknown_user_still_runs_password_verify(self, auth_client):
+        """Unknown usernames must still run a bcrypt verify (timing equalization).
+
+        Without this, the short-circuit skips the bcrypt check for unknown
+        users and the response time reveals whether a username exists.
+        """
+        client, mock_repo = auth_client
+        mock_repo.get_by_username = AsyncMock(return_value=None)
+
+        with patch(
+            "llm_proxy.api.routers.auth.verify_admin_password",
+            wraps=verify_admin_password,
+        ) as spy:
+            response = client.post(
+                "/api/auth/login",
+                json={"username": "ghost", "password": "whatever-password"},
+            )
+
+        assert response.status_code == 401
+        spy.assert_called_once()
+        # The verify ran against a real bcrypt hash (the precomputed dummy),
+        # so the timing cost matches the real-password path.
+        _, password_hash = spy.call_args.args
+        assert password_hash.startswith("$2") and len(password_hash) == 60
+
     def test_login_wrong_password(self, auth_client):
         client, mock_repo = auth_client
         mock_repo.get_by_username = AsyncMock(return_value=_mock_user("admin", "test-password-123"))
@@ -273,6 +299,42 @@ class TestLoginLockout:
         body = response.json()
         error_msg = body.get("error", {}).get("message", "").lower()
         assert "locked" in error_msg
+
+    def test_lockout_accumulates_across_ips_for_same_username(self, auth_client):
+        """Lockout is keyed by username: failures from different IPs accumulate.
+
+        An attacker rotating source IPs must not be able to bypass the
+        per-account lockout.
+        """
+        client, mock_repo = auth_client
+        mock_repo.get_by_username = AsyncMock(return_value=None)
+
+        real_lockout = BaseLockoutManager(max_attempts=3, lockout_duration=60)
+        ips = iter(["203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"])
+
+        with (
+            patch("llm_proxy.api.routers.auth.get_lockout_manager", return_value=real_lockout),
+            patch(
+                "llm_proxy.api.routers.auth.get_client_ip",
+                side_effect=lambda _request: next(ips),
+            ),
+        ):
+            for _ in range(3):
+                response = client.post(
+                    "/api/auth/login",
+                    json={"username": "admin", "password": "wrong-password-1"},
+                )
+                assert response.status_code == 401
+
+            # Fourth attempt from yet another IP is locked out: the failures
+            # accumulated on the username, not on any single IP.
+            response = client.post(
+                "/api/auth/login",
+                json={"username": "admin", "password": "wrong-password-1"},
+            )
+            assert response.status_code == 400
+            error_msg = response.json().get("error", {}).get("message", "").lower()
+            assert "locked" in error_msg
 
 
 class TestLogout:

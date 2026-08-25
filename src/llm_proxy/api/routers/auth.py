@@ -7,6 +7,7 @@ which validates credentials against the database.
 """
 
 import time
+from functools import lru_cache
 
 from fastapi import APIRouter, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,18 @@ from llm_proxy.security.passwords import hash_password, verify_admin_password
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 limiter = get_rate_limiter()
+
+
+@lru_cache(maxsize=1)
+def _dummy_password_hash() -> str:
+    """Bcrypt hash of a throwaway password, for login timing equalization.
+
+    Verifying against this dummy hash when the submitted username does not
+    exist costs the same as a real password check, so an attacker cannot
+    distinguish valid usernames from invalid ones by response time. Computed
+    lazily on first use so importing this module never pays bcrypt's cost.
+    """
+    return hash_password("dummy-password-for-timing-equalization")
 
 
 async def _write_login_audit_log(
@@ -135,7 +148,10 @@ async def login(
 
     lockout_manager = get_lockout_manager()
     client_ip = get_client_ip(request)
-    lockout_key = f"{credentials.username}:{client_ip}"
+    # Lockout is keyed by username only: an attacker rotating source IPs must
+    # not be able to bypass the per-account lockout. IP-level throttling is
+    # handled separately by the rate limiter.
+    lockout_key = credentials.username
 
     if lockout_manager.is_locked_out(lockout_key):
         remaining = lockout_manager.get_lockout_remaining(lockout_key)
@@ -151,11 +167,18 @@ async def login(
     repo = UserRepository(session)
     user = await repo.get_by_username(credentials.username)
 
-    if (
-        user is None
-        or not user.is_active
-        or not verify_admin_password(credentials.password, user.password_hash)
-    ):
+    if user is None:
+        # Timing equalization: run a bcrypt verify against the precomputed
+        # dummy hash so unknown usernames cost the same as a real password
+        # check (prevents username enumeration via response time).
+        verify_admin_password(credentials.password, _dummy_password_hash())
+        auth_failed = True
+    else:
+        auth_failed = not user.is_active or not verify_admin_password(
+            credentials.password, user.password_hash
+        )
+
+    if auth_failed:
         lockout_manager.record_failed_attempt(lockout_key)
         logger.warning(f"Failed login attempt for user: {credentials.username} from {client_ip}")
         # Write audit log with proper classification (before raising exception)
@@ -167,6 +190,9 @@ async def login(
             error_message="Invalid username or password",
         )
         raise AuthenticationFailedError(message="Invalid username or password")
+
+    # The failure branch above always raises, so the user exists here.
+    assert user is not None
 
     lockout_manager.clear_failed_attempts(lockout_key)
     logger.info(f"Successful login for user: {credentials.username} from {client_ip}")

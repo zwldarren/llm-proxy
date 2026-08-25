@@ -187,7 +187,7 @@ async def startup_web_search(app: FastAPI, config_manager: DatabaseConfigManager
                 web_search_interceptor = WebSearchInterceptor(provider=search_provider)
                 logger.debug("Web search interceptor initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize web search interceptor: {e}")
+            logger.error(f"Failed to initialize web search interceptor: {e}", exc_info=True)
 
     app.state.web_search_interceptor = web_search_interceptor
 
@@ -207,7 +207,7 @@ async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManage
                 await mcp_manager.start_server(mcp_repo, server.name)
                 logger.debug(f"Auto-started MCP server: {server.name}")
             except Exception as e:
-                logger.error(f"Failed to auto-start MCP server {server.name}: {e}")
+                logger.error(f"Failed to auto-start MCP server {server.name}: {e}", exc_info=True)
                 # Continue with remaining servers; do not crash app startup.
 
 

@@ -604,7 +604,7 @@ class StreamingProcessor:
                     cancel_token.set()
                 return True
         except Exception:
-            pass
+            logger.debug("Failed to check client disconnect", exc_info=True)
         return False
 
     @staticmethod

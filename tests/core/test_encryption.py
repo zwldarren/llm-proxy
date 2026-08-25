@@ -151,14 +151,16 @@ class TestEncryptionEdgeCases:
 
         assert enc_module.decrypt_api_key(None) is None
 
-    def test_decrypt_disabled_returns_encrypted(self):
-        """When encryption disabled, decrypt returns the value (likely to fail later)."""
+    def test_decrypt_disabled_raises_for_encrypted_value(self):
+        """When encryption is disabled, decrypting an 'enc:' value must raise."""
+        from llm_proxy.core.exceptions import EncryptionError
+
         init_encryption(None)
         import llm_proxy.security.encryption as enc_module
 
-        # With encryption disabled, decrypt just returns the value
-        result = enc_module.decrypt_api_key("enc:something")
-        assert result == "enc:something"
+        # Fail closed: ciphertext cannot be decrypted without the key.
+        with pytest.raises(EncryptionError):
+            enc_module.decrypt_api_key("enc:something")
 
     def test_encrypt_very_long_key(self):
         """Very long API keys should be encryptable."""

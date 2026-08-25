@@ -268,7 +268,7 @@ class RateLimitManager:
                 redis_limiter = get_redis_rate_limiter()
                 return await redis_limiter.is_rate_limited(identifier, limit, window_size)
             except Exception as e:
-                logger.error(f"Redis rate limiter failed: {e}")
+                logger.error(f"Redis rate limiter failed: {e}", exc_info=True)
                 if security.redis_rate_limit_fail_closed:
                     logger.warning("Rate limiting failing closed (blocking request)")
                     return True, {

@@ -576,21 +576,37 @@ class ProviderUpdate(BaseModel):
     native_web_search: bool | None = None
 
 
+def mask_api_key(value: str | None) -> str:
+    """Mask an API key for display (first 3 + last 4 chars).
+
+    The plaintext key must never appear in admin API responses; this is the
+    single masking helper for provider keys so the format stays consistent
+    across list/detail/update responses.
+    """
+    if not value:
+        return ""
+    if len(value) > 8:
+        return f"{value[:3]}...{value[-4:]}"
+    return "***"
+
+
 class ProviderRead(ProviderBase):
-    """Schema for reading provider configuration (sanitized)."""
+    """Schema for reading provider configuration (sanitized).
+
+    ``api_key`` is never serialized: it only feeds the ``masked_api_key``
+    computed field, so the plaintext key cannot leak into responses. The
+    default keeps ``ProviderDetails(**model_dump())`` construction valid
+    (the excluded field is absent from the dump).
+    """
 
     id: int
-    api_key: str = Field(exclude=True)  # Exclude from JSON output
+    api_key: str = Field(default="", exclude=True)  # Never serialized
 
     @computed_field
     @property
     def masked_api_key(self) -> str:
         """Masked version of the API key for display purposes."""
-        if self.api_key:
-            if len(self.api_key) > 8:
-                return f"{self.api_key[:3]}...{self.api_key[-4:]}"
-            return "***"
-        return ""
+        return mask_api_key(self.api_key)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -599,6 +615,18 @@ class ProviderDetails(ProviderRead):
     """Schema for reading full provider configuration including models."""
 
     models: list[ModelRead] = Field(default_factory=list, description="Configured models")
+
+
+class ProviderKeyReveal(BaseModel):
+    """Response for the explicit provider API key reveal endpoint.
+
+    The plaintext key is only ever returned by this endpoint (never by
+    list/detail/update responses, which carry ``masked_api_key``); every
+    reveal is recorded in the audit log.
+    """
+
+    name: str
+    api_key: str
 
 
 class ProviderTypeRead(BaseModel):

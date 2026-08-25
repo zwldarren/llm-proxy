@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import httpx2
+
 from llm_proxy.core.errors.classification import is_same_provider_retryable
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.utils import quiet_aclose
@@ -22,7 +24,52 @@ T = TypeVar("T")
 # exponential backoff ceiling (30s + jitter). Values above this are clamped.
 MAX_RETRY_AFTER_SECONDS = 60.0
 
+# Transport-level exceptions that indicate a transient connection problem and
+# are safe to retry mid-stream. Classification is by exception type, never by
+# message text, so it is robust to provider/httpx2 wording changes. httpx2
+# mirrors httpx's hierarchy:
+# - NetworkError covers ConnectError, ReadError, WriteError, CloseError
+# - TimeoutException covers ConnectTimeout, ReadTimeout, WriteTimeout, PoolTimeout
+# - RemoteProtocolError covers a peer closing the connection mid-stream or
+#   sending a malformed response
+# asyncio.TimeoutError (== builtin TimeoutError, an OSError subclass) covers
+# client-side timeouts raised outside httpx2; OSError covers raw socket errors
+# (ConnectionResetError, ConnectionRefusedError, BrokenPipeError, ...).
+#
+# Deliberate exclusions (trade-off vs. the old message matching):
+# - asyncio.CancelledError derives from BaseException, so `except Exception`
+#   never catches it; it must never be classified as retryable.
+# - httpx2.StreamError / LocalProtocolError are client-side misuse errors
+#   ("the developer made an error"), not transport failures; retrying them
+#   would only burn attempts. The old message matching could retry a
+#   StreamError whose text mentioned "connection" -- that was a
+#   misclassification.
+# - httpx2.ProxyError is a configuration-level failure, not a transient
+#   transport error; it propagates immediately.
+# - Provider-specific details embedded in error *messages* (e.g. a provider
+#   saying "connection reset" inside a JSON error body) are no longer retried
+#   unless the exception type itself is transport-level. Such messages are
+#   surfaced to the caller as-is instead.
+RETRYABLE_STREAM_EXCEPTIONS = (
+    httpx2.NetworkError,
+    httpx2.TimeoutException,
+    httpx2.RemoteProtocolError,
+    asyncio.TimeoutError,
+    OSError,
+)
+
 logger = get_logger(__name__)
+
+
+def _is_retryable_stream_error(error: Exception) -> bool:
+    """Return True when *error* is a transient transport-level failure.
+
+    Used by ``execute_generator`` to decide whether a stream that failed
+    before yielding any data can be retried. Classification is purely by
+    exception type (see ``RETRYABLE_STREAM_EXCEPTIONS``); message text is
+    never inspected.
+    """
+    return isinstance(error, RETRYABLE_STREAM_EXCEPTIONS)
 
 
 def _in_test_mode() -> bool:
@@ -201,20 +248,16 @@ class RetryPolicy:
                 if yielded_data:
                     raise
                 last_error = e
-                if isinstance(e, (asyncio.TimeoutError, TimeoutError)):
-                    logger.warning(
-                        f"{self._provider_name} timeout error "
-                        f"(attempt {attempt + 1}/{self._max_retries}): {e}"
-                    )
-                elif any(
-                    err in str(e).lower() for err in ["connection", "timeout", "reset", "refused"]
-                ):
-                    logger.warning(
-                        f"{self._provider_name} connection error "
-                        f"(attempt {attempt + 1}/{self._max_retries}): {e}"
-                    )
-                else:
+                if not _is_retryable_stream_error(e):
                     raise
+                if isinstance(e, (asyncio.TimeoutError, httpx2.TimeoutException)):
+                    label = "timeout"
+                else:
+                    label = "connection"
+                logger.warning(
+                    f"{self._provider_name} {label} error "
+                    f"(attempt {attempt + 1}/{self._max_retries}): {e}"
+                )
                 if attempt < self._max_retries - 1:
                     await self._backoff(attempt, e)
                 else:

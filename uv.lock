@@ -982,11 +982,9 @@ dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx2" },
-    { name = "huggingface-hub" },
     { name = "langfuse" },
     { name = "mcp" },
     { name = "numpy" },
-    { name = "onnxruntime" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-sdk" },
@@ -997,13 +995,19 @@ dependencies = [
     { name = "pyjwt" },
     { name = "python-dotenv" },
     { name = "redis" },
-    { name = "scikit-learn" },
     { name = "slowapi" },
     { name = "sqlalchemy" },
     { name = "tiktoken" },
-    { name = "transformers" },
     { name = "uvicorn" },
     { name = "websockets" },
+]
+
+[package.optional-dependencies]
+smart-routing = [
+    { name = "huggingface-hub" },
+    { name = "onnxruntime" },
+    { name = "scikit-learn" },
+    { name = "transformers" },
     { name = "xgboost" },
 ]
 
@@ -1028,11 +1032,11 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43.0.0" },
     { name = "fastapi", specifier = ">=0.120.4" },
     { name = "httpx2", specifier = ">=2.2.0" },
-    { name = "huggingface-hub", specifier = ">=1.21" },
+    { name = "huggingface-hub", marker = "extra == 'smart-routing'", specifier = ">=1.21" },
     { name = "langfuse", specifier = ">=4.7.1,<5.0.0" },
     { name = "mcp", specifier = ">=2.0.0" },
     { name = "numpy", specifier = ">=2.5.1" },
-    { name = "onnxruntime", specifier = ">=1.27" },
+    { name = "onnxruntime", marker = "extra == 'smart-routing'", specifier = ">=1.27" },
     { name = "opentelemetry-api", specifier = ">=1.44.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.44.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.44.0" },
@@ -1043,15 +1047,16 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "redis", specifier = ">=7.1.0" },
-    { name = "scikit-learn", specifier = ">=1.9.0" },
+    { name = "scikit-learn", marker = "extra == 'smart-routing'", specifier = ">=1.9.0" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "tiktoken", specifier = ">=0.12.0" },
-    { name = "transformers", specifier = ">=5.12.1" },
+    { name = "transformers", marker = "extra == 'smart-routing'", specifier = ">=5.12.1" },
     { name = "uvicorn", specifier = ">=0.38.0" },
     { name = "websockets", specifier = ">=15.0" },
-    { name = "xgboost", specifier = ">=3.4.0" },
+    { name = "xgboost", marker = "extra == 'smart-routing'", specifier = ">=3.4.0" },
 ]
+provides-extras = ["smart-routing"]
 
 [package.metadata.requires-dev]
 dev = [

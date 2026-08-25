@@ -54,7 +54,7 @@ class RedisClient:
                 raise ConfigurationError(f"Redis ping failed: {ping_error}") from ping_error
 
         except Exception as e:
-            logger.error(f"Failed to initialize Redis: {e}")
+            logger.error(f"Failed to initialize Redis: {e}", exc_info=True)
             self._client = None
             self._pool = None
             raise ConfigurationError(f"Redis initialization failed: {e}") from e

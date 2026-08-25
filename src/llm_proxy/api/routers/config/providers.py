@@ -17,13 +17,21 @@ from llm_proxy.api.routers.config.models import model_record_to_read
 from llm_proxy.api.schemas.admin import (
     ProviderCreate,
     ProviderDetails,
+    ProviderKeyReveal,
     ProviderRead,
     ProviderTypeRead,
     ProviderUpdate,
 )
 from llm_proxy.core.adapter import list_provider_types
-from llm_proxy.core.exceptions import ConflictError, NotFoundError, ValidationError
+from llm_proxy.core.exceptions import (
+    ConflictError,
+    EncryptionError,
+    NotFoundError,
+    ValidationError,
+)
+from llm_proxy.core.identity import get_request_identity
 from llm_proxy.http.client import validate_server_url
+from llm_proxy.observability.audit_helpers import write_provider_key_reveal_audit_log
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -139,8 +147,13 @@ async def get_provider(
 
     models_data = [model_record_to_read(m.model) for m in provider.model_provider_mappings]
 
+    read = provider_record_to_read(provider)
     return ProviderDetails(
-        **provider_record_to_read(provider).model_dump(),
+        **read.model_dump(),
+        # model_dump() omits the excluded api_key field; pass it through so
+        # the masked_api_key computed field stays populated (it is never
+        # serialized).
+        api_key=read.api_key,
         models=models_data,
     )
 
@@ -162,6 +175,10 @@ async def create_provider(
         await commit_and_reload(session, request)
 
         return provider_record_to_read(provider)
+    except EncryptionError:
+        # Fail closed: encryption failures must surface as a sanitized 5xx,
+        # not be masked as a 400 validation error.
+        raise
     except IntegrityError:
         raise ConflictError(
             message=(
@@ -174,6 +191,33 @@ async def create_provider(
         raise ValidationError(
             message=f"Failed to create provider: {e}",
         ) from e
+
+
+@router.post("/{name:path}/api-key/reveal", response_model=ProviderKeyReveal)
+async def reveal_provider_api_key(
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    name: str = Path(...),
+) -> ProviderKeyReveal:
+    """Reveal a provider's plaintext API key.
+
+    The plaintext key is only ever returned by this explicit endpoint —
+    list/detail/update responses carry ``masked_api_key`` instead. Every
+    reveal is recorded in the audit log (``event_type=DATA_ACCESS``).
+    """
+    repo = get_config_repository(session)
+    provider = await repo.get_provider(name)
+    if not provider:
+        raise NotFoundError(message=f"Provider '{name}' not found")
+
+    identity = get_request_identity(request)
+    await write_provider_key_reveal_audit_log(
+        request,
+        actor=identity.display_name or "unknown",
+        provider_name=name,
+    )
+
+    return ProviderKeyReveal(name=provider.name, api_key=provider.api_key or "")
 
 
 @router.put("/{name:path}", response_model=ProviderRead)
@@ -194,6 +238,10 @@ async def update_provider(
 
     await commit_and_reload(session, request)
 
+    # update_provider returns the record with the key still encrypted; re-read
+    # it so the response carries a meaningful masked key (the plaintext never
+    # leaves the server).
+    provider = await repo.get_provider(name)
     return provider_record_to_read(provider)
 
 

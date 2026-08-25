@@ -372,7 +372,7 @@ class WebSearchInterceptor:
         except Exception as e:
             error_code = getattr(e, "error_code", "unavailable")
             error_message = str(e) if str(e) else "Search failed"
-            logger.error(f"Web search failed: query='{query}', error={e}")
+            logger.error(f"Web search failed: query='{query}', error={e}", exc_info=True)
 
             # Determine status based on error type
             status = WebSearchStatus.ERROR

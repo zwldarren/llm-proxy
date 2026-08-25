@@ -51,10 +51,15 @@ def _get_load_lock() -> asyncio.Lock:
 
 
 def _import_onnx_deps():
-    import onnxruntime as ort
-    from huggingface_hub import hf_hub_download
-    from transformers import AutoTokenizer
-
+    try:
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+        from transformers import AutoTokenizer
+    except ImportError as exc:
+        raise ImportError(
+            "The smart-routing embedding signal requires the 'smart-routing' extra. "
+            "Install it with: uv sync --extra smart-routing"
+        ) from exc
     return AutoTokenizer, ort, hf_hub_download
 
 
@@ -142,10 +147,15 @@ def _classifier_load_warning(path: Path, error: Exception) -> str:
     detail = str(error).strip() or error.__class__.__name__
     hint = ""
     marker = f"{error.__class__.__name__} {detail}".lower()
-    if "xgboost" in marker or "libomp" in marker:
+    if "libomp" in marker:
         hint = (
-            " On macOS, install the OpenMP runtime with `brew install libomp`,"
-            " then restart UncommonRoute."
+            " On macOS, install the OpenMP runtime with `brew install libomp`, "
+            "then restart llm-proxy."
+        )
+    elif isinstance(error, ImportError):
+        hint = (
+            " Install the 'smart-routing' extra to enable the embedding classifier: "
+            "uv sync --extra smart-routing"
         )
     return (
         f"Embedding classifier failed to load from {path}: {detail}. "
@@ -348,8 +358,10 @@ class EmbeddingSignal:
         if self._embed_fn is None and model_name:
             try:
                 self._embed_fn = _default_embed_fn()
-            except ImportError:
-                logger.warning("ONNX embedding deps not installed; embedding signal will abstain")
+            except ImportError as e:
+                logger.warning(
+                    "ONNX embedding deps not installed; embedding signal will abstain (%s)", e
+                )
             except Exception as e:
                 logger.warning("Failed to load embedding model %s: %s", model_name, e)
 
@@ -444,7 +456,12 @@ class EmbeddingSignal:
                     self._meta_scaler = pickle.load(f)
                 logger.info("Loaded metadata scaler from %s", scaler_path)
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to load metadata scaler from %s; "
+                    "embedding routing signal will run in degraded mode",
+                    scaler_path,
+                    exc_info=True,
+                )
 
     @staticmethod
     def _extract_meta_features(messages: list[dict[str, Any]], text: str) -> list[float]:

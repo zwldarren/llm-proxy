@@ -89,6 +89,11 @@ def _get_fernet() -> Fernet | None:
 def encrypt_api_key(api_key: str | None) -> str | None:
     """Encrypt an API key for secure storage.
 
+    Fail-closed: if encryption is enabled but the encryption primitive fails,
+    an :class:`EncryptionError` is raised and the plaintext key is never
+    returned for storage. The only path that stores plaintext is the
+    deliberate "encryption disabled" configuration state.
+
     Args:
         api_key: The plaintext API key to encrypt.
 
@@ -96,6 +101,9 @@ def encrypt_api_key(api_key: str | None) -> str | None:
         The encrypted API key as a base64 string, prefixed with 'enc:'.
         If encryption is not enabled, returns the original key.
         Returns None if api_key is None.
+
+    Raises:
+        EncryptionError: If encryption fails while encryption is enabled.
     """
     if not api_key:
         return api_key
@@ -114,8 +122,8 @@ def encrypt_api_key(api_key: str | None) -> str | None:
         return f"enc:{encrypted.decode()}"
     except Exception as e:
         logger.error(f"Failed to encrypt API key: {e}")
-        # Fall back to plaintext if encryption fails
-        return api_key
+        # Fail closed: never fall back to plaintext when encryption fails.
+        raise EncryptionError(f"Failed to encrypt API key: {e}") from e
 
 
 def decrypt_api_key(encrypted_key: str | None) -> str | None:
@@ -128,22 +136,28 @@ def decrypt_api_key(encrypted_key: str | None) -> str | None:
         The decrypted plaintext API key.
         If the key is not encrypted (no 'enc:' prefix), returns as-is.
         Returns None if encrypted_key is None.
+
+    Raises:
+        EncryptionError: If the key cannot be decrypted (invalid token,
+            encryption not enabled, or any other decryption failure).
     """
     if not encrypted_key:
         return encrypted_key
 
-    # Not encrypted
+    # Not encrypted: legacy plaintext rows written while encryption was
+    # disabled are read back as-is (intentional read compatibility).
     if not encrypted_key.startswith("enc:"):
         return encrypted_key
 
     fernet = _get_fernet()
     if fernet is None:
-        logger.warning(
+        # Fail closed: an 'enc:'-prefixed value cannot be decrypted without
+        # the encryption key. Returning the ciphertext would only defer the
+        # failure to the provider call with a confusing error.
+        raise EncryptionError(
             "Cannot decrypt API key: encryption not enabled. "
             "Set ENCRYPTION_KEY environment variable."
         )
-        # Return the encrypted value (will likely fail when used)
-        return encrypted_key
 
     try:
         encrypted_data = encrypted_key[4:]  # Remove 'enc:' prefix

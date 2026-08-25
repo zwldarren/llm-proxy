@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pytest
 
@@ -42,6 +44,23 @@ def test_embedding_signal_predict_degrades_when_classifier_asset_broken(tmp_path
     )
     assert vote.tier_id in {0, 1, 2, 3, None}
     assert vote.confidence is None or 0.0 <= vote.confidence <= 1.0
+
+
+def test_scaler_load_failure_logs_warning(tmp_path, caplog):
+    """A corrupt meta_scaler.pkl logs a warning instead of failing silently."""
+    broken = tmp_path / "meta_scaler.pkl"
+    broken.write_bytes(b"\x80\x04\x95" + b"garbage" * 100)
+
+    sig = EmbeddingSignal(embed_fn=_fake_embed)
+    sig._meta_scaler = None  # isolate from the real asset scaler loaded in __init__
+    with caplog.at_level("WARNING"):
+        sig._try_load_scaler(tmp_path)
+
+    assert sig._meta_scaler is None
+    assert any(
+        record.levelno == logging.WARNING and "scaler" in record.message.lower()
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio

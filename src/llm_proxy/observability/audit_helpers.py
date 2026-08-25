@@ -270,3 +270,53 @@ async def write_member_audit_log(
         # the lost audit entry as a warning so operators notice a silent
         # gap in the audit trail without failing the request.
         logger.warning("Failed to write member audit log to database", exc_info=True)
+
+
+async def write_provider_key_reveal_audit_log(
+    request: Request,
+    actor: str,
+    provider_name: str,
+) -> None:
+    """Write an audit log entry for a provider API key reveal.
+
+    Revealing a plaintext upstream key is a sensitive data-access event, so
+    it is recorded with ``event_type=DATA_ACCESS`` and the provider as the
+    resource. Failures are logged as warnings only — the reveal itself
+    already succeeded and must not be rolled back by a lost audit entry.
+    """
+    try:
+        from llm_proxy.config.manager import resolve_logging_config
+        from llm_proxy.observability.service import RequestLogCreate, RequestLogService
+
+        config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
+        if not config.enable_database_logging:
+            return
+
+        log_data = RequestLogCreate(
+            request_id=getattr(request.state, "request_id", None) or "unknown",
+            timestamp=time.time(),
+            endpoint=request.url.path,
+            method=request.method,
+            status_code=200,
+            response_time_ms=None,
+            log_type=LogType.AUDIT,
+            user_identity=actor,
+            client_ip=get_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            auth_method="jwt",
+            error_message=None,
+            server_hostname=get_server_hostname(),
+            service_name="llm-proxy",
+            event_type=EventType.DATA_ACCESS,
+            action_category=ActionCategory.READ,
+            resource_type=ResourceType.PROVIDER,
+            resource_id=provider_name,
+            outcome=Outcome.SUCCESS,
+            log_metadata={"is_api_endpoint": True, "secret_reveal": True},
+        )
+
+        service = RequestLogService(config)
+        service.create_log_background(log_data)
+        request.state.audit_log_written = True
+    except Exception:
+        logger.warning("Failed to write provider key reveal audit log", exc_info=True)

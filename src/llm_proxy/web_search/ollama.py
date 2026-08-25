@@ -4,10 +4,7 @@ import asyncio
 import uuid
 from typing import Any
 
-import httpx2
-
 from llm_proxy.config.types.web_search import OllamaConfig
-from llm_proxy.core.exceptions import WebSearchError
 from llm_proxy.http.client import AsyncSession, HTTPClient
 from llm_proxy.observability.logger import get_logger
 
@@ -16,6 +13,7 @@ from .provider import (
     WebSearchProvider,
     WebSearchResponse,
     WebSearchToolConfig,
+    translate_web_search_error,
 )
 
 logger = get_logger(__name__)
@@ -128,29 +126,14 @@ class OllamaProvider(WebSearchProvider):
                 usage={"web_search_requests": 1},
             )
 
-        except httpx2.HTTPStatusError as e:
-            status_code = e.response.status_code if e.response is not None else 500
-            logger.error(f"Ollama HTTP error: status={status_code}, query='{query}', error={e}")
-            raise WebSearchError(
-                message=f"Ollama web search failed: {status_code}",
-                error_code=self._map_http_error(status_code),
-                provider_name="ollama",
-            ) from e
-
-        except httpx2.TimeoutException as e:
-            logger.error(f"Ollama timeout: query='{query}', timeout={self._config.timeout}s")
-            raise WebSearchError(
-                message=f"Ollama web search timed out after {self._config.timeout}s",
-                error_code="too_many_requests",
-                provider_name="ollama",
-            ) from e
-
         except Exception as e:
-            logger.error(f"Ollama unexpected error: query='{query}', error={e}")
-            raise WebSearchError(
-                message=f"Ollama web search failed: {e}",
-                error_code="unavailable",
+            raise translate_web_search_error(
+                e,
                 provider_name="ollama",
+                display_name="Ollama",
+                query=query,
+                timeout=self._config.timeout,
+                map_http_error=self._map_http_error,
             ) from e
 
     async def close(self) -> None:

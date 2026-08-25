@@ -203,10 +203,14 @@ class TestProviderRepository:
             mock_decrypt.return_value = "decrypted-key"
             mock_session.refresh = AsyncMock()
 
-            await repo.update_provider("test-provider", api_key="new-key")
+            result = await repo.update_provider("test-provider", api_key="new-key")
 
             mock_encrypt.assert_called_once_with("new-key")
             mock_session.flush.assert_called_once()
+            # The key must stay encrypted on the returned record: the admin
+            # API must never receive plaintext keys from the repository.
+            mock_decrypt.assert_not_called()
+            assert result.api_key == "encrypted-key"
 
     @pytest.mark.asyncio
     async def test_update_provider_with_metadata(self, repo, mock_session, mock_provider):
@@ -228,6 +232,9 @@ class TestProviderRepository:
             )
 
             assert result is not None
+            # No api_key change: the stored key is left untouched and must
+            # not be decrypted in place.
+            mock_decrypt.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_update_provider_not_found(self, repo, mock_session):

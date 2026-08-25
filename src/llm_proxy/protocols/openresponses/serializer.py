@@ -32,10 +32,23 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.content_blocks import (
     CustomToolUseBlock,
+    DocumentBlock,
+    FileBlock,
+    ImageBlock,
+    RedactedThinkingBlock,
+    RefusalBlock,
     ServerToolUseBlock,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+)
+from llm_proxy.models.content_blocks.anthropic_builtin import (
+    BashCodeExecutionToolResultBlock,
+    CodeExecutionToolResultBlock,
+    TextEditorCodeExecutionToolResultBlock,
+    ToolSearchToolResultBlock,
+    WebFetchToolResultBlock,
+    WebSearchToolResultBlock,
 )
 from llm_proxy.models.params import GenerationParams, OpenAISpecificParams
 from llm_proxy.models.tools import is_web_search_tool_name
@@ -1256,6 +1269,480 @@ def unwrap_custom_tool_arguments(arguments: str) -> str:
     return arguments
 
 
+def _resolve_format_context(context: FormatContext | None) -> FormatContext:
+    """Resolve the format context, falling back to the handler's context."""
+    if context is None:
+        try:
+            from llm_proxy.protocols.openresponses.handler import get_format_context
+
+            ctx = get_format_context()
+            if ctx is not None:
+                context = ctx
+        except ImportError:
+            logger.debug(
+                "Could not import get_format_context from openresponses handler; "
+                "proceeding without format context."
+            )
+    if context is None:
+        context = FormatContext()
+    return context
+
+
+def _collect_web_search_results(output: list[Any]) -> dict[str, dict[str, Any]]:
+    """First pass: collect web search results keyed by tool_use_id."""
+    web_search_results: dict[str, dict[str, Any]] = {}
+    for block in output:
+        if isinstance(block, WebSearchToolResultBlock):
+            sources: list[dict[str, str]] = []
+            if isinstance(block.content, list):
+                for item in block.content:
+                    if isinstance(item, dict):
+                        sources.append(
+                            {
+                                "url": str(item.get("url", "")),
+                                "title": str(item.get("title", "")),
+                            }
+                        )
+            web_search_results[block.tool_use_id] = {
+                "sources": sources,
+                "is_error": block.is_error,
+            }
+    return web_search_results
+
+
+def _format_text_block(
+    block: TextBlock, include: list[str] | None, response: InternalResponse
+) -> dict[str, Any]:
+    """Format a text block as a completed assistant message item."""
+    annotations: list[dict[str, Any]] = []
+    if block.citations:
+        for citation in block.citations:
+            if isinstance(citation, dict) and citation.get("type") == "url_citation":
+                annotations.append(
+                    {
+                        "type": "url_citation",
+                        "url": citation.get("url", ""),
+                        "start_index": citation.get("start_index", 0),
+                        "end_index": citation.get("end_index", 0),
+                        "title": citation.get("title", ""),
+                    }
+                )
+    text_part: dict[str, Any] = {
+        "type": "output_text",
+        "text": block.text,
+        "annotations": annotations,
+        "logprobs": [],
+    }
+    if include and "message.output_text.logprobs" in include:
+        logprobs_list: list[dict[str, Any]] = []
+        if response.logprobs and response.logprobs.content:
+            logprobs_list = [
+                {
+                    "token": t.token,
+                    "logprob": t.logprob,
+                    "bytes": t.bytes,
+                    "top_logprobs": [
+                        {"token": x.token, "logprob": x.logprob, "bytes": x.bytes}
+                        for x in (t.top_logprobs or [])
+                    ],
+                }
+                for t in response.logprobs.content
+            ]
+        text_part["logprobs"] = logprobs_list
+    return {
+        "type": "message",
+        "id": generate_item_id(),
+        "status": "completed",
+        "role": "assistant",
+        "phase": "final_answer",
+        "content": [text_part],
+    }
+
+
+def _format_thinking_block(
+    block: ThinkingBlock | RedactedThinkingBlock, include: list[str] | None
+) -> dict[str, Any]:
+    """Format a thinking block as a reasoning item."""
+    text = "[redacted]" if isinstance(block, RedactedThinkingBlock) else block.thinking
+    reasoning_item: dict[str, Any] = {
+        "type": "reasoning",
+        "id": generate_item_id(),
+        "status": "completed",
+        "content": [],
+        "summary": [{"type": "summary_text", "text": text}],
+    }
+    if include and "reasoning.encrypted_content" in include:
+        encrypted = getattr(block, "encrypted_content", None)
+        if encrypted:
+            reasoning_item["encrypted_content"] = encrypted
+    return reasoning_item
+
+
+def _format_tool_use_block(
+    block: ToolUseBlock | ServerToolUseBlock | CustomToolUseBlock,
+    include: list[str] | None,
+    web_search_results: dict[str, dict[str, Any]],
+    context: FormatContext,
+) -> dict[str, Any]:
+    """Format a tool-use block as a function_call / web_search_call / tool_search_call item."""
+    name = block.name
+    if is_web_search_tool_name(name):
+        args = block.input
+        query = args.get("query", "") if isinstance(args, dict) else ""
+        result_data = web_search_results.get(block.id)
+        if not result_data and web_search_declared_as_function(context.tools):
+            # The client declared web_search as a client-executed
+            # function tool (e.g. Hermes Agent): emit a function_call
+            # so it can run the search and return results. A
+            # web_search_call would make such clients believe the
+            # search already ran server-side and silently end the
+            # turn.
+            if isinstance(args, dict):
+                args_str = orjson.dumps(args).decode()
+            elif isinstance(args, str):
+                args_str = args
+            else:
+                args_str = "{}"
+            return {
+                "type": "function_call",
+                "id": generate_item_id(),
+                "call_id": block.id,
+                "name": name,
+                "arguments": args_str,
+                "status": "completed",
+            }
+
+        # The proxy interceptor executed the search (result_data) or
+        # the client declared the builtin web_search tool: report a
+        # completed web_search_call. When the upstream itself
+        # executed the search, its full action (query/queries and,
+        # when requested via include, sources) is re-emitted
+        # verbatim so non-streaming native passthrough keeps the
+        # sources.
+        ws_item: dict[str, Any] = {
+            "type": "web_search_call",
+            "id": f"ws_{secrets.token_hex(12)}",
+            "status": "completed",
+        }
+        upstream_action = None
+        if isinstance(block, (ToolUseBlock, ServerToolUseBlock)) and block.extra:
+            upstream_action = block.extra.get("responses_action")
+        if isinstance(upstream_action, dict):
+            ws_item["action"] = dict(upstream_action)
+        else:
+            ws_item["action"] = {
+                "type": "search",
+                "query": query,
+                "queries": [query] if query else [],
+            }
+        if result_data:
+            if include and "web_search_call.action.sources" in include:
+                ws_item["action"]["sources"] = result_data["sources"]
+            if include and "web_search_call.results" in include:
+                ws_item["results"] = result_data["sources"]
+        return ws_item
+
+    if name == "tool_search":
+        ts_args = block.input
+        if isinstance(ts_args, str):
+            try:
+                ts_args = orjson.loads(ts_args)
+            except orjson.JSONDecodeError:
+                logger.warning(
+                    "Failed to parse tool_search arguments as JSON: %s",
+                    ts_args[:200],
+                )
+                ts_args = {}
+        return {
+            "type": "tool_search_call",
+            "id": generate_item_id(),
+            "call_id": block.id,
+            "status": "completed",
+            "execution": "client",
+            "arguments": ts_args if isinstance(ts_args, dict) else {},
+        }
+
+    display_name, namespace = restore_tool_name(context.namespace_map, block.name)
+
+    args = block.input
+    if isinstance(args, dict):
+        args = orjson.dumps(args).decode()
+
+    # Preserve custom tool type when the original request defined
+    # this name as a custom tool. Otherwise emit a normal function_call.
+    # Tolerant matching: models often echo the short history name
+    # (``exec``) rather than the flattened tool-definition name
+    # (``functions__exec``) carried by the custom-name set.
+    item_type = "function_call"
+    if isinstance(block, CustomToolUseBlock) or (
+        context.tools
+        and match_custom_tool_name(name, extract_custom_tool_names(context.tools)) is not None
+    ):
+        item_type = "custom_tool_call"
+
+    func_call_item: dict[str, Any] = {
+        "type": item_type,
+        "id": generate_item_id(),
+        "call_id": block.id,
+        "name": display_name,
+        "status": "completed",
+    }
+    if namespace:
+        func_call_item["namespace"] = namespace
+    if item_type == "custom_tool_call":
+        # Unwrap the JSON {"content": "..."} wrapper that the
+        # function-tool conversion added, leaving only the raw text
+        # that Codex expects as ``input``.
+        func_call_item["input"] = unwrap_custom_tool_arguments(args)
+    else:
+        func_call_item["arguments"] = args
+    if isinstance(block, ToolUseBlock) and block.extra.get("thought_signature"):
+        func_call_item["thought_signature"] = block.extra["thought_signature"]
+    return func_call_item
+
+
+def _format_refusal_block(
+    block: RefusalBlock, output: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Format a refusal block, extending the trailing message when possible."""
+    msg_content: list[dict[str, Any]] = [{"type": "refusal", "refusal": block.refusal}]
+    if output and output[-1]["type"] == "message":
+        output[-1]["content"].extend(msg_content)
+        return None
+    return {
+        "type": "message",
+        "id": generate_item_id(),
+        "status": "completed",
+        "role": "assistant",
+        "phase": "final_answer",
+        "content": msg_content,
+    }
+
+
+def _format_media_block(block: ImageBlock | DocumentBlock | FileBlock) -> dict[str, Any]:
+    """Format image/document/file blocks as placeholder assistant messages."""
+    if isinstance(block, ImageBlock):
+        text = f"[Image: {block.source.media_type or 'unknown'}]"
+        if block.source.type == "file_id":
+            text = f"[Image: file_id={block.source.data}]"
+    elif isinstance(block, DocumentBlock):
+        title = f" '{block.title}'" if block.title else ""
+        text = f"[Document{title}: {block.source.media_type or 'unknown'}]"
+    else:
+        file_name = block.filename or block.file_id or "unknown"
+        text = f"[File: {file_name}]"
+    return {
+        "type": "message",
+        "id": generate_item_id(),
+        "status": "completed",
+        "role": "assistant",
+        "phase": "final_answer",
+        "content": [{"type": "output_text", "text": text}],
+    }
+
+
+def _format_tool_result_block(block: Any) -> dict[str, Any] | None:
+    """Format tool result blocks as function_call_output / tool_search_output items."""
+    # Skip web search results — they are already represented
+    # as web_search_call items above
+    if isinstance(block, WebSearchToolResultBlock):
+        return None
+    if isinstance(block, ToolSearchToolResultBlock):
+        tools = block.content
+        if isinstance(tools, str):
+            try:
+                tools = orjson.loads(tools)
+            except orjson.JSONDecodeError:
+                logger.warning(
+                    "Failed to parse tool_search result as JSON: %s",
+                    tools[:200],
+                )
+                tools = []
+        return {
+            "type": "tool_search_output",
+            "id": generate_item_id(),
+            "call_id": block.tool_use_id,
+            "status": "completed",
+            "execution": "client",
+            "tools": tools,
+        }
+    content = block.content
+    if isinstance(content, list):
+        content = _content_blocks_to_text(content)
+    elif not isinstance(content, str):
+        content = str(content)
+    return {
+        "type": "function_call_output",
+        "id": generate_item_id(),
+        "call_id": block.tool_use_id,
+        "output": content,
+        "status": "completed",
+    }
+
+
+def _format_output_item(
+    block: Any,
+    output: list[dict[str, Any]],
+    include: list[str] | None,
+    response: InternalResponse,
+    web_search_results: dict[str, dict[str, Any]],
+    context: FormatContext,
+) -> dict[str, Any] | None:
+    """Convert one output ContentBlock to a Responses output item.
+
+    Returns None when the block is already represented by an earlier item
+    (web search results) or was merged into the trailing message (refusals).
+    """
+    if isinstance(block, TextBlock):
+        return _format_text_block(block, include, response)
+    if isinstance(block, (ThinkingBlock, RedactedThinkingBlock)):
+        return _format_thinking_block(block, include)
+    if isinstance(block, (ToolUseBlock, ServerToolUseBlock, CustomToolUseBlock)):
+        return _format_tool_use_block(block, include, web_search_results, context)
+    if isinstance(block, RefusalBlock):
+        return _format_refusal_block(block, output)
+    if isinstance(block, (ImageBlock, DocumentBlock, FileBlock)):
+        return _format_media_block(block)
+    if isinstance(
+        block,
+        (
+            ToolResultBlock,
+            WebSearchToolResultBlock,
+            WebFetchToolResultBlock,
+            CodeExecutionToolResultBlock,
+            BashCodeExecutionToolResultBlock,
+            TextEditorCodeExecutionToolResultBlock,
+            ToolSearchToolResultBlock,
+        ),
+    ):
+        return _format_tool_result_block(block)
+    return None
+
+
+def _build_status_and_error(
+    response: InternalResponse,
+) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
+    """Derive response status, error and incomplete_details from finish_reason."""
+    status = "completed"
+    error: dict[str, Any] | None = None
+    incomplete_details: dict[str, Any] | None = None
+    finish_reason = response.finish_reason
+    if finish_reason == "length":
+        status = "incomplete"
+        # Preserve the upstream incomplete reason (max_output_tokens /
+        # content_filter) when the provider supplied one; otherwise keep
+        # the generic "length" reason.
+        incomplete_reason = (response.provider_info or {}).get("incomplete_reason")
+        incomplete_details = {"reason": incomplete_reason or "length"}
+    elif finish_reason == "error":
+        status = "failed"
+        # Terminal-status validation: an HTTP 2xx response object whose
+        # status is failed/cancelled must surface the upstream error
+        # instead of masquerading as a completion. The upstream error
+        # payload is carried through provider_info by the OpenAI provider
+        # serializer.
+        upstream_error = (response.provider_info or {}).get("upstream_error")
+        if isinstance(upstream_error, dict) and (
+            upstream_error.get("message") or upstream_error.get("code")
+        ):
+            error = {
+                "code": upstream_error.get("code") or "provider_error",
+                "message": upstream_error.get("message")
+                or "Provider returned an error finish reason.",
+                "type": upstream_error.get("type") or "provider_error",
+                "param": upstream_error.get("param"),
+            }
+        else:
+            error = {
+                "code": "provider_error",
+                "message": "Provider returned an error finish reason.",
+                "type": "provider_error",
+                "param": None,
+            }
+    return status, error, incomplete_details
+
+
+def _build_usage(response: InternalResponse) -> dict[str, Any]:
+    """Convert InternalResponse usage to the Responses usage payload."""
+    if not response.usage:
+        return _convert_usage(None)
+    usage_payload: dict[str, Any] = {
+        "prompt_tokens": response.usage.input_tokens,
+        "completion_tokens": response.usage.output_tokens,
+        "total_tokens": (
+            response.usage.total_tokens
+            if response.usage.total_tokens is not None
+            else response.usage.input_tokens + response.usage.output_tokens
+        ),
+    }
+    if response.usage.prompt_tokens_details:
+        usage_payload["prompt_tokens_details"] = asdict(response.usage.prompt_tokens_details)
+    if response.usage.completion_tokens_details:
+        usage_payload["completion_tokens_details"] = asdict(
+            response.usage.completion_tokens_details
+        )
+    return _convert_usage(usage_payload)
+
+
+def _build_response_resource(
+    context: FormatContext,
+    response_id: str,
+    response_model: str,
+    created_at: int,
+    completed_at: int | None,
+    status: str,
+    output: list[dict[str, Any]],
+    error: dict[str, Any] | None,
+    usage: dict[str, Any],
+    incomplete_details: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Assemble the final Responses ResponseResource payload."""
+    return {
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "completed_at": completed_at,
+        "status": status,
+        "model": response_model,
+        "previous_response_id": context.previous_response_id,
+        "instructions": context.instructions,
+        "output": output,
+        "error": error,
+        # Echo the request's tool declarations (raw Responses-shaped dicts
+        # collected by the protocol layer), as the spec's ResponseResource
+        # carries the effective tool set.
+        "tools": [t for t in (context.tools or []) if isinstance(t, dict)],
+        "tool_choice": context.tool_choice if context.tool_choice is not None else "auto",
+        "truncation": context.truncation or "disabled",
+        "parallel_tool_calls": (
+            True if context.parallel_tool_calls is None else context.parallel_tool_calls
+        ),
+        "text": context.text or {"format": {"type": "text"}},
+        # Spec: top_p/temperature are required numbers on ResponseResource;
+        # default to the OpenAI defaults (1.0) when not provided.
+        "top_p": context.top_p if context.top_p is not None else 1.0,
+        "presence_penalty": (
+            context.presence_penalty if context.presence_penalty is not None else 0.0
+        ),
+        "frequency_penalty": (
+            context.frequency_penalty if context.frequency_penalty is not None else 0.0
+        ),
+        "top_logprobs": context.top_logprobs or 0,
+        "temperature": context.temperature if context.temperature is not None else 1.0,
+        "reasoning": context.reasoning,
+        "usage": usage,
+        "max_output_tokens": context.max_output_tokens,
+        "max_tool_calls": context.max_tool_calls,
+        "store": context.store or False,
+        "background": context.background or False,
+        "service_tier": context.service_tier or "default",
+        "metadata": context.metadata or {},
+        "safety_identifier": context.safety_identifier,
+        "prompt_cache_key": context.prompt_cache_key,
+        "incomplete_details": incomplete_details,
+    }
+
+
 @register_protocol_serializer("openresponses")
 class OpenResponsesProtocolSerializer(ProtocolSerializer):
     """Protocol serializer for OpenAI Responses API format.
@@ -1289,405 +1776,22 @@ class OpenResponsesProtocolSerializer(ProtocolSerializer):
             logger.error("Invalid response type: %s", type(response).__name__)
             return {"error": "Invalid response type"}
 
-        if context is None:
-            try:
-                from llm_proxy.protocols.openresponses.handler import get_format_context
-
-                ctx = get_format_context()
-                if ctx is not None:
-                    context = ctx
-            except ImportError:
-                logger.debug(
-                    "Could not import get_format_context from openresponses handler; "
-                    "proceeding without format context."
-                )
-        if context is None:
-            context = FormatContext()
-
-        instructions = context.instructions
-        previous_response_id = context.previous_response_id
-        store = context.store
-        metadata = context.metadata
-        temperature = context.temperature
-        top_p = context.top_p
-        presence_penalty = context.presence_penalty
-        frequency_penalty = context.frequency_penalty
-        truncation = context.truncation
-        parallel_tool_calls = context.parallel_tool_calls
-        max_output_tokens = context.max_output_tokens
-        max_tool_calls = context.max_tool_calls
-        reasoning = context.reasoning
-        service_tier = context.service_tier
-        text = context.text
-        top_logprobs = context.top_logprobs
-        background = context.background
-        safety_identifier = context.safety_identifier
-        prompt_cache_key = context.prompt_cache_key
-        include = context.include
+        context = _resolve_format_context(context)
         response_id = response.id or generate_response_id()
         response_model = response.model or "unknown"
         created_at = response.created_at or int(time.time())
 
         # First pass: collect web search results keyed by tool_use_id
-        from llm_proxy.models.content_blocks.anthropic_builtin import (
-            WebSearchToolResultBlock as _WSRes,
-        )
-
-        web_search_results: dict[str, dict[str, Any]] = {}
-        for block in response.output:
-            if isinstance(block, _WSRes):
-                sources: list[dict[str, str]] = []
-                if isinstance(block.content, list):
-                    for item in block.content:
-                        if isinstance(item, dict):
-                            sources.append(
-                                {
-                                    "url": str(item.get("url", "")),
-                                    "title": str(item.get("title", "")),
-                                }
-                            )
-                web_search_results[block.tool_use_id] = {
-                    "sources": sources,
-                    "is_error": block.is_error,
-                }
-
-        output: list[dict[str, Any]] = []
+        web_search_results = _collect_web_search_results(response.output)
 
         # Second pass: build output items
+        output: list[dict[str, Any]] = []
         for block in response.output:
-            from llm_proxy.models import (
-                CustomToolUseBlock,
-                DocumentBlock,
-                FileBlock,
-                ImageBlock,
-                RedactedThinkingBlock,
-                RefusalBlock,
-                ServerToolUseBlock,
-                ThinkingBlock,
-                ToolResultBlock,
-                ToolUseBlock,
+            item = _format_output_item(
+                block, output, context.include, response, web_search_results, context
             )
-            from llm_proxy.models.content_blocks.anthropic_builtin import (
-                BashCodeExecutionToolResultBlock,
-                CodeExecutionToolResultBlock,
-                TextEditorCodeExecutionToolResultBlock,
-                ToolSearchToolResultBlock,
-                WebFetchToolResultBlock,
-                WebSearchToolResultBlock,
-            )
-
-            if isinstance(block, TextBlock):
-                annotations: list[dict[str, Any]] = []
-                if block.citations:
-                    for citation in block.citations:
-                        if isinstance(citation, dict) and citation.get("type") == "url_citation":
-                            annotations.append(
-                                {
-                                    "type": "url_citation",
-                                    "url": citation.get("url", ""),
-                                    "start_index": citation.get("start_index", 0),
-                                    "end_index": citation.get("end_index", 0),
-                                    "title": citation.get("title", ""),
-                                }
-                            )
-                text_part: dict[str, Any] = {
-                    "type": "output_text",
-                    "text": block.text,
-                    "annotations": annotations,
-                    "logprobs": [],
-                }
-                if include and "message.output_text.logprobs" in include:
-                    logprobs_list: list[dict[str, Any]] = []
-                    if response.logprobs and response.logprobs.content:
-                        logprobs_list = [
-                            {
-                                "token": t.token,
-                                "logprob": t.logprob,
-                                "bytes": t.bytes,
-                                "top_logprobs": [
-                                    {"token": x.token, "logprob": x.logprob, "bytes": x.bytes}
-                                    for x in (t.top_logprobs or [])
-                                ],
-                            }
-                            for t in response.logprobs.content
-                        ]
-                    text_part["logprobs"] = logprobs_list
-                output.append(
-                    {
-                        "type": "message",
-                        "id": generate_item_id(),
-                        "status": "completed",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [text_part],
-                    }
-                )
-            elif isinstance(block, ThinkingBlock):
-                reasoning_item: dict[str, Any] = {
-                    "type": "reasoning",
-                    "id": generate_item_id(),
-                    "status": "completed",
-                    "content": [],
-                    "summary": [
-                        {
-                            "type": "summary_text",
-                            "text": block.thinking,
-                        }
-                    ],
-                }
-                if include and "reasoning.encrypted_content" in include:
-                    encrypted = getattr(block, "encrypted_content", None)
-                    if encrypted:
-                        reasoning_item["encrypted_content"] = encrypted
-                output.append(reasoning_item)
-            elif isinstance(block, RedactedThinkingBlock):
-                reasoning_item: dict[str, Any] = {
-                    "type": "reasoning",
-                    "id": generate_item_id(),
-                    "status": "completed",
-                    "content": [],
-                    "summary": [
-                        {
-                            "type": "summary_text",
-                            "text": "[redacted]",
-                        }
-                    ],
-                }
-                output.append(reasoning_item)
-            elif isinstance(block, (ToolUseBlock, ServerToolUseBlock, CustomToolUseBlock)):
-                name = getattr(block, "name", "")
-                if is_web_search_tool_name(name):
-                    args = block.input
-                    query = args.get("query", "") if isinstance(args, dict) else ""
-                    result_data = web_search_results.get(block.id)
-                    if not result_data and web_search_declared_as_function(
-                        context.tools if context else None
-                    ):
-                        # The client declared web_search as a client-executed
-                        # function tool (e.g. Hermes Agent): emit a function_call
-                        # so it can run the search and return results. A
-                        # web_search_call would make such clients believe the
-                        # search already ran server-side and silently end the
-                        # turn.
-                        if isinstance(args, dict):
-                            args_str = orjson.dumps(args).decode()
-                        elif isinstance(args, str):
-                            args_str = args
-                        else:
-                            args_str = "{}"
-                        output.append(
-                            {
-                                "type": "function_call",
-                                "id": generate_item_id(),
-                                "call_id": block.id,
-                                "name": name,
-                                "arguments": args_str,
-                                "status": "completed",
-                            }
-                        )
-                        continue
-
-                    # The proxy interceptor executed the search (result_data) or
-                    # the client declared the builtin web_search tool: report a
-                    # completed web_search_call. When the upstream itself
-                    # executed the search, its full action (query/queries and,
-                    # when requested via include, sources) is re-emitted
-                    # verbatim so non-streaming native passthrough keeps the
-                    # sources.
-                    ws_item: dict[str, Any] = {
-                        "type": "web_search_call",
-                        "id": f"ws_{secrets.token_hex(12)}",
-                        "status": "completed",
-                    }
-                    upstream_action = None
-                    if isinstance(block, (ToolUseBlock, ServerToolUseBlock)) and block.extra:
-                        upstream_action = block.extra.get("responses_action")
-                    if isinstance(upstream_action, dict):
-                        ws_item["action"] = dict(upstream_action)
-                    else:
-                        ws_item["action"] = {
-                            "type": "search",
-                            "query": query,
-                            "queries": [query] if query else [],
-                        }
-                    if result_data:
-                        if include and "web_search_call.action.sources" in include:
-                            ws_item["action"]["sources"] = result_data["sources"]
-                        if include and "web_search_call.results" in include:
-                            ws_item["results"] = result_data["sources"]
-                    output.append(ws_item)
-                    continue
-
-                if name == "tool_search":
-                    ts_args = block.input
-                    if isinstance(ts_args, str):
-                        try:
-                            ts_args = orjson.loads(ts_args)
-                        except orjson.JSONDecodeError:
-                            logger.warning(
-                                "Failed to parse tool_search arguments as JSON: %s",
-                                ts_args[:200],
-                            )
-                            ts_args = {}
-                    output.append(
-                        {
-                            "type": "tool_search_call",
-                            "id": generate_item_id(),
-                            "call_id": block.id,
-                            "status": "completed",
-                            "execution": "client",
-                            "arguments": ts_args if isinstance(ts_args, dict) else {},
-                        }
-                    )
-                    continue
-
-                display_name, namespace = restore_tool_name(
-                    context.namespace_map if context else None, block.name
-                )
-
-                args = block.input
-                if isinstance(args, dict):
-                    args = orjson.dumps(args).decode()
-
-                # Preserve custom tool type when the original request defined
-                # this name as a custom tool. Otherwise emit a normal function_call.
-                # Tolerant matching: models often echo the short history name
-                # (``exec``) rather than the flattened tool-definition name
-                # (``functions__exec``) carried by the custom-name set.
-                item_type = "function_call"
-                if isinstance(block, CustomToolUseBlock) or (
-                    context.tools
-                    and match_custom_tool_name(name, extract_custom_tool_names(context.tools))
-                    is not None
-                ):
-                    item_type = "custom_tool_call"
-
-                func_call_item: dict[str, Any] = {
-                    "type": item_type,
-                    "id": generate_item_id(),
-                    "call_id": block.id,
-                    "name": display_name,
-                    "status": "completed",
-                }
-                if namespace:
-                    func_call_item["namespace"] = namespace
-                if item_type == "custom_tool_call":
-                    # Unwrap the JSON {"content": "..."} wrapper that the
-                    # function-tool conversion added, leaving only the raw text
-                    # that Codex expects as ``input``.
-                    func_call_item["input"] = unwrap_custom_tool_arguments(args)
-                else:
-                    func_call_item["arguments"] = args
-                if isinstance(block, ToolUseBlock) and block.extra.get("thought_signature"):
-                    func_call_item["thought_signature"] = block.extra["thought_signature"]
-                output.append(func_call_item)
-            elif isinstance(block, RefusalBlock):
-                msg_content: list[dict[str, Any]] = [{"type": "refusal", "refusal": block.refusal}]
-                if output and output[-1]["type"] == "message":
-                    output[-1]["content"].extend(msg_content)
-                else:
-                    output.append(
-                        {
-                            "type": "message",
-                            "id": generate_item_id(),
-                            "status": "completed",
-                            "role": "assistant",
-                            "phase": "final_answer",
-                            "content": msg_content,
-                        }
-                    )
-            elif isinstance(block, ImageBlock):
-                text = f"[Image: {block.source.media_type or 'unknown'}]"
-                if block.source.type == "file_id":
-                    text = f"[Image: file_id={block.source.data}]"
-                output.append(
-                    {
-                        "type": "message",
-                        "id": generate_item_id(),
-                        "status": "completed",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [{"type": "output_text", "text": text}],
-                    }
-                )
-            elif isinstance(block, DocumentBlock):
-                title = f" '{block.title}'" if block.title else ""
-                text = f"[Document{title}: {block.source.media_type or 'unknown'}]"
-                output.append(
-                    {
-                        "type": "message",
-                        "id": generate_item_id(),
-                        "status": "completed",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [{"type": "output_text", "text": text}],
-                    }
-                )
-            elif isinstance(block, FileBlock):
-                file_name = block.filename or block.file_id or "unknown"
-                file_text = f"[File: {file_name}]"
-                output.append(
-                    {
-                        "type": "message",
-                        "id": generate_item_id(),
-                        "status": "completed",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [{"type": "output_text", "text": file_text}],
-                    }
-                )
-            elif isinstance(
-                block,
-                (
-                    ToolResultBlock,
-                    WebSearchToolResultBlock,
-                    WebFetchToolResultBlock,
-                    CodeExecutionToolResultBlock,
-                    BashCodeExecutionToolResultBlock,
-                    TextEditorCodeExecutionToolResultBlock,
-                    ToolSearchToolResultBlock,
-                ),
-            ):
-                # Skip web search results — they are already represented
-                # as web_search_call items above
-                if isinstance(block, WebSearchToolResultBlock):
-                    continue
-                if isinstance(block, ToolSearchToolResultBlock):
-                    tools = block.content
-                    if isinstance(tools, str):
-                        try:
-                            tools = orjson.loads(tools)
-                        except orjson.JSONDecodeError:
-                            logger.warning(
-                                "Failed to parse tool_search result as JSON: %s",
-                                tools[:200],
-                            )
-                            tools = []
-                    output.append(
-                        {
-                            "type": "tool_search_output",
-                            "id": generate_item_id(),
-                            "call_id": block.tool_use_id,
-                            "status": "completed",
-                            "execution": "client",
-                            "tools": tools,
-                        }
-                    )
-                    continue
-                content = block.content
-                if isinstance(content, list):
-                    content = _content_blocks_to_text(content)
-                elif not isinstance(content, str):
-                    content = str(content)
-                output.append(
-                    {
-                        "type": "function_call_output",
-                        "id": generate_item_id(),
-                        "call_id": block.tool_use_id,
-                        "output": content,
-                        "status": "completed",
-                    }
-                )
+            if item is not None:
+                output.append(item)
 
         if not output:
             output.append(
@@ -1714,114 +1818,32 @@ class OpenResponsesProtocolSerializer(ProtocolSerializer):
             ):
                 output.insert(min(position + inserted, len(output)), dict(raw_item))
 
-        status = "completed"
-        error: dict[str, Any] | None = None
-        incomplete_details: dict[str, Any] | None = None
-        finish_reason = response.finish_reason
-        if finish_reason == "length":
-            status = "incomplete"
-            # Preserve the upstream incomplete reason (max_output_tokens /
-            # content_filter) when the provider supplied one; otherwise keep
-            # the generic "length" reason.
-            incomplete_reason = (response.provider_info or {}).get("incomplete_reason")
-            incomplete_details = {"reason": incomplete_reason or "length"}
+        status, error, incomplete_details = _build_status_and_error(response)
+        if status == "incomplete" and output:
             # Spec: an item that ends in a terminal incomplete state MUST be the
             # last item emitted, and the containing response MUST be incomplete.
-            if output:
-                output[-1]["status"] = "incomplete"
-        elif finish_reason == "error":
-            status = "failed"
-            # Terminal-status validation: an HTTP 2xx response object whose
-            # status is failed/cancelled must surface the upstream error
-            # instead of masquerading as a completion. The upstream error
-            # payload is carried through provider_info by the OpenAI provider
-            # serializer.
-            upstream_error = (response.provider_info or {}).get("upstream_error")
-            if isinstance(upstream_error, dict) and (
-                upstream_error.get("message") or upstream_error.get("code")
-            ):
-                error = {
-                    "code": upstream_error.get("code") or "provider_error",
-                    "message": upstream_error.get("message")
-                    or "Provider returned an error finish reason.",
-                    "type": upstream_error.get("type") or "provider_error",
-                    "param": upstream_error.get("param"),
-                }
-            else:
-                error = {
-                    "code": "provider_error",
-                    "message": "Provider returned an error finish reason.",
-                    "type": "provider_error",
-                    "param": None,
-                }
+            output[-1]["status"] = "incomplete"
 
         completed_at = int(time.time()) if status != "in_progress" else None
 
-        usage = None
-        if response.usage:
-            usage_payload: dict[str, Any] = {
-                "prompt_tokens": response.usage.input_tokens,
-                "completion_tokens": response.usage.output_tokens,
-                "total_tokens": (
-                    response.usage.total_tokens
-                    if response.usage.total_tokens is not None
-                    else response.usage.input_tokens + response.usage.output_tokens
-                ),
-            }
-            if response.usage.prompt_tokens_details:
-                usage_payload["prompt_tokens_details"] = asdict(
-                    response.usage.prompt_tokens_details
-                )
-            if response.usage.completion_tokens_details:
-                usage_payload["completion_tokens_details"] = asdict(
-                    response.usage.completion_tokens_details
-                )
-            usage = _convert_usage(usage_payload)
-        else:
-            usage = _convert_usage(None)
+        usage = _build_usage(response)
 
         # Cache reasoning keyed by function call_id for next-turn restoration.
         # Best-effort: a cache write must never fail the client response.
         try_cache_reasoning_from_responses_output(output, response_id, logger_prefix="Serializer")
 
-        return {
-            "id": response_id,
-            "object": "response",
-            "created_at": created_at,
-            "completed_at": completed_at,
-            "status": status,
-            "model": response_model,
-            "previous_response_id": previous_response_id,
-            "instructions": instructions,
-            "output": output,
-            "error": error,
-            # Echo the request's tool declarations (raw Responses-shaped dicts
-            # collected by the protocol layer), as the spec's ResponseResource
-            # carries the effective tool set.
-            "tools": [t for t in (context.tools or []) if isinstance(t, dict)],
-            "tool_choice": context.tool_choice if context.tool_choice is not None else "auto",
-            "truncation": truncation or "disabled",
-            "parallel_tool_calls": True if parallel_tool_calls is None else parallel_tool_calls,
-            "text": text or {"format": {"type": "text"}},
-            # Spec: top_p/temperature are required numbers on ResponseResource;
-            # default to the OpenAI defaults (1.0) when not provided.
-            "top_p": top_p if top_p is not None else 1.0,
-            "presence_penalty": presence_penalty if presence_penalty is not None else 0.0,
-            "frequency_penalty": frequency_penalty if frequency_penalty is not None else 0.0,
-            "top_logprobs": top_logprobs or 0,
-            "temperature": temperature if temperature is not None else 1.0,
-            "reasoning": reasoning,
-            "usage": usage,
-            "max_output_tokens": max_output_tokens,
-            "max_tool_calls": max_tool_calls,
-            "store": store or False,
-            "background": background or False,
-            "service_tier": service_tier or "default",
-            "metadata": metadata or {},
-            "safety_identifier": safety_identifier,
-            "prompt_cache_key": prompt_cache_key,
-            "incomplete_details": incomplete_details,
-        }
+        return _build_response_resource(
+            context,
+            response_id=response_id,
+            response_model=response_model,
+            created_at=created_at,
+            completed_at=completed_at,
+            status=status,
+            output=output,
+            error=error,
+            usage=usage,
+            incomplete_details=incomplete_details,
+        )
 
 
 __all__ = [

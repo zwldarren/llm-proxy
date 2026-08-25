@@ -1,0 +1,28 @@
+# Pre-commit hooks mirroring the CI checks (see .github/workflows/ci.yml).
+# Hooks run locally via `uv run`, so tool versions stay locked to
+# pyproject.toml and no network access is needed at hook runtime.
+# Stages use pre-commit 3.x+ defaults (pre-commit / pre-merge-commit /
+# pre-push / manual).
+minimum_pre_commit_version: "3.0"
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+        require_serial: true
+      - id: ty-check
+        name: ty check
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+        types: [python]
+        require_serial: true

@@ -48,6 +48,10 @@ class BaseLockoutManager:
 
     Thread-safe with background cleanup to avoid per-request cleanup overhead.
 
+    In-memory only: lockout state lives in this process, so it is not shared
+    across workers and is reset on restart. Deployments that need durable or
+    shared lockout state must back this with a shared store (e.g. Redis).
+
     ``max_attempts``/``lockout_duration`` are resolved dynamically when a
     ``params_getter`` is provided (the production singletons use this so
     UI-managed changes apply immediately); otherwise the static constructor

@@ -431,8 +431,6 @@ class RequestExecutionStage(PipelineStage):
             state.response = self._create_error_response(e)
         except ConfigurationError:
             raise
-        finally:
-            pass
 
     @staticmethod
     def _populate_unit_billing_dimensions(state: PipelineState) -> None:

@@ -39,7 +39,7 @@ jobs:
       - name: Install Python
         run: uv python install
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra smart-routing
       - name: Type check
         run: uv run ty check
 
@@ -54,6 +54,6 @@ jobs:
       - name: Install Python
         run: uv python install
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra smart-routing
       - name: Run tests
         run: uv run pytest

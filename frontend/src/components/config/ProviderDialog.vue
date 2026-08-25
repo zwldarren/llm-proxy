@@ -346,7 +346,12 @@ const onSubmit = handleSubmit(async (values) => {
               <div class="grid gap-2">
                 <Label for="apikey">{{ t("providers.apiKey") }}</Label>
                 <div v-if="isEditing && !apiKeyEditing" class="flex items-center gap-2">
-                  <Input value="********" type="password" disabled class="flex-1 bg-muted/50" />
+                  <Input
+                    :value="provider?.masked_api_key || '********'"
+                    type="password"
+                    disabled
+                    class="flex-1 bg-muted/50 font-mono"
+                  />
                   <Button variant="outline" @click="apiKeyEditing = true">
                     {{ t("common.edit") }}
                   </Button>

@@ -188,7 +188,9 @@ class ProviderRepository(BaseRepository):
 
         await self.session.flush()
         await self.session.refresh(provider)
-        self._decrypt_provider_key(provider)
+        # The key stays encrypted on the returned record: the admin API must
+        # never receive plaintext keys from the repository (responses carry a
+        # masked form; the explicit reveal endpoint decrypts on demand).
         return provider
 
     async def delete_provider(self, name: str) -> bool:

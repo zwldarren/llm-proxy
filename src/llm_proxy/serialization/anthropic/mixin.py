@@ -6,21 +6,47 @@ to avoid duplicating content block conversion logic.
 
 from typing import TYPE_CHECKING, Any
 
+import orjson
+
 from llm_proxy.models import (
+    AudioBlock,
+    AudioSource,
     ContentBlock,
+    CustomToolUseBlock,
+    DocumentBlock,
+    DocumentSource,
+    FileBlock,
+    ImageBlock,
+    ImageSource,
     RawBlock,
     RedactedThinkingBlock,
+    RefusalBlock,
+    ServerToolUseBlock,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
 from llm_proxy.models.content_blocks.anthropic_builtin import (
+    BashCodeExecutionToolResultBlock,
     CacheControl,
     Caller,
+    CodeExecutionToolResultBlock,
+    ContainerUploadBlock,
     MidConversationSystemBlock,
+    SearchResultBlock,
+    TextEditorCodeExecutionToolResultBlock,
+    ToolReferenceBlock,
+    ToolSearchToolResultBlock,
+    WebFetchToolResultBlock,
+    WebSearchResultContentBlock,
+    WebSearchToolResultBlock,
 )
 from llm_proxy.models.finish_reasons import map_finish_reason
+from llm_proxy.serialization._shared_degradation import (
+    degrade_block_to_text,
+    should_degrade_block,
+)
 from llm_proxy.serialization.content_parsers import (
     parse_audio_block_anthropic,
     parse_file_block_anthropic,
@@ -284,391 +310,362 @@ class AnthropicContentMixin:
         context: BuildContext | None = None,
     ) -> Any:
         """Format ContentBlock list to Anthropic content format."""
-        from llm_proxy.models import (
-            AudioBlock,
-            CustomToolUseBlock,
-            DocumentBlock,
-            FileBlock,
-            ImageBlock,
-            RefusalBlock,
-            ServerToolUseBlock,
-            ToolResultBlock,
-        )
-        from llm_proxy.models.content_blocks.anthropic_builtin import (
-            BashCodeExecutionToolResultBlock,
-            CodeExecutionToolResultBlock,
-            ContainerUploadBlock,
-            SearchResultBlock,
-            TextEditorCodeExecutionToolResultBlock,
-            ToolReferenceBlock,
-            ToolSearchToolResultBlock,
-            WebFetchToolResultBlock,
-            WebSearchResultContentBlock,
-            WebSearchToolResultBlock,
-        )
-
         result: list[dict[str, Any]] = []
         for block in blocks:
-            if isinstance(block, TextBlock):
-                text_block: dict[str, Any] = {"type": "text", "text": block.text}
-                if block.citations:
-                    text_block["citations"] = self._format_citations(block.citations)
-                if block.cache_control:
-                    text_block["cache_control"] = self._format_cache_control(block.cache_control)
-                result.append(text_block)
-            elif isinstance(block, ToolUseBlock):
-                tool_block: dict[str, Any] = {
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": flatten_history_tool_name(
-                        context.namespace_map if context else None, block.name
-                    ),
-                    "input": block.input,
-                }
-                if block.cache_control:
-                    tool_block["cache_control"] = self._format_cache_control(block.cache_control)
-                result.append(tool_block)
-            elif isinstance(block, ServerToolUseBlock):
-                server_tool_block: dict[str, Any] = {
-                    "type": "server_tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                }
-                if block.cache_control:
-                    server_tool_block["cache_control"] = self._format_cache_control(
-                        block.cache_control
-                    )
-                result.append(server_tool_block)
-            elif isinstance(block, CustomToolUseBlock):
-                import orjson
+            formatted = self._format_content_block(block, context=context)
+            if formatted is not None:
+                result.append(formatted)
+        return self._finalize_content_blocks(result)
 
-                tool_input: dict[str, Any] = {}
-                try:
-                    parsed = orjson.loads(block.input)
-                    if isinstance(parsed, dict):
-                        tool_input = parsed
-                except orjson.JSONDecodeError, TypeError:
-                    # Raw freeform input (e.g. Codex ``exec`` JavaScript source)
-                    # is wrapped under the same ``input`` key the bridged
-                    # function-tool schema declares, so the model sees a
-                    # consistent format in history and echoes it back.
-                    tool_input = {"input": block.input}
-                custom_tool_block: dict[str, Any] = {
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": flatten_history_tool_name(
-                        context.namespace_map if context else None, block.name
-                    ),
-                    "input": tool_input,
-                }
-                result.append(custom_tool_block)
-            elif isinstance(block, ThinkingBlock):
-                if not block.thinking:
-                    continue
-                thinking_block: dict[str, Any] = {
-                    "type": "thinking",
-                    "thinking": block.thinking,
-                }
-                if block.signature:
-                    thinking_block["signature"] = block.signature
-                result.append(thinking_block)
-            elif isinstance(block, RedactedThinkingBlock):
-                result.append(
-                    {
-                        "type": "redacted_thinking",
-                        "data": block.data,
-                    }
-                )
-            elif isinstance(block, RefusalBlock):
-                result.append(
-                    {
-                        "type": "refusal",
-                        "refusal": block.refusal,
-                    }
-                )
-            elif isinstance(block, ImageBlock):
-                if block.source.type == "base64":
-                    result.append(
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": block.source.media_type,
-                                "data": block.source.data,
-                            },
-                        }
-                    )
-                elif block.source.type == "url":
-                    result.append(
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "url",
-                                "url": block.source.data,
-                            },
-                        }
-                    )
-                elif block.source.type == "file_id":
-                    result.append(
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "file",
-                                "file_id": block.source.data,
-                            },
-                        }
-                    )
-            elif isinstance(block, DocumentBlock):
-                if block.source.type == "base64":
-                    doc_block: dict[str, Any] = {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": block.source.media_type,
-                            "data": block.source.data,
-                        },
-                    }
-                    if block.title:
-                        doc_block["title"] = block.title
-                    if block.citations:
-                        doc_block["citations"] = block.citations
-                    if block.context:
-                        doc_block["context"] = block.context
-                    result.append(doc_block)
-                elif block.source.type == "url":
-                    doc_block: dict[str, Any] = {
-                        "type": "document",
-                        "source": {
-                            "type": "url",
-                            "url": block.source.data,
-                        },
-                    }
-                    if block.title:
-                        doc_block["title"] = block.title
-                    if block.citations:
-                        doc_block["citations"] = block.citations
-                    if block.context:
-                        doc_block["context"] = block.context
-                    result.append(doc_block)
-                elif block.source.type == "file_id":
-                    doc_block = {
-                        "type": "document",
-                        "source": {
-                            "type": "file",
-                            "file_id": block.source.data,
-                        },
-                    }
-                    if block.title:
-                        doc_block["title"] = block.title
-                    if block.citations:
-                        doc_block["citations"] = block.citations
-                    if block.context:
-                        doc_block["context"] = block.context
-                    result.append(doc_block)
-                elif block.source.type == "text":
-                    doc_block: dict[str, Any] = {
-                        "type": "document",
-                        "source": {
-                            "type": "text",
-                            "media_type": block.source.media_type or "text/plain",
-                            "data": block.source.data,
-                        },
-                    }
-                    if block.title:
-                        doc_block["title"] = block.title
-                    if block.citations:
-                        doc_block["citations"] = block.citations
-                    if block.context:
-                        doc_block["context"] = block.context
-                    result.append(doc_block)
-                elif block.source.type == "content":
-                    doc_block = {
-                        "type": "document",
-                        "source": {
-                            "type": "content",
-                            "content": block.source.data,
-                        },
-                    }
-                    if block.source.media_type:
-                        doc_block["source"]["media_type"] = block.source.media_type
-                    if block.title:
-                        doc_block["title"] = block.title
-                    if block.citations:
-                        doc_block["citations"] = block.citations
-                    if block.context:
-                        doc_block["context"] = block.context
-                    result.append(doc_block)
-            elif isinstance(block, AudioBlock):
-                if block.source.type == "base64":
-                    result.append(
-                        {
-                            "type": "audio",
-                            "source": {
-                                "type": "base64",
-                                "media_type": block.source.media_type,
-                                "data": block.source.data,
-                            },
-                        }
-                    )
-                elif block.source.type == "url":
-                    result.append(
-                        {
-                            "type": "audio",
-                            "source": {
-                                "type": "url",
-                                "url": block.source.data,
-                            },
-                        }
-                    )
-                elif block.source.type == "file_id":
-                    # Anthropic API does not support audio content blocks via file_id.
-                    # Degrade to text placeholder to avoid crashing when routing from
-                    # other protocols that support audio file_id (e.g. OpenAI).
-                    result.append(
-                        {
-                            "type": "text",
-                            "text": f"[Audio: file_id={block.source.data}]",
-                        }
-                    )
-            elif isinstance(block, FileBlock):
-                file_block: dict[str, Any] = {"type": "file"}
-                if block.file_data:
-                    file_block["file_data"] = block.file_data
-                if block.file_id:
-                    file_block["file_id"] = block.file_id
-                if block.filename:
-                    file_block["filename"] = block.filename
-                result.append(file_block)
-            elif isinstance(block, SearchResultBlock):
-                search_block: dict[str, Any] = {"type": "search_result"}
-                if block.source:
-                    search_block["source"] = block.source
-                if block.file_id:
-                    search_block["file_id"] = block.file_id
-                if block.title:
-                    search_block["title"] = block.title
-                if block.content:
-                    search_block["content"] = self.format_content_blocks(
-                        block.content, context=context
-                    )
-                if block.metadata:
-                    search_block["metadata"] = block.metadata
-                if block.cache_control:
-                    search_block["cache_control"] = self._format_cache_control(block.cache_control)
-                result.append(search_block)
-            elif isinstance(block, ContainerUploadBlock):
-                container_block: dict[str, Any] = {"type": "container_upload"}
-                if block.file_id:
-                    container_block["file_id"] = block.file_id
-                if block.filename:
-                    container_block["filename"] = block.filename
-                if block.content:
-                    container_block["content"] = block.content
-                if block.media_type:
-                    container_block["media_type"] = block.media_type
-                result.append(container_block)
-            elif isinstance(block, ToolReferenceBlock):
-                ref_block: dict[str, Any] = {
-                    "type": "tool_reference",
-                    "tool_id": block.tool_id,
-                }
-                if block.tool_name:
-                    ref_block["tool_name"] = block.tool_name
-                if block.tool_type:
-                    ref_block["tool_type"] = block.tool_type
-                result.append(ref_block)
-            elif isinstance(block, MidConversationSystemBlock):
-                sys_block: dict[str, Any] = {
-                    "type": "mid_conv_system",
-                    "content": self.format_content_blocks(block.content, context=context),
-                }
-                if block.cache_control:
-                    sys_block["cache_control"] = self._format_cache_control(block.cache_control)
-                result.append(sys_block)
-            elif isinstance(block, WebSearchToolResultBlock):
-                result.append(
-                    self._format_tool_result_block("web_search_tool_result", block, context=context)
-                )
-            elif isinstance(block, WebFetchToolResultBlock):
-                result.append(
-                    self._format_tool_result_block("web_fetch_tool_result", block, context=context)
-                )
-            elif isinstance(block, WebSearchResultContentBlock):
-                ws_block: dict[str, Any] = {
-                    "type": "web_search_result",
-                    "url": block.url,
-                    "title": block.title,
-                    "encoded_content": block.encoded_content,
-                }
-                if block.page_age:
-                    ws_block["page_age"] = block.page_age
-                result.append(ws_block)
-            elif isinstance(block, CodeExecutionToolResultBlock):
-                result.append(
-                    self._format_tool_result_block(
-                        "code_execution_tool_result", block, context=context
-                    )
-                )
-            elif isinstance(block, BashCodeExecutionToolResultBlock):
-                result.append(
-                    self._format_tool_result_block(
-                        "bash_code_execution_tool_result", block, context=context
-                    )
-                )
-            elif isinstance(block, TextEditorCodeExecutionToolResultBlock):
-                result.append(
-                    self._format_tool_result_block(
-                        "text_editor_code_execution_tool_result", block, context=context
-                    )
-                )
-            elif isinstance(block, ToolSearchToolResultBlock):
-                result.append(
-                    self._format_tool_result_block(
-                        "tool_search_tool_result", block, context=context
-                    )
-                )
-            elif isinstance(block, ToolResultBlock):
-                content = block.content
-                if isinstance(content, list):
-                    content = self.format_content_blocks(content, context=context)
-                tr_block: dict[str, Any] = {
-                    "type": "tool_result",
-                    "tool_use_id": block.tool_use_id,
-                    "content": content,
-                }
-                if block.is_error:
-                    tr_block["is_error"] = True
-                if block.cache_control:
-                    tr_block["cache_control"] = self._format_cache_control(block.cache_control)
-                result.append(tr_block)
-            elif isinstance(block, RawBlock):
-                # Passthrough for provider-specific blocks
-                if block.provider_type.startswith("anthropic:"):
-                    result.append(block.data)
-                else:
-                    # Degrade foreign RawBlock to text placeholder
-                    result.append({"type": "text", "text": f"[Raw block: {block.provider_type}]"})
-            else:
-                from llm_proxy.serialization._shared_degradation import (
-                    degrade_block_to_text,
-                    should_degrade_block,
-                )
+    def _format_content_block(
+        self, block: ContentBlock, context: BuildContext | None
+    ) -> dict[str, Any] | None:
+        """Format a single ContentBlock to Anthropic wire format, or None to skip."""
+        if isinstance(block, TextBlock):
+            return self._format_text_block(block)
+        if isinstance(block, ToolUseBlock):
+            return self._format_tool_use_block(block, context=context)
+        if isinstance(block, ServerToolUseBlock):
+            return self._format_server_tool_use_block(block, context=context)
+        if isinstance(block, CustomToolUseBlock):
+            return self._format_custom_tool_use_block(block, context=context)
+        if isinstance(block, ThinkingBlock):
+            return self._format_thinking_block(block)
+        if isinstance(block, RedactedThinkingBlock):
+            return self._format_redacted_thinking_block(block)
+        if isinstance(block, RefusalBlock):
+            return self._format_refusal_block(block)
+        if isinstance(block, ImageBlock):
+            return self._format_image_block(block)
+        if isinstance(block, DocumentBlock):
+            return self._format_document_block(block)
+        if isinstance(block, AudioBlock):
+            return self._format_audio_block(block)
+        if isinstance(block, FileBlock):
+            return self._format_file_block(block)
+        if isinstance(block, SearchResultBlock):
+            return self._format_search_result_block(block, context=context)
+        if isinstance(block, ContainerUploadBlock):
+            return self._format_container_upload_block(block)
+        if isinstance(block, ToolReferenceBlock):
+            return self._format_tool_reference_block(block)
+        if isinstance(block, MidConversationSystemBlock):
+            return self._format_mid_conv_system_block(block, context=context)
+        if isinstance(block, WebSearchToolResultBlock):
+            return self._format_tool_result_block("web_search_tool_result", block, context=context)
+        if isinstance(block, WebFetchToolResultBlock):
+            return self._format_tool_result_block("web_fetch_tool_result", block, context=context)
+        if isinstance(block, WebSearchResultContentBlock):
+            return self._format_web_search_result_block(block)
+        if isinstance(block, CodeExecutionToolResultBlock):
+            return self._format_tool_result_block(
+                "code_execution_tool_result", block, context=context
+            )
+        if isinstance(block, BashCodeExecutionToolResultBlock):
+            return self._format_tool_result_block(
+                "bash_code_execution_tool_result", block, context=context
+            )
+        if isinstance(block, TextEditorCodeExecutionToolResultBlock):
+            return self._format_tool_result_block(
+                "text_editor_code_execution_tool_result", block, context=context
+            )
+        if isinstance(block, ToolSearchToolResultBlock):
+            return self._format_tool_result_block("tool_search_tool_result", block, context=context)
+        if isinstance(block, ToolResultBlock):
+            return self._format_tool_result(block, context=context)
+        if isinstance(block, RawBlock):
+            return self._format_raw_block(block)
+        return self._format_unsupported_block(block, context=context)
 
-                policy = getattr(context, "unsupported_block_policy", "drop") if context else "drop"
-                supported = (
-                    getattr(context, "supported_content_blocks", frozenset())
-                    if context
-                    else frozenset()
-                )
-                if not should_degrade_block(
-                    policy, block, self.provider_name, supported_blocks=supported
-                ):
-                    continue
-                degraded = degrade_block_to_text(block)
-                if degraded is not None:
-                    result.append({"type": "text", "text": degraded})
+    def _format_text_block(self, block: TextBlock) -> dict[str, Any]:
+        """Format a TextBlock to Anthropic wire format."""
+        text_block: dict[str, Any] = {"type": "text", "text": block.text}
+        if block.citations:
+            text_block["citations"] = self._format_citations(block.citations)
+        if block.cache_control:
+            text_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return text_block
 
+    def _format_tool_use_block(
+        self, block: ToolUseBlock, context: BuildContext | None
+    ) -> dict[str, Any]:
+        """Format a ToolUseBlock to Anthropic wire format."""
+        tool_block: dict[str, Any] = {
+            "type": "tool_use",
+            "id": block.id,
+            "name": flatten_history_tool_name(
+                context.namespace_map if context else None, block.name
+            ),
+            "input": block.input,
+        }
+        if block.cache_control:
+            tool_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return tool_block
+
+    def _format_server_tool_use_block(
+        self, block: ServerToolUseBlock, context: BuildContext | None
+    ) -> dict[str, Any]:
+        """Format a ServerToolUseBlock to Anthropic wire format."""
+        server_tool_block: dict[str, Any] = {
+            "type": "server_tool_use",
+            "id": block.id,
+            "name": block.name,
+            "input": block.input,
+        }
+        if block.cache_control:
+            server_tool_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return server_tool_block
+
+    def _format_custom_tool_use_block(
+        self, block: CustomToolUseBlock, context: BuildContext | None
+    ) -> dict[str, Any]:
+        """Format a CustomToolUseBlock to Anthropic wire format."""
+        tool_input: dict[str, Any] = {}
+        try:
+            parsed = orjson.loads(block.input)
+            if isinstance(parsed, dict):
+                tool_input = parsed
+        except orjson.JSONDecodeError, TypeError:
+            # Raw freeform input (e.g. Codex ``exec`` JavaScript source)
+            # is wrapped under the same ``input`` key the bridged
+            # function-tool schema declares, so the model sees a
+            # consistent format in history and echoes it back.
+            tool_input = {"input": block.input}
+        custom_tool_block: dict[str, Any] = {
+            "type": "tool_use",
+            "id": block.id,
+            "name": flatten_history_tool_name(
+                context.namespace_map if context else None, block.name
+            ),
+            "input": tool_input,
+        }
+        return custom_tool_block
+
+    def _format_thinking_block(self, block: ThinkingBlock) -> dict[str, Any] | None:
+        """Format a ThinkingBlock, or None to skip empty thinking."""
+        if not block.thinking:
+            return None
+        thinking_block: dict[str, Any] = {
+            "type": "thinking",
+            "thinking": block.thinking,
+        }
+        if block.signature:
+            thinking_block["signature"] = block.signature
+        return thinking_block
+
+    def _format_redacted_thinking_block(self, block: RedactedThinkingBlock) -> dict[str, Any]:
+        """Format a RedactedThinkingBlock to Anthropic wire format."""
+        return {
+            "type": "redacted_thinking",
+            "data": block.data,
+        }
+
+    def _format_refusal_block(self, block: RefusalBlock) -> dict[str, Any]:
+        """Format a RefusalBlock to Anthropic wire format."""
+        return {
+            "type": "refusal",
+            "refusal": block.refusal,
+        }
+
+    @staticmethod
+    def _format_file_source(
+        source: ImageSource | AudioSource | DocumentSource,
+    ) -> dict[str, Any] | None:
+        """Map a base64/url/file_id source to Anthropic wire format.
+
+        Returns None for source types callers handle specially (e.g. document
+        ``text``/``content`` sources, or audio ``file_id`` degradation).
+        """
+        if source.type == "base64":
+            return {
+                "type": "base64",
+                "media_type": source.media_type,
+                "data": source.data,
+            }
+        if source.type == "url":
+            return {"type": "url", "url": source.data}
+        if source.type == "file_id":
+            return {"type": "file", "file_id": source.data}
+        return None
+
+    def _format_image_block(self, block: ImageBlock) -> dict[str, Any] | None:
+        """Format an ImageBlock, or None for unsupported source types."""
+        source = self._format_file_source(block.source)
+        if source is None:
+            return None
+        return {"type": "image", "source": source}
+
+    def _format_document_block(self, block: DocumentBlock) -> dict[str, Any] | None:
+        """Format a DocumentBlock, or None for unsupported source types."""
+        source = block.source
+        source_dict = self._format_file_source(source)
+        if source_dict is not None:
+            doc_block: dict[str, Any] = {"type": "document", "source": source_dict}
+        elif source.type == "text":
+            doc_block = {
+                "type": "document",
+                "source": {
+                    "type": "text",
+                    "media_type": source.media_type or "text/plain",
+                    "data": source.data,
+                },
+            }
+        elif source.type == "content":
+            doc_block = {
+                "type": "document",
+                "source": {
+                    "type": "content",
+                    "content": source.data,
+                },
+            }
+            if source.media_type:
+                doc_block["source"]["media_type"] = source.media_type
+        else:
+            return None
+        if block.title:
+            doc_block["title"] = block.title
+        if block.citations:
+            doc_block["citations"] = block.citations
+        if block.context:
+            doc_block["context"] = block.context
+        return doc_block
+
+    def _format_audio_block(self, block: AudioBlock) -> dict[str, Any] | None:
+        """Format an AudioBlock, or None for unsupported source types."""
+        if block.source.type == "file_id":
+            # Anthropic API does not support audio content blocks via file_id.
+            # Degrade to text placeholder to avoid crashing when routing from
+            # other protocols that support audio file_id (e.g. OpenAI).
+            return {
+                "type": "text",
+                "text": f"[Audio: file_id={block.source.data}]",
+            }
+        source = self._format_file_source(block.source)
+        if source is None:
+            return None
+        return {"type": "audio", "source": source}
+
+    def _format_file_block(self, block: FileBlock) -> dict[str, Any]:
+        """Format a FileBlock to Anthropic wire format."""
+        file_block: dict[str, Any] = {"type": "file"}
+        if block.file_data:
+            file_block["file_data"] = block.file_data
+        if block.file_id:
+            file_block["file_id"] = block.file_id
+        if block.filename:
+            file_block["filename"] = block.filename
+        return file_block
+
+    def _format_search_result_block(
+        self, block: SearchResultBlock, context: BuildContext | None
+    ) -> dict[str, Any]:
+        """Format a SearchResultBlock to Anthropic wire format."""
+        search_block: dict[str, Any] = {"type": "search_result"}
+        if block.source:
+            search_block["source"] = block.source
+        if block.file_id:
+            search_block["file_id"] = block.file_id
+        if block.title:
+            search_block["title"] = block.title
+        if block.content:
+            search_block["content"] = self.format_content_blocks(block.content, context=context)
+        if block.metadata:
+            search_block["metadata"] = block.metadata
+        if block.cache_control:
+            search_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return search_block
+
+    def _format_container_upload_block(self, block: ContainerUploadBlock) -> dict[str, Any]:
+        """Format a ContainerUploadBlock to Anthropic wire format."""
+        container_block: dict[str, Any] = {"type": "container_upload"}
+        if block.file_id:
+            container_block["file_id"] = block.file_id
+        if block.filename:
+            container_block["filename"] = block.filename
+        if block.content:
+            container_block["content"] = block.content
+        if block.media_type:
+            container_block["media_type"] = block.media_type
+        return container_block
+
+    def _format_tool_reference_block(self, block: ToolReferenceBlock) -> dict[str, Any]:
+        """Format a ToolReferenceBlock to Anthropic wire format."""
+        ref_block: dict[str, Any] = {
+            "type": "tool_reference",
+            "tool_id": block.tool_id,
+        }
+        if block.tool_name:
+            ref_block["tool_name"] = block.tool_name
+        if block.tool_type:
+            ref_block["tool_type"] = block.tool_type
+        return ref_block
+
+    def _format_mid_conv_system_block(
+        self, block: MidConversationSystemBlock, context: BuildContext | None
+    ) -> dict[str, Any]:
+        """Format a MidConversationSystemBlock to Anthropic wire format."""
+        sys_block: dict[str, Any] = {
+            "type": "mid_conv_system",
+            "content": self.format_content_blocks(block.content, context=context),
+        }
+        if block.cache_control:
+            sys_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return sys_block
+
+    def _format_web_search_result_block(self, block: WebSearchResultContentBlock) -> dict[str, Any]:
+        """Format a WebSearchResultContentBlock to Anthropic wire format."""
+        ws_block: dict[str, Any] = {
+            "type": "web_search_result",
+            "url": block.url,
+            "title": block.title,
+            "encoded_content": block.encoded_content,
+        }
+        if block.page_age:
+            ws_block["page_age"] = block.page_age
+        return ws_block
+
+    def _format_tool_result(
+        self, block: ToolResultBlock, context: BuildContext | None
+    ) -> dict[str, Any]:
+        """Format a plain ToolResultBlock to Anthropic wire format."""
+        content = block.content
+        if isinstance(content, list):
+            content = self.format_content_blocks(content, context=context)
+        tr_block: dict[str, Any] = {
+            "type": "tool_result",
+            "tool_use_id": block.tool_use_id,
+            "content": content,
+        }
+        if block.is_error:
+            tr_block["is_error"] = True
+        if block.cache_control:
+            tr_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return tr_block
+
+    def _format_raw_block(self, block: RawBlock) -> dict[str, Any]:
+        """Format a RawBlock: passthrough for Anthropic blocks, text placeholder otherwise."""
+        if block.provider_type.startswith("anthropic:"):
+            return block.data
+        # Degrade foreign RawBlock to text placeholder
+        return {"type": "text", "text": f"[Raw block: {block.provider_type}]"}
+
+    def _format_unsupported_block(
+        self, block: ContentBlock, context: BuildContext | None
+    ) -> dict[str, Any] | None:
+        """Apply the unsupported-block policy, or None to drop the block."""
+        policy = getattr(context, "unsupported_block_policy", "drop") if context else "drop"
+        supported = (
+            getattr(context, "supported_content_blocks", frozenset()) if context else frozenset()
+        )
+        if not should_degrade_block(policy, block, self.provider_name, supported_blocks=supported):
+            return None
+        degraded = degrade_block_to_text(block)
+        if degraded is not None:
+            return {"type": "text", "text": degraded}
+        return None
+
+    def _finalize_content_blocks(self, result: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Strip empty text blocks and guarantee a non-empty result."""
         # Strip empty text blocks when there are other meaningful blocks.
         # This prevents round-trip noise from OpenAI-style null content
         # being converted into an empty Anthropic text block.
