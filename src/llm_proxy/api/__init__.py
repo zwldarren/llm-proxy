@@ -59,6 +59,7 @@ from llm_proxy.api.routers import (
     openresponses_router,
     openresponses_ws_router,
     realtime_ws_router,
+    system_router,
     team_router,
 )
 from llm_proxy.core.context import reset_context
@@ -66,6 +67,7 @@ from llm_proxy.core.errors import register_formatter_factory
 from llm_proxy.core.exceptions import NotFoundError
 from llm_proxy.core.utils import install_asyncgen_close_race_filter
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.version import get_version
 
 logger = get_logger(__name__)
 
@@ -115,7 +117,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="LLM Proxy",
         description=("A proxy server that unifies different LLM providers to OpenAI format"),
-        version="0.1.0",
+        version=get_version(),
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -195,6 +197,7 @@ def create_app() -> FastAPI:
     app.include_router(me_router)
     app.include_router(feedback_router)
     app.include_router(me_tracing_router)
+    app.include_router(system_router)
 
     # Mount MCP proxy as a pure ASGI app (bypasses FastAPI middleware)
     app.mount("/servers", mcp_proxy_app, name="mcp_proxy")

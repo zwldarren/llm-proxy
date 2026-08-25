@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AboutSection: typeof import('./src/components/settings/sections/AboutSection.vue')['default']
     AccessScopePicker: typeof import('./src/components/common/AccessScopePicker.vue')['default']
     AccountBudgetBanner: typeof import('./src/components/common/AccountBudgetBanner.vue')['default']
     Alert: typeof import('./src/components/ui/alert/Alert.vue')['default']

@@ -24,6 +24,7 @@ from .models import router as models_router
 from .openresponses import router as openresponses_router
 from .openresponses import ws_router as openresponses_ws_router
 from .realtime import ws_router as realtime_ws_router
+from .system import router as system_router
 from .team import router as team_router
 
 __all__ = [
@@ -48,5 +49,6 @@ __all__ = [
     "openresponses_router",
     "openresponses_ws_router",
     "realtime_ws_router",
+    "system_router",
     "team_router",
 ]

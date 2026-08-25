@@ -5,8 +5,12 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import MobileSidebarTrigger from "./MobileSidebarTrigger.vue";
 import NavSidebar from "./NavSidebar.vue";
 import CommandPalette from "./CommandPalette.vue";
+import { useAuthStore } from "@/stores/auth";
+import { useSystemStore } from "@/stores/system";
 
 const { t } = useI18n();
+const authStore = useAuthStore();
+const systemStore = useSystemStore();
 
 interface Props {
   layoutMode?: "default" | "full";
@@ -55,7 +59,15 @@ const onRevealEnd = (event: AnimationEvent) => {
 // onMounted fires once. onActivated also fires on the first mount
 // (for kept-alive pages). The debounce in triggerReveal naturally
 // deduplicates calls within the same tick, so we can call both safely.
-onMounted(triggerReveal);
+onMounted(() => {
+  triggerReveal();
+  // Version/update-check info for the sidebar + settings. Fire-and-forget:
+  // never block render, never toast on this automatic call. The endpoint is
+  // admin-only, so non-admins skip it (they would get a guaranteed 403).
+  if (authStore.isAdmin) {
+    systemStore.fetchSystemInfo().catch(() => {});
+  }
+});
 onActivated(triggerReveal);
 </script>
 

@@ -198,6 +198,19 @@ class UvicornSettings(BaseSettings):
     timeout_keepalive: int = Field(default=600, alias="UVICORN_TIMEOUT_KEEPALIVE")
 
 
+class UpdateCheckSettings(BaseSettings):
+    """GitHub-based update-check environment variables.
+
+    When enabled, ``GET /api/system/info`` compares the running version
+    against the highest tag of the GitHub repository (cached in memory).
+    Disable to guarantee the server never calls out to GitHub.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="UPDATE_CHECK__", extra="forbid")
+
+    enabled: bool = True
+
+
 class Settings(BaseSettings):
     """Root settings object."""
 
@@ -216,6 +229,7 @@ class Settings(BaseSettings):
     log_batch: LogBatchWriterSettings = Field(default_factory=LogBatchWriterSettings)
     usage_batch: UsageBatchWriterSettings = Field(default_factory=UsageBatchWriterSettings)
     uvicorn: UvicornSettings = Field(default_factory=UvicornSettings)
+    update_check: UpdateCheckSettings = Field(default_factory=UpdateCheckSettings)
 
     encryption_key: SecretStr | None = Field(default=None, alias="ENCRYPTION_KEY")
 
