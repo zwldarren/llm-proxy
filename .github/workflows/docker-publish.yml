@@ -7,6 +7,9 @@ on:
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main" ]
+  # Allow explicit dispatch (e.g. by release.yml on the release tag), since
+  # GITHUB_TOKEN-created tags do not cascade-trigger push workflows.
+  workflow_dispatch:
 
 env:
   # Use docker.io for Docker Hub if empty
