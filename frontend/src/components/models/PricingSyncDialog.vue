@@ -140,11 +140,45 @@ function deriveStatus(r: SyncPricingResult, old: Candidate, next: Candidate): Ro
   return "changed";
 }
 
+/**
+ * Infer which source a mapping's stored pricing came from.
+ *
+ * The backend has no memory of the source used by a previous sync and defaults
+ * to the alphabetically-first source, which makes the Source column show an
+ * arbitrary value (and can even flag rows as "changed" against a source whose
+ * prices were never saved). When the stored prices exactly match one of the
+ * available sources, that is almost certainly where they came from — prefer it
+ * over the backend default.
+ */
+function inferSavedSource(r: SyncPricingResult): string | null {
+  if (r.old_input_cost === null && r.old_output_cost === null) return null;
+  const matches = r.available_sources.filter(
+    (o) =>
+      samePrice(o.input_cost_per_1m ?? null, r.old_input_cost ?? null) &&
+      samePrice(o.output_cost_per_1m ?? null, r.old_output_cost ?? null)
+  );
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0].source;
+  // Input/output collide across sources; disambiguate on the other dimensions.
+  const exact = matches.find(
+    (o) =>
+      samePrice(o.cached_read_cost_per_1m ?? null, r.old_cached_read_cost ?? null) &&
+      samePrice(o.cached_write_cost_per_1m ?? null, r.old_cached_write_cost ?? null) &&
+      samePrice(o.audio_input_cost_per_1m ?? null, r.old_audio_input_cost ?? null) &&
+      samePrice(o.audio_output_cost_per_1m ?? null, r.old_audio_output_cost ?? null)
+  );
+  return (exact ?? matches[0]).source;
+}
+
 function buildRows(response: SyncPricingResponse): ReviewRow[] {
   return response.results.map((r) => {
     const old = oldFrom(r);
-    const candidate = candidateFrom(r);
-    const status = deriveStatus(r, old, candidate);
+    const savedSource = inferSavedSource(r);
+    const sourceKey = savedSource ?? r.selected_source ?? null;
+    // Recompute the candidate from the inferred source so the shown prices
+    // always belong to the source displayed in the Source column.
+    const candidate = (savedSource && candidateFromSource(r, savedSource)) || candidateFrom(r);
+    const status = deriveStatus({ ...r, selected_source: sourceKey }, old, candidate);
     return {
       key: r.mapping_id,
       result: r,
@@ -153,7 +187,7 @@ function buildRows(response: SyncPricingResponse): ReviewRow[] {
       // Auto-select only NEW rows: filling gaps is safe, changing existing
       // prices always requires explicit opt-in.
       selected: status === "new",
-      sourceKey: r.selected_source ?? null,
+      sourceKey,
       old,
       candidate,
     };

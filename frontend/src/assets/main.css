@@ -262,6 +262,9 @@
 	 * Light Mode - Monochrome Editorial Theme
 	 * Crisp black & white with cool-neutral grays
 	 */
+  /* Native widgets (scrollbars, form controls) follow the light theme */
+  color-scheme: light;
+
   --background: 220 3% 98.5%;
   --foreground: 220 8% 5%;
 
@@ -351,6 +354,10 @@
 	 * Dark Mode - Monochrome Editorial Theme
 	 * Deep cool-neutral dark tones with crisp whites
 	 */
+  /* Native widgets (scrollbars, form controls) follow the dark theme — without
+   * this the native dark scrollbar is nearly invisible on dark backgrounds */
+  color-scheme: dark;
+
   --background: 220 12% 4%;
   --foreground: 0 0% 96%;
 
@@ -457,6 +464,38 @@
   }
   html {
     scroll-behavior: smooth;
+  }
+
+  /* Scrollbars — thin, theme-aware, and identical on every scroll surface
+   * (main content, dialogs, tables, text areas). `color-scheme` above makes
+   * native scrollbars follow the active theme; the rules below slim them down
+   * and tint the thumb with muted-foreground so it stays visible on dark
+   * backgrounds. Standard properties cover Firefox and Chromium 121+; the
+   * ::-webkit-* fallbacks cover older WebKit. The thumb color intentionally
+   * matches the reka-ui ScrollArea thumb (see ScrollBar.vue). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.4);
+    border-radius: 8px;
+    /* Transparent gutter keeps the thumb slim over wide content */
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.6);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   /* Smooth theme transitions - scoped to theme-relevant properties */
@@ -568,6 +607,16 @@
 /* Custom Utilities - Simplified */
 @utility glass {
   @apply bg-card border border-border;
+}
+
+/* Hide the scrollbar while keeping the element scrollable — used by horizontal
+ * toolbars that scroll on overflow. Referenced across views; without this
+ * definition the class is a no-op and a native scrollbar appears. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Settings Panel Animations */
