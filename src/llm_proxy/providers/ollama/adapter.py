@@ -16,10 +16,14 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.content_blocks import ImageBlock
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.providers.base import BaseHttpProvider
+from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
 from llm_proxy.providers.capabilities import ChatCapabilityMixin, EmbeddingCapabilityMixin
 from llm_proxy.serialization.context import BuildContext
-from llm_proxy.serialization.ollama.request_builder import OLLAMA_NATIVE_OPTIONS
+from llm_proxy.serialization.ollama.request_builder import (
+    OLLAMA_NATIVE_OPTIONS,
+    OLLAMA_NATIVE_TOP_LEVEL_KEYS,
+    OLLAMA_RESPONSES_ONLY_KEYS,
+)
 from llm_proxy.serialization.providers import get_provider_serializer
 
 if TYPE_CHECKING:
@@ -43,6 +47,10 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
     DEFAULT_BASE_URL = "http://localhost:11434"
     CHAT_ENDPOINT = "/api/chat"
     EMBEDDINGS_ENDPOINT = "/api/embed"
+
+    #: Extra keys that are native /api/embed parameters; exempt from the
+    #: unknown-fields policy so they survive the merge into the body.
+    _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset({"keep_alive", "truncate", "options"})
 
     def __init__(
         self,
@@ -112,7 +120,16 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
                     old_block, source=new_source
                 )
 
-    _OLLAMA_HANDLED_EXTRA_KEYS: set[str] = set(OLLAMA_NATIVE_OPTIONS) | {"keep_alive"}
+    #: Extra keys the request builder explicitly handles (native options,
+    #: native top-level params, and responses-only keys it deliberately
+    #: drops). All of them are exempt from the unknown-fields policy so a
+    #: strict ``unknown_fields_policy: error`` config does not reject keys
+    #: the builder already decided the fate of.
+    _OLLAMA_HANDLED_EXTRA_KEYS: set[str] = (
+        set(OLLAMA_NATIVE_OPTIONS)
+        | set(OLLAMA_NATIVE_TOP_LEVEL_KEYS)
+        | set(OLLAMA_RESPONSES_ONLY_KEYS)
+    )
 
     def _build_chat_raw(self, request: InternalRequest, context: BuildContext) -> dict[str, Any]:
         return _serializer.build_provider_request(request, context)
@@ -153,6 +170,7 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
             model=request.model,
             request_id=request.request_id,
             request=request,
+            logprobs=bool(request.params.openai and request.params.openai.logprobs),
         )
         from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_response
 
@@ -199,6 +217,13 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
                     timeout=stream_timeout,
                 ) as response:
                     assert response.status_code is not None
+                    # Stash upstream response headers so the API layer can
+                    # forward them (request-id, ratelimit-*, ...) once the
+                    # client StreamingResponse is created — same as the shared
+                    # _stream_raw_sse path.
+                    self._last_stream_response_headers = extract_rate_limit_headers(
+                        getattr(response, "headers", None)
+                    )
                     if response.status_code >= 400:
                         try:
                             await response.aread()
@@ -234,6 +259,30 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
 
                         try:
                             chunk_data = orjson.loads(line_str)
+
+                            # Ollama reports mid-stream failures as an
+                            # {"error": ...} JSON line inside an HTTP 200
+                            # stream: its server can only set the HTTP status
+                            # for errors that precede any streamed content.
+                            # Without this check the error is silently
+                            # swallowed and the client sees an empty or
+                            # truncated response ending in a normal [DONE].
+                            if "error" in chunk_data:
+                                error_message, error_type = self._extract_error_from_body(
+                                    chunk_data, "Ollama stream error"
+                                )
+                                # Ollama's stream error lines may carry the
+                                # original HTTP status (server/routes.go sends
+                                # {"error": ..., "status": ...} for
+                                # api.StatusError); fall back to 500 when absent.
+                                status = chunk_data.get("status")
+                                raise ProviderError(
+                                    message=error_message,
+                                    error_type=error_type,
+                                    status_code=status if isinstance(status, int) else 500,
+                                    provider_name=self._provider_name,
+                                )
+
                             openai_chunk = converter.convert_chunk(chunk_data)
 
                             if chunk_data.get("done"):
@@ -270,10 +319,11 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
     def _parse_model(self, raw: dict[str, Any]) -> ProviderModelInfo:
         from llm_proxy.models.provider import ProviderModelInfo
 
+        size = raw.get("size") or 0
         return ProviderModelInfo(
             id=raw.get("name", ""),
             name=raw.get("name", ""),
-            description=f"Size: {raw.get('size', 0):,} bytes",
+            description=f"Size: {size:,} bytes",
             owned_by=None,
         )
 

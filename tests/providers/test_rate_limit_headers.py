@@ -160,9 +160,9 @@ def test_extract_rate_limit_headers_captures_anthropic_headers():
     ``anthropic-ratelimit-*`` family to pace its retries; both must reach the
     client through the proxy.
     """
-    from llm_proxy.providers.base import _extract_rate_limit_headers
+    from llm_proxy.providers.base import extract_rate_limit_headers
 
-    captured = _extract_rate_limit_headers(
+    captured = extract_rate_limit_headers(
         {
             "content-type": "application/json",
             "request-id": "req_01ABC",

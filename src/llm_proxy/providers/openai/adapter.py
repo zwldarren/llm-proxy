@@ -21,7 +21,7 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import (
     STREAM_READ_TIMEOUT,
     BaseHttpProvider,
-    _extract_rate_limit_headers,
+    extract_rate_limit_headers,
 )
 from llm_proxy.providers.capabilities import (
     AudioCapabilityMixin,
@@ -262,7 +262,7 @@ class OpenAIAdapter(
             from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_response
 
             try_cache_reasoning_from_response(result)
-        result.provider_info["_rate_limit_headers"] = _extract_rate_limit_headers(
+        result.provider_info["_rate_limit_headers"] = extract_rate_limit_headers(
             getattr(response, "headers", None)
         )
         return result
@@ -306,7 +306,7 @@ class OpenAIAdapter(
                     timeout=stream_timeout,
                 ) as response:
                     await self._raise_for_stream_status(response)
-                    self._last_stream_response_headers = _extract_rate_limit_headers(
+                    self._last_stream_response_headers = extract_rate_limit_headers(
                         getattr(response, "headers", None)
                     )
 
@@ -392,7 +392,7 @@ class OpenAIAdapter(
                     # Stash upstream response headers so the API layer can
                     # forward them (x-request-id, openai-version, rate limits)
                     # once the client StreamingResponse is created.
-                    self._last_stream_response_headers = _extract_rate_limit_headers(
+                    self._last_stream_response_headers = extract_rate_limit_headers(
                         getattr(response, "headers", None)
                     )
 

@@ -193,6 +193,16 @@ def mock_response_cls() -> type[MockResponse]:
 
 
 @pytest.fixture
+def make_mock_client():
+    """The shared mock-AsyncSession factory (``create_mock_client``), as a fixture.
+
+    Same rationale as ``mock_response_cls``: importing ``conftest`` directly
+    is unreliable, fixtures are the collision-free way to share it.
+    """
+    return create_mock_client
+
+
+@pytest.fixture
 def make_auth_info():
     """Build a minimal verified-key auth-info dict for middleware tests.
 

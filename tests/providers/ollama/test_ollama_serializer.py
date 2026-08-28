@@ -529,6 +529,178 @@ class TestResponseDurationMetrics:
         }
 
 
+class TestResponseDoneReason:
+    """Raw done_reason is preserved for observability even when it does not
+    map to an OpenAI finish_reason."""
+
+    def test_load_done_reason_preserved(self, serializer):
+        """done_reason "load" (empty messages load the model) maps to
+        finish_reason "stop" on the wire but stays visible in provider_info."""
+        response = {
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+            "done_reason": "load",
+        }
+        result = serializer.parse_provider_response(response, model="llama3.2")
+        assert result.finish_reason == "stop"
+        assert result.provider_info.get("done_reason") == "load"
+
+    def test_unload_done_reason_preserved(self, serializer):
+        """done_reason "unload" (keep_alive=0) is preserved too."""
+        response = {
+            "message": {"role": "assistant", "content": ""},
+            "done": True,
+            "done_reason": "unload",
+        }
+        result = serializer.parse_provider_response(response, model="llama3.2")
+        assert result.finish_reason == "stop"
+        assert result.provider_info.get("done_reason") == "unload"
+
+    def test_standard_done_reason_preserved(self, serializer):
+        """Standard reasons are preserved as-is."""
+        response = {
+            "message": {"role": "assistant", "content": "hi"},
+            "done": True,
+            "done_reason": "length",
+        }
+        result = serializer.parse_provider_response(response, model="llama3.2")
+        assert result.finish_reason == "length"
+        assert result.provider_info.get("done_reason") == "length"
+
+
+class TestResponseLogprobs:
+    """Non-streaming logprobs are parsed into InternalResponse.logprobs."""
+
+    def _response(self):
+        return {
+            "model": "llama3.2",
+            "message": {"role": "assistant", "content": "hi"},
+            "done": True,
+            "done_reason": "stop",
+            "logprobs": [
+                {
+                    "token": "Hello",
+                    "logprob": -0.5,
+                    "bytes": [72, 101, 108, 108, 111],
+                    "top_logprobs": [
+                        {"token": "Hello", "logprob": -0.5},
+                        {"token": "Hi", "logprob": -1.2},
+                    ],
+                },
+            ],
+        }
+
+    def test_logprobs_parsed_when_requested(self, serializer):
+        """logprobs=True populates the typed ChoiceLogprobs field."""
+        result = serializer.parse_provider_response(
+            self._response(), model="llama3.2", logprobs=True
+        )
+        assert result.logprobs is not None
+        assert result.logprobs.content is not None
+        entry = result.logprobs.content[0]
+        assert entry.token == "Hello"
+        assert entry.logprob == -0.5
+        assert entry.bytes == [72, 101, 108, 108, 111]
+        assert entry.top_logprobs is not None
+        assert [t.token for t in entry.top_logprobs] == ["Hello", "Hi"]
+
+    def test_logprobs_skipped_when_not_requested(self, serializer):
+        """Without the logprobs flag the payload is not parsed."""
+        result = serializer.parse_provider_response(self._response(), model="llama3.2")
+        assert result.logprobs is None
+
+    def test_logprobs_empty_list(self, serializer):
+        """An empty logprobs list yields no logprobs field."""
+        response = self._response()
+        response["logprobs"] = []
+        result = serializer.parse_provider_response(response, model="llama3.2", logprobs=True)
+        assert result.logprobs is None
+
+
+class TestEmbeddingResponse:
+    """Ollama /api/embed response parsing."""
+
+    def test_embeddings_parsed(self, serializer):
+        response = {
+            "model": "nomic-embed-text",
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+        result = serializer.parse_provider_embedding_response(response)
+        assert result.model == "nomic-embed-text"
+        assert len(result.data) == 2
+        assert result.data[0].embedding == [0.1, 0.2]
+        assert result.data[1].index == 1
+
+    def test_prompt_eval_count_parsed_as_usage(self, serializer):
+        """prompt_eval_count from /api/embed becomes usage for billing."""
+        response = {
+            "model": "nomic-embed-text",
+            "embeddings": [[0.1, 0.2]],
+            "prompt_eval_count": 7,
+        }
+        result = serializer.parse_provider_embedding_response(response)
+        assert result.usage is not None
+        assert result.usage.input_tokens == 7
+        assert result.usage.total_tokens == 7
+
+    def test_no_usage_without_prompt_eval_count(self, serializer):
+        response = {"model": "nomic-embed-text", "embeddings": [[0.1, 0.2]]}
+        result = serializer.parse_provider_embedding_response(response)
+        assert result.usage is None
+
+
+class TestResponseBlockOrder:
+    """Ollama response parsing must emit thinking before answer text."""
+
+    def test_thinking_block_precedes_text_block(self, serializer):
+        """Thinking must be the first block.
+
+        Anthropic-protocol rendering preserves block order (thinking blocks
+        are only valid before text blocks), and streaming emits thinking
+        deltas first — non-streaming must match that order.
+        """
+        response = {
+            "model": "qwen3",
+            "message": {
+                "role": "assistant",
+                "content": "The answer is 42.",
+                "thinking": "Let me think about this...",
+            },
+            "done": True,
+            "done_reason": "stop",
+        }
+        result = serializer.parse_provider_response(response, model="qwen3")
+
+        assert [type(block).__name__ for block in result.output] == [
+            "ThinkingBlock",
+            "TextBlock",
+        ]
+
+    def test_thinking_only_no_text(self, serializer):
+        """A thinking-only response still yields a single ThinkingBlock."""
+        response = {
+            "model": "qwen3",
+            "message": {"role": "assistant", "content": "", "thinking": "Hmm..."},
+            "done": True,
+            "done_reason": "stop",
+        }
+        result = serializer.parse_provider_response(response, model="qwen3")
+
+        assert [type(block).__name__ for block in result.output] == ["ThinkingBlock"]
+
+    def test_empty_thinking_not_emitted(self, serializer):
+        """Whitespace-only thinking must not produce an empty block."""
+        response = {
+            "model": "qwen3",
+            "message": {"role": "assistant", "content": "Answer", "thinking": "   "},
+            "done": True,
+            "done_reason": "stop",
+        }
+        result = serializer.parse_provider_response(response, model="qwen3")
+
+        assert [type(block).__name__ for block in result.output] == ["TextBlock"]
+
+
 class TestComplexConversations:
     def test_multi_turn_with_tools(self, serializer):
         conv = ConversationContext(

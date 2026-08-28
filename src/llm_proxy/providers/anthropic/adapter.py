@@ -22,7 +22,7 @@ from llm_proxy.providers.anthropic.client_headers import (
     ensure_claude_code_beta,
     get_client_headers,
 )
-from llm_proxy.providers.base import BaseHttpProvider, _extract_rate_limit_headers
+from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
 from llm_proxy.providers.capabilities import ChatCapabilityMixin
 from llm_proxy.serialization.anthropic.serializer import (
     _normalize_anthropic_messages,
@@ -128,7 +128,7 @@ class AnthropicAdapter(ChatCapabilityMixin, BaseHttpProvider):
                 request_id=request.request_id,
                 request=request,
             )
-        result.provider_info["_rate_limit_headers"] = _extract_rate_limit_headers(
+        result.provider_info["_rate_limit_headers"] = extract_rate_limit_headers(
             getattr(response, "headers", None)
         )
         return result

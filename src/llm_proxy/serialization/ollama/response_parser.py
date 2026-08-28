@@ -17,9 +17,12 @@ from llm_proxy.models.embedding import (
     EmbeddingData,
     InternalEmbeddingResponse,
 )
-from llm_proxy.models.types import ImageSource, Usage
+from llm_proxy.models.types import ChoiceLogprobs, ImageSource, TokenLogprob, Usage
 from llm_proxy.serialization.ollama.metrics import extract_ollama_metrics
-from llm_proxy.serialization.ollama.tool_utils import convert_logprobs, normalize_tool_calls
+from llm_proxy.serialization.ollama.tool_utils import (
+    normalize_logprob_entries,
+    normalize_tool_calls,
+)
 
 
 class OllamaResponseParserMixin:
@@ -38,6 +41,13 @@ class OllamaResponseParserMixin:
         thinking = message.get("thinking")
 
         output: list[ContentBlock] = []
+
+        # Thinking must precede answer text: Anthropic-protocol rendering
+        # preserves block order (thinking blocks are only valid before text
+        # blocks), and streaming emits thinking deltas first — non-streaming
+        # must match that order.
+        if thinking and isinstance(thinking, str) and thinking.strip():
+            output.append(ThinkingBlock(thinking=thinking))
 
         if content:
             output.append(TextBlock(text=content))
@@ -70,6 +80,14 @@ class OllamaResponseParserMixin:
         valid_reasons = ("stop", "length", "tool_calls")
         finish_reason = done_reason if done_reason in valid_reasons else "stop"
 
+        # Ollama also reports "load" (empty messages load the model) and
+        # "unload" (keep_alive=0) as done_reason; neither maps to an OpenAI
+        # finish_reason, so the wire value falls back to "stop" while the
+        # raw reason is preserved for observability.
+        provider_info: dict[str, Any] = {"provider": "ollama"}
+        if done_reason:
+            provider_info["done_reason"] = done_reason
+
         usage = None
         if response.get("prompt_eval_count") is not None or response.get("eval_count") is not None:
             usage = Usage(
@@ -80,11 +98,6 @@ class OllamaResponseParserMixin:
             )
 
         response_id = response.get("id") or generate_response_id()
-
-        if thinking and isinstance(thinking, str) and thinking.strip():
-            output.append(ThinkingBlock(thinking=thinking))
-
-        provider_info: dict[str, Any] = {"provider": "ollama"}
 
         # Preserve Ollama native duration metrics (nanoseconds) for observability.
         duration_metrics = extract_ollama_metrics(response)
@@ -103,10 +116,29 @@ class OllamaResponseParserMixin:
                     )
                 )
 
+        logprobs_obj: ChoiceLogprobs | None = None
         if logprobs and response.get("logprobs"):
-            converted_logprobs = convert_logprobs(response.get("logprobs"))
-            if converted_logprobs:
-                provider_info["logprobs"] = converted_logprobs
+            entries = normalize_logprob_entries(response.get("logprobs"))
+            if entries:
+                logprobs_obj = ChoiceLogprobs(
+                    content=[
+                        TokenLogprob(
+                            token=entry["token"],
+                            logprob=entry["logprob"],
+                            bytes=entry.get("bytes"),
+                            top_logprobs=[
+                                TokenLogprob(
+                                    token=t["token"],
+                                    logprob=t["logprob"],
+                                    bytes=t.get("bytes"),
+                                )
+                                for t in entry.get("top_logprobs", [])
+                            ]
+                            or None,
+                        )
+                        for entry in entries
+                    ]
+                )
 
         return InternalResponse(
             id=response_id,
@@ -116,6 +148,7 @@ class OllamaResponseParserMixin:
             finish_reason=finish_reason,
             request_id=request_id,
             provider_info=provider_info,
+            logprobs=logprobs_obj,
         )
 
     def parse_provider_embedding_response(
@@ -127,9 +160,20 @@ class OllamaResponseParserMixin:
         for index, embedding in enumerate(embeddings):
             data_list.append(EmbeddingData(embedding=embedding, index=index))
 
+        # /api/embed reports prompt_eval_count (no output tokens); surface it
+        # as usage so billing/observability can account for it.
+        usage = None
+        prompt_eval_count = response.get("prompt_eval_count")
+        if prompt_eval_count is not None:
+            usage = Usage(
+                input_tokens=prompt_eval_count,
+                total_tokens=prompt_eval_count,
+            )
+
         return InternalEmbeddingResponse(
             model=response.get("model") or model,
             data=data_list,
+            usage=usage,
         )
 
     # _normalize_tool_calls and convert_logprobs are provided by

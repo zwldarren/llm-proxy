@@ -59,7 +59,7 @@ _PASSTHROUGH_RESPONSE_HEADERS = frozenset(
 )
 
 
-def _extract_rate_limit_headers(headers) -> dict[str, str]:
+def extract_rate_limit_headers(headers) -> dict[str, str]:
     """Capture upstream rate-limit and informational headers for passthrough.
 
     Preserves ``x-ratelimit-*``, ``RateLimit-*``, ``anthropic-ratelimit-*``,
@@ -127,6 +127,11 @@ class BaseHttpProvider(BaseAdapter, ABC):
     EXTRA_HEADERS: dict[str, str] = {}
 
     _api_key: str | None = None
+
+    #: Native embedding parameters that must survive the unknown-fields policy
+    #: (e.g. Ollama's keep_alive/truncate/options). Adapters with native
+    #: embedding params override this; empty by default.
+    _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset()
 
     def __init__(self, config: AdapterConfig | None = None, **kwargs: Any):
         if config is None:
@@ -399,7 +404,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
                     # Stash upstream response headers so the API layer can
                     # forward them (request-id, ratelimit-*, ...) once the
                     # client StreamingResponse is created.
-                    self._last_stream_response_headers = _extract_rate_limit_headers(
+                    self._last_stream_response_headers = extract_rate_limit_headers(
                         getattr(response, "headers", None)
                     )
 
@@ -600,6 +605,12 @@ class BaseHttpProvider(BaseAdapter, ABC):
             )
 
         if rt == RequestType.EMBEDDING:
+            # Adapters may declare native embedding parameters (e.g. Ollama's
+            # keep_alive/truncate/options) that must survive the
+            # unknown-fields policy after _merge_extra injects them into the
+            # body. Declared at the chokepoint so every call path honors it.
+            if self._EMBEDDING_EXEMPT_EXTRA_KEYS:
+                exempt_keys = (exempt_keys or set()) | set(self._EMBEDDING_EXEMPT_EXTRA_KEYS)
             return OutboundBody(json_body=_finalize(self._build_embedding_raw(request)))
         if rt == RequestType.SPEECH:
             return OutboundBody(json_body=_finalize(self._build_speech_raw(request)))

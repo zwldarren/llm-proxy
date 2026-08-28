@@ -86,19 +86,24 @@ def normalize_tool_calls(
     return normalized or None
 
 
-def convert_logprobs(ollama_logprobs: list[Any] | None) -> dict[str, Any] | None:
-    """Convert Ollama logprobs to OpenAI-compatible format.
+def normalize_logprob_entries(ollama_logprobs: list[Any] | None) -> list[dict[str, Any]]:
+    """Normalize raw Ollama logprob entries to a shared dict shape.
+
+    Single source of truth for entry normalization (token/logprob/bytes/
+    top_logprobs defaults): ``convert_logprobs`` wraps the result in the
+    OpenAI wire dict, and the non-streaming response parser maps it onto
+    typed ``TokenLogprob`` models.
 
     Args:
         ollama_logprobs: Raw logprobs from Ollama response
 
     Returns:
-        Dict with "content" key containing normalized logprob entries, or None
+        List of normalized entries; empty for empty/invalid input
     """
     if not ollama_logprobs or not isinstance(ollama_logprobs, list):
-        return None
+        return []
 
-    content: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     for item in ollama_logprobs:
         if not isinstance(item, dict):
             continue
@@ -126,6 +131,21 @@ def convert_logprobs(ollama_logprobs: list[Any] | None) -> dict[str, Any] | None
             if top_logprobs:
                 entry["top_logprobs"] = top_logprobs
 
-        content.append(entry)
+        entries.append(entry)
 
+    return entries
+
+
+def convert_logprobs(ollama_logprobs: list[Any] | None) -> dict[str, Any] | None:
+    """Convert Ollama logprobs to OpenAI-compatible format.
+
+    Thin wrapper over ``normalize_logprob_entries`` producing the wire dict.
+
+    Args:
+        ollama_logprobs: Raw logprobs from Ollama response
+
+    Returns:
+        Dict with "content" key containing normalized logprob entries, or None
+    """
+    content = normalize_logprob_entries(ollama_logprobs)
     return {"content": content} if content else None

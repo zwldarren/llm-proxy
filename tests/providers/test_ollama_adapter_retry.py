@@ -1,11 +1,12 @@
 """Tests for Ollama adapter retry logic."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx2
+import orjson
 import pytest
 
-from llm_proxy.http.client import AsyncSession
+from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models import (
     ConversationContext,
     InternalEmbeddingRequest,
@@ -33,26 +34,20 @@ class TestChatCompletionRetry:
         )
 
     @pytest.mark.asyncio
-    async def test_chat_completion_retries_on_timeout(self, provider, chat_request):
+    async def test_chat_completion_retries_on_timeout(
+        self, provider, chat_request, mock_response_cls, make_mock_client
+    ):
         """Test that chat_completion retries on timeout errors."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise httpx2.TimeoutException("Connection timed out")
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
+        ok_response = mock_response_cls(
+            json_data={
                 "model": "llama2",
                 "message": {"role": "assistant", "content": "Hello!"},
                 "done": True,
             }
-            return mock_response
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        )
+        mock_client = make_mock_client(
+            [httpx2.TimeoutException("Connection timed out")] * 2 + [ok_response]
+        )
 
         with (
             patch.object(provider, "_get_client", return_value=mock_client),
@@ -60,33 +55,23 @@ class TestChatCompletionRetry:
         ):
             result = await provider.chat_completion(chat_request)
 
-        assert call_count == 3
+        assert mock_client.post.call_count == 3
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_chat_completion_retries_on_rate_limit(self, provider, chat_request):
+    async def test_chat_completion_retries_on_rate_limit(
+        self, provider, chat_request, mock_response_cls, make_mock_client
+    ):
         """Test that chat_completion retries on rate limit errors."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response = MagicMock()
-            if call_count < 3:
-                mock_response.status_code = 429
-                mock_response.json = AsyncMock(return_value={"error": "Rate limited"})
-                mock_response.raise_for_status.side_effect = Exception("HTTP 429")
-            else:
-                mock_response.status_code = 200
-                mock_response.json.return_value = {
-                    "model": "llama2",
-                    "message": {"role": "assistant", "content": "Hello!"},
-                    "done": True,
-                }
-            return mock_response
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        rate_limited = mock_response_cls(status_code=429, text_data='{"error": "Rate limited"}')
+        ok_response = mock_response_cls(
+            json_data={
+                "model": "llama2",
+                "message": {"role": "assistant", "content": "Hello!"},
+                "done": True,
+            }
+        )
+        mock_client = make_mock_client([rate_limited, rate_limited, ok_response])
 
         with (
             patch.object(provider, "_get_client", return_value=mock_client),
@@ -94,64 +79,42 @@ class TestChatCompletionRetry:
         ):
             await provider.chat_completion(chat_request)
 
-        assert call_count == 3
+        assert mock_client.post.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_chat_completion_raises_after_retries_exhausted(self, provider, chat_request):
+    async def test_chat_completion_raises_after_retries_exhausted(
+        self, provider, chat_request, make_mock_client
+    ):
         """Test that chat_completion raises after max retries exhausted."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            raise httpx2.TimeoutException("Connection timed out")
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        mock_client = make_mock_client()
+        mock_client.post.side_effect = httpx2.TimeoutException("Connection timed out")
 
         with (
             patch.object(provider, "_get_client", return_value=mock_client),
             patch.object(provider, "_download_images_in_conversation"),
         ):
-            from llm_proxy.core.exceptions import ProviderError
-
             with pytest.raises(ProviderError, match="timed out") as exc_info:
                 await provider.chat_completion(chat_request)
             assert exc_info.value.error_type == "timeout_error"
 
-        assert call_count == 3
+        assert mock_client.post.call_count == 3
 
     @pytest.mark.asyncio
     async def test_chat_completion_raises_non_retryable_error_immediately(
-        self, provider, chat_request
+        self, provider, chat_request, mock_response_cls, make_mock_client
     ):
         """Test that chat_completion raises immediately for non-retryable errors."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_response.text = "Bad request"
-            mock_response.json = AsyncMock(return_value={"error": "Bad request"})
-
-            mock_response.raise_for_status.side_effect = Exception("HTTP 400")
-            return mock_response
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        bad_request = mock_response_cls(status_code=400, text_data='{"error": "Bad request"}')
+        mock_client = make_mock_client(bad_request)
 
         with (
             patch.object(provider, "_get_client", return_value=mock_client),
             patch.object(provider, "_download_images_in_conversation"),
+            pytest.raises(ProviderError, match="Bad request"),
         ):
-            from llm_proxy.core.exceptions import ProviderError
+            await provider.chat_completion(chat_request)
 
-            with pytest.raises(ProviderError, match="Bad request"):
-                await provider.chat_completion(chat_request)
-
-        assert call_count == 1
+        assert mock_client.post.call_count == 1
 
 
 class TestEmbeddingsRetry:
@@ -166,108 +129,198 @@ class TestEmbeddingsRetry:
         return InternalEmbeddingRequest(model="nomic-embed-text", input="test text")
 
     @pytest.mark.asyncio
-    async def test_embeddings_retries_on_timeout(self, provider, embedding_request):
+    async def test_embeddings_retries_on_timeout(
+        self, provider, embedding_request, mock_response_cls, make_mock_client
+    ):
         """Test that embeddings retries on timeout errors."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise httpx2.TimeoutException("Connection timed out")
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
+        ok_response = mock_response_cls(
+            json_data={
                 "model": "nomic-embed-text",
                 "embeddings": [[0.1, 0.2, 0.3]],
             }
-            return mock_response
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        )
+        mock_client = make_mock_client(
+            [httpx2.TimeoutException("Connection timed out")] * 2 + [ok_response]
+        )
 
         with patch.object(provider, "_get_client", return_value=mock_client):
             result = await provider.embeddings(embedding_request)
 
-        assert call_count == 3
+        assert mock_client.post.call_count == 3
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_embeddings_retries_on_rate_limit(self, provider, embedding_request):
+    async def test_embeddings_retries_on_rate_limit(
+        self, provider, embedding_request, mock_response_cls, make_mock_client
+    ):
         """Test that embeddings retries on rate limit errors."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response = MagicMock()
-            if call_count < 3:
-                mock_response.status_code = 429
-                mock_response.json = AsyncMock(return_value={"error": "Rate limited"})
-                mock_response.raise_for_status.side_effect = Exception("HTTP 429")
-            else:
-                mock_response.status_code = 200
-                mock_response.json.return_value = {
-                    "model": "nomic-embed-text",
-                    "embeddings": [[0.1, 0.2, 0.3]],
-                }
-            return mock_response
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        rate_limited = mock_response_cls(status_code=429, text_data='{"error": "Rate limited"}')
+        ok_response = mock_response_cls(
+            json_data={
+                "model": "nomic-embed-text",
+                "embeddings": [[0.1, 0.2, 0.3]],
+            }
+        )
+        mock_client = make_mock_client([rate_limited, rate_limited, ok_response])
 
         with patch.object(provider, "_get_client", return_value=mock_client):
             await provider.embeddings(embedding_request)
 
-        assert call_count == 3
+        assert mock_client.post.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_embeddings_raises_after_retries_exhausted(self, provider, embedding_request):
+    async def test_embeddings_raises_after_retries_exhausted(
+        self, provider, embedding_request, make_mock_client
+    ):
         """Test that embeddings raises after max retries exhausted."""
-        call_count = 0
-
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            raise httpx2.TimeoutException("Connection timed out")
-
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
+        mock_client = make_mock_client()
+        mock_client.post.side_effect = httpx2.TimeoutException("Connection timed out")
 
         with patch.object(provider, "_get_client", return_value=mock_client):
-            from llm_proxy.core.exceptions import ProviderError
-
             with pytest.raises(ProviderError, match="timed out") as exc_info:
                 await provider.embeddings(embedding_request)
             assert exc_info.value.error_type == "timeout_error"
 
-        assert call_count == 3
+        assert mock_client.post.call_count == 3
 
     @pytest.mark.asyncio
     async def test_embeddings_raises_non_retryable_error_immediately(
-        self, provider, embedding_request
+        self, provider, embedding_request, mock_response_cls, make_mock_client
     ):
         """Test that embeddings raises immediately for non-retryable errors."""
-        call_count = 0
+        bad_request = mock_response_cls(status_code=400, text_data='{"error": "Bad request"}')
+        mock_client = make_mock_client(bad_request)
 
-        async def mock_post(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_response.text = "Bad request"
-            mock_response.json = AsyncMock(return_value={"error": "Bad request"})
+        with (
+            patch.object(provider, "_get_client", return_value=mock_client),
+            pytest.raises(ProviderError, match="Bad request"),
+        ):
+            await provider.embeddings(embedding_request)
 
-            mock_response.raise_for_status.side_effect = Exception("HTTP 400")
-            return mock_response
+        assert mock_client.post.call_count == 1
 
-        mock_client = MagicMock(spec=AsyncSession)
-        mock_client.post = mock_post
 
-        with patch.object(provider, "_get_client", return_value=mock_client):
-            from llm_proxy.core.exceptions import ProviderError
+class TestStreamErrorChunk:
+    """Ollama reports mid-stream failures as {"error": ...} JSON lines inside
+    an HTTP 200 ndjson stream (its server can only set the HTTP status for
+    errors that precede any streamed content). The adapter must surface them
+    as ProviderError instead of silently yielding an empty/truncated stream."""
 
-            with pytest.raises(ProviderError, match="Bad request"):
-                await provider.embeddings(embedding_request)
+    @pytest.fixture
+    def provider(self):
+        return OllamaAdapter(base_url="http://localhost:11434", max_retries=2)
 
-        assert call_count == 1
+    @pytest.fixture
+    def chat_request(self):
+        return InternalRequest(
+            model="test-model",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            stream=True,
+        )
+
+    @pytest.fixture
+    def stream_patchers(self, mock_response_cls, make_mock_client):
+        """Patch the provider to stream the given ndjson chunks from a mock client."""
+
+        def _make(provider, chunks):
+            response = mock_response_cls(
+                status_code=200, stream_chunks=[orjson.dumps(c) for c in chunks]
+            )
+            mock_client = make_mock_client(response)
+            return patch.object(provider, "_get_client", return_value=mock_client), patch.object(
+                provider, "_download_images_in_conversation"
+            )
+
+        return _make
+
+    @pytest.mark.asyncio
+    async def test_midstream_error_chunk_raises_provider_error(
+        self, provider, chat_request, stream_patchers
+    ):
+        """An {"error": ...} line after content must abort with ProviderError."""
+        chunks = [
+            {
+                "model": "test-model",
+                "created_at": "2026-01-01T00:00:00Z",
+                "message": {"role": "assistant", "content": "partial"},
+                "done": False,
+            },
+            {"error": "runner crashed: out of memory"},
+        ]
+        patcher, dl_patcher = stream_patchers(provider, chunks)
+
+        with patcher, dl_patcher:
+            with pytest.raises(ProviderError, match="out of memory") as exc_info:
+                stream = await provider.stream_chat_completion(chat_request)
+                async for _ in stream:
+                    pass
+
+            assert exc_info.value.error_type == "api_error"
+            assert exc_info.value.status_code == 500
+
+    @pytest.mark.asyncio
+    async def test_error_chunk_before_content_carries_status(
+        self, provider, chat_request, stream_patchers
+    ):
+        """Error chunks may carry an explicit status field — surface it."""
+        chunks = [{"error": "model failed to load", "status": 503}]
+        patcher, dl_patcher = stream_patchers(provider, chunks)
+
+        with patcher, dl_patcher:
+            with pytest.raises(ProviderError, match="failed to load") as exc_info:
+                stream = await provider.stream_chat_completion(chat_request)
+                async for _ in stream:
+                    pass
+
+            assert exc_info.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_error_before_content_is_retried(self, provider, chat_request, stream_patchers):
+        """Nothing yielded yet: the error chunk is retryable like any stream failure."""
+        chunks = [{"error": "transient load failure"}]
+        patcher, dl_patcher = stream_patchers(provider, chunks)
+
+        with (
+            patcher,
+            dl_patcher,
+            pytest.raises(ProviderError, match="transient load failure"),
+        ):
+            stream = await provider.stream_chat_completion(chat_request)
+            async for _ in stream:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_normal_stream_unaffected(self, provider, chat_request, stream_patchers):
+        """Regular chunks without an error key stream through unchanged."""
+        chunks = [
+            {
+                "model": "test-model",
+                "created_at": "2026-01-01T00:00:00Z",
+                "message": {"role": "assistant", "content": "Hello"},
+                "done": False,
+            },
+            {
+                "model": "test-model",
+                "created_at": "2026-01-01T00:00:01Z",
+                "message": {"role": "assistant", "content": ""},
+                "done": True,
+                "done_reason": "stop",
+                "prompt_eval_count": 3,
+                "eval_count": 5,
+            },
+        ]
+        patcher, dl_patcher = stream_patchers(provider, chunks)
+
+        with patcher, dl_patcher:
+            collected = []
+            stream = await provider.stream_chat_completion(chat_request)
+            async for chunk in stream:
+                collected.append(chunk)
+
+        assert collected[-1] == "[DONE]"
+        assert any(
+            isinstance(c, dict) and c.get("usage", {}).get("completion_tokens") == 5
+            for c in collected
+        )

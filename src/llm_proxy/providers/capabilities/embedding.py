@@ -3,7 +3,7 @@
 from typing import Any
 
 from llm_proxy.models import InternalEmbeddingRequest, InternalEmbeddingResponse
-from llm_proxy.providers.base import _extract_rate_limit_headers
+from llm_proxy.providers.base import extract_rate_limit_headers
 from llm_proxy.providers.capabilities.host import EmbeddingSelf
 
 
@@ -45,7 +45,7 @@ class EmbeddingCapabilityMixin:
         result = self._get_serializer().parse_provider_embedding_response(
             response.json(), model=request.model
         )
-        result.provider_info["_rate_limit_headers"] = _extract_rate_limit_headers(
+        result.provider_info["_rate_limit_headers"] = extract_rate_limit_headers(
             getattr(response, "headers", None)
         )
         return result

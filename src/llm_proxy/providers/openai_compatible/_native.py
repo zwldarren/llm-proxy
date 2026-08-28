@@ -35,7 +35,7 @@ from llm_proxy.providers.anthropic.client_headers import (
 from llm_proxy.providers.anthropic.client_headers import (
     get_client_headers as get_anthropic_client_headers,
 )
-from llm_proxy.providers.base import _extract_rate_limit_headers
+from llm_proxy.providers.base import extract_rate_limit_headers
 from llm_proxy.providers.openai.client_headers import (
     get_client_headers as get_openai_client_headers,
 )
@@ -240,7 +240,7 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
         # stays consistent.
         response = await self._post_json_response_with_retry(url, self._build_headers(), body)
         result = self._build_passthrough_response(response.json(), request)
-        result.provider_info["_rate_limit_headers"] = _extract_rate_limit_headers(
+        result.provider_info["_rate_limit_headers"] = extract_rate_limit_headers(
             getattr(response, "headers", None)
         )
         return result

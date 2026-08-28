@@ -23,7 +23,7 @@ from llm_proxy.models import (
     InternalTranslationRequest,
     InternalTranslationResponse,
 )
-from llm_proxy.providers.base import _extract_rate_limit_headers
+from llm_proxy.providers.base import extract_rate_limit_headers
 from llm_proxy.providers.capabilities.host import AudioSelf
 
 
@@ -255,7 +255,7 @@ class AudioCapabilityMixin:
             content_type=response.headers.get("content-type", f"audio/{request.response_format}"),
             request_id=request.request_id,
             provider_info={
-                "_rate_limit_headers": _extract_rate_limit_headers(
+                "_rate_limit_headers": extract_rate_limit_headers(
                     getattr(response, "headers", None)
                 )
             },
@@ -317,7 +317,7 @@ class AudioCapabilityMixin:
             response_data = response.json()
         else:
             response_data = {"text": response.text}
-        return response_data, _extract_rate_limit_headers(getattr(response, "headers", None))
+        return response_data, extract_rate_limit_headers(getattr(response, "headers", None))
 
     async def transcription(
         self: AudioSelf, request: InternalTranscriptionRequest, **_kwargs: Any

@@ -19,7 +19,7 @@ from llm_proxy.models import (
     InternalResponse,
 )
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.providers.base import BaseHttpProvider, _extract_rate_limit_headers
+from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
 from llm_proxy.providers.capabilities import (
     AudioCapabilityMixin,
     ChatCapabilityMixin,
@@ -247,7 +247,7 @@ class OpenAICompatibleBase(
         # Runs on both tiers: provider metadata extraction (e.g. OpenRouter
         # cost fields for billing) only needs the raw body + provider_info.
         result = self._post_process_chat_response(response_data, result)
-        result.provider_info["_rate_limit_headers"] = _extract_rate_limit_headers(
+        result.provider_info["_rate_limit_headers"] = extract_rate_limit_headers(
             getattr(response, "headers", None)
         )
         return result

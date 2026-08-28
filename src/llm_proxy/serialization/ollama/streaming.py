@@ -59,7 +59,10 @@ class OllamaStreamingMixin:
             finish_reason = _DONE_REASON_MAP.get(chunk.get("done_reason"), "stop")
 
         openai_chunk: dict[str, Any] = {
-            "id": f"chatcmpl-{chunk.get('created_at', '')}",
+            # Stable per-stream id: ``created_at`` is an ISO timestamp (with
+            # colons/dots) that would leak into the id; the converter's fixed
+            # ``_created_at`` epoch keeps it clean and identical across chunks.
+            "id": f"chatcmpl-{getattr(self, '_created_at', None) or int(time.time())}",
             "object": "chat.completion.chunk",
             "created": getattr(self, "_created_at", None) or int(time.time()),
             "model": chunk.get("model", ""),
@@ -120,6 +123,10 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         self._tool_call_index: int = 0
         # Fixed per-stream timestamp so all chunks share the same ``created``.
         self._created_at: int = int(time.time())
+        # OpenAI convention: only the first delta carries ``role``. Ollama
+        # repeats ``role`` on every streamed chunk, so track whether the
+        # first delta has been emitted and strip it afterwards.
+        self._role_sent: bool = False
         # Usage captured from the terminal ``done`` chunk (Ollama reports
         # prompt_eval_count/eval_count only there).
         self._usage: StreamingUsage | None = None
@@ -162,6 +169,15 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         choices = openai_chunk.get("choices", [])
         if choices:
             delta = choices[0].get("delta", {})
+
+            # Keep ``role`` only on the first delta; Ollama emits it on every
+            # chunk, but the OpenAI wire convention is role-once.
+            if "role" in delta:
+                if self._role_sent:
+                    delta.pop("role")
+                else:
+                    self._role_sent = True
+
             tool_calls = delta.get("tool_calls")
             if tool_calls:
                 for call in tool_calls:

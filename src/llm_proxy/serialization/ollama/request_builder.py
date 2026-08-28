@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from llm_proxy.core.thinking import convert_to_ollama, resolve_thinking
-from llm_proxy.models import InternalRequest
+from llm_proxy.models import InternalEmbeddingRequest, InternalRequest
 from llm_proxy.models.tools import CustomTool, FunctionTool, OpenAIToolSearchTool, ToolDefinition
 from llm_proxy.models.types import unwrap_json_schema_wrapper
 from llm_proxy.serialization.context import BuildContext
@@ -18,25 +18,35 @@ OLLAMA_NATIVE_OPTIONS: frozenset[str] = frozenset(
         "min_p",
         "repeat_penalty",
         "repeat_last_n",
-        "tfs_z",
         "typical_p",
-        "mirostat",
-        "mirostat_eta",
-        "mirostat_tau",
-        "epsilon_cutoff",
-        "eta_cutoff",
         "num_ctx",
         "num_predict",
         "num_keep",
         "num_gpu",
         "num_thread",
+        "num_batch",
+        "main_gpu",
+        "use_mmap",
+        "draft_num_predict",
+    }
+)
+
+#: Ollama native top-level request parameters (not options.*) that clients
+#: may pass via extra. They are exempt from the unknown-fields policy so they
+#: survive to the body. ``truncate``/``shift`` control context-overflow
+#: behavior (Ollama >= 0.8); ``keep_alive`` controls model unload timing.
+OLLAMA_NATIVE_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
+    {
+        "keep_alive",
+        "truncate",
+        "shift",
     }
 )
 
 # Responses-API-only extra keys with no Ollama equivalent. They must never
 # leak into the Ollama body as top-level keys (Ollama ignores unknown keys,
 # but leaking them is silent and confusing).
-_OLLAMA_RESPONSES_ONLY_KEYS: frozenset[str] = frozenset(
+OLLAMA_RESPONSES_ONLY_KEYS: frozenset[str] = frozenset(
     {
         "previous_response_id",
         "include",
@@ -77,6 +87,13 @@ class OllamaRequestBuilderMixin:
             if tools_list:
                 body["tools"] = tools_list
 
+        # Ollama has no tool_choice parameter; surface the drop instead of
+        # silently ignoring a client's explicit tool-selection request.
+        if request.tool_choice is not None:
+            logger.warning(
+                "tool_choice is not supported by the Ollama provider and will be ignored"
+            )
+
         if request.params.response_format:
             rf = request.params.response_format
             if rf.type == "json_object":
@@ -97,6 +114,19 @@ class OllamaRequestBuilderMixin:
                 if isinstance(request.params.stop, list)
                 else [request.params.stop]
             )
+        # Ollama supports these common sampling params natively; the OpenAI
+        # protocol parses them into params (they never reach request.extra),
+        # so they must be mapped here or they are silently dropped.
+        if request.params.presence_penalty is not None:
+            options["presence_penalty"] = request.params.presence_penalty
+        if request.params.frequency_penalty is not None:
+            options["frequency_penalty"] = request.params.frequency_penalty
+        if request.params.seed is not None:
+            options["seed"] = request.params.seed
+        # Anthropic-protocol clients carry top_k in params.anthropic; Ollama
+        # has a native options.top_k equivalent.
+        if request.params.anthropic is not None and request.params.anthropic.top_k is not None:
+            options["top_k"] = request.params.anthropic.top_k
 
         if options:
             body["options"] = options
@@ -111,31 +141,46 @@ class OllamaRequestBuilderMixin:
                 body["top_logprobs"] = request.params.openai.top_logprobs
 
         if request.extra:
-            # truncation: disabled cannot be enforced on Ollama (no truncation
-            # control exists); surface it instead of silently ignoring it.
+            # OpenResponses truncation=disabled maps to Ollama's native
+            # top-level truncate: false (context overflow then errors instead
+            # of silently truncating).
             if request.extra.get("truncation") == "disabled":
-                logger.warning(
-                    "truncation=disabled is not enforceable on the Ollama provider; "
-                    "context overflow behavior depends on the Ollama server."
-                )
+                body["truncate"] = False
 
             native_options = {k: v for k, v in request.extra.items() if k in OLLAMA_NATIVE_OPTIONS}
             if native_options:
                 body.setdefault("options", {}).update(native_options)
 
-            if "keep_alive" in request.extra:
-                body["keep_alive"] = request.extra["keep_alive"]
+            for key in OLLAMA_NATIVE_TOP_LEVEL_KEYS:
+                if key in request.extra:
+                    body[key] = request.extra[key]
 
             for key, value in request.extra.items():
                 if (
                     key not in OLLAMA_NATIVE_OPTIONS
-                    and key != "keep_alive"
-                    and key not in _OLLAMA_RESPONSES_ONLY_KEYS
+                    and key not in OLLAMA_NATIVE_TOP_LEVEL_KEYS
+                    and key not in OLLAMA_RESPONSES_ONLY_KEYS
                     and key not in body
                     and value is not None
                 ):
                     body[key] = value
 
+        return body
+
+    def build_provider_embedding_request(self, request: InternalEmbeddingRequest) -> dict[str, Any]:
+        """Build an Ollama /api/embed request body.
+
+        Ollama supports ``model``/``input``/``dimensions`` natively (plus
+        ``options``/``keep_alive``/``truncate``, which arrive via the extra
+        merge path). OpenAI-only fields such as ``encoding_format`` are not
+        sent — Ollama would silently ignore them.
+        """
+        body: dict[str, Any] = {
+            "model": request.model,
+            "input": request.input,
+        }
+        if request.dimensions is not None:
+            body["dimensions"] = request.dimensions
         return body
 
     def _convert_tools_to_ollama(self, tools: list[ToolDefinition]) -> list[dict[str, Any]]:
