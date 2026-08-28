@@ -576,7 +576,7 @@ class ModelExperienceRecord(Base):
     __tablename__ = "model_experience"
 
     name: Mapped[str] = mapped_column(
-        ForeignKey("models.name", ondelete="CASCADE"), primary_key=True
+        ForeignKey("models.name", ondelete="CASCADE", onupdate="CASCADE"), primary_key=True
     )
     samples: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reward_mean: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
