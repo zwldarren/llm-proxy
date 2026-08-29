@@ -472,8 +472,10 @@
    * and tint the thumb with muted-foreground so it stays visible on dark
    * backgrounds. Standard properties cover Firefox and Chromium 121+; the
    * ::-webkit-* fallbacks cover older WebKit. The thumb color intentionally
-   * matches the reka-ui ScrollArea thumb (see ScrollBar.vue). */
-  * {
+   * matches the reka-ui ScrollArea thumb (see ScrollBar.vue). The selector is
+   * `:where()`-wrapped (zero specificity) so component scrollbar utilities
+   * like `scrollbar-none` keep winning without layer juggling. */
+  :where(*) {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
   }

@@ -375,6 +375,14 @@ class BaseHttpProvider(BaseAdapter, ABC):
             # asyncio's async-gen GC finalizer (see quiet_aclose).
             await quiet_aclose(lines)
 
+    def _stash_stream_response_headers(self, response) -> None:
+        # Stash upstream response headers so the API layer can forward them
+        # (request-id, ratelimit-*, ...) once the client StreamingResponse
+        # is created.
+        self._last_stream_response_headers = extract_rate_limit_headers(
+            getattr(response, "headers", None)
+        )
+
     def _stream_raw_sse(
         self,
         url: str,
@@ -401,12 +409,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
                     timeout=stream_timeout,
                 ) as response:
                     await self._raise_for_stream_status(response)
-                    # Stash upstream response headers so the API layer can
-                    # forward them (request-id, ratelimit-*, ...) once the
-                    # client StreamingResponse is created.
-                    self._last_stream_response_headers = extract_rate_limit_headers(
-                        getattr(response, "headers", None)
-                    )
+                    self._stash_stream_response_headers(response)
 
                     buf: list[str] = []
                     async for raw_line in response.iter_lines():

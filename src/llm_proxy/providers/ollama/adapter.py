@@ -16,13 +16,14 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.content_blocks import ImageBlock
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
+from llm_proxy.providers.base import BaseHttpProvider
 from llm_proxy.providers.capabilities import ChatCapabilityMixin, EmbeddingCapabilityMixin
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.ollama.request_builder import (
     OLLAMA_NATIVE_OPTIONS,
     OLLAMA_NATIVE_TOP_LEVEL_KEYS,
     OLLAMA_RESPONSES_ONLY_KEYS,
+    OLLAMA_STALE_OPTION_KEYS,
 )
 from llm_proxy.serialization.providers import get_provider_serializer
 
@@ -129,6 +130,7 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
         set(OLLAMA_NATIVE_OPTIONS)
         | set(OLLAMA_NATIVE_TOP_LEVEL_KEYS)
         | set(OLLAMA_RESPONSES_ONLY_KEYS)
+        | set(OLLAMA_STALE_OPTION_KEYS)
     )
 
     def _build_chat_raw(self, request: InternalRequest, context: BuildContext) -> dict[str, Any]:
@@ -217,13 +219,7 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
                     timeout=stream_timeout,
                 ) as response:
                     assert response.status_code is not None
-                    # Stash upstream response headers so the API layer can
-                    # forward them (request-id, ratelimit-*, ...) once the
-                    # client StreamingResponse is created — same as the shared
-                    # _stream_raw_sse path.
-                    self._last_stream_response_headers = extract_rate_limit_headers(
-                        getattr(response, "headers", None)
-                    )
+                    self._stash_stream_response_headers(response)
                     if response.status_code >= 400:
                         try:
                             await response.aread()

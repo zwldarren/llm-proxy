@@ -20,6 +20,7 @@ from llm_proxy.models import (
     ThinkingConfig,
 )
 from llm_proxy.providers.ollama.adapter import OllamaAdapter
+from llm_proxy.serialization.ollama.request_builder import _warn_tool_choice_ignored
 
 
 class TestBuildRequestBody:
@@ -237,6 +238,21 @@ class TestBuildRequestBody:
         # Default ignore policy strips them from the body entirely
         assert "mirostat" not in body
         assert "tfs_z" not in body
+
+    def test_stale_options_never_leak_under_passthrough(self):
+        """Stale Modelfile-only keys stay out of the body under any policy."""
+        adapter = OllamaAdapter(unknown_fields_policy="passthrough")
+        request = InternalRequest(
+            model="test",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            extra={"mirostat": 2, "tfs_z": 1.0, "eta_cutoff": 0.5},
+        )
+        body = adapter._build_request_body(request)
+        assert "mirostat" not in body
+        assert "tfs_z" not in body
+        assert "eta_cutoff" not in body
 
     def test_truncate_and_shift_survive_ignore_policy(self, provider):
         """Native top-level truncate/shift pass through the default policy."""
@@ -531,19 +547,33 @@ class TestToolChoiceWarning:
     def provider(self):
         return OllamaAdapter()
 
-    def test_tool_choice_logs_warning(self, provider, caplog):
-        request = InternalRequest(
-            model="test",
-            conversation=ConversationContext(
-                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+    def test_tool_choice_logs_warning_once(self, provider, caplog):
+        """The drop is surfaced once per process, not on every request."""
+        _warn_tool_choice_ignored.cache_clear()
+        requests = [
+            InternalRequest(
+                model="test",
+                conversation=ConversationContext(
+                    messages=[Message(role="user", content=[TextBlock(text="hi")])]
+                ),
+                tool_choice="none",
             ),
-            tool_choice="none",
-        )
+            InternalRequest(
+                model="test",
+                conversation=ConversationContext(
+                    messages=[Message(role="user", content=[TextBlock(text="hi")])]
+                ),
+                tool_choice="auto",
+            ),
+        ]
         with caplog.at_level(logging.WARNING):
-            provider._build_request_body(request)
-        assert any("tool_choice" in record.message for record in caplog.records)
+            for request in requests:
+                provider._build_request_body(request)
+        warnings = [record for record in caplog.records if "tool_choice" in record.message]
+        assert len(warnings) == 1
 
     def test_no_warning_without_tool_choice(self, provider, caplog):
+        _warn_tool_choice_ignored.cache_clear()
         request = InternalRequest(
             model="test",
             conversation=ConversationContext(

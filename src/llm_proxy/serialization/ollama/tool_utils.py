@@ -9,6 +9,8 @@ from typing import Any, cast
 
 import orjson
 
+from llm_proxy.models.types import TokenLogprob
+
 
 def normalize_tool_calls(
     tool_calls: Any,
@@ -86,13 +88,34 @@ def normalize_tool_calls(
     return normalized or None
 
 
-def normalize_logprob_entries(ollama_logprobs: list[Any] | None) -> list[dict[str, Any]]:
-    """Normalize raw Ollama logprob entries to a shared dict shape.
+def _normalize_logprob_entry(item: dict[str, Any]) -> TokenLogprob:
+    """Normalize one raw Ollama logprob entry to a ``TokenLogprob``."""
+    top_logprobs: list[TokenLogprob] = []
+    if isinstance(item.get("top_logprobs"), list):
+        for t in item["top_logprobs"]:
+            if isinstance(t, dict):
+                top_logprobs.append(
+                    TokenLogprob(
+                        token=t.get("token", ""),
+                        logprob=t.get("logprob", 0.0),
+                        bytes=t.get("bytes"),
+                    )
+                )
+    return TokenLogprob(
+        token=item.get("token", ""),
+        logprob=item.get("logprob", 0.0),
+        bytes=item.get("bytes"),
+        top_logprobs=top_logprobs or None,
+    )
+
+
+def normalize_logprob_entries(ollama_logprobs: list[Any] | None) -> list[TokenLogprob]:
+    """Normalize raw Ollama logprob entries to typed ``TokenLogprob`` models.
 
     Single source of truth for entry normalization (token/logprob/bytes/
-    top_logprobs defaults): ``convert_logprobs`` wraps the result in the
-    OpenAI wire dict, and the non-streaming response parser maps it onto
-    typed ``TokenLogprob`` models.
+    top_logprobs defaults): ``convert_logprobs`` serializes the typed
+    entries to the OpenAI wire dict, and the non-streaming response parser
+    consumes them directly.
 
     Args:
         ollama_logprobs: Raw logprobs from Ollama response
@@ -102,38 +125,17 @@ def normalize_logprob_entries(ollama_logprobs: list[Any] | None) -> list[dict[st
     """
     if not ollama_logprobs or not isinstance(ollama_logprobs, list):
         return []
+    return [_normalize_logprob_entry(item) for item in ollama_logprobs if isinstance(item, dict)]
 
-    entries: list[dict[str, Any]] = []
-    for item in ollama_logprobs:
-        if not isinstance(item, dict):
-            continue
 
-        entry: dict[str, Any] = {
-            "token": item.get("token", ""),
-            "logprob": item.get("logprob", 0.0),
-        }
-
-        if item.get("bytes") is not None:
-            entry["bytes"] = item["bytes"]
-
-        if item.get("top_logprobs"):
-            top_logprobs: list[dict[str, Any]] = []
-            for t in item["top_logprobs"]:
-                if not isinstance(t, dict):
-                    continue
-                top_entry: dict[str, Any] = {
-                    "token": t.get("token", ""),
-                    "logprob": t.get("logprob", 0.0),
-                }
-                if t.get("bytes") is not None:
-                    top_entry["bytes"] = t["bytes"]
-                top_logprobs.append(top_entry)
-            if top_logprobs:
-                entry["top_logprobs"] = top_logprobs
-
-        entries.append(entry)
-
-    return entries
+def _logprob_to_wire(entry: TokenLogprob) -> dict[str, Any]:
+    """Serialize a typed ``TokenLogprob`` to the OpenAI wire dict shape."""
+    wire: dict[str, Any] = {"token": entry.token, "logprob": entry.logprob}
+    if entry.bytes is not None:
+        wire["bytes"] = entry.bytes
+    if entry.top_logprobs:
+        wire["top_logprobs"] = [_logprob_to_wire(t) for t in entry.top_logprobs]
+    return wire
 
 
 def convert_logprobs(ollama_logprobs: list[Any] | None) -> dict[str, Any] | None:
@@ -147,5 +149,5 @@ def convert_logprobs(ollama_logprobs: list[Any] | None) -> dict[str, Any] | None
     Returns:
         Dict with "content" key containing normalized logprob entries, or None
     """
-    content = normalize_logprob_entries(ollama_logprobs)
-    return {"content": content} if content else None
+    entries = normalize_logprob_entries(ollama_logprobs)
+    return {"content": [_logprob_to_wire(e) for e in entries]} if entries else None

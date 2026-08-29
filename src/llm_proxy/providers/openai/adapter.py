@@ -306,9 +306,7 @@ class OpenAIAdapter(
                     timeout=stream_timeout,
                 ) as response:
                     await self._raise_for_stream_status(response)
-                    self._last_stream_response_headers = extract_rate_limit_headers(
-                        getattr(response, "headers", None)
-                    )
+                    self._stash_stream_response_headers(response)
 
                     current_event_type = None
 
@@ -389,12 +387,7 @@ class OpenAIAdapter(
                     timeout=stream_timeout,
                 ) as response:
                     await self._raise_for_stream_status(response)
-                    # Stash upstream response headers so the API layer can
-                    # forward them (x-request-id, openai-version, rate limits)
-                    # once the client StreamingResponse is created.
-                    self._last_stream_response_headers = extract_rate_limit_headers(
-                        getattr(response, "headers", None)
-                    )
+                    self._stash_stream_response_headers(response)
 
                     buf: list[str] = []
                     # Use response.iter_lines() directly to preserve the empty

@@ -17,7 +17,7 @@ from llm_proxy.models.embedding import (
     EmbeddingData,
     InternalEmbeddingResponse,
 )
-from llm_proxy.models.types import ChoiceLogprobs, ImageSource, TokenLogprob, Usage
+from llm_proxy.models.types import ChoiceLogprobs, ImageSource, Usage
 from llm_proxy.serialization.ollama.metrics import extract_ollama_metrics
 from llm_proxy.serialization.ollama.tool_utils import (
     normalize_logprob_entries,
@@ -120,25 +120,7 @@ class OllamaResponseParserMixin:
         if logprobs and response.get("logprobs"):
             entries = normalize_logprob_entries(response.get("logprobs"))
             if entries:
-                logprobs_obj = ChoiceLogprobs(
-                    content=[
-                        TokenLogprob(
-                            token=entry["token"],
-                            logprob=entry["logprob"],
-                            bytes=entry.get("bytes"),
-                            top_logprobs=[
-                                TokenLogprob(
-                                    token=t["token"],
-                                    logprob=t["logprob"],
-                                    bytes=t.get("bytes"),
-                                )
-                                for t in entry.get("top_logprobs", [])
-                            ]
-                            or None,
-                        )
-                        for entry in entries
-                    ]
-                )
+                logprobs_obj = ChoiceLogprobs(content=entries)
 
         return InternalResponse(
             id=response_id,

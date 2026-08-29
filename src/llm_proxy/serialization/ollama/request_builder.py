@@ -1,5 +1,6 @@
 """Ollama request builder mixin."""
 
+import functools
 import logging
 from typing import Any
 
@@ -10,6 +11,14 @@ from llm_proxy.models.types import unwrap_json_schema_wrapper
 from llm_proxy.serialization.context import BuildContext
 
 logger = logging.getLogger(__name__)
+
+
+# ``tool_choice`` is surfaced, not silent — but once per process, not on
+# every request carrying it.
+@functools.cache
+def _warn_tool_choice_ignored() -> None:
+    logger.warning("tool_choice is not supported by the Ollama provider and will be ignored")
+
 
 OLLAMA_NATIVE_OPTIONS: frozenset[str] = frozenset(
     {
@@ -66,6 +75,21 @@ OLLAMA_RESPONSES_ONLY_KEYS: frozenset[str] = frozenset(
     }
 )
 
+# Ollama option keys removed from the request API (Modelfile-only since
+# Ollama 0.8): the server ignores them both in ``options.*`` and at top
+# level, so they are dropped outright instead of leaking into the body as
+# ignored top-level keys.
+OLLAMA_STALE_OPTION_KEYS: frozenset[str] = frozenset(
+    {
+        "tfs_z",
+        "mirostat",
+        "mirostat_eta",
+        "mirostat_tau",
+        "epsilon_cutoff",
+        "eta_cutoff",
+    }
+)
+
 
 class OllamaRequestBuilderMixin:
     """Build Ollama native API request bodies from InternalRequest."""
@@ -90,9 +114,7 @@ class OllamaRequestBuilderMixin:
         # Ollama has no tool_choice parameter; surface the drop instead of
         # silently ignoring a client's explicit tool-selection request.
         if request.tool_choice is not None:
-            logger.warning(
-                "tool_choice is not supported by the Ollama provider and will be ignored"
-            )
+            _warn_tool_choice_ignored()
 
         if request.params.response_format:
             rf = request.params.response_format
@@ -160,6 +182,7 @@ class OllamaRequestBuilderMixin:
                     key not in OLLAMA_NATIVE_OPTIONS
                     and key not in OLLAMA_NATIVE_TOP_LEVEL_KEYS
                     and key not in OLLAMA_RESPONSES_ONLY_KEYS
+                    and key not in OLLAMA_STALE_OPTION_KEYS
                     and key not in body
                     and value is not None
                 ):
