@@ -933,17 +933,17 @@ async def test_cancel_token_set_stops_stream_generator_early() -> None:
 async def test_client_disconnect_sets_cancel_token_and_stops_stream() -> None:
     """Client disconnection must set the cancel_token and stop the stream.
 
-    When req.is_disconnected() returns True in the streaming loop, the
-    cancel_token must be set and the stream must stop yielding chunks.
-    This is the primary fix for FD racing on disconnect+reconnect.
+    When the client's receive channel reports ``http.disconnect`` in the
+    streaming loop, the cancel_token must be set and the stream must stop
+    yielding chunks. This is the primary fix for FD racing on disconnect+reconnect.
     """
     disconnect_count = 0
     captured_cancel_token: asyncio.Event | None = None
 
-    async def _is_disconnected():
+    async def _receive_disconnect():
         nonlocal disconnect_count
         disconnect_count += 1
-        return True
+        return {"type": "http.disconnect"}
 
     async def _capture_and_stream(*args: Any, **kwargs: Any):
         nonlocal captured_cancel_token
@@ -975,7 +975,7 @@ async def test_client_disconnect_sets_cancel_token_and_stops_stream() -> None:
     )
 
     req = _build_mock_request()
-    req.is_disconnected = _is_disconnected
+    req._receive = _receive_disconnect
 
     processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
     unified_request = _build_unified_request()
@@ -994,7 +994,7 @@ async def test_client_disconnect_sets_cancel_token_and_stops_stream() -> None:
     chunk_count_in_payload = payload.count('"content":"chunk')
     assert '"content":"chunk0"' in payload, "pre-fetched first chunk should be streamed"
     assert disconnect_count >= 1, (
-        f"is_disconnected should have been called at least once, got {disconnect_count}"
+        f"receive() should have been polled for disconnect at least once, got {disconnect_count}"
     )
     assert chunk_count_in_payload <= 11, (
         f"Stream should stop after ~10 chunks when disconnect is detected, "
@@ -1007,9 +1007,9 @@ async def test_client_disconnect_sets_cancel_token_and_stops_stream() -> None:
 async def test_normal_streaming_completes_without_cancel_token_interference() -> None:
     """Streaming must complete normally when client stays connected.
 
-    Control test: when is_disconnected() always returns False, the full
-    stream (including [DONE]) must be delivered and cancel_token must
-    remain unset.
+    Control test: when the client's receive channel never reports a
+    disconnect, the full stream (including [DONE]) must be delivered and
+    cancel_token must remain unset.
     """
     captured_cancel_token: asyncio.Event | None = None
 
@@ -1045,10 +1045,18 @@ async def test_normal_streaming_completes_without_cancel_token_interference() ->
     processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
     unified_request = _build_unified_request()
     streaming_marker = StreamingResponseMarker(unified_request, adapter)
+
+    async def _receive_connected():
+        # A live connection: no message ever arrives (checks time out).
+        await asyncio.sleep(30)
+        return {"type": "http.request", "more_body": False}
+
+    req = _build_mock_request()
+    req._receive = _receive_connected
     response = await processor._streaming_processor.process(
         streaming_marker=streaming_marker,
         raw_request_data={"model": "glm-5", "stream": True},
-        req=_build_mock_request(),
+        req=req,
         context=context,
         trace_id="trace-normal",
     )

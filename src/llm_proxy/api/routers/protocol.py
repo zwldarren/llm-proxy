@@ -28,7 +28,11 @@ from llm_proxy.api.context import (
     build_translation_request_context,
 )
 from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
-from llm_proxy.api.keepalive import await_with_keepalive, supports_keepalive
+from llm_proxy.api.keepalive import (
+    await_with_disconnect_monitor,
+    await_with_keepalive,
+    supports_keepalive,
+)
 from llm_proxy.api.utils import (
     add_info_endpoint,
     create_standard_router,
@@ -134,7 +138,7 @@ def _create_endpoint_fn(
             )
 
         # CDN proxies (e.g. Cloudflare) abort requests that stay silent for
-        # ~100s. Slow non-streaming requests (long-reasoning models) can opt
+        # ~100s. Slow non-streaming requests (long-reasoning models) opt
         # into whitespace heartbeats to survive that budget. See keepalive.py.
         keepalive = resolve_keepalive_params(
             getattr(fastapi_request.app.state, "config_manager", None)
@@ -145,9 +149,13 @@ def _create_endpoint_fn(
                 process_coro,
                 grace_seconds=keepalive.grace_seconds,
                 interval_seconds=keepalive.interval_seconds,
+                request=fastapi_request,
             )
 
-        return await process_coro
+        # Everything else (streaming, disabled keepalive, binary protocols):
+        # poll for client disconnects while the pipeline runs so abandoned
+        # requests stop generating and are logged as failures.
+        return await await_with_disconnect_monitor(process_coro, fastapi_request)
 
     return handle_protocol_request
 

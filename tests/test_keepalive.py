@@ -8,6 +8,7 @@ from fastapi import Response
 
 from llm_proxy.api.keepalive import (
     _heartbeat_body,
+    await_with_disconnect_monitor,
     await_with_keepalive,
     supports_keepalive,
 )
@@ -160,6 +161,104 @@ class TestHeartbeatMode:
         assert cancelled.is_set()
 
 
+class TestDisconnectMonitor:
+    """Client-disconnect monitoring (api/keepalive.wait_for_either)."""
+
+    class _FakeRequest:
+        """Minimal Request stand-in whose _receive emulates ASGI semantics.
+
+        While "connected", a receive() poll blocks until the check timeout;
+        once "disconnected", it immediately yields http.disconnect — the
+        behavior ``check_client_disconnected`` relies on.
+        """
+
+        def __init__(self, disconnect_after: int | None = None):
+            from types import SimpleNamespace
+
+            self.state = SimpleNamespace()
+            self.state.client_disconnected = False
+            self._checks = 0
+            self._disconnect_after = disconnect_after
+
+        @property
+        def _disconnected(self) -> bool:
+            return self._disconnect_after is not None and self._checks > self._disconnect_after
+
+        async def _receive(self):
+            self._checks += 1
+            if self._disconnected:
+                return {"type": "http.disconnect"}
+            await asyncio.sleep(10)  # long poll past any check_client_disconnected wait
+            return {"type": "http.request"}
+
+    async def test_fast_task_returns_response(self):
+        original = _json_response({"ok": True}, status_code=201)
+
+        async def fast():
+            return original
+
+        request = self._FakeRequest()
+        result = await await_with_disconnect_monitor(fast(), request)
+        assert result is original
+
+    async def test_slow_task_polls_until_disconnect_and_cancels(self):
+        cancelled = asyncio.Event()
+
+        async def slow():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return _json_response({})
+
+        request = self._FakeRequest(disconnect_after=1)
+        result = await await_with_disconnect_monitor(slow(), request, poll_interval=0.05)
+        assert cancelled.is_set(), "pipeline task was not cancelled after disconnect"
+        assert request.state.client_disconnected is True
+        assert result.status_code == 499
+
+    async def test_grace_phase_detects_disconnect(self):
+        """await_with_keepalive(request=...) polls during the grace period."""
+        cancelled = asyncio.Event()
+
+        async def slow():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return _json_response({})
+
+        request = self._FakeRequest(disconnect_after=1)
+        result = await await_with_keepalive(
+            slow(),
+            grace_seconds=30.0,
+            interval_seconds=1.0,
+            request=request,
+        )
+        assert cancelled.is_set()
+        assert request.state.client_disconnected is True
+        assert result.status_code == 499
+
+    async def test_grace_phase_switches_to_heartbeat_when_slow(self):
+        """No disconnect: after the grace period the heartbeat stream starts."""
+
+        async def slow_response():
+            await asyncio.sleep(0.4)
+            return _json_response({"late": True})
+
+        request = self._FakeRequest()
+        result = await await_with_keepalive(
+            slow_response(),
+            grace_seconds=0.15,
+            interval_seconds=0.05,
+            request=request,
+        )
+        body = await _collect_body(result)
+        assert orjson.loads(body[1:] if body[:1] == b" " else body) == {"late": True}
+
+
 class TestRecursionErrorHandler:
     """The deep-nesting payload fix: RecursionError maps to a clean 400."""
 
@@ -184,3 +283,17 @@ class TestRecursionErrorHandler:
         payload = orjson.loads(response.body)
         assert payload["error"]["code"] == "payload_too_deeply_nested"
         assert "too deeply nested" in payload["error"]["message"]
+
+
+class TestKeepaliveDefaults:
+    """Keepalive (and its interval knob) ships enabled for CDN deployments."""
+
+    def test_enabled_by_default(self):
+        from llm_proxy.config.types.server import KeepaliveParams
+
+        params = KeepaliveParams()
+        assert params.enabled is True
+        # Must stay comfortably below the ~100s Cloudflare origin budget so
+        # heartbeat mode starts in time to emit the first byte.
+        assert params.grace_seconds < 100
+        assert params.interval_seconds > 0

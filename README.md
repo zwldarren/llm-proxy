@@ -37,7 +37,7 @@ Speak any client protocol; the proxy normalizes it to a unified internal model a
 - **Virtual models** — Route to `auto`, `fast`, or `best` and let the built-in keyword-free classifier (structural + Unicode + n-gram features, no LLM call) pick a real model by complexity, cost, and capability. An optional embedding-based signal (install with `uv sync --extra smart-routing`) sharpens tier prediction; without it, routing degrades gracefully to the structural signals.
 - **Cost-aware selection** — Routing tiers (`ECONOMY` / `BALANCED` / `PREMIUM`) with bandit-style exploration that learns from real outcomes.
 - **Fallback chains & circuit breakers** — Per-provider attempt tracking, automatic retries on failure, and breakers that stop hammering a sick upstream.
-- **Keepalive heartbeats** — Whitespace heartbeats keep slow non-streaming requests alive behind CDNs (avoids Cloudflare 524s).
+- **Keepalive heartbeats** — Whitespace heartbeats keep slow non-streaming requests alive behind CDNs (avoids Cloudflare 524s), enabled by default; streaming responses emit SSE comment heartbeats during upstream silence, and abandoned requests (client/CDN gave up) are cancelled and logged as 499 failures instead of silently succeeding.
 
 ### 🔍 Built-in Web Search
 

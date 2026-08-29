@@ -9,6 +9,7 @@ Note: SSE event formatting is handled by SSEBuilder (streaming/sse_builder.py).
 This module focuses only on HTTP streaming concerns.
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import cast
@@ -17,6 +18,39 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from llm_proxy.core.constants import DEFAULT_DISCONNECT_CHECK_INTERVAL
+
+# How long a disconnect poll waits on the receive channel before concluding
+# the client is still connected. Short enough not to delay detection, long
+# enough to avoid busy-looping on message-event wake-ups.
+_DISCONNECT_RECEIVE_WAIT_SECONDS = 0.5
+
+
+async def check_client_disconnected(req: Request) -> bool:
+    """Return True when the client connection is gone.
+
+    Cannot rely on ``Request.is_disconnected()``: it only observes messages
+    that arrive without an await checkpoint (anyio pre-cancelled scope), which
+    under BaseHTTPMiddleware never happens — the wrapped receive blocks until
+    a real message arrives. Instead, race the receive against a short wait so
+    ``http.disconnect`` is seen when the client is actually gone.
+
+    Safe to call repeatedly: ASGI servers keep answering with disconnect
+    messages after the connection is lost, and a timed-out receive is simply
+    cancelled (nothing was delivered, so nothing is lost).
+    """
+    receive = getattr(req, "_receive", None)
+    if receive is None:
+        return False
+    try:
+        message = await asyncio.wait_for(receive(), timeout=_DISCONNECT_RECEIVE_WAIT_SECONDS)
+    except TimeoutError:
+        # No message in time — the connection is still open.
+        return False
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - a failed receive check must not kill the request
+        return False
+    return isinstance(message, dict) and message.get("type") == "http.disconnect"
 
 
 @dataclass
@@ -129,4 +163,5 @@ class StreamingHandler:
 __all__ = [
     "StreamingHandler",
     "StreamingResponseConfig",
+    "check_client_disconnected",
 ]

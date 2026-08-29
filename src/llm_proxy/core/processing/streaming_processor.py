@@ -25,6 +25,7 @@ from llm_proxy.core.errors import (
 )
 from llm_proxy.core.errors.handler import ErrorHandler
 from llm_proxy.core.exceptions import (
+    ClientDisconnectedError,
     ConfigurationError,
     ProviderError,
 )
@@ -54,6 +55,14 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.streaming.handler import StreamingHandler
 
 logger = get_logger(__name__)
+
+# SSE comment frame emitted (and ignored by every SSE parser per the WHATWG
+# spec) when the upstream stream falls silent, so fronting CDNs such as
+# Cloudflare keep the connection open while a model ponders its next token.
+_SSE_KEEPALIVE_COMMENT = ": keep-alive\n\n"
+
+# Default heartbeat interval, overridden by the UI-managed keepalive config.
+_DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 15.0
 
 
 @dataclass
@@ -593,10 +602,15 @@ class StreamingProcessor:
         cancel_token: asyncio.Event | None,
         interval: int = 10,
     ) -> bool:
-        if req is None or chunk_count % interval != 0:
+        # Always check the very first chunk: a client that vanished while the
+        # (potentially minutes-long) pre-response pipeline ran would otherwise
+        # serve an entire stream into the void before the interval check fires.
+        if req is None or (chunk_count % interval != 0 and chunk_count != 1):
             return False
         try:
-            if await req.is_disconnected():
+            from llm_proxy.streaming.handler import check_client_disconnected
+
+            if await check_client_disconnected(req):
                 logger.debug(
                     "Client disconnected during stream, signalling cancel_token to stop provider"
                 )
@@ -606,6 +620,46 @@ class StreamingProcessor:
         except Exception:
             logger.debug("Failed to check client disconnect", exc_info=True)
         return False
+
+    @staticmethod
+    async def _iterate_chunks_with_comments(
+        stream,
+        *,
+        interval: float,
+        comment: str | None,
+    ):
+        """Iterate stream chunks, emitting an SSE comment during silent gaps.
+
+        The upstream iterator itself is never cancelled: a cancelled ``anext``
+        would inject a ``CancelledError`` into the provider stream and
+        truncate it. One racing task is instead awaited repeatedly between
+        comment emissions, so silence yields comments and data resumes from
+        the same in-flight read.
+        """
+        if interval <= 0:
+            interval = _DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+        iterator = aiter(stream)
+        while True:
+            chunk_task: asyncio.Task = asyncio.ensure_future(anext(iterator))
+            try:
+                while True:
+                    done, _ = await asyncio.wait({chunk_task}, timeout=interval)
+                    if done:
+                        try:
+                            chunk = chunk_task.result()
+                        except StopAsyncIteration:
+                            return
+                        yield ("chunk", chunk)
+                        break
+                    if comment is not None:
+                        # Comments bypass the chunk transformer: they are not
+                        # protocol data, just raw SSE comment frames.
+                        yield ("comment", comment)
+            finally:
+                if not chunk_task.done():
+                    chunk_task.cancel()
+                    with suppress(Exception):
+                        await chunk_task
 
     @staticmethod
     async def _safe_cleanup(coro, description: str) -> None:
@@ -890,6 +944,30 @@ class StreamingProcessor:
     ) -> Response:
         _should_intercept_web_search = proxy_web_search_active
 
+        # Streaming-side of the CDN keepalive: while the upstream stream
+        # falls silent (model thinking, slow provider), emit SSE comment
+        # frames so the CDN's time budget does not expire mid-stream.
+        # Comments are ignored by SSE parsers by definition, so this is safe
+        # for every protocol and not gated on the non-streaming keepalive
+        # toggle. Interval follows the same operator-facing knob.
+        heartbeat_interval = _DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+        if config_manager is not None:
+            try:
+                from llm_proxy.config.manager import resolve_keepalive_params
+
+                heartbeat_interval = max(
+                    resolve_keepalive_params(config_manager).interval_seconds, 0.5
+                )
+            except Exception:  # noqa: BLE001 - heartbeat tuning must never break streaming
+                logger.debug(
+                    "Failed to resolve keepalive params for stream heartbeat", exc_info=True
+                )
+        heartbeat_comment = (
+            _SSE_KEEPALIVE_COMMENT
+            if self.streaming_handler.config.media_type == "text/event-stream"
+            else None
+        )
+
         async def stream_generator(
             _first_chunks=first_chunks,
             _stream=stream,
@@ -909,10 +987,13 @@ class StreamingProcessor:
             _config_manager=config_manager,
             _response_store=response_store,
             _on_request_completed=on_request_completed,
+            _heartbeat_interval=heartbeat_interval,
+            _heartbeat_comment=heartbeat_comment,
         ):
             stream_error: Exception | None = None
             first_chunk_time: datetime | None = None
             chunk_count = 0
+            client_disconnected = False
             state = ContinuationState(transformer=_transformer, stream_request=_stream_request)
             try:
                 if _event_context is not None:
@@ -928,7 +1009,18 @@ class StreamingProcessor:
                     await _tracing_registry.on_stream_chunk(_stream_request, chunk, _event_context)
                     yield chunk
 
-                async for chunk in _stream:
+                async for kind, payload in self._iterate_chunks_with_comments(
+                    _stream,
+                    interval=_heartbeat_interval,
+                    comment=_heartbeat_comment,
+                ):
+                    if kind == "comment":
+                        if not client_disconnected and not (
+                            _cancel_token and _cancel_token.is_set()
+                        ):
+                            yield payload
+                        continue
+                    chunk = payload
                     if not isinstance(chunk, (str, dict)):
                         continue
                     if _cancel_token and _cancel_token.is_set():
@@ -968,6 +1060,9 @@ class StreamingProcessor:
                         yield chunk
                         chunk_count += 1
                         if await self._check_disconnect(_req, chunk_count, _cancel_token):
+                            client_disconnected = True
+                            if stream_error is None:
+                                stream_error = ClientDisconnectedError()
                             break
                         continue
 
@@ -979,25 +1074,33 @@ class StreamingProcessor:
                         yield transformed
                         chunk_count += 1
                         if await self._check_disconnect(_req, chunk_count, _cancel_token):
+                            client_disconnected = True
+                            if stream_error is None:
+                                stream_error = ClientDisconnectedError()
                             break
 
-                if _should_intercept_web_search:
-                    async for chunk in self._web_search_processor.generate_continuation(
-                        state,
-                        web_search_interceptor=_web_search_interceptor,
-                        web_search_tool_config=_web_search_tool_config,
-                        proxy_web_search_active=_proxy_web_search_active,
-                        current_adapter=current_adapter,
-                        tracing_registry=_tracing_registry,
-                        event_context=_event_context,
-                        cancel_token=_cancel_token,
+                if _should_intercept_web_search and not client_disconnected:
+                    async for _kind, payload in self._iterate_chunks_with_comments(
+                        self._web_search_processor.generate_continuation(
+                            state,
+                            web_search_interceptor=_web_search_interceptor,
+                            web_search_tool_config=_web_search_tool_config,
+                            proxy_web_search_active=_proxy_web_search_active,
+                            current_adapter=current_adapter,
+                            tracing_registry=_tracing_registry,
+                            event_context=_event_context,
+                            cancel_token=_cancel_token,
+                        ),
+                        interval=_heartbeat_interval,
+                        comment=_heartbeat_comment,
                     ):
-                        yield chunk
+                        yield payload
 
                 if (
                     _native_streaming
                     and _protocol_name == "openresponses"
                     and not (_cancel_token and _cancel_token.is_set())
+                    and not client_disconnected
                 ):
                     # Spec: the terminal event MUST be the literal string
                     # [DONE]. The native Responses upstream ends its stream
@@ -1006,7 +1109,7 @@ class StreamingProcessor:
                     # transformer path.
                     yield "data: [DONE]\n\n"
 
-                if not _native_streaming:
+                if not _native_streaming and not client_disconnected:
                     if state.depth > 0 and _transformer is not state.transformer:
                         merge_continuation_usage(_transformer, state.transformer)
 
@@ -1040,7 +1143,11 @@ class StreamingProcessor:
                 # without response storage no-op. Skipped when the client
                 # disconnected mid-stream (the snapshot would be partial) and
                 # best-effort otherwise.
-                if _response_store is not None and not (_cancel_token and _cancel_token.is_set()):
+                if (
+                    _response_store is not None
+                    and not client_disconnected
+                    and not (_cancel_token and _cancel_token.is_set())
+                ):
                     await self._safe_cleanup(
                         _transformer.finalize_persistence(
                             _stream_request,
@@ -1049,6 +1156,22 @@ class StreamingProcessor:
                         ),
                         "Failed to persist streamed response",
                     )
+            except asyncio.CancelledError:
+                # The response task was cancelled — for a client disconnect
+                # this is the origin-side 524 moment. Mark the log entry as a
+                # client abandonment (499) instead of a successful request.
+                client_disconnected = True
+                if stream_error is None:
+                    stream_error = ClientDisconnectedError()
+                raise
+            except GeneratorExit:
+                # The response was closed without reaching the end (client
+                # disconnect mid-response, server teardown). Recorded so the
+                # abandonment is visible in the logs.
+                client_disconnected = True
+                if stream_error is None:
+                    stream_error = ClientDisconnectedError()
+                raise
             except Exception as e:
                 stream_error = e
                 if _event_context is not None:
@@ -1081,10 +1204,15 @@ class StreamingProcessor:
                     )
                 # Fire the post-request hook (model-experience observation) once
                 # the stream has actually finished; the early return in process()
-                # never reaches the hook call that covers setup failures.
+                # never reaches the hook call that covers setup failures. A
+                # client disconnect is not a model failure (EWMA measures
+                # provider health), so it still counts as success here.
                 if _event_context is not None and _on_request_completed is not None:
+                    experience_success = stream_error is None or isinstance(
+                        stream_error, ClientDisconnectedError
+                    )
                     await self._safe_cleanup(
-                        _on_request_completed(_event_context, stream_error is None),
+                        _on_request_completed(_event_context, experience_success),
                         "Failed to call on_request_completed",
                     )
                 await self._safe_cleanup(

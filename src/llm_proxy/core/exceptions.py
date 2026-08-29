@@ -20,6 +20,26 @@ class AdapterNotFoundError(LLMProxyError):
     """Raised when no adapter is found for a provider."""
 
 
+class ClientDisconnectedError(LLMProxyError):
+    """Raised (or recorded) when the client goes away before the response.
+
+    Behind CDNs such as Cloudflare this is how a 524 surfaces server-side: the
+    CDN abandons the request after its time-to-first-byte budget expires and
+    closes the connection while the origin keeps generating. Status 499 follows
+    the nginx "client closed request" convention so it lands in the 4xx error
+    bucket of the logs UI instead of looking like a success.
+    """
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message
+            or "Client disconnected before the response completed "
+            "(likely a client/CDN timeout, e.g. Cloudflare 524)",
+            code="client_disconnected",
+            status_code=499,
+        )
+
+
 class ConfigurationError(LLMProxyError):
     """Raised when there's a configuration error."""
 
@@ -196,6 +216,7 @@ class MCPSecurityError(MCPError):
 __all__ = [
     "AdapterNotFoundError",
     "AuthenticationFailedError",
+    "ClientDisconnectedError",
     "ConfigurationError",
     "ConflictError",
     "ForbiddenError",

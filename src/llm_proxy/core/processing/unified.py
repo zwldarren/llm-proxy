@@ -21,6 +21,7 @@ from llm_proxy.core.context import RequestUserContext, set_request_user_context
 from llm_proxy.core.errors import get_error_handler
 from llm_proxy.core.errors.protocols import protocol_for_name
 from llm_proxy.core.exceptions import (
+    ClientDisconnectedError,
     LLMProxyError,
     ValidationError,
 )
@@ -282,6 +283,19 @@ class UnifiedProcessor:
                 code="internal_error",
             )
         except LLMProxyError:
+            raise
+        except asyncio.CancelledError:
+            # The pipeline was cancelled — for a client disconnect (see
+            # await_with_disconnect_monitor / keepalive in api/keepalive.py)
+            # this is the "invisible 524" moment: the origin keeps generating
+            # for a client that is already gone. Record the abandonment so it
+            # shows up as a failed (499) request instead of vanishing.
+            if getattr(req.state, "client_disconnected", False):
+                error = ClientDisconnectedError()
+                tracing_registry = context.tracing_registry or get_tracing_registry()
+                await asyncio.shield(
+                    tracing_registry.on_error(state.unified_request, error, event_context)
+                )
             raise
         except Exception as e:
             tracing_registry = context.tracing_registry or get_tracing_registry()

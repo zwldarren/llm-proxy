@@ -78,11 +78,17 @@ class KeepaliveParams(BaseModel):
     until the real JSON body is ready. Note: in heartbeat mode the status is
     committed to 200 early, so errors surfacing afterwards are delivered as
     a 200 + error JSON body.
+
+    ``interval_seconds`` also drives the SSE comment heartbeats emitted on
+    silent upstream gaps in streaming responses (": keep-alive" frames, which
+    SSE parsers ignore by definition) — the same CDN budget, streaming side.
+    Both behaviors are safe without a CDN, so default-enabled; disable here
+    if a client cannot tolerate them.
     """
 
-    enabled: bool = Field(default=False, description="Enable non-streaming keepalive heartbeats")
+    enabled: bool = Field(default=True, description="Enable non-streaming keepalive heartbeats")
     grace_seconds: float = Field(
-        default=30.0,
+        default=60.0,
         gt=0,
         description="How long to wait for normal completion before switching to "
         "heartbeat mode. Must stay comfortably below the CDN's timeout.",
