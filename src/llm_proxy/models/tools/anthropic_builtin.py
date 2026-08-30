@@ -113,7 +113,9 @@ class WebSearchTool(ToolDefinition):
     """
 
     name: Literal["web_search"] = "web_search"
-    type: Literal["web_search_20250305", "web_search_20260209"] = "web_search_20250305"
+    type: Literal["web_search_20250305", "web_search_20260209", "web_search_20260318"] = (
+        "web_search_20250305"
+    )
     cache_control: dict[str, Any] | None = None
     allowed_callers: (
         list[Literal["direct", "code_execution_20250825", "code_execution_20260120"]] | None
@@ -122,6 +124,9 @@ class WebSearchTool(ToolDefinition):
     blocked_domains: list[str] | None = None
     defer_loading: bool | None = None
     max_uses: int | None = None
+    # web_search_20260318+: "full" (default) or "excluded" — whether tool
+    # results are included in the model's context.
+    response_inclusion: str | None = None
     strict: bool | None = None
     user_location: UserLocation | None = None
 
@@ -131,7 +136,9 @@ class WebFetchTool(ToolDefinition):
     """Web fetch tool."""
 
     name: Literal["web_fetch"] = "web_fetch"
-    type: Literal["web_fetch_20250910", "web_fetch_20260209"] = "web_fetch_20250910"
+    type: Literal[
+        "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309", "web_fetch_20260318"
+    ] = "web_fetch_20250910"
     cache_control: dict[str, Any] | None = None
     allowed_callers: (
         list[Literal["direct", "code_execution_20250825", "code_execution_20260120"]] | None
@@ -142,4 +149,6 @@ class WebFetchTool(ToolDefinition):
     defer_loading: bool | None = None
     max_content_tokens: int | None = None
     max_uses: int | None = None
+    # web_fetch_20260318+: "full" (default) or "excluded" — mirrors web_search.
+    response_inclusion: str | None = None
     strict: bool | None = None

@@ -416,11 +416,21 @@ def create_protocol_router(
         route_response_model,
         route_handler,
     ) in endpoint.additional_routes:
+        # Additional routes run inside the same protocol middleware chain as
+        # the main endpoint: the anthropic protocol captures client headers
+        # (anthropic-beta, Claude Code fingerprint, ...) here, and
+        # count_tokens forwards them upstream.
+        async def middleware_route_handler(
+            request: Any, fastapi_request: Request, _handler=route_handler
+        ) -> Any:
+            for mw in middleware:
+                await mw(request, fastapi_request)
+            return await _handler(request, fastapi_request)
+
         route_trace_name = f"http_request:{endpoint.name}:{route_path}"
         traced_route_handler = create_traced_handler(
-            route_trace_name, route_handler, route_request_model
+            route_trace_name, middleware_route_handler, route_request_model
         )
-
         endpoint_kwargs: dict[str, Any] = {
             "path": route_path,
             "name": f"{endpoint.name}_{route_path.replace('/', '_')}",

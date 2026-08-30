@@ -366,12 +366,18 @@ def parse_usage_and_provider_extras(
             cache_read_input_tokens=usage_data.get("cache_read_input_tokens"),
             cache_creation_input_tokens=usage_data.get("cache_creation_input_tokens"),
         )
+
+        # Beta extensions (fast-mode "speed", compaction/fallback
+        # "iterations") ride extras verbatim so anthropic clients keep the
+        # full Usage shape on converted paths.
         for key in (
             "cache_creation",
             "inference_geo",
             "server_tool_use",
             "output_tokens_details",
             "service_tier",
+            "speed",
+            "iterations",
         ):
             if key in usage_data and usage_data[key] is not None:
                 extras[key] = usage_data[key]
@@ -687,6 +693,12 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
             provider_info.setdefault("service_tier", service_tier)
         if stop_details:
             provider_info["stop_details"] = stop_details
+        # Cache-diagnostics beta (cache-diagnosis-2026-04-07): the response's
+        # message-level ``diagnostics`` object. An explicit ``null`` is a
+        # meaningful state (no divergence), so presence is keyed on the raw
+        # field, not on the value.
+        if "diagnostics" in response:
+            provider_info["diagnostics"] = response["diagnostics"]
 
         return InternalResponse(
             id=response.get("id") or generate_response_id(),
@@ -766,6 +778,9 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                     tool_def["blocked_domains"] = tool.blocked_domains
                 if tool.max_uses is not None:
                     tool_def["max_uses"] = tool.max_uses
+                if tool.response_inclusion is not None:
+                    # web_search_20260318+: "full" | "excluded".
+                    tool_def["response_inclusion"] = tool.response_inclusion
                 if tool.user_location:
                     tool_def["user_location"] = {
                         "type": tool.user_location.type,
@@ -795,6 +810,9 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                     tool_def["max_content_tokens"] = tool.max_content_tokens
                 if tool.max_uses is not None:
                     tool_def["max_uses"] = tool.max_uses
+                if tool.response_inclusion is not None:
+                    # web_fetch_20260318+: "full" | "excluded"; mirrors web_search.
+                    tool_def["response_inclusion"] = tool.response_inclusion
                 self._add_common_tool_fields(tool_def, tool)
                 result.append(tool_def)
             elif isinstance(tool, OpenAIToolSearchTool):

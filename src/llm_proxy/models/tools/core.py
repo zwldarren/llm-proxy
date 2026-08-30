@@ -22,6 +22,9 @@ class FunctionTool(ToolDefinition):
     defer_loading: bool | None = None
     eager_input_streaming: bool | None = None
     input_examples: list[dict[str, Any]] | None = None
+    # Anthropic prompt-cache breakpoint on the tool definition itself;
+    # dict passthrough ("ephemeral" + optional "ttl") — other providers ignore it.
+    cache_control: dict[str, Any] | None = None
 
 
 @dataclass

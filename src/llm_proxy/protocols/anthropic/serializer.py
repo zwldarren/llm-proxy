@@ -210,6 +210,12 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
         if response.provider_info.get("service_tier"):
             result["usage"]["service_tier"] = response.provider_info["service_tier"]
 
+        # Beta usage extensions (fast-mode, compaction/server-side-fallback).
+        if response.provider_info.get("speed") is not None:
+            result["usage"]["speed"] = response.provider_info["speed"]
+        if response.provider_info.get("iterations") is not None:
+            result["usage"]["iterations"] = response.provider_info["iterations"]
+
         stop_seq = response.provider_info.get("stop_sequence")
         if stop_seq:
             result["stop_sequence"] = stop_seq
@@ -219,6 +225,11 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
 
         if response.provider_info.get("container"):
             result["container"] = response.provider_info["container"]
+
+        # Cache-diagnostics beta: meaningful ``null`` must survive, so key on
+        # presence rather than truthiness.
+        if "diagnostics" in response.provider_info:
+            result["diagnostics"] = response.provider_info["diagnostics"]
 
         return result
 
@@ -306,6 +317,7 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                         defer_loading=tool.get("defer_loading"),
                         eager_input_streaming=tool.get("eager_input_streaming"),
                         input_examples=tool.get("input_examples"),
+                        cache_control=tool.get("cache_control"),
                     )
                 )
             elif tool_type.startswith("web_search_"):
@@ -330,6 +342,7 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                         blocked_domains=tool.get("blocked_domains"),
                         defer_loading=tool.get("defer_loading"),
                         max_uses=tool.get("max_uses"),
+                        response_inclusion=tool.get("response_inclusion"),
                         strict=tool.get("strict"),
                         user_location=user_location,
                         cache_control=tool.get("cache_control"),
@@ -405,6 +418,7 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                         defer_loading=tool.get("defer_loading"),
                         max_content_tokens=tool.get("max_content_tokens"),
                         max_uses=tool.get("max_uses"),
+                        response_inclusion=tool.get("response_inclusion"),
                         strict=tool.get("strict"),
                         cache_control=tool.get("cache_control"),
                     )

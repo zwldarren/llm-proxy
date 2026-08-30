@@ -80,3 +80,41 @@ def test_transcription_route_parses_multipart(app):
     parsed = processor.process.call_args.kwargs["protocol_request"]
     assert parsed.model == "whisper-1"
     assert parsed.file == b"fake-audio-bytes"
+
+
+def test_additional_routes_run_protocol_middleware(app):
+    """Additional routes (e.g. anthropic count_tokens) must run inside the
+    protocol middleware chain: the anthropic capture middleware stores the
+    client ``anthropic-beta``/fingerprint headers that count_tokens forwards.
+    Regression: additional routes bypassed endpoint middleware entirely."""
+    ran = {"middleware": False, "handler": False}
+
+    async def capture_mw(_request, _fastapi_request):
+        ran["middleware"] = True
+
+    async def count_handler(_request, _fastapi_request):
+        ran["handler"] = True
+        return {"input_tokens": 7}
+
+    from pydantic import BaseModel
+
+    from llm_proxy.protocols.base import ProtocolEndpoint
+
+    class CountBody(BaseModel):
+        model: str
+
+    endpoint = ProtocolEndpoint(
+        name="mwprobe",
+        paths=["/v1/mwprobe/messages"],
+        request_model=None,
+        middleware=[capture_mw],
+        additional_routes=[("/v1/mwprobe/messages/count", CountBody, None, count_handler)],
+    )
+    app.include_router(create_protocol_router(endpoint))
+
+    with TestClient(app) as client:
+        resp = client.post("/v1/mwprobe/messages/count", json={"model": "m"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"input_tokens": 7}
+    assert ran == {"middleware": True, "handler": True}

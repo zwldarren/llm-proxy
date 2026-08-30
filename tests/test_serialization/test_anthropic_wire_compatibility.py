@@ -605,3 +605,131 @@ def test_stream_container_reaches_message_delta():
     )
     assert '"container":{"id":"c_1"' in sse
     assert '"stop_reason":"end_turn"' in sse
+
+
+def test_tool_definition_cache_control_roundtrip(provider):
+    """Official tools accept a cache_control breakpoint; the rebuild path must
+    not drop it (FunctionTool previously had no cache_control field)."""
+    body = build(
+        provider,
+        {
+            "model": "claude-opus-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "name": "get_weather",
+                    "description": "d",
+                    "input_schema": {"type": "object"},
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                    "strict": True,
+                }
+            ],
+        },
+    )
+    assert body["tools"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+
+def test_server_tool_response_inclusion_roundtrip(provider):
+    """web_search_20260318 / web_fetch_20260318 accept ``response_inclusion``;
+    the rebuild path must keep it on both tool families."""
+    body = build(
+        provider,
+        {
+            "model": "claude-opus-5",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [
+                {
+                    "type": "web_search_20260318",
+                    "name": "web_search",
+                    "max_uses": 2,
+                    "response_inclusion": "full",
+                },
+                {
+                    "type": "web_fetch_20260318",
+                    "name": "web_fetch",
+                    "response_inclusion": "excluded",
+                },
+            ],
+        },
+    )
+    assert body["tools"][0]["response_inclusion"] == "full"
+    assert body["tools"][1]["response_inclusion"] == "excluded"
+
+
+def test_non_streaming_beta_usage_and_diagnostics(provider, protocol):
+    """fast-mode ``usage.speed``, compaction ``usage.iterations`` and the
+    cache-diagnostics beta ``diagnostics`` object survive the converted path."""
+    raw = {
+        "id": "1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5",
+        "content": [{"type": "text", "text": "hi"}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "speed": "fast",
+            "iterations": [{"type": "message", "input_tokens": 10, "output_tokens": 5}],
+        },
+        "diagnostics": {"cache_miss_reason": None},
+    }
+    internal = provider.parse_provider_response(raw, model="claude-opus-5")
+    out = protocol.format_response(internal)
+    assert out["usage"]["speed"] == "fast"
+    assert out["usage"]["iterations"] == [
+        {"type": "message", "input_tokens": 10, "output_tokens": 5}
+    ]
+    assert out["diagnostics"] == {"cache_miss_reason": None}
+
+
+def test_non_streaming_diagnostics_null_state_preserved(provider, protocol):
+    """``diagnostics: null`` is a meaningful "no divergence" state, not absence."""
+    raw = {
+        "id": "1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5",
+        "content": [{"type": "text", "text": "hi"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+        "diagnostics": None,
+    }
+    internal = provider.parse_provider_response(raw, model="claude-opus-5")
+    out = protocol.format_response(internal)
+    assert "diagnostics" in out
+    assert out["diagnostics"] is None
+
+
+def test_stream_beta_usage_and_diagnostics_pass_chain():
+    """Diagnostics replay inside message_start; speed/iterations ride the
+    converter → transformer chain into the SSE stream."""
+    sse = _run_stream(
+        [
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "m",
+                    "usage": {"input_tokens": 1},
+                    "diagnostics": {"cache_miss_reason": None},
+                },
+            },
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {
+                    "output_tokens": 3,
+                    "speed": "fast",
+                    "iterations": [{"type": "message", "input_tokens": 1, "output_tokens": 3}],
+                },
+            },
+            {"type": "message_stop"},
+        ]
+    )
+    assert '"diagnostics":{"cache_miss_reason":null}' in sse
+    assert '"speed":"fast"' in sse
+    assert '"iterations":[{"type":"message"' in sse
+    assert '"stop_reason":"end_turn"' in sse

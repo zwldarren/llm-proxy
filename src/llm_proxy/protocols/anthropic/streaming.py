@@ -23,11 +23,14 @@ from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
 
 def _message_delta_usage(usage: dict) -> dict:
-    """Strip keys absent from the official ``MessageDeltaUsage`` shape.
+    """Shape the terminal ``message_delta`` usage block.
 
-    ``service_tier`` belongs to the full ``Usage`` object (emitted in
-    ``message_start``); the terminal ``message_delta`` carries the narrower
-    ``MessageDeltaUsage`` which does not define it.
+    Strips keys absent from the official ``MessageDeltaUsage`` shape, except
+    documented beta extensions: fast-mode ``speed`` and compaction/fallback
+    ``iterations`` ride through (SDKs ignore unknown keys; stripping them
+    would break per-iteration cost accounting, since top-level tokens EXCLUDE
+    compaction iterations). ``service_tier`` belongs to the full ``Usage``
+    object (emitted in ``message_start``) and stays stripped.
     """
     return {k: v for k, v in usage.items() if k != "service_tier"}
 
@@ -65,6 +68,10 @@ class AnthropicStreamingTransformer(StreamingTransformer):
         self._pending_container: dict[str, Any] | None = None
         self._pending_usage: dict | None = None
         self._has_pending_usage = False
+        # Cache-diagnostics beta: message-level object arriving on the
+        # canonical channel from the provider converter; replayed inside
+        # message_start.message.
+        self._pending_diagnostics: dict[str, Any] | None = None
 
     @classmethod
     def continuation(
@@ -135,6 +142,11 @@ class AnthropicStreamingTransformer(StreamingTransformer):
             else:
                 self._pending_usage = normalized
                 self._has_pending_usage = True
+        # Cache-diagnostics beta: capture before the message_start emission so
+        # the first message (emitted below) already carries it.
+        diag = chunk.get("diagnostics")
+        if diag is not None:
+            self._pending_diagnostics = diag
 
         # Send message_start on first chunk with content
         if not self._sent_message_start and (choices or usage):
@@ -426,6 +438,8 @@ class AnthropicStreamingTransformer(StreamingTransformer):
             "server_tool_use",
             "output_tokens_details",
             "service_tier",
+            "speed",
+            "iterations",
             "prompt_tokens_details",
             "completion_tokens_details",
         ):
@@ -446,26 +460,29 @@ class AnthropicStreamingTransformer(StreamingTransformer):
                 "server_tool_use",
                 "output_tokens_details",
                 "service_tier",
+                # Beta usage extensions (fast-mode, compaction/fallback).
+                "speed",
+                "iterations",
             ):
                 value = self._pending_usage.get(key)
                 if value is not None:
                     start_usage[key] = value
-        return self._sse_event(
-            "message_start",
-            {
-                "type": "message_start",
-                "message": {
-                    "id": self.response_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "model": self.model,
-                    "content": [],
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": start_usage,
-                },
-            },
-        )
+        message: dict[str, Any] = {
+            "id": self.response_id,
+            "type": "message",
+            "role": "assistant",
+            "model": self.model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": start_usage,
+        }
+        if self._pending_diagnostics is not None:
+            # Cache-diagnostics beta: official streams attach ``diagnostics``
+            # to the message_start message.
+            message["diagnostics"] = self._pending_diagnostics
+            self._pending_diagnostics = None
+        return self._sse_event("message_start", {"type": "message_start", "message": message})
 
     def _content_block_start(self, index: int, block: dict[str, Any]) -> str:
         """Generate content_block_start event."""

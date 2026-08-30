@@ -157,9 +157,7 @@ class AnthropicChunkConverter(StreamingTransformer):
         self._cache_read_input_tokens = usage.get("cache_read_input_tokens") or 0
         self._cache_creation_input_tokens = usage.get("cache_creation_input_tokens") or 0
 
-        # Emit initial chunk with assistant role so the protocol transformer
-        # can detect the start of the assistant turn.
-        return _make_openai_chunk(
+        chunk = _make_openai_chunk(
             self._response_id,
             self._model,
             self._created_at,
@@ -171,6 +169,13 @@ class AnthropicChunkConverter(StreamingTransformer):
                 }
             ],
         )
+        # Cache-diagnostics beta: the message-level ``diagnostics`` travels
+        # with ``message_start``; forward it on the canonical channel so the
+        # protocol transformer can replay it inside its message_start.
+        diagnostics = msg.get("diagnostics")
+        if diagnostics is not None:
+            chunk["diagnostics"] = diagnostics
+        return chunk
 
     def _handle_content_block_start(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """content_block_start: emit placeholder chunk for new content block."""
@@ -399,9 +404,10 @@ class AnthropicChunkConverter(StreamingTransformer):
             if server_tool_use is not None:
                 self._pending_usage["server_tool_use"] = server_tool_use
             # Anthropic-native usage extensions (output_tokens_details.
-            # thinking_tokens, service_tier) travel losslessly to the
-            # protocol transformer's passthrough channel.
-            for key in ("output_tokens_details", "service_tier"):
+            # thinking_tokens, service_tier, fast-mode "speed", compaction/
+            # fallback "iterations") travel losslessly to the protocol
+            # transformer's passthrough channel.
+            for key in ("output_tokens_details", "service_tier", "speed", "iterations"):
                 if usage.get(key) is not None:
                     self._pending_usage[key] = usage[key]
         return None  # State-only event; chunk emitted on message_stop.
