@@ -85,6 +85,9 @@ class AnthropicChunkConverter(StreamingTransformer):
         self._tool_call_index: int = 0
         self._current_tool_index: int = 0
         self._pending_stop_reason: str | None = None
+        self._pending_stop_sequence: str | None = None
+        self._pending_stop_details: dict[str, Any] | None = None
+        self._pending_container: dict[str, Any] | None = None
         self._pending_usage: dict[str, Any] | None = None
         # Set once the final chunk (stop_reason + usage) has been emitted;
         # ``_pending_usage`` is intentionally kept afterwards so that
@@ -240,7 +243,23 @@ class AnthropicChunkConverter(StreamingTransformer):
                 ],
             )
 
-        return None  # Unknown block type → skip
+        # Unknown block type (web_search_tool_result, web_fetch_tool_result,
+        # container_upload, ...): forward the complete block losslessly in a
+        # ``raw_content_block`` delta slot so native-shaped providers can
+        # replay it on their SSE stream; other protocol transformers ignore
+        # the key (same as before, but no silent block loss).
+        return _make_openai_chunk(
+            self._response_id,
+            self._model,
+            self._created_at,
+            choices=[
+                {
+                    "index": 0,
+                    "delta": {"raw_content_block": block},
+                    "finish_reason": None,
+                }
+            ],
+        )
 
     def _handle_content_block_delta(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """content_block_delta: emit delta chunk for an in-progress block."""
@@ -305,6 +324,22 @@ class AnthropicChunkConverter(StreamingTransformer):
                 ],
             )
 
+        if delta_type == "citations_delta":
+            # Lossless citation passthrough (attached to the current text block).
+            citation = delta.get("citation")
+            return _make_openai_chunk(
+                self._response_id,
+                self._model,
+                self._created_at,
+                choices=[
+                    {
+                        "index": 0,
+                        "delta": {"citations": citation},
+                        "finish_reason": None,
+                    }
+                ],
+            )
+
         return None  # Unknown delta type → skip
 
     def _handle_content_block_stop(self, event: dict[str, Any]) -> dict[str, Any] | None:
@@ -327,11 +362,22 @@ class AnthropicChunkConverter(StreamingTransformer):
         return None
 
     def _handle_message_delta(self, event: dict[str, Any]) -> dict[str, Any] | None:
-        """message_delta: capture stop_reason and usage; no chunk emitted."""
+        """message_delta: capture stop_reason/stop_sequence/usage; no chunk emitted."""
         delta = event.get("delta", {})
         stop_reason = delta.get("stop_reason")
         if stop_reason:
             self._pending_stop_reason = _map_stop_reason(stop_reason)
+        stop_sequence = delta.get("stop_sequence")
+        if stop_sequence is not None:
+            self._pending_stop_sequence = stop_sequence
+        stop_details = delta.get("stop_details")
+        if stop_details:
+            self._pending_stop_details = stop_details
+        # Container info (code execution) rides the canonical channel the
+        # same way as stop_details, for the protocol transformer to replay.
+        container = delta.get("container")
+        if container is not None:
+            self._pending_container = container
 
         usage = event.get("usage", {})
         if usage:
@@ -352,20 +398,57 @@ class AnthropicChunkConverter(StreamingTransformer):
             server_tool_use = usage.get("server_tool_use")
             if server_tool_use is not None:
                 self._pending_usage["server_tool_use"] = server_tool_use
+            # Anthropic-native usage extensions (output_tokens_details.
+            # thinking_tokens, service_tier) travel losslessly to the
+            # protocol transformer's passthrough channel.
+            for key in ("output_tokens_details", "service_tier"):
+                if usage.get(key) is not None:
+                    self._pending_usage[key] = usage[key]
         return None  # State-only event; chunk emitted on message_stop.
 
+    def _handle_error(self, event: dict[str, Any]) -> dict[str, Any] | None:
+        """error: propagate mid-stream upstream errors instead of swallowing them.
+
+        Raising a ProviderError lets the streaming pipeline surface the real
+        failure (and its Anthropic error type) through the protocol
+        transformer's ``error_frames`` instead of truncating the stream
+        silently at this point.
+        """
+        from llm_proxy.core.exceptions import ProviderError
+
+        error = event.get("error", {})
+        error_type = error.get("type") or "api_error"
+        message = error.get("message") or "Upstream error event in stream"
+        raise ProviderError(message=message, error_type=error_type, provider_name="anthropic")
+
     def _build_final_chunk(self) -> dict[str, Any] | None:
-        """Build a final chunk with pending stop_reason and usage, if any."""
+        """Build a final chunk with pending stop fields and usage, if any."""
         if self._final_chunk_emitted:
             return None
         choice: dict[str, Any] = {"index": 0, "delta": {}}
         if self._pending_stop_reason:
             choice["finish_reason"] = self._pending_stop_reason
             self._pending_stop_reason = None
+        # Anthropic-native terminal fields preserved for the wire format.
+        if self._pending_stop_sequence is not None:
+            choice["stop_sequence"] = self._pending_stop_sequence
+            self._pending_stop_sequence = None
+        if self._pending_stop_details is not None:
+            choice["stop_details"] = self._pending_stop_details
+            self._pending_stop_details = None
+        if self._pending_container is not None:
+            # Container info survives to the protocol transformer; emit even
+            # without stop_reason/usage so it is never silently dropped.
+            choice["container"] = self._pending_container
+            self._pending_container = None
         chunk_data: dict[str, Any] = {"choices": [choice]}
         if self._pending_usage:
             chunk_data["usage"] = self._pending_usage
-        if not choice.get("finish_reason") and not chunk_data.get("usage"):
+        if (
+            not choice.get("finish_reason")
+            and "container" not in choice
+            and not chunk_data.get("usage")
+        ):
             return None
         # Keep ``_pending_usage`` for post-stream ``get_usage()`` calls.
         self._final_chunk_emitted = True
@@ -423,4 +506,5 @@ _EVENT_HANDLERS: dict[str, Any] = {
     "message_delta": AnthropicChunkConverter._handle_message_delta,
     "message_stop": AnthropicChunkConverter._handle_message_stop,
     "ping": AnthropicChunkConverter._handle_ping,
+    "error": AnthropicChunkConverter._handle_error,
 }

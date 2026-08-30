@@ -60,6 +60,20 @@ if TYPE_CHECKING:
     from llm_proxy.serialization.context import BuildContext
 
 
+# Server-side tool result blocks that share the {tool_use_id, content}
+# shape (plus ``caller`` on the web_search/web_fetch pair). Kept lossless
+# on parse so multi-turn histories with web_search / web_fetch / code
+# execution results survive the internal round-trip.
+_SERVER_TOOL_RESULT_BLOCK_TYPES: dict[str, type] = {
+    "web_search_tool_result": WebSearchToolResultBlock,
+    "web_fetch_tool_result": WebFetchToolResultBlock,
+    "code_execution_tool_result": CodeExecutionToolResultBlock,
+    "bash_code_execution_tool_result": BashCodeExecutionToolResultBlock,
+    "text_editor_code_execution_tool_result": TextEditorCodeExecutionToolResultBlock,
+    "tool_search_tool_result": ToolSearchToolResultBlock,
+}
+
+
 class AnthropicContentMixin:
     """Shared content parsing and formatting for Anthropic format."""
 
@@ -85,7 +99,6 @@ class AnthropicContentMixin:
         )
         from llm_proxy.models.content_blocks.anthropic_builtin import (
             WebSearchResultContentBlock,
-            WebSearchToolResultBlock,
         )
 
         if content is None:
@@ -118,13 +131,20 @@ class AnthropicContentMixin:
                     block = parse_image_block_anthropic(part)
                     if block:
                         block.cache_control = self._parse_cache_control(part)
+                        if (
+                            isinstance(block, ImageBlock)
+                            and part.get("transformations") is not None
+                        ):
+                            block.transformations = part["transformations"]
                         blocks.append(block)
                         continue
+
                     block = parse_audio_block_anthropic(part)
                     if block:
                         block.cache_control = self._parse_cache_control(part)
                         blocks.append(block)
                         continue
+
                     block = parse_file_block_anthropic(part)
                     if block:
                         block.cache_control = self._parse_cache_control(part)
@@ -149,6 +169,8 @@ class AnthropicContentMixin:
                                     media_type=source.get("media_type"),
                                 ),
                                 title=part.get("title"),
+                                citations=part.get("citations"),
+                                context=part.get("context"),
                                 cache_control=cache_control,
                             )
                         )
@@ -156,24 +178,34 @@ class AnthropicContentMixin:
 
                     if part_type == "tool_use":
                         cache_control = self._parse_cache_control(part)
+                        extra: dict[str, Any] = {}
+                        if part.get("caller") is not None:
+                            extra["caller"] = part["caller"]
+                        if part.get("toolset_name"):
+                            extra["toolset_name"] = part["toolset_name"]
                         blocks.append(
                             ToolUseBlock(
                                 id=part.get("id", ""),
                                 name=part.get("name", ""),
                                 input=part.get("input", {}),
                                 cache_control=cache_control,
+                                extra=extra,
                             )
                         )
                         continue
 
                     if part_type == "server_tool_use":
                         cache_control = self._parse_cache_control(part)
+                        server_extra: dict[str, Any] = {}
+                        if part.get("caller") is not None:
+                            server_extra["caller"] = part["caller"]
                         blocks.append(
                             ServerToolUseBlock(
                                 id=part.get("id", ""),
                                 name=part.get("name", ""),
                                 input=part.get("input", {}),
                                 cache_control=cache_control,
+                                extra=server_extra,
                             )
                         )
                         continue
@@ -188,9 +220,14 @@ class AnthropicContentMixin:
                                 tool_use_id=part.get("tool_use_id", ""),
                                 content=result_content,
                                 is_error=part.get("is_error", False),
+                                toolset_name=part.get("toolset_name"),
                                 cache_control=cache_control,
                             )
                         )
+                        continue
+
+                    if part_type in _SERVER_TOOL_RESULT_BLOCK_TYPES:
+                        blocks.append(self._parse_server_tool_result_block(part, part_type))
                         continue
 
                     if part_type == "thinking":
@@ -227,6 +264,7 @@ class AnthropicContentMixin:
                                 title=part.get("title", ""),
                                 content=content_blocks,
                                 metadata=part.get("metadata"),
+                                citations=part.get("citations"),
                                 cache_control=cache_control,
                             )
                         )
@@ -243,6 +281,7 @@ class AnthropicContentMixin:
                                 filename=part.get("filename"),
                                 content=part.get("content"),
                                 media_type=part.get("media_type"),
+                                cache_control=self._parse_cache_control(part),
                             )
                         )
                         continue
@@ -257,24 +296,7 @@ class AnthropicContentMixin:
                                 tool_id=part.get("tool_id", ""),
                                 tool_name=part.get("tool_name"),
                                 tool_type=part.get("tool_type"),
-                            )
-                        )
-                        continue
-
-                    if part_type == "web_search_tool_result":
-                        result_content = part.get("content", "")
-                        if isinstance(result_content, list):
-                            result_content = self.parse_content_blocks(result_content)
-                        caller = None
-                        if part.get("caller"):
-                            c = part["caller"]
-                            caller = Caller(type=c.get("type", "direct"), tool_id=c.get("tool_id"))
-                        blocks.append(
-                            WebSearchToolResultBlock(
-                                tool_use_id=part.get("tool_use_id", ""),
-                                content=result_content,
-                                is_error=part.get("is_error", False),
-                                caller=caller,
+                                cache_control=self._parse_cache_control(part),
                             )
                         )
                         continue
@@ -300,9 +322,43 @@ class AnthropicContentMixin:
                             )
                         )
                         continue
+
+                    # Unknown block: raw passthrough instead of silent drop, so
+                    # novel/future server-side blocks (browser_state, new tool
+                    # results, ...) survive an internal round-trip. Anthropic
+                    # formatting replays them verbatim; other providers degrade
+                    # them via the unsupported-block policy.
+                    blocks.append(RawBlock(provider_type=f"anthropic:{part_type}", data=part))
             return blocks
 
         return [TextBlock(text=str(content))]
+
+    def _parse_server_tool_result_block(self, part: dict[str, Any], part_type: str):
+        """Parse a server-side tool result block (web_search, web_fetch, code exec, ...).
+
+        ``is_error`` is kept internally only (round-trip fidelity); it is not
+        part of any official block shape and is never re-emitted. ``caller``
+        exists on web_search/web_fetch results only; the code-execution
+        families' results carry just ``{content, tool_use_id}`` (plus
+        ``cache_control``).
+        """
+        result_content = part.get("content", "")
+        if isinstance(result_content, list):
+            result_content = self.parse_content_blocks(result_content)
+        cls = _SERVER_TOOL_RESULT_BLOCK_TYPES[part_type]
+        kwargs: dict[str, Any] = {
+            "tool_use_id": part.get("tool_use_id", ""),
+            "content": result_content,
+            "is_error": part.get("is_error", False),
+            "cache_control": self._parse_cache_control(part),
+        }
+        if part_type in ("web_search_tool_result", "web_fetch_tool_result"):
+            caller = None
+            if part.get("caller"):
+                c = part["caller"]
+                caller = Caller(type=c.get("type", "direct"), tool_id=c.get("tool_id"))
+            kwargs["caller"] = caller
+        return cls(**kwargs)
 
     def format_content_blocks(
         self,
@@ -398,6 +454,10 @@ class AnthropicContentMixin:
             ),
             "input": block.input,
         }
+        if block.extra.get("caller") is not None:
+            tool_block["caller"] = block.extra["caller"]
+        if block.extra.get("toolset_name"):
+            tool_block["toolset_name"] = block.extra["toolset_name"]
         if block.cache_control:
             tool_block["cache_control"] = self._format_cache_control(block.cache_control)
         return tool_block
@@ -412,6 +472,8 @@ class AnthropicContentMixin:
             "name": block.name,
             "input": block.input,
         }
+        if block.extra.get("caller") is not None:
+            server_tool_block["caller"] = block.extra["caller"]
         if block.cache_control:
             server_tool_block["cache_control"] = self._format_cache_control(block.cache_control)
         return server_tool_block
@@ -493,7 +555,10 @@ class AnthropicContentMixin:
         source = self._format_file_source(block.source)
         if source is None:
             return None
-        return {"type": "image", "source": source}
+        image_block: dict[str, Any] = {"type": "image", "source": source}
+        if block.transformations:
+            image_block["transformations"] = block.transformations
+        return image_block
 
     def _format_document_block(self, block: DocumentBlock) -> dict[str, Any] | None:
         """Format a DocumentBlock, or None for unsupported source types."""
@@ -567,6 +632,8 @@ class AnthropicContentMixin:
             search_block["file_id"] = block.file_id
         if block.title:
             search_block["title"] = block.title
+        if block.citations:
+            search_block["citations"] = block.citations
         if block.content:
             search_block["content"] = self.format_content_blocks(block.content, context=context)
         if block.metadata:
@@ -580,6 +647,8 @@ class AnthropicContentMixin:
         container_block: dict[str, Any] = {"type": "container_upload"}
         if block.file_id:
             container_block["file_id"] = block.file_id
+        if block.cache_control:
+            container_block["cache_control"] = self._format_cache_control(block.cache_control)
         if block.filename:
             container_block["filename"] = block.filename
         if block.content:
@@ -589,15 +658,17 @@ class AnthropicContentMixin:
         return container_block
 
     def _format_tool_reference_block(self, block: ToolReferenceBlock) -> dict[str, Any]:
-        """Format a ToolReferenceBlock to Anthropic wire format."""
-        ref_block: dict[str, Any] = {
-            "type": "tool_reference",
-            "tool_id": block.tool_id,
-        }
+        """Format a ToolReferenceBlock to Anthropic wire format.
+
+        Official ``tool_reference`` blocks carry only ``tool_name`` (plus
+        ``cache_control``); ``tool_id``/``tool_type`` are not part of the
+        schema and are never emitted.
+        """
+        ref_block: dict[str, Any] = {"type": "tool_reference"}
         if block.tool_name:
             ref_block["tool_name"] = block.tool_name
-        if block.tool_type:
-            ref_block["tool_type"] = block.tool_type
+        if block.cache_control:
+            ref_block["cache_control"] = self._format_cache_control(block.cache_control)
         return ref_block
 
     def _format_mid_conv_system_block(
@@ -638,6 +709,8 @@ class AnthropicContentMixin:
         }
         if block.is_error:
             tr_block["is_error"] = True
+        if block.toolset_name:
+            tr_block["toolset_name"] = block.toolset_name
         if block.cache_control:
             tr_block["cache_control"] = self._format_cache_control(block.cache_control)
         return tr_block
@@ -732,13 +805,18 @@ class AnthropicContentMixin:
             "tool_use_id": block.tool_use_id,
             "content": content,
         }
-        if block.is_error:
-            result["is_error"] = True
-        if hasattr(block, "caller") and block.caller:
+        # ``caller`` is official on web_search/web_fetch results only;
+        # ``is_error``/``toolset_name`` are not part of any server tool
+        # result block shape and are never emitted.
+        if block_type in ("web_search_tool_result", "web_fetch_tool_result") and getattr(
+            block, "caller", None
+        ):
             caller_dict: dict[str, Any] = {"type": block.caller.type}
             if block.caller.tool_id:
                 caller_dict["tool_id"] = block.caller.tool_id
             result["caller"] = caller_dict
+        if getattr(block, "cache_control", None):
+            result["cache_control"] = self._format_cache_control(block.cache_control)
         return result
 
     def _map_finish_reason(self, finish_reason: str) -> str:

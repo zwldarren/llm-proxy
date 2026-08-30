@@ -55,12 +55,35 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                     conversation.system_messages = [
                         SystemMessage.from_text(role="system", text="\n\n".join(texts))
                     ]
-                    if any(b.get("cache_control") is not None for b in system_blocks):
+                    if any(
+                        b.get("cache_control") is not None or b.get("citations") is not None
+                        for b in system_blocks
+                    ):
                         _system_blocks = system_blocks
 
-        params = self._parse_params(data)
-
         from llm_proxy.models import RequestMetadata
+
+        # Back-compat for non-SDK clients: a body-level ``betas`` list behaves
+        # like the ``anthropic-beta`` header, and legacy ``output_format``
+        # aliases ``output_config.format`` (structured-outputs pre-rename).
+        betas = data.get("betas")
+        if isinstance(betas, list) and betas:
+            from llm_proxy.providers.anthropic.client_headers import merge_body_betas
+
+            merge_body_betas(betas)
+        if isinstance(data.get("output_format"), dict) and not (
+            isinstance(data.get("output_config"), dict)
+            and data["output_config"].get("format") is not None
+        ):
+            output_config = data.get("output_config")
+            data = {
+                **data,
+                "output_config": {
+                    **(output_config if isinstance(output_config, dict) else {}),
+                    "format": data["output_format"],
+                },
+            }
+        params = self._parse_params(data)
 
         extra = {
             k: v for k, v in data.items() if k not in self._known_request_fields() and v is not None
@@ -105,10 +128,20 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                     content.insert(0, reasoning_block)
 
             if role == "user":
-                tool_results = [b for b in content if isinstance(b, ToolResultBlock)]
+                # Exact-type check: subclasses (CodeExecutionToolResultBlock,
+                # BashCodeExecutionToolResultBlock, ...) are server-side tool
+                # results that must stay in the user turn, not become tool turns.
+                tool_results = [b for b in content if type(b) is ToolResultBlock]
                 if tool_results:
                     for tr in tool_results:
                         conv.messages.append(Message(role="tool", content=[tr]))
+                    # Server-tool result blocks (web_fetch_tool_result, ...)
+                    # share the user turn with client tool_result blocks; keep
+                    # them in a same-role user message instead of dropping them.
+                    tool_result_ids = {id(b) for b in tool_results}
+                    rest = [b for b in content if id(b) not in tool_result_ids]
+                    if rest:
+                        conv.messages.append(Message(role="user", content=rest))
                 else:
                     conv.messages.append(Message(role="user", content=content))
             else:
@@ -169,12 +202,20 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
         if response.provider_info.get("server_tool_use"):
             result["usage"]["server_tool_use"] = response.provider_info["server_tool_use"]
 
+        # Anthropic reports these inside ``usage`` (not top-level).
+        if response.provider_info.get("output_tokens_details"):
+            result["usage"]["output_tokens_details"] = response.provider_info[
+                "output_tokens_details"
+            ]
         if response.provider_info.get("service_tier"):
-            result["service_tier"] = response.provider_info["service_tier"]
+            result["usage"]["service_tier"] = response.provider_info["service_tier"]
 
         stop_seq = response.provider_info.get("stop_sequence")
         if stop_seq:
             result["stop_sequence"] = stop_seq
+
+        if response.provider_info.get("stop_details"):
+            result["stop_details"] = response.provider_info["stop_details"]
 
         if response.provider_info.get("container"):
             result["container"] = response.provider_info["container"]
@@ -435,4 +476,6 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
             "context_management",
             "disable_parallel_tool_use",
             "request_id",
+            "betas",
+            "output_format",
         }

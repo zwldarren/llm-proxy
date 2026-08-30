@@ -60,7 +60,9 @@ class MessagesRequest(BaseModel):
     metadata: dict[str, Any] | None = Field(None, description="Request metadata")
     thinking: dict[str, Any] | bool | None = Field(None, description="Extended thinking config")
     cache_control: dict[str, Any] | None = Field(None, description="Top-level cache control")
-    container: str | None = Field(None, description="Container identifier for code execution")
+    container: str | dict[str, Any] | None = Field(
+        None, description="Container identifier or params (skills) for code execution"
+    )
     inference_geo: str | None = Field(None, description="Geographic region for inference")
     service_tier: Literal["auto", "standard_only"] | None = Field(None, description="Service tier")
     output_config: dict[str, Any] | None = Field(None, description="Output configuration")

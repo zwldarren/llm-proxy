@@ -27,6 +27,8 @@ class ImageBlock(ContentBlock):
     source: ImageSource
     detail: str | None = None
     cache_control: Any | None = None
+    # Anthropic image transformations config (e.g. oversized_image: error).
+    transformations: dict[str, Any] | None = None
 
 
 @dataclass
@@ -75,4 +77,5 @@ class ToolResultBlock(ContentBlock):
     content: str | list[ContentBlock]
     is_error: bool = False
     name: str | None = None
+    toolset_name: str | None = None
     cache_control: Any | None = None

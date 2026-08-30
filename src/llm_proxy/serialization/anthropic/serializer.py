@@ -366,7 +366,13 @@ def parse_usage_and_provider_extras(
             cache_read_input_tokens=usage_data.get("cache_read_input_tokens"),
             cache_creation_input_tokens=usage_data.get("cache_creation_input_tokens"),
         )
-        for key in ("cache_creation", "inference_geo", "server_tool_use"):
+        for key in (
+            "cache_creation",
+            "inference_geo",
+            "server_tool_use",
+            "output_tokens_details",
+            "service_tier",
+        ):
             if key in usage_data and usage_data[key] is not None:
                 extras[key] = usage_data[key]
     return usage, extras
@@ -483,7 +489,11 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
 
         body: dict[str, Any] = {
             "model": context.model or request.model,
-            "max_tokens": request.params.max_tokens or 16384,
+            # ``max_tokens: 0`` is a valid Anthropic value (cache pre-warm without
+            # generation) — only an absent value defaults to 16384.
+            "max_tokens": (
+                16384 if request.params.max_tokens is None else request.params.max_tokens
+            ),
             "messages": messages,
         }
 
@@ -668,12 +678,15 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
         stop_sequence = response.get("stop_sequence")
         container = response.get("container")
         service_tier = response.get("service_tier")
+        stop_details = response.get("stop_details")
         if stop_sequence:
             provider_info["stop_sequence"] = stop_sequence
         if container:
             provider_info["container"] = container
         if service_tier:
-            provider_info["service_tier"] = service_tier
+            provider_info.setdefault("service_tier", service_tier)
+        if stop_details:
+            provider_info["stop_details"] = stop_details
 
         return InternalResponse(
             id=response.get("id") or generate_response_id(),

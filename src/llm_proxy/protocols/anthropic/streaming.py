@@ -11,9 +11,25 @@ from typing import Any
 import orjson
 
 from llm_proxy.core.exceptions import ProviderError
-from llm_proxy.models import ServerToolUseBlock, TextBlock, ThinkingBlock, ToolUseBlock
+from llm_proxy.models import (
+    RawBlock,
+    ServerToolUseBlock,
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+)
 from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+
+
+def _message_delta_usage(usage: dict) -> dict:
+    """Strip keys absent from the official ``MessageDeltaUsage`` shape.
+
+    ``service_tier`` belongs to the full ``Usage`` object (emitted in
+    ``message_start``); the terminal ``message_delta`` carries the narrower
+    ``MessageDeltaUsage`` which does not define it.
+    """
+    return {k: v for k, v in usage.items() if k != "service_tier"}
 
 
 class AnthropicStreamingTransformer(StreamingTransformer):
@@ -44,6 +60,9 @@ class AnthropicStreamingTransformer(StreamingTransformer):
         self._tool_name = ""
         self._tool_args = ""
         self._pending_stop_reason: str | None = None
+        self._pending_stop_sequence: str | None = None
+        self._pending_stop_details: dict[str, Any] | None = None
+        self._pending_container: dict[str, Any] | None = None
         self._pending_usage: dict | None = None
         self._has_pending_usage = False
 
@@ -106,6 +125,16 @@ class AnthropicStreamingTransformer(StreamingTransformer):
                 self._input_tokens = input_tokens
             if output_tokens > 0 or self._output_tokens == 0:
                 self._output_tokens = output_tokens
+            # Fold usage before emitting message_start so its ``usage`` block
+            # can carry the full Anthropic shape (cache keys, server_tool_use).
+            normalized = self._normalize_usage(usage)
+            if self._pending_usage is not None:
+                for key, value in normalized.items():
+                    if value or key not in self._pending_usage:
+                        self._pending_usage[key] = value
+            else:
+                self._pending_usage = normalized
+                self._has_pending_usage = True
 
         # Send message_start on first chunk with content
         if not self._sent_message_start and (choices or usage):
@@ -297,20 +326,61 @@ class AnthropicStreamingTransformer(StreamingTransformer):
                                     {"type": "input_json_delta", "partial_json": args},
                                 )
                             )
+                # Server-side tool result blocks arriving losslessly from the
+                # converter (web_search_tool_result, web_fetch_tool_result,
+                # container_upload, ...): replay as a start+stop pair so
+                # native-shaped clients keep the full block.
+                raw_block = delta.get("raw_content_block")
+                if isinstance(raw_block, dict):
+                    self._close_current_open_block(result_chunks)
+                    block_events = [self._content_block_start(self._current_block_index, raw_block)]
+                    block_events.append(self._content_block_stop(self._current_block_index))
+                    result_chunks.extend(block_events)
+                    self._current_block_index += 1
+                    self._accumulated_output.append(
+                        RawBlock(
+                            provider_type=f"anthropic:{raw_block.get('type', 'unknown')}",
+                            data=raw_block,
+                        )
+                    )
+
+                # Citations attach only to text blocks: close any open
+                # tool/thinking block first, then land the citation on a
+                # (possibly fresh) text block.
+                citation = delta.get("citations")
+                if isinstance(citation, dict):
+                    if self._in_tool_block or self._in_thinking_block:
+                        self._close_current_open_block(result_chunks)
+                    if not self._in_text_block:
+                        self._in_text_block = True
+                        result_chunks.append(
+                            self._content_block_start(
+                                self._current_block_index, {"type": "text", "text": ""}
+                            )
+                        )
+                    result_chunks.append(
+                        self._content_block_delta(
+                            self._current_block_index,
+                            {"type": "citations_delta", "citation": citation},
+                        )
+                    )
 
                 if finish_reason:
                     self._close_current_open_block(result_chunks)
                     self._pending_stop_reason = self._map_finish_reason(finish_reason)
-
-        if usage:
-            normalized = self._normalize_usage(usage)
-            if self._pending_usage is not None:
-                for key, value in normalized.items():
-                    if value or key not in self._pending_usage:
-                        self._pending_usage[key] = value
-            else:
-                self._pending_usage = normalized
-                self._has_pending_usage = True
+                # Anthropic-native terminal fields arriving through the
+                # converter's canonical channel: choice["stop_sequence"] and
+                # choice["stop_details"]. Read regardless of finish_reason so
+                # finalize flushes without a stop_reason still replay them.
+                stop_sequence = choice.get("stop_sequence")
+                if stop_sequence is not None:
+                    self._pending_stop_sequence = stop_sequence
+                stop_details = choice.get("stop_details")
+                if stop_details is not None:
+                    self._pending_stop_details = stop_details
+                container = choice.get("container")
+                if container is not None:
+                    self._pending_container = container
 
         return "".join(result_chunks) if result_chunks else None
 
@@ -354,6 +424,8 @@ class AnthropicStreamingTransformer(StreamingTransformer):
             "cache_creation_input_tokens",
             "cache_read_input_tokens",
             "server_tool_use",
+            "output_tokens_details",
+            "service_tier",
             "prompt_tokens_details",
             "completion_tokens_details",
         ):
@@ -364,6 +436,20 @@ class AnthropicStreamingTransformer(StreamingTransformer):
 
     def _message_start(self, input_tokens: int = 0, output_tokens: int = 0) -> str:
         """Generate message_start event."""
+        # Anthropic's message_start.usage carries the full usage shape; fold
+        # in cache/server-tool keys already accumulated from the first chunk.
+        start_usage: dict[str, Any] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        if self._pending_usage:
+            for key in (
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+                "server_tool_use",
+                "output_tokens_details",
+                "service_tier",
+            ):
+                value = self._pending_usage.get(key)
+                if value is not None:
+                    start_usage[key] = value
         return self._sse_event(
             "message_start",
             {
@@ -376,7 +462,7 @@ class AnthropicStreamingTransformer(StreamingTransformer):
                     "content": [],
                     "stop_reason": None,
                     "stop_sequence": None,
-                    "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+                    "usage": start_usage,
                 },
             },
         )
@@ -402,11 +488,21 @@ class AnthropicStreamingTransformer(StreamingTransformer):
         self, stop_reason: str, usage: dict[str, Any]
     ) -> str:
         """Generate message_delta event with stop_reason and usage combined."""
+        delta: dict[str, Any] = {"stop_reason": stop_reason}
+        if self._pending_stop_sequence is not None:
+            delta["stop_sequence"] = self._pending_stop_sequence
+            self._pending_stop_sequence = None
+        if self._pending_stop_details is not None:
+            delta["stop_details"] = self._pending_stop_details
+            self._pending_stop_details = None
+        if self._pending_container is not None:
+            delta["container"] = self._pending_container
+            self._pending_container = None
         return self._sse_event(
             "message_delta",
             {
                 "type": "message_delta",
-                "delta": {"stop_reason": stop_reason},
+                "delta": delta,
                 "usage": usage,
             },
         )
@@ -545,13 +641,15 @@ class AnthropicStreamingTransformer(StreamingTransformer):
             result_chunks.append(
                 self._message_delta_with_stop_reason_and_usage(
                     self._pending_stop_reason,
-                    usage,
+                    _message_delta_usage(usage),
                 )
             )
             self._pending_stop_reason = None
             self._has_pending_usage = False
         elif self._has_pending_usage and self._pending_usage is not None:
-            result_chunks.append(self._message_delta_with_usage(self._pending_usage))
+            result_chunks.append(
+                self._message_delta_with_usage(_message_delta_usage(self._pending_usage))
+            )
             self._has_pending_usage = False
 
         result_chunks.append(self._message_stop())

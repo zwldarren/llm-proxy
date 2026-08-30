@@ -95,6 +95,7 @@ class ContainerUploadBlock(ContentBlock):
     filename: str | None = None
     content: str | None = None
     media_type: str | None = None
+    cache_control: Any | None = None
 
 
 @dataclass
@@ -122,6 +123,7 @@ class SearchResultBlock(ContentBlock):
     title: str | None = None
     content: list[ContentBlock] | None = None
     metadata: dict[str, Any] | None = None
+    citations: Any | None = None
     cache_control: Any | None = None
 
 
@@ -132,6 +134,7 @@ class ToolReferenceBlock(ContentBlock):
     tool_id: str
     tool_name: str | None = None
     tool_type: str | None = None
+    cache_control: Any | None = None
 
 
 @dataclass
@@ -142,6 +145,7 @@ class WebSearchToolResultBlock(ContentBlock):
     content: str | list[ContentBlock] | list[dict[str, Any]]
     is_error: bool = False
     caller: Caller | None = None
+    cache_control: Any | None = None
 
 
 @dataclass
@@ -152,6 +156,7 @@ class WebFetchToolResultBlock(ContentBlock):
     content: str | list[ContentBlock]
     is_error: bool = False
     caller: Caller | None = None
+    cache_control: Any | None = None
 
 
 @dataclass

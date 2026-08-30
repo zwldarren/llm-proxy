@@ -19,8 +19,8 @@ from llm_proxy.models import (
 from llm_proxy.models.provider import ProviderModelInfo
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.anthropic.client_headers import (
-    ensure_claude_code_beta,
     get_client_headers,
+    merge_client_headers,
 )
 from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
 from llm_proxy.providers.capabilities import ChatCapabilityMixin
@@ -47,6 +47,7 @@ class AnthropicAdapter(ChatCapabilityMixin, BaseHttpProvider):
 
     DEFAULT_BASE_URL = "https://api.anthropic.com"
     CHAT_ENDPOINT = "/v1/messages"
+    COUNT_TOKENS_ENDPOINT = "/v1/messages/count_tokens"
 
     EXTRA_HEADERS = {"anthropic-version": "2023-06-01"}
     AUTH_HEADER = "x-api-key"
@@ -73,19 +74,11 @@ class AnthropicAdapter(ChatCapabilityMixin, BaseHttpProvider):
         """Build upstream headers, merging captured Claude Code client headers.
 
         On the native Anthropic path, client fingerprint headers captured by
-        the anthropic protocol layer are forwarded verbatim without overriding
-        provider/auth headers. ``anthropic-beta`` is rebuilt to guarantee it
-        carries the ``claude-code-20250219`` marker so the upstream enables
-        Claude Code features.
+        the anthropic protocol layer are forwarded (see ``merge_client_headers``
+        for the precedence rules); auth headers always come from provider config.
         """
         headers = super()._build_headers(auth_header, auth_prefix)
-        client_headers = get_client_headers()
-        if client_headers:
-            existing = {k.lower() for k in headers}
-            for key, value in client_headers.items():
-                if key.lower() not in existing:
-                    headers[key] = value
-            headers["anthropic-beta"] = ensure_claude_code_beta(headers.get("anthropic-beta"))
+        merge_client_headers(headers, get_client_headers())
         return headers
 
     def _build_chat_raw(self, request, context):
@@ -147,6 +140,21 @@ class AnthropicAdapter(ChatCapabilityMixin, BaseHttpProvider):
         body = self._stream_body(request)
         body["stream"] = True
         return url, body
+
+    async def count_tokens(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Forward a ``/v1/messages/count_tokens`` request to the upstream.
+
+        Returns the raw upstream response (``{"input_tokens": N}``) so the
+        protocol endpoint can report the provider's real tokenizer count
+        instead of a local heuristic estimate. Only defined on adapters
+        whose upstream actually implements the Anthropic count endpoint —
+        callers duck-type on ``hasattr(adapter, "count_tokens")``.
+        """
+        # The count endpoint always rides the provider base URL: a custom
+        # ``chat_completion`` endpoint_base_urls override points at the chat
+        # path, so the count path must not be appended there.
+        url = f"{self._base_url}{self.COUNT_TOKENS_ENDPOINT}"
+        return await self._post_json_with_retry(url, self._build_headers(), body)
 
     async def stream_chat_completion_native(
         self,

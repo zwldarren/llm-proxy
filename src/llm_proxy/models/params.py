@@ -54,7 +54,7 @@ class AnthropicSpecificParams:
     stop_sequences: list[str] | None = None
     disable_parallel_tool_use: bool | None = None
     cache_control: dict[str, Any] | None = None
-    container: str | None = None
+    container: str | dict[str, Any] | None = None
     inference_geo: str | None = None
     output_config: dict[str, Any] | None = None
     service_tier: str | None = None

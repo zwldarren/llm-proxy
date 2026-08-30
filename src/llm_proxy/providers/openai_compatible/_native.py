@@ -30,10 +30,10 @@ from typing import Any
 from llm_proxy.core.conversion import plan_conversion, prepare_native_body
 from llm_proxy.models import ConversionTier, InternalRequest, InternalResponse, Usage
 from llm_proxy.providers.anthropic.client_headers import (
-    ensure_claude_code_beta,
+    get_client_headers as get_anthropic_client_headers,
 )
 from llm_proxy.providers.anthropic.client_headers import (
-    get_client_headers as get_anthropic_client_headers,
+    merge_client_headers as merge_anthropic_client_headers,
 )
 from llm_proxy.providers.base import extract_rate_limit_headers
 from llm_proxy.providers.openai.client_headers import (
@@ -146,24 +146,18 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
 
         On the native Anthropic/Responses passthrough paths, client fingerprint
         headers captured by the protocol layers (Claude Code, Codex, ...) are
-        forwarded verbatim without overriding provider/auth headers.
-        ``anthropic-beta`` is rebuilt to guarantee it carries the
-        ``claude-code-20250219`` marker so the upstream enables Claude Code
-        features. Only the protocol layer of the current request has captured
-        anything, so the other merge — and every merge on the Chat Completions
-        translation path, which has no capture middleware — is a no-op.
+        forwarded per ``merge_client_headers``: existing keys win except
+        ``anthropic-version`` (the client's explicit value wins), and the
+        ``claude-code-20250219`` beta marker is injected only for Claude Code
+        clients. Only the protocol layer of the current request has captured
+        anything, so every merge on the Chat Completions translation path,
+        which has no capture middleware, is a no-op.
 
         Adapters with their own ``_build_headers`` (e.g. KimiCodeAdapter,
         GLMBase's ``x-api-key``) call ``super()`` and inherit this merge.
         """
         headers = super()._build_headers(auth_header, auth_prefix)
-        anthropic_headers = get_anthropic_client_headers()
-        if anthropic_headers:
-            existing = {k.lower() for k in headers}
-            for key, value in anthropic_headers.items():
-                if key.lower() not in existing:
-                    headers[key] = value
-            headers["anthropic-beta"] = ensure_claude_code_beta(headers.get("anthropic-beta"))
+        merge_anthropic_client_headers(headers, get_anthropic_client_headers())
         openai_headers = get_openai_client_headers()
         if openai_headers:
             existing = {k.lower() for k in headers}
