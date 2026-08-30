@@ -7,8 +7,6 @@ These functions have no dependency on a serializer class.
 
 from typing import Any
 
-import orjson
-
 from llm_proxy.models import (
     AudioBlock,
     ConversationContext,
@@ -40,6 +38,10 @@ from llm_proxy.models.content_blocks.anthropic_builtin import (
 )
 from llm_proxy.models.content_blocks.extended import RawBlock, RedactedThinkingBlock
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.serialization._canonical_json import (
+    canonical_json_string,
+    canonical_json_string_if_parseable,
+)
 from llm_proxy.serialization._shared_conversion import try_convert_block
 from llm_proxy.serialization._shared_degradation import (
     degrade_block_to_text,
@@ -361,7 +363,11 @@ def _assistant_message_to_openai(
                 "type": "function",
                 "function": {
                     "name": tc_name,
-                    "arguments": orjson.dumps(block.input).decode(),
+                    # Canonical (key-sorted, compact) arguments: the same
+                    # logical call re-encoded by the client with a different
+                    # key order must stay byte-identical across turns so
+                    # upstream prefix/prompt caches keep hitting.
+                    "arguments": canonical_json_string(block.input),
                 },
             }
             if isinstance(block, ToolUseBlock) and block.extra.get("thought_signature"):
@@ -388,6 +394,12 @@ def _assistant_message_to_openai(
                 # the custom-tool function bridge (see
                 # OpenAIToolsHandler._custom_tool_to_function) so the history
                 # matches the converted tool definitions the provider received.
+                inner = block.input
+                if isinstance(inner, str):
+                    # Freeform custom-tool input usually carries JSON; normalize
+                    # parseable payloads so history calls stay byte-identical
+                    # across turns (same rationale as ``arguments``).
+                    inner = canonical_json_string_if_parseable(inner)
                 tool_calls.append(
                     {
                         "id": block.id,
@@ -396,7 +408,7 @@ def _assistant_message_to_openai(
                             "name": flatten_history_tool_name(
                                 context.namespace_map if context else None, block.name
                             ),
-                            "arguments": orjson.dumps({"content": block.input}).decode(),
+                            "arguments": canonical_json_string({"content": inner}),
                         },
                     }
                 )

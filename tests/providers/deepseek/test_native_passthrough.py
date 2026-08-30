@@ -238,6 +238,56 @@ class TestNativeBodies:
         assert raw["stream"] is False
 
 
+class TestAnthropicThinkingDisabledEffortConflict:
+    """DeepSeek's Anthropic endpoint 400s on ``thinking: disabled`` + effort
+    ("thinking options type cannot be disabled when reasoning_effort is set").
+    Claude Code 2.1.166+ Workflow / Dynamic Workflow subagents send exactly
+    that combination; the conflicting effort parameter must be stripped before
+    the native passthrough forwards the body (mirrors cc-switch's
+    ``normalize_deepseek_thinking_disabled_strip_effort``).
+    """
+
+    def test_effort_stripped_from_populated_output_config(self, adapter):
+        raw = raw_anthropic(
+            thinking={"type": "disabled"},
+            output_config={"effort": "low", "format": {"type": "text"}},
+        )
+        req = _request(raw)
+        _url, body = adapter._native_request_parts(req, stream=False)
+        assert body["output_config"] == {"format": {"type": "text"}}
+        # The raw stash is untouched: only a shallow copy is prepared, so the
+        # fix must never edit the shared output_config dict in place.
+        assert raw["output_config"] == {"effort": "low", "format": {"type": "text"}}
+
+    def test_effort_only_output_config_removed_entirely(self, adapter):
+        raw = raw_anthropic(thinking={"type": "disabled"}, output_config={"effort": "high"})
+        req = _request(raw)
+        _url, body = adapter._native_request_parts(req, stream=False)
+        assert "output_config" not in body
+        assert raw["output_config"] == {"effort": "high"}
+
+    def test_mixed_in_reasoning_effort_dropped(self, adapter):
+        raw = raw_anthropic(thinking={"type": "disabled"}, reasoning_effort="medium")
+        req = _request(raw)
+        _url, body = adapter._native_request_parts(req, stream=False)
+        assert "reasoning_effort" not in body
+
+    def test_thinking_enabled_keeps_effort(self, adapter):
+        raw = raw_anthropic(
+            thinking={"type": "enabled", "budget_tokens": 2048},
+            output_config={"effort": "low"},
+        )
+        req = _request(raw)
+        _url, body = adapter._native_request_parts(req, stream=False)
+        assert body["output_config"] == {"effort": "low"}
+
+    def test_no_thinking_keeps_effort(self, adapter):
+        raw = raw_anthropic(output_config={"effort": "medium"})
+        req = _request(raw)
+        _url, body = adapter._native_request_parts(req, stream=False)
+        assert body["output_config"] == {"effort": "medium"}
+
+
 # ---------------------------------------------------------------------------
 # Non-streaming chat completion dispatch
 # ---------------------------------------------------------------------------

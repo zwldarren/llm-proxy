@@ -1,9 +1,11 @@
-"""Conversation-key derivation shared by routing layers.
+"""Conversation-key derivation shared by routing and provider layers.
 
-Used by smart routing (model continuity) and by the provider-level
-``session_sticky`` selection strategy. The key identifies "the same
-conversation" as best we can: an explicit session id when the client is a
-trusted proxy, otherwise a hash of the first user message prefix.
+Used by smart routing (model continuity), the provider-level
+``session_sticky`` selection strategy, and provider request building (an
+upstream ``prompt_cache_key`` derived from client session metadata). The
+key identifies "the same conversation" as best we can: an explicit session
+id when the client is a trusted proxy, otherwise a hash of the first user
+message prefix.
 """
 
 import hashlib
@@ -14,6 +16,37 @@ from typing import Any
 # missing/unknown type are accepted too; non-text parts (images, audio,
 # tool calls) contribute nothing so the derived key stays stable across turns.
 _TEXT_PART_TYPES = {"text", "input_text", "output_text"}
+
+# Claude Code's ``metadata.user_id`` embeds the session id after this marker
+# (``user_<id>_account_<account>_session_<session>``).
+_SESSION_MARKER = "_session_"
+
+
+def session_id_from_client_metadata(metadata: Any) -> str | None:
+    """Extract a session identifier from Anthropic-style request metadata.
+
+    Claude Code sends ``metadata.user_id`` in the form
+    ``user_<id>_account_<account>_session_<session>``; everything after the
+    first ``_session_`` marker is the session id (mirrors cc-switch's
+    ``parse_session_from_user_id``). An explicit ``metadata.session_id`` field
+    is honoured as a fallback for clients that send it directly.
+
+    Non-dict metadata and empty/whitespace-only values yield None, so callers
+    can treat the result uniformly as "no client-side session known".
+    """
+    if not isinstance(metadata, dict):
+        return None
+    user_id = metadata.get("user_id")
+    if isinstance(user_id, str):
+        marker_at = user_id.find(_SESSION_MARKER)
+        if marker_at != -1:
+            session = user_id[marker_at + len(_SESSION_MARKER) :]
+            if session.strip():
+                return session
+    session_id = metadata.get("session_id")
+    if isinstance(session_id, str) and session_id.strip():
+        return session_id
+    return None
 
 
 def _content_text(content: Any) -> str:
@@ -61,4 +94,4 @@ def conversation_key(session_id: str | None, messages: list[dict]) -> str | None
     return None
 
 
-__all__ = ["conversation_key"]
+__all__ = ["conversation_key", "session_id_from_client_metadata"]

@@ -98,6 +98,17 @@ class OpenAIRequestBuilder:
             if request.stream_options.include_obfuscation is not None:
                 opts["include_obfuscation"] = request.stream_options.include_obfuscation
             body["stream_options"] = opts
+        elif body.get("stream"):
+            # Rebuilt/converted streaming bodies (this builder only runs on the
+            # FULL_CONVERSION tier): without an explicit ``stream_options``
+            # most Chat Completions upstreams omit the terminal usage chunk,
+            # so ``message_delta`` usage arrives as zeros and the whole
+            # input/output/cache billing is silently lost (mirrors cc-switch's
+            # ``inject_openai_stream_include_usage``). Only the upstream stream
+            # gains the usage chunk — the client-facing stream is re-serialized
+            # from parsed chunks, so clients never see it. Clients that
+            # explicitly sent ``stream_options`` keep their exact semantics.
+            body["stream_options"] = {"include_usage": True}
         return body
 
     @staticmethod
@@ -222,36 +233,46 @@ class OpenAIRequestBuilder:
     def _build_openai_params(
         body: dict[str, Any], request: InternalRequest, context: BuildContext
     ) -> dict[str, Any]:
-        if request.params.openai is None:
-            return body
-
         op = request.params.openai
-        for attr in (
-            "service_tier",
-            "verbosity",
-            "store",
-            "metadata",
-            "prompt_cache_retention",
-            "safety_identifier",
-            "logprobs",
-            "top_logprobs",
-            "audio",
-            "modalities",
-            "prediction",
-            "web_search_options",
-            "parallel_tool_calls",
-            "logit_bias",
-        ):
-            val = getattr(op, attr, None)
-            if val is not None:
-                body[attr] = val
-        # Gated: only forward prompt_cache_key to upstreams known to accept it
-        # (strict gateways 400 on unknown fields). See
-        # _should_send_prompt_cache_key.
-        if op.prompt_cache_key is not None and OpenAIRequestBuilder._should_send_prompt_cache_key(
+        if op is not None:
+            for attr in (
+                "service_tier",
+                "verbosity",
+                "store",
+                "metadata",
+                "prompt_cache_retention",
+                "safety_identifier",
+                "logprobs",
+                "top_logprobs",
+                "audio",
+                "modalities",
+                "prediction",
+                "web_search_options",
+                "parallel_tool_calls",
+                "logit_bias",
+            ):
+                val = getattr(op, attr, None)
+                if val is not None:
+                    body[attr] = val
+        # prompt_cache_key: the client's explicit value wins; otherwise a
+        # session id derived from Anthropic client metadata (Claude Code sends
+        # ``metadata.user_id = user_..._session_<id>``) keeps
+        # conversation-level KV caches warm across turns. Gated to the same
+        # base-url allow-list as client-provided keys — strict Chat
+        # Completions gateways 400 on unknown fields. Mirrors cc-switch's
+        # session → prompt_cache_key derivation.
+        cache_key = op.prompt_cache_key if op is not None else None
+        if cache_key is None:
+            from llm_proxy.core.conversation_key import session_id_from_client_metadata
+
+            anthropic_metadata = (
+                request.params.anthropic.metadata if request.params.anthropic else None
+            )
+            cache_key = session_id_from_client_metadata(anthropic_metadata)
+        if cache_key is not None and OpenAIRequestBuilder._should_send_prompt_cache_key(
             context.base_url
         ):
-            body["prompt_cache_key"] = op.prompt_cache_key
+            body["prompt_cache_key"] = cache_key
         return body
 
     @staticmethod

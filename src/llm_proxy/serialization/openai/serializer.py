@@ -311,8 +311,6 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 body["service_tier"] = oai.service_tier
             if oai.safety_identifier is not None:
                 body["safety_identifier"] = oai.safety_identifier
-            if oai.prompt_cache_key is not None:
-                body["prompt_cache_key"] = oai.prompt_cache_key
             if oai.parallel_tool_calls is not None:
                 body["parallel_tool_calls"] = oai.parallel_tool_calls
             # logprobs: Responses API exposes ``top_logprobs`` (0-20) plus an
@@ -322,6 +320,25 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 self._merge_include(body, "message.output_text.logprobs")
             elif oai.logprobs:
                 self._merge_include(body, "message.output_text.logprobs")
+
+        # prompt_cache_key: client-provided wins; otherwise derive a session
+        # id from Anthropic client metadata (Claude Code sends
+        # ``user_..._session_<id>``) so conversation-level prompt caches
+        # stay warm on native Responses upstreams. Outside the ``oai`` block:
+        # Anthropic-protocol clients carry no OpenAISpecificParams at all.
+        # Same exposure class as the client-provided field: the Responses
+        # wire accepts it, and third-party emulation was already exposed to
+        # it via client passthrough.
+        prompt_cache_key = oai.prompt_cache_key if oai is not None else None
+        if prompt_cache_key is None:
+            from llm_proxy.core.conversation_key import session_id_from_client_metadata
+
+            anthropic_metadata = (
+                request.params.anthropic.metadata if request.params.anthropic else None
+            )
+            prompt_cache_key = session_id_from_client_metadata(anthropic_metadata)
+        if prompt_cache_key is not None:
+            body["prompt_cache_key"] = prompt_cache_key
 
         # ``user`` is deprecated on the Responses API but still accepted; map
         # the end-user identifier from request metadata to the Responses

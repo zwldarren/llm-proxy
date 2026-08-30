@@ -8,7 +8,7 @@ degrades session_sticky to random, so any shape that produces None for a
 normal chat is a bug.
 """
 
-from llm_proxy.core.conversation_key import conversation_key
+from llm_proxy.core.conversation_key import conversation_key, session_id_from_client_metadata
 
 
 def _chat(messages: list[dict]) -> list[dict]:
@@ -140,3 +140,37 @@ def test_consecutive_text_parts_join_without_separator():
     )
     joined = _chat([{"role": "user", "content": "Hello world"}])
     assert conversation_key(None, split) == conversation_key(None, joined)
+
+
+def test_session_from_metadata_user_id_session_marker():
+    """Claude Code's ``user_..._session_<id>`` user_id yields the suffix (mirrors
+    cc-switch's ``parse_session_from_user_id``)."""
+    metadata = {"user_id": "user_abc_account_111_session_sess-123"}
+    assert session_id_from_client_metadata(metadata) == "sess-123"
+
+
+def test_session_marker_takes_everything_after_first_occurrence():
+    metadata = {"user_id": "user_a_session_b_session_c"}
+    assert session_id_from_client_metadata(metadata) == "b_session_c"
+
+
+def test_session_id_direct_field_fallback():
+    metadata = {"session_id": "direct-sess"}
+    assert session_id_from_client_metadata(metadata) == "direct-sess"
+
+
+def test_empty_session_suffix_falls_through_to_session_id():
+    metadata = {"user_id": "user_abc_session_", "session_id": "fallback"}
+    assert session_id_from_client_metadata(metadata) == "fallback"
+
+
+def test_metadata_without_session_signals():
+    assert session_id_from_client_metadata({"user_id": "user_abc_account_111"}) is None
+    assert session_id_from_client_metadata({}) is None
+
+
+def test_invalid_metadata_returns_none():
+    assert session_id_from_client_metadata(None) is None
+    assert session_id_from_client_metadata("user_x_session_y") is None
+    assert session_id_from_client_metadata({"user_id": ""}) is None
+    assert session_id_from_client_metadata({"session_id": "   "}) is None

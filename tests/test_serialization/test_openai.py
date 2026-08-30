@@ -778,9 +778,16 @@ def test_build_provider_request_always_full_converts(provider_serializer):
     assert raw["model"] == "client-alias"
 
 
-def test_build_provider_request_stream_without_stream_options_sends_none(provider_serializer):
-    """A streaming request without stream_options must not get a fabricated
-    stream_options block on the provider body."""
+def test_build_provider_request_stream_without_stream_options_injects_include_usage(
+    provider_serializer,
+):
+    """A rebuilt streaming request without an explicit stream_options gets
+    ``include_usage: true`` injected: most Chat Completions upstreams omit the
+    terminal usage chunk otherwise, so message_delta usage arrives as zeros
+    and input/output/cache billing is silently lost (estimation fallback is
+    less accurate than provider-reported usage). Non-streaming bodies stay
+    untouched, and clients that explicitly sent stream_options keep their
+    exact semantics (see the include_usage=false test above)."""
     request = InternalRequest(
         model="gpt-4",
         conversation=ConversationContext(
@@ -793,7 +800,124 @@ def test_build_provider_request_stream_without_stream_options_sends_none(provide
     body = provider_serializer.build_provider_request(request)
 
     assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
+
+
+def test_build_provider_request_non_streaming_gets_no_stream_options(provider_serializer):
+    """Non-streaming requests never carry stream_options, even implicitly."""
+    request = InternalRequest(
+        model="gpt-4",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="hi")])]
+        ),
+        params=GenerationParams(),
+        stream=False,
+    )
+
+    body = provider_serializer.build_provider_request(request)
+
+    assert body["stream"] is False
     assert "stream_options" not in body
+
+
+# ---------------------------------------------------------------------------
+# prompt_cache_key derivation from client session metadata (task: cc-switch
+# parity — Claude Code sends metadata.user_id = user_..._session_<id>)
+# ---------------------------------------------------------------------------
+
+
+def _request_with_anthropic_metadata(metadata: dict | None) -> InternalRequest:
+    from llm_proxy.models import AnthropicSpecificParams
+
+    anthropic = AnthropicSpecificParams(metadata=metadata) if metadata is not None else None
+    return InternalRequest(
+        model="gpt-4",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="hi")])]
+        ),
+        params=GenerationParams(anthropic=anthropic),
+        stream=False,
+    )
+
+
+def test_anthropic_session_metadata_becomes_prompt_cache_key_on_allowlisted_upstream(
+    provider_serializer,
+):
+    from llm_proxy.serialization.context import BuildContext
+
+    request = _request_with_anthropic_metadata({"user_id": "user_abc_account_111_session_sess-123"})
+    context = BuildContext(base_url="https://api.openai.com/v1")
+    body = provider_serializer.build_provider_request(request, context=context)
+    assert body["prompt_cache_key"] == "sess-123"
+
+
+def test_anthropic_session_metadata_not_sent_to_ungated_upstream(provider_serializer):
+    """Strict Chat Completions gateways 400 on unknown fields — the derived
+    key obeys the same base-url gate as client-provided values."""
+    from llm_proxy.serialization.context import BuildContext
+
+    request = _request_with_anthropic_metadata({"user_id": "user_abc_session_sess-123"})
+    context = BuildContext(base_url="https://api.deepseek.com")
+    body = provider_serializer.build_provider_request(request, context=context)
+    assert "prompt_cache_key" not in body
+
+
+def test_client_prompt_cache_key_wins_over_derived_session(provider_serializer):
+    from llm_proxy.models import AnthropicSpecificParams, OpenAISpecificParams
+    from llm_proxy.serialization.context import BuildContext
+
+    request = InternalRequest(
+        model="gpt-4",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="hi")])]
+        ),
+        params=GenerationParams(
+            openai=OpenAISpecificParams(prompt_cache_key="client-key"),
+            anthropic=AnthropicSpecificParams(metadata={"user_id": "user_a_session_b"}),
+        ),
+        stream=False,
+    )
+    context = BuildContext(base_url="https://api.openai.com/v1")
+    body = provider_serializer.build_provider_request(request, context=context)
+    assert body["prompt_cache_key"] == "client-key"
+
+
+def test_responses_provider_prompt_cache_key_from_anthropic_metadata():
+    """Native Responses upstreams get the derived session id the same way the
+    client-provided field is forwarded (no base-url gate on the Responses
+    wire — same exposure class as client passthrough)."""
+    responses_serializer = OpenAIResponsesProviderSerializer()
+    request = _request_with_anthropic_metadata({"user_id": "user_abc_account_111_session_sess-123"})
+    body = responses_serializer.build_provider_request(request)
+    assert body["prompt_cache_key"] == "sess-123"
+
+
+def test_tool_call_arguments_are_canonicalized(provider_serializer):
+    """Rebuilt tool-call arguments must be key-sorted and compact so identical
+    logical calls stay byte-identical across turns (upstream prompt caches
+    match exact bytes)."""
+    request = InternalRequest(
+        model="gpt-4",
+        conversation=ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[
+                        ToolUseBlock(
+                            id="call_1", name="get_weather", input={"z": 1, "a": {"y": 2, "x": 3}}
+                        ),
+                    ],
+                )
+            ]
+        ),
+        params=GenerationParams(),
+        stream=False,
+    )
+
+    body = provider_serializer.build_provider_request(request)
+
+    arguments = body["messages"][0]["tool_calls"][0]["function"]["arguments"]
+    assert arguments == '{"a":{"x":3,"y":2},"z":1}'
 
 
 def test_parse_provider_response_maps_deepseek_cache_fields(provider_serializer):
