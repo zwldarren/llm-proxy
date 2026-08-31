@@ -26,7 +26,6 @@ from pydantic import ValidationError
 from llm_proxy.models import ConversationContext, InternalResponse, Message
 from llm_proxy.models.content_blocks import TextBlock
 from llm_proxy.models.content_blocks.extended import RedactedThinkingBlock, ThinkingBlock
-from llm_proxy.protocols.anthropic.schemas import MessagesRequest
 from llm_proxy.protocols.openresponses.schemas import (
     InputTokensDetails,
     ResponsesRequest,
@@ -82,37 +81,6 @@ def _response(finish_reason: str | None = None) -> InternalResponse:
 # ---------------------------------------------------------------------------
 # Anthropic protocol: thinking budget validation + terminal message_delta
 # ---------------------------------------------------------------------------
-
-
-class TestThinkingBudgetValidation:
-    def test_budget_below_minimum_rejected(self):
-        with pytest.raises(ValidationError):
-            MessagesRequest(
-                model="m",
-                max_tokens=2000,
-                messages=[],
-                thinking={"type": "enabled", "budget_tokens": 1000},
-            )
-
-    def test_budget_at_minimum_accepted(self):
-        MessagesRequest(
-            model="m",
-            max_tokens=2000,
-            messages=[],
-            thinking={"type": "enabled", "budget_tokens": 1024},
-        )
-
-    def test_budget_at_max_tokens_rejected(self):
-        with pytest.raises(ValidationError):
-            MessagesRequest(
-                model="m",
-                max_tokens=2000,
-                messages=[],
-                thinking={"type": "enabled", "budget_tokens": 2000},
-            )
-
-    def test_budget_none_accepted(self):
-        MessagesRequest(model="m", messages=[], thinking={"type": "enabled"})
 
 
 class TestAnthropicFinalizeMessageDelta:

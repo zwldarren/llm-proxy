@@ -329,14 +329,9 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
         # Same exposure class as the client-provided field: the Responses
         # wire accepts it, and third-party emulation was already exposed to
         # it via client passthrough.
-        prompt_cache_key = oai.prompt_cache_key if oai is not None else None
-        if prompt_cache_key is None:
-            from llm_proxy.core.conversation_key import session_id_from_client_metadata
+        from llm_proxy.core.conversation_key import prompt_cache_key_from_request
 
-            anthropic_metadata = (
-                request.params.anthropic.metadata if request.params.anthropic else None
-            )
-            prompt_cache_key = session_id_from_client_metadata(anthropic_metadata)
+        prompt_cache_key = prompt_cache_key_from_request(request)
         if prompt_cache_key is not None:
             body["prompt_cache_key"] = prompt_cache_key
 

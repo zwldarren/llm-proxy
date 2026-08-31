@@ -139,6 +139,40 @@ class TestHeartbeatMode:
         assert task.cancelled()
         assert cancelled.is_set()
 
+    async def test_heartbeat_phase_detects_disconnect_and_cancels(self):
+        """Disconnect after the grace switch: the in-flight provider request is
+        cancelled and the abandonment is flagged for 499 logging. This is the
+        slow-request scenario (> grace) the keepalive feature exists for."""
+        cancelled = asyncio.Event()
+
+        async def slow():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return _json_response({})
+
+        task = asyncio.ensure_future(slow())
+        request = TestDisconnectMonitor._FakeRequest(disconnect_after=1)
+        gen = _heartbeat_body(task, interval_seconds=0.05, request=request)
+
+        # The disconnect monitor polls in the background; keep pulling
+        # heartbeats until the stream ends (the fake disconnects on its
+        # second poll, after its first ~0.5s connected poll).
+        chunks = [c async for c in gen]
+
+        assert chunks, "expected heartbeat bytes before the stream ended"
+        assert all(c == b" " for c in chunks)
+        # task.cancel() is delivered asynchronously; let the slow() task
+        # process it before asserting.
+        for _ in range(20):
+            if cancelled.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert cancelled.is_set(), "provider task was not cancelled after disconnect"
+        assert request.state.client_disconnected is True
+
     async def test_cancellation_during_grace_cancels_processing_task(self):
         cancelled = asyncio.Event()
 

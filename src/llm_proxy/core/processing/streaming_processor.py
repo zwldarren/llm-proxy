@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -623,7 +624,7 @@ class StreamingProcessor:
 
     @staticmethod
     async def _iterate_chunks_with_comments(
-        stream,
+        stream: AsyncIterator[Any],
         *,
         interval: float,
         comment: str | None,
@@ -995,6 +996,14 @@ class StreamingProcessor:
             chunk_count = 0
             client_disconnected = False
             state = ContinuationState(transformer=_transformer, stream_request=_stream_request)
+
+            def mark_disconnected() -> None:
+                """Record the abandonment (client_disconnected + stream error) once."""
+                nonlocal client_disconnected, stream_error
+                client_disconnected = True
+                if stream_error is None:
+                    stream_error = ClientDisconnectedError()
+
             try:
                 if _event_context is not None:
                     _event_context.is_streaming = True
@@ -1060,9 +1069,7 @@ class StreamingProcessor:
                         yield chunk
                         chunk_count += 1
                         if await self._check_disconnect(_req, chunk_count, _cancel_token):
-                            client_disconnected = True
-                            if stream_error is None:
-                                stream_error = ClientDisconnectedError()
+                            mark_disconnected()
                             break
                         continue
 
@@ -1074,9 +1081,7 @@ class StreamingProcessor:
                         yield transformed
                         chunk_count += 1
                         if await self._check_disconnect(_req, chunk_count, _cancel_token):
-                            client_disconnected = True
-                            if stream_error is None:
-                                stream_error = ClientDisconnectedError()
+                            mark_disconnected()
                             break
 
                 if _should_intercept_web_search and not client_disconnected:
@@ -1094,6 +1099,16 @@ class StreamingProcessor:
                         interval=_heartbeat_interval,
                         comment=_heartbeat_comment,
                     ):
+                        if _kind == "comment":
+                            # Same gating as the main loop: comments stop
+                            # flowing once the client abandoned the stream.
+                            if not client_disconnected and not (
+                                _cancel_token and _cancel_token.is_set()
+                            ):
+                                yield payload
+                            continue
+                        if _cancel_token and _cancel_token.is_set():
+                            break
                         yield payload
 
                 if (
@@ -1160,17 +1175,13 @@ class StreamingProcessor:
                 # The response task was cancelled — for a client disconnect
                 # this is the origin-side 524 moment. Mark the log entry as a
                 # client abandonment (499) instead of a successful request.
-                client_disconnected = True
-                if stream_error is None:
-                    stream_error = ClientDisconnectedError()
+                mark_disconnected()
                 raise
             except GeneratorExit:
                 # The response was closed without reaching the end (client
                 # disconnect mid-response, server teardown). Recorded so the
                 # abandonment is visible in the logs.
-                client_disconnected = True
-                if stream_error is None:
-                    stream_error = ClientDisconnectedError()
+                mark_disconnected()
                 raise
             except Exception as e:
                 stream_error = e

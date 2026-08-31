@@ -727,9 +727,10 @@ class TestOpenAIResponseParserDetails:
 
 
 def test_build_provider_request_respects_stream_usage_false(provider_serializer):
-    """stream_options.include_usage=false must be forwarded as-is: the proxy
-    does not override it. Billing falls back to token estimation when the
-    provider returns no usage chunk."""
+    """stream_options.include_usage=false is overridden to True upstream:
+    ADR-0008 — a client sending false would silently disable the proxy's cost
+    accounting (the terminal usage chunk never arrives). The client never
+    sees the change on rebuilt streams."""
     from llm_proxy.models.types import StreamOptions
 
     request = InternalRequest(
@@ -745,7 +746,7 @@ def test_build_provider_request_respects_stream_usage_false(provider_serializer)
     body = provider_serializer.build_provider_request(request)
 
     assert body["stream"] is True
-    assert body["stream_options"]["include_usage"] is False
+    assert body["stream_options"]["include_usage"] is True
 
 
 def test_build_provider_request_always_full_converts(provider_serializer):

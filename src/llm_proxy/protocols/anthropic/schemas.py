@@ -3,7 +3,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AnthropicToolChoice(BaseModel):
@@ -66,22 +66,3 @@ class MessagesRequest(BaseModel):
     inference_geo: str | None = Field(None, description="Geographic region for inference")
     service_tier: Literal["auto", "standard_only"] | None = Field(None, description="Service tier")
     output_config: dict[str, Any] | None = Field(None, description="Output configuration")
-
-    @model_validator(mode="after")
-    def validate_thinking_budget(self) -> MessagesRequest:
-        """Validate thinking.budget_tokens: >= 1024 and < max_tokens."""
-        if self.thinking is not None:
-            budget_tokens: int | None = None
-            if isinstance(self.thinking, dict):
-                budget_tokens = self.thinking.get("budget_tokens")
-            elif hasattr(self.thinking, "budget_tokens"):
-                budget_tokens = self.thinking.budget_tokens
-
-            if budget_tokens is not None and (
-                budget_tokens < 1024 or budget_tokens >= self.max_tokens
-            ):
-                raise ValueError(
-                    f"thinking.budget_tokens ({budget_tokens}) must be >= 1024 and "
-                    f"less than max_tokens ({self.max_tokens})"
-                )
-        return self

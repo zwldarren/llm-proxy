@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from fastapi import Request, Response
 
 from llm_proxy.config.manager import load_logging_config
+from llm_proxy.core.constants import CLIENT_DISCONNECTED_STATE_KEY
 from llm_proxy.core.context import RequestUserContext, set_request_user_context
 from llm_proxy.core.errors import get_error_handler
 from llm_proxy.core.errors.protocols import protocol_for_name
@@ -290,7 +291,7 @@ class UnifiedProcessor:
             # this is the "invisible 524" moment: the origin keeps generating
             # for a client that is already gone. Record the abandonment so it
             # shows up as a failed (499) request instead of vanishing.
-            if getattr(req.state, "client_disconnected", False):
+            if getattr(req.state, CLIENT_DISCONNECTED_STATE_KEY, False):
                 error = ClientDisconnectedError()
                 tracing_registry = context.tracing_registry or get_tracing_registry()
                 await asyncio.shield(

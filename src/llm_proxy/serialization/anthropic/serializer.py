@@ -8,6 +8,7 @@ from typing import Any
 
 import orjson
 
+from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.core.thinking import convert_to_anthropic
 from llm_proxy.core.utils import generate_response_id
 from llm_proxy.models import (
@@ -59,7 +60,10 @@ from llm_proxy.models.tools import (
     WebSearchTool,
 )
 from llm_proxy.models.types import Usage
-from llm_proxy.serialization.anthropic.mixin import AnthropicContentMixin
+from llm_proxy.serialization.anthropic import (
+    ANTHROPIC_USAGE_EXTENSION_KEYS,
+    AnthropicContentMixin,
+)
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.providers.base import ProviderSerializer
@@ -374,16 +378,13 @@ def parse_usage_and_provider_extras(
         )
 
         # Beta extensions (fast-mode "speed", compaction/fallback
-        # "iterations") ride extras verbatim so anthropic clients keep the
-        # full Usage shape on converted paths.
+        # "iterations", plus the full-Usage keys) ride extras verbatim so
+        # anthropic clients keep the full Usage shape on converted paths.
         for key in (
+            *ANTHROPIC_USAGE_EXTENSION_KEYS,
             "cache_creation",
             "inference_geo",
             "server_tool_use",
-            "output_tokens_details",
-            "service_tier",
-            "speed",
-            "iterations",
         ):
             if key in usage_data and usage_data[key] is not None:
                 extras[key] = usage_data[key]
@@ -527,6 +528,28 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
             and thinking_result.get("thinking", {}).get("type") in ("enabled", "adaptive")
         )
         is_claude_model = "claude" in (context.model or request.model or "").lower()
+
+        # Anthropic's API enforces ``thinking.budget_tokens >= 1024`` and
+        # ``budget_tokens < max_tokens``. Enforced here (provider-side, not in
+        # the client-facing parser) and only for Claude models: third-party
+        # Anthropic-compatible upstreams (DeepSeek, GLM, Kimi Code, ...) may
+        # not impose the floor, and rejecting proxy-side would break requests
+        # they previously accepted.
+        if is_claude_model and thinking_enabled:
+            thinking_body = thinking_result.get("thinking") if thinking_result else None
+            budget_tokens = (
+                thinking_body.get("budget_tokens") if isinstance(thinking_body, dict) else None
+            )
+            max_tokens = 16384 if request.params.max_tokens is None else request.params.max_tokens
+            if budget_tokens is not None and (budget_tokens < 1024 or budget_tokens >= max_tokens):
+                raise ValidationError(
+                    message=(
+                        f"thinking.budget_tokens ({budget_tokens}) must be >= 1024 and "
+                        f"less than max_tokens ({max_tokens})"
+                    ),
+                    code="invalid_parameter",
+                    status_code=400,
+                )
 
         if not thinking_enabled or not is_claude_model:
             _set_temperature_and_top_p(body, request.params)

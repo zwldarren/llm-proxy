@@ -17,3 +17,9 @@ API_KEY_CACHE_TTL_SECONDS = 60
 
 # Lockout cleanup interval in seconds
 LOCKOUT_CLEANUP_INTERVAL_SECONDS = 60
+
+# Cross-layer contract between api/keepalive.py (writer: sets it when the
+# client connection died) and core/processing/unified.py (reader: records the
+# abandonment as a 499). Kept as a named constant so the attribute stays a
+# load-bearing but discoverable contract.
+CLIENT_DISCONNECTED_STATE_KEY = "client_disconnected"

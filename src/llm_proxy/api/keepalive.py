@@ -44,6 +44,7 @@ import orjson
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from llm_proxy.core.constants import CLIENT_DISCONNECTED_STATE_KEY
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -91,6 +92,11 @@ class _Disconnected:
     """Client went away; the task was cancelled and the pipeline logged it."""
 
 
+@dataclass(frozen=True)
+class _GraceExpired:
+    """The keepalive grace deadline passed without completion or disconnect."""
+
+
 async def wait_for_either(
     task: asyncio.Task[Response],
     request: Request,
@@ -108,10 +114,12 @@ async def wait_for_either(
     delays a cycle longer than ``poll_interval``, so callers can treat that as
     the upper bound of the cycle granularity.
     """
+    # The disconnect check races the wait deadline; a pending check is
+    # cancelled rather than allowed to stretch the cycle. Deferred import:
+    # streaming.handler pulls in streaming machinery that would cycle through
+    # the API layer at module import time.
     from llm_proxy.streaming.handler import check_client_disconnected
 
-    # One connection-check per cycle; it races the task, so a pending check is
-    # cancelled rather than allowed to stretch the cycle.
     checks = asyncio.ensure_future(check_client_disconnected(request))
     try:
         done, _ = await asyncio.wait(
@@ -126,7 +134,7 @@ async def wait_for_either(
     if task in done:
         return task.result()
     if checks in done and checks.result():
-        request.state.client_disconnected = True
+        setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
@@ -161,21 +169,119 @@ def _extract_body(response: Response) -> bytes:
     )
 
 
-async def _heartbeat_body(
-    task: asyncio.Task[Response], interval_seconds: float
-) -> AsyncIterator[bytes]:
-    """Yield heartbeat whitespace until the processing task completes, then its body."""
+async def _poll_until_done(
+    task: asyncio.Task[Response],
+    request: Request,
+    *,
+    poll_interval: float,
+    deadline: float | None = None,
+) -> Response | _Disconnected | _GraceExpired:
+    """Await ``task`` while polling the client connection for disconnects.
+
+    Shared by the keepalive grace period and the standalone disconnect
+    monitor. Returns the task's response when it completes, ``_Disconnected``
+    when the client went away (the task was cancelled and the pipeline logged
+    the abandonment), or ``_GraceExpired`` when ``deadline`` elapsed without
+    either.
+    """
+    loop = asyncio.get_running_loop()
+    while True:
+        if deadline is not None:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return _GraceExpired()
+            interval = min(remaining, poll_interval)
+        else:
+            interval = poll_interval
+        outcome = await wait_for_either(task, request, poll_interval=interval)
+        if isinstance(outcome, _Waiting):
+            continue
+        return outcome
+
+
+async def _disconnect_monitor(
+    request: Request,
+    task: asyncio.Task[Response],
+    stop_event: asyncio.Event,
+) -> None:
+    """Poll the client connection for disconnects during heartbeat mode.
+
+    Runs as its own task, independent of the response generator: once the
+    client is gone, uvicorn's middleware stops pulling the generator, so the
+    generator itself can never observe the disconnect. On detection the
+    in-flight pipeline task is cancelled with the abandonment flagged, so
+    the pipeline records it as a failure instead of a clean success.
+    """
+    from llm_proxy.streaming.handler import check_client_disconnected
+
     try:
         while True:
-            done, _ = await asyncio.wait({task}, timeout=interval_seconds)
-            if done:
-                break
-            yield _HEARTBEAT_BYTE
+            if await check_client_disconnected(request):
+                setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
+                stop_event.set()
+                if not task.done():
+                    task.cancel()
+                return
+            await asyncio.sleep(0)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - a failed poll must not kill the request
+        logger.debug("Keepalive disconnect monitor failed", exc_info=True)
+
+
+async def _heartbeat_body(
+    task: asyncio.Task[Response],
+    interval_seconds: float,
+    request: Request | None = None,
+) -> AsyncIterator[bytes]:
+    """Yield heartbeat whitespace until the processing task completes, then its body.
+
+    When ``request`` is given, a dedicated monitor task polls the client
+    connection while heartbeating: a gone client cancels the in-flight
+    provider request (the pipeline's cancellation handler records the
+    abandonment as a 499) and ends the stream — the client is gone, so
+    nothing further would be readable anyway.
+    """
+    try:
+        if request is not None:
+            stop_event = asyncio.Event()
+            monitor = asyncio.ensure_future(_disconnect_monitor(request, task, stop_event))
+            try:
+                while True:
+                    if task.done():
+                        break
+                    if stop_event.is_set():
+                        # Client went away: the monitor cancelled the task and
+                        # the pipeline logged the abandonment. End the stream.
+                        return
+                    with suppress(TimeoutError):
+                        await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+                    if task.done():
+                        break
+                    if stop_event.is_set():
+                        return
+                    yield _HEARTBEAT_BYTE
+            finally:
+                stop_event.set()
+                monitor.cancel()
+                with suppress(asyncio.CancelledError):
+                    await monitor
+        else:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=interval_seconds)
+                if done:
+                    break
+                yield _HEARTBEAT_BYTE
 
         yield _extract_body(task.result())
     except asyncio.CancelledError:
         # Client disconnected while we were heartbeating: stop the upstream
         # request as well so we don't keep paying for an abandoned generation.
+        # Flag the abandonment so the pipeline records it (the cancellation
+        # may come from the middleware's disconnect handling rather than our
+        # own monitor; both must record, never a clean success).
+        if request is not None:
+            setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
         if not task.done():
             task.cancel()
         raise
@@ -200,9 +306,9 @@ async def await_with_keepalive(
             committing to a 200 + heartbeat stream.
         interval_seconds: Heartbeat interval once in heartbeat mode.
         request: Optional request used for client-disconnect polling while
-            waiting. When the client disconnects, the processing task is
-            cancelled and a terminal 499 response is returned (the client is
-            gone; the log entry carries the failure).
+            waiting and during heartbeat mode. When the client disconnects,
+            the processing task is cancelled and a terminal 499 response is
+            returned (the client is gone; the log entry carries the failure).
 
     Returns:
         The original response when it completes within the grace period,
@@ -213,21 +319,25 @@ async def await_with_keepalive(
     if request is not None:
         # Wait out the grace period, watching for both completion and client
         # disconnects (uvicorn does not cancel handler tasks by itself).
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + grace_seconds
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                break
-            outcome = await wait_for_either(
-                task, request, poll_interval=min(remaining, _DISCONNECT_POLL_INTERVAL)
+        deadline = asyncio.get_running_loop().time() + grace_seconds
+        try:
+            outcome = await _poll_until_done(
+                task, request, poll_interval=_DISCONNECT_POLL_INTERVAL, deadline=deadline
             )
-            if isinstance(outcome, _Waiting):
-                continue
-            if isinstance(outcome, _Disconnected):
-                # Client disconnected: terminal response; the pipeline logged it.
-                return JSONResponse(status_code=499, content=_DISCONNECT_RESPONSE_PAYLOAD)
+        except BaseException:
+            # Real error or caller cancellation: don't leave the provider
+            # request running unattended.
+            if not task.done():
+                task.cancel()
+            raise
+        if isinstance(outcome, _Disconnected):
+            # Client disconnected: terminal response; the pipeline logged it.
+            return JSONResponse(status_code=499, content=_DISCONNECT_RESPONSE_PAYLOAD)
+        if not isinstance(outcome, _GraceExpired):
+            # Task result — a fully-rendered Response, or anything else the
+            # processing coroutine produced (FastAPI renders bare dicts).
             return outcome
+        # ``_GraceExpired`` — fall through to heartbeat mode below.
     else:
         try:
             return await asyncio.wait_for(asyncio.shield(task), timeout=grace_seconds)
@@ -246,7 +356,7 @@ async def await_with_keepalive(
         "switching to keepalive heartbeat mode"
     )
     return StreamingResponse(
-        _heartbeat_body(task, interval_seconds),
+        _heartbeat_body(task, interval_seconds, request=request),
         status_code=200,
         media_type="application/json",
     )
@@ -271,11 +381,7 @@ async def await_with_disconnect_monitor(
     task = asyncio.ensure_future(coro)
 
     try:
-        while True:
-            outcome = await wait_for_either(task, request, poll_interval=poll_interval)
-            if isinstance(outcome, _Waiting):
-                continue
-            break
+        outcome = await _poll_until_done(task, request, poll_interval=poll_interval)
     except BaseException:
         # Real error or caller cancellation: don't leave the provider request
         # running unattended.
@@ -290,6 +396,11 @@ async def await_with_disconnect_monitor(
             status_code=499,
             content=_DISCONNECT_RESPONSE_PAYLOAD,
         )
+    if isinstance(outcome, _GraceExpired):
+        # Unreachable: no deadline was passed, so the grace sentinel can
+        # never be returned here. Raised so the type checker can narrow the
+        # union to ``Response``.
+        raise AssertionError("grace-expired sentinel without a deadline")
     return outcome
 
 
@@ -297,5 +408,4 @@ __all__ = [
     "await_with_disconnect_monitor",
     "await_with_keepalive",
     "supports_keepalive",
-    "wait_for_either",
 ]

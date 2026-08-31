@@ -63,14 +63,10 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
 
         from llm_proxy.models import RequestMetadata
 
-        # Back-compat for non-SDK clients: a body-level ``betas`` list behaves
-        # like the ``anthropic-beta`` header, and legacy ``output_format``
-        # aliases ``output_config.format`` (structured-outputs pre-rename).
-        betas = data.get("betas")
-        if isinstance(betas, list) and betas:
-            from llm_proxy.providers.anthropic.client_headers import merge_body_betas
-
-            merge_body_betas(betas)
+        # Back-compat for non-SDK clients: legacy ``output_format`` aliases
+        # ``output_config.format`` (structured-outputs pre-rename). Body-level
+        # ``betas`` is handled by the protocol's ``on_parse_request`` hook,
+        # which owns the header-context side effect (ADR-0009).
         if isinstance(data.get("output_format"), dict) and not (
             isinstance(data.get("output_config"), dict)
             and data["output_config"].get("format") is not None

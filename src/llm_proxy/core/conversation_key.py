@@ -26,10 +26,13 @@ def session_id_from_client_metadata(metadata: Any) -> str | None:
     """Extract a session identifier from Anthropic-style request metadata.
 
     Claude Code sends ``metadata.user_id`` in the form
-    ``user_<id>_account_<account>_session_<session>``; everything after the
-    first ``_session_`` marker is the session id (mirrors cc-switch's
-    ``parse_session_from_user_id``). An explicit ``metadata.session_id`` field
-    is honoured as a fallback for clients that send it directly.
+    ``user_<id>_account_<account>_session_<session>`` where the session is
+    the trailing segment; everything from the first ``_session_`` marker on
+    is the session id (mirrors cc-switch's ``parse_session_from_user_id``).
+    Splitting at the first marker (not the last) keeps the full id even when
+    the session itself contains the marker. An explicit
+    ``metadata.session_id`` field is honoured as a fallback for clients that
+    send it directly.
 
     Non-dict metadata and empty/whitespace-only values yield None, so callers
     can treat the result uniformly as "no client-side session known".
@@ -47,6 +50,25 @@ def session_id_from_client_metadata(metadata: Any) -> str | None:
     if isinstance(session_id, str) and session_id.strip():
         return session_id
     return None
+
+
+def prompt_cache_key_from_request(request: Any) -> str | None:
+    """Resolve the upstream ``prompt_cache_key`` for a request.
+
+    The client's explicit ``params.openai.prompt_cache_key`` wins; otherwise
+    a session id derived from Anthropic client metadata (Claude Code sends
+    ``metadata.user_id = user_..._session_<id>``) keeps conversation-level KV
+    caches warm across turns. Mirrors cc-switch's session → prompt_cache_key
+    derivation. Shared by the Chat Completions request builder and the
+    Responses provider serializer.
+    """
+    params = getattr(request, "params", None)
+    openai_params = getattr(params, "openai", None)
+    cache_key = getattr(openai_params, "prompt_cache_key", None)
+    if cache_key is not None:
+        return cache_key
+    anthropic_params = getattr(params, "anthropic", None)
+    return session_id_from_client_metadata(getattr(anthropic_params, "metadata", None))
 
 
 def _content_text(content: Any) -> str:
@@ -94,4 +116,4 @@ def conversation_key(session_id: str | None, messages: list[dict]) -> str | None
     return None
 
 
-__all__ = ["conversation_key", "session_id_from_client_metadata"]
+__all__ = ["conversation_key", "prompt_cache_key_from_request", "session_id_from_client_metadata"]

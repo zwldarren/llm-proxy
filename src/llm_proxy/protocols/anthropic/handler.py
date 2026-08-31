@@ -1,6 +1,7 @@
 """Anthropic Messages API protocol endpoint."""
 
 import traceback
+from contextlib import AsyncExitStack
 from typing import Any
 
 from fastapi import Request
@@ -17,6 +18,11 @@ from llm_proxy.protocols.anthropic.schemas import (
 from llm_proxy.protocols.anthropic.serializer import AnthropicProtocolSerializer  # noqa: F401
 from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 from llm_proxy.protocols.base import ProtocolEndpoint
+from llm_proxy.providers.anthropic.client_headers import (
+    capture_client_headers,
+    clear_client_headers,
+    merge_body_betas,
+)
 
 logger = get_logger(__name__)
 
@@ -28,8 +34,6 @@ async def _capture_client_headers(request: Any, fastapi_request: Any) -> None:
     headers when building native Anthropic upstream requests (Claude Code
     fingerprint headers and the ``anthropic-beta`` marker).
     """
-    from llm_proxy.providers.anthropic.client_headers import capture_client_headers
-
     headers = getattr(fastapi_request, "headers", None)
     if headers is not None:
         capture_client_headers(headers)
@@ -37,9 +41,21 @@ async def _capture_client_headers(request: Any, fastapi_request: Any) -> None:
 
 def _clear_client_headers() -> None:
     """Drop the captured client headers after request formatting completes."""
-    from llm_proxy.providers.anthropic.client_headers import clear_client_headers
-
     clear_client_headers()
+
+
+def _merge_body_betas(raw_request_data: dict[str, Any]) -> None:
+    """Protocol hook (on_parse_request): merge a body-level ``betas`` list.
+
+    Back-compat for non-SDK clients: a body-level ``betas`` list behaves
+    like the ``anthropic-beta`` header. Runs before parsing, in the same
+    context as the header capture, so the adapter's merged upstream headers
+    see it. This owns the header-context side effect so the serializer's
+    ``parse_request`` stays a pure wire-to-internal conversion (ADR-0009).
+    """
+    betas = raw_request_data.get("betas")
+    if isinstance(betas, list) and betas:
+        merge_body_betas(betas)
 
 
 _BILLING_HEADER_PREFIX = "x-anthropic-billing-header:"
@@ -85,17 +101,10 @@ async def handle_count_tokens(
     back to a local heuristic estimate for non-native providers or on any
     forwarding failure.
     """
-    from llm_proxy.providers.anthropic.client_headers import (
-        capture_client_headers,
-        clear_client_headers,
-    )
-
-    # The upstream count may differ per beta features (e.g. context
-    # management), so capture fingerprint headers the same way /v1/messages
-    # does. This additional route bypasses protocol middleware.
-    headers = getattr(fastapi_request, "headers", None)
-    if headers is not None:
-        capture_client_headers(headers)
+    # Client headers are already captured by the protocol middleware chain
+    # (additional routes run inside it). The context is only cleared here:
+    # this route bypasses UnifiedProcessor, whose on_format_done hook would
+    # otherwise drop the headers after the request completes.
     try:
         forwarded = await _forward_count_tokens(request, fastapi_request)
         if forwarded is not None:
@@ -137,8 +146,8 @@ async def _forward_count_tokens(
     request: CountTokensRequest, fastapi_request: Request
 ) -> CountTokensResponse | None:
     """Try to count via the selected provider's upstream count endpoint."""
-    from contextlib import AsyncExitStack
-
+    # Deferred import: api.context pulls in protocols.registry at module
+    # level, which would cycle back into this protocol module.
     from llm_proxy.api.context import build_request_context
 
     context = await build_request_context(request, fastapi_request, protocol_name="anthropic")
@@ -200,6 +209,7 @@ anthropic_protocol = ProtocolEndpoint(
     request_model=MessagesRequest,
     streaming_transformer=AnthropicStreamingTransformer,
     middleware=[_capture_client_headers],
+    on_parse_request=_merge_body_betas,
     on_format_done=_clear_client_headers,
     on_provider_selected=_strip_claude_cli_billing_header,
     additional_routes=[

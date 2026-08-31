@@ -21,6 +21,9 @@ captured headers.
 
 import contextvars
 from collections.abc import Mapping
+from typing import Any
+
+from llm_proxy.providers.headers import merge_passthrough_headers
 
 # Exact header names (lowercase) forwarded to native Anthropic upstreams.
 _PASSTHROUGH_EXACT = frozenset(
@@ -117,7 +120,7 @@ def is_claude_code_client(headers: Mapping[str, str]) -> bool:
     return "claude-cli/" in (headers.get("user-agent") or "").lower()
 
 
-def merge_body_betas(betas: list) -> None:
+def merge_body_betas(betas: list[Any]) -> None:
     """Fold SDK-style ``betas`` request-body field into the captured beta header.
 
     The official SDKs send ``betas`` as the ``anthropic-beta`` header, but some
@@ -148,10 +151,7 @@ def merge_client_headers(headers: dict[str, str], client_headers: Mapping[str, s
     - ``anthropic-beta`` gains the ``claude-code-20250219`` marker only for
       Claude Code clients; other clients' beta lists pass through untouched.
     """
-    existing = {k.lower() for k in headers}
-    for key, value in client_headers.items():
-        if key.lower() not in existing:
-            headers[key] = value
+    merge_passthrough_headers(headers, client_headers)
     client_version = client_headers.get("anthropic-version")
     if client_version:
         headers["anthropic-version"] = client_version

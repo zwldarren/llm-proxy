@@ -590,21 +590,22 @@ class TestAnthropicProtocolEndpoint:
         assert unified.params.anthropic.cache_control == {"type": "ephemeral"}
 
     def test_parse_request_thinking_budget_validation(self):
-        """Test that thinking.budget_tokens must be less than max_tokens."""
-        from pydantic import ValidationError
+        """Test that thinking.budget_tokens bounds are enforced provider-side
+        (Claude models only; see TestThinkingBudgetValidation in
+        test_anthropic_wire_compatibility.py for the full matrix)."""
 
         MessagesRequest = anthropic_protocol.request_model
 
-        try:
-            MessagesRequest(
-                model="claude-3-opus",
-                max_tokens=100,
-                messages=[{"role": "user", "content": "hello"}],
-                thinking={"type": "enabled", "budget_tokens": 200},
-            )
-            raise AssertionError("Should have raised validation error")
-        except ValidationError:
-            pass
+        # The client-facing schema no longer validates the budget: the check
+        # moved to the Anthropic provider serializer so third-party
+        # Anthropic-compatible upstreams keep accepting what they did before.
+        parsed = MessagesRequest(
+            model="claude-3-opus",
+            max_tokens=100,
+            messages=[{"role": "user", "content": "hello"}],
+            thinking={"type": "enabled", "budget_tokens": 200},
+        )
+        assert parsed.model == "claude-3-opus"
 
     def test_additional_routes_count_tokens(self):
         """Test that additional_routes returns count_tokens endpoint."""

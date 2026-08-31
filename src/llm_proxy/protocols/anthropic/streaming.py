@@ -19,18 +19,20 @@ from llm_proxy.models import (
     ToolUseBlock,
 )
 from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
+from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
 
 def _message_delta_usage(usage: dict) -> dict:
     """Shape the terminal ``message_delta`` usage block.
 
-    Strips keys absent from the official ``MessageDeltaUsage`` shape, except
-    documented beta extensions: fast-mode ``speed`` and compaction/fallback
-    ``iterations`` ride through (SDKs ignore unknown keys; stripping them
-    would break per-iteration cost accounting, since top-level tokens EXCLUDE
-    compaction iterations). ``service_tier`` belongs to the full ``Usage``
-    object (emitted in ``message_start``) and stays stripped.
+    Everything except ``service_tier`` passes through: ``service_tier`` is
+    only valid on the full ``Usage`` object (emitted in ``message_start``).
+    The remaining keys — cache counters, ``output_tokens_details``, and the
+    beta extensions (fast-mode ``speed``, compaction/fallback
+    ``iterations``) — ride through verbatim: SDKs ignore unknown keys, and
+    stripping the compaction counter would break per-iteration cost
+    accounting, since top-level tokens EXCLUDE compaction iterations.
     """
     return {k: v for k, v in usage.items() if k != "service_tier"}
 
@@ -433,13 +435,10 @@ class AnthropicStreamingTransformer(StreamingTransformer):
             normalized["output_tokens"] = int(usage["output_tokens"])
 
         for key in (
+            *ANTHROPIC_USAGE_EXTENSION_KEYS,
             "cache_creation_input_tokens",
             "cache_read_input_tokens",
             "server_tool_use",
-            "output_tokens_details",
-            "service_tier",
-            "speed",
-            "iterations",
             "prompt_tokens_details",
             "completion_tokens_details",
         ):
@@ -455,14 +454,10 @@ class AnthropicStreamingTransformer(StreamingTransformer):
         start_usage: dict[str, Any] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
         if self._pending_usage:
             for key in (
+                *ANTHROPIC_USAGE_EXTENSION_KEYS,
                 "cache_creation_input_tokens",
                 "cache_read_input_tokens",
                 "server_tool_use",
-                "output_tokens_details",
-                "service_tier",
-                # Beta usage extensions (fast-mode, compaction/fallback).
-                "speed",
-                "iterations",
             ):
                 value = self._pending_usage.get(key)
                 if value is not None:

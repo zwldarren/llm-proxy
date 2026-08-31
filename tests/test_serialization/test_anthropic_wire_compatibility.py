@@ -23,6 +23,7 @@ Covers gaps found by an audit against the official Anthropic Messages API:
 import pytest
 
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.protocols.anthropic.handler import anthropic_protocol
 from llm_proxy.protocols.anthropic.schemas import MessagesRequest
 from llm_proxy.protocols.anthropic.serializer import AnthropicProtocolSerializer
 from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
@@ -65,6 +66,60 @@ def test_max_tokens_zero_reaches_upstream(provider):
         provider, {"model": "m", "max_tokens": 0, "messages": [{"role": "user", "content": "warm"}]}
     )
     assert body["max_tokens"] == 0
+
+
+def _thinking_request(model: str, max_tokens: int | None, budget_tokens: int | None = None) -> dict:
+    thinking: dict = {"type": "enabled"}
+    if budget_tokens is not None:
+        thinking["budget_tokens"] = budget_tokens
+    data: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": "x"}],
+        "thinking": thinking,
+    }
+    if max_tokens is not None:
+        data["max_tokens"] = max_tokens
+    return data
+
+
+class TestThinkingBudgetValidation:
+    """thinking.budget_tokens bounds are enforced provider-side (Anthropic's
+    API imposes >= 1024 and < max_tokens), gated on Claude models so
+    third-party Anthropic-compatible upstreams keep accepting what they
+    previously did."""
+
+    def test_budget_below_minimum_rejected(self, provider):
+        from llm_proxy.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match=">= 1024"):
+            build(provider, _thinking_request("claude-sonnet-4-5", 2000, budget_tokens=1000))
+
+    def test_budget_at_minimum_accepted(self, provider):
+        body = build(provider, _thinking_request("claude-sonnet-4-5", 2000, budget_tokens=1024))
+        assert body["thinking"]["budget_tokens"] == 1024
+
+    def test_budget_at_max_tokens_rejected(self, provider):
+        from llm_proxy.core.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="less than max_tokens"):
+            build(provider, _thinking_request("claude-sonnet-4-5", 2000, budget_tokens=2000))
+
+    def test_budget_none_accepted(self, provider):
+        body = build(provider, _thinking_request("claude-sonnet-4-5", 2000))
+        assert body["thinking"]["type"] == "enabled"
+
+    def test_budget_below_minimum_accepted_for_non_claude_model(self, provider):
+        """The 1024 floor is Anthropic-API-specific: compatible third-party
+        upstreams (DeepSeek, GLM, Kimi Code, ...) may not impose it."""
+        body = build(provider, _thinking_request("deepseek-chat", 2000, budget_tokens=500))
+        assert body["thinking"]["budget_tokens"] == 500
+
+    def test_budget_below_minimum_accepted_for_non_thinking_request(self, provider):
+        """The floor only applies while thinking is enabled (``adaptive`` or
+        ``enabled``); a disabled thinking block passes through."""
+        data = _thinking_request("claude-sonnet-4-5", 2000, budget_tokens=500)
+        data["thinking"]["type"] = "disabled"
+        assert build(provider, data)
 
 
 def test_server_tool_results_survive_roundtrip(protocol, provider):
@@ -516,7 +571,10 @@ def test_body_betas_merge_into_beta_header(protocol):
 
     clear_client_headers()
     try:
-        protocol.parse_request(
+        # Body-level ``betas`` is merged by the protocol's on_parse_request
+        # hook (parse_request itself stays a pure wire-to-internal
+        # conversion, ADR-0009).
+        anthropic_protocol.on_parse_request(
             {
                 "model": "m",
                 "max_tokens": 1,
@@ -543,7 +601,7 @@ def test_body_betas_merge_with_captured_header(protocol):
 
     try:
         capture_client_headers({"anthropic-beta": "interleaved-thinking-2025-05-14"})
-        protocol.parse_request(
+        anthropic_protocol.on_parse_request(
             {
                 "model": "m",
                 "max_tokens": 1,

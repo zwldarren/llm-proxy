@@ -92,8 +92,13 @@ class OpenAIRequestBuilder:
     @staticmethod
     def _build_stream_options(body: dict[str, Any], request: InternalRequest) -> dict[str, Any]:
         if request.stream_options is not None:
+            # ADR-0008: ``include_usage`` is no longer client-controllable on
+            # streaming requests — a client sending ``false`` would silently
+            # disable the proxy's cost accounting (the terminal usage chunk
+            # never arrives, so billing degrades to estimation). Forced on
+            # upstream; clients never see it on rebuilt streams.
             opts: dict[str, Any] = {
-                "include_usage": request.stream_options.include_usage,
+                "include_usage": True,
             }
             if request.stream_options.include_obfuscation is not None:
                 opts["include_obfuscation"] = request.stream_options.include_obfuscation
@@ -106,8 +111,7 @@ class OpenAIRequestBuilder:
             # input/output/cache billing is silently lost (mirrors cc-switch's
             # ``inject_openai_stream_include_usage``). Only the upstream stream
             # gains the usage chunk — the client-facing stream is re-serialized
-            # from parsed chunks, so clients never see it. Clients that
-            # explicitly sent ``stream_options`` keep their exact semantics.
+            # from parsed chunks, so clients never see it.
             body["stream_options"] = {"include_usage": True}
         return body
 
@@ -261,14 +265,9 @@ class OpenAIRequestBuilder:
         # base-url allow-list as client-provided keys — strict Chat
         # Completions gateways 400 on unknown fields. Mirrors cc-switch's
         # session → prompt_cache_key derivation.
-        cache_key = op.prompt_cache_key if op is not None else None
-        if cache_key is None:
-            from llm_proxy.core.conversation_key import session_id_from_client_metadata
+        from llm_proxy.core.conversation_key import prompt_cache_key_from_request
 
-            anthropic_metadata = (
-                request.params.anthropic.metadata if request.params.anthropic else None
-            )
-            cache_key = session_id_from_client_metadata(anthropic_metadata)
+        cache_key = prompt_cache_key_from_request(request)
         if cache_key is not None and OpenAIRequestBuilder._should_send_prompt_cache_key(
             context.base_url
         ):

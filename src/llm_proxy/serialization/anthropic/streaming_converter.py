@@ -15,7 +15,9 @@ logic lives alongside the provider serializer.
 import time
 from typing import Any
 
+from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models.finish_reasons import ANTHROPIC_TO_OPENAI
+from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
 
@@ -407,16 +409,20 @@ class AnthropicChunkConverter(StreamingTransformer):
             # thinking_tokens, service_tier, fast-mode "speed", compaction/
             # fallback "iterations") travel losslessly to the protocol
             # transformer's passthrough channel.
-            for key in ("output_tokens_details", "service_tier", "speed", "iterations"):
+            for key in ANTHROPIC_USAGE_EXTENSION_KEYS:
                 if usage.get(key) is not None:
                     self._pending_usage[key] = usage[key]
             # Also normalize provider-native counters into the OpenAI-dialect
-            # details objects (cached_tokens / reasoning_tokens), so canonical-
-            # channel consumers such as the OpenResponses usage folding can
-            # read a single dialect instead of special-casing Anthropic keys.
+            # details objects (cached_tokens / cache_write_tokens /
+            # reasoning_tokens), so canonical-channel consumers such as the
+            # OpenResponses usage folding can read a single dialect instead
+            # of special-casing Anthropic keys.
             if self._cache_read_input_tokens:
                 prompt_details = self._pending_usage.setdefault("prompt_tokens_details", {})
                 prompt_details["cached_tokens"] = self._cache_read_input_tokens
+            if self._cache_creation_input_tokens:
+                prompt_details = self._pending_usage.setdefault("prompt_tokens_details", {})
+                prompt_details["cache_write_tokens"] = self._cache_creation_input_tokens
             output_details = usage.get("output_tokens_details")
             thinking_tokens = (
                 output_details.get("thinking_tokens") if isinstance(output_details, dict) else None
@@ -434,8 +440,6 @@ class AnthropicChunkConverter(StreamingTransformer):
         transformer's ``error_frames`` instead of truncating the stream
         silently at this point.
         """
-        from llm_proxy.core.exceptions import ProviderError
-
         error = event.get("error", {})
         error_type = error.get("type") or "api_error"
         message = error.get("message") or "Upstream error event in stream"

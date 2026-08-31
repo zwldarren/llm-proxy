@@ -36,6 +36,7 @@ from llm_proxy.providers.anthropic.client_headers import (
     merge_client_headers as merge_anthropic_client_headers,
 )
 from llm_proxy.providers.base import extract_rate_limit_headers
+from llm_proxy.providers.headers import merge_passthrough_headers
 from llm_proxy.providers.openai.client_headers import (
     get_client_headers as get_openai_client_headers,
 )
@@ -158,12 +159,7 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
         """
         headers = super()._build_headers(auth_header, auth_prefix)
         merge_anthropic_client_headers(headers, get_anthropic_client_headers())
-        openai_headers = get_openai_client_headers()
-        if openai_headers:
-            existing = {k.lower() for k in headers}
-            for key, value in openai_headers.items():
-                if key.lower() not in existing:
-                    headers[key] = value
+        merge_passthrough_headers(headers, get_openai_client_headers())
         return headers
 
     # ------------------------------------------------------------------
