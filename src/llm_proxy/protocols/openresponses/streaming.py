@@ -14,7 +14,10 @@ from llm_proxy.models import ServerToolUseBlock, TextBlock, ThinkingBlock, ToolU
 from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.openresponses.handler import get_format_context
-from llm_proxy.protocols.openresponses.serializer import conversation_to_input_items
+from llm_proxy.protocols.openresponses.serializer import (
+    conversation_to_input_items,
+    incomplete_reason_from_finish,
+)
 from llm_proxy.protocols.openresponses.streaming_emitter import StreamingContentEmitter
 from llm_proxy.protocols.openresponses.streaming_events import StreamingEventFactory
 from llm_proxy.serialization.responses_toolkit import generate_item_id
@@ -95,6 +98,10 @@ class OpenResponsesStreamingState:
     reasoning_encrypted_contents: dict[int, str] = field(default_factory=dict)
     # Whether reasoning.encrypted_content was requested in include
     include_reasoning_encrypted: bool = False
+    # Anthropic thinking signatures (bridged as reasoning-item
+    # ``encrypted_content``), tracked per item so multi-block streams keep the
+    # signature attached to the item that produced it.
+    reasoning_signatures: dict[int, str] = field(default_factory=dict)
     # Track tool call indices that are server-side web_search (not emitted to client)
     web_search_tool_indices: set[int] = field(default_factory=set)
     # Count of native (provider-executed) web search calls, billed per request.
@@ -579,7 +586,8 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
             self.state.audio_input_tokens = (
                 ptd.get("audio_tokens", self.state.audio_input_tokens) or 0
             )
-
+        # Provider converters normalize provider-native counters into the
+        # OpenAI-dialect details objects, so only the dialect keys are read here.
         ctd = usage.get("completion_tokens_details")
         if isinstance(ctd, dict):
             self.state.audio_output_tokens = (
@@ -600,10 +608,15 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
         """
         events = ""
 
+        signature = delta.get("reasoning_signature")
+        if signature:
+            # Provider-emitted thinking signature (Anthropic upstream via the
+            # canonical chunk channel).
+            self.state.reasoning_signatures.setdefault(self.state.current_item_index, signature)
+
         reasoning_content = delta.get("reasoning_content")
         if reasoning_content:
             events += self._emitter._emit_reasoning_content(reasoning_content)
-
         content = delta.get("content")
         if content:
             events += self._emitter._emit_text_content(content)
@@ -714,10 +727,12 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
         if self._has_pending_web_search_continuation():
             return events
 
-        if finish_reason == "length":
+        reason = incomplete_reason_from_finish(finish_reason)
+        if reason is not None:
             events += self._factory._create_response_incomplete_event(
                 input_tokens=self.state.input_tokens,
                 output_tokens=self.state.output_tokens,
+                reason=reason,
             )
         else:
             events += self._factory._create_response_completed_event(
@@ -758,7 +773,11 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
                 if content_type == "output_text":
                     output.append(TextBlock(text=text))
                 elif content_type == "reasoning_text":
-                    output.append(ThinkingBlock(thinking=text))
+                    output.append(
+                        ThinkingBlock(
+                            thinking=text, signature=self.state.reasoning_signatures.get(key[0])
+                        )
+                    )
 
         for idx, tool_id in self.state.tool_call_ids.items():
             tool_name = self.state.tool_call_names.get(idx, "")

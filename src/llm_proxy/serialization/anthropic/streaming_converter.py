@@ -410,6 +410,20 @@ class AnthropicChunkConverter(StreamingTransformer):
             for key in ("output_tokens_details", "service_tier", "speed", "iterations"):
                 if usage.get(key) is not None:
                     self._pending_usage[key] = usage[key]
+            # Also normalize provider-native counters into the OpenAI-dialect
+            # details objects (cached_tokens / reasoning_tokens), so canonical-
+            # channel consumers such as the OpenResponses usage folding can
+            # read a single dialect instead of special-casing Anthropic keys.
+            if self._cache_read_input_tokens:
+                prompt_details = self._pending_usage.setdefault("prompt_tokens_details", {})
+                prompt_details["cached_tokens"] = self._cache_read_input_tokens
+            output_details = usage.get("output_tokens_details")
+            thinking_tokens = (
+                output_details.get("thinking_tokens") if isinstance(output_details, dict) else None
+            )
+            if thinking_tokens is not None:
+                completion_details = self._pending_usage.setdefault("completion_tokens_details", {})
+                completion_details["reasoning_tokens"] = thinking_tokens
         return None  # State-only event; chunk emitted on message_stop.
 
     def _handle_error(self, event: dict[str, Any]) -> dict[str, Any] | None:

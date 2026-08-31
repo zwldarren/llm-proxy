@@ -528,14 +528,14 @@ class TestAnthropicProtocolEndpoint:
         MessagesRequest = anthropic_protocol.request_model
         request = MessagesRequest(
             model="claude-3-opus",
-            max_tokens=1000,
+            max_tokens=2000,
             messages=[{"role": "user", "content": "think about it"}],
-            thinking={"type": "enabled", "budget_tokens": 500},
+            thinking={"type": "enabled", "budget_tokens": 1024},
         )
         unified = _serializer.parse_request(request.model_dump(exclude_none=True))
         assert unified.params.thinking is not None
         assert unified.params.thinking.type == "enabled"
-        assert unified.params.thinking.budget_tokens == 500
+        assert unified.params.thinking.budget_tokens == 1024
 
     def test_parse_request_with_metadata(self):
         """Test parsing request with metadata."""

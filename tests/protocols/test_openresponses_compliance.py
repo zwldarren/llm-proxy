@@ -1633,7 +1633,7 @@ class TestCompletedAtHandling:
         result = _serializer.format_response(internal)
         assert result["status"] == "incomplete"
         assert result["completed_at"] is not None
-        assert result["incomplete_details"]["reason"] == "length"
+        assert result["incomplete_details"]["reason"] == "max_output_tokens"
 
     def test_failed_response_has_completed_at(self):
         internal = InternalResponse(

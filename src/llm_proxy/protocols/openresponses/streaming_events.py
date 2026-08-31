@@ -34,6 +34,23 @@ def _create_summary_text_part(text: str) -> dict[str, Any]:
     }
 
 
+def _reasoning_encrypted_content(state: Any, item_index: int) -> str | None:
+    """Encrypted content for a reasoning item (include-gated or signature fallback).
+
+    The include-gated payload (``reasoning.encrypted_content`` requested) wins.
+    Otherwise an Anthropic-origin thinking signature is bridged into
+    ``encrypted_content`` — the only Responses field that round-trips it — so
+    replaying the item keeps multi-turn extended thinking working.
+    """
+    if state.include_reasoning_encrypted:
+        encrypted = (
+            state.reasoning_encrypted_contents.get(item_index) or state.reasoning_encrypted_content
+        )
+        if encrypted:
+            return encrypted
+    return state.reasoning_signatures.get(item_index)
+
+
 def _build_openresponses_response(
     *,
     response_id: str,
@@ -778,11 +795,8 @@ class StreamingEventFactory:
             item["summary"] = []
             if text:
                 item["summary"].append(_create_summary_text_part(text))
-            encrypted = (
-                self.state.reasoning_encrypted_contents.get(item_index)
-                or self.state.reasoning_encrypted_content
-            )
-            if self.state.include_reasoning_encrypted and encrypted:
+            encrypted = _reasoning_encrypted_content(self.state, item_index)
+            if encrypted:
                 item["encrypted_content"] = encrypted
         elif item_type in ("custom_tool_call", "function_call", "tool_search_call"):
             self._set_tool_call_args(item, item_index)
@@ -811,6 +825,7 @@ class StreamingEventFactory:
         status: str = "completed",
         input_tokens: int = 0,
         output_tokens: int = 0,
+        incomplete_reason: str | None = None,
     ) -> str:
         """Create response.completed event.
 
@@ -818,11 +833,17 @@ class StreamingEventFactory:
             status: Response status
             input_tokens: Total input tokens
             output_tokens: Total output tokens
+            incomplete_reason: Spec incomplete reason ("max_output_tokens" /
+                "content_filter") when status is "incomplete"
 
         Returns:
             SSE event string
         """
-        incomplete_details = {"reason": "length"} if status == "incomplete" else None
+        incomplete_details = (
+            {"reason": incomplete_reason}
+            if status == "incomplete" and incomplete_reason is not None
+            else None
+        )
         response_payload = _build_openresponses_response(
             response_id=self.response_id,
             created_at=self.state.created_at,
@@ -900,6 +921,7 @@ class StreamingEventFactory:
         self,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        reason: str = "max_output_tokens",
     ) -> str:
         """Create response.incomplete event.
 
@@ -908,6 +930,7 @@ class StreamingEventFactory:
         Args:
             input_tokens: Total input tokens
             output_tokens: Total output tokens
+            reason: Spec incomplete reason ("max_output_tokens" or "content_filter")
 
         Returns:
             SSE event string
@@ -921,7 +944,7 @@ class StreamingEventFactory:
             output=self._build_final_output(),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            incomplete_details={"reason": "length"},
+            incomplete_details={"reason": reason},
             reasoning=self.state.reasoning,
             cached_tokens=self.state.cached_tokens,
             reasoning_tokens=self.state.reasoning_tokens,
@@ -996,11 +1019,8 @@ class StreamingEventFactory:
                 # text, emit it once rather than as duplicate summary parts.
                 if summary_text and summary_text != text:
                     reasoning_item["summary"].append(_create_summary_text_part(summary_text))
-                encrypted = (
-                    self.state.reasoning_encrypted_contents.get(item_index)
-                    or self.state.reasoning_encrypted_content
-                )
-                if self.state.include_reasoning_encrypted and encrypted:
+                encrypted = _reasoning_encrypted_content(self.state, item_index)
+                if encrypted:
                     reasoning_item["encrypted_content"] = encrypted
                 output.append(reasoning_item)
                 continue

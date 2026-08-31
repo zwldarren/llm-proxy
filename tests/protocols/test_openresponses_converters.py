@@ -1024,7 +1024,7 @@ class TestFormatResponse:
         )
         result = self._serializer.format_response(internal)
         assert result["status"] == "incomplete"
-        assert result["incomplete_details"]["reason"] == "length"
+        assert result["incomplete_details"]["reason"] == "max_output_tokens"
 
     def test_finish_reason_error(self):
         internal = InternalResponse(

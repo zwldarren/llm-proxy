@@ -69,7 +69,7 @@ class MessagesRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_thinking_budget(self) -> MessagesRequest:
-        """Validate that thinking.budget_tokens is less than max_tokens."""
+        """Validate thinking.budget_tokens: >= 1024 and < max_tokens."""
         if self.thinking is not None:
             budget_tokens: int | None = None
             if isinstance(self.thinking, dict):
@@ -77,9 +77,11 @@ class MessagesRequest(BaseModel):
             elif hasattr(self.thinking, "budget_tokens"):
                 budget_tokens = self.thinking.budget_tokens
 
-            if budget_tokens is not None and budget_tokens >= self.max_tokens:
+            if budget_tokens is not None and (
+                budget_tokens < 1024 or budget_tokens >= self.max_tokens
+            ):
                 raise ValueError(
-                    f"thinking.budget_tokens ({budget_tokens}) must be less than "
-                    f"max_tokens ({self.max_tokens})"
+                    f"thinking.budget_tokens ({budget_tokens}) must be >= 1024 and "
+                    f"less than max_tokens ({self.max_tokens})"
                 )
         return self

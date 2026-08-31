@@ -511,8 +511,11 @@ class AnthropicContentMixin:
             "type": "thinking",
             "thinking": block.thinking,
         }
-        if block.signature:
-            thinking_block["signature"] = block.signature
+        # Responses clients carry the signature (or redacted payload) in the
+        # reasoning item's ``encrypted_content``; restore it for verification.
+        signature = block.signature or block.encrypted_content
+        if signature:
+            thinking_block["signature"] = signature
         return thinking_block
 
     def _format_redacted_thinking_block(self, block: RedactedThinkingBlock) -> dict[str, Any]:

@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import orjson
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -851,3 +852,152 @@ class TestFormEncodedBody:
         assert response.status_code == 200
         assert isinstance(captured["raw"].input, list)
         assert captured["raw"].input[0].role == "user"
+
+
+def _stored_response() -> dict:
+    """Minimal stored response payload as persisted by ResponseStore.store."""
+    return {
+        "id": "resp_x",
+        "object": "response",
+        "created_at": 1,
+        "completed_at": 2,
+        "status": "completed",
+        "model": "gpt-5.2",
+        "output": [],
+        "input": [
+            {"type": "message", "role": "user", "content": "first", "id": "item_a"},
+            {"type": "message", "role": "user", "content": "second", "id": "item_b"},
+            {"type": "message", "role": "user", "content": "third", "id": "item_c"},
+        ],
+    }
+
+
+def _seed_stored_response(mock_redis, **overrides) -> None:
+    """Point mock_redis.get at a stored response body, with optional overrides."""
+    stored = _stored_response()
+    stored.update(overrides)
+    mock_redis.get = AsyncMock(return_value=orjson.dumps(stored))
+
+
+class TestCancelResponse:
+    """POST /v1/responses/{id}/cancel (spec Responses — Cancel)."""
+
+    def test_cancel_stored_response_conflicts(self, client, mock_redis):
+        """Stored responses are terminal (requests run synchronously); cancel
+        must surface a 409 rather than pretending to cancel."""
+        _seed_stored_response(mock_redis)
+        response = client.post("/v1/responses/resp_x/cancel")
+        assert response.status_code == 409
+
+    def test_cancel_cancelled_response_idempotent(self, client, mock_redis):
+        """Spec (background guide): cancelling twice is idempotent — a second
+        cancel returns the stored Response object instead of conflicting."""
+        _seed_stored_response(mock_redis, status="cancelled")
+        response = client.post("/v1/responses/resp_x/cancel")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "cancelled"
+        assert "input" not in body
+
+    def test_cancel_background_in_progress_response_succeeds(self, client, mock_redis):
+        """Spec: only responses created with background=true can be cancelled;
+        the cancelled status is persisted back to the store."""
+        _seed_stored_response(mock_redis, status="in_progress", background=True)
+        response = client.post("/v1/responses/resp_x/cancel")
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "cancelled"
+        saved = orjson.loads(mock_redis.setex.call_args.args[2])
+        assert saved["status"] == "cancelled"
+
+    def test_cancel_non_background_response_conflicts(self, client, mock_redis):
+        """Spec: only responses created with background=true can be cancelled —
+        a non-background in-flight response must conflict."""
+        _seed_stored_response(mock_redis, status="in_progress", background=False)
+        response = client.post("/v1/responses/resp_x/cancel")
+        assert response.status_code == 409
+
+    def test_cancel_unknown_response_not_found(self, client, mock_redis):
+        response = client.post("/v1/responses/resp_missing/cancel")
+        assert response.status_code == 404
+
+    def test_endpoint_registered(self):
+        from llm_proxy.api.routers.openresponses import router
+
+        cancel_paths = {
+            route.path
+            for route in router.routes
+            if "POST" in (getattr(route, "methods", None) or set())
+        }
+        assert "/v1/responses/{response_id}/cancel" in cancel_paths
+
+
+class TestListInputItems:
+    """GET /v1/responses/{id}/input_items (spec Responses Input Items — List)."""
+
+    def test_lists_materialized_input(self, client, mock_redis):
+        _seed_stored_response(mock_redis)
+        response = client.get("/v1/responses/resp_x/input_items")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["object"] == "list"
+        assert [i["id"] for i in body["data"]] == ["item_c", "item_b", "item_a"]  # desc default
+        assert body["first_id"] == "item_c"
+        assert body["last_id"] == "item_a"
+        assert body["has_more"] is False
+
+    def test_order_asc_and_limit(self, client, mock_redis):
+        _seed_stored_response(mock_redis)
+        response = client.get(
+            "/v1/responses/resp_x/input_items", params={"order": "asc", "limit": 2}
+        )
+        body = response.json()
+        assert [i["id"] for i in body["data"]] == ["item_a", "item_b"]
+        assert body["first_id"] == "item_a"
+
+    def test_limit_out_of_range_rejected(self, client, mock_redis):
+        """Spec: limit ranges between 1 and 100 — out-of-range values are
+        rejected instead of silently clamped."""
+        _seed_stored_response(mock_redis)
+        response = client.get(
+            "/v1/responses/resp_x/input_items", params={"limit": 500, "order": "asc"}
+        )
+        assert response.status_code == 422
+
+    def test_after_paginates(self, client, mock_redis):
+        _seed_stored_response(mock_redis)
+        response = client.get(
+            "/v1/responses/resp_x/input_items", params={"order": "asc", "after": "item_b"}
+        )
+        body = response.json()
+        assert [i["id"] for i in body["data"]] == ["item_c"]
+
+    def test_after_desc_paginates(self, client, mock_redis):
+        """The after cursor skips items in the requested (desc) order."""
+        _seed_stored_response(mock_redis)
+        response = client.get("/v1/responses/resp_x/input_items", params={"after": "item_c"})
+        body = response.json()
+        assert [i["id"] for i in body["data"]] == ["item_b", "item_a"]
+        assert body["first_id"] == "item_b"
+
+    def test_unknown_after_rejected(self, client, mock_redis):
+        """An after cursor that matches no input item is an error."""
+        _seed_stored_response(mock_redis)
+        response = client.get("/v1/responses/resp_x/input_items", params={"after": "no_such_item"})
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_cursor"
+
+    def test_include_validates_values(self, client, mock_redis):
+        """include values outside the spec's documented set are rejected."""
+        _seed_stored_response(mock_redis)
+        ok = client.get(
+            "/v1/responses/resp_x/input_items",
+            params={"include": "reasoning.encrypted_content"},
+        )
+        assert ok.status_code == 200, ok.text
+        bad = client.get("/v1/responses/resp_x/input_items", params={"include": "bogus.field"})
+        assert bad.status_code == 400
+        assert bad.json()["error"]["code"] == "invalid_include"
+
+    def test_not_found(self, client, mock_redis):
+        response = client.get("/v1/responses/resp_missing/input_items")
+        assert response.status_code == 404

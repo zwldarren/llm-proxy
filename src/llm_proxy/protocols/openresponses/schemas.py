@@ -4,6 +4,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+#: Spec ServiceTier values (shared by request params, response echo and the
+#: compact endpoint so all three accept the same tier set).
+type ServiceTier = Literal["auto", "default", "flex", "scale", "priority", "fast", "ultrafast"]
+
 # =============================================================================
 # Content Types (Input)
 # =============================================================================
@@ -21,7 +25,9 @@ class InputImageContent(BaseModel):
 
     type: Literal["input_image"] = "input_image"
     image_url: str = Field(..., description="URL or base64 data URL of the image")
-    detail: Literal["low", "high", "auto"] = Field("auto", description="Image detail level")
+    detail: Literal["low", "high", "auto", "original"] = Field(
+        "auto", description="Image detail level"
+    )
 
 
 class InputFileContent(BaseModel):
@@ -670,6 +676,12 @@ class ReasoningParam(BaseModel):
     summary: Literal["auto", "concise", "detailed"] | None = Field(
         None, description="Reasoning summary style"
     )
+    generate_summary: Literal["auto", "concise", "detailed"] | None = Field(
+        None,
+        description=(
+            "Deprecated: use `summary` instead. Legacy reasoning summary generation control"
+        ),
+    )
 
 
 class TextResponseFormat(BaseModel):
@@ -722,6 +734,9 @@ class InputTokensDetails(BaseModel):
     """Input token usage details."""
 
     cached_tokens: int = Field(..., description="Number of cached tokens")
+    cache_write_tokens: int | None = Field(
+        None, description="Number of tokens written to the prompt cache"
+    )
 
 
 class OutputTokensDetails(BaseModel):
@@ -827,9 +842,7 @@ class ResponsesRequest(BaseModel):
     truncation: Literal["auto", "disabled"] | None = Field(None, description="Truncation mode")
     instructions: str | None = Field(None, description="Additional instructions")
     store: bool | None = Field(None, description="Store response")
-    service_tier: Literal["auto", "default", "flex", "priority"] | None = Field(
-        None, description="Service tier"
-    )
+    service_tier: ServiceTier | None = Field(None, description="Service tier")
     top_logprobs: int | None = Field(None, ge=0, le=20, description="Number of top logprobs")
 
 
@@ -842,8 +855,8 @@ class ResponsesResponse(BaseModel):
     id: str = Field(..., description="Unique response ID")
     object: Literal["response"] = "response"
     created_at: int = Field(..., description="Unix timestamp of creation")
-    status: Literal["queued", "in_progress", "completed", "failed", "incomplete"] = Field(
-        ..., description="Response status"
+    status: Literal["queued", "in_progress", "completed", "failed", "incomplete", "cancelled"] = (
+        Field(..., description="Response status")
     )
     model: str = Field(..., description="Model used")
 
@@ -869,9 +882,7 @@ class ResponsesResponse(BaseModel):
     max_tool_calls: int | None = Field(None, description="Max tool calls")
     store: bool | None = Field(None, description="Store response")
     background: bool | None = Field(None, description="Background mode")
-    service_tier: Literal["auto", "default", "flex", "priority"] | None = Field(
-        None, description="Service tier used"
-    )
+    service_tier: ServiceTier | None = Field(None, description="Service tier used")
     metadata: dict[str, str] | None = Field(None, description="Metadata")
     safety_identifier: str | None = Field(None, description="Safety identifier")
     prompt_cache_key: str | None = Field(None, description="Cache key")
@@ -880,6 +891,7 @@ class ResponsesResponse(BaseModel):
 
 
 __all__ = [
+    "ServiceTier",
     "InputTextContent",
     "InputImageContent",
     "InputFileContent",

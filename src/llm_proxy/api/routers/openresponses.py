@@ -6,14 +6,20 @@ from contextlib import suppress
 from typing import Annotated, Any, Literal, cast
 
 import orjson
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.requests import Request as StarletteRequest
 
 from llm_proxy.api.context import HasModel, build_request_context
 from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
-from llm_proxy.core.exceptions import AuthenticationFailedError, ConfigurationError, NotFoundError
+from llm_proxy.core.exceptions import (
+    AuthenticationFailedError,
+    ConfigurationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from llm_proxy.core.ws_common import (
     WS_CLOSE_AUTH_FAILED,
     WS_MAX_CONNECTION_SECONDS,
@@ -27,6 +33,7 @@ from llm_proxy.protocols.openresponses.compaction import build_compaction_respon
 from llm_proxy.protocols.openresponses.schemas import (
     ReasoningParam,
     ResponsesResponse,
+    ServiceTier,
     TextFormatParam,
     TextParam,
     ToolParam,
@@ -116,9 +123,7 @@ class CompactionRequest(BaseModel):
         None, description="Whether the model may call multiple tools in parallel"
     )
     reasoning: ReasoningParam | None = Field(None, description="Reasoning configuration")
-    service_tier: Literal["auto", "default", "flex", "priority"] | None = Field(
-        None, description="Service tier"
-    )
+    service_tier: ServiceTier | None = Field(None, description="Service tier")
     prompt_cache_options: dict[str, Any] | None = Field(
         None, description="Prompt cache options (opaque, accepted for compatibility)"
     )
@@ -255,6 +260,25 @@ router.post("/responses/compact")(compact_response)
 router.post("/v1/v1/responses/compact")(compact_response)
 
 
+def _response_not_found(response_id: str) -> NotFoundError:
+    """Build the standard not-found error for a missing or expired stored response."""
+    return NotFoundError(
+        message=f"Response '{response_id}' not found or expired. "
+        "Stored responses expire after 24 hours."
+    )
+
+
+def _stripped_response(stored: dict[str, Any]) -> dict[str, Any]:
+    """Drop the internal materialized ``input`` from a stored response body.
+
+    The stored body carries ``input`` so follow-up previous_response_id
+    continuations (and /v1/responses/compact) can replay the conversation. The
+    spec's ResponseResource has no ``input`` field, so endpoints strip it
+    before returning the body to clients.
+    """
+    return {k: v for k, v in stored.items() if k != "input"}
+
+
 @router.get("/v1/responses/{response_id}")
 async def get_response(
     response_id: str,
@@ -276,16 +300,8 @@ async def get_response(
     """
     stored = await response_store.retrieve(api_key_name, response_id)
     if stored is None:
-        raise NotFoundError(
-            message=f"Response '{response_id}' not found or expired. "
-            "Stored responses expire after 24 hours."
-        )
-    # The stored body carries the materialized ``input`` so follow-up
-    # previous_response_id continuations (and /v1/responses/compact) can
-    # replay the conversation. That is internal proxy state — the spec's
-    # ResponseResource has no ``input`` field — so strip it before returning.
-    stored = {k: v for k, v in stored.items() if k != "input"}
-    return ResponsesResponse(**stored)
+        raise _response_not_found(response_id)
+    return ResponsesResponse(**_stripped_response(stored))
 
 
 @router.delete("/v1/responses/{response_id}")
@@ -308,15 +324,127 @@ async def delete_response(
     if not deleted:
         # OpenAI parity: deleting an unknown/expired response id is a 404,
         # not a 200 with deleted=false.
-        raise NotFoundError(
-            message=f"Response '{response_id}' not found or expired. "
-            "Stored responses expire after 24 hours."
-        )
+        raise _response_not_found(response_id)
     return {
         "id": response_id,
         "deleted": True,
         "object": "response.deleted",
     }
+
+
+@router.post("/v1/responses/{response_id}/cancel")
+async def cancel_response(
+    response_id: str,
+    response_store: ResponseStoreRequiredDep,
+    api_key_name: ApiKeyNameDep,
+) -> dict:
+    """Cancel a stored response by ID.
+
+    Per the spec, only responses created with ``background=true`` whose status
+    is still queued/in_progress can be cancelled, and cancelling an
+    already-cancelled response is idempotent (the stored response object is
+    returned). The proxy executes requests synchronously, so a stored response
+    is normally already terminal by the time a cancel call arrives — the
+    endpoint therefore surfaces the spec-shaped 409 conflict instead of
+    pretending to cancel.
+    """
+    stored = await response_store.retrieve(api_key_name, response_id)
+    if stored is None:
+        raise _response_not_found(response_id)
+    status = stored.get("status")
+    if status == "cancelled":
+        # Spec (background guide): cancelling twice is idempotent — a second
+        # cancel simply returns the final Response object.
+        return _stripped_response(stored)
+    if status in ("queued", "in_progress") and stored.get("background") is True:
+        # Spec: only responses created with background=true can be cancelled.
+        stored["status"] = "cancelled"
+        await response_store.store(api_key_name, response_id, stored)
+        return _stripped_response(stored)
+    raise ConflictError(
+        message=f"Cannot cancel a response with status '{status}'. "
+        "Only background responses that are still queued or in progress "
+        "can be cancelled."
+    )
+
+
+#: Spec include values for the input-items endpoint. The stored items already
+#: carry whatever the client sent (e.g. ``reasoning.encrypted_content``), so
+#: every supported includable is honored by returning the stored data verbatim;
+#: values outside this set are rejected per the spec.
+_INPUT_ITEMS_INCLUDE_VALUES = frozenset(
+    {
+        "file_search_call.results",
+        "web_search_call.results",
+        "web_search_call.action.sources",
+        "message.input_image.image_url",
+        "computer_call_output.output.image_url",
+        "code_interpreter_call.outputs",
+        "reasoning.encrypted_content",
+        "message.output_text.logprobs",
+    }
+)
+
+
+@router.get("/v1/responses/{response_id}/input_items")
+async def list_input_items(
+    response_id: str,
+    response_store: ResponseStoreRequiredDep,
+    api_key_name: ApiKeyNameDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    order: Literal["asc", "desc"] = "desc",
+    after: str | None = None,
+    # ``include`` is a FastAPI-reserved parameter name, so the wire param is
+    # bound via an explicit alias.
+    include_values: Annotated[list[str] | None, Query(alias="include")] = None,
+) -> dict:
+    """List the input items of a stored response.
+
+    The stored body carries the materialized ``input`` items (reconciled with
+    previous_response_id continuations), which is exactly the item list this
+    endpoint returns. ``after`` is an item cursor: items following that item in
+    the requested order are returned; an unknown cursor is rejected.
+    """
+    stored = await response_store.retrieve(api_key_name, response_id)
+    if stored is None:
+        raise _response_not_found(response_id)
+    items: list[Any] = _as_input_items(stored.get("input"))
+
+    include = include_values or []
+    if include:
+        unknown = [value for value in include if value not in _INPUT_ITEMS_INCLUDE_VALUES]
+        if unknown:
+            raise ValidationError(
+                message=f"Invalid include value(s): {', '.join(unknown)}. Supported "
+                f"values: {', '.join(sorted(_INPUT_ITEMS_INCLUDE_VALUES))}.",
+                code="invalid_include",
+            )
+    if order == "desc":
+        items = list(reversed(items))
+    if after is not None:
+        position = next((i for i, item in enumerate(items) if _item_id(item) == after), None)
+        if position is None:
+            raise ValidationError(
+                message=f"Unknown 'after' cursor '{after}': no input item with "
+                "that id exists in this response.",
+                code="invalid_cursor",
+            )
+        items = items[position + 1 :]
+    data = items[:limit]
+    return {
+        "object": "list",
+        "data": data,
+        "first_id": _item_id(data[0]) if data else None,
+        "last_id": _item_id(data[-1]) if data else None,
+        "has_more": len(items) > len(data),
+    }
+
+
+def _item_id(item: Any) -> str | None:
+    """Item ID accessor for raw input item dicts (ids are optional)."""
+    if isinstance(item, dict):
+        return item.get("id")
+    return None
 
 
 def _as_input_items(value: Any) -> list[Any]:

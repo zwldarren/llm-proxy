@@ -642,7 +642,7 @@ class TestIncompleteAndRefusal:
             )
         )
         assert result["status"] == "incomplete"
-        assert result["incomplete_details"] == {"reason": "length"}
+        assert result["incomplete_details"] == {"reason": "max_output_tokens"}
         assert result["output"][-1]["status"] == "incomplete"
 
     def test_standalone_refusal_is_completed(self):

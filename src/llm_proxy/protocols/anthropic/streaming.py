@@ -664,8 +664,14 @@ class AnthropicStreamingTransformer(StreamingTransformer):
             self._pending_stop_reason = None
             self._has_pending_usage = False
         elif self._has_pending_usage and self._pending_usage is not None:
+            # Official message_delta events always carry a stop_reason alongside
+            # usage; fall back to "end_turn" when the upstream never supplied
+            # one (degenerate truncation path).
             result_chunks.append(
-                self._message_delta_with_usage(_message_delta_usage(self._pending_usage))
+                self._message_delta_with_stop_reason_and_usage(
+                    "end_turn",
+                    _message_delta_usage(self._pending_usage),
+                )
             )
             self._has_pending_usage = False
 

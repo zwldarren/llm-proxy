@@ -68,6 +68,12 @@ from llm_proxy.serialization.responses_toolkit import (
 
 logger = logging.getLogger(__name__)
 
+#: Placeholder text emitted for RedactedThinkingBlock summaries. The opaque
+#: payload rides ``encrypted_content`` (see conversation_to_input_items /
+#: _format_thinking_block); the parse side recognizes this marker to restore
+#: the block type on round-trip.
+REDACTED_THINKING_TEXT = "[redacted]"
+
 # Audio format to media type mapping for input_audio content blocks
 _AUDIO_FORMAT_TO_MEDIA_TYPE: dict[str, str] = {
     "wav": "audio/wav",
@@ -247,15 +253,19 @@ def conversation_to_input_items(
                 reasoning_item: dict[str, Any] = {"type": "reasoning", "summary": []}
                 if block.thinking:
                     reasoning_item["summary"] = [{"type": "summary_text", "text": block.thinking}]
-                if block.encrypted_content:
-                    reasoning_item["encrypted_content"] = block.encrypted_content
+                # Bridge anthropic-native verification payloads (signature) into
+                # encrypted_content — the only Responses field that round-trips.
+                native_payload = block.encrypted_content or block.signature
+                if native_payload:
+                    reasoning_item["encrypted_content"] = native_payload
                 if reasoning_item["summary"] or reasoning_item.get("encrypted_content"):
                     reasoning_items.append(reasoning_item)
             elif isinstance(block, RedactedThinkingBlock) and block.data:
                 reasoning_items.append(
                     {
                         "type": "reasoning",
-                        "summary": [{"type": "summary_text", "text": block.data}],
+                        "summary": [{"type": "summary_text", "text": REDACTED_THINKING_TEXT}],
+                        "encrypted_content": block.data,
                     }
                 )
             elif isinstance(block, ToolUseBlock):
@@ -684,7 +694,12 @@ def _process_reasoning_item(
     if not thinking_text:
         thinking_text = _extract_summary_text(item_dict.get("summary", []))
     encrypted = item_dict.get("encrypted_content")
-    if thinking_text or encrypted:
+    if thinking_text == REDACTED_THINKING_TEXT and encrypted:
+        # Round-trip of a formatted redacted_thinking block: the opaque data
+        # rides in encrypted_content (see conversation_to_input_items /
+        # _format_thinking_block).
+        pending_assistant_blocks.append(RedactedThinkingBlock(data=encrypted))
+    elif thinking_text or encrypted:
         pending_assistant_blocks.append(
             ThinkingBlock(thinking=thinking_text, encrypted_content=encrypted)
         )
@@ -1317,7 +1332,10 @@ def _format_text_block(
     annotations: list[dict[str, Any]] = []
     if block.citations:
         for citation in block.citations:
-            if isinstance(citation, dict) and citation.get("type") == "url_citation":
+            if not isinstance(citation, dict):
+                continue
+            ctype = citation.get("type")
+            if ctype == "url_citation":
                 annotations.append(
                     {
                         "type": "url_citation",
@@ -1325,6 +1343,24 @@ def _format_text_block(
                         "start_index": citation.get("start_index", 0),
                         "end_index": citation.get("end_index", 0),
                         "title": citation.get("title", ""),
+                    }
+                )
+            elif isinstance(ctype, str) and ctype and citation.get("url"):
+                # Anthropic-native citation dicts (char_location /
+                # page_location / content_block_location /
+                # web_search_result_location / search_result_location): the
+                # Responses annotation union has no location-citation type, so
+                # project URL/title evidence onto url_citation when a real URL
+                # is present. No URL (e.g. cite_index-only references) means
+                # the annotation would carry fabricated offsets — drop it
+                # instead.
+                annotations.append(
+                    {
+                        "type": "url_citation",
+                        "url": citation.get("url"),
+                        "start_index": 0,
+                        "end_index": 0,
+                        "title": citation.get("title") or citation.get("document_title", ""),
                     }
                 )
     text_part: dict[str, Any] = {
@@ -1362,8 +1398,17 @@ def _format_text_block(
 def _format_thinking_block(
     block: ThinkingBlock | RedactedThinkingBlock, include: list[str] | None
 ) -> dict[str, Any]:
-    """Format a thinking block as a reasoning item."""
-    text = "[redacted]" if isinstance(block, RedactedThinkingBlock) else block.thinking
+    """Format a thinking block as a completed reasoning item.
+
+    Redacted blocks surface the ``REDACTED_THINKING_TEXT`` marker in their
+    summary (the parse side restores the block type on round-trip). Anthropic
+    verification payloads (``thinking.signature`` / ``redacted_thinking.data``)
+    have no Responses-native field, so ``encrypted_content`` carries them —
+    replaying this item keeps multi-turn extended thinking working since
+    Anthropic rejects unsigned thinking blocks. Genuine ``encrypted_content``
+    stays include-gated per the spec.
+    """
+    text = REDACTED_THINKING_TEXT if isinstance(block, RedactedThinkingBlock) else block.thinking
     reasoning_item: dict[str, Any] = {
         "type": "reasoning",
         "id": generate_item_id(),
@@ -1371,10 +1416,11 @@ def _format_thinking_block(
         "content": [],
         "summary": [{"type": "summary_text", "text": text}],
     }
-    if include and "reasoning.encrypted_content" in include:
-        encrypted = getattr(block, "encrypted_content", None)
-        if encrypted:
-            reasoning_item["encrypted_content"] = encrypted
+    native_payload = getattr(block, "signature", None) or getattr(block, "data", None)
+    requested = bool(include) and "reasoning.encrypted_content" in include
+    encrypted = getattr(block, "encrypted_content", None)
+    if (encrypted and requested) or native_payload:
+        reasoning_item["encrypted_content"] = encrypted or native_payload
     return reasoning_item
 
 
@@ -1619,6 +1665,21 @@ def _format_output_item(
     return None
 
 
+def incomplete_reason_from_finish(finish_reason: str | None) -> str | None:
+    """Map a finish reason to the spec's ``incomplete_details.reason`` value.
+
+    Returns ``"max_output_tokens"`` / ``"content_filter"`` when the finish
+    reason denotes an incomplete response, else None. Shared by the
+    non-streaming formatter, the streaming transformer and the event factory
+    so the finish-reason mapping lives in exactly one place.
+    """
+    if finish_reason == "content_filter":
+        return "content_filter"
+    if finish_reason == "length":
+        return "max_output_tokens"
+    return None
+
+
 def _build_status_and_error(
     response: InternalResponse,
 ) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
@@ -1627,13 +1688,11 @@ def _build_status_and_error(
     error: dict[str, Any] | None = None
     incomplete_details: dict[str, Any] | None = None
     finish_reason = response.finish_reason
-    if finish_reason == "length":
+    if finish_reason in ("length", "content_filter"):
         status = "incomplete"
-        # Preserve the upstream incomplete reason (max_output_tokens /
-        # content_filter) when the provider supplied one; otherwise keep
-        # the generic "length" reason.
-        incomplete_reason = (response.provider_info or {}).get("incomplete_reason")
-        incomplete_details = {"reason": incomplete_reason or "length"}
+        provider_reason = (response.provider_info or {}).get("incomplete_reason")
+        incomplete_reason = provider_reason or incomplete_reason_from_finish(finish_reason)
+        incomplete_details = {"reason": incomplete_reason}
     elif finish_reason == "error":
         status = "failed"
         # Terminal-status validation: an HTTP 2xx response object whose
@@ -1675,12 +1734,31 @@ def _build_usage(response: InternalResponse) -> dict[str, Any]:
             else response.usage.input_tokens + response.usage.output_tokens
         ),
     }
-    if response.usage.prompt_tokens_details:
-        usage_payload["prompt_tokens_details"] = asdict(response.usage.prompt_tokens_details)
-    if response.usage.completion_tokens_details:
-        usage_payload["completion_tokens_details"] = asdict(
-            response.usage.completion_tokens_details
+    # Fold provider-canonical fields into the OpenAI-dialect details objects.
+    prompt_details = (
+        asdict(response.usage.prompt_tokens_details) if response.usage.prompt_tokens_details else {}
+    )
+    if response.usage.cache_read_input_tokens:
+        prompt_details["cached_tokens"] = max(
+            prompt_details.get("cached_tokens") or 0,
+            response.usage.cache_read_input_tokens,
         )
+    if response.usage.cache_creation_input_tokens:
+        prompt_details["cache_write_tokens"] = response.usage.cache_creation_input_tokens
+    if prompt_details:
+        usage_payload["prompt_tokens_details"] = prompt_details
+    completion_details = (
+        asdict(response.usage.completion_tokens_details)
+        if response.usage.completion_tokens_details
+        else {}
+    )
+    if response.usage.reasoning_tokens:
+        completion_details["reasoning_tokens"] = max(
+            completion_details.get("reasoning_tokens") or 0,
+            response.usage.reasoning_tokens,
+        )
+    if completion_details:
+        usage_payload["completion_tokens_details"] = completion_details
     return _convert_usage(usage_payload)
 
 

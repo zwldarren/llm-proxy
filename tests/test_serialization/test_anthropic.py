@@ -1297,6 +1297,43 @@ class TestAnthropicChunkConverter:
         assert stop_chunk is not None
         assert stop_chunk["choices"][0]["delta"]["reasoning_signature"] == "sigA"
 
+    def test_usage_normalized_into_openai_dialect_details(self, converter):
+        """Anthropic-native cache/thinking counters are normalized into the
+        OpenAI-dialect details objects so canonical-channel consumers read a
+        single dialect; the lossless passthrough keys are preserved."""
+        converter.convert_chunk(
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "m1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-x",
+                    "content": [],
+                    "usage": {"input_tokens": 10, "cache_read_input_tokens": 70},
+                },
+            }
+        )
+        converter.convert_chunk(
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {
+                    "output_tokens": 5,
+                    "output_tokens_details": {"thinking_tokens": 7},
+                },
+            }
+        )
+        final = converter.convert_chunk({"type": "message_stop"})
+        assert final is not None
+        usage = final["usage"]
+        assert usage["prompt_tokens"] == 80  # 10 input + 70 cache read
+        assert usage["prompt_tokens_details"] == {"cached_tokens": 70}
+        assert usage["completion_tokens_details"] == {"reasoning_tokens": 7}
+        # Lossless Anthropic-native passthrough is preserved.
+        assert usage["cache_read_input_tokens"] == 70
+        assert usage["output_tokens_details"] == {"thinking_tokens": 7}
+
     def test_thinking_and_signature_full_flow(self, converter):
         """Multiple thinking deltas plus signature are all preserved."""
         converter.convert_chunk(

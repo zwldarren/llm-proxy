@@ -642,7 +642,7 @@ class TestIncompleteReasonPreserved:
         assert formatted["status"] == "incomplete"
         assert formatted["incomplete_details"] == {"reason": "content_filter"}
 
-    def test_missing_reason_defaults_to_length(self):
+    def test_missing_reason_defaults_to_max_output_tokens(self):
         from llm_proxy.protocols.openresponses.serializer import (
             OpenResponsesProtocolSerializer,
         )
@@ -667,7 +667,7 @@ class TestIncompleteReasonPreserved:
         )
         formatted = OpenResponsesProtocolSerializer().format_response(parsed)
         assert formatted["status"] == "incomplete"
-        assert formatted["incomplete_details"] == {"reason": "length"}
+        assert formatted["incomplete_details"] == {"reason": "max_output_tokens"}
 
 
 class TestWebSearchActionPreserved:
