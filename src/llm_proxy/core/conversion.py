@@ -68,6 +68,7 @@ from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_ou
 from llm_proxy.models import ConversionTier, InternalRequest
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.streaming.sse_parse import iter_sse_data_events
 
 if TYPE_CHECKING:
     from llm_proxy.serialization.context import BuildContext
@@ -345,48 +346,35 @@ class NativePassthroughHandler:
         if not isinstance(chunk, str):
             return None
 
-        event_type: str | None = None
-        for line in chunk.split("\n"):
-            line = line.strip()
-            if line.startswith("event: "):
-                event_type = line[7:]
-            elif line.startswith("data: "):
-                try:
-                    parsed = orjson.loads(line[6:])
-                except JSONDecodeError:
-                    continue
-
-                effective_type = event_type or (
-                    parsed.get("type") if isinstance(parsed, dict) else None
-                )
-                if effective_type in (
-                    "response.completed",
-                    "response.incomplete",
-                    "response.failed",
-                ):
-                    payload = parsed.get("response")
-                    if isinstance(payload, dict):
-                        state = getattr(transformer, "state", None)
-                        if state is not None and hasattr(state, "final_response_payload"):
-                            state.final_response_payload = payload
-                        NativePassthroughHandler._apply_openresponses_usage(
-                            payload.get("usage"), event_context
-                        )
-                        # Reasoning cache: native streams bypass the
-                        # transformer (whose accumulation feeds the cache on
-                        # converted streams), so write it from the terminal
-                        # snapshot instead. Never fatal.
-                        try_cache_reasoning_from_responses_output(
-                            payload.get("output"),
-                            payload.get("id", "") or "",
-                            logger_prefix="NativePassthrough",
-                        )
-                        if model:
-                            payload["model"] = model
-                            return NativePassthroughHandler._rewrite_openresponses_frame(
-                                chunk, parsed
-                            )
-                event_type = None
+        for event_type, parsed in iter_sse_data_events(chunk):
+            effective_type = event_type or (
+                parsed.get("type") if isinstance(parsed, dict) else None
+            )
+            if effective_type in (
+                "response.completed",
+                "response.incomplete",
+                "response.failed",
+            ):
+                payload = parsed.get("response")
+                if isinstance(payload, dict):
+                    state = getattr(transformer, "state", None)
+                    if state is not None and hasattr(state, "final_response_payload"):
+                        state.final_response_payload = payload
+                    NativePassthroughHandler._apply_openresponses_usage(
+                        payload.get("usage"), event_context
+                    )
+                    # Reasoning cache: native streams bypass the
+                    # transformer (whose accumulation feeds the cache on
+                    # converted streams), so write it from the terminal
+                    # snapshot instead. Never fatal.
+                    try_cache_reasoning_from_responses_output(
+                        payload.get("output"),
+                        payload.get("id", "") or "",
+                        logger_prefix="NativePassthrough",
+                    )
+                    if model:
+                        payload["model"] = model
+                        return NativePassthroughHandler._rewrite_openresponses_frame(chunk, parsed)
         return None
 
     @staticmethod
@@ -493,22 +481,11 @@ class NativePassthroughHandler:
         if not isinstance(chunk, str) or "event:" not in chunk:
             return
 
-        event_type: str | None = None
-        for line in chunk.split("\n"):
-            line = line.strip()
-            if line.startswith("event: "):
-                event_type = line[7:]
-            elif line.startswith("data: ") and event_type:
-                try:
-                    parsed = orjson.loads(line[6:])
-                except JSONDecodeError:
-                    continue
-
-                if event_type in ("message_start", "message_delta"):
-                    NativePassthroughHandler.process_anthropic_usage_event(
-                        event_type, parsed, event_context
-                    )
-                event_type = None
+        for event_type, parsed in iter_sse_data_events(chunk):
+            if event_type in ("message_start", "message_delta"):
+                NativePassthroughHandler.process_anthropic_usage_event(
+                    event_type, parsed, event_context
+                )
 
 
 __all__ = [

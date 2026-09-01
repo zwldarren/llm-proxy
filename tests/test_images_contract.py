@@ -173,6 +173,23 @@ def test_gemini_image_stream_is_normalized_to_openai_events():
     assert normalized[1]["b64_json"] == "abc"
 
 
+def test_gemini_image_stream_no_space_sse_is_normalized():
+    """Kimi-style no-space ``data:{...}`` framing must parse identically."""
+    payload = orjson.dumps(
+        {
+            "candidates": [
+                {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "abc"}}]}}
+            ],
+            "usageMetadata": {"promptTokenCount": 4, "candidatesTokenCount": 2},
+        }
+    ).decode()
+    normalized = normalize_image_stream_chunk(f"data:{payload}\n\n", created_at=123)
+    assert len(normalized) == 2
+    assert normalized[0]["type"] == "image_generation.partial_image"
+    assert normalized[1]["type"] == "image_generation.completed"
+    assert normalized[1]["usage"]["total_tokens"] == 6
+
+
 def test_edit_stream_events_pass_through_unchanged():
     chunk = (
         "event: image_edit.partial_image\n"

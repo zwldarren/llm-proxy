@@ -18,6 +18,7 @@ from llm_proxy.core.adapter import AdapterConfig, register_adapter
 from llm_proxy.models import InternalResponse
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
+from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 logger = get_logger(__name__)
 
@@ -59,9 +60,7 @@ class OpenRouterAdapter(OpenAICompatibleBase):
     def _stream_filter_line(self, line_str: str) -> str | None:
         if line_str.startswith(":"):
             return None
-        if line_str.startswith("data: "):
-            return line_str[6:].strip()
-        return None
+        return parse_sse_data_line(line_str)
 
     def _post_process_chat_response(
         self, response: dict[str, Any], result: InternalResponse

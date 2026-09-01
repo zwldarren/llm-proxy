@@ -8,6 +8,7 @@ import orjson
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models import InternalRequest
 from llm_proxy.providers.capabilities.host import ChatSelf
+from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 
 class ChatCapabilityMixin:
@@ -47,9 +48,7 @@ class ChatCapabilityMixin:
         )
 
     def _stream_filter_line(self: ChatSelf, line_str: str) -> str | None:
-        if line_str.startswith("data: "):
-            return line_str[6:].strip()
-        return None
+        return parse_sse_data_line(line_str)
 
     def _stream_transform_chunk(
         self: ChatSelf, chunk: dict[str, Any], context: dict[str, Any]

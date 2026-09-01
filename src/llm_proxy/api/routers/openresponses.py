@@ -40,6 +40,7 @@ from llm_proxy.protocols.openresponses.schemas import (
 )
 from llm_proxy.protocols.openresponses.store import ResponseStore
 from llm_proxy.providers.openai.client_headers import capture_client_headers
+from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 logger = logging.getLogger(__name__)
 
@@ -499,8 +500,8 @@ def _parse_sse_blocks(buffer: str) -> tuple[list[dict[str, Any]], str]:
     for block in complete:
         data_line = None
         for line in block.splitlines():
-            if line.startswith("data: "):
-                data_line = line[6:]
+            data_line = parse_sse_data_line(line)
+            if data_line is not None:
                 break
         if data_line is None or data_line == "[DONE]":
             continue

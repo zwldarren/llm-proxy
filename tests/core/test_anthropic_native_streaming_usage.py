@@ -80,3 +80,49 @@ def test_anthropic_combined_start_and_delta_usage():
     assert ctx.cache_read_input_tokens == 300
     assert ctx.cache_creation_input_tokens == 200
     assert ctx.total_tokens == 2000  # 1500 + 500
+
+
+def test_anthropic_no_space_sse_delimiters_usage_extraction():
+    """Kimi Code-style upstreams emit SSE without a space after the field
+    colon (``event:message_delta`` / ``data:{...}``). Per the SSE spec that
+    is equivalent to ``event: message_delta``; usage must still be captured.
+    """
+    frame = (
+        "event:message_delta\n"
+        'data:{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},'
+        '"usage":{"input_tokens":294,"cache_creation_input_tokens":0,'
+        '"cache_read_input_tokens":96512,"output_tokens":63,'
+        '"output_tokens_details":{"thinking_tokens":41}}}\n\n'
+    )
+    ctx = EventContext(
+        request_id="r1",
+        trace_id="t1",
+        model="kimi-k2",
+        request_type=RequestType.CHAT,
+    )
+    handler.maybe_capture_native_streaming_usage(frame, ctx)
+    assert ctx.prompt_tokens == 96806
+    assert ctx.completion_tokens == 63
+    assert ctx.total_tokens == 96869
+    assert ctx.cache_read_input_tokens == 96512
+    assert ctx.cache_creation_input_tokens == 0
+
+
+def test_anthropic_no_space_message_start_usage_extraction():
+    """message_start frames with no-space delimiters must also be parsed."""
+    frame = (
+        "event:message_start\n"
+        'data:{"type":"message_start","message":{"id":"msg_123","type":"message",'
+        '"role":"assistant","model":"kimi-k2","usage":{"input_tokens":1000,'
+        '"output_tokens":0,"cache_read_input_tokens":300,'
+        '"cache_creation_input_tokens":200}}}\n\n'
+    )
+    ctx = EventContext(
+        request_id="r1",
+        trace_id="t1",
+        model="kimi-k2",
+        request_type=RequestType.CHAT,
+    )
+    handler.maybe_capture_native_streaming_usage(frame, ctx)
+    assert ctx.prompt_tokens == 1500
+    assert ctx.total_tokens == 1500

@@ -382,6 +382,22 @@ class TestStreamingUsageCapture:
         assert ctx.total_tokens == 10
         assert transformer.state.final_response_payload["usage"]["input_tokens"] == 7
 
+    def test_no_space_sse_delimiters_captured(self):
+        """Upstreams that omit the space after the SSE field colon
+        (``data:{...}``) must still be parsed — spec-equivalent framing."""
+        ctx = self._ctx()
+        transformer = self._transformer()
+        chunk = (
+            "event:response.completed\n"
+            'data:{"type":"response.completed",'
+            '"response":{"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}}\n\n'
+        )
+        NativePassthroughHandler.maybe_capture_native_openresponses(chunk, transformer, ctx)
+        assert ctx.prompt_tokens == 7
+        assert ctx.completion_tokens == 3
+        assert ctx.total_tokens == 10
+        assert transformer.state.final_response_payload["usage"]["input_tokens"] == 7
+
     def _transformer(self) -> types.SimpleNamespace:
         return types.SimpleNamespace(state=types.SimpleNamespace(final_response_payload=None))
 

@@ -48,6 +48,7 @@ from llm_proxy.serialization.gemini.speech import (
     wav_header,
 )
 from llm_proxy.serialization.providers import get_provider_serializer
+from llm_proxy.streaming.sse_parse import strip_sse_data_prefix
 
 if TYPE_CHECKING:
     from llm_proxy.models.provider import ProviderModelInfo
@@ -560,11 +561,7 @@ class GeminiAdapter(
                         if not line:
                             continue
 
-                        line_str = line.decode("utf-8")
-
-                        if line_str.startswith("data: "):
-                            line_str = line_str[6:]
-
+                        line_str = strip_sse_data_prefix(line.decode("utf-8"))
                         if not line_str or line_str == "[DONE]":
                             continue
 
@@ -867,9 +864,7 @@ class GeminiAdapter(
                     async for line in cast(AsyncIterator[bytes], response.iter_lines()):
                         if not line:
                             continue
-                        line_str = line.decode("utf-8")
-                        if line_str.startswith("data: "):
-                            line_str = line_str[6:]
+                        line_str = strip_sse_data_prefix(line.decode("utf-8"))
                         if not line_str or line_str == "[DONE]":
                             continue
                         try:
@@ -1283,10 +1278,7 @@ class GeminiAdapter(
                         if not line:
                             continue
 
-                        line_str = line.decode("utf-8")
-                        if line_str.startswith("data: "):
-                            line_str = line_str[6:]
-
+                        line_str = strip_sse_data_prefix(line.decode("utf-8"))
                         if not line_str or line_str == "[DONE]":
                             continue
 

@@ -54,6 +54,7 @@ from llm_proxy.observability.cost import finalize_event_cost
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.streaming.handler import StreamingHandler
+from llm_proxy.streaming.sse_parse import contains_sse_event
 
 logger = get_logger(__name__)
 
@@ -1037,7 +1038,7 @@ class StreamingProcessor:
                         break
 
                     if _native_streaming:
-                        if isinstance(chunk, str) and "event: message_start" in chunk:
+                        if isinstance(chunk, str) and contains_sse_event(chunk, "message_start"):
                             handler = self._native_passthrough_handler
                             # Mask the upstream's internal model name with the
                             # client-requested alias (see InternalRequest.echo_model).

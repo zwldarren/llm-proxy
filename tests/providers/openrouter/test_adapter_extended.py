@@ -69,6 +69,11 @@ class TestStreamFilterLine:
         assert result is not None
         assert "a: b" in result
 
+    def test_passes_data_lines_without_space(self, adapter):
+        """No-space SSE framing (Kimi-style upstreams) parses identically."""
+        assert adapter._stream_filter_line('data:{"choices":[]}') == '{"choices":[]}'
+        assert adapter._stream_filter_line("data:[DONE]") == "[DONE]"
+
 
 # ---------------------------------------------------------------------------
 # Request body — OpenRouter-specific parameters

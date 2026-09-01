@@ -774,3 +774,30 @@ class TestPromptCacheKeyGating:
     def test_dropped_for_kimi_non_coding_path(self):
         body = self._body_for_base_url("https://api.kimi.com/v1")
         assert "prompt_cache_key" not in body
+
+
+class TestStreamFilterLineNoSpaceTolerance:
+    """The default chat stream filter must accept both SSE spellings.
+
+    Upstreams disagree on ``data: {...}`` vs ``data:{...}``; the no-space
+    form must not silently drop the whole stream.
+    """
+
+    @pytest.fixture
+    def adapter(self):
+        return OpenAICompatibleBase(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+        )
+
+    def test_data_line_both_spellings(self, adapter):
+        assert adapter._stream_filter_line('data: {"choices":[]}') == '{"choices":[]}'
+        assert adapter._stream_filter_line('data:{"choices":[]}') == '{"choices":[]}'
+
+    def test_done_marker_both_spellings(self, adapter):
+        assert adapter._stream_filter_line("data: [DONE]") == "[DONE]"
+        assert adapter._stream_filter_line("data:[DONE]") == "[DONE]"
+
+    def test_non_data_lines_return_none(self, adapter):
+        assert adapter._stream_filter_line("event: chunk") is None
+        assert adapter._stream_filter_line("") is None

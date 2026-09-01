@@ -998,3 +998,60 @@ class TestGeminiStreamingErrorPassthrough:
         error = exc_info.value
         assert error.status_code == 400
         assert "Gemini request failed" not in error.message
+
+
+class TestGeminiNoSpaceSseTolerance:
+    """Gemini-compatible relays may omit the space after the SSE field colon.
+
+    Regression: ``data:{...}`` lines used to fall through to orjson with the
+    ``data:`` prefix intact, so every chunk was silently dropped (empty
+    stream, no usage). The parser must accept both SSE spellings.
+    """
+
+    @staticmethod
+    def _stream_response(lines: list[bytes]) -> MagicMock:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        async def _iter_lines():
+            for line in lines:
+                yield line
+
+        mock_response.iter_lines = _iter_lines
+        return mock_response
+
+    @staticmethod
+    def _chat_request() -> InternalRequest:
+        return InternalRequest(
+            model="gemini-2.0-flash",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+        )
+
+    async def test_stream_chat_parses_no_space_sse_frames(self):
+        from contextlib import asynccontextmanager
+
+        adapter = GeminiAdapter(api_key="test-key")
+        response_mock = self._stream_response(
+            [
+                b'data:{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],'
+                b'"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}',
+                b"data:[DONE]",
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_streaming_post(*args, **kwargs):
+            yield response_mock
+
+        with (
+            patch.object(adapter, "_get_client", return_value=MagicMock()),
+            patch.object(adapter._transport, "streaming_post", fake_streaming_post),
+        ):
+            stream_gen = await adapter.stream_chat_completion(self._chat_request())
+            chunks = [chunk async for chunk in stream_gen]
+
+        content_chunks = [chunk for chunk in chunks if chunk != "[DONE]"]
+        assert content_chunks, "no-space SSE frames must still produce chunks"
+        assert any(chunk.get("choices") for chunk in content_chunks)

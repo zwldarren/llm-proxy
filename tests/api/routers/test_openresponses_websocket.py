@@ -10,7 +10,32 @@ from starlette.websockets import WebSocketDisconnect
 
 from llm_proxy.api.dependencies import require_api_key_auth
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
+from llm_proxy.api.routers.openresponses import _parse_sse_blocks
 from llm_proxy.protocols.openresponses.store import ResponseStore
+
+
+@pytest.mark.parametrize(
+    ("buffer", "expected"),
+    [
+        (
+            # No-space spelling: relays may omit the space after the SSE
+            # field colon (spec-equivalent); the WS transport must not drop
+            # those events.
+            'event:response.completed\ndata:{"type":"response.completed","response":{"id":"r1"}}\n\n',
+            [{"type": "response.completed", "response": {"id": "r1"}}],
+        ),
+        (
+            'event: response.completed\ndata: {"type":"response.completed"}\n\n',
+            [{"type": "response.completed"}],
+        ),
+    ],
+    ids=["no-space", "spaced"],
+)
+def test_parse_sse_blocks_accepts_both_sse_spellings(buffer, expected):
+    """Both spaced and no-space SSE field spellings parse identically."""
+    events, remainder = _parse_sse_blocks(buffer)
+    assert events == expected
+    assert remainder == ""
 
 
 @pytest.fixture

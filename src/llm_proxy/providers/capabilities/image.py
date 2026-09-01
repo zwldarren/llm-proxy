@@ -9,6 +9,7 @@ import orjson
 from llm_proxy.core.exceptions import ProviderError, ValidationError
 from llm_proxy.models import InternalImageResponse
 from llm_proxy.providers.capabilities.host import ImageSelf
+from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 
 def _image_sse_payloads(chunk: str) -> tuple[list[dict[str, Any]], bool]:
@@ -16,10 +17,9 @@ def _image_sse_payloads(chunk: str) -> tuple[list[dict[str, Any]], bool]:
     payloads: list[dict[str, Any]] = []
     done = False
     for line in chunk.splitlines():
-        line = line.strip()
-        if not line.startswith("data: "):
+        raw = parse_sse_data_line(line)
+        if raw is None:
             continue
-        raw = line[6:]
         if raw == "[DONE]":
             done = True
             continue
