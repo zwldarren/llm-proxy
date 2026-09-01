@@ -1,6 +1,6 @@
 [project]
 name = "llm-proxy"
-version = "0.2.0"
+version = "0.2.1"
 description = "A self-hostable, multi-provider LLM API gateway with protocol translation, streaming, rate limiting, MCP integration, and a Vue 3 admin dashboard."
 readme = "README.md"
 requires-python = ">=3.14"
