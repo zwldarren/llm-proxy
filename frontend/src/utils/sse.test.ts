@@ -43,6 +43,7 @@ describe("sse utils", () => {
       const result = parseStreamResponse(body);
       expect(result.reconstructedContent).toBe("Hello World");
       expect(result.chunks).toHaveLength(3);
+      expect(result.meta.eventCount).toBe(3);
     });
 
     it("reconstructs reasoning content", () => {
@@ -76,6 +77,7 @@ describe("sse utils", () => {
 
       const result = parseAnthropicStreamResponse(body);
       expect(result.reconstructedContent).toBe("Hello World");
+      expect(result.meta.eventCount).toBe(3);
     });
 
     it("extracts tool calls from tool_use blocks", () => {

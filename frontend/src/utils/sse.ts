@@ -1,4 +1,26 @@
+/**
+ * Response-level metadata extracted from a stream, shared by both SSE
+ * dialects. Returned as one object so consumers can pass it straight
+ * through instead of re-bundling flat fields.
+ */
+export interface StreamMeta {
+  /** Completion / message id (first event that carries one) */
+  id?: string;
+  /** Model (first event that carries one) */
+  model?: string;
+  /** finish_reason (OpenAI-style streams) */
+  finishReason?: string;
+  /** stop_reason (Anthropic streams) */
+  stopReason?: string;
+  /** stop_sequence (Anthropic streams) */
+  stopSequence?: string;
+  /** Number of successfully parsed SSE data events */
+  eventCount: number;
+}
+
 interface StreamChunk {
+  id?: string;
+  model?: string;
   choices?: Array<{
     delta?: {
       content?: string;
@@ -27,6 +49,8 @@ interface ParsedStreamResponse {
   reasoningContent: string;
   toolCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
   chunks: StreamChunk[];
+  /** Stream-level metadata (id, model, finish reason, event count) */
+  meta: StreamMeta;
 }
 
 interface ParsedSSEEvent {
@@ -100,6 +124,7 @@ export const parseStreamResponse = (body: string): ParsedStreamResponse => {
   const lines = body.split("\n");
   let reconstructedContent = "";
   let reasoningContent = "";
+  const meta: StreamMeta = { eventCount: 0 };
   const chunks: StreamChunk[] = [];
   // Reconstruct streaming tool calls incrementally, keyed by delta index.
   const toolBuffers = new Map<
@@ -110,13 +135,20 @@ export const parseStreamResponse = (body: string): ParsedStreamResponse => {
   for (const line of lines) {
     const parsed = parseSSEEvent(line);
     if (!parsed) continue;
+    meta.eventCount++;
     if (parsed.error) {
       chunks.push({ error: parsed.error });
       continue;
     }
     if (parsed.data) {
       chunks.push(parsed.data);
-      const delta = parsed.data.choices?.[0]?.delta;
+      meta.id = meta.id ?? parsed.data.id;
+      meta.model = meta.model ?? parsed.data.model;
+      const choice = parsed.data.choices?.[0];
+      const delta = choice?.delta;
+      if (choice?.finish_reason) {
+        meta.finishReason = choice.finish_reason;
+      }
       if (!delta) continue;
       if (delta.content) {
         reconstructedContent += delta.content;
@@ -155,13 +187,30 @@ export const parseStreamResponse = (body: string): ParsedStreamResponse => {
       };
     });
 
-  return { reconstructedContent, reasoningContent, toolCalls, chunks };
+  return {
+    reconstructedContent,
+    reasoningContent,
+    toolCalls,
+    chunks,
+    meta,
+  };
 };
+
+/** One ordered content block reconstructed from an Anthropic stream. */
+export type AnthropicStreamBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string }
+  | { type: "redacted_thinking" }
+  | { type: "tool_use"; id: string; name: string; arguments: string };
 
 interface ParsedAnthropicStreamResponse {
   reconstructedContent: string;
   reasoningContent: string;
   toolCalls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  /** Content blocks in their original (content-block index) order */
+  blocks: AnthropicStreamBlock[];
+  /** Stream-level metadata (message id, model, stop reason, event count) */
+  meta: StreamMeta;
 }
 
 /**
@@ -172,11 +221,10 @@ export const parseAnthropicStreamResponse = (body: string): ParsedAnthropicStrea
   let reconstructedContent = "";
   let reasoningContent = "";
   const toolCalls: ParsedAnthropicStreamResponse["toolCalls"] = [];
-  const toolBuffers: Map<string, { name: string; arguments: string }> = new Map();
-  let currentToolId = "";
-  let currentToolArgs = "";
-  let currentContentIndex = -1;
-  let currentThinkingIndex = -1;
+  const meta: StreamMeta = { eventCount: 0 };
+
+  // Ordered content blocks keyed by their content-block index.
+  const blockSlots = new Map<number, AnthropicStreamBlock>();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]?.trim();
@@ -202,20 +250,31 @@ export const parseAnthropicStreamResponse = (body: string): ParsedAnthropicStrea
     } catch {
       continue;
     }
+    meta.eventCount++;
 
     const type = data.type as string | undefined;
 
-    if (type === "content_block_start") {
+    if (type === "message_start") {
+      const message = data.message as Record<string, unknown> | undefined;
+      meta.id = (message?.id as string) || meta.id;
+      meta.model = (message?.model as string) || meta.model;
+    } else if (type === "message_delta") {
+      const delta = data.delta as Record<string, unknown> | undefined;
+      meta.stopReason = (delta?.stop_reason as string) || meta.stopReason;
+      meta.stopSequence = (delta?.stop_sequence as string) || meta.stopSequence;
+    } else if (type === "content_block_start") {
       const index = data.index as number;
       const contentBlock = data.content_block as Record<string, unknown> | undefined;
       if (contentBlock?.type === "text") {
-        currentContentIndex = index;
+        blockSlots.set(index, { type: "text", text: (contentBlock.text as string) || "" });
       } else if (contentBlock?.type === "thinking") {
-        currentThinkingIndex = index;
-      } else if (contentBlock?.type === "tool_use") {
-        currentToolId = (contentBlock.id as string) || "";
-        currentToolArgs = "";
-        toolBuffers.set(currentToolId, {
+        blockSlots.set(index, { type: "thinking", thinking: "" });
+      } else if (contentBlock?.type === "redacted_thinking") {
+        blockSlots.set(index, { type: "redacted_thinking" });
+      } else if (contentBlock?.type === "tool_use" || contentBlock?.type === "server_tool_use") {
+        blockSlots.set(index, {
+          type: "tool_use",
+          id: (contentBlock.id as string) || "",
           name: (contentBlock.name as string) || "",
           arguments: "",
         });
@@ -223,34 +282,38 @@ export const parseAnthropicStreamResponse = (body: string): ParsedAnthropicStrea
     } else if (type === "content_block_delta") {
       const index = data.index as number;
       const delta = data.delta as Record<string, unknown> | undefined;
-      if (delta?.type === "text_delta" && index === currentContentIndex) {
-        reconstructedContent += (delta.text as string) || "";
-      } else if (delta?.type === "thinking_delta" && index === currentThinkingIndex) {
-        reasoningContent += (delta.thinking as string) || "";
-      } else if (delta?.type === "input_json_delta") {
-        currentToolArgs += (delta.partial_json as string) || "";
-        if (currentToolId && toolBuffers.has(currentToolId)) {
-          const tool = toolBuffers.get(currentToolId)!;
-          tool.arguments = currentToolArgs;
-        }
-      }
-    } else if (type === "content_block_stop") {
-      const index = data.index as number;
-      if (index === currentContentIndex) {
-        currentContentIndex = -1;
-      } else if (index === currentThinkingIndex) {
-        currentThinkingIndex = -1;
+      const slot = blockSlots.get(index);
+      if (delta?.type === "text_delta" && slot?.type === "text") {
+        const text = (delta.text as string) || "";
+        slot.text += text;
+        reconstructedContent += text;
+      } else if (delta?.type === "thinking_delta" && slot?.type === "thinking") {
+        const thinking = (delta.thinking as string) || "";
+        slot.thinking += thinking;
+        reasoningContent += thinking;
+      } else if (delta?.type === "input_json_delta" && slot?.type === "tool_use") {
+        slot.arguments += (delta.partial_json as string) || "";
       }
     }
   }
 
-  for (const [id, tool] of toolBuffers) {
-    toolCalls.push({
-      id,
-      type: "function",
-      function: { name: tool.name, arguments: tool.arguments },
-    });
+  const blocks = [...blockSlots.entries()].sort((a, b) => a[0] - b[0]).map(([, block]) => block);
+
+  for (const block of blocks) {
+    if (block.type === "tool_use") {
+      toolCalls.push({
+        id: block.id,
+        type: "function",
+        function: { name: block.name, arguments: block.arguments },
+      });
+    }
   }
 
-  return { reconstructedContent, reasoningContent, toolCalls };
+  return {
+    reconstructedContent,
+    reasoningContent,
+    toolCalls,
+    blocks,
+    meta,
+  };
 };

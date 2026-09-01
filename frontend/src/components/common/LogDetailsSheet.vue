@@ -41,9 +41,7 @@ const copyId = async () => {
         class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border/60 bg-muted/10 shrink-0 relative pr-16 flex flex-col gap-3 sm:gap-3.5"
       >
         <div class="flex items-start sm:items-center gap-2.5 sm:gap-3">
-          <div
-            class="p-2 sm:p-2.5 rounded-md bg-muted border border-border/40 text-muted-foreground shrink-0 flex items-center justify-center"
-          >
+          <div class="icon-container p-1.5 shrink-0 text-primary">
             <Activity v-if="!isAuditLog && !isToolLog" class="size-4 sm:size-5" />
             <Shield v-else-if="isAuditLog" class="size-4 sm:size-5" />
             <Wrench v-else-if="isMcpLog" class="size-4 sm:size-5" />
@@ -56,7 +54,7 @@ const copyId = async () => {
             >
               <span>{{ t("logs.viewDetails") }}</span>
               <span
-                class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/70 px-2 py-0.5 rounded border border-border/40"
+                class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/70 px-2 py-0.5 rounded-full border border-border/40"
               >
                 {{
                   isAuditLog

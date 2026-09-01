@@ -194,13 +194,13 @@ defineExpose({
   <div
     v-if="log.error_message"
     role="alert"
-    class="rounded-md border border-status-error/25 bg-status-error/5 p-3 sm:p-4 space-y-3"
+    class="rounded-xl border border-status-error/25 bg-status-error/5 p-3 sm:p-4 space-y-3"
   >
     <h3 class="flex items-center gap-2 text-xs sm:text-sm font-bold text-status-error">
       <AlertTriangle class="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" /> {{ t("logs.error") }}
     </h3>
     <p
-      class="text-[11px] sm:text-xs text-foreground/90 font-mono max-h-32 sm:max-h-48 overflow-auto bg-background/50 p-2 sm:p-3 rounded-lg border border-border/20"
+      class="text-[11px] sm:text-xs text-foreground/90 font-mono max-h-32 sm:max-h-48 overflow-auto bg-background/60 p-2 sm:p-3 rounded-md"
     >
       {{ log.error_message }}
     </p>
@@ -250,17 +250,18 @@ defineExpose({
             :data="log.log_metadata.error_details.original_error"
             class="mt-1"
             max-height="max-h-96"
+            flat
           />
         </div>
         <!-- Response Body -->
         <div v-if="log.log_metadata.error_details.response_body" class="mt-2 md:col-span-2">
           <span class="error-detail-label">Response Body:</span>
-          <div class="mt-1">
+          <div class="mt-1 rounded-md bg-background/60 p-3">
             <JsonViewer
               :data="log.log_metadata.error_details.response_body"
               :deep="2"
               max-height="max-h-96"
-              class="border border-error-light/15 dark:border-error-dark/20"
+              flat
             />
           </div>
         </div>
@@ -293,7 +294,7 @@ defineExpose({
         {{ t("logs.stackTrace") }}
       </h4>
       <pre
-        class="text-[11px] sm:text-xs font-mono text-foreground/80 bg-background/50 p-2 sm:p-3 rounded-lg border border-border/20 max-h-48 sm:max-h-96 overflow-auto scrollbar-thin"
+        class="text-[11px] sm:text-xs font-mono text-foreground/80 bg-background/60 p-2 sm:p-3 rounded-md max-h-48 sm:max-h-96 overflow-auto scrollbar-thin"
         >{{ log.error_stack_trace }}</pre>
     </div>
   </div>

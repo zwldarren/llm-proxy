@@ -11,6 +11,10 @@
  * Large argument/result payloads are size-guarded: anything beyond
  * MAX_INLINE_BYTES is collapsed by default and only expanded on demand, so
  * a multi-MB tool result never freezes the page.
+ *
+ * Visual contract: the card uses the same flat `rounded-lg` hairline row
+ * language as every other output item, and the inner JSON viewers render
+ * `flat` — a bordered box inside the row would be a card-in-card.
  */
 import { ArrowRight, ChevronDown, Search, Wrench } from "@lucide/vue";
 import { computed, ref } from "vue";
@@ -18,7 +22,7 @@ import { useI18n } from "vue-i18n";
 import JsonViewer from "@/components/common/JsonViewer.vue";
 import { Badge } from "@/components/ui/badge";
 import type { ToolCallInfo, ToolResultInfo } from "@/utils/logResponseParser";
-import { parseToolArgs } from "@/utils/logFormat";
+import { formatBytes, MAX_INLINE_BYTES, parseToolArgs } from "@/utils/logFormat";
 
 const props = withDefaults(
   defineProps<{
@@ -27,15 +31,22 @@ const props = withDefaults(
     result?: ToolResultInfo;
     /** Sequence index for display */
     index?: number;
+    /**
+     * Render without the outer shell (border/radius/background) for use inside
+     * the unified output-items list container, which supplies the shell and
+     * hairline dividers. Default: standalone card row.
+     */
+    bare?: boolean;
     /** Start expanded? Default: collapsed */
     defaultExpanded?: boolean;
   }>(),
-  { defaultExpanded: false }
+  { defaultExpanded: false, bare: false }
 );
 
 const { t } = useI18n();
 
-const MAX_INLINE_BYTES = 256 * 1024; // 256 KB
+// 256 KB inline budget imported from logFormat — shared by every log view so
+// oversized payloads stay collapsed and only expand on demand.
 
 const expanded = ref(props.defaultExpanded);
 
@@ -105,13 +116,6 @@ const parsedResult = computed<unknown>(() => {
 
 const hasResult = computed(() => Boolean(props.result && props.result.output));
 
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
 function toggle() {
   expanded.value = !expanded.value;
 }
@@ -127,13 +131,16 @@ const searchQuery = computed(() => {
 
 <template>
   <div
-    class="rounded-lg border bg-action-amber/5 border-action-amber/20 overflow-hidden transition-colors"
-    :class="expanded ? 'hover:border-action-amber/35' : ''"
+    :class="
+      bare
+        ? undefined
+        : 'rounded-lg border border-border/50 bg-muted/10 overflow-hidden transition-colors'
+    "
   >
     <!-- Header row -->
     <button
       type="button"
-      class="w-full flex items-center gap-2 p-3 text-left hover:bg-action-amber/5 transition-colors cursor-pointer"
+      class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-muted/20 transition-colors cursor-pointer"
       :aria-expanded="expanded"
       @click="toggle"
     >
@@ -147,7 +154,7 @@ const searchQuery = computed(() => {
       </span>
       <span
         v-if="call.id"
-        class="text-[11px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded border border-border/30 shrink-0 max-w-[40%] truncate"
+        class="text-[11px] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded-full shrink-0 max-w-[40%] truncate"
         :title="call.id"
       >
         {{ call.id }}
@@ -161,14 +168,14 @@ const searchQuery = computed(() => {
       </Badge>
       <span
         v-if="index !== undefined"
-        class="ml-auto text-[11px] font-mono text-muted-foreground/50 shrink-0"
+        class="ml-auto text-[11px] font-mono text-muted-foreground/60 shrink-0"
       >
         #{{ index + 1 }}
       </span>
     </button>
 
     <!-- Body -->
-    <div v-if="expanded" class="px-3 pb-3 pt-1 space-y-2.5 border-t border-action-amber/10">
+    <div v-if="expanded" class="px-3 pb-3 pt-1 space-y-2.5 border-t border-border/25">
       <!-- Inline search query for web_search -->
       <div v-if="searchQuery" class="text-xs font-mono text-muted-foreground/90 pt-2">
         <span class="text-muted-foreground/60">query: </span>
@@ -189,6 +196,7 @@ const searchQuery = computed(() => {
           :data="parsedArguments"
           :deep="2"
           :max-height="isOversized ? 'max-h-[400px]' : 'max-h-72'"
+          flat
         />
       </div>
       <div
@@ -199,7 +207,7 @@ const searchQuery = computed(() => {
       </div>
 
       <!-- Result -->
-      <div v-if="hasResult && result" class="space-y-1.5 pt-2 border-t border-action-amber/10">
+      <div v-if="hasResult && result" class="space-y-1.5 pt-2 border-t border-border/25">
         <div class="flex items-center justify-between">
           <span
             class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5"
@@ -224,6 +232,7 @@ const searchQuery = computed(() => {
           :data="parsedResult"
           :deep="2"
           :max-height="resultIsOversized ? 'max-h-[400px]' : 'max-h-72'"
+          flat
         />
       </div>
     </div>

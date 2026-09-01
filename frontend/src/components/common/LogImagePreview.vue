@@ -116,7 +116,7 @@ function openInNewTab(url: string) {
       <div
         v-for="(img, index) in resolved"
         :key="index"
-        class="group relative rounded-lg border border-border/40 bg-muted/10 overflow-hidden flex flex-col"
+        class="group relative rounded-lg border border-border/50 bg-muted/10 overflow-hidden flex flex-col"
       >
         <!-- Image canvas -->
         <button

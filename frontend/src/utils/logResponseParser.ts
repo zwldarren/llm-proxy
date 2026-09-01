@@ -24,8 +24,20 @@ import {
   parseAnthropicStreamResponse,
   parseStreamResponse,
 } from "@/utils/sse";
-import { parseToolArgs } from "@/utils/logFormat";
+import { asString, isRecord, parseToolArgs, safeStringify } from "@/utils/logFormat";
 
+/**
+ * Reduce a Responses `web_search_call` item to its query — either the single
+ * `action.query` or the `action.queries` list joined with commas.
+ */
+function webSearchQuery(action: Record<string, unknown> | undefined): string {
+  return (
+    asString(action?.query) ||
+    (Array.isArray(action?.queries)
+      ? (action!.queries as unknown[]).map((q) => asString(q) ?? "").join(", ")
+      : "")
+  );
+}
 // --- Types -------------------------------------------------------------
 
 type ResponseProtocol =
@@ -87,6 +99,34 @@ interface EmbeddingInfo {
   fullLength: number;
 }
 
+/**
+ * One output item in the order it appeared in the response — this is what
+ * makes the parsed view as faithful as reading the raw stream: reasoning,
+ * text and tool calls stay interleaved exactly as the model emitted them.
+ */
+export type ResponseItem =
+  | { kind: "reasoning"; text: string; redacted?: boolean }
+  | { kind: "text"; text: string }
+  | { kind: "tool_call"; call: ToolCallInfo }
+  | { kind: "tool_result"; result: ToolResultInfo }
+  | { kind: "image"; image: ImageInfo };
+
+/** Response-level metadata (finish reason, ids, stream event counts). */
+export interface ResponseMeta {
+  id?: string;
+  model?: string;
+  /** OpenAI finish_reason */
+  finishReason?: string;
+  /** Anthropic stop_reason / stop_sequence */
+  stopReason?: string;
+  stopSequence?: string;
+  /** Responses API status (completed / incomplete / ...) */
+  status?: string;
+  serviceTier?: string;
+  /** Number of parsed SSE events (streams only) */
+  eventCount?: number;
+}
+
 export interface ParsedResponse {
   protocol: ResponseProtocol;
   /** Reconstructed assistant text content */
@@ -97,6 +137,10 @@ export interface ParsedResponse {
   toolCalls: ToolCallInfo[];
   /** Tool results returned to the model (Anthropic tool_result / Responses function_call_output) */
   toolResults: ToolResultInfo[];
+  /** Ordered output items (reasoning/text/tool_call/tool_result/image) */
+  items: ResponseItem[];
+  /** Response-level metadata */
+  meta: ResponseMeta;
   /** Generated images (image_generation / image_edit) */
   images: ImageInfo[];
   /** Embedding vectors (embedding requests) */
@@ -117,29 +161,14 @@ const empty = (overrides: Partial<ParsedResponse> = {}): ParsedResponse => ({
   reasoning: "",
   toolCalls: [],
   toolResults: [],
+  items: [],
+  meta: {},
   images: [],
   hasData: false,
   ...overrides,
 });
 
 // --- Helpers -----------------------------------------------------------
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function safeJsonStringify(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  try {
-    return typeof value === "string" ? value : JSON.stringify(value);
-  } catch {
-    return undefined;
-  }
-}
 
 /** Inferred MIME type for a base64 image data URL. */
 function imageMimeType(format?: string): string {
@@ -205,6 +234,19 @@ function parseOpenAIChat(body: Record<string, unknown>): ParsedResponse {
     }
   }
 
+  // Approximate emission order: reasoning -> text -> tool calls.
+  const items: ResponseItem[] = [];
+  if (reasoning) items.push({ kind: "reasoning", text: reasoning });
+  if (content) items.push({ kind: "text", text: content });
+  for (const call of toolCalls) items.push({ kind: "tool_call", call });
+
+  const meta: ResponseMeta = {
+    id: asString(body.id),
+    model: asString(body.model),
+    finishReason: asString(choice?.finish_reason),
+    serviceTier: asString(body.service_tier),
+  };
+
   const hasData = Boolean(content || reasoning || toolCalls.length);
   return {
     protocol: "openai-chat",
@@ -212,6 +254,8 @@ function parseOpenAIChat(body: Record<string, unknown>): ParsedResponse {
     reasoning,
     toolCalls,
     toolResults: [],
+    items,
+    meta,
     images: [],
     hasData,
   };
@@ -225,6 +269,7 @@ function parseOpenAIResponses(body: Record<string, unknown>): ParsedResponse {
   let reasoning = "";
   const toolCalls: ToolCallInfo[] = [];
   const toolResults: ToolResultInfo[] = [];
+  const items: ResponseItem[] = [];
 
   for (const item of output) {
     if (!isRecord(item)) continue;
@@ -233,85 +278,121 @@ function parseOpenAIResponses(body: Record<string, unknown>): ParsedResponse {
 
     if (type === "message") {
       const parts = item.content;
+      let messageText = "";
       if (Array.isArray(parts)) {
         for (const part of parts) {
           if (!isRecord(part)) continue;
           if (part.type === "output_text" || part.type === "text") {
-            content += asString(part.text) ?? "";
-            content += "\n";
+            messageText += asString(part.text) ?? "";
           } else if (part.type === "refusal") {
-            content += asString(part.refusal) ?? "";
-            content += "\n";
+            messageText += asString(part.refusal) ?? "";
           }
         }
       }
+      if (messageText) {
+        content += messageText;
+        content += "\n";
+        items.push({ kind: "text", text: messageText });
+      }
     } else if (type === "reasoning") {
       const parts = item.content;
+      let reasoningText = "";
       if (Array.isArray(parts)) {
         for (const part of parts) {
           if (isRecord(part) && (part.type === "reasoning_text" || part.type === "text")) {
-            reasoning += asString(part.text) ?? "";
-            reasoning += "\n";
+            reasoningText += asString(part.text) ?? "";
           }
         }
       }
       // Encrypted reasoning content (when redacted)
       const encrypted = asString(item.encrypted_content);
-      if (!reasoning && encrypted) reasoning = encrypted;
+      if (reasoningText) {
+        reasoning += reasoningText;
+        reasoning += "\n";
+        items.push({ kind: "reasoning", text: reasoningText });
+      } else if (encrypted) {
+        items.push({ kind: "reasoning", text: "", redacted: true });
+        if (!reasoning) reasoning = encrypted;
+      }
     } else if (type === "function_call" || type === "custom_tool_call") {
       const args = asString(item.arguments) ?? "";
       const input = item.input;
-      const argStr = args || safeJsonStringify(input) || "";
-      toolCalls.push({
+      const argStr = args || safeStringify(input) || "";
+      const call: ToolCallInfo = {
         id: asString(item.id) || asString(item.call_id),
         name: asString(item.name) ?? "",
         arguments: argStr,
         parsedArguments: parseToolArgs(argStr),
         kind: type === "custom_tool_call" ? "custom" : "function",
         status,
-      });
+      };
+      toolCalls.push(call);
+      items.push({ kind: "tool_call", call });
     } else if (type === "web_search_call") {
-      const action = isRecord(item.action) ? item.action : undefined;
-      const query =
-        asString(action?.query) ||
-        (Array.isArray(action?.queries)
-          ? (action!.queries as unknown[]).map((q) => asString(q) ?? "").join(", ")
-          : "");
-      toolCalls.push({
+      const query = webSearchQuery(isRecord(item.action) ? item.action : undefined);
+      const call: ToolCallInfo = {
         id: asString(item.id),
         name: "web_search",
         arguments: query ? JSON.stringify({ query }) : "",
         parsedArguments: query ? { query } : undefined,
         kind: "web_search",
         status,
-      });
+      };
+      toolCalls.push(call);
+      items.push({ kind: "tool_call", call });
     } else if (type === "tool_search_call") {
-      const args = safeJsonStringify(item.arguments) ?? "";
-      toolCalls.push({
+      const args = safeStringify(item.arguments) ?? "";
+      const call: ToolCallInfo = {
         id: asString(item.id) || asString(item.call_id),
         name: "tool_search",
         arguments: args,
         parsedArguments: parseToolArgs(args),
         kind: "tool_search",
         status,
-      });
+      };
+      toolCalls.push(call);
+      items.push({ kind: "tool_call", call });
     } else if (type === "function_call_output" || type === "tool_search_output") {
-      toolResults.push({
+      const result: ToolResultInfo = {
         callId: asString(item.call_id),
-        output: asString(item.output) ?? safeJsonStringify(item.output) ?? "",
+        output: asString(item.output) ?? safeStringify(item.output) ?? "",
         kind: type,
-      });
+      };
+      toolResults.push(result);
+      items.push({ kind: "tool_result", result });
+    } else if (type === "image_generation_call") {
+      const b64 = asString(item.result);
+      if (b64) {
+        const image: ImageInfo = { b64Json: b64, outputFormat: asString(item.output_format) };
+        items.push({ kind: "image", image });
+      }
     }
   }
 
-  const hasData = Boolean(content || reasoning || toolCalls.length || toolResults.length);
+  const incomplete = isRecord(body.incomplete_details)
+    ? asString(body.incomplete_details.reason)
+    : undefined;
+  const meta: ResponseMeta = {
+    id: asString(body.id),
+    model: asString(body.model),
+    status: asString(body.status),
+    finishReason: incomplete,
+    serviceTier: asString(body.service_tier),
+  };
+
+  const images = items.filter((i) => i.kind === "image").map((i) => i.image);
+  const hasData = Boolean(
+    content || reasoning || toolCalls.length || toolResults.length || images.length
+  );
   return {
     protocol: "openai-responses",
     content: content.trim(),
     reasoning: reasoning.trim(),
     toolCalls,
     toolResults,
-    images: [],
+    items,
+    meta,
+    images,
     hasData,
   };
 }
@@ -325,34 +406,48 @@ function parseAnthropic(body: Record<string, unknown>): ParsedResponse {
   const toolCalls: ToolCallInfo[] = [];
   const toolResults: ToolResultInfo[] = [];
   const images: ImageInfo[] = [];
+  const items: ResponseItem[] = [];
 
   for (const block of contentBlocks) {
     if (!isRecord(block)) continue;
     const type = asString(block.type);
 
     switch (type) {
-      case "text":
-        content += asString(block.text) ?? "";
-        content += "\n";
+      case "text": {
+        const text = asString(block.text) ?? "";
+        if (text) {
+          content += text;
+          content += "\n";
+          items.push({ kind: "text", text });
+        }
         break;
-      case "thinking":
-        reasoning += asString(block.thinking) ?? "";
-        reasoning += "\n";
+      }
+      case "thinking": {
+        const thinking = asString(block.thinking) ?? "";
+        if (thinking) {
+          reasoning += thinking;
+          reasoning += "\n";
+          items.push({ kind: "reasoning", text: thinking });
+        }
         break;
+      }
       case "redacted_thinking":
         reasoning += "[redacted]\n";
+        items.push({ kind: "reasoning", text: "", redacted: true });
         break;
       case "tool_use":
       case "server_tool_use": {
         const input = block.input;
-        const argStr = safeJsonStringify(input) ?? "";
-        toolCalls.push({
+        const argStr = safeStringify(input) ?? "";
+        const call: ToolCallInfo = {
           id: asString(block.id),
           name: asString(block.name) ?? "",
           arguments: argStr,
           parsedArguments: isRecord(input) ? input : undefined,
           kind: type === "server_tool_use" ? "server_tool_use" : "function",
-        });
+        };
+        toolCalls.push(call);
+        items.push({ kind: "tool_call", call });
         break;
       }
       case "tool_result": {
@@ -364,16 +459,18 @@ function parseAnthropic(body: Record<string, unknown>): ParsedResponse {
               ? c
                   .map((p) => {
                     if (isRecord(p) && p.type === "text") return asString(p.text) ?? "";
-                    return safeJsonStringify(p) ?? "";
+                    return safeStringify(p) ?? "";
                   })
                   .join("\n")
-              : (safeJsonStringify(c) ?? "");
-        toolResults.push({
+              : (safeStringify(c) ?? "");
+        const result: ToolResultInfo = {
           toolUseId: asString(block.tool_use_id),
           output: out,
           isError: block.is_error === true,
           kind: "tool_result",
-        });
+        };
+        toolResults.push(result);
+        items.push({ kind: "tool_result", result });
         break;
       }
       case "image": {
@@ -381,10 +478,15 @@ function parseAnthropic(body: Record<string, unknown>): ParsedResponse {
         const mediaType = asString(source?.media_type) ?? "image/png";
         const data = asString(source?.data);
         const url = asString(source?.url);
+        let image: ImageInfo | undefined;
         if (data) {
-          images.push({ b64Json: data, outputFormat: mediaType.replace("image/", "") });
+          image = { b64Json: data, outputFormat: mediaType.replace("image/", "") };
         } else if (url) {
-          images.push({ url, outputFormat: mediaType.replace("image/", "") });
+          image = { url, outputFormat: mediaType.replace("image/", "") };
+        }
+        if (image) {
+          images.push(image);
+          items.push({ kind: "image", image });
         }
         break;
       }
@@ -392,6 +494,14 @@ function parseAnthropic(body: Record<string, unknown>): ParsedResponse {
         break;
     }
   }
+
+  const meta: ResponseMeta = {
+    id: asString(body.id),
+    model: asString(body.model),
+    stopReason: asString(body.stop_reason),
+    stopSequence: asString(body.stop_sequence),
+    serviceTier: asString(body.service_tier),
+  };
 
   const hasData = Boolean(
     content || reasoning || toolCalls.length || toolResults.length || images.length
@@ -402,6 +512,8 @@ function parseAnthropic(body: Record<string, unknown>): ParsedResponse {
     reasoning: reasoning.trim(),
     toolCalls,
     toolResults,
+    items,
+    meta,
     images,
     hasData,
   };
@@ -428,6 +540,8 @@ function parseImage(body: Record<string, unknown>): ParsedResponse {
     reasoning: "",
     toolCalls: [],
     toolResults: [],
+    items: [],
+    meta: {},
     images,
     hasData: images.length > 0,
   };
@@ -457,6 +571,8 @@ function parseEmbedding(body: Record<string, unknown>): ParsedResponse {
     reasoning: "",
     toolCalls: [],
     toolResults: [],
+    items: [],
+    meta: { model: asString(body.model) },
     images: [],
     embeddings,
     hasData: embeddings.length > 0,
@@ -471,6 +587,8 @@ function parseAudioText(body: Record<string, unknown>): ParsedResponse {
     reasoning: "",
     toolCalls: [],
     toolResults: [],
+    items: [],
+    meta: {},
     images: [],
     audioText: text,
     hasData: Boolean(text),
@@ -478,22 +596,39 @@ function parseAudioText(body: Record<string, unknown>): ParsedResponse {
 }
 
 function parseResponsesStream(body: string): ParsedResponse {
-  // Reconstruct content/reasoning/tool calls from Responses SSE events.
-  // A function call arrives as:
-  //   response.output_item.added   { item: { type:"function_call", id, call_id, name, arguments:"" } }
-  //   response.function_call_arguments.delta  { item_id, delta }
-  //   response.function_call_arguments.done    { item_id, arguments }
-  //   response.output_item.done    { item: { type:"function_call", ... arguments } }
+  // Reconstruct ordered output items from Responses SSE events.
+  // Items are announced with response.output_item.added (carrying output_index
+  // and the item skeleton), filled by *.delta events, and finalized by
+  // response.output_item.done. Slots are keyed by output_index so the final
+  // item order matches the model's emission order exactly.
   const lines = body.split("\n");
-  let content = "";
-  let reasoning = "";
-  const toolCalls: ToolCallInfo[] = [];
-  // Keyed by item id (data.item_id / item.id).
-  const toolBuffers = new Map<string, { id: string; name: string; args: string }>();
 
-  const keyOf = (data: Record<string, unknown>): string | undefined =>
-    asString(data.item_id) ??
-    (typeof data.output_index === "number" ? String(data.output_index) : undefined);
+  interface ItemSlot {
+    type: string;
+    id?: string;
+    callId?: string;
+    name?: string;
+    args: string;
+    text: string;
+    reasoning: string;
+    status?: string;
+    query?: string;
+    b64?: string;
+    outputFormat?: string;
+  }
+
+  const slots = new Map<number, ItemSlot>();
+  const indexByItemId = new Map<string, number>();
+  const meta: ResponseMeta = {};
+  let eventCount = 0;
+
+  const slotOf = (data: Record<string, unknown>): ItemSlot | undefined => {
+    const idx =
+      typeof data.output_index === "number"
+        ? data.output_index
+        : indexByItemId.get(asString(data.item_id) ?? "");
+    return idx !== undefined ? slots.get(idx) : undefined;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]?.trim();
@@ -517,57 +652,146 @@ function parseResponsesStream(body: string): ParsedResponse {
     } catch {
       continue;
     }
+    eventCount++;
 
     const type = asString(data.type) ?? "";
 
-    if (type === "response.output_text.delta") {
-      content += asString(data.delta) ?? "";
-    } else if (type === "response.reasoning_text.delta") {
-      reasoning += asString(data.delta) ?? "";
-    } else if (type === "response.output_item.added" || type === "response.output_item.done") {
-      // A function_call item is announced (added) and finalized (done). Capture
-      // the name (and, on done, the final assembled arguments).
+    if (type === "response.output_item.added") {
       const item = isRecord(data.item) ? data.item : undefined;
-      if (item && asString(item.type) === "function_call") {
-        const id = asString(item.id) ?? keyOf(data);
-        if (id) {
-          const buf = toolBuffers.get(id) ?? { id, name: "", args: "" };
-          const itemName = asString(item.name);
-          if (itemName) buf.name = itemName;
-          const finalArgs = asString(item.arguments);
-          if (finalArgs && type === "response.output_item.done") buf.args = finalArgs;
-          toolBuffers.set(id, buf);
+      const idx = typeof data.output_index === "number" ? data.output_index : slots.size;
+      if (item) {
+        const slot: ItemSlot = {
+          type: asString(item.type) ?? "",
+          id: asString(item.id),
+          callId: asString(item.call_id),
+          name: asString(item.name),
+          args: "",
+          text: "",
+          reasoning: "",
+          status: asString(item.status),
+        };
+        slots.set(idx, slot);
+        if (slot.id) indexByItemId.set(slot.id, idx);
+      }
+    } else if (type === "response.output_text.delta") {
+      const slot = slotOf(data);
+      if (slot) slot.text += asString(data.delta) ?? "";
+    } else if (
+      type === "response.reasoning_text.delta" ||
+      type === "response.reasoning_summary_text.delta"
+    ) {
+      const slot = slotOf(data);
+      if (slot) slot.reasoning += asString(data.delta) ?? "";
+    } else if (type === "response.function_call_arguments.delta") {
+      const slot = slotOf(data);
+      if (slot) slot.args += asString(data.delta) ?? "";
+    } else if (type === "response.function_call_arguments.done") {
+      const slot = slotOf(data);
+      const doneArgs = asString(data.arguments);
+      if (slot && doneArgs) slot.args = doneArgs;
+    } else if (type === "response.output_item.done") {
+      const item = isRecord(data.item) ? data.item : undefined;
+      const slot = slotOf(data);
+      if (item && slot) {
+        slot.status = asString(item.status) ?? slot.status;
+        slot.name = asString(item.name) ?? slot.name;
+        slot.callId = slot.callId ?? asString(item.call_id);
+        const finalArgs = asString(item.arguments);
+        if (finalArgs) slot.args = finalArgs;
+        // web_search_call carries the query in its action.
+        const query = webSearchQuery(isRecord(item.action) ? item.action : undefined);
+        if (query) slot.query = query;
+        // image_generation_call carries the finished base64 image in `result`.
+        if (slot.type === "image_generation_call") {
+          const b64 = asString(item.result);
+          if (b64) {
+            slot.b64 = b64;
+            slot.outputFormat = asString(item.output_format);
+          }
         }
       }
-    } else if (type === "response.function_call_arguments.delta") {
-      const id = keyOf(data);
-      if (id) {
-        const buf = toolBuffers.get(id) ?? { id, name: "", args: "" };
-        buf.args += asString(data.delta) ?? "";
-        toolBuffers.set(id, buf);
+    } else if (type === "response.completed" || type === "response.created") {
+      const response = isRecord(data.response) ? data.response : undefined;
+      if (response) {
+        meta.id = asString(response.id) ?? meta.id;
+        meta.model = asString(response.model) ?? meta.model;
+        meta.serviceTier = asString(response.service_tier) ?? meta.serviceTier;
+        if (type === "response.completed") {
+          meta.status = asString(response.status);
+          const incomplete = isRecord(response.incomplete_details)
+            ? asString(response.incomplete_details.reason)
+            : undefined;
+          meta.finishReason = incomplete;
+        }
       }
-    } else if (type === "response.function_call_arguments.done") {
-      const id = keyOf(data);
-      const doneArgs = asString(data.arguments);
-      if (id && doneArgs) {
-        const buf = toolBuffers.get(id) ?? { id, name: "", args: "" };
-        buf.args = doneArgs;
-        toolBuffers.set(id, buf);
+    } else if (type === "response.incomplete" || type === "response.failed") {
+      meta.status = type.replace("response.", "");
+    }
+  }
+
+  let content = "";
+  let reasoning = "";
+  const toolCalls: ToolCallInfo[] = [];
+  const items: ResponseItem[] = [];
+  const images: ImageInfo[] = [];
+
+  for (const [, slot] of [...slots.entries()].sort((a, b) => a[0] - b[0])) {
+    if (slot.type === "message") {
+      if (slot.text) {
+        content += slot.text;
+        items.push({ kind: "text", text: slot.text });
+      }
+    } else if (slot.type === "reasoning") {
+      if (slot.reasoning) {
+        reasoning += slot.reasoning;
+        items.push({ kind: "reasoning", text: slot.reasoning });
+      } else {
+        items.push({ kind: "reasoning", text: "", redacted: true });
+      }
+    } else if (slot.type === "function_call" || slot.type === "custom_tool_call") {
+      const call: ToolCallInfo = {
+        id: slot.id || slot.callId,
+        name: slot.name ?? "",
+        arguments: slot.args,
+        parsedArguments: parseToolArgs(slot.args),
+        kind: slot.type === "custom_tool_call" ? "custom" : "function",
+        status: slot.status,
+      };
+      toolCalls.push(call);
+      items.push({ kind: "tool_call", call });
+    } else if (slot.type === "web_search_call") {
+      const call: ToolCallInfo = {
+        id: slot.id,
+        name: "web_search",
+        arguments: slot.query ? JSON.stringify({ query: slot.query }) : "",
+        parsedArguments: slot.query ? { query: slot.query } : undefined,
+        kind: "web_search",
+        status: slot.status,
+      };
+      toolCalls.push(call);
+      items.push({ kind: "tool_call", call });
+    } else if (slot.type === "tool_search_call") {
+      const call: ToolCallInfo = {
+        id: slot.id || slot.callId,
+        name: "tool_search",
+        arguments: slot.args,
+        parsedArguments: parseToolArgs(slot.args),
+        kind: "tool_search",
+        status: slot.status,
+      };
+      toolCalls.push(call);
+      items.push({ kind: "tool_call", call });
+    } else if (slot.type === "image_generation_call") {
+      // The finished image only arrives on response.output_item.done.
+      if (slot.b64) {
+        const image: ImageInfo = { b64Json: slot.b64, outputFormat: slot.outputFormat };
+        images.push(image);
+        items.push({ kind: "image", image });
       }
     }
   }
 
-  for (const [, buf] of toolBuffers) {
-    if (buf.name) {
-      toolCalls.push({
-        id: buf.id,
-        name: buf.name,
-        arguments: buf.args,
-        parsedArguments: parseToolArgs(buf.args),
-        kind: "function",
-      });
-    }
-  }
+  meta.eventCount = eventCount;
 
   return {
     protocol: "stream-responses",
@@ -575,8 +799,10 @@ function parseResponsesStream(body: string): ParsedResponse {
     reasoning,
     toolCalls,
     toolResults: [],
-    images: [],
-    hasData: Boolean(content || reasoning || toolCalls.length),
+    items,
+    meta,
+    images,
+    hasData: Boolean(content || reasoning || toolCalls.length || images.length),
   };
 }
 
@@ -590,12 +816,30 @@ function parseStream(body: string): ParsedResponse {
       parsedArguments: parseToolArgs(tc.function.arguments),
       kind: "function",
     }));
+    // Faithful per-block ordering from content-block indices.
+    const items: ResponseItem[] = [];
+    for (const block of parsed.blocks) {
+      if (block.type === "text") {
+        if (block.text) items.push({ kind: "text", text: block.text });
+      } else if (block.type === "thinking") {
+        if (block.thinking) items.push({ kind: "reasoning", text: block.thinking });
+      } else if (block.type === "redacted_thinking") {
+        items.push({ kind: "reasoning", text: "", redacted: true });
+      } else if (block.type === "tool_use") {
+        const call = toolCalls.find((tc) => tc.id === block.id);
+        if (call) items.push({ kind: "tool_call", call });
+      }
+    }
     return {
       protocol: "stream-anthropic",
       content: parsed.reconstructedContent,
       reasoning: parsed.reasoningContent,
       toolCalls,
       toolResults: [],
+      items,
+      meta: {
+        ...parsed.meta,
+      },
       images: [],
       hasData: Boolean(parsed.reconstructedContent || parsed.reasoningContent || toolCalls.length),
     };
@@ -612,12 +856,21 @@ function parseStream(body: string): ParsedResponse {
     parsedArguments: parseToolArgs(tc.function.arguments),
     kind: "function",
   }));
+  // Approximate emission order: reasoning -> text -> tool calls.
+  const items: ResponseItem[] = [];
+  if (parsed.reasoningContent) items.push({ kind: "reasoning", text: parsed.reasoningContent });
+  if (parsed.reconstructedContent) items.push({ kind: "text", text: parsed.reconstructedContent });
+  for (const call of toolCalls) items.push({ kind: "tool_call", call });
   return {
     protocol: "stream-openai",
     content: parsed.reconstructedContent,
     reasoning: parsed.reasoningContent,
     toolCalls,
     toolResults: [],
+    items,
+    meta: {
+      ...parsed.meta,
+    },
     images: [],
     hasData: Boolean(parsed.reconstructedContent || parsed.reasoningContent || toolCalls.length),
   };
@@ -651,6 +904,8 @@ export function parseLogResponse(body: unknown, requestType?: string): ParsedRes
       reasoning: "",
       toolCalls: [],
       toolResults: [],
+      items: body.trim() ? [{ kind: "text", text: body }] : [],
+      meta: {},
       images: [],
       hasData: body.trim().length > 0,
     };

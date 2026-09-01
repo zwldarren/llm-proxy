@@ -35,10 +35,18 @@ const props = withDefaults(
     maxHeight?: string;
     collapsedOnClickBrackets?: boolean;
     deep?: number;
+    /**
+     * Borderless/transparent variant for nesting inside an already-contained
+     * region (collapsible rows, banners): the parent supplies the surface, so
+     * the viewer must not draw a second box (no card-in-card). Default (boxed)
+     * is for viewers sitting directly on a page/sheet surface.
+     */
+    flat?: boolean;
   }>(),
   {
     deep: 3,
     collapsedOnClickBrackets: true,
+    flat: false,
   }
 );
 
@@ -171,8 +179,12 @@ const copyLabel = computed(() => {
 
     <!-- JSON content container -->
     <div
-      class="bg-muted/50 rounded-md border border-border overflow-x-auto relative group"
-      :class="maxHeight || 'max-h-96'"
+      class="overflow-x-auto relative group"
+      :class="
+        flat
+          ? maxHeight || 'max-h-96'
+          : `${maxHeight || 'max-h-96'} bg-muted/50 rounded-lg border border-border`
+      "
     >
       <!-- Floating copy button (when no label) -->
       <div
@@ -207,7 +219,7 @@ const copyLabel = computed(() => {
       </div>
 
       <!-- JSON tree -->
-      <div v-else class="p-3 break-all">
+      <div v-else class="break-all" :class="flat ? '' : 'p-3'">
         <VueJsonPretty
           :data="jsonData"
           :deep="deep"
