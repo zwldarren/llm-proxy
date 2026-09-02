@@ -174,6 +174,25 @@ def test_parse_provider_response_with_tool_call(serializer):
     assert isinstance(response.output[0], ToolUseBlock)
     assert response.output[0].name == "get_weather"
     assert response.output[0].input == {"location": "Boston", "unit": "celsius"}
+    # Gemini ends function-call turns with STOP; the parser must promote to
+    # the OpenAI convention so OpenAI/Anthropic clients see tool_calls/tool_use.
+    assert response.finish_reason == "tool_calls"
+
+
+def test_parse_provider_response_length_with_tool_call_stays_length(serializer):
+    """Only STOP is promoted to tool_calls; MAX_TOKENS stays length."""
+    provider_response = {
+        "candidates": [
+            {
+                "content": {"parts": [{"functionCall": {"name": "get_weather", "args": {}}}]},
+                "finishReason": "MAX_TOKENS",
+            }
+        ],
+    }
+
+    response = serializer.parse_provider_response(provider_response)
+
+    assert response.finish_reason == "length"
 
 
 def test_parse_provider_response_with_tool_call_thought_signature(serializer):

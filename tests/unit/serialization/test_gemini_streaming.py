@@ -50,6 +50,35 @@ def test_transform_tool_call_chunk(transformer):
     assert '"name":"get_weather"' in result
 
 
+def test_transform_finish_after_tool_call_chunk(transformer):
+    """Gemini sends STOP on function-call turns: terminal finish_reason must
+    be tool_calls when tool calls were seen in earlier chunks."""
+    tool_chunk = (
+        '{"candidates": [{"content": {"parts": [{"functionCall": '
+        '{"name": "get_weather", "args": {"city": "Rome"}}}]}}]}'
+    )
+    finish_chunk = '{"candidates": [{"finishReason": "STOP"}]}'
+
+    assert transformer.transform(tool_chunk) is not None
+    result = transformer.transform(finish_chunk)
+
+    assert result is not None
+    assert '"finish_reason":"tool_calls"' in result
+
+
+def test_transform_finish_in_tool_call_chunk(transformer):
+    """functionCall and finishReason arriving in one chunk still promotes."""
+    gemini_chunk = (
+        '{"candidates": [{"content": {"parts": [{"functionCall": '
+        '{"name": "get_weather", "args": {"city": "Rome"}}}]}, "finishReason": "STOP"}]}'
+    )
+
+    result = transformer.transform(gemini_chunk)
+
+    assert result is not None
+    assert '"finish_reason":"tool_calls"' in result
+
+
 def test_transform_tool_call_chunk_with_thought_signature(transformer):
     """Test function call conversion preserves thoughtSignature."""
     gemini_chunk = """{

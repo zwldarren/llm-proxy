@@ -243,6 +243,12 @@ class GeminiStreamingTransformer(StreamingTransformer):
             # candidates ever. Surface an explicit content_filter finish so
             # OpenAI clients do not mistake the empty stream for a normal end.
             finish_reason = "content_filter"
+        # Gemini ends function-call turns with STOP (no distinct finish
+        # reason); promote to the OpenAI convention when tool calls were seen
+        # in this chunk or earlier ones, mirroring the gemini_interactions
+        # streaming converter.
+        if finish_reason == "stop" and (tool_calls or self._tool_calls_buffer):
+            finish_reason = "tool_calls"
 
         openai_chunk: dict[str, Any] = {
             "id": self.response_id or f"chatcmpl-{self._chunk_index}",

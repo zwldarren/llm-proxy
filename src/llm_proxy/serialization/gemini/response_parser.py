@@ -156,6 +156,11 @@ class GeminiResponseParserMixin:
 
             gemini_reason = candidate.get("finishReason")
             finish_reason = map_finish_reason(gemini_reason, "gemini", "openai")
+            # Gemini ends function-call turns with STOP (no distinct finish
+            # reason); promote to the OpenAI convention when tool calls were
+            # produced, mirroring the gemini_interactions parser.
+            if finish_reason == "stop" and any(isinstance(b, ToolUseBlock) for b in output):
+                finish_reason = "tool_calls"
 
             if annotations:
                 provider_info["annotations"] = annotations
