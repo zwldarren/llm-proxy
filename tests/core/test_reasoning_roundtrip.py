@@ -342,12 +342,38 @@ class TestGeminiProtocolRoundTrip(ReasoningRoundtripTestMixin):
         assert thought_parts[0]["text"] == "I need to analyze this"
 
     def test_thinking_block_signature_to_gemini_format(self):
-        conv = self._make_conv_with_thinking("think", signature="sig123")
+        # Gemini-issued signatures replay under the Part schema's
+        # ``thoughtSignature`` field (there is no ``signature`` field on Part).
+        conv = ConversationContext()
+        conv.messages.append(
+            Message(
+                role="assistant",
+                content=[
+                    ThinkingBlock(
+                        thinking="think",
+                        signature="sig123",
+                        signature_origin="gemini",
+                    ),
+                    TextBlock(text="Hello world"),
+                ],
+            )
+        )
         contents, _ = self.mixin._convert_conversation_to_gemini(conv)
         parts = contents[0]["parts"]
         thought_parts = [p for p in parts if p.get("thought") is True]
         assert len(thought_parts) == 1
-        assert thought_parts[0]["signature"] == "sig123"
+        assert thought_parts[0]["thoughtSignature"] == "sig123"
+
+    def test_thinking_block_foreign_signature_not_replayed(self):
+        # A signature with no Gemini provenance (e.g. an Anthropic signature
+        # bridged through history) must not be sent to Gemini.
+        conv = self._make_conv_with_thinking("think", signature="anthropic-sig")
+        contents, _ = self.mixin._convert_conversation_to_gemini(conv)
+        parts = contents[0]["parts"]
+        thought_parts = [p for p in parts if p.get("thought") is True]
+        assert len(thought_parts) == 1
+        assert "signature" not in thought_parts[0]
+        assert "thoughtSignature" not in thought_parts[0]
 
     def test_thinking_block_with_text_blocks(self):
         conv = ConversationContext()
@@ -396,19 +422,28 @@ class TestGeminiProtocolRoundTrip(ReasoningRoundtripTestMixin):
 
     def test_gemini_thought_part_signature_reaches_gemini_request(self):
         """A ThinkingBlock carrying a Gemini thought signature must serialize
-        back to a thought part with signature so multi-turn context survives."""
+        back to a thought part with ``thoughtSignature`` so multi-turn
+        context survives. Signatures parsed from Gemini responses carry
+        ``signature_origin="gemini"`` (see the response parser test above);
+        the builder only replays those."""
         conv = ConversationContext()
         conv.messages.append(
             Message(
                 role="assistant",
-                content=[ThinkingBlock(thinking="planning", signature="SIG_T")],
+                content=[
+                    ThinkingBlock(
+                        thinking="planning",
+                        signature="SIG_T",
+                        signature_origin="gemini",
+                    )
+                ],
             )
         )
         contents, _ = self.mixin._convert_conversation_to_gemini(conv)
         model_parts = [c for c in contents if c.get("role") == "model"][0]["parts"]
         thought_parts = [p for p in model_parts if p.get("thought") is True]
         assert len(thought_parts) == 1
-        assert thought_parts[0].get("signature") == "SIG_T"
+        assert thought_parts[0].get("thoughtSignature") == "SIG_T"
 
     def test_gemini_streaming_thought_part_signature_accumulated(self):
         """Gemini streaming thought parts with thoughtSignature must accumulate
@@ -501,7 +536,11 @@ class TestCrossProtocolRoundTrip:
         thought_parts = [p for p in contents[0]["parts"] if p.get("thought") is True]
         assert len(thought_parts) == 1
         assert thought_parts[0]["text"] == "Let me think"
-        assert thought_parts[0]["signature"] == "sig"
+        # Anthropic signatures are a different scheme; replaying them to
+        # Gemini would fail its thoughtSignature validation. The thinking
+        # text is preserved, the foreign signature is not sent.
+        assert "signature" not in thought_parts[0]
+        assert "thoughtSignature" not in thought_parts[0]
 
     def test_openai_input_to_gemini_output(self):
         parser = OpenAIParsingMixin()

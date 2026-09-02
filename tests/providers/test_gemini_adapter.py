@@ -114,8 +114,10 @@ class TestGeminiStreamingUsage:
 
         assert "usage" not in chunk_data
 
-    def test_empty_candidates_returns_none(self):
-        """Test that empty candidates returns None (filtered out)."""
+    def test_usage_only_chunk_without_candidates_is_emitted(self):
+        """Trailing chunks that only carry usageMetadata (no candidates) must
+        reach the client: GenerateContentResponse omits candidates only when
+        the prompt was blocked, but usage-only chunks are still emitted."""
         chunk = {
             "candidates": [],
             "usageMetadata": {
@@ -126,7 +128,10 @@ class TestGeminiStreamingUsage:
 
         transformer = GeminiStreamingTransformer(model="gemini-2.0-flash")
         result_str = transformer.transform_chunk(chunk)
-        assert result_str is None
+        assert result_str is not None
+        result = orjson.loads(result_str.replace("data: ", "").strip())
+        assert result["choices"][0]["delta"] == {}
+        assert result["usage"]["prompt_tokens"] == 0
 
 
 class TestDownloadedImagesUsedInRequest:
@@ -378,7 +383,10 @@ class TestGeminiEmbeddingsRequest:
 
         assert ":embedContent" in url
         assert "batchEmbedContents" not in url
-        assert body == {"content": {"parts": [{"text": "hello world"}]}}
+        assert body == {
+            "model": "models/test-model",
+            "content": {"parts": [{"text": "hello world"}]},
+        }
 
     @pytest.mark.asyncio
     async def test_multiple_inputs_uses_batchembedcontents(self):
@@ -939,7 +947,12 @@ class TestGeminiStreamingErrorPassthrough:
     def _error_client() -> MagicMock:
         mock_response = MagicMock()
         mock_response.status_code = 400
-        mock_response.json.return_value = TestGeminiErrorResponseParsing._LOCATION_BODY
+        error_body = TestGeminiErrorResponseParsing._LOCATION_BODY
+        # The base _raise_for_stream_status parses response.text via orjson
+        # (mirrors a real httpx response, where text is the raw body string).
+        mock_response.text = orjson.dumps(error_body).decode()
+        mock_response.json.return_value = error_body
+        mock_response.headers = {}
         mock_response.aread = AsyncMock()
         mock_client = MagicMock()
         mock_client.post = AsyncMock(return_value=mock_response)

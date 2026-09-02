@@ -36,7 +36,12 @@ class GeminiEmbeddingsMixin:
         return InternalEmbeddingResponse(model=model, data=data_list, usage=usage)
 
     def build_provider_embedding_request(self, request: InternalEmbeddingRequest) -> dict[str, Any]:
-        body: dict[str, Any] = {"content": {"parts": [{"text": request.input}]}}
+        # EmbedContentRequest.model is Required (resource name format
+        # "models/{model}") even when the model is also in the URL.
+        body: dict[str, Any] = {
+            "model": f"models/{request.model}",
+            "content": {"parts": [{"text": request.input}]},
+        }
         if request.dimensions:
             body["embedContentConfig"] = {"outputDimensionality": request.dimensions}
         return body

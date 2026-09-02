@@ -32,6 +32,7 @@ from llm_proxy.serialization.gemini_interactions.annotations import (
 from llm_proxy.serialization.gemini_interactions.finish_reason import (
     FAILED_STATUSES,
     STATUS_TO_FINISH_REASON,
+    interaction_error_message,
 )
 from llm_proxy.serialization.gemini_interactions.usage import (
     interactions_billable_token_counts,
@@ -162,11 +163,11 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         return None
 
     def _raise_status_error(self, status: str, event: dict[str, Any]) -> None:
+        # The Interaction resource carries failure details in ``error``
+        # (singular); ``errors`` is accepted as a defensive fallback. The
+        # interaction-level error wins over the event-level one.
         interaction = event.get("interaction") or {}
-        errors = interaction.get("errors") or event.get("errors") or []
-        message = "; ".join(
-            f"{e.get('code', '')}: {e.get('message', '')}" for e in errors if isinstance(e, dict)
-        )
+        message = interaction_error_message(interaction) or interaction_error_message(event)
         raise ProviderError(
             message=message or f"Gemini interaction ended with status={status!r}",
             error_type="api_error",
@@ -311,17 +312,23 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         return None
 
     def _emit_reasoning(self, text: str) -> dict[str, Any] | None:
-        """Emit the incremental tail of a growing reasoning summary."""
+        """Emit a reasoning delta.
+
+        ``thought``/``thought_summary`` deltas carry incremental text (like
+        ``text`` deltas). A cumulative snapshot shape (the whole summary so
+        far, supersets of what we buffered) is handled defensively: only the
+        new tail is emitted. Genuine increments are appended verbatim.
+        """
         buffer = self._reasoning_buffer
-        if text.startswith(buffer) and len(text) > len(buffer):
+        if text.startswith(buffer):
+            if len(text) == len(buffer):
+                return None
             tail = text[len(buffer) :]
             self._reasoning_buffer = text
             return self._make_openai_chunk({"reasoning_content": tail})
-        if not text.startswith(buffer):
-            # Not a continuation (defensive); emit the whole delta.
-            self._reasoning_buffer = text
-            return self._make_openai_chunk({"reasoning_content": text})
-        return None
+        # Not a cumulative snapshot: an incremental fragment — append it.
+        self._reasoning_buffer = buffer + text
+        return self._make_openai_chunk({"reasoning_content": text})
 
     def _emit_arguments_delta(
         self, event: dict[str, Any], delta: dict[str, Any]
@@ -336,14 +343,25 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             call = {"id": f"call_{index}", "name": "", "arguments": "", "emitted": False}
             self._tool_calls[index] = call
 
-        partial = delta.get("partial_arguments") or delta.get("arguments") or ""
+        # Interactions streams arguments as partial JSON fragments that "must
+        # be accumulated across deltas" (breaking-changes guide); a cumulative
+        # snapshot shape is handled defensively for older revisions.
+        partial = delta.get("partial_arguments")
+        if partial is None:
+            partial = delta.get("arguments")
         if not isinstance(partial, str):
-            partial = str(partial)
+            partial = str(partial or "")
 
         previous = call["arguments"]
         assert isinstance(previous, str)  # always a str: initialized and updated below
-        tail = partial[len(previous) :] if partial.startswith(previous) else partial
-        call["arguments"] = partial
+        if previous and partial.startswith(previous) and len(partial) > len(previous):
+            # Cumulative snapshot: emit only the newly appended tail.
+            tail = partial[len(previous) :]
+            call["arguments"] = partial
+        else:
+            # Fragment: append to the accumulated arguments.
+            tail = partial
+            call["arguments"] = previous + partial
 
         if not tail:
             return None
@@ -496,6 +514,7 @@ class InteractionsStreamingTransformer(StreamingTransformer):
                 ThinkingBlock(
                     thinking=self._reasoning_buffer,
                     signature=self._reasoning_signature,
+                    signature_origin="gemini",
                 )
             )
 

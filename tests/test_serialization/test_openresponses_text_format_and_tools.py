@@ -374,7 +374,9 @@ class TestResponsesToolsConsumerBehavior:
             body = self._build("gemini")
         assert "responses_tools" not in body
         tools = body.get("tools", [])
-        assert any(decl.get("name") == "g" for decl in tools.get("function_declarations", []))
+        # tools is array<Tool>; the function declarations live on the entry.
+        decls = tools[0].get("function_declarations", []) if tools else []
+        assert any(decl.get("name") == "g" for decl in decls)
         assert any("responses_tools" in r.message for r in caplog.records)
 
     def test_anthropic_drops_responses_tools_with_warning(self, caplog):

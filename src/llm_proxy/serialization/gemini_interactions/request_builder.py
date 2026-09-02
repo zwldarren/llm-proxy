@@ -17,8 +17,9 @@ Builds Interactions ``interactions.create`` bodies from InternalRequest:
 Parameters the Interactions API does not support are warn-and-dropped (the
 ``_warn_unsupported_*`` pattern): cached_content, top_k,
 frequency_penalty, presence_penalty, candidateCount (n>1).
-``safety_settings`` IS supported and converted from the legacy
-generateContent vocabulary (see ``_convert_safety_settings``).
+``safety_settings`` is NOT supported by the Interactions API (custom safety
+settings are not yet available there; the API rejects unknown top-level
+fields) and is warn-and-dropped.
 """
 
 import logging
@@ -77,40 +78,6 @@ _SERVICE_TIER_MAP = {
 # default variant).
 _UNSUPPORTED_COMMON_PARAMS = ("frequency_penalty", "presence_penalty")
 _UNSUPPORTED_GEMINI_PARAMS = ("top_k", "candidate_count")
-
-# Legacy generateContent safety vocabulary -> Interactions vocabulary.
-# https://ai.google.dev/api/interactions-api#SafetySetting
-_SAFETY_CATEGORY_MAP = {
-    "HARM_CATEGORY_HATE_SPEECH": "hate_speech",
-    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "sexually_explicit",
-    "HARM_CATEGORY_DANGEROUS_CONTENT": "dangerous_content",
-    "HARM_CATEGORY_HARASSMENT": "harassment",
-    "HARM_CATEGORY_CIVIC_INTEGRITY": "civic_integrity",
-}
-_SAFETY_THRESHOLD_MAP = {
-    "BLOCK_NONE": "block_none",
-    "BLOCK_ONLY_HIGH": "block_only_high",
-    "BLOCK_MEDIUM_AND_ABOVE": "block_medium_and_above",
-    "BLOCK_LOW_AND_ABOVE": "block_low_and_above",
-}
-_INTERACTIONS_SAFETY_TYPES = frozenset(
-    {
-        "hate_speech",
-        "dangerous_content",
-        "harassment",
-        "sexually_explicit",
-        "civic_integrity",
-        "image_hate",
-        "image_dangerous_content",
-        "image_harassment",
-        "image_sexually_explicit",
-        "jailbreak",
-    }
-)
-_INTERACTIONS_SAFETY_THRESHOLDS = frozenset(
-    {"block_low_and_above", "block_medium_and_above", "block_only_high", "block_none", "off"}
-)
-_INTERACTIONS_SAFETY_METHODS = frozenset({"severity", "probability"})
 
 
 class GeminiInteractionsRequestBuilderMixin:
@@ -182,11 +149,15 @@ class GeminiInteractionsRequestBuilderMixin:
             if value is not None and key != "store":
                 body[key] = value
 
-        # safety_settings: supported, converted from the legacy vocabulary.
+        # safety_settings: NOT supported by the Interactions API (see module
+        # docstring); warn-and-drop instead of failing the request.
         if request.params.gemini is not None and request.params.gemini.safety_settings:
-            converted = self._convert_safety_settings(request.params.gemini.safety_settings)
-            if converted:
-                body["safety_settings"] = converted
+            logger.warning(
+                "Gemini Interactions API does not support safety_settings; "
+                "dropping %d setting(s). Switch the provider's metadata.api_variant "
+                "back to 'generate_content' if you need them.",
+                len(request.params.gemini.safety_settings),
+            )
 
         # Warn-and-drop for generateContent-only parameters.
         self._warn_unsupported_params(request)
@@ -210,55 +181,6 @@ class GeminiInteractionsRequestBuilderMixin:
 
     @abstractmethod
     def _system_instruction_text(self, conversation: Any) -> str | None: ...
-
-    @staticmethod
-    def _convert_safety_settings(
-        settings: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Convert legacy generateContent safety settings to the Interactions
-        vocabulary.
-
-        Legacy entries use ``{"category": "HARM_CATEGORY_*",
-        "threshold": "BLOCK_*"}``; Interactions wants ``{"type":
-        "hate_speech", "threshold": "block_medium_and_above", "method":
-        ...}``. Entries already in the Interactions vocabulary pass through;
-        entries with unknown values are warn-and-dropped.
-        """
-        converted: list[dict[str, Any]] = []
-        for setting in settings:
-            category = setting.get("category") or setting.get("type")
-            threshold = setting.get("threshold")
-            if not isinstance(category, str) or not isinstance(threshold, str):
-                logger.warning(
-                    "Gemini Interactions: safety setting missing category/type or "
-                    "threshold; dropping %r",
-                    setting,
-                )
-                continue
-            category = _SAFETY_CATEGORY_MAP.get(category, category)
-            threshold = _SAFETY_THRESHOLD_MAP.get(threshold, threshold)
-            if (
-                category not in _INTERACTIONS_SAFETY_TYPES
-                or threshold not in _INTERACTIONS_SAFETY_THRESHOLDS
-            ):
-                logger.warning(
-                    "Gemini Interactions: unsupported safety setting %r; dropping",
-                    setting,
-                )
-                continue
-            entry: dict[str, Any] = {"type": category, "threshold": threshold}
-            method = setting.get("method")
-            if method is not None:
-                if method not in _INTERACTIONS_SAFETY_METHODS:
-                    logger.warning(
-                        "Gemini Interactions: unsupported safety method %r; dropping %r",
-                        method,
-                        setting,
-                    )
-                    continue
-                entry["method"] = method
-            converted.append(entry)
-        return converted
 
     @staticmethod
     def _warn_unsupported_params(request: InternalRequest) -> None:

@@ -893,9 +893,10 @@ class TestRequestBuilder:
         assert "frequency_penalty" in caplog.text
         assert "n=2" in caplog.text
 
-    def test_safety_settings_legacy_vocabulary_converted(self, serializer):
-        """Legacy generateContent safety settings are converted to the
-        Interactions vocabulary (category -> type, BLOCK_* -> block_*)."""
+    def test_safety_settings_not_supported_and_dropped(self, serializer, caplog):
+        """The Interactions API does not support custom safety settings
+        (Interactions overview, "Limitations"); they are warn-and-dropped
+        instead of sent (the API rejects unknown top-level fields)."""
         request = InternalRequest(
             model="gemini-3.7-flash",
             conversation=ConversationContext(
@@ -908,69 +909,14 @@ class TestRequestBuilder:
                             "category": "HARM_CATEGORY_HARASSMENT",
                             "threshold": "BLOCK_MEDIUM_AND_ABOVE",
                         },
-                        {
-                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                            "threshold": "BLOCK_ONLY_HIGH",
-                            "method": "severity",
-                        },
-                    ]
-                )
-            ),
-        )
-        body = serializer.build_provider_request(request)
-        assert body["safety_settings"] == [
-            {"type": "harassment", "threshold": "block_medium_and_above"},
-            {
-                "type": "dangerous_content",
-                "threshold": "block_only_high",
-                "method": "severity",
-            },
-        ]
-
-    def test_safety_settings_interactions_vocabulary_passthrough(self, serializer):
-        """Entries already in the Interactions vocabulary pass through."""
-        request = InternalRequest(
-            model="gemini-3.7-flash",
-            conversation=ConversationContext(
-                messages=[Message(role="user", content=[TextBlock(text="Hi")])]
-            ),
-            params=GenerationParams(
-                gemini=GeminiSpecificParams(
-                    safety_settings=[
                         {"type": "jailbreak", "threshold": "off"},
-                        {"type": "image_hate", "threshold": "block_none"},
                     ]
                 )
             ),
         )
         body = serializer.build_provider_request(request)
-        assert body["safety_settings"] == [
-            {"type": "jailbreak", "threshold": "off"},
-            {"type": "image_hate", "threshold": "block_none"},
-        ]
-
-    def test_safety_settings_unknown_values_dropped(self, serializer, caplog):
-        """Entries with unknown categories/thresholds are warn-and-dropped."""
-        request = InternalRequest(
-            model="gemini-3.7-flash",
-            conversation=ConversationContext(
-                messages=[Message(role="user", content=[TextBlock(text="Hi")])]
-            ),
-            params=GenerationParams(
-                gemini=GeminiSpecificParams(
-                    safety_settings=[
-                        {"category": "HARM_CATEGORY_UNKNOWN", "threshold": "BLOCK_NONE"},
-                        {"type": "hate_speech", "threshold": "BLOCK_WEIRD"},
-                        {"type": "hate_speech", "threshold": "block_none", "method": "bogus"},
-                        {"type": "hate_speech", "threshold": "block_none"},
-                    ]
-                )
-            ),
-        )
-        body = serializer.build_provider_request(request)
-        assert body["safety_settings"] == [{"type": "hate_speech", "threshold": "block_none"}]
-        assert "unsupported safety setting" in caplog.text
-        assert "unsupported safety method" in caplog.text
+        assert "safety_settings" not in body
+        assert "does not support safety_settings" in caplog.text
 
     def test_service_tier_mapping(self, serializer):
         request = InternalRequest(

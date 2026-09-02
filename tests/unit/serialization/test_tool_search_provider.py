@@ -55,8 +55,9 @@ class TestGeminiToolSearch:
         builder = self._make_builder()
         result = builder._convert_tools_to_gemini([OpenAIToolSearchTool()])
         assert result is not None
-        assert "function_declarations" in result
-        decls = result["function_declarations"]
+        # tools is array<Tool>; a single entry carries the declarations.
+        assert isinstance(result, list) and len(result) == 1
+        decls = result[0]["function_declarations"]
         assert len(decls) == 1
         decl = decls[0]
         assert decl["name"] == _TOOL_SEARCH_NAME
@@ -73,7 +74,7 @@ class TestGeminiToolSearch:
         func = FunctionTool(name="get_weather", parameters={"type": "object"})
         result = builder._convert_tools_to_gemini([OpenAIToolSearchTool(), func])
         assert result is not None
-        decls = result["function_declarations"]
+        decls = result[0]["function_declarations"]
         assert len(decls) == 2
         names = [d["name"] for d in decls]
         assert _TOOL_SEARCH_NAME in names
@@ -97,9 +98,8 @@ class TestGeminiCustomTool:
         custom = CustomTool(name="my_custom_tool", description="A custom tool")
         result = builder._convert_tools_to_gemini([custom])
         assert result is not None
-        assert "function_declarations" in result
-        decls = result["function_declarations"]
-        assert len(decls) == 1
+        assert isinstance(result, list) and len(result) == 1
+        decls = result[0]["function_declarations"]
         decl = decls[0]
         assert decl["name"] == "my_custom_tool"
         assert decl["description"] == "A custom tool"
@@ -116,7 +116,7 @@ class TestGeminiCustomTool:
         custom = CustomTool(name="bare_tool")
         result = builder._convert_tools_to_gemini([custom])
         assert result is not None
-        decl = result["function_declarations"][0]
+        decl = result[0]["function_declarations"][0]
         assert decl["name"] == "bare_tool"
         assert "description" not in decl
 
@@ -128,7 +128,7 @@ class TestGeminiCustomTool:
         func = FunctionTool(name="get_weather", parameters={"type": "object"})
         result = builder._convert_tools_to_gemini([custom, func])
         assert result is not None
-        decls = result["function_declarations"]
+        decls = result[0]["function_declarations"]
         assert len(decls) == 2
         names = [d["name"] for d in decls]
         assert "my_custom" in names

@@ -813,6 +813,9 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
     _models_endpoint: str = "/models"
     _models_data_key: str = "data"
+    # Page size for providers whose list endpoint is paginated (e.g. Gemini's
+    # ListModels caps a page at 50 by default); None sends no pageSize param.
+    _models_page_size: int | None = None
 
     def _models_url(self) -> str:
         return f"{self._base_url}{self._models_endpoint}"
@@ -837,8 +840,19 @@ class BaseHttpProvider(BaseAdapter, ABC):
         url = self._models_url()
         headers = self._models_headers()
 
-        data = await fetch_json(http_client, url, headers=headers)
-        models = data.get(self._models_data_key, [])
+        models: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            params: dict[str, Any] = {}
+            if self._models_page_size is not None:
+                params["pageSize"] = self._models_page_size
+            if page_token:
+                params["pageToken"] = page_token
+            data = await fetch_json(http_client, url, headers=headers, params=params)
+            models.extend(data.get(self._models_data_key, []))
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
 
         return sorted(
             [self._parse_model(m) for m in models],

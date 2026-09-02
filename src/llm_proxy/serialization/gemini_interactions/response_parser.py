@@ -36,6 +36,7 @@ from llm_proxy.serialization.gemini_interactions.annotations import (
 from llm_proxy.serialization.gemini_interactions.finish_reason import (
     FAILED_STATUSES,
     STATUS_TO_FINISH_REASON,
+    interaction_error_message,
 )
 from llm_proxy.serialization.gemini_interactions.usage import (
     interactions_billable_token_counts,
@@ -60,12 +61,9 @@ class GeminiInteractionsResponseParserMixin:
     ) -> InternalResponse:
         status = response.get("status")
         if status in FAILED_STATUSES:
-            errors = response.get("errors") or []
-            message = "; ".join(
-                f"{e.get('code', '')}: {e.get('message', '')}"
-                for e in errors
-                if isinstance(e, dict)
-            )
+            # The Interaction resource carries failure details in ``error``
+            # (singular, per the SDK docs); ``errors`` is a defensive fallback.
+            message = interaction_error_message(response)
             raise ProviderError(
                 message=message or f"Gemini interaction ended with status={status!r}",
                 error_type="api_error",

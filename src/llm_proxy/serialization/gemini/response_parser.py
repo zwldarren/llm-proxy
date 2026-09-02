@@ -16,18 +16,26 @@ from llm_proxy.models import (
 from llm_proxy.models.finish_reasons import map_finish_reason
 from llm_proxy.models.types import AudioSource, ImageSource, Usage, VideoSource
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
+from llm_proxy.serialization.gemini.code_execution import extract_code_execution_text
 from llm_proxy.serialization.gemini.usage import billable_token_counts
 
 
-def _mime_of(part_data: Any) -> str:
-    """Return the MIME type of an inlineData/fileData part.
-
-    The Gemini REST API emits camelCase (``mimeType``) while some fixtures
-    and SDKs use snake_case (``mime_type``); accept both.
-    """
+def _part_field(part_data: Any, camel: str, snake: str) -> str:
+    """Return a part field by its REST API (camelCase) name, with a
+    snake_case fallback for fixtures/SDKs that pre-normalize."""
     if not isinstance(part_data, dict):
         return ""
-    return part_data.get("mime_type") or part_data.get("mimeType") or ""
+    return part_data.get(camel) or part_data.get(snake) or ""
+
+
+def _mime_of(part_data: Any) -> str:
+    """Return the MIME type of an inlineData/fileData part."""
+    return _part_field(part_data, "mimeType", "mime_type")
+
+
+def _uri_of(part_data: Any) -> str:
+    """Return the URI of a fileData part (``fileUri`` in the REST API)."""
+    return _part_field(part_data, "fileUri", "file_uri")
 
 
 class GeminiResponseParserMixin:
@@ -54,19 +62,27 @@ class GeminiResponseParserMixin:
                 match part:
                     case {"thought": True, "text": str(text)}:
                         sig = part.get("thoughtSignature") or part.get("thought_signature")
-                        output.append(ThinkingBlock(thinking=text, signature=sig))
+                        output.append(
+                            ThinkingBlock(thinking=text, signature=sig, signature_origin="gemini")
+                        )
                     case {"text": str(text)}:
                         text_parts.append(text)
                     case {"functionCall": fc}:
                         sig = part.get("thoughtSignature") or part.get("thought_signature")
                         output.append(
                             ToolUseBlock(
-                                id=f"{fc.get('name', '')}_call",
+                                # FunctionCall.id is the correlation id the
+                                # client must echo back in FunctionResponse.
+                                id=fc.get("id") or f"{fc.get('name', '')}_call",
                                 name=fc.get("name", ""),
                                 input=fc.get("args", {}),
                                 extra={"thought_signature": sig},
                             )
                         )
+                    case {"executableCode": _} | {"codeExecutionResult": _}:
+                        text = extract_code_execution_text(part)
+                        if text:
+                            text_parts.append(text)
                     case {"inlineData": inline} if _mime_of(inline).startswith("audio/"):
                         output.append(
                             AudioBlock(
@@ -77,13 +93,13 @@ class GeminiResponseParserMixin:
                                 )
                             )
                         )
-                    case {"inlineData": inline} if inline.get("mime_type", "").startswith("video/"):
+                    case {"inlineData": inline} if _mime_of(inline).startswith("video/"):
                         output.append(
                             VideoBlock(
                                 source=VideoSource(
                                     type="base64",
                                     data=inline.get("data", ""),
-                                    media_type=inline.get("mime_type", ""),
+                                    media_type=_mime_of(inline),
                                 )
                             )
                         )
@@ -93,7 +109,7 @@ class GeminiResponseParserMixin:
                                 source=ImageSource(
                                     type="base64",
                                     data=inline.get("data", ""),
-                                    media_type=inline.get("mime_type", ""),
+                                    media_type=_mime_of(inline),
                                 )
                             )
                         )
@@ -102,18 +118,18 @@ class GeminiResponseParserMixin:
                             AudioBlock(
                                 source=AudioSource(
                                     type="file_id",
-                                    data=fd.get("file_uri") or fd.get("fileUri", ""),
+                                    data=_uri_of(fd),
                                     media_type=_mime_of(fd),
                                 )
                             )
                         )
-                    case {"fileData": fd} if fd.get("mime_type", "").startswith("video/"):
+                    case {"fileData": fd} if _mime_of(fd).startswith("video/"):
                         output.append(
                             VideoBlock(
                                 source=VideoSource(
                                     type="file_id",
-                                    data=fd.get("file_uri", ""),
-                                    media_type=fd.get("mime_type", ""),
+                                    data=_uri_of(fd),
+                                    media_type=_mime_of(fd),
                                 )
                             )
                         )
@@ -122,8 +138,8 @@ class GeminiResponseParserMixin:
                             ImageBlock(
                                 source=ImageSource(
                                     type="file_id",
-                                    data=fd.get("file_uri", ""),
-                                    media_type=fd.get("mime_type", ""),
+                                    data=_uri_of(fd),
+                                    media_type=_mime_of(fd),
                                 )
                             )
                         )
@@ -154,9 +170,14 @@ class GeminiResponseParserMixin:
                 provider_info["avgLogprobs"] = candidate["avgLogprobs"]
             if "logprobsResult" in candidate:
                 provider_info["logprobsResult"] = candidate["logprobsResult"]
+            grounding_supports = candidate.get("groundingSupports")
+            if isinstance(grounding_supports, list) and grounding_supports:
+                provider_info["groundingSupports"] = grounding_supports
 
         if "promptFeedback" in response:
             provider_info["promptFeedback"] = response["promptFeedback"]
+        if "modelVersion" in response:
+            provider_info["modelVersion"] = response["modelVersion"]
 
         usage = None
         # Native Google Search grounding is billed per search request;
@@ -190,7 +211,10 @@ class GeminiResponseParserMixin:
             usage.web_search_requests = web_search_requests
 
         return InternalResponse(
-            id=response.get("id") or generate_response_id(),
+            # GenerateContentResponse carries the correlation id as
+            # ``responseId`` (there is no ``id`` field); keep ``id`` as a
+            # defensive fallback for fixtures.
+            id=response.get("responseId") or response.get("id") or generate_response_id(),
             model=model or "unknown",
             output=output,
             usage=usage,

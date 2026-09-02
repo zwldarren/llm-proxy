@@ -170,19 +170,22 @@ def wav_header(
     ``0xFFFFFFFF`` (unknown length), which common players accept for
     chunked/streamed WAV playback.
     """
-    size = 0xFFFFFFFF if data_size is None else data_size
+    # Streaming: unknown length. Both size fields must carry the "unknown"
+    # marker 0xFFFFFFFF — computing RIFF size + 36 here would wrap around to
+    # 35 (an invalid header some players reject).
+    riff_size = 0xFFFFFFFF if data_size is None else (data_size + 36) & 0xFFFFFFFF
     byte_rate = sample_rate * channels * sample_width
     block_align = channels * sample_width
     return (
         b"RIFF"
-        + struct.pack("<I", (size + 36) & 0xFFFFFFFF)
+        + struct.pack("<I", riff_size)
         + b"WAVE"
         + b"fmt "
         + struct.pack(
             "<IHHIIHH", 16, 1, channels, sample_rate, byte_rate, block_align, 8 * sample_width
         )
         + b"data"
-        + struct.pack("<I", size)
+        + struct.pack("<I", 0xFFFFFFFF if data_size is None else data_size)
     )
 
 

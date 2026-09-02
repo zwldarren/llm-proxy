@@ -39,7 +39,7 @@ def test_build_provider_request_basic(serializer):
 
     body = serializer.build_provider_request(request)
 
-    assert body["model"] == "gemini-2.0-flash"
+    assert body["model"] == "models/gemini-2.0-flash"
     assert "contents" in body
     assert len(body["contents"]) == 1
     assert body["contents"][0]["role"] == "user"
@@ -322,8 +322,9 @@ def test_build_provider_request_with_tools(serializer):
     body = serializer.build_provider_request(request)
 
     assert "tools" in body
-    assert "function_declarations" in body["tools"]
-    func_decl = body["tools"]["function_declarations"][0]
+    # GenerateContentRequest.tools is array<Tool>.
+    assert isinstance(body["tools"], list) and len(body["tools"]) == 1
+    func_decl = body["tools"][0]["function_declarations"][0]
     assert func_decl["name"] == "get_weather"
     assert func_decl["description"] == "Get current weather for a location"
     assert func_decl["parameters"]["properties"]["location"]["type"] == "string"
@@ -347,9 +348,9 @@ def test_build_provider_request_with_web_search_tool(serializer):
     body = serializer.build_provider_request(request)
 
     assert "tools" in body
-    assert "google_search" in body["tools"]
-    assert body["tools"]["google_search"] == {}
-    assert "function_declarations" not in body["tools"]
+    assert isinstance(body["tools"], list) and len(body["tools"]) == 1
+    assert body["tools"][0]["google_search"] == {}
+    assert "function_declarations" not in body["tools"][0]
 
 
 def test_build_provider_request_with_mixed_tools(serializer):
@@ -375,10 +376,10 @@ def test_build_provider_request_with_mixed_tools(serializer):
     body = serializer.build_provider_request(request)
 
     assert "tools" in body
-    assert "google_search" in body["tools"]
-    assert body["tools"]["google_search"] == {}
-    assert "function_declarations" in body["tools"]
-    assert body["tools"]["function_declarations"][0]["name"] == "calculator"
+    assert isinstance(body["tools"], list) and len(body["tools"]) == 1
+    assert body["tools"][0]["google_search"] == {}
+    assert "function_declarations" in body["tools"][0]
+    assert body["tools"][0]["function_declarations"][0]["name"] == "calculator"
 
 
 def test_build_provider_request_with_image(serializer):
@@ -624,11 +625,12 @@ class TestSanitizeGeminiSchema:
                 ],
             }
         )
-        assert result["anyOf"][0] == {"type": "string"}
-        assert result["anyOf"][1] == {"type": "number"}
+        # minLength/minimum/default are documented Schema fields — kept.
+        assert result["anyOf"][0] == {"type": "string", "minLength": 1}
+        assert result["anyOf"][1] == {"type": "number", "minimum": 0, "default": 5}
 
-    def test_strips_newly_added_keywords(self):
-        """Regression test: validation and annotation keywords are stripped."""
+    def test_keeps_documented_schema_constraint_keywords(self):
+        """Constraint keywords documented in the Gemini Schema are preserved."""
         result = GeminiProviderSerializer._sanitize_gemini_schema(
             {
                 "type": "object",
@@ -658,18 +660,23 @@ class TestSanitizeGeminiSchema:
                 },
             }
         )
+        # Still stripped: JSON Schema vocabulary absent from the Gemini Schema.
         assert "$id" not in result
         assert "$schema" not in result
-        assert "title" not in result
-        assert "default" not in result
         assert "examples" not in result
-        assert "minLength" not in result["properties"]["name"]
-        assert "maxLength" not in result["properties"]["name"]
-        assert "pattern" not in result["properties"]["name"]
-        assert "minimum" not in result["properties"]["count"]
-        assert "maximum" not in result["properties"]["count"]
-        assert "minItems" not in result["properties"]["tags"]
-        assert "maxItems" not in result["properties"]["tags"]
+        # Documented Gemini Schema fields are preserved verbatim.
+        assert result["title"] == "My Schema"
+        assert result["default"] is None
+        name = result["properties"]["name"]
+        assert name["minLength"] == 1
+        assert name["maxLength"] == 100
+        assert name["pattern"] == "^[a-z]+$"
+        count = result["properties"]["count"]
+        assert count["minimum"] == 0
+        assert count["maximum"] == 999
+        tags = result["properties"]["tags"]
+        assert tags["minItems"] == 1
+        assert tags["maxItems"] == 10
 
     def test_none_schema_returns_empty_dict(self):
         """None input is handled defensively."""
@@ -733,7 +740,7 @@ class TestSanitizeGeminiSchema:
         )
 
         body = serializer.build_provider_request(request)
-        params = body["tools"]["function_declarations"][0]["parameters"]
+        params = body["tools"][0]["function_declarations"][0]["parameters"]
         assert "additionalProperties" not in params
         assert "definitions" not in params
         nested = params["properties"]["nested"]

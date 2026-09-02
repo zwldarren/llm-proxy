@@ -462,6 +462,13 @@ class GeminiAdapter(
             message = str(error_data) if error_data else str(error_body)
             error_type = get_error_type_for_status(status_code)
 
+        # Invalid API keys surface as HTTP 400 + INVALID_ARGUMENT ("API key
+        # not valid. Please pass a valid API key."), which would otherwise be
+        # classified as invalid_request_error; it is an authentication
+        # failure so key rotation/alerting can react.
+        if "api key not valid" in message.lower():
+            error_type = "authentication_error"
+
         if "user location is not supported" in message.lower():
             message = f"{message} {_LOCATION_BLOCK_HINT}"
 
@@ -536,20 +543,8 @@ class GeminiAdapter(
                     json=body,
                     timeout=stream_timeout,
                 ) as response:
-                    assert response.status_code is not None
-                    if response.status_code >= 400:
-                        await response.aread()
-                        try:
-                            error_body = response.json()
-                        except Exception:
-                            error_text = response.text
-                            raise ProviderError(
-                                message=error_text or f"HTTP {response.status_code}",
-                                error_type=get_error_type_for_status(response.status_code),
-                                status_code=response.status_code,
-                                provider_name=self.provider_name,
-                            ) from None
-                        raise self._parse_error_response(response.status_code, error_body)
+                    # Base helper parses the provider error body and preserves Retry-After.
+                    await self._raise_for_stream_status(response)
 
                     async for line in cast(
                         AsyncIterator[bytes],
@@ -846,20 +841,8 @@ class GeminiAdapter(
                 async with self._streaming_post(
                     client, url, headers=headers, json=body, timeout=stream_timeout
                 ) as response:
-                    assert response.status_code is not None
-                    if response.status_code >= 400:
-                        await response.aread()
-                        try:
-                            error_body = response.json()
-                        except Exception:
-                            error_text = response.text
-                            raise ProviderError(
-                                message=error_text or f"HTTP {response.status_code}",
-                                error_type=get_error_type_for_status(response.status_code),
-                                status_code=response.status_code,
-                                provider_name=self.provider_name,
-                            ) from None
-                        raise self._parse_error_response(response.status_code, error_body)
+                    # Base helper parses the provider error body and preserves Retry-After.
+                    await self._raise_for_stream_status(response)
 
                     async for line in cast(AsyncIterator[bytes], response.iter_lines()):
                         if not line:
@@ -1259,20 +1242,8 @@ class GeminiAdapter(
                 async with self._streaming_post(
                     client, url, headers=headers, json=body, timeout=stream_timeout
                 ) as response:
-                    assert response.status_code is not None
-                    if response.status_code >= 400:
-                        await response.aread()
-                        try:
-                            error_body = response.json()
-                        except Exception:
-                            error_text = response.text
-                            raise ProviderError(
-                                message=error_text or f"HTTP {response.status_code}",
-                                error_type=get_error_type_for_status(response.status_code),
-                                status_code=response.status_code,
-                                provider_name=self.provider_name,
-                            ) from None
-                        raise self._parse_error_response(response.status_code, error_body)
+                    # Base helper parses the provider error body and preserves Retry-After.
+                    await self._raise_for_stream_status(response)
 
                     async for line in cast(AsyncIterator[bytes], response.iter_lines()):
                         if not line:
@@ -1550,7 +1521,10 @@ class GeminiAdapter(
             provider_name=self.provider_name,
         )
 
+    # ListModels returns at most 50 models per page by default (max 1000);
+    # fetch a full page per request so large catalogs are not truncated.
     _models_data_key = "models"
+    _models_page_size = 1000
 
     def _models_url(self) -> str:
         return f"{self._base_url}/models"

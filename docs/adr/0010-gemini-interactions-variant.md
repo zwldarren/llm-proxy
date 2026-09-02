@@ -106,12 +106,14 @@ need them stay on the default variant):
 - `top_k`, `frequency_penalty`, `presence_penalty`, `n>1` (candidateCount)
 - `video_metadata` (never used by the proxy; documented only)
 
-`safety_settings` IS supported by the Interactions API (top-level
-`safety_settings` array of `{method, threshold, type}`); the serializer
-converts the legacy generateContent vocabulary (`category`
-`HARM_CATEGORY_*` → `type` lowercase, `BLOCK_*` → `block_*`) and passes
-entries already in the Interactions vocabulary through. Entries with unknown
-values are warn-and-dropped.
+`safety_settings` is NOT supported by the Interactions API (verified
+against the live API 2026-08): the Interactions overview's "Limitations"
+section states custom safety settings are not yet available there, and the
+API rejects unknown top-level fields. The serializer warn-and-drops
+`params.gemini.safety_settings` (with a hint to switch
+`metadata.api_variant` back to `generate_content`). This amends the original
+draft of this ADR, which claimed safety_settings was supported and converted
+from the legacy generateContent vocabulary.
 
 Structured-output schemas are passed through untouched as standard JSON
 Schema (lowercase `type`); the generateContent `sanitize_gemini_schema`

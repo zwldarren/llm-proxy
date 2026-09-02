@@ -335,8 +335,12 @@ class GeminiConversationMixin:
                 if not block.thinking:
                     continue
                 thought_part: dict[str, Any] = {"thought": True, "text": block.thinking}
-                if block.signature is not None:
-                    thought_part["signature"] = block.signature
+                # Part schema field is ``thoughtSignature`` (no ``signature``
+                # field exists; Gemini 3 rejects unknown fields). Only replay
+                # signatures issued by Gemini itself — e.g. an Anthropic
+                # signature bridged through history would fail validation.
+                if block.signature and block.signature_origin == "gemini":
+                    thought_part["thoughtSignature"] = block.signature
                 parts.append(thought_part)
             elif isinstance(block, ToolResultBlock):
                 raw_name = (

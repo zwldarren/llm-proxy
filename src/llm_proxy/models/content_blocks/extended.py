@@ -1,17 +1,28 @@
 """Extended ContentBlock types supported by multiple providers but not universal."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from llm_proxy.models.content_blocks.core import ContentBlock
+
+#: Providers whose thought signatures may be replayed to the same provider.
+SignatureOrigin = Literal["gemini"]
 
 
 @dataclass
 class ThinkingBlock(ContentBlock):
-    """Thinking / reasoning content. Supported by Anthropic and OpenAI o-series."""
+    """Thinking / reasoning content. Supported by Anthropic and OpenAI o-series.
+
+    ``signature`` is provider-specific (Anthropic signature, OpenAI reasoning
+    signature, Gemini thoughtSignature). ``signature_origin`` records which
+    provider produced the signature so target serializers can decide whether
+    replaying it is valid (e.g. only Gemini-issued thoughtSignatures may be
+    sent back to Gemini).
+    """
 
     thinking: str
     signature: str | None = None
+    signature_origin: SignatureOrigin | None = None
     encrypted_content: str | None = None
     cache_control: Any | None = None
 

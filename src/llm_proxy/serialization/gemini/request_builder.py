@@ -39,7 +39,6 @@ _GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
         "allOf",
         "const",
         "contains",
-        "default",
         "definitions",
         "dependentRequired",
         "dependentSchemas",
@@ -51,25 +50,15 @@ _GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
         "exclusiveMinimum",
         "if",
         "maxContains",
-        "maxItems",
-        "maxLength",
-        "maxProperties",
-        "maximum",
         "minContains",
-        "minItems",
-        "minLength",
-        "minProperties",
-        "minimum",
         "multipleOf",
         "not",
         "oneOf",
-        "pattern",
         "patternProperties",
         "prefixItems",
         "propertyNames",
         "ref",
         "then",
-        "title",
         "unevaluatedProperties",
         "uniqueItems",
     }
@@ -106,8 +95,9 @@ class GeminiRequestBuilderMixin:
     def _build_provider_request(
         self, request: InternalRequest, context: BuildContext
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"model": context.model or request.model}
-
+        # GenerateContentRequest.model is the resource name: "models/{model}".
+        model = context.model or request.model
+        body: dict[str, Any] = {"model": f"models/{model}" if model else model}
         contents, system_instruction = self._convert_conversation_to_gemini(
             request.conversation, context
         )
@@ -233,6 +223,21 @@ class GeminiRequestBuilderMixin:
         "speech_config": "speechConfig",
     }
 
+    @staticmethod
+    def _is_gemini_25_model(model: str | None) -> bool:
+        """Check if the model name indicates a Gemini 2.5 series model."""
+        return model is not None and "gemini-2.5" in model
+
+    @staticmethod
+    def _is_gemini_25_pro_model(model: str | None) -> bool:
+        """Check if the model name indicates a Gemini 2.5 Pro model."""
+        return model is not None and "gemini-2.5" in model and "pro" in model
+
+    @staticmethod
+    def _is_gemini_3_model(model: str | None) -> bool:
+        """Check if the model name indicates a Gemini 3 series model."""
+        return model is not None and "gemini-3" in model
+
     def _build_generation_config(
         self, request: InternalRequest, model: str | None = None
     ) -> dict[str, Any] | None:
@@ -264,12 +269,35 @@ class GeminiRequestBuilderMixin:
 
         thinking = resolve_thinking(request)
         if thinking is not None:
-            if self._is_gemini_25_model(model):
-                gemini_thinking = convert_to_gemini_legacy(thinking)
-            else:
+            effective_model = model or request.model
+            if self._is_gemini_25_model(effective_model):
+                # Gemini 2.5 rejects thinkingLevel; use thinkingBudget.
+                if thinking.type == "disabled":
+                    # 2.5 Flash family supports disabling via thinkingBudget=0;
+                    # 2.5 Pro cannot disable thinking (budget floor 128).
+                    if self._is_gemini_25_pro_model(effective_model):
+                        logger.warning(
+                            "Gemini 2.5 Pro cannot disable thinking; ignoring the request"
+                        )
+                    else:
+                        config["thinkingConfig"] = {"thinkingBudget": 0}
+                else:
+                    gemini_thinking = convert_to_gemini_legacy(thinking)
+                    if gemini_thinking:
+                        config.update(gemini_thinking)
+            elif self._is_gemini_3_model(effective_model):
                 gemini_thinking = convert_to_gemini(thinking)
-            if gemini_thinking:
-                config.update(gemini_thinking)
+                if gemini_thinking:
+                    config.update(gemini_thinking)
+            else:
+                # thinkingConfig (2.5 thinkingBudget / 3 thinkingLevel) is only
+                # supported on the 2.5 and 3 series; older models reject it.
+                if thinking.type != "disabled":
+                    logger.warning(
+                        "thinking config is not supported by model %r (requires "
+                        "Gemini 2.5+); omitting thinkingConfig",
+                        effective_model,
+                    )
 
         if params.gemini:
             for attr, key in self._GEMINI_PARAM_MAP.items():
@@ -313,7 +341,13 @@ class GeminiRequestBuilderMixin:
 
         return config if config else None
 
-    def _convert_tools_to_gemini(self, tools: list[ToolDefinition]) -> dict[str, Any] | None:
+    def _convert_tools_to_gemini(self, tools: list[ToolDefinition]) -> list[dict[str, Any]] | None:
+        """Convert tool definitions to the Gemini ``tools`` array.
+
+        ``GenerateContentRequest.tools`` is ``array<Tool>`` (a bare object is
+        rejected by protojson); function declarations and the Google Search
+        grounding tool live on a single Tool entry.
+        """
         declarations: list[dict[str, Any]] = []
         has_google_search = False
 
@@ -390,13 +424,13 @@ class GeminiRequestBuilderMixin:
                     type(tool).__name__,
                 )
 
-        result: dict[str, Any] = {}
+        entry: dict[str, Any] = {}
         if declarations:
-            result["function_declarations"] = declarations
+            entry["function_declarations"] = declarations
         if has_google_search:
-            result["google_search"] = {}
+            entry["google_search"] = {}
 
-        return result if result else None
+        return [entry] if entry else None
 
     def _build_tool_config(self, request: InternalRequest) -> dict[str, Any] | None:
         tool_choice = request.tool_choice

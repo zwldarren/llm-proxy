@@ -8,6 +8,7 @@ from orjson import JSONDecodeError
 
 from llm_proxy.models.finish_reasons import map_finish_reason
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
+from llm_proxy.serialization.gemini.code_execution import extract_code_execution_text
 from llm_proxy.serialization.gemini.usage import billable_token_counts
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
@@ -98,14 +99,14 @@ class GeminiStreamingTransformer(StreamingTransformer):
         Returns:
             OpenAI chat.completion.chunk dictionary, or None if no valid content
         """
+        # A chunk without candidates is not noise: per the GenerateContentResponse
+        # docs, candidates are absent only when the prompt was blocked
+        # (promptFeedback.blockReason); trailing chunks may also carry only
+        # usageMetadata. Both must reach the client.
         candidates = chunk.get("candidates", [])
-        if not candidates:
-            return None
-
-        candidate = candidates[0]
+        candidate = candidates[0] if candidates else {}
         content = candidate.get("content", {})
         parts = content.get("parts", [])
-
         # Native Google Search grounding is billed per search request;
         # webSearchQueries lists the queries the model actually issued.
         grounding = candidate.get("groundingMetadata")
@@ -155,6 +156,10 @@ class GeminiStreamingTransformer(StreamingTransformer):
                             "image_url": {"url": f"data:{mime_type};base64,{data}"},
                         }
                     )
+                case {"executableCode": _} | {"codeExecutionResult": _}:
+                    text = extract_code_execution_text(part)
+                    if text:
+                        text_parts.append(text)
                 case {"functionCall": func_call}:
                     tool_calls.append(
                         {
@@ -222,9 +227,22 @@ class GeminiStreamingTransformer(StreamingTransformer):
                     self._text_buffer += "\n" + "\n".join(markdown_images)
                 else:
                     self._text_buffer += "\n".join(markdown_images)
-
-        if not delta and not finish_reason:
+        if (
+            not delta
+            and not finish_reason
+            and "promptFeedback" not in chunk
+            and "usageMetadata" not in chunk
+        ):
+            # Usage-only trailing chunks (no candidates) still carry the bill;
+            # emit them. Prompt-blocked chunks fall through too so the
+            # promptFeedback passthrough below reaches the client.
             return None
+
+        if not finish_reason and isinstance(chunk.get("promptFeedback"), dict):
+            # The prompt (not the response) was blocked; there will be no
+            # candidates ever. Surface an explicit content_filter finish so
+            # OpenAI clients do not mistake the empty stream for a normal end.
+            finish_reason = "content_filter"
 
         openai_chunk: dict[str, Any] = {
             "id": self.response_id or f"chatcmpl-{self._chunk_index}",
@@ -308,6 +326,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
                 ThinkingBlock(
                     thinking=self._reasoning_buffer,
                     signature=self._reasoning_signature_buffer or None,
+                    signature_origin="gemini",
                 )
             )
 

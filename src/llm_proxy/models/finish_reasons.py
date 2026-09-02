@@ -15,7 +15,12 @@ class FinishReason(StrEnum):
     CONTEXT_LENGTH = "context_length"  # Anthropic: model_context_window_exceeded
 
 
-# Gemini → OpenAI mapping
+# Gemini → OpenAI mapping. Enum values from the API discovery document
+# (FinishReason): FINISH_REASON_UNSPECIFIED, STOP, MAX_TOKENS, SAFETY,
+# RECITATION, LANGUAGE, OTHER, BLOCKLIST, PROHIBITED_CONTENT, SPII,
+# MALFORMED_FUNCTION_CALL, IMAGE_SAFETY, IMAGE_PROHIBITED_CONTENT, IMAGE_OTHER,
+# NO_IMAGE, IMAGE_RECITATION, UNEXPECTED_TOOL_CALL, TOO_MANY_TOOL_CALLS,
+# MISSING_THOUGHT_SIGNATURE, MALFORMED_RESPONSE, ESCALATION.
 GEMINI_TO_OPENAI: dict[str, str] = {
     "STOP": "stop",
     "MAX_TOKENS": "length",
@@ -24,12 +29,19 @@ GEMINI_TO_OPENAI: dict[str, str] = {
     "LANGUAGE": "content_filter",
     "MALFORMED_FUNCTION_CALL": "tool_calls",
     "IMAGE_SAFETY": "content_filter",
+    "IMAGE_PROHIBITED_CONTENT": "content_filter",
+    "IMAGE_OTHER": "stop",
+    "IMAGE_RECITATION": "content_filter",
     "NO_IMAGE": "content_filter",
+    "UNEXPECTED_TOOL_CALL": "tool_calls",
     "TOO_MANY_TOOL_CALLS": "tool_calls",
+    "MISSING_THOUGHT_SIGNATURE": "stop",
+    "MALFORMED_RESPONSE": "stop",
     "OTHER": "stop",
     "BLOCKLIST": "content_filter",
     "PROHIBITED_CONTENT": "content_filter",
     "SPII": "content_filter",
+    "ESCALATION": "content_filter",
     "FINISH_REASON_UNSPECIFIED": "stop",
 }
 
@@ -65,12 +77,19 @@ GEMINI_TO_ANTHROPIC: dict[str, str] = {
     "LANGUAGE": "refusal",
     "MALFORMED_FUNCTION_CALL": "tool_use",
     "IMAGE_SAFETY": "refusal",
+    "IMAGE_PROHIBITED_CONTENT": "refusal",
+    "IMAGE_OTHER": "end_turn",
+    "IMAGE_RECITATION": "refusal",
     "NO_IMAGE": "refusal",
+    "UNEXPECTED_TOOL_CALL": "tool_use",
     "TOO_MANY_TOOL_CALLS": "tool_use",
+    "MISSING_THOUGHT_SIGNATURE": "end_turn",
+    "MALFORMED_RESPONSE": "end_turn",
     "OTHER": "end_turn",
     "BLOCKLIST": "refusal",
     "PROHIBITED_CONTENT": "refusal",
     "SPII": "refusal",
+    "ESCALATION": "refusal",
     "FINISH_REASON_UNSPECIFIED": "end_turn",
 }
 
