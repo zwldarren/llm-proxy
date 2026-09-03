@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 import type { HTMLAttributes } from "vue";
 import { useI18n } from "vue-i18n";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   Pagination,
@@ -172,25 +173,35 @@ const rangeText = computed(() => {
 
         <!-- Desktop: Full pagination with Shadcn-Vue -->
         <PaginationContent v-slot="{ items }" class="hidden sm:flex items-center gap-1.5">
-          <PaginationFirst
-            :disabled="disabled || !canGoPrev"
-            size="icon-sm"
-            class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
-            :title="t('common.firstPage')"
-            @click="goToFirst"
-          >
-            <ChevronFirst />
-          </PaginationFirst>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <PaginationFirst
+                :disabled="disabled || !canGoPrev"
+                size="icon-sm"
+                class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
+                :aria-label="t('common.firstPage')"
+                @click="goToFirst"
+              >
+                <ChevronFirst />
+              </PaginationFirst>
+            </TooltipTrigger>
+            <TooltipContent>{{ t("common.firstPage") }}</TooltipContent>
+          </Tooltip>
 
-          <PaginationPrevious
-            :disabled="disabled || !canGoPrev"
-            size="icon-sm"
-            class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
-            :title="t('common.previous')"
-            @click="goToPrev"
-          >
-            <ChevronLeft />
-          </PaginationPrevious>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <PaginationPrevious
+                :disabled="disabled || !canGoPrev"
+                size="icon-sm"
+                class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
+                :aria-label="t('common.previous')"
+                @click="goToPrev"
+              >
+                <ChevronLeft />
+              </PaginationPrevious>
+            </TooltipTrigger>
+            <TooltipContent>{{ t("common.previous") }}</TooltipContent>
+          </Tooltip>
 
           <template v-for="(item, index) in items" :key="index">
             <PaginationItem
@@ -216,25 +227,35 @@ const rangeText = computed(() => {
             />
           </template>
 
-          <PaginationNext
-            :disabled="disabled || !canGoNext"
-            size="icon-sm"
-            class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
-            :title="t('common.next')"
-            @click="goToNext"
-          >
-            <ChevronRight />
-          </PaginationNext>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <PaginationNext
+                :disabled="disabled || !canGoNext"
+                size="icon-sm"
+                class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
+                :aria-label="t('common.next')"
+                @click="goToNext"
+              >
+                <ChevronRight />
+              </PaginationNext>
+            </TooltipTrigger>
+            <TooltipContent>{{ t("common.next") }}</TooltipContent>
+          </Tooltip>
 
-          <PaginationLast
-            :disabled="disabled || !canGoNext"
-            size="icon-sm"
-            class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
-            :title="t('common.lastPage')"
-            @click="goToLast"
-          >
-            <ChevronLast />
-          </PaginationLast>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <PaginationLast
+                :disabled="disabled || !canGoNext"
+                size="icon-sm"
+                class="border border-border/80 bg-background/80 hover:bg-accent/70 hover:text-accent-foreground rounded-md transition-colors duration-200"
+                :aria-label="t('common.lastPage')"
+                @click="goToLast"
+              >
+                <ChevronLast />
+              </PaginationLast>
+            </TooltipTrigger>
+            <TooltipContent>{{ t("common.lastPage") }}</TooltipContent>
+          </Tooltip>
         </PaginationContent>
       </Pagination>
 

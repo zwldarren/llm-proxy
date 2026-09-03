@@ -16,6 +16,7 @@ import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { DialogContent, DialogDescription, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ImageInfo } from "@/utils/logResponseParser";
 import { buildImageDataUrl } from "@/utils/logResponseParser";
 
@@ -153,28 +154,34 @@ function openInNewTab(url: string) {
               #{{ index + 1 }}
             </span>
             <div class="flex items-center gap-1">
-              <Button
-                v-if="img.displayUrl"
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7"
-                :aria-label="t('logs.openInNewTabN', { n: index + 1 })"
-                :title="t('logs.openInNewTab')"
-                @click="openInNewTab(img.displayUrl)"
-              >
-                <ExternalLink class="size-3.5" />
-              </Button>
-              <Button
-                v-if="img.displayUrl"
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7"
-                :aria-label="t('logs.downloadImageN', { n: index + 1 })"
-                :title="t('logs.downloadImage')"
-                @click="downloadImage(img, index)"
-              >
-                <Download class="size-3.5" />
-              </Button>
+              <Tooltip v-if="img.displayUrl">
+                <TooltipTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7"
+                    :aria-label="t('logs.openInNewTabN', { n: index + 1 })"
+                    @click="openInNewTab(img.displayUrl)"
+                  >
+                    <ExternalLink class="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ t("logs.openInNewTab") }}</TooltipContent>
+              </Tooltip>
+              <Tooltip v-if="img.displayUrl">
+                <TooltipTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7"
+                    :aria-label="t('logs.downloadImageN', { n: index + 1 })"
+                    @click="downloadImage(img, index)"
+                  >
+                    <Download class="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ t("logs.downloadImage") }}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 

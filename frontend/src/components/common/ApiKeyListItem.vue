@@ -94,7 +94,6 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
             v-if="status === 'disabled'"
             variant="destructive"
             class="font-medium text-[11px] px-1.5 py-0"
-            :title="t('apiKeys.disabled')"
           >
             {{ t("apiKeys.disabled") }}
           </Badge>
@@ -102,23 +101,16 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
             v-else-if="status === 'expired'"
             variant="outline"
             class="font-medium text-[11px] px-1.5 py-0 border-status-warning/60 text-status-warning"
-            :title="t('apiKeys.expired')"
           >
             {{ t("apiKeys.expired") }}
           </Badge>
-          <Badge
-            v-else
-            variant="secondary"
-            class="font-medium text-[11px] px-1.5 py-0"
-            :title="t('apiKeys.active')"
-          >
+          <Badge v-else variant="secondary" class="font-medium text-[11px] px-1.5 py-0">
             {{ t("apiKeys.active") }}
           </Badge>
           <Badge
             v-if="isBudgetExceeded"
             variant="destructive"
             class="font-medium text-[11px] px-1.5 py-0"
-            :title="t('apiKeys.budgetExceeded')"
           >
             {{ t("apiKeys.budgetExceeded") }}
           </Badge>

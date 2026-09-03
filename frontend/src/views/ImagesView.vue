@@ -24,7 +24,7 @@ import SpecimenTray from "@/components/playground/SpecimenTray.vue";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { chatApi } from "@/services/api/chat";
 import { getErrorMessage } from "@/utils/error";
 import { imagesApi } from "@/services/api/images";
@@ -515,43 +515,41 @@ watch(
 
         <div class="flex items-center gap-1">
           <!-- Settings Toggle -->
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  @click="showSettings = !showSettings"
-                  class="relative h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  :class="{ 'bg-muted text-foreground': showSettings }"
-                >
-                  <Settings2 class="w-4 h-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t("images.settings") }}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                @click="showSettings = !showSettings"
+                :aria-label="t('images.settings')"
+                class="relative h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                :class="{ 'bg-muted text-foreground': showSettings }"
+              >
+                <Settings2 class="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{{ t("images.settings") }}</p>
+            </TooltipContent>
+          </Tooltip>
 
           <!-- Clear Results -->
-          <TooltipProvider v-if="runs.length > 0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  @click="clearRuns"
-                  class="h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 class="w-4 h-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t("images.clearResults") }}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip v-if="runs.length > 0">
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                @click="clearRuns"
+                :aria-label="t('images.clearResults')"
+                class="h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 class="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{{ t("images.clearResults") }}</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </header>
     </template>
@@ -754,15 +752,19 @@ watch(
                   <span>n{{ activeRun.n }}</span>
                   <span aria-hidden="true" class="text-border">·</span>
                   <span>{{ formatLatency(activeRun.latencyMs) }}</span>
-                  <button
-                    type="button"
-                    class="ml-1 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                    :title="t('playground.inspectRun')"
-                    :aria-label="t('playground.inspectRun')"
-                    @click="showInspector = true"
-                  >
-                    <FileJson2 class="w-3.5 h-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button
+                        type="button"
+                        class="ml-1 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                        :aria-label="t('playground.inspectRun')"
+                        @click="showInspector = true"
+                      >
+                        <FileJson2 class="w-3.5 h-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("playground.inspectRun") }}</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { configApi } from "@/services/api/config";
 import type { ProviderModelInfo } from "@/types/schemas";
 import { getErrorMessage } from "@/utils/error";
@@ -130,17 +131,22 @@ const displayValue = computed(() => {
               class="h-8 text-xs border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent shadow-none pl-1.5 pr-2"
             />
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="h-9 w-9 shrink-0 rounded-l-none"
-            :disabled="isLoading"
-            @click="handleRefresh"
-            :title="t('common.refresh')"
-          >
-            <Loader2 v-if="isLoading" class="h-4 w-4 animate-spin" />
-            <RefreshCw v-else class="h-4 w-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9 shrink-0 rounded-l-none"
+                :disabled="isLoading"
+                @click="handleRefresh"
+                :aria-label="t('common.refresh')"
+              >
+                <Loader2 v-if="isLoading" class="h-4 w-4 animate-spin" />
+                <RefreshCw v-else class="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t("common.refresh") }}</TooltipContent>
+          </Tooltip>
         </div>
 
         <!-- Loading state (only on first fetch) -->

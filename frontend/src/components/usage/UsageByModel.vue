@@ -5,7 +5,7 @@ import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
 
 interface Props {
@@ -133,72 +133,63 @@ const truncateModelName = (name: string, maxLength = 28): string => {
 
       <ScrollArea class="h-90 w-full">
         <div v-if="sortedModels.length > 0" class="px-4 sm:px-6 py-1 space-y-0.5">
-          <TooltipProvider>
-            <div
-              v-for="(item, index) in paginatedModels"
-              :key="`${item.provider}-${item.model}`"
-              class="group relative rounded-lg py-1.5 px-2 transition-colors hover:bg-muted/50 border border-transparent hover:border-border/40"
-            >
-              <div class="flex items-center gap-3 mb-1">
-                <div class="flex items-start gap-2 flex-1 min-w-0">
-                  <span
-                    class="inline-flex items-center justify-center h-5 min-w-5 rounded border border-border/60 bg-background text-[11px] font-semibold text-muted-foreground shrink-0 mt-0.5"
-                  >
-                    {{ (currentPage - 1) * itemsPerPage + index + 1 }}
-                  </span>
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5 min-w-0">
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <span class="text-sm truncate font-medium cursor-default flex-1 min-w-0">
-                            {{ truncateModelName(item.model) }}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent class="font-mono text-xs max-w-xs">
-                          <p>{{ item.model }}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="flex items-center gap-6 text-right shrink-0">
-                  <div>
-                    <div class="font-mono text-[13px] font-medium text-foreground">
-                      {{ formatNumberWithSuffix(item.requests) }}
-                    </div>
-                  </div>
-                  <div class="w-20">
-                    <div class="font-mono text-[13px] font-semibold text-action-amber">
-                      {{ formatCostWithPrecision(item.cost, 2) }}
-                    </div>
+          <div
+            v-for="(item, index) in paginatedModels"
+            :key="`${item.provider}-${item.model}`"
+            class="group relative rounded-lg py-1.5 px-2 transition-colors hover:bg-muted/50 border border-transparent hover:border-border/40"
+          >
+            <div class="flex items-center gap-3 mb-1">
+              <div class="flex items-start gap-2 flex-1 min-w-0">
+                <span
+                  class="inline-flex items-center justify-center h-5 min-w-5 rounded border border-border/60 bg-background text-[11px] font-semibold text-muted-foreground shrink-0 mt-0.5"
+                >
+                  {{ (currentPage - 1) * itemsPerPage + index + 1 }}
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <Tooltip v-if="item.model.length > 28">
+                      <TooltipTrigger as-child>
+                        <span class="text-sm truncate font-medium cursor-default flex-1 min-w-0">
+                          {{ truncateModelName(item.model) }}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent class="font-mono text-xs max-w-xs">
+                        <p>{{ item.model }}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <span v-else class="text-sm truncate font-medium cursor-default flex-1 min-w-0">
+                      {{ truncateModelName(item.model) }}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              <div
-                class="mb-0.5 flex items-center justify-between text-[11px] text-muted-foreground"
-              >
-                <span>{{ getShare(item.requests) }}% {{ t("home.ofTotalRequests") }}</span>
-                <span>{{ item.provider }}</span>
-              </div>
-
-              <div class="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <div
-                      class="h-full rounded-full transition-all duration-500 bg-foreground/70"
-                      :style="{ width: `${Math.max((item.requests / totalRequests) * 100, 2)}%` }"
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" class="font-mono text-xs">
-                    {{ getShare(item.requests) }}%
-                    {{ t("home.ofTotalRequests") }}
-                  </TooltipContent>
-                </Tooltip>
+              <div class="flex items-center gap-6 text-right shrink-0">
+                <div>
+                  <div class="font-mono text-[13px] font-medium text-foreground">
+                    {{ formatNumberWithSuffix(item.requests) }}
+                  </div>
+                </div>
+                <div class="w-20">
+                  <div class="font-mono text-[13px] font-semibold text-action-amber">
+                    {{ formatCostWithPrecision(item.cost, 2) }}
+                  </div>
+                </div>
               </div>
             </div>
-          </TooltipProvider>
+
+            <div class="mb-0.5 flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>{{ getShare(item.requests) }}% {{ t("home.ofTotalRequests") }}</span>
+              <span>{{ item.provider }}</span>
+            </div>
+
+            <div class="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-500 bg-foreground/70"
+                :style="{ width: `${Math.max((item.requests / totalRequests) * 100, 2)}%` }"
+              />
+            </div>
+          </div>
 
           <!-- Pagination -->
           <Separator v-if="totalPages > 1" class="mt-2" />

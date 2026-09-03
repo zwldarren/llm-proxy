@@ -156,7 +156,6 @@ const hasAnyPricing = computed(
         type="button"
         class="w-full rounded-md px-1.5 py-1 -my-1 text-right cursor-pointer transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
         :aria-label="t('models.pricingDetails')"
-        :title="t('models.pricingDetails')"
       >
         <div class="text-data text-xs leading-tight">
           <span class="font-medium text-action-blue">{{ inputText ?? "—" }}</span>

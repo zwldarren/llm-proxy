@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Search,
   Copy,
@@ -244,23 +245,28 @@ const handleCopy = async (text: string) => {
                       >
                         {{ tool.name }}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
-                        :title="t('mcpServers.copyName')"
-                        @click.stop="handleCopy(tool.name)"
-                      >
-                        <component
-                          :is="copiedName === tool.name ? Check : Copy"
-                          class="w-3.5 h-3.5"
-                          :class="
-                            copiedName === tool.name
-                              ? 'text-status-success'
-                              : 'text-muted-foreground'
-                          "
-                        />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
+                            :aria-label="t('mcpServers.copyName')"
+                            @click.stop="handleCopy(tool.name)"
+                          >
+                            <component
+                              :is="copiedName === tool.name ? Check : Copy"
+                              class="w-3.5 h-3.5"
+                              :class="
+                                copiedName === tool.name
+                                  ? 'text-status-success'
+                                  : 'text-muted-foreground'
+                              "
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{{ t("mcpServers.copyName") }}</TooltipContent>
+                      </Tooltip>
                     </div>
                     <p
                       class="text-xs text-muted-foreground leading-relaxed pr-6 whitespace-pre-wrap"
@@ -296,23 +302,28 @@ const handleCopy = async (text: string) => {
                       >
                         {{ prompt.name }}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
-                        :title="t('mcpServers.copyName')"
-                        @click.stop="handleCopy(prompt.name)"
-                      >
-                        <component
-                          :is="copiedName === prompt.name ? Check : Copy"
-                          class="w-3.5 h-3.5"
-                          :class="
-                            copiedName === prompt.name
-                              ? 'text-status-success'
-                              : 'text-muted-foreground'
-                          "
-                        />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
+                            :aria-label="t('mcpServers.copyName')"
+                            @click.stop="handleCopy(prompt.name)"
+                          >
+                            <component
+                              :is="copiedName === prompt.name ? Check : Copy"
+                              class="w-3.5 h-3.5"
+                              :class="
+                                copiedName === prompt.name
+                                  ? 'text-status-success'
+                                  : 'text-muted-foreground'
+                              "
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{{ t("mcpServers.copyName") }}</TooltipContent>
+                      </Tooltip>
                     </div>
                     <p
                       class="text-xs text-muted-foreground leading-relaxed pr-6 whitespace-pre-wrap"
@@ -348,23 +359,28 @@ const handleCopy = async (text: string) => {
                       >
                         {{ resource.name }}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
-                        :title="t('mcpServers.copyName')"
-                        @click.stop="handleCopy(resource.name)"
-                      >
-                        <component
-                          :is="copiedName === resource.name ? Check : Copy"
-                          class="w-3.5 h-3.5"
-                          :class="
-                            copiedName === resource.name
-                              ? 'text-status-success'
-                              : 'text-muted-foreground'
-                          "
-                        />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
+                            :aria-label="t('mcpServers.copyName')"
+                            @click.stop="handleCopy(resource.name)"
+                          >
+                            <component
+                              :is="copiedName === resource.name ? Check : Copy"
+                              class="w-3.5 h-3.5"
+                              :class="
+                                copiedName === resource.name
+                                  ? 'text-status-success'
+                                  : 'text-muted-foreground'
+                              "
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{{ t("mcpServers.copyName") }}</TooltipContent>
+                      </Tooltip>
                     </div>
                     <p
                       class="text-xs text-muted-foreground leading-relaxed pr-6 whitespace-pre-wrap"

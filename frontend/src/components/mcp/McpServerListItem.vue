@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { McpServerCapabilities, McpServerRead, McpServerStatus } from "@/types/schemas";
 import { cn } from "@/lib/utils";
 import { useMcpServerMeta } from "@/composables/useMcpServerMeta";
@@ -98,20 +99,25 @@ const commandDisplay = computed(() => {
 
         <div class="mt-1 flex items-center gap-2 min-w-0 flex-wrap">
           <!-- Endpoint (proxy URL or command) -->
-          <button
-            v-if="fullProxyUrl"
-            class="flex items-center gap-1.5 min-w-0 max-w-full text-muted-foreground hover:text-foreground transition-colors"
-            :disabled="isLoading"
-            :title="fullProxyUrl"
-            @click.stop="copyProxyUrl"
-          >
-            <component
-              :is="copied ? Check : Globe"
-              class="w-3.5 h-3.5 shrink-0 transition-all duration-300"
-              :class="copied ? 'text-status-success' : 'text-muted-foreground/70'"
-            />
-            <span class="truncate min-w-0 font-mono text-xs">{{ fullProxyUrl }}</span>
-          </button>
+          <Tooltip v-if="fullProxyUrl">
+            <TooltipTrigger as-child>
+              <button
+                class="flex items-center gap-1.5 min-w-0 max-w-full text-muted-foreground hover:text-foreground transition-colors"
+                :disabled="isLoading"
+                @click.stop="copyProxyUrl"
+              >
+                <component
+                  :is="copied ? Check : Globe"
+                  class="w-3.5 h-3.5 shrink-0 transition-all duration-300"
+                  :class="copied ? 'text-status-success' : 'text-muted-foreground/70'"
+                />
+                <span class="truncate min-w-0 font-mono text-xs">{{ fullProxyUrl }}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent class="break-all max-w-xs">{{
+              copied ? t("common.copied") : fullProxyUrl
+            }}</TooltipContent>
+          </Tooltip>
           <span
             v-else-if="commandDisplay"
             class="truncate font-mono text-xs text-muted-foreground"

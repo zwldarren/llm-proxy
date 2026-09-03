@@ -7,7 +7,12 @@ const props = withDefaults(
   defineProps<TooltipContentProps & { class?: HTMLAttributes["class"] }>(),
   {
     sideOffset: 4,
-    side: "right",
+    side: "top",
+    // Keep collision handling on: an absent Boolean prop is cast to `false` by
+    // Vue and forwarded verbatim, which would disable reka-ui's shift/flip and
+    // let edge-anchored tooltips overflow the viewport.
+    avoidCollisions: true,
+    collisionPadding: 8,
   }
 );
 

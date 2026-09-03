@@ -165,6 +165,27 @@ async function flushPromises() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// Passthrough stubs: Tooltip parts now rely on the app-level TooltipProvider,
+// which is absent in isolated view mounts.
+const TooltipStub = defineComponent({
+  name: "Tooltip",
+  setup(_, { slots }) {
+    return () => slots.default?.();
+  },
+});
+const TooltipTriggerStub = defineComponent({
+  name: "TooltipTrigger",
+  setup(_, { slots }) {
+    return () => slots.default?.();
+  },
+});
+const TooltipContentStub = defineComponent({
+  name: "TooltipContent",
+  setup() {
+    return () => null;
+  },
+});
+
 describe("LogsView", () => {
   it("loads logs on mount", async () => {
     const wrapper = mount(LogsView, {
@@ -174,6 +195,9 @@ describe("LogsView", () => {
           Card: CardStub,
           Button: ButtonStub,
           Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
         },
       },
     });
@@ -196,6 +220,9 @@ describe("LogsView", () => {
           Card: CardStub,
           Button: ButtonStub,
           Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
         },
       },
     });

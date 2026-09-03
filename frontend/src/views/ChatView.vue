@@ -39,7 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChatMessage as ChatMessageType, ContentPart } from "@/types/schemas";
 import { useChat, type ChatOptions } from "@/composables/useChat";
 import type { WebSearchConfig } from "@/composables/useChat";
@@ -1043,47 +1043,45 @@ watch(
 
         <div class="flex items-center gap-1">
           <!-- Settings Toggle -->
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  @click="toggleSettings"
-                  class="relative h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  :class="{ 'bg-muted text-foreground': showSettings }"
-                >
-                  <Settings2 class="w-4 h-4" />
-                  <span
-                    v-if="hasActiveSettings && !showSettings"
-                    class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full ring-2 ring-background"
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t("chat.advancedSettings") }}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                @click="toggleSettings"
+                :aria-label="t('chat.advancedSettings')"
+                class="relative h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                :class="{ 'bg-muted text-foreground': showSettings }"
+              >
+                <Settings2 class="w-4 h-4" />
+                <span
+                  v-if="hasActiveSettings && !showSettings"
+                  class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full ring-2 ring-background"
+                />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{{ t("chat.advancedSettings") }}</p>
+            </TooltipContent>
+          </Tooltip>
 
           <!-- Clear Chat -->
-          <TooltipProvider v-if="messages.length > 0">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  @click="handleClearChat"
-                  class="h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Eraser class="w-4 h-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{{ t("chat.clearChatTitle") }}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip v-if="messages.length > 0">
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                @click="handleClearChat"
+                :aria-label="t('chat.clearChatTitle')"
+                class="h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <Eraser class="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{{ t("chat.clearChatTitle") }}</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </header>
     </template>
@@ -1317,32 +1315,46 @@ watch(
               >
                 <div class="flex items-center gap-1.5">
                   <!-- Attach file button -->
-                  <button
-                    type="button"
-                    @click="triggerFileInput"
-                    :disabled="selectedEndpoint === '/v1/audio/speech'"
-                    class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    :title="
-                      selectedEndpoint === '/v1/audio/speech'
-                        ? 'Attachments not supported for speech generation'
-                        : t('chat.uploadFile')
-                    "
-                  >
-                    <Paperclip class="w-4 h-4" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button
+                        type="button"
+                        @click="triggerFileInput"
+                        :disabled="selectedEndpoint === '/v1/audio/speech'"
+                        class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        :aria-label="
+                          selectedEndpoint === '/v1/audio/speech'
+                            ? 'Attachments not supported for speech generation'
+                            : t('chat.uploadFile')
+                        "
+                      >
+                        <Paperclip class="w-4 h-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{
+                      selectedEndpoint === "/v1/audio/speech"
+                        ? "Attachments not supported for speech generation"
+                        : t("chat.uploadFile")
+                    }}</TooltipContent>
+                  </Tooltip>
 
                   <!-- Web Search Toggle -->
-                  <button
-                    type="button"
-                    @click="webSearch.enabled = !webSearch.enabled"
-                    class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer"
-                    :class="{
-                      'text-foreground bg-muted/40 ring-1 ring-border': webSearch.enabled,
-                    }"
-                    :title="t('chat.webSearch')"
-                  >
-                    <Globe class="w-4 h-4" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <button
+                        type="button"
+                        @click="webSearch.enabled = !webSearch.enabled"
+                        class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer"
+                        :class="{
+                          'text-foreground bg-muted/40 ring-1 ring-border': webSearch.enabled,
+                        }"
+                        :aria-label="t('chat.webSearch')"
+                      >
+                        <Globe class="w-4 h-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("chat.webSearch") }}</TooltipContent>
+                  </Tooltip>
 
                   <input
                     type="file"

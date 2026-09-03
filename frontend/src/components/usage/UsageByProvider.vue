@@ -3,7 +3,6 @@ import { ArrowDown, Database } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
 
 interface Props {
@@ -89,72 +88,52 @@ const getShare = (requests: number): string => {
 
       <ScrollArea class="h-85 w-full">
         <div v-if="sortedProviders.length > 0" class="px-4 sm:px-6 py-1 space-y-0.5">
-          <TooltipProvider>
-            <div
-              v-for="(item, index) in sortedProviders"
-              :key="item.provider"
-              class="group relative rounded-lg py-1.5 px-2 transition-colors hover:bg-muted/50 border border-transparent hover:border-border/40"
-            >
-              <div class="flex items-center gap-3 mb-1">
-                <div class="flex items-center gap-2 flex-1 min-w-0">
-                  <span
-                    class="inline-flex items-center justify-center h-5 min-w-5 rounded border border-border/60 bg-background text-[11px] font-semibold text-muted-foreground"
-                  >
-                    {{ index + 1 }}
-                  </span>
-                  <span class="font-medium text-sm capitalize truncate">
-                    {{ item.provider }}
-                  </span>
-                </div>
-
-                <div class="flex items-center gap-6 text-right shrink-0">
-                  <div>
-                    <div class="font-mono text-[13px] font-medium text-foreground">
-                      {{ formatNumberWithSuffix(item.requests) }}
-                    </div>
-                  </div>
-                  <div class="w-20">
-                    <div class="font-mono text-[13px] font-semibold text-action-blue">
-                      {{ formatCostWithPrecision(item.cost, 2) }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="mb-0.5 flex items-center justify-between text-[11px] text-muted-foreground"
-              >
-                <span>{{ getShare(item.requests) }}% {{ t("home.ofTotalRequests") }}</span>
+          <div
+            v-for="(item, index) in sortedProviders"
+            :key="item.provider"
+            class="group relative rounded-lg py-1.5 px-2 transition-colors hover:bg-muted/50 border border-transparent hover:border-border/40"
+          >
+            <div class="flex items-center gap-3 mb-1">
+              <div class="flex items-center gap-2 flex-1 min-w-0">
                 <span
-                  >{{ formatNumberWithSuffix(item.input_tokens + item.output_tokens) }}
-                  {{ t("logs.totalTokens") }}</span
+                  class="inline-flex items-center justify-center h-5 min-w-5 rounded border border-border/60 bg-background text-[11px] font-semibold text-muted-foreground"
                 >
+                  {{ index + 1 }}
+                </span>
+                <span class="font-medium text-sm capitalize truncate">
+                  {{ item.provider }}
+                </span>
               </div>
 
-              <div class="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <div
-                      class="h-full rounded-full transition-all duration-500 bg-foreground/70"
-                      :style="{ width: `${Math.max((item.requests / totalRequests) * 100, 2)}%` }"
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" class="font-mono text-xs">
-                    <div class="space-y-1">
-                      <p>
-                        {{ getShare(item.requests) }}%
-                        {{ t("home.ofTotalRequests") }}
-                      </p>
-                      <p class="text-muted-foreground">
-                        {{ formatNumberWithSuffix(item.input_tokens + item.output_tokens) }}
-                        {{ t("logs.totalTokens") }}
-                      </p>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
+              <div class="flex items-center gap-6 text-right shrink-0">
+                <div>
+                  <div class="font-mono text-[13px] font-medium text-foreground">
+                    {{ formatNumberWithSuffix(item.requests) }}
+                  </div>
+                </div>
+                <div class="w-20">
+                  <div class="font-mono text-[13px] font-semibold text-action-blue">
+                    {{ formatCostWithPrecision(item.cost, 2) }}
+                  </div>
+                </div>
               </div>
             </div>
-          </TooltipProvider>
+
+            <div class="mb-0.5 flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>{{ getShare(item.requests) }}% {{ t("home.ofTotalRequests") }}</span>
+              <span
+                >{{ formatNumberWithSuffix(item.input_tokens + item.output_tokens) }}
+                {{ t("logs.totalTokens") }}</span
+              >
+            </div>
+
+            <div class="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-500 bg-foreground/70"
+                :style="{ width: `${Math.max((item.requests / totalRequests) * 100, 2)}%` }"
+              />
+            </div>
+          </div>
         </div>
         <div v-else class="py-12 text-center text-muted-foreground text-sm">
           {{ t("logs.noLogs") }}

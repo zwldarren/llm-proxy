@@ -7,6 +7,7 @@ import LogDetailsIO from "@/components/common/LogDetailsIO.vue";
 import LogDetailsMetrics from "@/components/common/LogDetailsMetrics.vue";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LogRead } from "@/types/schemas";
 import { formatDate } from "@/utils/format";
 
@@ -82,14 +83,21 @@ const copyId = async () => {
             class="font-mono text-xs bg-background text-muted-foreground py-1 sm:py-0.5 px-2.5 flex items-center gap-2 hover:border-muted-foreground/30 transition-colors border-border/70 min-h-8 sm:min-h-0 truncate max-w-full"
           >
             <span class="truncate">{{ log?.request_id }}</span>
-            <button
-              @click="copyId"
-              class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
-              :title="copiedId ? t('common.copied') : t('common.copy')"
-            >
-              <Check v-if="copiedId" class="w-3.5 h-3.5 text-status-success" />
-              <Copy v-else class="w-3.5 h-3.5" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  @click="copyId"
+                  class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
+                  :aria-label="copiedId ? t('common.copied') : t('common.copy')"
+                >
+                  <Check v-if="copiedId" class="w-3.5 h-3.5 text-status-success" />
+                  <Copy v-else class="w-3.5 h-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{
+                copiedId ? t("common.copied") : t("common.copy")
+              }}</TooltipContent>
+            </Tooltip>
           </Badge>
 
           <Badge

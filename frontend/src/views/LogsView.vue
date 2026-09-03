@@ -41,6 +41,7 @@ import TableCellNumeric from "@/components/common/TableCellNumeric.vue";
 import TableCellTimestamp from "@/components/common/TableCellTimestamp.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import {
   Table,
@@ -1044,20 +1045,25 @@ const auditListAction = (log: LogListItemType): string => {
                           />
                         </span>
                         <template v-else>
-                          <Button
+                          <Tooltip
                             v-for="signal in ['ok', 'weak', 'strong'] as const"
                             :key="signal"
-                            size="icon"
-                            variant="ghost"
-                            class="h-8 w-8 text-muted-foreground/60 hover:text-foreground"
-                            :title="t(FEEDBACK_LABEL_KEYS[signal])"
-                            :aria-label="t(FEEDBACK_LABEL_KEYS[signal])"
-                            :disabled="feedbackSubmittingIds.has(log.request_id)"
-                            @click.stop="submitFeedback(log, signal)"
-                            @keydown.stop
                           >
-                            <component :is="FEEDBACK_ICONS[signal]" class="size-4" />
-                          </Button>
+                            <TooltipTrigger as-child>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                class="h-8 w-8 text-muted-foreground/60 hover:text-foreground"
+                                :aria-label="t(FEEDBACK_LABEL_KEYS[signal])"
+                                :disabled="feedbackSubmittingIds.has(log.request_id)"
+                                @click.stop="submitFeedback(log, signal)"
+                                @keydown.stop
+                              >
+                                <component :is="FEEDBACK_ICONS[signal]" class="size-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t(FEEDBACK_LABEL_KEYS[signal]) }}</TooltipContent>
+                          </Tooltip>
                         </template>
                       </div>
                       <Button

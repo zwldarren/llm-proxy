@@ -10,6 +10,7 @@ import PageHeader from "@/components/common/PageHeader.vue";
 import { CAPABILITY_META, CAPABILITY_ORDER } from "@/components/plaza/capabilities";
 import PlazaModelListItem from "@/components/plaza/PlazaModelListItem.vue";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -136,16 +137,20 @@ const sortedModels = computed(() => {
       <header class="config-header-bar px-4 sm:px-6 py-4">
         <PageHeader :title="t('plaza.title')" :description="t('plaza.description')" :icon="Boxes">
           <template #actions>
-            <Button
-              variant="ghost"
-              size="icon"
-              :disabled="isLoading"
-              :aria-label="t('common.refresh')"
-              :title="t('common.refresh')"
-              @click="fetchCatalog"
-            >
-              <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  :disabled="isLoading"
+                  :aria-label="t('common.refresh')"
+                  @click="fetchCatalog"
+                >
+                  <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t("common.refresh") }}</TooltipContent>
+            </Tooltip>
           </template>
         </PageHeader>
       </header>

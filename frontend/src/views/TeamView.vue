@@ -33,6 +33,7 @@ import SortableHead from "@/components/common/SortableHead.vue";
 import TableCellActions from "@/components/common/TableCellActions.vue";
 import TableCellName from "@/components/common/TableCellName.vue";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -685,7 +686,6 @@ onMounted(loadMembers);
                     <button
                       type="button"
                       class="cursor-pointer rounded-full transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      :title="t('team.changeRole')"
                       :aria-label="t('team.changeRole')"
                     >
                       <Badge :variant="member.role === 'admin' ? 'default' : 'secondary'">
@@ -723,7 +723,6 @@ onMounted(loadMembers);
                     v-if="member.must_change_password"
                     variant="outline"
                     class="border-status-warning/60 text-status-warning font-normal"
-                    :title="t('team.memberMustSetPassword')"
                   >
                     {{ t("team.passwordChangePending") }}
                   </Badge>
@@ -776,7 +775,6 @@ onMounted(loadMembers);
               <TableCell class="hidden xl:table-cell">
                 <button
                   type="button"
-                  :title="t('team.manageBudget')"
                   :aria-label="t('team.manageBudget')"
                   class="-m-1 rounded-md p-1 text-left transition-colors cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   @click="openBudgetDialog(member)"
@@ -791,80 +789,105 @@ onMounted(loadMembers);
                 <div
                   class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
                 >
-                  <Button
-                    v-if="member.role !== 'admin'"
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    :title="t('team.manageModels')"
-                    :aria-label="t('team.manageModels')"
-                    @click="openModelsDialog(member)"
-                  >
-                    <Boxes class="h-4 w-4 icon-btn-muted" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    :title="t('team.manageBudget')"
-                    :aria-label="t('team.manageBudget')"
-                    @click="openBudgetDialog(member)"
-                  >
-                    <Wallet class="h-4 w-4 icon-btn-muted" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    :title="t('team.renameUsername')"
-                    :aria-label="t('team.renameUsername')"
-                    @click="openRenameDialog(member)"
-                  >
-                    <UserPen class="h-4 w-4 icon-btn-muted" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    :title="t('team.resetPassword')"
-                    :aria-label="t('team.resetPassword')"
-                    @click="openResetDialog(member)"
-                  >
-                    <KeyRound class="h-4 w-4 icon-btn-muted" />
-                  </Button>
-                  <Button
-                    v-if="member.is_active"
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    :disabled="isSelf(member)"
-                    :title="t('team.deactivateMember')"
-                    :aria-label="t('team.deactivateMember')"
-                    @click="openDeactivateDialog(member)"
-                  >
-                    <UserX class="h-4 w-4 icon-btn-muted" />
-                  </Button>
-                  <Button
-                    v-else
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    :title="t('team.reactivateMember')"
-                    :aria-label="t('team.reactivateMember')"
-                    @click="openReactivateDialog(member)"
-                  >
-                    <UserCheck class="h-4 w-4 icon-btn-muted" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
-                    :title="t('team.deleteMember')"
-                    :aria-label="t('team.deleteMember')"
-                    @click="openDeleteDialog(member)"
-                  >
-                    <Trash2 class="h-4 w-4" />
-                  </Button>
+                  <Tooltip v-if="member.role !== 'admin'">
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :aria-label="t('team.manageModels')"
+                        @click="openModelsDialog(member)"
+                      >
+                        <Boxes class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.manageModels") }}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :aria-label="t('team.manageBudget')"
+                        @click="openBudgetDialog(member)"
+                      >
+                        <Wallet class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.manageBudget") }}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :aria-label="t('team.renameUsername')"
+                        @click="openRenameDialog(member)"
+                      >
+                        <UserPen class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.renameUsername") }}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :aria-label="t('team.resetPassword')"
+                        @click="openResetDialog(member)"
+                      >
+                        <KeyRound class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.resetPassword") }}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip v-if="member.is_active">
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :disabled="isSelf(member)"
+                        :aria-label="t('team.deactivateMember')"
+                        @click="openDeactivateDialog(member)"
+                      >
+                        <UserX class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.deactivateMember") }}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip v-else>
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :aria-label="t('team.reactivateMember')"
+                        @click="openReactivateDialog(member)"
+                      >
+                        <UserCheck class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.reactivateMember") }}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        :aria-label="t('team.deleteMember')"
+                        @click="openDeleteDialog(member)"
+                      >
+                        <Trash2 class="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("team.deleteMember") }}</TooltipContent>
+                  </Tooltip>
                 </div>
               </TableCellActions>
             </TableRow>

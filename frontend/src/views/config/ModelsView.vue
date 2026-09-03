@@ -30,6 +30,7 @@ import PricingSyncDialog from "@/components/models/PricingSyncDialog.vue";
 import { CAPABILITY_META, deriveModelCapabilities } from "@/components/plaza/capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SheetDescription from "@/components/ui/sheet/SheetDescription.vue";
 import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
@@ -986,16 +987,21 @@ const confirmDelete = async () => {
                       <div
                         class="flex items-center justify-end gap-1.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50"
                       >
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/80"
-                          :title="t('models.editProvider')"
-                          @click="openProviderEditDialog(index)"
-                        >
-                          <Settings class="w-4 h-4" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger as-child>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                              :aria-label="t('models.editProvider')"
+                              @click="openProviderEditDialog(index)"
+                            >
+                              <Settings class="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{{ t("models.editProvider") }}</TooltipContent>
+                        </Tooltip>
                         <Button
                           type="button"
                           variant="ghost"

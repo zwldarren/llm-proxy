@@ -4,6 +4,7 @@ import { Check, Copy, AlertTriangle, Loader2 } from "@lucide/vue";
 import { computed, ref, defineAsyncComponent, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 // Async load vue-json-pretty with error and loading fallbacks
 const VueJsonPretty = defineAsyncComponent({
@@ -159,22 +160,26 @@ const copyLabel = computed(() => {
       >
         {{ label }}
       </h4>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-10 w-10 shrink-0"
-        :disabled="copied && !copyError"
-        :aria-label="copyLabel"
-        :title="copyLabel"
-        @click="handleCopy"
-      >
-        <Check
-          v-if="copied && !copyError"
-          class="w-4 h-4 text-status-success motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50"
-        />
-        <AlertTriangle v-else-if="copyError" class="w-4 h-4 text-destructive" />
-        <Copy v-else class="w-4 h-4 text-muted-foreground" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-10 w-10 shrink-0"
+            :disabled="copied && !copyError"
+            :aria-label="copyLabel"
+            @click="handleCopy"
+          >
+            <Check
+              v-if="copied && !copyError"
+              class="w-4 h-4 text-status-success motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50"
+            />
+            <AlertTriangle v-else-if="copyError" class="w-4 h-4 text-destructive" />
+            <Copy v-else class="w-4 h-4 text-muted-foreground" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ copyLabel }}</TooltipContent>
+      </Tooltip>
     </div>
 
     <!-- JSON content container -->
@@ -191,21 +196,25 @@ const copyLabel = computed(() => {
         v-if="!label"
         class="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity z-10"
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          class="h-9 w-9 bg-background/50 hover:bg-background"
-          :aria-label="copyLabel"
-          :title="copyLabel"
-          @click="handleCopy"
-        >
-          <Check
-            v-if="copied && !copyError"
-            class="w-4 h-4 text-status-success motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50"
-          />
-          <AlertTriangle v-else-if="copyError" class="w-4 h-4 text-destructive" />
-          <Copy v-else class="w-4 h-4 text-muted-foreground" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-9 w-9 bg-background/50 hover:bg-background"
+              :aria-label="copyLabel"
+              @click="handleCopy"
+            >
+              <Check
+                v-if="copied && !copyError"
+                class="w-4 h-4 text-status-success motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50"
+              />
+              <AlertTriangle v-else-if="copyError" class="w-4 h-4 text-destructive" />
+              <Copy v-else class="w-4 h-4 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ copyLabel }}</TooltipContent>
+        </Tooltip>
       </div>
 
       <!-- Empty state -->
