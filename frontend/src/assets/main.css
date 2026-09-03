@@ -517,7 +517,6 @@
   video,
   canvas,
   svg,
-  .loading-spinner,
   [class*="animate-"] {
     transition: none !important;
   }
@@ -528,6 +527,7 @@
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
@@ -1214,14 +1214,6 @@
 
   .card-grid-4 {
     @apply grid gap-4 grid-cols-2 lg:grid-cols-4;
-  }
-
-  .loading-container {
-    @apply flex items-center justify-center py-12;
-  }
-
-  .loading-spinner {
-    @apply w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin;
   }
 
   .empty-container {

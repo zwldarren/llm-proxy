@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Loader2, Trash2 } from "@lucide/vue";
+import { Trash2 } from "@lucide/vue";
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import AppLayout from "@/components/layout/AppLayout.vue";
+import LoadingState from "@/components/common/LoadingState.vue";
 import NumberStepper from "@/components/settings/NumberStepper.vue";
 import PreferenceSection from "@/components/settings/sections/PreferenceSection.vue";
 import ServerLogsSection from "@/components/settings/sections/ServerLogsSection.vue";
@@ -519,9 +520,7 @@ onUnmounted(() => {
     </template>
 
     <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 relative">
-      <div v-if="showLoadingSpinner" class="flex items-center justify-center py-12">
-        <Loader2 class="w-8 h-8 animate-spin text-primary" />
-      </div>
+      <LoadingState v-if="showLoadingSpinner" :show-text="false" />
 
       <div
         v-else

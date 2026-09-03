@@ -26,7 +26,7 @@ import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import EmptyTableRow from "@/components/common/EmptyTableRow.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
-import LoadingState from "@/components/common/LoadingState.vue";
+import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import MemberBudgetCell from "@/components/common/MemberBudgetCell.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import SortableHead from "@/components/common/SortableHead.vue";
@@ -606,11 +606,8 @@ onMounted(loadMembers);
     <!-- Content area -->
     <div class="config-content">
       <!-- Loading state -->
-      <div
-        v-if="isLoading && members.length === 0"
-        class="h-full flex items-center justify-center animate-fade-in px-6"
-      >
-        <LoadingState />
+      <div v-if="isLoading && members.length === 0" class="h-full animate-fade-in">
+        <TableSkeleton :icon="false" />
       </div>
 
       <!-- Error state -->

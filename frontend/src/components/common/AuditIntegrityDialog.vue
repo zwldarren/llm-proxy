@@ -93,7 +93,7 @@ const errorType = (e: AuditIntegrityError): "warning" | "error" => {
           v-if="isVerifying"
           class="flex flex-col items-center justify-center gap-3 py-10 text-center"
         >
-          <LoadingState mode="spinner" />
+          <LoadingState :show-text="false" />
           <p class="text-xs text-muted-foreground">{{ t("logs.audit.verifying") }}</p>
         </div>
 

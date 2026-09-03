@@ -41,7 +41,7 @@ import TableCellNumeric from "@/components/common/TableCellNumeric.vue";
 import TableCellTimestamp from "@/components/common/TableCellTimestamp.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import LoadingState from "@/components/common/LoadingState.vue";
+import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import {
   Table,
   TableBody,
@@ -876,12 +876,9 @@ const auditListAction = (log: LogListItemType): string => {
           <div class="h-full bg-primary/60 animate-loading-bar" />
         </div>
 
-        <!-- Initial loading spinner -->
-        <div
-          v-if="isInitialLoad && isFetching"
-          class="flex-1 flex flex-col items-center justify-center"
-        >
-          <LoadingState mode="spinner" />
+        <!-- Initial loading skeleton mirrors the table geometry -->
+        <div v-if="isInitialLoad && isFetching" class="flex-1 overflow-hidden animate-fade-in">
+          <TableSkeleton :icon="false" :rows="10" />
         </div>
 
         <!-- Empty state -->

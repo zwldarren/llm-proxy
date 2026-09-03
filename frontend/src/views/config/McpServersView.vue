@@ -6,7 +6,7 @@ import { toast } from "vue-sonner";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
-import ContentSkeleton from "@/components/common/ContentSkeleton.vue";
+import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import ViewToggle from "@/components/common/ViewToggle.vue";
 import McpServerList from "@/components/mcp/McpServerList.vue";
@@ -352,11 +352,8 @@ onMounted(() => fetchServers());
 
     <!-- Content area -->
     <div class="config-content">
-      <div
-        v-if="isLoading && servers.length === 0"
-        class="h-full flex items-start justify-center animate-fade-in px-6"
-      >
-        <ContentSkeleton />
+      <div v-if="isLoading && servers.length === 0" class="h-full animate-fade-in">
+        <TableSkeleton />
       </div>
       <div
         v-else-if="servers.length === 0"

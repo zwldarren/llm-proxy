@@ -23,7 +23,7 @@ import DateTimePicker from "@/components/common/DateTimePicker.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import EmptyFilterResults from "@/components/common/EmptyFilterResults.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
-import ContentSkeleton from "@/components/common/ContentSkeleton.vue";
+import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import EmptyTableRow from "@/components/common/EmptyTableRow.vue";
 import SortableHead from "@/components/common/SortableHead.vue";
@@ -553,11 +553,8 @@ onMounted(() => {
 
     <!-- Content area -->
     <div class="config-content">
-      <div
-        v-if="isLoading && apiKeys.length === 0"
-        class="h-full flex items-start justify-center animate-fade-in px-6"
-      >
-        <ContentSkeleton />
+      <div v-if="isLoading && apiKeys.length === 0" class="h-full animate-fade-in">
+        <TableSkeleton :icon="false" />
       </div>
       <div
         v-else-if="apiKeys.length === 0"

@@ -5,7 +5,7 @@ import { useI18n } from "vue-i18n";
 import EmptyFilterResults from "@/components/common/EmptyFilterResults.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
-import LoadingState from "@/components/common/LoadingState.vue";
+import ListSkeleton from "@/components/common/ListSkeleton.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import { CAPABILITY_META, CAPABILITY_ORDER } from "@/components/plaza/capabilities";
 import PlazaModelListItem from "@/components/plaza/PlazaModelListItem.vue";
@@ -245,11 +245,8 @@ const sortedModels = computed(() => {
 
     <!-- Content area -->
     <div class="config-content">
-      <div
-        v-if="isLoading && models.length === 0"
-        class="h-full flex items-center justify-center animate-fade-in px-6"
-      >
-        <LoadingState />
+      <div v-if="isLoading && models.length === 0" class="h-full overflow-hidden animate-fade-in">
+        <ListSkeleton :rows="9" />
       </div>
       <div
         v-else-if="loadError"

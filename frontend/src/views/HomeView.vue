@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { RangeCalendar } from "@/components/ui/range-calendar";
 import { Separator } from "@/components/ui/separator";
 import EmptyState from "@/components/common/EmptyState.vue";
-import LoadingState from "@/components/common/LoadingState.vue";
+import DashboardSkeleton from "@/components/common/DashboardSkeleton.vue";
 import {
   UsageByModel,
   UsageByProvider,
@@ -221,12 +221,10 @@ onMounted(() => {
 
     <div class="config-content">
       <!-- Loading (initial load only — refreshes keep the panel on screen so
-           values crossfade in place instead of the dashboard snapping away) -->
-      <div
-        v-if="isLoadingUsage && !usageStats"
-        class="h-full flex items-center justify-center py-20"
-      >
-        <LoadingState mode="spinner" />
+           values crossfade in place instead of the dashboard snapping away).
+           The skeleton mirrors the dashboard geometry to avoid a layout jump. -->
+      <div v-if="isLoadingUsage && !usageStats" class="h-full overflow-y-auto animate-fade-in">
+        <DashboardSkeleton />
       </div>
 
       <template v-else-if="usageStats">

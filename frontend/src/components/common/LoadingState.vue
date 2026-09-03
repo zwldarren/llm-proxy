@@ -3,8 +3,6 @@ import { Loader2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 
 interface Props {
-  /** Loading display mode - unified to spinner */
-  mode?: "spinner";
   /** Custom loading text, defaults to i18n 'common.loading' */
   text?: string;
   /** Whether to show the loading text */
@@ -14,7 +12,6 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  mode: "spinner",
   text: undefined,
   showText: true,
   size: "md",
@@ -30,27 +27,18 @@ const sizeClasses = {
 </script>
 
 <template>
+  <!-- Flat-by-default: a single quiet spinner, no glows or gradient overlays.
+       The global prefers-reduced-motion rule neutralizes the spin. -->
   <div
     class="loading-state"
     role="status"
     aria-busy="true"
     :aria-label="text ?? t('common.loading')"
   >
-    <div class="relative">
-      <Loader2 :class="[sizeClasses[props.size], 'animate-spin text-primary']" />
-      <div
-        class="absolute inset-0 rounded-full animate-spin"
-        style="
-          background: linear-gradient(
-            to right,
-            hsl(var(--primary) / var(--opacity-light)),
-            transparent,
-            transparent
-          );
-        "
-      />
-    </div>
+    <Loader2
+      :class="[sizeClasses[props.size], 'animate-spin text-muted-foreground']"
+      aria-hidden="true"
+    />
     <span v-if="showText" class="text-sm">{{ text ?? t("common.loading") }}</span>
-    <span class="sr-only">{{ text ?? t("common.loading") }}</span>
   </div>
 </template>
