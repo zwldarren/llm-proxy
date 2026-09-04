@@ -371,6 +371,12 @@ A recessed column with a gradient rail; items are quiet until active, then marke
 - **Items:** `rounded-lg px-3 py-2.5 text-sm font-medium transition-all 200ms`, `min-h-11 min-w-11`. Active: `bg-sidebar-accent/95` + the 2px gradient indicator line (`from-sidebar-primary to-sidebar-primary/60`, `rounded-r-full`, active glow) + icon `scale-110`. Hover: `bg-sidebar-accent/70` + a horizontal reflection sweep (`via-sidebar-primary/12`, opacity 0→100). Logout hover tints `destructive/16`.
 - **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/50` — a tracked eyebrow used **only** for the three nav section groups (Overview / Tools / Config), never as a page-section eyebrow.
 
+### Role-Switched Routes
+One route may render different views by role when both roles work on the same data: `/models` renders the management UI for admins and the read-only catalog for viewers. Rules for this pattern:
+- The role switch must be **synchronous** (derived from the auth store's JWT, never async) so there is no flash of the wrong view.
+- Nav placement and command-palette grouping follow **each role's mental model** (Catalog for viewers, Configuration for admins) while pointing at the same route; legacy URLs redirect by route name.
+- Keep this pattern rare — admin tools otherwise live under `/config/*` with an `adminOnly` route guard.
+
 ### Color-Tinted Icon Container (signature)
 `.icon-container` and its `-primary/-blue/-amber/-success` variants: `p-2.5 rounded-xl min-h-11 min-w-11`, `bg-linear-to-br from-<color>/15–20 via-<color>/10 to-<color>/5–12`, `ring-1 ring-<color>/25–30`, `inset 0 1px 0 <color>/0.2–0.26`. The signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen.
 

@@ -29,7 +29,15 @@ interface Command {
 }
 
 const navCommands = computed<Command[]>(() => {
-  const base: Command[] = [
+  // Mirrors the sidebar's role-aware placement: the merged /models page
+  // reads as a catalog to viewers and as configuration to admins.
+  const modelsCommand: Command = {
+    id: "nav-models",
+    label: t("nav.models"),
+    group: authStore.isAdmin ? t("nav.config") : t("nav.catalog"),
+    run: () => router.push("/models"),
+  };
+  const commands: Command[] = [
     {
       id: "nav-home",
       label: t("home.usageTitle"),
@@ -42,12 +50,11 @@ const navCommands = computed<Command[]>(() => {
       group: t("nav.overview"),
       run: () => router.push("/logs"),
     },
-    {
-      id: "nav-models",
-      label: t("nav.modelPlaza"),
-      group: t("nav.catalog"),
-      run: () => router.push("/models"),
-    },
+  ];
+  if (!authStore.isAdmin) {
+    commands.push(modelsCommand);
+  }
+  commands.push(
     {
       id: "nav-chat",
       label: t("nav.chat"),
@@ -65,28 +72,17 @@ const navCommands = computed<Command[]>(() => {
       label: t("nav.apiKeys"),
       group: t("nav.config"),
       run: () => router.push("/config/api-keys"),
-    },
-    {
-      id: "nav-settings",
-      label: t("nav.settings"),
-      group: t("nav.settings"),
-      run: () => router.push("/config/settings"),
-    },
-  ];
+    }
+  );
   if (authStore.isAdmin) {
-    base.push(
+    commands.push(
       {
         id: "nav-providers",
         label: t("nav.providers"),
         group: t("nav.config"),
         run: () => router.push("/config/providers"),
       },
-      {
-        id: "nav-models-cfg",
-        label: t("nav.models"),
-        group: t("nav.config"),
-        run: () => router.push("/config/models"),
-      },
+      modelsCommand,
       {
         id: "nav-mcp",
         label: t("nav.mcpServers"),
@@ -101,7 +97,13 @@ const navCommands = computed<Command[]>(() => {
       }
     );
   }
-  return base;
+  commands.push({
+    id: "nav-settings",
+    label: t("nav.settings"),
+    group: t("nav.settings"),
+    run: () => router.push("/config/settings"),
+  });
+  return commands;
 });
 
 // Recent logs fetched lazily when the palette opens. Bounded to a handful so the

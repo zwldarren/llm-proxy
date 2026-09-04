@@ -27,6 +27,7 @@ export const STORAGE_KEYS = {
 
   // UI state
   MODELS_VIEW_MODE: "llm-proxy:models-view-mode",
+  PLAZA_VIEW_MODE: "llm-proxy:plaza-view-mode",
   PROVIDERS_VIEW_MODE: "llm-proxy:providers-view-mode",
   API_KEYS_VIEW_MODE: "llm-proxy:api-keys-view-mode",
   MCP_SERVERS_VIEW_MODE: "llm-proxy:mcp-servers-view-mode",

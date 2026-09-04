@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { Check, ChevronDown, Copy, ExternalLink, ImageOff, Layers } from "@lucide/vue";
+import { Check, ChevronDown, Copy, ExternalLink } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { toast } from "vue-sonner";
-import { useClipboard } from "@vueuse/core";
-import { CAPABILITY_META, CAPABILITY_ORDER } from "@/components/plaza/capabilities";
+import { CAPABILITY_META } from "@/components/plaza/capabilities";
+import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
+import { usePlazaModelRow } from "@/components/plaza/usePlazaModelRow";
+import ModelIcon from "@/components/models/ModelIcon.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ModelCatalogEntry } from "@/types/schemas";
 import { formatContextLength, formatTokens } from "@/utils/format";
-import { getIconUrl, isMonoIcon } from "@/utils/icons";
 
 interface Props {
   model: ModelCatalogEntry;
@@ -20,35 +20,11 @@ const props = defineProps<Props>();
 const { t, locale } = useI18n();
 
 const isOpen = ref(false);
-const iconFailed = ref(false);
-const iconUrl = computed(() => getIconUrl(props.model.icon_url, props.model.name));
 const exactContext = computed(() => formatTokens(props.model.context_length, locale.value));
 
-const safeHomepageUrl = computed(() => {
-  const url = props.model.homepage_url;
-  if (!url) return null;
-  return /^(https?):\/\//i.test(url) ? url : null;
-});
-
-const capabilities = computed(() =>
-  CAPABILITY_ORDER.filter((cap) => props.model.capabilities?.includes(cap))
+const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = usePlazaModelRow(
+  () => props.model
 );
-
-const { copy, copied } = useClipboard({ legacy: true, copiedDuring: 1500 });
-
-async function copyName() {
-  try {
-    await copy(props.model.name);
-  } catch {
-    toast.error(t("plaza.copyFailed"));
-  }
-}
-
-function tierBadgeVariant(tier: string | null | undefined): "default" | "secondary" | "outline" {
-  if (tier === "PREMIUM") return "default";
-  if (tier === "BALANCED") return "secondary";
-  return "outline";
-}
 </script>
 
 <template>
@@ -56,33 +32,18 @@ function tierBadgeVariant(tier: string | null | undefined): "default" | "seconda
     class="group border-b border-border transition-colors duration-150"
     :class="isOpen ? 'bg-muted/30' : 'hover:bg-muted/50'"
   >
-    <!-- Row header: icon · name + badges · context · provider count · chevron -->
+    <!-- Row header: icon · name + tier + capability icons · context · chevron -->
     <button
       type="button"
-      class="flex w-full items-center gap-3 px-4 sm:px-6 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+      class="flex w-full items-center gap-3 px-4 sm:px-6 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
       :aria-expanded="isOpen"
       :aria-label="isOpen ? t('plaza.collapseDetails') : t('plaza.expandDetails')"
       @click="isOpen = !isOpen"
     >
-      <span
-        :class="[
-          'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 overflow-hidden',
-          iconUrl ? 'bg-card border border-border' : 'bg-primary/10',
-        ]"
-      >
-        <img
-          v-if="iconUrl && !iconFailed"
-          :src="iconUrl"
-          alt=""
-          :class="[isMonoIcon(model.name) ? 'icon-mono' : null, 'w-5 h-5 object-contain']"
-          loading="lazy"
-          @error="iconFailed = true"
-        />
-        <ImageOff v-else class="w-4 h-4 text-muted-foreground" />
-      </span>
+      <ModelIcon :name="model.name" :icon-url="model.icon_url" />
 
       <span class="flex-1 min-w-0">
-        <span class="flex items-center gap-1.5 flex-wrap">
+        <span class="flex items-center gap-1.5">
           <span
             class="font-mono text-[13px] font-medium text-foreground truncate"
             :title="model.name"
@@ -96,25 +57,27 @@ function tierBadgeVariant(tier: string | null | undefined): "default" | "seconda
           >
             {{ model.quality_tier }}
           </Badge>
-          <Badge
-            v-for="cap in capabilities"
-            :key="cap"
-            variant="outline"
-            :class="['text-[11px] px-1.5 py-0 shrink-0', CAPABILITY_META[cap].badgeClass]"
-          >
-            <component :is="CAPABILITY_META[cap].icon" class="size-3 mr-0.5" />
-            {{ t(CAPABILITY_META[cap].labelKey) }}
-          </Badge>
+          <CapabilityIcons :capabilities="capabilities" />
         </span>
-        <span class="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span class="inline-flex items-center gap-1">
-            <Layers class="size-3 text-muted-foreground/70" />
-            {{ t("plaza.providerCount", model.provider_names.length) }}
-          </span>
-          <span v-if="model.context_length != null" aria-hidden="true">·</span>
-          <span v-if="model.context_length != null" class="font-mono tabular-nums">
-            {{ formatContextLength(model.context_length) }} {{ t("plaza.context") }}
-          </span>
+        <!-- Inline description: one scannable line without expanding -->
+        <span
+          v-if="model.description"
+          class="block truncate text-xs text-muted-foreground"
+          :title="model.description"
+        >
+          {{ model.description }}
+        </span>
+        <!-- Meta line: providers · context -->
+        <span
+          class="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground/80"
+        >
+          <span class="truncate">{{ model.provider_names.join(" · ") }}</span>
+          <template v-if="model.context_length != null">
+            <span class="text-border" aria-hidden="true">·</span>
+            <span class="tabular-nums shrink-0">
+              {{ formatContextLength(model.context_length) }} {{ t("plaza.context") }}
+            </span>
+          </template>
         </span>
       </span>
 
@@ -128,7 +91,7 @@ function tierBadgeVariant(tier: string | null | undefined): "default" | "seconda
     <!-- Expanded details -->
     <Transition name="plaza-expand">
       <div v-if="isOpen" class="px-4 sm:px-6 pb-4">
-        <div class="sm:pl-12 space-y-3">
+        <div class="sm:pl-11 space-y-3">
           <p
             :class="[
               'max-w-3xl text-xs leading-relaxed',

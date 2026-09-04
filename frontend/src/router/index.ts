@@ -56,9 +56,11 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      // Single models entry point: admins get the management UI, other
+      // authenticated users get the read-only browse view (see ModelsView).
       path: "/models",
-      name: "modelPlaza",
-      component: () => import("@/views/ModelPlazaView.vue"),
+      name: "models",
+      component: () => import("@/views/ModelsView.vue"),
       meta: { requiresAuth: true },
     },
     {
@@ -68,10 +70,9 @@ const router = createRouter({
       meta: { requiresAuth: true, adminOnly: true },
     },
     {
+      // Legacy admin URL kept as a redirect so old bookmarks keep working.
       path: "/config/models",
-      name: "models",
-      component: () => import("@/views/config/ModelsView.vue"),
-      meta: { requiresAuth: true, adminOnly: true },
+      redirect: { name: "models" },
     },
     {
       path: "/config/settings",
@@ -149,9 +150,8 @@ type ViewName =
   | "ChatView"
   | "ImagesView"
   | "LogsView"
-  | "ModelPlazaView"
+  | "ModelsView"
   | "config/ProvidersView"
-  | "config/ModelsView"
   | "config/ApiKeysView"
   | "config/McpServersView"
   | "config/SettingsView"
@@ -162,9 +162,19 @@ const VIEW_IMPORTS: Record<ViewName, () => Promise<unknown>> = {
   ChatView: () => import("@/views/ChatView.vue"),
   ImagesView: () => import("@/views/ImagesView.vue"),
   LogsView: () => import("@/views/LogsView.vue"),
-  ModelPlazaView: () => import("@/views/ModelPlazaView.vue"),
+  ModelsView: async () => {
+    // /models renders a role-switched dispatcher that lazy-loads its inner
+    // view; warm the role-appropriate inner chunk too, or first paint waits
+    // on a second sequential fetch.
+    const authStore = useAuthStore();
+    await Promise.all([
+      import("@/views/ModelsView.vue"),
+      authStore.isAdmin
+        ? import("@/views/config/ModelsView.vue")
+        : import("@/views/ModelPlazaView.vue"),
+    ]);
+  },
   "config/ProvidersView": () => import("@/views/config/ProvidersView.vue"),
-  "config/ModelsView": () => import("@/views/config/ModelsView.vue"),
   "config/ApiKeysView": () => import("@/views/config/ApiKeysView.vue"),
   "config/McpServersView": () => import("@/views/config/McpServersView.vue"),
   "config/SettingsView": () => import("@/views/config/SettingsView.vue"),
@@ -178,9 +188,8 @@ router.afterEach((to) => {
     { name: "chat", view: "ChatView" },
     { name: "images", view: "ImagesView" },
     { name: "logs", view: "LogsView" },
-    { name: "modelPlaza", view: "ModelPlazaView" },
+    { name: "models", view: "ModelsView" },
     { name: "providers", view: "config/ProvidersView" },
-    { name: "models", view: "config/ModelsView" },
     { name: "apiKeys", view: "config/ApiKeysView" },
     { name: "mcpServers", view: "config/McpServersView" },
     { name: "settings", view: "config/SettingsView" },
@@ -188,7 +197,7 @@ router.afterEach((to) => {
   ];
 
   // Define which routes are admin-only
-  const adminRoutes = new Set(["providers", "models", "mcpServers", "team", "circuitBreaker"]);
+  const adminRoutes = new Set(["providers", "mcpServers", "team", "circuitBreaker"]);
 
   // Filter out the page we just navigated to, and admin-only pages for non-admins
   const viewsToPrefetch = allViews.filter(

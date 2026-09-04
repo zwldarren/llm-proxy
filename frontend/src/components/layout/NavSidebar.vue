@@ -3,7 +3,6 @@ import type { Component, ComputedRef } from "vue";
 import { computed, ref, watch } from "vue";
 import {
   BarChart3,
-  Boxes,
   ChevronLeft,
   ChevronRight,
   Cpu,
@@ -121,26 +120,35 @@ type NavSection = {
   items: NavItem[];
 };
 
-const memberSections: NavSection[] = [
-  {
-    title: "nav.overview",
-    items: [
-      { name: "nav.usage", href: "/", icon: BarChart3 },
-      { name: "nav.logs", href: "/logs", icon: ScrollText },
-    ],
-  },
-  {
-    title: "nav.catalog",
-    items: [{ name: "nav.modelPlaza", href: "/models", icon: Boxes }],
-  },
-  {
+// Role-aware placement for the merged /models page: viewers browse it as a
+// catalog, while admins find model management where every other admin tool
+// lives — under Configuration. Same route either way; the view switches by
+// role inside the route component.
+const memberSections: ComputedRef<NavSection[]> = computed(() => {
+  const sections: NavSection[] = [
+    {
+      title: "nav.overview",
+      items: [
+        { name: "nav.usage", href: "/", icon: BarChart3 },
+        { name: "nav.logs", href: "/logs", icon: ScrollText },
+      ],
+    },
+  ];
+  if (!authStore.isAdmin) {
+    sections.push({
+      title: "nav.catalog",
+      items: [{ name: "nav.models", href: "/models", icon: Cpu }],
+    });
+  }
+  sections.push({
     title: "nav.playground",
     items: [
       { name: "nav.chat", href: "/chat", icon: MessageSquare },
       { name: "nav.images", href: "/images", icon: ImageIcon },
     ],
-  },
-];
+  });
+  return sections;
+});
 
 const expandedGroups = useStorage<Record<string, boolean>>(STORAGE_KEYS.SIDEBAR_EXPANDED_GROUPS, {
   "nav.general": true,
@@ -153,14 +161,13 @@ const configSections: ComputedRef<NavSection[]> = computed(() => {
 
   // Items accessible to all authenticated users
   items.push({ name: "nav.apiKeys", href: "/config/api-keys", icon: Key });
-  // Future: add more non-admin config items here, e.g.:
-  // items.push({ name: "nav.availableModels", href: "/config/models", icon: Cpu });
 
   // Admin-only items
   if (authStore.isAdmin) {
     items.push(
       { name: "nav.providers", href: "/config/providers", icon: Database },
-      { name: "nav.models", href: "/config/models", icon: Cpu },
+      // /models renders the management UI for admins (see memberSections).
+      { name: "nav.models", href: "/models", icon: Cpu },
       { name: "nav.mcpServers", href: "/config/mcp-servers", icon: McpIcon },
       { name: "team.title", href: "/team", icon: Users }
     );
@@ -185,7 +192,7 @@ const settingsSections: ComputedRef<NavSection[]> = computed(() => {
 
 // Sections visible based on user role
 const visibleSections = computed(() => {
-  return [...memberSections, ...configSections.value, ...settingsSections.value];
+  return [...memberSections.value, ...configSections.value, ...settingsSections.value];
 });
 
 // Ensure any dynamic/new collapsible groups default to true
@@ -302,10 +309,6 @@ const PREFETCH_ROUTES: Record<string, () => void> = {
     providerStore.prefetch();
     import("@/views/config/ProvidersView.vue");
   },
-  "/config/models": () => {
-    modelStore.prefetch();
-    import("@/views/config/ModelsView.vue");
-  },
   "/config/api-keys": () => {
     apiKeyStore.prefetch();
     import("@/views/config/ApiKeysView.vue");
@@ -315,7 +318,19 @@ const PREFETCH_ROUTES: Record<string, () => void> = {
     import("@/views/config/McpServersView.vue");
   },
   "/logs": () => import("@/views/LogsView.vue"),
-  "/models": () => import("@/views/ModelPlazaView.vue"),
+  "/models": () => {
+    // The route lazy-loads a role-appropriate inner view, so warm that chunk
+    // too — warming only the dispatcher leaves first paint waiting on a
+    // second fetch. The admin store warms only for admins (the config API
+    // rejects viewers).
+    import("@/views/ModelsView.vue");
+    if (authStore.isAdmin) {
+      modelStore.prefetch();
+      import("@/views/config/ModelsView.vue");
+    } else {
+      import("@/views/ModelPlazaView.vue");
+    }
+  },
   "/chat": () => import("@/views/ChatView.vue"),
   "/images": () => import("@/views/ImagesView.vue"),
   "/": () => import("@/views/HomeView.vue"),

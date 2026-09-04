@@ -87,10 +87,10 @@ class TestFetchModelsDevPricing:
         }
 
     async def test_parses_nested_models(self):
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return self._sample_payload()
 
-        with patch.object(pricing, "fetch_json", fake_fetch_json):
+        with patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data):
             data = await _fetch_models_dev_pricing(MagicMock())
 
         assert set(data.keys()) == {"gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet"}
@@ -100,7 +100,7 @@ class TestFetchModelsDevPricing:
         assert gpt4o.output_cost_per_1m == 10.0
 
     async def test_skips_zero_or_missing_pricing(self):
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return {
                 "openai": {
                     "models": {
@@ -111,7 +111,7 @@ class TestFetchModelsDevPricing:
                 }
             }
 
-        with patch.object(pricing, "fetch_json", fake_fetch_json):
+        with patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data):
             data = await _fetch_models_dev_pricing(MagicMock())
 
         assert "free-model" not in data
@@ -119,16 +119,16 @@ class TestFetchModelsDevPricing:
         assert "good" in data
 
     async def test_skips_non_dict_provider_blocks(self):
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return {"openai": "not-a-dict", "anthropic": {"models": "nope"}}
 
-        with patch.object(pricing, "fetch_json", fake_fetch_json):
+        with patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data):
             data = await _fetch_models_dev_pricing(MagicMock())
 
         assert data == {}
 
     async def test_indexes_by_suffix_when_slash_present(self):
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return {
                 "openai": {
                     "models": {
@@ -137,7 +137,7 @@ class TestFetchModelsDevPricing:
                 }
             }
 
-        with patch.object(pricing, "fetch_json", fake_fetch_json):
+        with patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data):
             data = await _fetch_models_dev_pricing(MagicMock())
 
         assert "org/gpt-4o" in data
@@ -198,12 +198,12 @@ class TestSyncModelPricingEndpoint:
         return mapping
 
     async def test_http_status_error_returns_failure(self, request_obj):
-        async def boom(client, url):
+        async def boom(client):
             raise httpx2.HTTPStatusError(
                 "bad", request=MagicMock(), response=MagicMock(status_code=500)
             )
 
-        with patch.object(pricing, "fetch_json", boom):
+        with patch.object(pricing, "fetch_models_dev_data", boom):
             response = await sync_model_pricing(
                 SyncPricingRequest(dry_run=True), request_obj, session=MagicMock()
             )
@@ -212,10 +212,10 @@ class TestSyncModelPricingEndpoint:
         assert "models.dev" in (response.error or "")
 
     async def test_request_error_returns_failure(self, request_obj):
-        async def boom(client, url):
+        async def boom(client):
             raise httpx2.RequestError("network down")
 
-        with patch.object(pricing, "fetch_json", boom):
+        with patch.object(pricing, "fetch_models_dev_data", boom):
             response = await sync_model_pricing(
                 SyncPricingRequest(dry_run=True), request_obj, session=MagicMock()
             )
@@ -228,11 +228,11 @@ class TestSyncModelPricingEndpoint:
         model = self._model("gpt-4o", [mapping])
         repo = self._fake_repo([model])
 
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return {"openai": {"models": {"gpt-4o": {"cost": {"input": 2.5, "output": 10.0}}}}}
 
         with (
-            patch.object(pricing, "fetch_json", fake_fetch_json),
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
             patch.object(pricing, "get_config_repository", return_value=repo),
         ):
             response = await sync_model_pricing(
@@ -254,11 +254,11 @@ class TestSyncModelPricingEndpoint:
         model = self._model("gpt-4o", [mapping])
         repo = self._fake_repo([model])
 
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return {"openai": {"models": {"gpt-4o": {"cost": {"input": 2.5, "output": 10.0}}}}}
 
         with (
-            patch.object(pricing, "fetch_json", fake_fetch_json),
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
             patch.object(pricing, "get_config_repository", return_value=repo),
             patch.object(pricing, "commit_and_reload", AsyncMock()) as reload_mock,
         ):
@@ -284,11 +284,11 @@ class TestSyncModelPricingEndpoint:
         model = self._model("unknown-model", [mapping])
         repo = self._fake_repo([model])
 
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return {}
 
         with (
-            patch.object(pricing, "fetch_json", fake_fetch_json),
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
             patch.object(pricing, "get_config_repository", return_value=repo),
         ):
             response = await sync_model_pricing(
@@ -304,11 +304,11 @@ class TestSyncModelPricingEndpoint:
         model = self._model("gpt-4o", [mapping])
         repo = self._fake_repo([model])
 
-        async def fake_fetch_json(client, url):
+        async def fake_fetch_models_dev_data(client):
             return pricing_data
 
         with (
-            patch.object(pricing, "fetch_json", fake_fetch_json),
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
             patch.object(pricing, "get_config_repository", return_value=repo),
         ):
             response = await sync_model_pricing(

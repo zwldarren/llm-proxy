@@ -16,14 +16,11 @@ from llm_proxy.api.routers.config.pricing_schemas import (
     SyncPricingResponse,
     SyncPricingResult,
 )
-from llm_proxy.http.client import fetch_json
+from llm_proxy.core.models_dev import coerce_float, fetch_models_dev_data
 
 router = APIRouter(
     prefix="/models", tags=["configuration"], dependencies=[Depends(require_admin_role)]
 )
-
-# models.dev API URL for fetching model pricing
-_MODELS_DEV_API_URL = "https://models.dev/api.json"
 
 
 def _is_valid_pricing(input_cost: float | None, output_cost: float | None) -> bool:
@@ -33,7 +30,7 @@ def _is_valid_pricing(input_cost: float | None, output_cost: float | None) -> bo
 
 async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPricingInfo]]:
     client = await get_http_client(request)
-    data = await fetch_json(client, _MODELS_DEV_API_URL)
+    data = await fetch_models_dev_data(client)
 
     pricing_data: dict[str, list[ModelPricingInfo]] = {}
 
@@ -60,18 +57,12 @@ async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPri
             input_audio = cost.get("input_audio")
             output_audio = cost.get("output_audio")
 
-            def _to_float(v):
-                try:
-                    return float(v) if v is not None else None
-                except ValueError, TypeError:
-                    return None
-
-            input_cost_f = _to_float(input_cost)
-            output_cost_f = _to_float(output_cost)
-            cache_read_f = _to_float(cache_read)
-            cache_write_f = _to_float(cache_write)
-            input_audio_f = _to_float(input_audio)
-            output_audio_f = _to_float(output_audio)
+            input_cost_f = coerce_float(input_cost)
+            output_cost_f = coerce_float(output_cost)
+            cache_read_f = coerce_float(cache_read)
+            cache_write_f = coerce_float(cache_write)
+            input_audio_f = coerce_float(input_audio)
+            output_audio_f = coerce_float(output_audio)
 
             if not _is_valid_pricing(input_cost_f, output_cost_f):
                 continue

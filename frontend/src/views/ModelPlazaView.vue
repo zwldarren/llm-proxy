@@ -4,12 +4,18 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import EmptyFilterResults from "@/components/common/EmptyFilterResults.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import EmptyTableRow from "@/components/common/EmptyTableRow.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
 import ListSkeleton from "@/components/common/ListSkeleton.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import SortableHead from "@/components/common/SortableHead.vue";
+import TableSkeleton from "@/components/common/TableSkeleton.vue";
+import ViewToggle from "@/components/common/ViewToggle.vue";
 import { CAPABILITY_META, CAPABILITY_ORDER } from "@/components/plaza/capabilities";
 import PlazaModelListItem from "@/components/plaza/PlazaModelListItem.vue";
+import PlazaModelTableRow from "@/components/plaza/PlazaModelTableRow.vue";
 import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
@@ -19,12 +25,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTableFilter } from "@/composables/useTableFilter";
+import { useViewMode } from "@/composables/useViewMode";
+import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { catalogApi } from "@/services/api/catalog";
+import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
 import type { ModelCapability, ModelCatalogEntry } from "@/types/schemas";
 
 defineOptions({ name: "ModelPlazaView" });
 
 const { t } = useI18n();
+
+const viewMode = useViewMode(STORAGE_KEYS.PLAZA_VIEW_MODE);
 
 const models = ref<ModelCatalogEntry[]>([]);
 const isLoading = ref(false);
@@ -99,34 +110,35 @@ const visibleModels = computed(() => {
   );
 });
 
-type SortKey = "name-asc" | "name-desc" | "context-desc" | "context-asc";
-const sortKey = ref<SortKey>("name-asc");
+type SortField = "name" | "context";
+const sortField = ref<SortField>("name");
+const sortDir = ref<"asc" | "desc">("asc");
+
+/** Toolbar select proxy: maps the composite "field-dir" value onto the refs. */
+const sortSelect = computed({
+  get: () => `${sortField.value}-${sortDir.value}`,
+  set: (v: string) => {
+    const [field, dir] = v.split("-") as [SortField, "asc" | "desc"];
+    sortField.value = field;
+    sortDir.value = dir;
+  },
+});
+
+function onSort(field: string) {
+  if (field === sortField.value) {
+    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
+  } else {
+    sortField.value = field as SortField;
+    sortDir.value = field === "context" ? "desc" : "asc";
+  }
+}
 
 const sortedModels = computed(() => {
   const items = [...visibleModels.value];
-  switch (sortKey.value) {
-    case "name-desc":
-      items.sort((a, b) => b.name.localeCompare(a.name));
-      break;
-    case "context-desc":
-    case "context-asc": {
-      // Models without a context length always sort last, regardless of direction.
-      const dir: 1 | -1 = sortKey.value === "context-asc" ? 1 : -1;
-      items.sort((a, b) => {
-        const aMissing = a.context_length == null ? 1 : 0;
-        const bMissing = b.context_length == null ? 1 : 0;
-        if (aMissing !== bMissing) return aMissing - bMissing;
-        return (
-          ((a.context_length ?? 0) - (b.context_length ?? 0)) * dir || a.name.localeCompare(b.name)
-        );
-      });
-      break;
-    }
-    case "name-asc":
-    default:
-      items.sort((a, b) => a.name.localeCompare(b.name));
-      break;
-  }
+  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
+  items.sort(
+    sortField.value === "context" ? compareModelsByContextLength(dir) : compareModelsByName(dir)
+  );
   return items;
 });
 </script>
@@ -165,9 +177,9 @@ const sortedModels = computed(() => {
         :total-count="models.length"
         @clear-filters="clearFilters"
       >
-        <Select v-model="sortKey">
+        <Select v-if="viewMode === 'list'" v-model="sortSelect">
           <SelectTrigger
-            class="min-h-11 w-full sm:w-52 shrink-0 border-border/40 bg-muted/15 hover:bg-muted/25 transition-colors duration-200 focus:bg-background"
+            class="min-h-11 min-w-0 flex-1 sm:w-52 sm:flex-none shrink border-border/40 bg-muted/15 hover:bg-muted/25 transition-colors duration-200 focus:bg-background"
             :aria-label="t('plaza.sortLabel')"
           >
             <SelectValue />
@@ -179,6 +191,7 @@ const sortedModels = computed(() => {
             <SelectItem value="context-asc">{{ t("plaza.sortContextAsc") }}</SelectItem>
           </SelectContent>
         </Select>
+        <ViewToggle v-model="viewMode" />
       </FilterBar>
     </div>
 
@@ -251,7 +264,8 @@ const sortedModels = computed(() => {
     <!-- Content area -->
     <div class="config-content">
       <div v-if="isLoading && models.length === 0" class="h-full overflow-hidden animate-fade-in">
-        <ListSkeleton :rows="9" />
+        <ListSkeleton v-if="viewMode === 'list'" :rows="9" />
+        <TableSkeleton v-else :rows="9" />
       </div>
       <div
         v-else-if="loadError"
@@ -271,12 +285,49 @@ const sortedModels = computed(() => {
           </template>
         </EmptyState>
       </div>
-      <div v-else class="config-scroll">
-        <EmptyFilterResults v-if="sortedModels.length === 0" @clear="clearFilters" />
-        <div v-else class="config-list list-stagger">
-          <PlazaModelListItem v-for="model in sortedModels" :key="model.name" :model="model" />
+      <template v-else>
+        <!-- Table view (default): dense, sortable columns -->
+        <Table
+          v-if="viewMode === 'table'"
+          class="table-modern"
+          container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+        >
+          <TableHeader class="config-thead">
+            <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
+              <SortableHead
+                :label="t('plaza.model')"
+                sort-key="name"
+                :active-field="sortField"
+                :active-dir="sortDir"
+                @sort="onSort"
+              />
+              <TableHead>{{ t("plaza.tier") }}</TableHead>
+              <SortableHead
+                :label="t('plaza.context')"
+                sort-key="context"
+                align="right"
+                :active-field="sortField"
+                :active-dir="sortDir"
+                @sort="onSort"
+              />
+              <TableHead>{{ t("plaza.providers") }}</TableHead>
+              <TableHead class="w-24 text-right">{{ t("common.actions") }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody class="row-stagger">
+            <PlazaModelTableRow v-for="model in sortedModels" :key="model.name" :model="model" />
+            <EmptyTableRow v-if="sortedModels.length === 0" :colspan="5" @clear="clearFilters" />
+          </TableBody>
+        </Table>
+
+        <!-- List view: expandable rows with inline description -->
+        <div v-else class="config-scroll">
+          <EmptyFilterResults v-if="sortedModels.length === 0" @clear="clearFilters" />
+          <div v-else class="config-list list-stagger">
+            <PlazaModelListItem v-for="model in sortedModels" :key="model.name" :model="model" />
+          </div>
         </div>
-      </div>
+      </template>
     </div>
   </AppLayout>
 </template>

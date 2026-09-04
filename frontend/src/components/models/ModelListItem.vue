@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { Check, Edit, ImageOff, Trash2 } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { Check, Edit, Trash2 } from "@lucide/vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { getIconUrl, isMonoIcon } from "@/utils/icons";
-import { CAPABILITY_META, deriveModelCapabilities } from "@/components/plaza/capabilities";
-import { Badge } from "@/components/ui/badge";
+import { deriveModelCapabilities } from "@/components/plaza/capabilities";
+import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
+import ModelIcon from "@/components/models/ModelIcon.vue";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ModelPricingCell from "@/components/models/ModelPricingCell.vue";
+import { formatContextLength } from "@/utils/format";
 import type { ModelRead } from "@/types/schemas";
 
 interface Props {
@@ -26,9 +28,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const iconFailed = ref(false);
-
-const iconUrl = computed(() => getIconUrl(props.model.icon_url, props.model.name));
 const providers = computed(() => props.model.providers ?? []);
 const hasRoutingInfo = computed(() => Boolean(props.model.auto_eligible));
 const capabilities = computed(() => deriveModelCapabilities(props.model));
@@ -40,92 +39,86 @@ const capabilities = computed(() => deriveModelCapabilities(props.model));
   >
     <div class="flex items-center gap-3">
       <!-- Icon -->
-      <div
-        :class="[
-          'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden',
-          iconUrl ? 'bg-card border border-border' : 'bg-primary/10',
-        ]"
-        role="img"
-        :aria-label="model.name"
-      >
-        <img
-          v-if="iconUrl && !iconFailed"
-          :src="iconUrl"
-          :alt="model.name"
-          :class="[isMonoIcon(model.name) ? 'icon-mono' : null, 'w-5 h-5 object-contain']"
-          loading="lazy"
-          @error="iconFailed = true"
-        />
-        <ImageOff v-else class="w-4 h-4 text-muted-foreground" />
-      </div>
+      <ModelIcon :name="model.name" :icon-url="model.icon_url" :decorative="false" />
 
-      <!-- Name + routing badges + providers -->
+      <!-- Name + description + meta line -->
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-1.5 flex-wrap">
+        <div class="flex items-center gap-1.5">
           <h3 class="text-sm font-medium text-foreground truncate" :title="model.name">
             {{ model.name }}
           </h3>
-          <Badge
-            v-for="cap in capabilities"
-            :key="cap"
-            variant="outline"
-            :class="['text-[11px] px-1.5 py-0 shrink-0', CAPABILITY_META[cap].badgeClass]"
-          >
-            <component :is="CAPABILITY_META[cap].icon" class="size-3 mr-0.5" />
-            {{ t(CAPABILITY_META[cap].labelKey) }}
-          </Badge>
-          <template v-if="hasRoutingInfo">
-            <span
-              v-if="model.auto_eligible"
-              class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
-              :title="t('models.autoEligible')"
-            >
-              <Check class="size-2.5" />
-            </span>
-            <Badge
-              v-if="model.quality_tier"
-              :variant="
-                model.quality_tier === 'PREMIUM'
-                  ? 'default'
-                  : model.quality_tier === 'BALANCED'
-                    ? 'secondary'
-                    : 'outline'
-              "
-              class="text-[11px] uppercase font-medium px-1.5 py-0"
-            >
-              {{ model.quality_tier }}
-            </Badge>
-            <Badge
-              v-for="mode in model.routing_assignments || []"
-              :key="mode"
-              variant="outline"
-              class="text-[11px] px-1.5 py-0 border-action-blue/30 bg-action-blue/5 text-action-blue uppercase"
-            >
-              {{ mode }}
-            </Badge>
-          </template>
+          <CapabilityIcons :capabilities="capabilities" />
         </div>
-        <div class="mt-1 flex items-center gap-1.5 flex-wrap">
+        <!-- Inline description: one scannable line, OpenRouter-list style -->
+        <p
+          v-if="model.description"
+          class="mt-0.5 truncate text-xs text-muted-foreground"
+          :title="model.description"
+        >
+          {{ model.description }}
+        </p>
+        <!-- Meta line: providers · context; routing is kept apart as its own chip -->
+        <div
+          class="mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap font-mono text-[11px] text-muted-foreground"
+        >
           <template v-if="providers.length > 0">
-            <Badge
-              v-for="p in providers.slice(0, 3)"
-              :key="p.provider_name"
-              variant="outline"
-              class="cursor-pointer border-border/60 bg-background/55 px-1.5 py-0 font-mono text-[11px] transition-colors hover:bg-accent"
-              @click.stop="emit('filterProvider', p.provider_name)"
-            >
-              {{ p.provider_name }}
-            </Badge>
-            <span v-if="providers.length > 3" class="text-[11px] text-muted-foreground font-medium">
+            <template v-for="(p, i) in providers.slice(0, 3)" :key="p.provider_name">
+              <span v-if="i > 0" class="text-border" aria-hidden="true">·</span>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <button
+                    type="button"
+                    class="rounded-sm transition-colors hover:text-foreground hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    :aria-label="t('models.filterByProvider') + ': ' + p.provider_name"
+                    @click.stop="emit('filterProvider', p.provider_name)"
+                  >
+                    {{ p.provider_name }}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {{ t("models.filterByProvider") + ": " + p.provider_name }}
+                </TooltipContent>
+              </Tooltip>
+            </template>
+            <span v-if="providers.length > 3" class="text-muted-foreground/70">
               +{{ providers.length - 3 }}
             </span>
           </template>
-          <span v-else class="text-xs text-muted-foreground italic">-</span>
+          <span v-else>-</span>
+          <template v-if="model.context_length">
+            <span class="text-border" aria-hidden="true">·</span>
+            <span class="tabular-nums shrink-0">
+              {{ formatContextLength(model.context_length) }}
+              <span class="font-sans lowercase tracking-wide text-muted-foreground/70">{{
+                t("models.contextShort")
+              }}</span>
+            </span>
+          </template>
+          <!-- Smart-routing status: tinted chip, deliberately distinct from the
+               plain data to its left instead of glued to the context value -->
+          <template v-if="hasRoutingInfo">
+            <span
+              class="ml-1 inline-flex items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px font-sans text-[10px] font-medium text-status-success shrink-0"
+              :title="t('models.autoEligible')"
+            >
+              <Check class="size-2.5" aria-hidden="true" />
+              <span v-if="model.quality_tier" class="capitalize">
+                {{ model.quality_tier.toLowerCase() }}
+              </span>
+              <span v-else>{{ t("common.routing") }}</span>
+            </span>
+            <span
+              v-if="model.routing_assignments?.length"
+              class="font-mono text-[11px] text-muted-foreground/80"
+            >
+              {{ model.routing_assignments.join(", ") }}
+            </span>
+          </template>
         </div>
       </div>
 
-      <!-- Pricing -->
-      <div class="hidden sm:block w-24 shrink-0 text-right">
+      <!-- Pricing: stacked IN/OUT/CACHED block, the primary data on the row -->
+      <div class="hidden sm:block shrink-0 text-right">
         <ModelPricingCell :model="model" />
       </div>
 

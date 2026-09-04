@@ -5,13 +5,23 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { ModelRead } from "@/types/schemas";
 
 /**
- * Rich pricing cell for the models table.
- * Shows the effective input/output price (range-aware across provider-level
- * overrides and the model default) and opens a popover with the full pricing
- * breakdown across all pricing dimensions.
+ * Pricing cell for the models table/list.
+ *
+ * Two display modes:
+ * - `field="input" | "output" | "cached"`: a single scannable mono value (or
+ *   "min–max" range when provider overrides differ) — used by the per-column
+ *   table layout.
+ * - default: a stacked IN/OUT/CACHED block — used by the list layout. The
+ *   CACHED row renders as "—" when no cached-read price is configured.
+ *
+ * Either way the cell stays a popover trigger that opens the full pricing
+ * breakdown across all pricing dimensions (cached write, audio, image, ...).
  */
 
-const props = defineProps<{ model: ModelRead }>();
+const props = defineProps<{
+  model: ModelRead;
+  field?: "input" | "output" | "cached";
+}>();
 
 const { t } = useI18n();
 
@@ -109,6 +119,12 @@ function rangeText(key: CostKey): string | null {
 
 const inputText = computed(() => rangeText("input_cost_per_1m"));
 const outputText = computed(() => rangeText("output_cost_per_1m"));
+const cachedText = computed(() => rangeText("cached_read_cost_per_1m"));
+
+const FIELD_TEXTS = { input: inputText, output: outputText, cached: cachedText } as const;
+
+/** The single value shown when `field` is set. */
+const fieldText = computed(() => (props.field ? FIELD_TEXTS[props.field].value : null));
 
 /** Short labels for extra priced dimensions (cached, audio, image, ...). */
 const activeDims = computed(() => {
@@ -118,6 +134,12 @@ const activeDims = computed(() => {
   }
   return [...dims];
 });
+
+const extraDimsTitle = computed(() =>
+  activeDims.value.length
+    ? t("models.morePricingDims", { dims: activeDims.value.join(", ") })
+    : undefined
+);
 
 interface CostRow extends CostField {
   value: number;
@@ -154,19 +176,51 @@ const hasAnyPricing = computed(
     <PopoverTrigger as-child>
       <button
         type="button"
-        class="w-full rounded-md px-1.5 py-1 -my-1 text-right cursor-pointer transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+        class="rounded-md px-1.5 py-1 -my-1 cursor-pointer transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+        :class="field ? 'text-right' : 'w-full text-right'"
         :aria-label="t('models.pricingDetails')"
       >
-        <div class="text-data text-xs leading-tight">
-          <span class="font-medium text-action-blue">{{ inputText ?? "—" }}</span>
-          <span class="mx-1 text-muted-foreground/50">/</span>
-          <span class="font-medium text-status-success">{{ outputText ?? "—" }}</span>
-        </div>
-        <div
-          v-if="activeDims.length"
-          class="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80"
-        >
-          {{ activeDims.join(" · ") }}
+        <!-- Single-column mode: one clear mono value -->
+        <template v-if="field">
+          <span class="text-data text-xs font-medium text-foreground">{{ fieldText ?? "—" }}</span>
+          <span
+            v-if="activeDims.length"
+            class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground/70"
+            :title="extraDimsTitle"
+            >+{{ activeDims.length }}</span
+          >
+        </template>
+
+        <!-- Stacked mode: labeled IN/OUT lines -->
+        <div v-else class="text-data text-xs leading-snug">
+          <div class="flex items-baseline justify-end gap-1.5">
+            <span
+              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/70"
+              >{{ t("models.inputShort") }}</span
+            >
+            <span class="font-medium text-foreground">{{ inputText ?? "—" }}</span>
+          </div>
+          <div class="flex items-baseline justify-end gap-1.5">
+            <span
+              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/70"
+              >{{ t("models.outputShort") }}</span
+            >
+            <span class="font-medium text-foreground">{{ outputText ?? "—" }}</span>
+          </div>
+          <div class="flex items-baseline justify-end gap-1.5">
+            <span
+              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/70"
+              >{{ t("models.cachedShort") }}</span
+            >
+            <span class="font-medium text-foreground">{{ cachedText ?? "—" }}</span>
+          </div>
+          <div
+            v-if="activeDims.length"
+            class="mt-0.5 text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/60"
+            :title="extraDimsTitle"
+          >
+            +{{ activeDims.length }} {{ t("models.moreDims") }}
+          </div>
         </div>
       </button>
     </PopoverTrigger>

@@ -1,18 +1,5 @@
 <script setup lang="ts">
-import {
-  ArrowUpDown,
-  Box,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Edit,
-  ImageOff,
-  Plus,
-  RefreshCw,
-  Settings,
-  Trash2,
-  X,
-} from "@lucide/vue";
+import { Box, Check, Edit, Plus, RefreshCw, Settings, Trash2, X } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -25,10 +12,10 @@ import EmptyTableRow from "@/components/common/EmptyTableRow.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import SortableHead from "@/components/common/SortableHead.vue";
 import ViewToggle from "@/components/common/ViewToggle.vue";
-import { ModelListItem, ModelPricingCell, CapabilityToggle } from "@/components/models";
+import { ModelListItem, ModelIcon, ModelPricingCell, CapabilityToggle } from "@/components/models";
 import PricingSyncDialog from "@/components/models/PricingSyncDialog.vue";
-import { CAPABILITY_META, deriveModelCapabilities } from "@/components/plaza/capabilities";
-import { Badge } from "@/components/ui/badge";
+import { deriveModelCapabilities } from "@/components/plaza/capabilities";
+import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -63,14 +50,18 @@ import { useProviderStore } from "@/stores/providers";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { ROUTING_MODES } from "@/constants/model";
 
-import type { ModelCreate, ModelRead, ModelProviderMapping } from "@/types/schemas";
 import type { ParameterOverridesConfig } from "@/types/parameterOverrides";
 import ParameterOverridesBuilder from "@/components/config/ParameterOverridesBuilder.vue";
 import ProviderModelSelector from "@/components/common/ProviderModelSelector.vue";
 import { getIconUrl, isMonoIcon } from "@/utils/icons";
+import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
 import { formatContextLength } from "@/utils/format";
 
-defineOptions({ name: "ModelsView" });
+import type { ModelCreate, ModelRead, ModelProviderMapping } from "@/types/schemas";
+
+// Rendered inside views/ModelsView.vue (the role dispatcher), which owns the
+// "ModelsView" name that App.vue's KeepAlive include list matches on.
+defineOptions({ name: "ModelsAdminView" });
 
 const { t } = useI18n();
 const { handleSaveError, handleDeleteError } = useErrorHandler();
@@ -84,14 +75,13 @@ const deletingModelName = ref("");
 const isEditing = ref(false);
 const editingModelName = ref("");
 const isSaving = ref(false);
-const failedIcons = ref(new Set<string>());
 const viewMode = useViewMode(STORAGE_KEYS.MODELS_VIEW_MODE);
 
 const models = computed(() => modelStore.models);
 const providers = computed(() => providerStore.providers);
 const isLoading = computed(() => modelStore.loading && !modelStore.ready);
 
-type SortField = "name" | "input_cost" | "output_cost";
+type SortField = "name" | "input_cost" | "output_cost" | "cached_read" | "context_length";
 const sortField = ref<SortField>("name");
 const sortDir = ref<"asc" | "desc">("asc");
 
@@ -109,7 +99,7 @@ const {
   filteredItems: baseFilteredModels,
   clearFilters: clearBaseFilters,
 } = useTableFilter(models, {
-  searchFields: ["name"],
+  searchFields: ["name", "description"],
 });
 
 const selectedProviderFilter = ref<string>("");
@@ -140,8 +130,14 @@ const filteredAndSortedModels = computed(() => {
   const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
   switch (sortField.value) {
     case "input_cost":
-    case "output_cost": {
-      const key = sortField.value === "input_cost" ? "input_cost_per_1m" : "output_cost_per_1m";
+    case "output_cost":
+    case "cached_read": {
+      const key =
+        sortField.value === "input_cost"
+          ? "input_cost_per_1m"
+          : sortField.value === "output_cost"
+            ? "output_cost_per_1m"
+            : "cached_read_cost_per_1m";
       items.sort((a, b) => {
         const va = effectiveCost(a, key);
         const vb = effectiveCost(b, key);
@@ -152,9 +148,12 @@ const filteredAndSortedModels = computed(() => {
       });
       break;
     }
+    case "context_length":
+      items.sort(compareModelsByContextLength(dir));
+      break;
     case "name":
     default:
-      items.sort((a, b) => a.name.localeCompare(b.name) * dir);
+      items.sort(compareModelsByName(dir));
       break;
   }
 
@@ -177,7 +176,7 @@ const hasRoutingInfo = (model: ModelRead): boolean => Boolean(model.auto_eligibl
 /** Effective price: lowest configured value across provider overrides + model default. */
 function effectiveCost(
   model: ModelRead,
-  key: "input_cost_per_1m" | "output_cost_per_1m"
+  key: "input_cost_per_1m" | "output_cost_per_1m" | "cached_read_cost_per_1m"
 ): number | null {
   const vals: number[] = [];
   for (const p of model.providers ?? []) {
@@ -188,12 +187,6 @@ function effectiveCost(
   if (d != null) vals.push(d);
   return vals.length > 0 ? Math.min(...vals) : null;
 }
-
-/** In/out quick-sort buttons rendered inside the pricing column header. */
-const pricingSortOptions = computed(() => [
-  { key: "input_cost" as SortField, label: t("models.inputShort") },
-  { key: "output_cost" as SortField, label: t("models.outputShort") },
-]);
 
 const newModel = ref<ModelCreate>({
   name: "",
@@ -614,7 +607,6 @@ const confirmDelete = async () => {
         >
           <TableHeader class="config-thead">
             <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
-              <TableHead class="w-10"></TableHead>
               <SortableHead
                 :label="t('models.name')"
                 sort-key="name"
@@ -622,159 +614,129 @@ const confirmDelete = async () => {
                 :active-dir="sortDir"
                 @sort="onSort"
               />
-
               <TableHead>{{ t("models.providers") }}</TableHead>
+              <SortableHead
+                :label="t('models.contextShort')"
+                sort-key="context_length"
+                align="right"
+                :active-field="sortField"
+                :active-dir="sortDir"
+                @sort="onSort"
+              />
               <TableHead>{{ t("common.routing") }}</TableHead>
-              <TableHead class="p-0">
-                <div class="flex items-center justify-end gap-1 px-3 py-1.5">
-                  <span
-                    class="mr-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                  >
-                    {{ t("common.pricing") }}
-                  </span>
-                  <button
-                    v-for="opt in pricingSortOptions"
-                    :key="opt.key"
-                    type="button"
-                    :data-testid="`sort-${opt.key}`"
-                    :aria-label="t('common.sortByColumn', { column: opt.label })"
-                    :class="[
-                      'inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors',
-                      'hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60',
-                      sortField === opt.key
-                        ? 'text-foreground'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ]"
-                    @click="onSort(opt.key)"
-                  >
-                    {{ opt.label }}
-                    <ChevronUp
-                      v-if="sortField === opt.key && sortDir === 'asc'"
-                      class="size-3 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <ChevronDown
-                      v-else-if="sortField === opt.key && sortDir === 'desc'"
-                      class="size-3 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <ArrowUpDown
-                      v-else
-                      class="size-2.5 text-muted-foreground/40 shrink-0"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-              </TableHead>
+              <SortableHead
+                :label="t('models.inputCostShort')"
+                sort-key="input_cost"
+                align="right"
+                :active-field="sortField"
+                :active-dir="sortDir"
+                @sort="onSort"
+              />
+              <SortableHead
+                :label="t('models.outputCostShort')"
+                sort-key="output_cost"
+                align="right"
+                :active-field="sortField"
+                :active-dir="sortDir"
+                @sort="onSort"
+              />
+              <SortableHead
+                :label="t('models.cachedReadCostShort')"
+                sort-key="cached_read"
+                align="right"
+                :active-field="sortField"
+                :active-dir="sortDir"
+                @sort="onSort"
+              />
               <TableHead class="w-24 text-right">{{ t("common.actions") }}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody class="row-stagger">
             <TableRow v-for="model in filteredAndSortedModels" :key="model.id" class="group">
+              <!-- Name: icon + name + capability icons -->
+              <TableCell class="font-medium">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
+                  <span class="truncate" :title="model.name">{{ model.name }}</span>
+                  <CapabilityIcons :capabilities="deriveModelCapabilities(model)" />
+                </div>
+              </TableCell>
+              <!-- Providers: quiet mono text, click to filter -->
               <TableCell>
                 <div
-                  :class="[
-                    'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden',
-                    getIconUrl(model.icon_url, model.name)
-                      ? 'bg-card border border-border'
-                      : 'bg-primary/10',
-                  ]"
+                  v-if="(model.providers || []).length > 0"
+                  class="flex items-center gap-1 flex-wrap font-mono text-xs text-muted-foreground"
                 >
-                  <img
-                    v-if="getIconUrl(model.icon_url, model.name) && !failedIcons.has(model.name)"
-                    :src="getIconUrl(model.icon_url, model.name)!"
-                    :alt="model.name"
-                    :class="[isMonoIcon(model.name) ? 'icon-mono' : null, 'w-5 h-5 object-contain']"
-                    loading="lazy"
-                    @error="failedIcons.add(model.name)"
-                  />
-                  <ImageOff v-else class="w-4 h-4 text-muted-foreground" />
-                </div>
-              </TableCell>
-              <TableCell class="font-medium">
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="truncate" :title="model.name">{{ model.name }}</span>
-                  <Badge
-                    v-for="cap in deriveModelCapabilities(model)"
-                    :key="cap"
-                    variant="outline"
-                    :class="['text-[11px] px-1.5 py-0 shrink-0', CAPABILITY_META[cap].badgeClass]"
-                  >
-                    <component :is="CAPABILITY_META[cap].icon" class="size-3 mr-0.5" />
-                    {{ t(CAPABILITY_META[cap].labelKey) }}
-                  </Badge>
-                </div>
-              </TableCell>
-              <TableCell>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <Badge
-                    v-for="p in (model.providers || []).slice(0, 3)"
+                  <template
+                    v-for="(p, i) in (model.providers || []).slice(0, 3)"
                     :key="p.provider_name"
-                    variant="outline"
-                    class="cursor-pointer border-border/60 bg-background/55 px-1.5 py-0 font-mono text-[11px] transition-colors hover:bg-accent"
-                    @click.stop="handleProviderFilter(p.provider_name)"
                   >
-                    {{ p.provider_name }}
-                  </Badge>
-                  <span
-                    v-if="(model.providers || []).length > 3"
-                    class="text-[11px] text-muted-foreground font-medium"
-                  >
+                    <span v-if="i > 0" class="text-border" aria-hidden="true">·</span>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <button
+                          type="button"
+                          class="rounded-sm transition-colors hover:text-foreground hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                          :aria-label="t('models.filterByProvider') + ': ' + p.provider_name"
+                          @click.stop="handleProviderFilter(p.provider_name)"
+                        >
+                          {{ p.provider_name }}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {{ t("models.filterByProvider") + ": " + p.provider_name }}
+                      </TooltipContent>
+                    </Tooltip>
+                  </template>
+                  <span v-if="(model.providers || []).length > 3" class="text-muted-foreground/70">
                     +{{ (model.providers || []).length - 3 }}
                   </span>
-                  <span
-                    v-if="!model.providers || model.providers.length === 0"
-                    class="text-xs text-muted-foreground italic"
-                  >
-                    -
-                  </span>
                 </div>
+                <span v-else class="text-xs text-muted-foreground">–</span>
+              </TableCell>
+              <!-- Context -->
+              <TableCell class="text-right">
+                <span
+                  v-if="model.context_length"
+                  class="text-data text-xs text-muted-foreground"
+                  :title="t('models.contextLength')"
+                >
+                  {{ formatContextLength(model.context_length) }}
+                </span>
+                <span v-else class="text-xs text-muted-foreground">–</span>
               </TableCell>
               <!-- Smart Routing -->
               <TableCell>
-                <div class="flex items-center gap-1 flex-wrap max-w-[240px]">
-                  <template v-if="hasRoutingInfo(model)">
-                    <span
-                      v-if="model.auto_eligible"
-                      class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
-                      :title="t('models.autoEligible')"
-                    >
-                      <Check class="size-2.5" />
-                    </span>
-                    <Badge
-                      v-if="model.quality_tier"
-                      :variant="
-                        model.quality_tier === 'PREMIUM'
-                          ? 'default'
-                          : model.quality_tier === 'BALANCED'
-                            ? 'secondary'
-                            : 'outline'
-                      "
-                      class="text-[11px] uppercase font-medium px-1.5 py-0"
-                    >
-                      {{ model.quality_tier }}
-                    </Badge>
-                    <Badge
-                      v-for="mode in model.routing_assignments || []"
-                      :key="mode"
-                      variant="outline"
-                      class="text-[11px] px-1.5 py-0 border-action-blue/30 bg-action-blue/5 text-action-blue uppercase"
-                    >
-                      {{ mode }}
-                    </Badge>
-                    <span
-                      v-if="model.context_length"
-                      class="inline-flex items-center font-mono text-[11px] tabular-nums text-muted-foreground"
-                      :title="t('models.contextLength')"
-                    >
-                      {{ formatContextLength(model.context_length) }}
-                    </span>
-                  </template>
-                  <span v-else class="text-xs text-muted-foreground">–</span>
+                <div
+                  v-if="hasRoutingInfo(model)"
+                  class="flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <span
+                    class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
+                    :title="t('models.autoEligible')"
+                  >
+                    <Check class="size-2.5" />
+                  </span>
+                  <span v-if="model.quality_tier" class="text-xs font-medium capitalize">
+                    {{ model.quality_tier.toLowerCase() }}
+                  </span>
+                  <span
+                    v-if="model.routing_assignments?.length"
+                    class="font-mono text-[11px] text-muted-foreground"
+                  >
+                    {{ model.routing_assignments.join(", ") }}
+                  </span>
                 </div>
+                <span v-else class="text-xs text-muted-foreground">–</span>
               </TableCell>
               <TableCell class="text-right">
-                <ModelPricingCell :model="model" />
+                <ModelPricingCell :model="model" field="input" />
+              </TableCell>
+              <TableCell class="text-right">
+                <ModelPricingCell :model="model" field="output" />
+              </TableCell>
+              <TableCell class="text-right">
+                <ModelPricingCell :model="model" field="cached" />
               </TableCell>
               <TableCell class="text-right">
                 <div
@@ -805,7 +767,7 @@ const confirmDelete = async () => {
             </TableRow>
             <EmptyTableRow
               v-if="filteredAndSortedModels.length === 0"
-              :colspan="7"
+              :colspan="8"
               @clear="clearFilters"
             />
           </TableBody>
