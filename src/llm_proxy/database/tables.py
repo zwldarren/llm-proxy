@@ -158,6 +158,30 @@ class ModelRecord(Base):
         default=False, nullable=False, server_default=false()
     )
 
+    # Display-only model attributes aligned with models.dev model fields so
+    # operators familiar with models.dev can map entries 1:1. None of these
+    # gate proxy behavior (unlike the supports_* flags above).
+    attachment: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    reasoning: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    tool_call: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    structured_output: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default=false()
+    )
+    temperature: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    experimental: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default=false()
+    )
+    open_weights: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default=false()
+    )
+    # models.dev status: "beta" | "deprecated"
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    family: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    knowledge: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    release_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # models.dev limit.output: maximum output tokens in a single response
+    max_output_tokens: Mapped[int | None] = mapped_column(nullable=True)
+
     # Relationships via join table
     provider_mappings: Mapped[list[ModelProviderRecord]] = relationship(
         "ModelProviderRecord",

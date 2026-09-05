@@ -1324,7 +1324,7 @@ watch(
                         class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         :aria-label="
                           selectedEndpoint === '/v1/audio/speech'
-                            ? 'Attachments not supported for speech generation'
+                            ? t('chat.attachmentsNotSupportedForSpeech')
                             : t('chat.uploadFile')
                         "
                       >
@@ -1333,7 +1333,7 @@ watch(
                     </TooltipTrigger>
                     <TooltipContent>{{
                       selectedEndpoint === "/v1/audio/speech"
-                        ? "Attachments not supported for speech generation"
+                        ? t("chat.attachmentsNotSupportedForSpeech")
                         : t("chat.uploadFile")
                     }}</TooltipContent>
                   </Tooltip>

@@ -6,8 +6,10 @@ import { CAPABILITY_META } from "@/components/plaza/capabilities";
 import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { usePlazaModelRow } from "@/components/plaza/usePlazaModelRow";
 import ModelIcon from "@/components/models/ModelIcon.vue";
+import ModelStatusChip from "@/components/models/ModelStatusChip.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ModelCatalogEntry } from "@/types/schemas";
 import { formatContextLength, formatTokens } from "@/utils/format";
 
@@ -44,12 +46,14 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
 
       <span class="flex-1 min-w-0">
         <span class="flex items-center gap-1.5">
-          <span
-            class="font-mono text-[13px] font-medium text-foreground truncate"
-            :title="model.name"
-          >
-            {{ model.name }}
-          </span>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span class="font-mono text-[13px] font-medium text-foreground truncate">
+                {{ model.name }}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{{ model.name }}</TooltipContent>
+          </Tooltip>
           <Badge
             v-if="model.quality_tier"
             :variant="tierBadgeVariant(model.quality_tier)"
@@ -57,16 +61,18 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
           >
             {{ model.quality_tier }}
           </Badge>
+          <ModelStatusChip v-if="model.status" :status="model.status" />
           <CapabilityIcons :capabilities="capabilities" />
         </span>
         <!-- Inline description: one scannable line without expanding -->
-        <span
-          v-if="model.description"
-          class="block truncate text-xs text-muted-foreground"
-          :title="model.description"
-        >
-          {{ model.description }}
-        </span>
+        <Tooltip v-if="model.description">
+          <TooltipTrigger as-child>
+            <span class="block truncate text-xs text-muted-foreground">
+              {{ model.description }}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ model.description }}</TooltipContent>
+        </Tooltip>
         <!-- Meta line: providers · context -->
         <span
           class="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground/80"
@@ -76,6 +82,12 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
             <span class="text-border" aria-hidden="true">·</span>
             <span class="tabular-nums shrink-0">
               {{ formatContextLength(model.context_length) }} {{ t("plaza.context") }}
+            </span>
+          </template>
+          <template v-if="model.max_output_tokens != null">
+            <span class="text-border" aria-hidden="true">·</span>
+            <span class="tabular-nums shrink-0">
+              {{ formatContextLength(model.max_output_tokens) }} {{ t("plaza.out") }}
             </span>
           </template>
         </span>
@@ -129,6 +141,40 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
                 {{ t("plaza.context") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground">{{ exactContext }}</dd>
+            </div>
+            <div v-if="model.max_output_tokens != null" class="flex items-baseline gap-2 text-xs">
+              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+                {{ t("plaza.maxOutput") }}
+              </dt>
+              <dd class="font-mono tabular-nums text-muted-foreground">
+                {{ formatTokens(model.max_output_tokens, locale) }}
+              </dd>
+            </div>
+            <div v-if="model.status" class="flex items-baseline gap-2 text-xs">
+              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+                {{ t("plaza.status") }}
+              </dt>
+              <dd class="font-mono tabular-nums text-muted-foreground lowercase">
+                {{ model.status }}
+              </dd>
+            </div>
+            <div v-if="model.family" class="flex items-baseline gap-2 text-xs">
+              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+                {{ t("plaza.family") }}
+              </dt>
+              <dd class="font-mono tabular-nums text-muted-foreground">{{ model.family }}</dd>
+            </div>
+            <div v-if="model.knowledge" class="flex items-baseline gap-2 text-xs">
+              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+                {{ t("plaza.knowledge") }}
+              </dt>
+              <dd class="font-mono tabular-nums text-muted-foreground">{{ model.knowledge }}</dd>
+            </div>
+            <div v-if="model.release_date" class="flex items-baseline gap-2 text-xs">
+              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+                {{ t("plaza.releaseDate") }}
+              </dt>
+              <dd class="font-mono tabular-nums text-muted-foreground">{{ model.release_date }}</dd>
             </div>
             <div
               v-if="model.provider_names.length"

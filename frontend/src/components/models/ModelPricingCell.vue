@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ModelRead } from "@/types/schemas";
 
 /**
@@ -183,12 +184,14 @@ const hasAnyPricing = computed(
         <!-- Single-column mode: one clear mono value -->
         <template v-if="field">
           <span class="text-data text-xs font-medium text-foreground">{{ fieldText ?? "—" }}</span>
-          <span
-            v-if="activeDims.length"
-            class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground/70"
-            :title="extraDimsTitle"
-            >+{{ activeDims.length }}</span
-          >
+          <Tooltip v-if="activeDims.length">
+            <TooltipTrigger as-child>
+              <span class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground/70"
+                >+{{ activeDims.length }}</span
+              >
+            </TooltipTrigger>
+            <TooltipContent>{{ extraDimsTitle }}</TooltipContent>
+          </Tooltip>
         </template>
 
         <!-- Stacked mode: labeled IN/OUT lines -->
@@ -214,13 +217,16 @@ const hasAnyPricing = computed(
             >
             <span class="font-medium text-foreground">{{ cachedText ?? "—" }}</span>
           </div>
-          <div
-            v-if="activeDims.length"
-            class="mt-0.5 text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/60"
-            :title="extraDimsTitle"
-          >
-            +{{ activeDims.length }} {{ t("models.moreDims") }}
-          </div>
+          <Tooltip v-if="activeDims.length">
+            <TooltipTrigger as-child>
+              <div
+                class="mt-0.5 text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/60"
+              >
+                +{{ activeDims.length }} {{ t("models.moreDims") }}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{{ extraDimsTitle }}</TooltipContent>
+          </Tooltip>
         </div>
       </button>
     </PopoverTrigger>

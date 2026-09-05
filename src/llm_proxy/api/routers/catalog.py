@@ -5,14 +5,16 @@ any authenticated user (including viewers). Excludes sensitive pricing and
 admin configuration details.
 """
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import get_async_session_dep, require_authenticated
 from llm_proxy.api.routers.config.helpers import get_config_repository
-from llm_proxy.api.schemas.admin import ModelCatalogEntry
+from llm_proxy.api.schemas.admin import (
+    ModelCatalogEntry,
+    derive_model_capabilities,
+    normalize_model_status,
+)
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.database import UserRepository
 from llm_proxy.observability.logger import get_logger
@@ -22,24 +24,6 @@ logger = get_logger(__name__)
 router = APIRouter(
     prefix="/api/catalog", tags=["catalog"], dependencies=[Depends(require_authenticated)]
 )
-
-
-def _derive_capabilities(model: Any) -> list[str]:
-    """Collect the display capabilities an admin configured for a model."""
-    capabilities: list[str] = []
-    if model.supports_images:
-        capabilities.append("vision")
-    if model.supports_image_generation:
-        capabilities.append("image_generation")
-    if model.supports_tts:
-        capabilities.append("tts")
-    if model.supports_stt:
-        capabilities.append("stt")
-    if model.supports_embedding:
-        capabilities.append("embedding")
-    if model.supports_realtime:
-        capabilities.append("realtime")
-    return capabilities
 
 
 @router.get("/models", response_model=list[ModelCatalogEntry])
@@ -83,7 +67,12 @@ async def list_model_catalog(
                 description=model.description,
                 homepage_url=model.homepage_url,
                 context_length=model.context_length,
-                capabilities=_derive_capabilities(model),
+                max_output_tokens=model.max_output_tokens,
+                capabilities=derive_model_capabilities(model),
+                status=normalize_model_status(model.status),
+                family=model.family,
+                knowledge=model.knowledge,
+                release_date=model.release_date,
                 quality_tier=model.quality_tier,
                 provider_names=provider_names,
             )

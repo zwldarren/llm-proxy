@@ -21,6 +21,7 @@ from llm_proxy.api.schemas.admin import (
     ModelProviderMapping,
     ModelRead,
     ModelUpdate,
+    normalize_model_status,
 )
 from llm_proxy.core.exceptions import ConflictError, NotFoundError, ValidationError
 from llm_proxy.core.identity import get_request_identity
@@ -124,6 +125,18 @@ def model_record_to_read(model) -> ModelRead:
         supports_stt=model.supports_stt,
         supports_embedding=model.supports_embedding,
         supports_realtime=model.supports_realtime,
+        attachment=model.attachment,
+        reasoning=model.reasoning,
+        tool_call=model.tool_call,
+        structured_output=model.structured_output,
+        temperature=model.temperature,
+        experimental=model.experimental,
+        open_weights=model.open_weights,
+        status=normalize_model_status(model.status),
+        family=model.family,
+        knowledge=model.knowledge,
+        release_date=model.release_date,
+        max_output_tokens=model.max_output_tokens,
         description=model.description,
         homepage_url=model.homepage_url,
         context_length=model.context_length,

@@ -1,12 +1,18 @@
-"""Tests for admin Pydantic schemas (API key MCP fields)."""
+"""Tests for admin Pydantic schemas (API key MCP fields, model status)."""
 
 from datetime import UTC, datetime
+
+import pytest
+from pydantic import ValidationError
 
 from llm_proxy.api.schemas.admin import (
     ApiKeyCreate,
     ApiKeyRead,
     ApiKeyResponse,
     ApiKeyUpdate,
+    ModelCreate,
+    ModelRead,
+    ModelUpdate,
 )
 
 # --- API key MCP field tests ---
@@ -50,3 +56,36 @@ def test_api_key_update_accepts_mcp_fields() -> None:
         allowed_mcp_servers=["github_mcp"],
     )
     assert update.allowed_mcp_servers == ["github_mcp"]
+
+
+# --- Model status vocabulary tests ---
+
+
+def test_model_update_rejects_unknown_status() -> None:
+    """PATCH must enforce the same models.dev vocabulary as POST."""
+    with pytest.raises(ValidationError, match="status must be 'beta' or 'deprecated'"):
+        ModelUpdate(status="active")
+
+
+def test_model_update_normalizes_status() -> None:
+    update = ModelUpdate(status=" Deprecated ")
+    assert update.status == "deprecated"
+
+
+def test_model_create_rejects_unknown_status() -> None:
+    with pytest.raises(ValidationError, match="status must be 'beta' or 'deprecated'"):
+        ModelCreate(name="m", providers=[], status="bogus")
+
+
+def test_model_read_derives_capabilities() -> None:
+    """ModelRead exposes backend-derived capabilities in plaza badge order."""
+    read = ModelRead(
+        id=1,
+        name="m",
+        providers=[],
+        supports_images=True,
+        supports_tts=True,
+        reasoning=True,
+        experimental=True,
+    )
+    assert read.capabilities == ["vision", "tts", "reasoning", "experimental"]

@@ -140,6 +140,65 @@ class ModelProviderMapping(BaseModel, ValidatorMixin):
 # --- Model Schemas ---
 
 
+ModelStatus = Literal["beta", "deprecated"]
+
+
+def normalize_model_status(v: object) -> ModelStatus | None:
+    """Normalize model status to the models.dev vocabulary: 'beta' or 'deprecated'.
+
+    Empty strings collapse to ``None``; anything outside the vocabulary raises.
+    Also narrows stored ``str`` values (validated at write time) to the
+    ``ModelStatus`` alias for typed read paths.
+    """
+    if v is None:
+        return None
+    value = str(v).strip().lower()
+    if value == "":
+        return None
+    if value not in ("beta", "deprecated"):
+        raise ValueError("status must be 'beta' or 'deprecated'")
+    return value
+
+
+def derive_model_capabilities(model: Any) -> list[str]:
+    """Collect the display capabilities configured for a model.
+
+    Proxy-bound flags (vision/realtime/...) come first, then informational
+    models.dev attributes. Order here defines plaza badge order; the admin
+    ``ModelRead`` computed field and the catalog endpoint both derive from
+    this single home.
+    """
+    capabilities: list[str] = []
+    if model.supports_images:
+        capabilities.append("vision")
+    if model.supports_image_generation:
+        capabilities.append("image_generation")
+    if model.supports_tts:
+        capabilities.append("tts")
+    if model.supports_stt:
+        capabilities.append("stt")
+    if model.supports_embedding:
+        capabilities.append("embedding")
+    if model.supports_realtime:
+        capabilities.append("realtime")
+    # Informational models.dev attributes (display-only).
+    if model.reasoning:
+        capabilities.append("reasoning")
+    if model.tool_call:
+        capabilities.append("tool_call")
+    if model.structured_output:
+        capabilities.append("structured_output")
+    if model.attachment:
+        capabilities.append("attachment")
+    if model.temperature:
+        capabilities.append("temperature")
+    if model.open_weights:
+        capabilities.append("open_weights")
+    if model.experimental:
+        capabilities.append("experimental")
+    return capabilities
+
+
 class ModelBase(BaseModel, ValidatorMixin):
     """Base schema for Model configuration."""
 
@@ -248,6 +307,58 @@ class ModelBase(BaseModel, ValidatorMixin):
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",
     )
+    # Display-only attributes, named after their models.dev counterparts so
+    # operators familiar with models.dev can map entries 1:1. These do not
+    # gate proxy behavior.
+    attachment: bool = Field(
+        default=False,
+        description="models.dev: attachment — whether this model supports file attachments",
+    )
+    reasoning: bool = Field(
+        default=False,
+        description="models.dev: reasoning — whether this model produces reasoning/thinking output",
+    )
+    tool_call: bool = Field(
+        default=False,
+        description="models.dev: tool_call — whether this model supports tool/function calling",
+    )
+    structured_output: bool = Field(
+        default=False,
+        description="models.dev: structured_output — supports JSON-schema output",
+    )
+    temperature: bool = Field(
+        default=False,
+        description="models.dev: temperature — whether this model supports temperature sampling",
+    )
+    experimental: bool = Field(
+        default=False,
+        description="models.dev: experimental — whether this model is experimental",
+    )
+    open_weights: bool = Field(
+        default=False,
+        description="models.dev: open_weights — whether this model has openly available weights",
+    )
+    status: ModelStatus | None = Field(
+        None,
+        description="models.dev: status — lifecycle status, 'beta' or 'deprecated'",
+    )
+    family: str | None = Field(
+        None,
+        description="models.dev: family — model family identifier (e.g. 'claude-sonnet')",
+    )
+    knowledge: str | None = Field(
+        None,
+        description="models.dev: knowledge — knowledge cutoff date (YYYY-MM-DD)",
+    )
+    release_date: str | None = Field(
+        None,
+        description="models.dev: release_date — release date (YYYY-MM-DD)",
+    )
+    max_output_tokens: int | None = Field(
+        None,
+        ge=0,
+        description="models.dev: limit.output — maximum output tokens in a single response",
+    )
     description: str | None = Field(
         None,
         description="Human-readable description shown in the model catalog",
@@ -265,6 +376,12 @@ class ModelBase(BaseModel, ValidatorMixin):
         None,
         description="Smart routing assignments (virtual model names like 'auto', 'fast', 'best')",
     )
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: object) -> str | None:
+        """Constrain status to the models.dev vocabulary: 'beta' or 'deprecated'."""
+        return normalize_model_status(v)
 
     @field_validator("homepage_url", mode="before")
     @classmethod
@@ -315,6 +432,18 @@ class ModelUpdate(BaseModel):
     supports_stt: bool | None = None
     supports_embedding: bool | None = None
     supports_realtime: bool | None = None
+    attachment: bool | None = None
+    reasoning: bool | None = None
+    tool_call: bool | None = None
+    structured_output: bool | None = None
+    temperature: bool | None = None
+    experimental: bool | None = None
+    open_weights: bool | None = None
+    status: ModelStatus | None = None
+    family: str | None = None
+    knowledge: str | None = None
+    release_date: str | None = None
+    max_output_tokens: int | None = Field(None, ge=0)
     auto_eligible: bool | None = None
     quality_tier: str | None = None
     routing_assignments: list[str] | None = None
@@ -336,6 +465,12 @@ class ModelUpdate(BaseModel):
         if not (lowered.startswith("http://") or lowered.startswith("https://")):
             raise ValueError("homepage_url must be an http:// or https:// URL")
         return v
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: object) -> str | None:
+        """Constrain status to the models.dev vocabulary: 'beta' or 'deprecated'."""
+        return normalize_model_status(v)
 
 
 class ModelRead(BaseModel):
@@ -449,6 +584,55 @@ class ModelRead(BaseModel):
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",
     )
+    attachment: bool = Field(
+        default=False,
+        description="models.dev: attachment — whether this model supports file attachments",
+    )
+    reasoning: bool = Field(
+        default=False,
+        description="models.dev: reasoning — whether this model produces reasoning/thinking output",
+    )
+    tool_call: bool = Field(
+        default=False,
+        description="models.dev: tool_call — whether this model supports tool/function calling",
+    )
+    structured_output: bool = Field(
+        default=False,
+        description="models.dev: structured_output — supports JSON-schema output",
+    )
+    temperature: bool = Field(
+        default=False,
+        description="models.dev: temperature — whether this model supports temperature sampling",
+    )
+    experimental: bool = Field(
+        default=False,
+        description="models.dev: experimental — whether this model is experimental",
+    )
+    open_weights: bool = Field(
+        default=False,
+        description="models.dev: open_weights — whether this model has openly available weights",
+    )
+    status: ModelStatus | None = Field(
+        None,
+        description="models.dev: status — lifecycle status, 'beta' or 'deprecated'",
+    )
+    family: str | None = Field(
+        None,
+        description="models.dev: family — model family identifier (e.g. 'claude-sonnet')",
+    )
+    knowledge: str | None = Field(
+        None,
+        description="models.dev: knowledge — knowledge cutoff date (YYYY-MM-DD)",
+    )
+    release_date: str | None = Field(
+        None,
+        description="models.dev: release_date — release date (YYYY-MM-DD)",
+    )
+    max_output_tokens: int | None = Field(
+        None,
+        ge=0,
+        description="models.dev: limit.output — maximum output tokens in a single response",
+    )
     description: str | None = Field(
         None,
         description="Human-readable description shown in the model catalog",
@@ -462,6 +646,12 @@ class ModelRead(BaseModel):
         ge=0,
         description="Maximum context length in tokens",
     )
+
+    @computed_field
+    @property
+    def capabilities(self) -> list[str]:
+        """Display capabilities derived from the flags above (single derivation home)."""
+        return derive_model_capabilities(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -481,13 +671,29 @@ class ModelCatalogEntry(BaseModel):
         None, description="URL to the model's homepage or Hugging Face page"
     )
     context_length: int | None = Field(None, ge=0, description="Maximum context length in tokens")
+    max_output_tokens: int | None = Field(
+        None,
+        ge=0,
+        description="models.dev: limit.output — maximum output tokens in a single response",
+    )
     capabilities: list[str] = Field(
         default_factory=list,
         description=(
             "Model capabilities configured by an admin: 'vision' (image input), "
-            "'image_generation', 'tts', 'stt', 'embedding'."
+            "'image_generation', 'tts', 'stt', 'embedding', 'realtime', plus informational "
+            "models.dev attributes ('attachment', 'reasoning', 'tool_call', "
+            "'structured_output', 'temperature', 'open_weights', 'experimental')."
         ),
     )
+    # Informational models.dev attributes (display-only; not proxy behavior).
+    status: ModelStatus | None = Field(
+        None, description="models.dev: status — 'beta' or 'deprecated'"
+    )
+    family: str | None = Field(None, description="models.dev: family — model family identifier")
+    knowledge: str | None = Field(
+        None, description="models.dev: knowledge — knowledge cutoff date (YYYY-MM-DD)"
+    )
+    release_date: str | None = Field(None, description="models.dev: release_date")
     quality_tier: str | None = Field(
         None, description="Smart routing quality tier (ECONOMY | BALANCED | PREMIUM)"
     )

@@ -114,6 +114,30 @@ interface ModelBase {
   supports_embedding?: boolean;
   /** Whether this model is served through the Realtime WebSocket relay */
   supports_realtime?: boolean;
+  /** models.dev: attachment — supports file attachments (display-only) */
+  attachment?: boolean;
+  /** models.dev: reasoning — produces reasoning/thinking output (display-only) */
+  reasoning?: boolean;
+  /** models.dev: tool_call — supports tool/function calling (display-only) */
+  tool_call?: boolean;
+  /** models.dev: structured_output — supports JSON-schema output (display-only) */
+  structured_output?: boolean;
+  /** models.dev: temperature — supports temperature sampling (display-only) */
+  temperature?: boolean;
+  /** models.dev: experimental — experimental model (display-only) */
+  experimental?: boolean;
+  /** models.dev: open_weights — openly available weights (display-only) */
+  open_weights?: boolean;
+  /** models.dev: status — lifecycle status, 'beta' or 'deprecated' */
+  status?: ModelStatus | null;
+  /** models.dev: family — model family identifier */
+  family?: string | null;
+  /** models.dev: knowledge — knowledge cutoff date (YYYY-MM-DD) */
+  knowledge?: string | null;
+  /** models.dev: release_date (YYYY-MM-DD) */
+  release_date?: string | null;
+  /** models.dev: limit.output — maximum output tokens in a single response */
+  max_output_tokens?: number | null;
   /** Human-readable description shown in the model catalog */
   description?: string | null;
   /** URL to the model's homepage or Hugging Face page */
@@ -150,6 +174,18 @@ export interface ModelUpdate {
   supports_stt?: boolean | null;
   supports_embedding?: boolean | null;
   supports_realtime?: boolean | null;
+  attachment?: boolean | null;
+  reasoning?: boolean | null;
+  tool_call?: boolean | null;
+  structured_output?: boolean | null;
+  temperature?: boolean | null;
+  experimental?: boolean | null;
+  open_weights?: boolean | null;
+  status?: ModelStatus | null;
+  family?: string | null;
+  knowledge?: string | null;
+  release_date?: string | null;
+  max_output_tokens?: number | null;
   quality_tier?: "ECONOMY" | "BALANCED" | "PREMIUM" | "" | null;
   routing_assignments?: string[] | null;
   description?: string | null;
@@ -159,11 +195,31 @@ export interface ModelUpdate {
 
 export interface ModelRead extends ModelBase {
   id: number;
+  /** Display capabilities derived backend-side from supports_* flags and models.dev attributes. */
+  capabilities?: ModelCapability[];
 }
 
-/** Model capability tags derived by the catalog endpoint. */
+/** models.dev lifecycle status. */
+export type ModelStatus = "beta" | "deprecated";
+
+/**
+ * Model capability tags derived by the catalog endpoint.
+ * Proxy-bound flags first, then informational models.dev attributes.
+ */
 export type ModelCapability =
-  "vision" | "image_generation" | "tts" | "stt" | "embedding" | "realtime";
+  | "vision"
+  | "image_generation"
+  | "tts"
+  | "stt"
+  | "embedding"
+  | "realtime"
+  | "reasoning"
+  | "tool_call"
+  | "structured_output"
+  | "attachment"
+  | "temperature"
+  | "open_weights"
+  | "experimental";
 
 /** Display-oriented model entry for the public model catalog (model plaza). */
 export interface ModelCatalogEntry {
@@ -172,7 +228,12 @@ export interface ModelCatalogEntry {
   description?: string | null;
   homepage_url?: string | null;
   context_length?: number | null;
+  max_output_tokens?: number | null;
   capabilities: ModelCapability[];
+  status?: ModelStatus | null;
+  family?: string | null;
+  knowledge?: string | null;
+  release_date?: string | null;
   quality_tier?: "ECONOMY" | "BALANCED" | "PREMIUM" | "" | null;
   provider_names: string[];
 }

@@ -12,9 +12,21 @@ import EmptyTableRow from "@/components/common/EmptyTableRow.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import SortableHead from "@/components/common/SortableHead.vue";
 import ViewToggle from "@/components/common/ViewToggle.vue";
-import { ModelListItem, ModelIcon, ModelPricingCell, CapabilityToggle } from "@/components/models";
+import {
+  ModelListItem,
+  ModelIcon,
+  ModelPricingCell,
+  CapabilityToggle,
+  ModelStatusChip,
+  ModelProviderList,
+  ModelContextCell,
+} from "@/components/models";
 import PricingSyncDialog from "@/components/models/PricingSyncDialog.vue";
-import { deriveModelCapabilities } from "@/components/plaza/capabilities";
+import {
+  BOUND_CAPABILITIES,
+  INFO_CAPABILITIES,
+  CAPABILITY_META,
+} from "@/components/plaza/capabilities";
 import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -55,9 +67,13 @@ import ParameterOverridesBuilder from "@/components/config/ParameterOverridesBui
 import ProviderModelSelector from "@/components/common/ProviderModelSelector.vue";
 import { getIconUrl, isMonoIcon } from "@/utils/icons";
 import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
-import { formatContextLength } from "@/utils/format";
 
-import type { ModelCreate, ModelRead, ModelProviderMapping } from "@/types/schemas";
+import type {
+  ModelCreate,
+  ModelRead,
+  ModelProviderMapping,
+  ModelCapability,
+} from "@/types/schemas";
 
 // Rendered inside views/ModelsView.vue (the role dispatcher), which owns the
 // "ModelsView" name that App.vue's KeepAlive include list matches on.
@@ -188,38 +204,87 @@ function effectiveCost(
   return vals.length > 0 ? Math.min(...vals) : null;
 }
 
-const newModel = ref<ModelCreate>({
-  name: "",
-  providers: [],
-  input_cost_per_1m: null,
-  output_cost_per_1m: null,
-  cached_read_cost_per_1m: null,
-  cached_write_cost_per_1m: null,
-  audio_input_cost_per_1m: null,
-  audio_output_cost_per_1m: null,
-  image_input_cost_per_1m: null,
-  cost_per_image: null,
-  audio_cost_per_minute: null,
-  tts_cost_per_1m_chars: null,
-  web_search_cost_per_1k: null,
-  icon_url: null,
-  parameter_overrides: null,
-  auto_eligible: false,
-  quality_tier: null,
-  routing_assignments: null,
-  supports_images: false,
-  supports_image_generation: false,
-  supports_tts: false,
-  supports_stt: false,
-  supports_embedding: false,
-  supports_realtime: false,
-  description: null,
-  homepage_url: null,
-  context_length: null,
-});
+/**
+ * Fresh form state for the model dialog. openCreateDialog seeds one empty
+ * provider mapping on top; openEditDialog overrides every field from the
+ * model being edited.
+ */
+function emptyModelForm(): ModelCreate {
+  return {
+    name: "",
+    providers: [],
+    input_cost_per_1m: null,
+    output_cost_per_1m: null,
+    cached_read_cost_per_1m: null,
+    cached_write_cost_per_1m: null,
+    audio_input_cost_per_1m: null,
+    audio_output_cost_per_1m: null,
+    image_input_cost_per_1m: null,
+    cost_per_image: null,
+    audio_cost_per_minute: null,
+    tts_cost_per_1m_chars: null,
+    web_search_cost_per_1k: null,
+    icon_url: null,
+    parameter_overrides: null,
+    auto_eligible: false,
+    quality_tier: null,
+    routing_assignments: null,
+    supports_images: false,
+    supports_image_generation: false,
+    supports_tts: false,
+    supports_stt: false,
+    supports_embedding: false,
+    supports_realtime: false,
+    attachment: false,
+    reasoning: false,
+    tool_call: false,
+    structured_output: false,
+    temperature: false,
+    experimental: false,
+    open_weights: false,
+    status: null,
+    family: null,
+    knowledge: null,
+    release_date: null,
+    max_output_tokens: null,
+    description: null,
+    homepage_url: null,
+    context_length: null,
+  };
+}
+
+const newModel = ref<ModelCreate>(emptyModelForm());
 
 const parameterOverrides = ref<ParameterOverridesConfig>({});
 const showProviderEditDialog = ref(false);
+
+/**
+ * Backing boolean field per capability. Proxy-bound capabilities map to the
+ * supports_* columns; informational capabilities share the models.dev name.
+ */
+const CAPABILITY_FIELD: Record<ModelCapability, string> = {
+  vision: "supports_images",
+  image_generation: "supports_image_generation",
+  tts: "supports_tts",
+  stt: "supports_stt",
+  embedding: "supports_embedding",
+  realtime: "supports_realtime",
+  attachment: "attachment",
+  reasoning: "reasoning",
+  tool_call: "tool_call",
+  structured_output: "structured_output",
+  temperature: "temperature",
+  open_weights: "open_weights",
+  experimental: "experimental",
+};
+
+function getCapability(cap: ModelCapability): boolean {
+  return Boolean(newModel.value[CAPABILITY_FIELD[cap] as keyof ModelCreate]);
+}
+
+function setCapability(cap: ModelCapability, value: boolean) {
+  (newModel.value as Record<string, unknown>)[CAPABILITY_FIELD[cap]] = value;
+}
 const editingProviderIndex = ref<number | null>(null);
 const editingProviderData = ref<ModelProviderMapping>({
   provider_name: "",
@@ -252,6 +317,34 @@ const descriptionModel = computed({
   },
 });
 
+// Select uses a "none" sentinel; null otherwise.
+const statusModel = computed({
+  get: () => newModel.value.status ?? "none",
+  set: (v: string) => {
+    newModel.value.status = v === "none" ? null : (v as "beta" | "deprecated");
+  },
+});
+
+// Text inputs bind non-null strings; proxy null <-> empty for optional fields.
+const familyModel = computed({
+  get: () => newModel.value.family ?? "",
+  set: (v: string) => {
+    newModel.value.family = v.trim() || null;
+  },
+});
+const knowledgeModel = computed({
+  get: () => newModel.value.knowledge ?? "",
+  set: (v: string) => {
+    newModel.value.knowledge = v || null;
+  },
+});
+const releaseDateModel = computed({
+  get: () => newModel.value.release_date ?? "",
+  set: (v: string) => {
+    newModel.value.release_date = v || null;
+  },
+});
+
 watch([() => newModel.value.icon_url, () => newModel.value.name], () => {
   iconPreviewFailed.value = false;
 });
@@ -261,7 +354,7 @@ const openCreateDialog = () => {
   editingModelName.value = "";
   iconPreviewFailed.value = false;
   newModel.value = {
-    name: "",
+    ...emptyModelForm(),
     providers: [
       {
         provider_name: "",
@@ -269,31 +362,6 @@ const openCreateDialog = () => {
         provider_model_name: "",
       },
     ],
-    input_cost_per_1m: null,
-    output_cost_per_1m: null,
-    cached_read_cost_per_1m: null,
-    cached_write_cost_per_1m: null,
-    audio_input_cost_per_1m: null,
-    audio_output_cost_per_1m: null,
-    image_input_cost_per_1m: null,
-    cost_per_image: null,
-    audio_cost_per_minute: null,
-    tts_cost_per_1m_chars: null,
-    web_search_cost_per_1k: null,
-    icon_url: null,
-    parameter_overrides: null,
-    auto_eligible: false,
-    quality_tier: null,
-    routing_assignments: null,
-    supports_images: false,
-    supports_image_generation: false,
-    supports_tts: false,
-    supports_stt: false,
-    supports_embedding: false,
-    supports_realtime: false,
-    description: null,
-    homepage_url: null,
-    context_length: null,
   };
   parameterOverrides.value = {};
   showCreateDialog.value = true;
@@ -304,6 +372,7 @@ const openEditDialog = (model: ModelRead) => {
   editingModelName.value = model.name;
   iconPreviewFailed.value = false;
   newModel.value = {
+    ...emptyModelForm(),
     name: model.name,
     providers: model.providers?.length
       ? [...model.providers]
@@ -347,6 +416,18 @@ const openEditDialog = (model: ModelRead) => {
     supports_stt: model.supports_stt ?? false,
     supports_embedding: model.supports_embedding ?? false,
     supports_realtime: model.supports_realtime ?? false,
+    attachment: model.attachment ?? false,
+    reasoning: model.reasoning ?? false,
+    tool_call: model.tool_call ?? false,
+    structured_output: model.structured_output ?? false,
+    temperature: model.temperature ?? false,
+    experimental: model.experimental ?? false,
+    open_weights: model.open_weights ?? false,
+    status: model.status ?? null,
+    family: model.family ?? null,
+    knowledge: model.knowledge ?? null,
+    release_date: model.release_date ?? null,
+    max_output_tokens: model.max_output_tokens ?? null,
     routing_assignments: model.routing_assignments ?? null,
     description: model.description ?? null,
     homepage_url: model.homepage_url ?? null,
@@ -478,6 +559,18 @@ const saveModel = async () => {
         supports_stt: modelData.supports_stt ?? false,
         supports_embedding: modelData.supports_embedding ?? false,
         supports_realtime: modelData.supports_realtime ?? false,
+        attachment: modelData.attachment ?? false,
+        reasoning: modelData.reasoning ?? false,
+        tool_call: modelData.tool_call ?? false,
+        structured_output: modelData.structured_output ?? false,
+        temperature: modelData.temperature ?? false,
+        experimental: modelData.experimental ?? false,
+        open_weights: modelData.open_weights ?? false,
+        status: modelData.status || null,
+        family: modelData.family ?? null,
+        knowledge: modelData.knowledge ?? null,
+        release_date: modelData.release_date ?? null,
+        max_output_tokens: modelData.max_output_tokens ?? null,
         description: modelData.description ?? null,
         homepage_url: modelData.homepage_url ?? null,
         context_length: modelData.context_length ?? null,
@@ -653,57 +746,34 @@ const confirmDelete = async () => {
           </TableHeader>
           <TableBody class="row-stagger">
             <TableRow v-for="model in filteredAndSortedModels" :key="model.id" class="group">
-              <!-- Name: icon + name + capability icons -->
+              <!-- Name: icon + name + status + capability icons -->
               <TableCell class="font-medium">
                 <div class="flex items-center gap-2.5 min-w-0">
                   <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
-                  <span class="truncate" :title="model.name">{{ model.name }}</span>
-                  <CapabilityIcons :capabilities="deriveModelCapabilities(model)" />
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <span class="truncate">{{ model.name }}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ model.name }}</TooltipContent>
+                  </Tooltip>
+                  <ModelStatusChip v-if="model.status" :status="model.status" />
+                  <CapabilityIcons :capabilities="model.capabilities ?? []" />
                 </div>
               </TableCell>
               <!-- Providers: quiet mono text, click to filter -->
               <TableCell>
-                <div
-                  v-if="(model.providers || []).length > 0"
-                  class="flex items-center gap-1 flex-wrap font-mono text-xs text-muted-foreground"
-                >
-                  <template
-                    v-for="(p, i) in (model.providers || []).slice(0, 3)"
-                    :key="p.provider_name"
-                  >
-                    <span v-if="i > 0" class="text-border" aria-hidden="true">·</span>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <button
-                          type="button"
-                          class="rounded-sm transition-colors hover:text-foreground hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                          :aria-label="t('models.filterByProvider') + ': ' + p.provider_name"
-                          @click.stop="handleProviderFilter(p.provider_name)"
-                        >
-                          {{ p.provider_name }}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {{ t("models.filterByProvider") + ": " + p.provider_name }}
-                      </TooltipContent>
-                    </Tooltip>
-                  </template>
-                  <span v-if="(model.providers || []).length > 3" class="text-muted-foreground/70">
-                    +{{ (model.providers || []).length - 3 }}
-                  </span>
-                </div>
-                <span v-else class="text-xs text-muted-foreground">–</span>
+                <ModelProviderList
+                  class="text-xs"
+                  :providers="model.providers || []"
+                  @filter="handleProviderFilter"
+                />
               </TableCell>
-              <!-- Context -->
+              <!-- Context / max output -->
               <TableCell class="text-right">
-                <span
-                  v-if="model.context_length"
-                  class="text-data text-xs text-muted-foreground"
-                  :title="t('models.contextLength')"
-                >
-                  {{ formatContextLength(model.context_length) }}
-                </span>
-                <span v-else class="text-xs text-muted-foreground">–</span>
+                <ModelContextCell
+                  :context-length="model.context_length"
+                  :max-output-tokens="model.max_output_tokens"
+                />
               </TableCell>
               <!-- Smart Routing -->
               <TableCell>
@@ -711,12 +781,16 @@ const confirmDelete = async () => {
                   v-if="hasRoutingInfo(model)"
                   class="flex items-center gap-1.5 whitespace-nowrap"
                 >
-                  <span
-                    class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
-                    :title="t('models.autoEligible')"
-                  >
-                    <Check class="size-2.5" />
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <span
+                        class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
+                      >
+                        <Check class="size-2.5" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{{ t("models.autoEligible") }}</TooltipContent>
+                  </Tooltip>
                   <span v-if="model.quality_tier" class="text-xs font-medium capitalize">
                     {{ model.quality_tier.toLowerCase() }}
                   </span>
@@ -834,8 +908,9 @@ const confirmDelete = async () => {
 
         <Tabs default-value="general" class="flex-1 flex flex-col min-h-0 w-full">
           <div class="px-4 sm:px-6 pt-4 shrink-0">
-            <TabsList class="grid w-full grid-cols-3 sm:grid-cols-5 h-auto">
+            <TabsList class="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
               <TabsTrigger value="general">{{ t("common.general") }}</TabsTrigger>
+              <TabsTrigger value="capabilities">{{ t("common.capabilities") }}</TabsTrigger>
               <TabsTrigger value="pricing">{{ t("common.pricing") }}</TabsTrigger>
               <TabsTrigger value="routing">{{ t("common.routing") }}</TabsTrigger>
               <TabsTrigger value="overrides">{{ t("common.overrides") }}</TabsTrigger>
@@ -990,6 +1065,55 @@ const confirmDelete = async () => {
               </div>
             </TabsContent>
 
+            <TabsContent value="capabilities" class="space-y-6 mt-0">
+              <!-- Feature-bound capabilities: these gate proxy behavior -->
+              <div class="space-y-4">
+                <div>
+                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                    {{ t("models.capBoundHeader") }}
+                  </h4>
+                  <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
+                    {{ t("models.capBoundHint") }}
+                  </p>
+                </div>
+                <div class="divide-y divide-border/60">
+                  <CapabilityToggle
+                    v-for="cap in BOUND_CAPABILITIES"
+                    :key="cap"
+                    :model-value="getCapability(cap)"
+                    :label="t(CAPABILITY_META[cap].labelKey)"
+                    :icon="CAPABILITY_META[cap].icon"
+                    :help-text="t('models.capBoundHelp.' + cap)"
+                    @update:model-value="setCapability(cap, $event)"
+                  />
+                </div>
+              </div>
+
+              <!-- Informational models.dev attributes: display-only -->
+              <div class="space-y-4">
+                <div>
+                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                    {{ t("models.capInfoHeader") }}
+                  </h4>
+                  <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
+                    {{ t("models.capInfoHint") }}
+                  </p>
+                </div>
+                <div class="divide-y divide-border/60">
+                  <CapabilityToggle
+                    v-for="cap in INFO_CAPABILITIES"
+                    :key="cap"
+                    :model-value="getCapability(cap)"
+                    :label="t(CAPABILITY_META[cap].labelKey)"
+                    :icon="CAPABILITY_META[cap].icon"
+                    :field="cap"
+                    :help-text="t('models.capInfoHelp.' + cap)"
+                    @update:model-value="setCapability(cap, $event)"
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
             <TabsContent value="pricing" class="space-y-4 mt-0">
               <div
                 class="rounded-lg border border-action-amber/30 bg-action-amber/10 px-3.5 py-2.5 mb-4"
@@ -1008,7 +1132,7 @@ const confirmDelete = async () => {
                   </Label>
                   <div class="relative">
                     <div
-                      class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                     >
                       <span class="text-muted-foreground sm:text-sm">$</span>
                     </div>
@@ -1031,7 +1155,7 @@ const confirmDelete = async () => {
                   </Label>
                   <div class="relative">
                     <div
-                      class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                     >
                       <span class="text-muted-foreground sm:text-sm">$</span>
                     </div>
@@ -1054,7 +1178,7 @@ const confirmDelete = async () => {
                   </Label>
                   <div class="relative">
                     <div
-                      class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                     >
                       <span class="text-muted-foreground sm:text-sm">$</span>
                     </div>
@@ -1077,7 +1201,7 @@ const confirmDelete = async () => {
                   </Label>
                   <div class="relative">
                     <div
-                      class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                     >
                       <span class="text-muted-foreground sm:text-sm">$</span>
                     </div>
@@ -1100,7 +1224,7 @@ const confirmDelete = async () => {
                   </Label>
                   <div class="relative">
                     <div
-                      class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                     >
                       <span class="text-muted-foreground sm:text-sm">$</span>
                     </div>
@@ -1123,7 +1247,7 @@ const confirmDelete = async () => {
                   </Label>
                   <div class="relative">
                     <div
-                      class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                     >
                       <span class="text-muted-foreground sm:text-sm">$</span>
                     </div>
@@ -1159,7 +1283,7 @@ const confirmDelete = async () => {
                     </Label>
                     <div class="relative">
                       <div
-                        class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                        class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                       >
                         <span class="text-muted-foreground sm:text-sm">$</span>
                       </div>
@@ -1182,7 +1306,7 @@ const confirmDelete = async () => {
                     </Label>
                     <div class="relative">
                       <div
-                        class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                        class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                       >
                         <span class="text-muted-foreground sm:text-sm">$</span>
                       </div>
@@ -1205,7 +1329,7 @@ const confirmDelete = async () => {
                     </Label>
                     <div class="relative">
                       <div
-                        class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                        class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                       >
                         <span class="text-muted-foreground sm:text-sm">$</span>
                       </div>
@@ -1228,7 +1352,7 @@ const confirmDelete = async () => {
                     </Label>
                     <div class="relative">
                       <div
-                        class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                        class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                       >
                         <span class="text-muted-foreground sm:text-sm">$</span>
                       </div>
@@ -1251,7 +1375,7 @@ const confirmDelete = async () => {
                     </Label>
                     <div class="relative">
                       <div
-                        class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
+                        class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
                       >
                         <span class="text-muted-foreground sm:text-sm">$</span>
                       </div>
@@ -1373,7 +1497,7 @@ const confirmDelete = async () => {
             </TabsContent>
 
             <TabsContent value="advanced" class="space-y-6 mt-0">
-              <!-- Section 1: Model Profile (description, links, specs) -->
+              <!-- Section 1: Model Profile (description, links) -->
               <div class="space-y-4">
                 <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                   {{ t("models.tabProfileHeader") }}
@@ -1396,22 +1520,34 @@ const confirmDelete = async () => {
                   </p>
                 </div>
 
-                <!-- Homepage URL + Context Length -->
+                <!-- Homepage URL -->
+                <div class="grid gap-2">
+                  <Label for="modelHomepageUrl" class="text-xs font-medium text-foreground">
+                    {{ t("models.homepageUrl") }}
+                  </Label>
+                  <Input
+                    id="modelHomepageUrl"
+                    v-model="newModel.homepage_url"
+                    :placeholder="t('models.homepageUrlPlaceholder')"
+                    class="h-9"
+                  />
+                  <p class="text-[11px] text-muted-foreground leading-normal">
+                    {{ t("models.homepageUrlHelp") }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Section 2: Limits (models.dev limit.*) -->
+              <div class="space-y-4">
+                <div>
+                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                    {{ t("models.limitsHeader") }}
+                  </h4>
+                  <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
+                    {{ t("models.limitsHint") }}
+                  </p>
+                </div>
                 <div class="grid gap-4 sm:grid-cols-2 items-start">
-                  <div class="grid gap-2">
-                    <Label for="modelHomepageUrl" class="text-xs font-medium text-foreground">
-                      {{ t("models.homepageUrl") }}
-                    </Label>
-                    <Input
-                      id="modelHomepageUrl"
-                      v-model="newModel.homepage_url"
-                      :placeholder="t('models.homepageUrlPlaceholder')"
-                      class="h-9"
-                    />
-                    <p class="text-[11px] text-muted-foreground leading-normal">
-                      {{ t("models.homepageUrlHelp") }}
-                    </p>
-                  </div>
                   <div class="grid gap-2">
                     <Label for="modelContextLength" class="text-xs font-medium text-foreground">
                       {{ t("models.contextLength") }}
@@ -1427,46 +1563,90 @@ const confirmDelete = async () => {
                       {{ t("models.contextLengthHelp") }}
                     </p>
                   </div>
+                  <div class="grid gap-2">
+                    <Label for="modelMaxOutputTokens" class="text-xs font-medium text-foreground">
+                      {{ t("models.maxOutputTokens") }}
+                    </Label>
+                    <NumberInput
+                      id="modelMaxOutputTokens"
+                      v-model.number="newModel.max_output_tokens"
+                      :placeholder="t('models.maxOutputTokensPlaceholder')"
+                      :min="0"
+                      class="h-9"
+                    />
+                    <p class="text-[11px] text-muted-foreground leading-normal">
+                      {{ t("models.maxOutputTokensHelp") }}
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <!-- Section 2: Capabilities & Behavior -->
+              <!-- Section 3: Classification (models.dev metadata) -->
               <div class="space-y-4">
-                <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
-                  {{ t("models.tabCapabilitiesHeader") }}
-                </h4>
-
-                <div class="divide-y divide-border/60">
-                  <CapabilityToggle
-                    v-model="newModel.supports_images"
-                    :label="t('models.supportsImages')"
-                    :help-text="t('models.supportsImagesHelp')"
-                  />
-                  <CapabilityToggle
-                    v-model="newModel.supports_image_generation"
-                    :label="t('models.supportsImageGeneration')"
-                    :help-text="t('models.supportsImageGenerationHelp')"
-                  />
-                  <CapabilityToggle
-                    v-model="newModel.supports_tts"
-                    :label="t('models.supportsTts')"
-                    :help-text="t('models.supportsTtsHelp')"
-                  />
-                  <CapabilityToggle
-                    v-model="newModel.supports_stt"
-                    :label="t('models.supportsStt')"
-                    :help-text="t('models.supportsSttHelp')"
-                  />
-                  <CapabilityToggle
-                    v-model="newModel.supports_embedding"
-                    :label="t('models.supportsEmbedding')"
-                    :help-text="t('models.supportsEmbeddingHelp')"
-                  />
-                  <CapabilityToggle
-                    v-model="newModel.supports_realtime"
-                    :label="t('models.supportsRealtime')"
-                    :help-text="t('models.supportsRealtimeHelp')"
-                  />
+                <div>
+                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                    {{ t("models.classificationHeader") }}
+                  </h4>
+                  <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
+                    {{ t("models.classificationHint") }}
+                  </p>
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2 items-start">
+                  <div class="grid gap-2">
+                    <Label for="modelStatus" class="text-xs font-medium text-foreground">
+                      {{ t("models.modelStatus") }}
+                    </Label>
+                    <Select v-model="statusModel">
+                      <SelectTrigger id="modelStatus" class="h-9 bg-background">
+                        <SelectValue :placeholder="t('models.modelStatusNone')" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{{ t("models.modelStatusNone") }}</SelectItem>
+                        <SelectItem value="beta">beta</SelectItem>
+                        <SelectItem value="deprecated">deprecated</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p class="text-[11px] text-muted-foreground leading-normal">
+                      {{ t("models.modelStatusHelp") }}
+                    </p>
+                  </div>
+                  <div class="grid gap-2">
+                    <Label for="modelFamily" class="text-xs font-medium text-foreground">
+                      {{ t("models.modelFamily") }}
+                    </Label>
+                    <Input
+                      id="modelFamily"
+                      v-model="familyModel"
+                      placeholder="claude-sonnet"
+                      class="h-9"
+                    />
+                    <p class="text-[11px] text-muted-foreground leading-normal">
+                      {{ t("models.modelFamilyHelp") }}
+                    </p>
+                  </div>
+                  <div class="grid gap-2">
+                    <Label for="modelKnowledge" class="text-xs font-medium text-foreground">
+                      {{ t("models.knowledgeCutoff") }}
+                    </Label>
+                    <Input id="modelKnowledge" v-model="knowledgeModel" type="date" class="h-9" />
+                    <p class="text-[11px] text-muted-foreground leading-normal">
+                      {{ t("models.knowledgeHelp") }}
+                    </p>
+                  </div>
+                  <div class="grid gap-2">
+                    <Label for="modelReleaseDate" class="text-xs font-medium text-foreground">
+                      {{ t("models.releaseDate") }}
+                    </Label>
+                    <Input
+                      id="modelReleaseDate"
+                      v-model="releaseDateModel"
+                      type="date"
+                      class="h-9"
+                    />
+                    <p class="text-[11px] text-muted-foreground leading-normal">
+                      {{ t("models.releaseDateHelp") }}
+                    </p>
+                  </div>
                 </div>
               </div>
 

@@ -3,13 +3,14 @@ import { Check, Copy, ExternalLink } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { usePlazaModelRow } from "@/components/plaza/usePlazaModelRow";
+import ModelContextCell from "@/components/models/ModelContextCell.vue";
 import ModelIcon from "@/components/models/ModelIcon.vue";
+import ModelStatusChip from "@/components/models/ModelStatusChip.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ModelCatalogEntry } from "@/types/schemas";
-import { formatContextLength } from "@/utils/format";
 
 /**
  * Dense table row for the model catalog (table view).
@@ -31,12 +32,15 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
     <TableCell>
       <div class="flex items-center gap-2.5 min-w-0">
         <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
-        <span
-          class="font-mono text-[13px] font-medium text-foreground truncate"
-          :title="model.name"
-        >
-          {{ model.name }}
-        </span>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <span class="font-mono text-[13px] font-medium text-foreground truncate">
+              {{ model.name }}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ model.name }}</TooltipContent>
+        </Tooltip>
+        <ModelStatusChip v-if="model.status" :status="model.status" />
         <CapabilityIcons :capabilities="capabilities" />
       </div>
     </TableCell>
@@ -51,21 +55,23 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
       </Badge>
       <span v-else class="text-xs text-muted-foreground">–</span>
     </TableCell>
-    <!-- Context -->
+    <!-- Context / max output -->
     <TableCell class="text-right">
-      <span v-if="model.context_length != null" class="text-data text-xs text-muted-foreground">
-        {{ formatContextLength(model.context_length) }}
-      </span>
-      <span v-else class="text-xs text-muted-foreground">–</span>
+      <ModelContextCell
+        :context-length="model.context_length"
+        :max-output-tokens="model.max_output_tokens"
+      />
     </TableCell>
     <!-- Providers -->
     <TableCell>
-      <span
-        class="block max-w-56 truncate font-mono text-xs text-muted-foreground"
-        :title="model.provider_names.join(', ')"
-      >
-        {{ model.provider_names.join(" · ") || "–" }}
-      </span>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <span class="block max-w-56 truncate font-mono text-xs text-muted-foreground">
+            {{ model.provider_names.join(" · ") || "–" }}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{{ model.provider_names.join(", ") }}</TooltipContent>
+      </Tooltip>
     </TableCell>
     <!-- Actions -->
     <TableCell class="text-right">
