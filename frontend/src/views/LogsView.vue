@@ -70,6 +70,13 @@ import {
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import {
+  completionTokens,
+  costUsd,
+  promptTokens,
+  totalTokens,
+  ttftMs,
+} from "@/utils/logEntryAccessors";
 
 const LogDetailsSheet = defineAsyncComponent(
   () => import("@/components/common/LogDetailsSheet.vue")
@@ -645,38 +652,26 @@ const submitFeedback = async (log: LogListItemType, signal: FeedbackSignal) => {
   }
 };
 
-// Token helpers
-const getTokenCount = (log: LogListItemType, type: "prompt" | "completion" | "total"): number => {
-  const meta = log.log_metadata as Record<string, unknown> | undefined;
-  const key =
-    type === "prompt"
-      ? "prompt_tokens"
-      : type === "completion"
-        ? "completion_tokens"
-        : "total_tokens";
-  const directValue = (log as unknown as Record<string, unknown>)[key] as number | undefined;
-  return directValue || (meta?.[key] as number) || 0;
-};
-
+// Token helpers — value resolution lives in logEntryAccessors; only
+// presentation (breakdown string, tooltip) stays here.
 const formatTokenBreakdown = (log: LogListItemType): string => {
-  const input = getTokenCount(log, "prompt");
-  const output = getTokenCount(log, "completion");
-  const total = getTokenCount(log, "total");
+  const input = promptTokens(log);
+  const output = completionTokens(log);
+  const total = totalTokens(log);
   if (input === 0 && output === 0 && total === 0) return "-";
   if (output === 0 && input > 0) return input.toLocaleString();
   return `${input.toLocaleString()} / ${output.toLocaleString()}`;
 };
 
 const getTokenTooltip = (log: LogListItemType): string => {
-  const input = getTokenCount(log, "prompt");
-  const output = getTokenCount(log, "completion");
+  const input = promptTokens(log);
+  const output = completionTokens(log);
   if (output === 0 && input > 0) return `Input: ${input.toLocaleString()}`;
   return `Input: ${input.toLocaleString()} | Output: ${output.toLocaleString()}`;
 };
 
 const formatTTFT = (log: LogListItemType): string => {
-  const ttft = (log.log_metadata?.ttft_ms as number | undefined) ?? log.ttft_ms;
-  return formatDurationOrFailed(log, ttft);
+  return formatDurationOrFailed(log, ttftMs(log));
 };
 
 // A 5xx row that records 0/1ms or no timing didn't really complete a round
@@ -689,7 +684,7 @@ const formatDurationOrFailed = (log: LogListItemType, ms: number | null | undefi
 };
 
 const getTimingTooltip = (log: LogListItemType): string => {
-  const ttft = (log.log_metadata?.ttft_ms as number | undefined) ?? log.ttft_ms;
+  const ttft = ttftMs(log);
   const duration = log.response_time_ms;
   const isStreaming = log.log_metadata?.streaming as boolean | undefined;
   if (isStreaming) {
@@ -1018,9 +1013,7 @@ const auditListAction = (log: LogListItemType): string => {
                     <span :title="getTokenTooltip(log)">{{ formatTokenBreakdown(log) }}</span>
                   </TableCellNumeric>
                   <TableCellNumeric class="hidden md:table-cell">
-                    {{
-                      formatCost(log.cost_usd ?? (log.log_metadata?.cost_usd as number | undefined))
-                    }}
+                    {{ formatCost(costUsd(log)) }}
                   </TableCellNumeric>
                   <TableCellActions>
                     <div class="flex items-center justify-end gap-0.5">

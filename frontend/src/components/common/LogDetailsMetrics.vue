@@ -26,6 +26,13 @@ import {
   getActor,
 } from "@/utils/format";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import {
+  cachedTokens,
+  completionTokens,
+  costUsd,
+  promptTokens,
+  ttftMs,
+} from "@/utils/logEntryAccessors";
 
 const props = defineProps<{
   log: LogRead;
@@ -63,46 +70,21 @@ const providerModelName = computed(() => {
   return typeof val === "string" ? val : null;
 });
 
-// TTFT (Time to First Token) from log_metadata
-const ttftMs = computed(() => {
-  return props.log.ttft_ms ?? props.log.log_metadata?.ttft_ms ?? null;
-});
-
+// TTFT, token chips and TPS all resolve through logEntryAccessors so the
+// metrics panel agrees with the list rows and the response view.
+//
 // Calculate TPS (tokens per second)
 const tps = computed(() => {
-  const completionTokens =
-    props.log.completion_tokens ??
-    (props.log.log_metadata?.completion_tokens as number | undefined);
+  const completion = completionTokens(props.log);
   const responseTime = props.log.response_time_ms;
-  if (!completionTokens || !responseTime || responseTime <= 0) return null;
-  return Math.round((completionTokens / responseTime) * 1000);
+  if (!completion || !responseTime || responseTime <= 0) return null;
+  return Math.round((completion / responseTime) * 1000);
 });
 
 // Cache savings
 const cacheSavings = computed((): number | null => {
   const val = props.log.log_metadata?.cache_savings_usd;
   return typeof val === "number" ? val : null;
-});
-
-// Helper getters for log_metadata values with proper typing
-const logPromptTokens = computed(() => {
-  const val = props.log.log_metadata?.prompt_tokens;
-  return typeof val === "number" ? val : (props.log.prompt_tokens ?? 0);
-});
-
-const logCompletionTokens = computed(() => {
-  const val = props.log.log_metadata?.completion_tokens;
-  return typeof val === "number" ? val : (props.log.completion_tokens ?? 0);
-});
-
-const cachedTokens = computed(() => {
-  return (
-    props.log.cached_prompt_tokens ??
-    props.log.cache_read_input_tokens ??
-    (props.log.log_metadata?.cached_prompt_tokens as number | undefined) ??
-    (props.log.log_metadata?.cache_read_input_tokens as number | undefined) ??
-    0
-  );
 });
 
 // MCP log metadata
@@ -247,14 +229,14 @@ const statusColorClass = computed(() => {
             </span>
             <div class="flex items-center gap-1.5 flex-wrap">
               <span
-                v-if="ttftMs !== null"
+                v-if="ttftMs(log) !== null"
                 class="text-[11px] text-muted-foreground font-mono"
                 :title="t('logs.ttft')"
               >
-                TTFT {{ ttftMs }}ms
+                TTFT {{ ttftMs(log) }}ms
               </span>
               <span
-                v-if="ttftMs !== null && tps !== null"
+                v-if="ttftMs(log) !== null && tps !== null"
                 class="text-[11px] text-muted-foreground/40"
                 >·</span
               >
@@ -285,14 +267,14 @@ const statusColorClass = computed(() => {
           </div>
           <div class="flex flex-col gap-1.5 mt-1">
             <span class="text-base sm:text-lg font-bold text-foreground font-mono tabular-nums">
-              {{ formatCost((log.cost_usd ?? log.log_metadata?.cost_usd) as number) }}
+              {{ formatCost(costUsd(log)) }}
             </span>
             <div class="flex items-center gap-1.5 flex-wrap">
               <span
                 class="text-[11px] text-muted-foreground font-mono"
-                :title="`${t('logs.inputTokens')}: ${formatTokens(logPromptTokens)} | ${t('logs.outputTokens')}: ${formatTokens(logCompletionTokens)}`"
+                :title="`${t('logs.inputTokens')}: ${formatTokens(promptTokens(log))} | ${t('logs.outputTokens')}: ${formatTokens(completionTokens(log))}`"
               >
-                {{ formatTokens(logPromptTokens) }} → {{ formatTokens(logCompletionTokens) }}
+                {{ formatTokens(promptTokens(log)) }} → {{ formatTokens(completionTokens(log)) }}
               </span>
               <span
                 v-if="cacheSavings !== null"
@@ -302,11 +284,11 @@ const statusColorClass = computed(() => {
                 {{ t("logs.saved") }} {{ formatCost(cacheSavings) }}
               </span>
               <span
-                v-if="cachedTokens > 0"
+                v-if="cachedTokens(log) > 0"
                 class="text-[11px] font-semibold bg-action-blue/15 border border-action-blue/30 text-action-blue px-1.5 py-0.5 rounded"
-                :title="`${t('logs.cachedTokens')}: ${formatTokens(cachedTokens)}`"
+                :title="`${t('logs.cachedTokens')}: ${formatTokens(cachedTokens(log))}`"
               >
-                {{ t("logs.cachedTokens") }} {{ formatTokens(cachedTokens) }}
+                {{ t("logs.cachedTokens") }} {{ formatTokens(cachedTokens(log)) }}
               </span>
             </div>
           </div>

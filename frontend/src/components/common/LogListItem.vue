@@ -28,6 +28,7 @@ import {
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { completionTokens, costUsd, promptTokens, ttftMs } from "@/utils/logEntryAccessors";
 
 interface MetricItem {
   icon: LucideIcon;
@@ -54,20 +55,9 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const getTokenCount = (log: LogItem, type: "prompt" | "completion" | "total") => {
-  switch (type) {
-    case "prompt":
-      return log.prompt_tokens || (log.log_metadata?.prompt_tokens as number) || 0;
-    case "completion":
-      return log.completion_tokens || (log.log_metadata?.completion_tokens as number) || 0;
-    default:
-      return log.total_tokens || (log.log_metadata?.total_tokens as number) || 0;
-  }
-};
-
 const formatTokenBreakdown = (log: LogItem): string => {
-  const input = getTokenCount(log, "prompt");
-  const output = getTokenCount(log, "completion");
+  const input = promptTokens(log);
+  const output = completionTokens(log);
 
   if (input === 0 && output === 0) return "-";
   if (output === 0 && input > 0) return input.toLocaleString();
@@ -200,22 +190,21 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
         value: formatTokenBreakdown(props.log),
         mono: true,
       });
-      if (props.log.ttft_ms || props.log.log_metadata?.ttft_ms) {
+      const ttft = ttftMs(props.log);
+      if (ttft !== null) {
         metrics.push({
           icon: Clock,
           label: t("logs.ttft"),
-          value: formatDuration(
-            props.log.ttft_ms ?? (props.log.log_metadata?.ttft_ms as number | undefined)
-          ),
+          value: formatDuration(ttft),
           mono: true,
         });
       }
-      const costValue = props.log.cost_usd ?? props.log.log_metadata?.cost_usd;
-      if (costValue !== undefined && costValue !== null) {
+      const costValue = costUsd(props.log);
+      if (costValue !== null) {
         metrics.push({
           icon: Coins,
           label: t("logs.cost"),
-          value: formatCost(costValue as number),
+          value: formatCost(costValue),
           mono: true,
         });
       }

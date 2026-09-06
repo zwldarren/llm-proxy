@@ -35,6 +35,14 @@ import {
   parseResultOutput,
 } from "@/utils/logFormat";
 import {
+  cacheCreationTokens,
+  cachedPromptTokens,
+  cacheReadTokens,
+  completionTokens,
+  promptTokens,
+  totalTokens,
+} from "@/utils/logEntryAccessors";
+import {
   isResponsesStreamResponse,
   parseLogResponse,
   type ParsedResponse,
@@ -146,36 +154,20 @@ function resultFor(callId: string | undefined) {
 }
 
 // --- Usage --------------------------------------------------------------------
+// Value resolution (flat column vs log_metadata fallback) is owned by
+// logEntryAccessors so every logs surface renders identical numbers.
 const logUsage = computed(() => {
-  const prompt =
-    props.log.prompt_tokens ?? (props.log.log_metadata?.prompt_tokens as number | undefined) ?? 0;
-  const completion =
-    props.log.completion_tokens ??
-    (props.log.log_metadata?.completion_tokens as number | undefined) ??
-    0;
-  const total =
-    props.log.total_tokens ?? (props.log.log_metadata?.total_tokens as number | undefined) ?? 0;
-
-  const cacheRead =
-    props.log.cache_read_input_tokens ??
-    (props.log.log_metadata?.cache_read_input_tokens as number | undefined) ??
-    0;
-  const cachedPrompt =
-    props.log.cached_prompt_tokens ??
-    (props.log.log_metadata?.cached_prompt_tokens as number | undefined) ??
-    0;
-  const cacheCreation =
-    props.log.cache_creation_input_tokens ??
-    (props.log.log_metadata?.cache_creation_input_tokens as number | undefined) ??
-    0;
+  const prompt = promptTokens(props.log);
+  const completion = completionTokens(props.log);
+  const total = totalTokens(props.log);
 
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,
     total_tokens: total,
-    cache_read_tokens: cacheRead,
-    cached_prompt_tokens: cachedPrompt,
-    cache_creation_tokens: cacheCreation,
+    cache_read_tokens: cacheReadTokens(props.log),
+    cached_prompt_tokens: cachedPromptTokens(props.log),
+    cache_creation_tokens: cacheCreationTokens(props.log),
     has_usage: prompt > 0 || completion > 0 || total > 0,
   };
 });
