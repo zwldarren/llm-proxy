@@ -41,6 +41,25 @@ class ConcreteProvider(BaseHttpProvider):
         """Return empty list for testing."""
         return []
 
+    DEFAULT_BASE_URL = "https://default.example.com"
+
+
+def test_base_provider_defaults_absorb_adapter_boilerplate():
+    """Keyword construction defaults provider_name/base_url without adapter __init__.
+
+    Concrete adapters are pure data declarations (like qwen/kimi_code): the
+    ``provider_name``/``base_url`` defaulting that used to be copy-pasted into
+    every adapter's ``__init__`` lives in ``BaseHttpProvider.__init__`` now.
+    """
+    provider = ConcreteProvider()
+    assert provider.provider_name == "test_provider"
+    assert provider._base_url == "https://default.example.com"
+
+    # Explicit kwargs still win over the defaults.
+    provider = ConcreteProvider(provider_name="custom", base_url="https://override.example.com")
+    assert provider.provider_name == "custom"
+    assert provider._base_url == "https://override.example.com"
+
 
 def test_provider_config_api_key_is_secret_str():
     """Provider API key is stored as SecretStr and hidden from repr/str."""

@@ -5,6 +5,8 @@ The UnifiedProcessor orchestrates stages in sequence via PipelineState.
 """
 
 from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
+from llm_proxy.core.processing.stages.composition import create_per_provider_stages
+from llm_proxy.core.processing.stages.fallback import FallbackAction, FallbackDecision
 from llm_proxy.core.processing.stages.parameter_override import (
     ParameterOverrideService,
     ParameterOverrideStage,
@@ -21,6 +23,8 @@ from llm_proxy.core.processing.stages.role_normalization import normalize_develo
 from llm_proxy.core.processing.stages.web_search import WebSearchStage
 
 __all__ = [
+    "FallbackAction",
+    "FallbackDecision",
     "ParameterOverrideService",
     "ParameterOverrideStage",
     "PipelineStage",
@@ -30,5 +34,6 @@ __all__ = [
     "RequestExecutionStage",
     "RetryExecutor",
     "WebSearchStage",
+    "create_per_provider_stages",
     "normalize_developer_roles",
 ]

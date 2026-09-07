@@ -3,7 +3,9 @@
 # Default retry and fallback settings
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_MAX_FALLBACK_ATTEMPTS = 10
-DEFAULT_DISCONNECT_CHECK_INTERVAL = 50
+# Chunk interval at which the streaming loop polls for client disconnects
+# (chunk 1 is always checked; see stream_lifecycle.check_client_disconnect).
+DEFAULT_DISCONNECT_CHECK_INTERVAL = 10
 
 # =============================================================================
 # PERFORMANCE OPTIMIZATION CONFIGURATION

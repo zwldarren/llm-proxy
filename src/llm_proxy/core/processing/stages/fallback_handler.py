@@ -3,7 +3,7 @@
 Extracted from StreamingProcessor to consolidate all provider fallback
 logic into a single, testable class. Retry classification, role-transform
 detection, failure recording, and provider swapping are delegated to the
-shared helpers in ``llm_proxy.core.processing.fallback`` so the streaming and
+shared helpers in ``llm_proxy.core.processing.stages.fallback`` so the streaming and
 non-streaming paths behave identically.
 """
 
@@ -17,7 +17,7 @@ from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.errors.handler import ErrorHandler
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.processing.base import RequestContext
-from llm_proxy.core.processing.fallback import (
+from llm_proxy.core.processing.stages.fallback import (
     FallbackAction,
     execute_fallback,
     plan_fallback,
@@ -42,7 +42,7 @@ class FallbackHandler:
 
     Consolidates error classification, fallback attempt recording, and
     next-provider selection into a single service that reuses the same
-    :mod:`llm_proxy.core.processing.fallback` helpers as the non-streaming
+    :mod:`llm_proxy.core.processing.stages.fallback` helpers as the non-streaming
     execution path.
     """
 

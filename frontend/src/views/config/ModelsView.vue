@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Box, Check, Edit, Plus, RefreshCw, Settings, Trash2, X } from "@lucide/vue";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
@@ -55,25 +55,19 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useErrorHandler } from "@/composables/useErrorHandler";
-import { useTableFilter } from "@/composables/useTableFilter";
+import { useModelForm } from "@/composables/useModelForm";
+import { useModelTable } from "@/composables/useModelTable";
 import { useViewMode } from "@/composables/useViewMode";
 import { useModelStore } from "@/stores/models";
 import { useProviderStore } from "@/stores/providers";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { ROUTING_MODES } from "@/constants/model";
 
-import type { ParameterOverridesConfig } from "@/types/parameterOverrides";
 import ParameterOverridesBuilder from "@/components/config/ParameterOverridesBuilder.vue";
 import ProviderModelSelector from "@/components/common/ProviderModelSelector.vue";
 import { getIconUrl, isMonoIcon } from "@/utils/icons";
-import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
 
-import type {
-  ModelCreate,
-  ModelRead,
-  ModelProviderMapping,
-  ModelCapability,
-} from "@/types/schemas";
+import type { ModelRead } from "@/types/schemas";
 
 // Rendered inside views/ModelsView.vue (the role dispatcher), which owns the
 // "ModelsView" name that App.vue's KeepAlive include list matches on.
@@ -97,490 +91,77 @@ const models = computed(() => modelStore.models);
 const providers = computed(() => providerStore.providers);
 const isLoading = computed(() => modelStore.loading && !modelStore.ready);
 
-type SortField = "name" | "input_cost" | "output_cost" | "cached_read" | "context_length";
-const sortField = ref<SortField>("name");
-const sortDir = ref<"asc" | "desc">("asc");
-
-function onSort(field: string) {
-  if (field === sortField.value) {
-    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-  } else {
-    sortField.value = field as SortField;
-    sortDir.value = "asc";
-  }
-}
-
 const {
   searchQuery,
-  filteredItems: baseFilteredModels,
-  clearFilters: clearBaseFilters,
-} = useTableFilter(models, {
-  searchFields: ["name", "description"],
-});
+  sortField,
+  sortDir,
+  onSort,
+  selectedProviderFilter,
+  availableProviders,
+  filteredAndSortedModels,
+  clearFilters,
+  handleProviderFilter,
+} = useModelTable(models);
 
-const selectedProviderFilter = ref<string>("");
-
-// Get all unique provider names from models
-const availableProviders = computed(() => {
-  const providerSet = new Set<string>();
-  for (const model of models.value) {
-    for (const p of model.providers ?? []) {
-      providerSet.add(p.provider_name);
-    }
-  }
-  return Array.from(providerSet).sort();
-});
-
-// Combined filter: base filters + provider filter + sorting
-const filteredAndSortedModels = computed(() => {
-  let items = [...baseFilteredModels.value] as unknown as ModelRead[];
-
-  // Apply provider filter
-  if (selectedProviderFilter.value) {
-    items = items.filter((model) =>
-      model.providers?.some((p) => p.provider_name === selectedProviderFilter.value)
-    );
-  }
-
-  // Apply sorting
-  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-  switch (sortField.value) {
-    case "input_cost":
-    case "output_cost":
-    case "cached_read": {
-      const key =
-        sortField.value === "input_cost"
-          ? "input_cost_per_1m"
-          : sortField.value === "output_cost"
-            ? "output_cost_per_1m"
-            : "cached_read_cost_per_1m";
-      items.sort((a, b) => {
-        const va = effectiveCost(a, key);
-        const vb = effectiveCost(b, key);
-        if (va == null && vb == null) return 0;
-        if (va == null) return 1; // models without pricing always sort last
-        if (vb == null) return -1;
-        return (va - vb) * dir;
-      });
-      break;
-    }
-    case "context_length":
-      items.sort(compareModelsByContextLength(dir));
-      break;
-    case "name":
-    default:
-      items.sort(compareModelsByName(dir));
-      break;
-  }
-
-  return items;
-});
-
-const clearFilters = () => {
-  clearBaseFilters();
-  selectedProviderFilter.value = "";
-  sortField.value = "name";
-  sortDir.value = "asc";
-};
-
-const handleProviderFilter = (provider: string) => {
-  selectedProviderFilter.value = selectedProviderFilter.value === provider ? "" : provider;
-};
-
-const hasRoutingInfo = (model: ModelRead): boolean => Boolean(model.auto_eligible);
-
-/** Effective price: lowest configured value across provider overrides + model default. */
-function effectiveCost(
-  model: ModelRead,
-  key: "input_cost_per_1m" | "output_cost_per_1m" | "cached_read_cost_per_1m"
-): number | null {
-  const vals: number[] = [];
-  for (const p of model.providers ?? []) {
-    const v = p[key];
-    if (v != null) vals.push(v);
-  }
-  const d = model[key];
-  if (d != null) vals.push(d);
-  return vals.length > 0 ? Math.min(...vals) : null;
-}
-
-/**
- * Fresh form state for the model dialog. openCreateDialog seeds one empty
- * provider mapping on top; openEditDialog overrides every field from the
- * model being edited.
- */
-function emptyModelForm(): ModelCreate {
-  return {
-    name: "",
-    providers: [],
-    input_cost_per_1m: null,
-    output_cost_per_1m: null,
-    cached_read_cost_per_1m: null,
-    cached_write_cost_per_1m: null,
-    audio_input_cost_per_1m: null,
-    audio_output_cost_per_1m: null,
-    image_input_cost_per_1m: null,
-    cost_per_image: null,
-    audio_cost_per_minute: null,
-    tts_cost_per_1m_chars: null,
-    web_search_cost_per_1k: null,
-    icon_url: null,
-    parameter_overrides: null,
-    auto_eligible: false,
-    quality_tier: null,
-    routing_assignments: null,
-    supports_images: false,
-    supports_image_generation: false,
-    supports_tts: false,
-    supports_stt: false,
-    supports_embedding: false,
-    supports_realtime: false,
-    attachment: false,
-    reasoning: false,
-    tool_call: false,
-    structured_output: false,
-    temperature: false,
-    experimental: false,
-    open_weights: false,
-    status: null,
-    family: null,
-    knowledge: null,
-    release_date: null,
-    max_output_tokens: null,
-    description: null,
-    homepage_url: null,
-    context_length: null,
-  };
-}
-
-const newModel = ref<ModelCreate>(emptyModelForm());
-
-const parameterOverrides = ref<ParameterOverridesConfig>({});
-const showProviderEditDialog = ref(false);
-
-/**
- * Backing boolean field per capability. Proxy-bound capabilities map to the
- * supports_* columns; informational capabilities share the models.dev name.
- */
-const CAPABILITY_FIELD: Record<ModelCapability, string> = {
-  vision: "supports_images",
-  image_generation: "supports_image_generation",
-  tts: "supports_tts",
-  stt: "supports_stt",
-  embedding: "supports_embedding",
-  realtime: "supports_realtime",
-  attachment: "attachment",
-  reasoning: "reasoning",
-  tool_call: "tool_call",
-  structured_output: "structured_output",
-  temperature: "temperature",
-  open_weights: "open_weights",
-  experimental: "experimental",
-};
-
-function getCapability(cap: ModelCapability): boolean {
-  return Boolean(newModel.value[CAPABILITY_FIELD[cap] as keyof ModelCreate]);
-}
-
-function setCapability(cap: ModelCapability, value: boolean) {
-  (newModel.value as Record<string, unknown>)[CAPABILITY_FIELD[cap]] = value;
-}
-const editingProviderIndex = ref<number | null>(null);
-const editingProviderData = ref<ModelProviderMapping>({
-  provider_name: "",
-  priority: 0,
-  provider_model_name: "",
-});
+const {
+  form: newModel,
+  parameterOverrides,
+  iconPreviewFailed,
+  getCapability,
+  setCapability,
+  showProviderEditDialog,
+  editingProviderIndex,
+  editingProviderData,
+  addProvider,
+  removeProvider,
+  openProviderEditDialog,
+  saveProviderEdit,
+  descriptionModel,
+  statusModel,
+  familyModel,
+  knowledgeModel,
+  releaseDateModel,
+  openForCreate,
+  openForEdit,
+  validate,
+  buildPayload,
+} = useModelForm();
 
 onMounted(() => {
   modelStore.fetchModels();
   providerStore.fetchProviders();
 });
 
-watch(
-  () => newModel.value.auto_eligible,
-  (val) => {
-    if (!val) {
-      newModel.value.quality_tier = null;
-      newModel.value.routing_assignments = null;
-    }
-  }
-);
-
-const iconPreviewFailed = ref(false);
-
-// Textarea binds a non-null string; proxy null <-> empty for the description field.
-const descriptionModel = computed({
-  get: () => newModel.value.description ?? "",
-  set: (v: string) => {
-    newModel.value.description = v || null;
-  },
-});
-
-// Select uses a "none" sentinel; null otherwise.
-const statusModel = computed({
-  get: () => newModel.value.status ?? "none",
-  set: (v: string) => {
-    newModel.value.status = v === "none" ? null : (v as "beta" | "deprecated");
-  },
-});
-
-// Text inputs bind non-null strings; proxy null <-> empty for optional fields.
-const familyModel = computed({
-  get: () => newModel.value.family ?? "",
-  set: (v: string) => {
-    newModel.value.family = v.trim() || null;
-  },
-});
-const knowledgeModel = computed({
-  get: () => newModel.value.knowledge ?? "",
-  set: (v: string) => {
-    newModel.value.knowledge = v || null;
-  },
-});
-const releaseDateModel = computed({
-  get: () => newModel.value.release_date ?? "",
-  set: (v: string) => {
-    newModel.value.release_date = v || null;
-  },
-});
-
-watch([() => newModel.value.icon_url, () => newModel.value.name], () => {
-  iconPreviewFailed.value = false;
-});
+const hasRoutingInfo = (model: ModelRead): boolean => Boolean(model.auto_eligible);
 
 const openCreateDialog = () => {
   isEditing.value = false;
   editingModelName.value = "";
-  iconPreviewFailed.value = false;
-  newModel.value = {
-    ...emptyModelForm(),
-    providers: [
-      {
-        provider_name: "",
-        priority: 0,
-        provider_model_name: "",
-      },
-    ],
-  };
-  parameterOverrides.value = {};
+  openForCreate();
   showCreateDialog.value = true;
 };
 
 const openEditDialog = (model: ModelRead) => {
   isEditing.value = true;
   editingModelName.value = model.name;
-  iconPreviewFailed.value = false;
-  newModel.value = {
-    ...emptyModelForm(),
-    name: model.name,
-    providers: model.providers?.length
-      ? [...model.providers]
-          .sort((a, b) => (b.priority || 0) - (a.priority || 0))
-          .map((p) => ({
-            provider_name: p.provider_name,
-            priority: p.priority || 0,
-            provider_model_name: p.provider_model_name,
-            input_cost_per_1m: p.input_cost_per_1m ?? null,
-            output_cost_per_1m: p.output_cost_per_1m ?? null,
-            cached_read_cost_per_1m: p.cached_read_cost_per_1m ?? null,
-            cached_write_cost_per_1m: p.cached_write_cost_per_1m ?? null,
-            audio_input_cost_per_1m: p.audio_input_cost_per_1m ?? null,
-            audio_output_cost_per_1m: p.audio_output_cost_per_1m ?? null,
-            image_input_cost_per_1m: p.image_input_cost_per_1m ?? null,
-            cost_per_image: p.cost_per_image ?? null,
-            audio_cost_per_minute: p.audio_cost_per_minute ?? null,
-            tts_cost_per_1m_chars: p.tts_cost_per_1m_chars ?? null,
-            web_search_cost_per_1k: p.web_search_cost_per_1k ?? null,
-            parameter_overrides: p.parameter_overrides ?? {},
-          }))
-      : [],
-    input_cost_per_1m: model.input_cost_per_1m,
-    output_cost_per_1m: model.output_cost_per_1m,
-    cached_read_cost_per_1m: model.cached_read_cost_per_1m ?? null,
-    cached_write_cost_per_1m: model.cached_write_cost_per_1m ?? null,
-    audio_input_cost_per_1m: model.audio_input_cost_per_1m ?? null,
-    audio_output_cost_per_1m: model.audio_output_cost_per_1m ?? null,
-    image_input_cost_per_1m: model.image_input_cost_per_1m ?? null,
-    cost_per_image: model.cost_per_image ?? null,
-    audio_cost_per_minute: model.audio_cost_per_minute ?? null,
-    tts_cost_per_1m_chars: model.tts_cost_per_1m_chars ?? null,
-    web_search_cost_per_1k: model.web_search_cost_per_1k ?? null,
-    icon_url: model.icon_url,
-    parameter_overrides: model.parameter_overrides ?? null,
-    auto_eligible: model.auto_eligible ?? false,
-    quality_tier: model.quality_tier ?? null,
-    supports_images: model.supports_images ?? false,
-    supports_image_generation: model.supports_image_generation ?? false,
-    supports_tts: model.supports_tts ?? false,
-    supports_stt: model.supports_stt ?? false,
-    supports_embedding: model.supports_embedding ?? false,
-    supports_realtime: model.supports_realtime ?? false,
-    attachment: model.attachment ?? false,
-    reasoning: model.reasoning ?? false,
-    tool_call: model.tool_call ?? false,
-    structured_output: model.structured_output ?? false,
-    temperature: model.temperature ?? false,
-    experimental: model.experimental ?? false,
-    open_weights: model.open_weights ?? false,
-    status: model.status ?? null,
-    family: model.family ?? null,
-    knowledge: model.knowledge ?? null,
-    release_date: model.release_date ?? null,
-    max_output_tokens: model.max_output_tokens ?? null,
-    routing_assignments: model.routing_assignments ?? null,
-    description: model.description ?? null,
-    homepage_url: model.homepage_url ?? null,
-    context_length: model.context_length ?? null,
-  };
-  parameterOverrides.value = model.parameter_overrides ?? {};
+  openForEdit(model);
   showCreateDialog.value = true;
 };
 
-const addProvider = () => {
-  newModel.value.providers.push({
-    provider_name: "",
-    priority: 0,
-    provider_model_name: "",
-    input_cost_per_1m: null,
-    output_cost_per_1m: null,
-    cached_read_cost_per_1m: null,
-    cached_write_cost_per_1m: null,
-    audio_input_cost_per_1m: null,
-    audio_output_cost_per_1m: null,
-    image_input_cost_per_1m: null,
-    cost_per_image: null,
-    audio_cost_per_minute: null,
-    tts_cost_per_1m_chars: null,
-    web_search_cost_per_1k: null,
-    parameter_overrides: {},
-  });
-};
-
-const removeProvider = (index: number) => {
-  newModel.value.providers.splice(index, 1);
-};
-
-const openProviderEditDialog = (index: number) => {
-  editingProviderIndex.value = index;
-  editingProviderData.value = { ...newModel.value.providers[index]! };
-  showProviderEditDialog.value = true;
-};
-
-const saveProviderEdit = () => {
-  if (editingProviderIndex.value !== null) {
-    newModel.value.providers[editingProviderIndex.value] = { ...editingProviderData.value };
-  }
-  showProviderEditDialog.value = false;
-  editingProviderIndex.value = null;
-};
-
 const saveModel = async () => {
-  if (!newModel.value.name.trim()) {
-    toast.error(t("models.nameRequired"));
-    return;
-  }
-
-  if (newModel.value.providers.length === 0) {
-    toast.error(t("models.atLeastOneProvider"));
-    return;
-  }
-
-  if (newModel.value.providers.some((p) => !p.provider_name)) {
-    toast.error(t("models.providerNameRequired"));
-    return;
-  }
-
-  if (newModel.value.providers.some((p) => !p.provider_model_name?.trim())) {
-    toast.error(t("models.providerModelNameRequired"));
-    return;
-  }
-
-  if (newModel.value.auto_eligible && !newModel.value.quality_tier) {
-    toast.error(t("models.qualityTierRequired"));
+  const errorKey = validate();
+  if (errorKey) {
+    toast.error(t(errorKey));
     return;
   }
 
   isSaving.value = true;
   try {
-    const modelData = { ...newModel.value };
-    if (!modelData.auto_eligible) {
-      modelData.quality_tier = null;
-      modelData.routing_assignments = null;
-    }
-
-    // Clean up provider data - preserve all fields
-    const cleanedProviders = modelData.providers.map((p) => ({
-      provider_name: p.provider_name,
-      priority: p.priority,
-      provider_model_name: p.provider_model_name,
-      input_cost_per_1m: p.input_cost_per_1m ?? null,
-      output_cost_per_1m: p.output_cost_per_1m ?? null,
-      cached_read_cost_per_1m: p.cached_read_cost_per_1m ?? null,
-      cached_write_cost_per_1m: p.cached_write_cost_per_1m ?? null,
-      audio_input_cost_per_1m: p.audio_input_cost_per_1m ?? null,
-      audio_output_cost_per_1m: p.audio_output_cost_per_1m ?? null,
-      image_input_cost_per_1m: p.image_input_cost_per_1m ?? null,
-      cost_per_image: p.cost_per_image ?? null,
-      audio_cost_per_minute: p.audio_cost_per_minute ?? null,
-      tts_cost_per_1m_chars: p.tts_cost_per_1m_chars ?? null,
-      web_search_cost_per_1k: p.web_search_cost_per_1k ?? null,
-      parameter_overrides: p.parameter_overrides ?? {},
-    }));
-
-    // Determine parameter overrides - use empty object if no overrides configured
-    const overrides =
-      Object.keys(parameterOverrides.value).length > 0 ? parameterOverrides.value : null;
-
+    const payload = buildPayload();
     if (isEditing.value) {
-      const newName = modelData.name.trim();
-      await modelStore.updateModel(editingModelName.value, {
-        name: newName,
-        providers: cleanedProviders,
-        input_cost_per_1m: modelData.input_cost_per_1m,
-        output_cost_per_1m: modelData.output_cost_per_1m,
-        cached_read_cost_per_1m: modelData.cached_read_cost_per_1m,
-        cached_write_cost_per_1m: modelData.cached_write_cost_per_1m,
-        audio_input_cost_per_1m: modelData.audio_input_cost_per_1m,
-        audio_output_cost_per_1m: modelData.audio_output_cost_per_1m,
-        image_input_cost_per_1m: modelData.image_input_cost_per_1m,
-        cost_per_image: modelData.cost_per_image,
-        audio_cost_per_minute: modelData.audio_cost_per_minute,
-        tts_cost_per_1m_chars: modelData.tts_cost_per_1m_chars,
-        web_search_cost_per_1k: modelData.web_search_cost_per_1k,
-        icon_url: modelData.icon_url,
-        parameter_overrides: overrides,
-        auto_eligible: modelData.auto_eligible,
-        quality_tier: modelData.quality_tier || null,
-        routing_assignments: modelData.routing_assignments,
-        supports_images: modelData.supports_images ?? false,
-        supports_image_generation: modelData.supports_image_generation ?? false,
-        supports_tts: modelData.supports_tts ?? false,
-        supports_stt: modelData.supports_stt ?? false,
-        supports_embedding: modelData.supports_embedding ?? false,
-        supports_realtime: modelData.supports_realtime ?? false,
-        attachment: modelData.attachment ?? false,
-        reasoning: modelData.reasoning ?? false,
-        tool_call: modelData.tool_call ?? false,
-        structured_output: modelData.structured_output ?? false,
-        temperature: modelData.temperature ?? false,
-        experimental: modelData.experimental ?? false,
-        open_weights: modelData.open_weights ?? false,
-        status: modelData.status || null,
-        family: modelData.family ?? null,
-        knowledge: modelData.knowledge ?? null,
-        release_date: modelData.release_date ?? null,
-        max_output_tokens: modelData.max_output_tokens ?? null,
-        description: modelData.description ?? null,
-        homepage_url: modelData.homepage_url ?? null,
-        context_length: modelData.context_length ?? null,
-      });
+      await modelStore.updateModel(editingModelName.value, payload);
     } else {
-      await modelStore.createModel({
-        ...modelData,
-        providers: cleanedProviders,
-        parameter_overrides: overrides,
-      });
+      await modelStore.createModel(payload);
     }
 
     showCreateDialog.value = false;

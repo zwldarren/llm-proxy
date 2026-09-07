@@ -5,7 +5,7 @@ from typing import Any
 
 import orjson
 
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.conversion import plan_conversion
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_output
@@ -99,19 +99,6 @@ class OpenAIAdapter(
     SPEECH_ENDPOINT = "/audio/speech"
     TRANSCRIPTION_ENDPOINT = "/audio/transcriptions"
     TRANSLATION_ENDPOINT = "/audio/translations"
-
-    def __init__(
-        self,
-        *,
-        config: AdapterConfig | None = None,
-        **kwargs: Any,
-    ):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "openai")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
     def _target_endpoint(self) -> str:
         """OpenAI adapter targets the Responses API endpoint."""

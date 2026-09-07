@@ -169,6 +169,20 @@ export const useChatStore = defineStore("chat", () => {
     stopAudio();
   }
 
+  /** Session teardown: drop the transcript from memory AND localStorage so
+   *  the next user on this browser never sees the previous user's chat.
+   *  (clearMessages alone leaves the persisted keys in place if the tab
+   *  closes before the debounced writer flushes.) */
+  function reset() {
+    clearMessages();
+    try {
+      localStorage.removeItem(STORAGE_KEYS.CHAT_MESSAGES);
+      localStorage.removeItem(STORAGE_KEYS.CHAT_RUNS);
+    } catch {
+      // ignore localStorage errors
+    }
+  }
+
   function setLoading(val: boolean) {
     isLoading.value = val;
   }
@@ -188,6 +202,7 @@ export const useChatStore = defineStore("chat", () => {
     stopAudio,
     pushMessage,
     clearMessages,
+    reset,
     setLoading,
     setError,
   };

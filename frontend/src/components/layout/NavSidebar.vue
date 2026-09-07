@@ -72,6 +72,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useSystemStore } from "@/stores/system";
 import { useProviderStore } from "@/stores/providers";
 import { useModelStore } from "@/stores/models";
+import { useCatalogStore } from "@/stores/catalog";
 import { useApiKeyStore } from "@/stores/apiKeys";
 import { useMcpServerStore } from "@/stores/mcpServers";
 
@@ -81,6 +82,7 @@ const { t } = useI18n();
 const authStore = useAuthStore();
 const providerStore = useProviderStore();
 const modelStore = useModelStore();
+const catalogStore = useCatalogStore();
 const apiKeyStore = useApiKeyStore();
 const mcpServerStore = useMcpServerStore();
 const { state, isMobile, toggleSidebar } = useSidebar();
@@ -328,6 +330,7 @@ const PREFETCH_ROUTES: Record<string, () => void> = {
       modelStore.prefetch();
       import("@/views/config/ModelsView.vue");
     } else {
+      catalogStore.prefetch();
       import("@/views/ModelPlazaView.vue");
     }
   },

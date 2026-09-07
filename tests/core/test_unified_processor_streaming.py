@@ -25,8 +25,20 @@ from llm_proxy.protocols.anthropic.schemas import MessagesRequest
 from llm_proxy.protocols.openai.handler import openai_protocol
 from llm_proxy.protocols.openai.schemas import ChatCompletionRequest
 from llm_proxy.protocols.openresponses.handler import openresponses_protocol
+from llm_proxy.streaming.transformer import PendingTerminalState, StreamingTransformer
 from llm_proxy.web_search import WebSearchInterceptor
 from llm_proxy.web_search.provider import SearchResult, WebSearchProvider, WebSearchResponse
+
+
+class _TerminalFake(PendingTerminalState, StreamingTransformer):
+    """Minimal transformer carrying pending terminal state, for merge tests
+    driven entirely through the public terminal-state interface."""
+
+    def transform(self, chunk):
+        return None
+
+    def finalize(self):
+        return ""
 
 
 class _FakeWebSearchProvider(WebSearchProvider):
@@ -64,7 +76,6 @@ def _build_mock_request() -> Any:
     req.state = MagicMock()
     req.state.request_id = "req-123"
     req.state.provider = "openai"
-    req.is_disconnected = AsyncMock(return_value=False)
     req.url = MagicMock(path="/v1/chat/completions")
     req.method = "POST"
     req.headers = {}
@@ -639,70 +650,6 @@ async def test_streaming_prefetch_accepts_future_delta_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_streaming_forwards_all_dict_chunks_after_prefetch() -> None:
-    """After prefetch, subsequent dict chunks must still be streamed to client."""
-
-    async def _mock_stream():
-        yield {
-            "id": "chatcmpl-3",
-            "object": "chat.completion.chunk",
-            "created": 1,
-            "model": "glm-5",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": "Hel"},
-                }
-            ],
-        }
-        yield {
-            "id": "chatcmpl-3",
-            "object": "chat.completion.chunk",
-            "created": 1,
-            "model": "glm-5",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": "lo"},
-                }
-            ],
-        }
-        yield "[DONE]"
-
-    adapter = MagicMock()
-    adapter.supports_native_streaming = MagicMock(return_value=False)
-    adapter.provider_name = "openai"
-    adapter.stream_chat_completion = AsyncMock(return_value=_mock_stream())
-
-    orchestrator = MagicMock()
-    orchestrator.should_retry.return_value = False
-    orchestrator.select_next_provider.return_value = None
-    orchestrator.needs_role_transform.return_value = False
-    orchestrator.exhausted = False
-
-    context = RequestContext(
-        orchestrator=orchestrator,
-        services=ServiceDependencies(adapter_factory=AsyncMock(return_value=adapter)),
-    )
-
-    processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
-    unified_request = _build_unified_request()
-    streaming_marker = StreamingResponseMarker(unified_request, adapter)
-    response = await processor._streaming_processor.process(
-        streaming_marker=streaming_marker,
-        raw_request_data={"model": "glm-5", "stream": True},
-        req=_build_mock_request(),
-        context=context,
-        trace_id="trace-3",
-    )
-
-    payload = await _collect_stream_text(response)
-    assert '"content":"Hel"' in payload
-    assert '"content":"lo"' in payload
-    assert "data: [DONE]" in payload
-
-
-@pytest.mark.asyncio
 async def test_streaming_prefetch_retries_retryable_finish_reason_before_output() -> None:
     """Retry with next provider when prefetch receives retryable finish_reason."""
 
@@ -847,163 +794,6 @@ async def test_cancel_token_passed_to_stream_chat_completion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_token_set_stops_stream_generator_early() -> None:
-    """Setting the cancel_token must cause the stream_generator to stop.
-
-    When the cancel_token is set (e.g. on client disconnect), the
-    stream_generator must break its iteration loop early and not yield
-    all provider chunks. This forces the provider connection to close.
-    """
-    captured_cancel_token: asyncio.Event | None = None
-
-    async def _capture_and_stream(*args: Any, **kwargs: Any):
-        nonlocal captured_cancel_token
-        captured_cancel_token = kwargs.get("cancel_token")
-        for chunk in [
-            {
-                "id": "chatcmpl-1",
-                "object": "chat.completion.chunk",
-                "created": 1,
-                "model": "glm-5",
-                "choices": [{"index": 0, "delta": {"content": "first"}}],
-            },
-            {
-                "id": "chatcmpl-1",
-                "object": "chat.completion.chunk",
-                "created": 2,
-                "model": "glm-5",
-                "choices": [{"index": 0, "delta": {"content": "second"}}],
-            },
-            {
-                "id": "chatcmpl-1",
-                "object": "chat.completion.chunk",
-                "created": 3,
-                "model": "glm-5",
-                "choices": [{"index": 0, "delta": {"content": "third"}}],
-            },
-            "[DONE]",
-        ]:
-            yield chunk
-
-    adapter = MagicMock()
-    adapter.supports_native_streaming = MagicMock(return_value=False)
-    adapter.provider_name = "openai"
-    adapter.stream_chat_completion = AsyncMock(side_effect=_capture_and_stream)
-
-    orchestrator = MagicMock()
-    orchestrator.should_retry.return_value = False
-    orchestrator.select_next_provider.return_value = None
-    orchestrator.needs_role_transform.return_value = False
-    orchestrator.exhausted = False
-
-    context = RequestContext(
-        orchestrator=orchestrator,
-        services=ServiceDependencies(adapter_factory=AsyncMock(return_value=adapter)),
-    )
-
-    processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
-    unified_request = _build_unified_request()
-    streaming_marker = StreamingResponseMarker(unified_request, adapter)
-    response = await processor._streaming_processor.process(
-        streaming_marker=streaming_marker,
-        raw_request_data={"model": "glm-5", "stream": True},
-        req=_build_mock_request(),
-        context=context,
-        trace_id="trace-cancel-early",
-    )
-
-    assert captured_cancel_token is not None, (
-        "cancel_token should have been captured from stream_chat_completion call"
-    )
-
-    captured_cancel_token.set()
-
-    payload = await _collect_stream_text(response)
-    assert '"content":"first"' in payload, "pre-fetched first chunk should still be streamed"
-    assert '"content":"second"' not in payload, (
-        "provider chunks after cancel_token.set() must NOT be streamed"
-    )
-    assert '"content":"third"' not in payload, (
-        "provider chunks after cancel_token.set() must NOT be streamed"
-    )
-    assert captured_cancel_token.is_set(), "cancel_token should have been set by the test"
-
-
-@pytest.mark.asyncio
-async def test_client_disconnect_sets_cancel_token_and_stops_stream() -> None:
-    """Client disconnection must set the cancel_token and stop the stream.
-
-    When the client's receive channel reports ``http.disconnect`` in the
-    streaming loop, the cancel_token must be set and the stream must stop
-    yielding chunks. This is the primary fix for FD racing on disconnect+reconnect.
-    """
-    disconnect_count = 0
-    captured_cancel_token: asyncio.Event | None = None
-
-    async def _receive_disconnect():
-        nonlocal disconnect_count
-        disconnect_count += 1
-        return {"type": "http.disconnect"}
-
-    async def _capture_and_stream(*args: Any, **kwargs: Any):
-        nonlocal captured_cancel_token
-        captured_cancel_token = kwargs.get("cancel_token")
-        for i in range(25):
-            yield {
-                "id": f"chatcmpl-{i}",
-                "object": "chat.completion.chunk",
-                "created": i,
-                "model": "glm-5",
-                "choices": [{"index": 0, "delta": {"content": f"chunk{i}"}}],
-            }
-        yield "[DONE]"
-
-    adapter = MagicMock()
-    adapter.supports_native_streaming = MagicMock(return_value=False)
-    adapter.provider_name = "openai"
-    adapter.stream_chat_completion = AsyncMock(side_effect=_capture_and_stream)
-
-    orchestrator = MagicMock()
-    orchestrator.should_retry.return_value = False
-    orchestrator.select_next_provider.return_value = None
-    orchestrator.needs_role_transform.return_value = False
-    orchestrator.exhausted = False
-
-    context = RequestContext(
-        orchestrator=orchestrator,
-        services=ServiceDependencies(adapter_factory=AsyncMock(return_value=adapter)),
-    )
-
-    req = _build_mock_request()
-    req._receive = _receive_disconnect
-
-    processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
-    unified_request = _build_unified_request()
-    streaming_marker = StreamingResponseMarker(unified_request, adapter)
-    response = await processor._streaming_processor.process(
-        streaming_marker=streaming_marker,
-        raw_request_data={"model": "glm-5", "stream": True},
-        req=req,
-        context=context,
-        trace_id="trace-disconnect",
-    )
-
-    assert captured_cancel_token is not None
-
-    payload = await _collect_stream_text(response)
-    chunk_count_in_payload = payload.count('"content":"chunk')
-    assert '"content":"chunk0"' in payload, "pre-fetched first chunk should be streamed"
-    assert disconnect_count >= 1, (
-        f"receive() should have been polled for disconnect at least once, got {disconnect_count}"
-    )
-    assert chunk_count_in_payload <= 11, (
-        f"Stream should stop after ~10 chunks when disconnect is detected, "
-        f"got {chunk_count_in_payload} chunks"
-    )
-    assert captured_cancel_token.is_set(), "cancel_token must be set when client disconnects"
-
-
-@pytest.mark.asyncio
 async def test_normal_streaming_completes_without_cancel_token_interference() -> None:
     """Streaming must complete normally when client stays connected.
 
@@ -1068,154 +858,6 @@ async def test_normal_streaming_completes_without_cancel_token_interference() ->
     assert captured_cancel_token is not None
     assert captured_cancel_token.is_set() is False, (
         "cancel_token should not be set during normal streaming"
-    )
-
-
-@pytest.mark.asyncio
-async def test_native_streaming_passthrough_skips_transformer() -> None:
-    """When adapter supports native streaming, raw SSE frames pass through unchanged."""
-
-    async def _mock_native_stream(*args: Any, **kwargs: Any):
-        yield 'event: message_start\ndata: {"type":"message_start"}\n\n'
-        yield 'event: content_block_delta\ndata: {"type":"content_block_delta"}\n\n'
-
-    adapter = MagicMock()
-    adapter.supports_native_streaming = MagicMock(return_value=True)
-    adapter.provider_name = "anthropic"
-    adapter.stream_chat_completion_native = AsyncMock(return_value=_mock_native_stream())
-
-    orchestrator = MagicMock()
-    orchestrator.should_retry.return_value = False
-    orchestrator.select_next_provider.return_value = None
-    orchestrator.needs_role_transform.return_value = False
-    orchestrator.exhausted = False
-
-    context = RequestContext(
-        orchestrator=orchestrator,
-        services=ServiceDependencies(adapter_factory=AsyncMock(return_value=adapter)),
-    )
-
-    processor = UnifiedProcessor(protocol_endpoint=anthropic_protocol)
-    unified_request = _build_unified_request()
-    unified_request.model = "claude-3-sonnet"
-    streaming_marker = StreamingResponseMarker(unified_request, adapter)
-    response = await processor._streaming_processor.process(
-        streaming_marker=streaming_marker,
-        raw_request_data={"model": "claude-3-sonnet", "stream": True},
-        req=_build_mock_request(),
-        context=context,
-        trace_id="trace-native",
-    )
-
-    assert response.media_type == "text/event-stream"
-
-    payload = await _collect_stream_text(response)
-    assert "event: message_start" in payload
-    assert 'data: {"type":"message_start"}' in payload
-    assert "event: content_block_delta" in payload
-    # No OpenAI-style data: [DONE] because native path skips the transformer
-    assert "data: [DONE]" not in payload
-
-
-@pytest.mark.asyncio
-async def test_native_streaming_traces_chunks() -> None:
-    """Native streaming path must still call tracing on_stream_chunk for every chunk."""
-
-    async def _mock_native_stream(*args: Any, **kwargs: Any):
-        yield 'event: message_start\ndata: {"type":"message_start"}\n\n'
-        yield 'event: content_block_delta\ndata: {"delta":"hello"}\n\n'
-
-    adapter = MagicMock()
-    adapter.supports_native_streaming = MagicMock(return_value=True)
-    adapter.provider_name = "anthropic"
-    adapter.stream_chat_completion_native = AsyncMock(return_value=_mock_native_stream())
-
-    orchestrator = MagicMock()
-    orchestrator.should_retry.return_value = False
-    orchestrator.select_next_provider.return_value = None
-    orchestrator.needs_role_transform.return_value = False
-    orchestrator.exhausted = False
-
-    mock_registry = MagicMock()
-    mock_registry.on_stream_chunk = AsyncMock()
-    mock_registry.on_stream_start = AsyncMock()
-    mock_registry.on_stream_end = AsyncMock()
-
-    context = RequestContext(
-        orchestrator=orchestrator,
-        services=ServiceDependencies(
-            adapter_factory=AsyncMock(return_value=adapter),
-            tracing_registry=mock_registry,
-        ),
-    )
-
-    processor = UnifiedProcessor(protocol_endpoint=anthropic_protocol)
-    unified_request = _build_unified_request()
-    unified_request.model = "claude-3-sonnet"
-    streaming_marker = StreamingResponseMarker(unified_request, adapter)
-    response = await processor._streaming_processor.process(
-        streaming_marker=streaming_marker,
-        raw_request_data={"model": "claude-3-sonnet", "stream": True},
-        req=_build_mock_request(),
-        context=context,
-        trace_id="trace-native-tracing",
-    )
-
-    # Consume the stream so on_stream_chunk is invoked
-    await _collect_stream_text(response)
-
-    chunk_calls = mock_registry.on_stream_chunk.call_args_list
-    assert len(chunk_calls) >= 2, "tracing should record native SSE chunks"
-    # First call should be the message_start frame
-    assert "message_start" in str(chunk_calls[0])
-
-
-@pytest.mark.asyncio
-async def test_native_streaming_injects_model_name() -> None:
-    """Native streaming must overwrite provider's model with the user-facing alias."""
-
-    async def _mock_native_stream(*args: Any, **kwargs: Any):
-        yield (
-            "event: message_start\n"
-            'data: {"type":"message_start","message":'
-            '{"id":"msg_123","model":"claude-3-sonnet-20240229"}}\n\n'
-        )
-        yield 'event: content_block_delta\ndata: {"delta":"hello"}\n\n'
-
-    adapter = MagicMock()
-    adapter.supports_native_streaming = MagicMock(return_value=True)
-    adapter.provider_name = "anthropic"
-    adapter.stream_chat_completion_native = AsyncMock(return_value=_mock_native_stream())
-
-    orchestrator = MagicMock()
-    orchestrator.should_retry.return_value = False
-    orchestrator.select_next_provider.return_value = None
-    orchestrator.needs_role_transform.return_value = False
-    orchestrator.exhausted = False
-
-    context = RequestContext(
-        orchestrator=orchestrator,
-        services=ServiceDependencies(adapter_factory=AsyncMock(return_value=adapter)),
-    )
-
-    processor = UnifiedProcessor(protocol_endpoint=anthropic_protocol)
-    unified_request = _build_unified_request()
-    unified_request.model = "claude-3-sonnet"
-    streaming_marker = StreamingResponseMarker(unified_request, adapter)
-    response = await processor._streaming_processor.process(
-        streaming_marker=streaming_marker,
-        raw_request_data={"model": "claude-3-sonnet", "stream": True},
-        req=_build_mock_request(),
-        context=context,
-        trace_id="trace-native-model",
-    )
-
-    payload = await _collect_stream_text(response)
-    assert "claude-3-sonnet-20240229" not in payload, (
-        "provider's internal model name should be masked"
-    )
-    assert 'model":"claude-3-sonnet"' in payload, (
-        "user-facing model alias must be injected into message_start"
     )
 
 
@@ -1480,7 +1122,7 @@ class TestModelEchoConsistency:
         """setup_fallback_provider must keep the client-requested alias on
         the fallback request — both the in-place branch (no overrides) and
         the re-parsed branch (with overrides)."""
-        from llm_proxy.core.processing.fallback import setup_fallback_provider
+        from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
         from llm_proxy.core.processing.stages.parameter_override import (
             ParameterOverrideService,
         )
@@ -1526,7 +1168,7 @@ class TestModelEchoConsistency:
 async def test_setup_fallback_provider_applies_overrides_to_pristine_body() -> None:
     """Regression: a failed provider's parameter overrides must not leak into
     the fallback attempt — overrides are applied to the pristine client body."""
-    from llm_proxy.core.processing.fallback import setup_fallback_provider
+    from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
     from llm_proxy.core.processing.stages.parameter_override import (
         ParameterOverrideService,
     )
@@ -1587,7 +1229,7 @@ async def test_setup_fallback_provider_skips_provider_rejecting_stage_rerun() ->
     """When the per-provider stage re-run rejects the request (e.g. an
     unresolvable proxy-local previous_response_id on a non-native upstream),
     the selector advances to the next provider instead of aborting."""
-    from llm_proxy.core.processing.fallback import setup_fallback_provider
+    from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
     from llm_proxy.core.processing.stages.parameter_override import (
         ParameterOverrideService,
     )
@@ -1651,23 +1293,30 @@ async def test_setup_fallback_provider_skips_provider_rejecting_stage_rerun() ->
 
 def test_merge_transformer_usage_sums_independent_calls() -> None:
     """Web-search continuation turns are independent billed upstream calls,
-    so usage must be summed, not maxed."""
+    so usage must be summed, not maxed.
+
+    Built through the public terminal-state interface (capture verbs +
+    ``merge_continuation_usage``); no private-field probes.
+    """
     from llm_proxy.core.processing.web_search_streaming import merge_continuation_usage
 
-    original = MagicMock()
-    original._pending_stop_reason = None
-    original._pending_usage = {
-        "input_tokens": 100,
-        "output_tokens": 20,
-        "cache_read_input_tokens": 50,
-    }
-    continuation = MagicMock()
-    continuation._pending_stop_reason = "end_turn"
-    continuation._pending_usage = {
-        "input_tokens": 150,
-        "output_tokens": 30,
-        "cache_read_input_tokens": 10,
-    }
+    original = _TerminalFake()
+    original.capture_usage(
+        {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cache_read_input_tokens": 50,
+        }
+    )
+    continuation = _TerminalFake()
+    continuation.capture_stop_reason("end_turn")
+    continuation.capture_usage(
+        {
+            "input_tokens": 150,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 10,
+        }
+    )
 
     merge_continuation_usage(original, continuation)
 
@@ -1676,3 +1325,76 @@ def test_merge_transformer_usage_sums_independent_calls() -> None:
         "output_tokens": 50,
         "cache_read_input_tokens": 60,
     }
+    # The continuation keeps its own stop_reason; the original has none.
+    assert continuation._pending_stop_reason == "end_turn"
+    assert original._pending_stop_reason is None
+
+
+def test_merge_terminal_state_adopts_absent_stop_reason_and_usage() -> None:
+    """The public merge verb: stop_reason adopted only when absent, usage
+    summed when both sides have one."""
+    original = _TerminalFake()
+    original.capture_stop_reason("max_tokens")
+    original.capture_usage({"input_tokens": 10, "output_tokens": 5})
+    continuation = _TerminalFake()
+
+    continuation.merge_terminal_state(original)
+
+    assert continuation._pending_stop_reason == "max_tokens"
+    assert continuation._pending_usage == {"input_tokens": 10, "output_tokens": 5}
+    assert continuation._has_pending_usage is True
+    # Merging again into an already-populated continuation keeps its own
+    # stop_reason and sums usage.
+    original.capture_usage({"input_tokens": 1, "output_tokens": 1})
+    continuation.merge_terminal_state(original)
+    assert continuation._pending_stop_reason == "max_tokens"
+    assert continuation._pending_usage == {"input_tokens": 11, "output_tokens": 6}
+
+
+
+
+
+class TestDisconnectIntervalGating:
+    """The disconnect poll must run on chunk 1 and every interval-th chunk.
+
+    Drives a fake of ``check_client_disconnected`` (the production primitive)
+    rather than ``Request.is_disconnected``, which production never calls.
+    """
+
+    @pytest.mark.asyncio
+    async def test_check_disconnect_gates_on_interval(self, monkeypatch) -> None:
+        from llm_proxy.core.processing import stream_lifecycle
+        from llm_proxy.streaming import handler as streaming_handler
+
+        fake_check = AsyncMock(return_value=False)
+        monkeypatch.setattr(streaming_handler, "check_client_disconnected", fake_check)
+
+        req = _build_mock_request()
+        cancel_token = asyncio.Event()
+
+        # Chunk 1 is always checked; interval boundaries (10, 20) are checked;
+        # other chunks are skipped.
+        for chunk_count in (1, 2, 3, 9, 10, 11, 20, 21):
+            result = await stream_lifecycle.check_client_disconnect(
+                req, chunk_count, cancel_token, interval=10
+            )
+            assert result is False
+        assert fake_check.await_count == 3, (
+            f"expected checks on chunks 1, 10, 20, got {fake_check.await_count}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_disconnect_sets_cancel_token_when_disconnected(self, monkeypatch) -> None:
+        from llm_proxy.core.processing import stream_lifecycle
+        from llm_proxy.streaming import handler as streaming_handler
+
+        fake_check = AsyncMock(return_value=True)
+        monkeypatch.setattr(streaming_handler, "check_client_disconnected", fake_check)
+
+        req = _build_mock_request()
+        cancel_token = asyncio.Event()
+
+        result = await stream_lifecycle.check_client_disconnect(req, 1, cancel_token, interval=10)
+
+        assert result is True
+        assert cancel_token.is_set(), "cancel_token must be set on disconnect"

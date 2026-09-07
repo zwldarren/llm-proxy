@@ -29,9 +29,10 @@ from llm_proxy.models import (
 class _FakeTransformer:
     """Minimal transformer satisfying the continuation seam's contract.
 
-    Tracks an Anthropic-style ``_current_block_index`` cursor so the
-    continuation loop's absolute-index math is exercised; ``created`` records
-    every instance (original + continuations) for index assertions.
+    Implements the public block-cursor interface with Anthropic semantics
+    (``block_cursor()`` is the next free block index; emitted result blocks
+    don't advance it); ``created`` records every instance (original +
+    continuations) for index assertions.
     """
 
     created: list = []
@@ -47,6 +48,12 @@ class _FakeTransformer:
     @classmethod
     def continuation(cls, **kwargs: Any) -> _FakeTransformer:
         return cls(**kwargs)
+
+    def block_cursor(self) -> int:
+        return self._current_block_index
+
+    def continuation_start_index(self, result_count: int, fallback: int) -> int:
+        return self._current_block_index + result_count
 
     def get_accumulated_output(self) -> list[Any]:
         return self._output

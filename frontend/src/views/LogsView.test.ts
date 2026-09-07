@@ -41,6 +41,7 @@ vi.mock("@/stores/auth", () => {
   return {
     useAuthStore: vi.fn(() => ({
       isAuthenticated: true,
+      isAdmin: true,
     })),
   };
 });
@@ -231,9 +232,10 @@ describe("LogsView", () => {
     expect(logsApi.getLogs).toHaveBeenCalled();
     vi.clearAllMocks();
 
-    // Switch tab to audit
-    // @ts-expect-error - vm exposes internal variables in setup
-    wrapper.vm.activeTab = "audit";
+    // Switch tab to audit by clicking the tab trigger (public behavior)
+    const auditTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text() === "nav.auditLogs");
+    expect(auditTab).toBeTruthy();
+    await auditTab!.trigger("mousedown");
     await flushPromises();
 
     // Wait a little bit more than debounce time to make sure no debounced fetch fires

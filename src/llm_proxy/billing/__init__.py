@@ -1,6 +1,7 @@
 """Billing package — token counting and cost calculation."""
 
 from llm_proxy.billing.cost import CostBreakdown, PricingRates, calculate_cost
+from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
 from llm_proxy.billing.tokens import (
     TokenUsage,
     count_embedding_input_tokens,
@@ -13,6 +14,7 @@ from llm_proxy.billing.tokens import (
     estimate_usage_from_request,
     extract_tokens_from_usage,
 )
+from llm_proxy.billing.transcription_stream_usage import TranscriptionStreamUsageTracker
 
 __all__ = [
     # Cost
@@ -30,4 +32,7 @@ __all__ = [
     "estimate_embedding_usage",
     "estimate_usage_from_request",
     "extract_tokens_from_usage",
+    # Stream usage trackers
+    "ImageStreamUsageTracker",
+    "TranscriptionStreamUsageTracker",
 ]

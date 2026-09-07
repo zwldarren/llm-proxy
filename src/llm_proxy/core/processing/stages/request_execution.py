@@ -13,12 +13,12 @@ from llm_proxy.core.exceptions import (
     ProviderError,
 )
 from llm_proxy.core.processing.base import RequestContext, mirror_conversion_tier
-from llm_proxy.core.processing.fallback import (
+from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
+from llm_proxy.core.processing.stages.fallback import (
     FallbackAction,
     execute_fallback,
     plan_fallback,
 )
-from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
 from llm_proxy.core.processing.stages.parameter_override import ParameterOverrideService
 from llm_proxy.core.processing.stages.role_normalization import normalize_developer_roles
 from llm_proxy.core.processing.strategies import StreamingResponseMarker

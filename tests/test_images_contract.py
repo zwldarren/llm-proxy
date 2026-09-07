@@ -229,9 +229,9 @@ def test_edit_stream_events_pass_through_unchanged():
 
 
 def test_usage_tracker_observes_edit_completed():
-    from llm_proxy.core.processing.streaming_processor import _ImageStreamUsageTracker
+    from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
 
-    tracker = _ImageStreamUsageTracker()
+    tracker = ImageStreamUsageTracker()
     tracker.observe(
         "event: image_edit.completed\n"
         "data: "

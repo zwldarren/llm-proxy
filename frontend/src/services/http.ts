@@ -100,7 +100,10 @@ export function handleUnauthorized(): void {
   // won't include the expired JWT before the reactive store is updated.
   tokenStorage.remove();
 
-  // Clear reactive store state synchronously (no API call needed).
+  // Clear the full local session (credentials + all cached stores).
+  // Credentials alone are not enough: the per-user list caches (catalog is
+  // allowlist-filtered server-side) would otherwise survive and be served to
+  // the next login on this browser.
   // We intentionally do NOT call the backend /logout endpoint here:
   // - The token is already invalid/expired; the backend can't attribute it.
   // - Calling logout creates noise in audit logs (duplicate logout entries
@@ -109,7 +112,7 @@ export function handleUnauthorized(): void {
   import("@/stores/auth").then(({ useAuthStore }) => {
     try {
       const store = useAuthStore();
-      store.clearCredentials();
+      store.clearLocalSession();
     } catch (e) {
       console.error("Failed to clear authStore on unauthorized error:", e);
     }

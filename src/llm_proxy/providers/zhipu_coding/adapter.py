@@ -14,9 +14,7 @@ llm_proxy.core.conversion, ADR-0002). Pay-as-you-go 智谱 keys should use the
 ``zhipu`` provider type instead.
 """
 
-from typing import Any
-
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.providers.openai_compatible._glm import GLMBase
 
 
@@ -37,14 +35,6 @@ class ZhipuCodingAdapter(GLMBase):
     #: Native endpoints live on different roots than the coding chat base.
     ANTHROPIC_MESSAGES_URL = "https://open.bigmodel.cn/api/anthropic/v1/messages"
     RESPONSES_URL = "https://open.bigmodel.cn/api/v1/responses"
-
-    def __init__(self, *, config: AdapterConfig | None = None, **kwargs: Any):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "zhipu-coding")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
 
 __all__ = ["ZhipuCodingAdapter"]

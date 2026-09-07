@@ -34,3 +34,10 @@ coverage
 
 # Vitest
 __screenshots__/
+
+# Package manager is bun (bun.lock is the committed lockfile).
+package-lock.json
+
+# Sources are .ts/.vue only — ignore stray vue-tsc emit, which vite would
+# resolve ahead of the .ts sources for extensionless imports.
+src/**/*.js

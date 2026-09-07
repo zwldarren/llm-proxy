@@ -17,7 +17,7 @@ import base64
 import time
 from typing import Any
 
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models import (
     InternalEmbeddingRequest,
@@ -68,19 +68,6 @@ class ChutesAdapter(OpenAICompatibleBase):
     LOBE_ICON_ID = None
 
     DEFAULT_BASE_URL = "https://llm.chutes.ai/v1"
-
-    def __init__(
-        self,
-        *,
-        config: AdapterConfig | None = None,
-        **kwargs: Any,
-    ):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "chutes")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
     def _normalize_model_name(self, model: str) -> str:
         if "/" in model:

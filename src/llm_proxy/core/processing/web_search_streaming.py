@@ -28,6 +28,11 @@ from llm_proxy.models.conversation import ConversationContext
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 
+# The usage-sum rule lives next to ``PendingTerminalState.merge_terminal_state``
+# (its only consumer, in ``streaming/transformer.py``); re-exported here for
+# the non-streaming continuation path and existing importers (ADR-0007).
+from llm_proxy.streaming.transformer import sum_usage_dicts  # noqa: F401
+
 logger = get_logger(__name__)
 
 MAX_CONTINUATION_DEPTH = 5
@@ -39,21 +44,18 @@ def _normalize_tool_name(name: str) -> str:
 
 
 def _absolute_block_cursor(transformer: Any) -> int | None:
-    """Return the transformer's absolute next-block/item cursor, or None when
-    the transformer tracks no cursor.
+    """Return the transformer's absolute block/item cursor, or None when the
+    transformer tracks no cursor.
 
-    The original transformer's cursor equals the length of its accumulated
-    output; a continuation transformer's accumulated output is relative to its
-    own start index, so the cursor is the only absolute reference. Anthropic
-    tracks it as ``_current_block_index``, OpenResponses as
-    ``state.current_item_index``.
+    Goes through the transformer's public ``block_cursor()`` verb; the cursor
+    position semantics (Anthropic: next free block index, OpenResponses: last
+    emitted item) are resolved by the concrete transformer — see
+    ``continuation_start_index``. Duck-typed fakes without the verb report no
+    cursor.
     """
-    block_cursor = getattr(transformer, "_current_block_index", None)
-    if block_cursor is not None:
-        return block_cursor
-    src_state = getattr(transformer, "state", None)
-    if src_state is not None:
-        return src_state.current_item_index
+    getter = getattr(transformer, "block_cursor", None)
+    if callable(getter):
+        return getter()
     return None
 
 
@@ -390,17 +392,13 @@ class WebSearchStreamProcessor:
             # continuation: each continuation transformer starts with an empty
             # accumulated output, so its length is relative to its own start
             # index. The transformer's cursor tracks the absolute position
-            # instead. Anthropic's ``_current_block_index`` is the next block
-            # index — web-search result blocks are emitted at explicit indices
-            # and do not advance it — while OpenResponses' ``current_item_index``
-            # is left pointing at the last emitted web-search result item.
-            block_cursor = _absolute_block_cursor(state.transformer)
-            if block_cursor is not None and hasattr(state.transformer, "_current_block_index"):
-                next_index = block_cursor + len(ws_results)
-            elif block_cursor is not None:
-                next_index = block_cursor + 1
-            else:
-                next_index = len(accumulated) + len(ws_results)
+            # instead; ``continuation_start_index`` resolves the
+            # protocol-specific cursor semantics (Anthropic: result blocks
+            # don't advance the next-free-index cursor; OpenResponses: the
+            # cursor rests on the last emitted result item).
+            next_index = state.transformer.continuation_start_index(
+                len(ws_results), fallback=len(accumulated) + len(ws_results)
+            )
             cont_cls = type(state.transformer)
             if not hasattr(cont_cls, "continuation"):
                 raise TypeError(
@@ -478,30 +476,6 @@ class ContinuationState:
     depth: int = 0
 
 
-def sum_usage_dicts(target: dict[str, Any], source: dict[str, Any]) -> None:
-    """Sum token keys from source into target, in place.
-
-    The original turn and the web-search continuation are two INDEPENDENT
-    upstream calls, each billed separately by the provider, so the correct
-    totals are sums — max() would undercount output/cache tokens (and input
-    tokens too: the continuation's re-sent conversation is real billed
-    input). Anthropic-style keys and OpenAI-style keys are summed under
-    their own vocabulary.
-    """
-    for key in (
-        "input_tokens",
-        "output_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_input_tokens",
-        "reasoning_tokens",
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-    ):
-        if key in target or key in source:
-            target[key] = target.get(key, 0) + source.get(key, 0)
-
-
 def sum_usage(target: Usage, source: Usage) -> None:
     """Sum source into target in place (independent billed calls).
 
@@ -526,23 +500,13 @@ def sum_usage(target: Usage, source: Usage) -> None:
 def merge_continuation_usage(original: Any, continuation: Any) -> None:
     """Merge pending stop_reason and usage from original into continuation transformer.
 
-    Transformers from different protocols expose different internal state
-    (e.g. ``OpenAIStreamingTransformer`` has no ``_pending_stop_reason`` or
-    ``_has_pending_usage``), so every access here is guarded to stay
-    protocol-agnostic and avoid ``AttributeError`` during web search
-    continuation merges.
+    Delegates to the continuation transformer's public
+    ``merge_terminal_state`` verb (ADR-0007): the merge rule — stop_reason
+    adopted only when absent, usage summed because the turns are independent
+    billed calls — lives with the pending terminal state it operates on.
+    Transformers without the verb (duck-typed fakes with no terminal state)
+    are skipped.
     """
-    orig_stop = getattr(original, "_pending_stop_reason", None)
-    cont_stop = getattr(continuation, "_pending_stop_reason", None)
-    if orig_stop and not cont_stop:
-        continuation._pending_stop_reason = orig_stop
-
-    orig_usage = getattr(original, "_pending_usage", None)
-    if orig_usage:
-        cont_usage = getattr(continuation, "_pending_usage", None)
-        if cont_usage:
-            sum_usage_dicts(cont_usage, orig_usage)
-        else:
-            continuation._pending_usage = orig_usage
-        if hasattr(continuation, "_has_pending_usage"):
-            continuation._has_pending_usage = True
+    merge = getattr(continuation, "merge_terminal_state", None)
+    if callable(merge):
+        merge(original)

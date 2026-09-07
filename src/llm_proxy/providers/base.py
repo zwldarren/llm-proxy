@@ -134,7 +134,17 @@ class BaseHttpProvider(BaseAdapter, ABC):
     _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset()
 
     def __init__(self, config: AdapterConfig | None = None, **kwargs: Any):
+        """Initialize shared transport, error translation, and retry policy.
+
+        Adapters need no ``__init__`` boilerplate: with keyword construction
+        (``config is None``), ``provider_name`` defaults to the adapter's
+        declared ``_DEFAULT_PROVIDER_NAME`` and ``base_url`` falls back to
+        ``DEFAULT_BASE_URL`` below — both overridable via kwargs. The
+        ``get_adapter`` factory always injects ``provider_name`` and passes
+        ``config=``.
+        """
         if config is None:
+            kwargs.setdefault("provider_name", self._DEFAULT_PROVIDER_NAME)
             config = AdapterConfig.from_kwargs(**kwargs)
 
         provider_name = config.provider_name

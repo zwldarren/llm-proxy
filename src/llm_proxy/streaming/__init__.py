@@ -2,6 +2,7 @@
 """Unified streaming infrastructure for LLM Proxy."""
 
 __all__ = [
+    "PendingTerminalState",
     "SSEBuilder",
     "StreamEvent",
     "StreamingHandler",
@@ -12,6 +13,7 @@ __all__ = [
 ]
 
 _SUBMODULES = {
+    "PendingTerminalState": ".transformer",
     "SSEBuilder": ".sse_builder",
     "StreamEvent": ".events",
     "StreamingHandler": ".handler",

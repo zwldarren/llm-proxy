@@ -117,6 +117,13 @@ export const useAuthStore = defineStore("auth", () => {
     import("@/stores/providers").then((m) => m.useProviderStore().reset()).catch(() => {});
     import("@/stores/models").then((m) => m.useModelStore().reset()).catch(() => {});
     import("@/stores/mcpServers").then((m) => m.useMcpServerStore().reset()).catch(() => {});
+    // Catalog is allowlist-filtered per user server-side; a stale cache would
+    // show the previous user's catalog after logout/login as someone else.
+    import("@/stores/catalog").then((m) => m.useCatalogStore().reset()).catch(() => {});
+    import("@/stores/providerTypes").then((m) => m.useProviderTypesStore().reset()).catch(() => {});
+    // The chat transcript persists in localStorage; drop it so the next user
+    // on this browser never sees the previous user's conversation.
+    import("@/stores/chat").then((m) => m.useChatStore().reset()).catch(() => {});
   }
 
   async function logout() {

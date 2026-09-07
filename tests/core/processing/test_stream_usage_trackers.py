@@ -10,9 +10,9 @@ from unittest.mock import MagicMock
 
 import orjson
 
-from llm_proxy.core.processing.streaming_processor import (
-    _ImageStreamUsageTracker,
-    _TranscriptionStreamUsageTracker,
+from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
+from llm_proxy.billing.transcription_stream_usage import (
+    TranscriptionStreamUsageTracker,
 )
 from llm_proxy.observability.event_context import EventContext
 
@@ -23,12 +23,12 @@ def _sse(payload: dict) -> str:
 
 
 class TestImageStreamUsageTrackerOpenAI:
-    """_ImageStreamUsageTracker parsing OpenAI gpt-image streaming events."""
+    """ImageStreamUsageTracker parsing OpenAI gpt-image streaming events."""
 
     def test_counts_completed_images_and_captures_usage(self):
         """Each image_generation.completed event increments the image count and
         captures the usage object (tokens + image_tokens)."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         chunk = "event: image_generation.completed\n" + _sse(
             {
                 "type": "image_generation.completed",
@@ -53,7 +53,7 @@ class TestImageStreamUsageTrackerOpenAI:
 
     def test_multiple_completed_images(self):
         """Multiple completed events accumulate the image count."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         for _ in range(3):
             tracker.observe(
                 "event: image_generation.completed\n"
@@ -64,7 +64,7 @@ class TestImageStreamUsageTrackerOpenAI:
     def test_apply_to_writes_usage_to_event_context(self):
         """apply_to overwrites the n-fallback with the actual count and writes
         token usage + image_input_tokens to the EventContext."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             "event: image_generation.completed\n"
             + _sse(
@@ -92,25 +92,25 @@ class TestImageStreamUsageTrackerOpenAI:
 
     def test_done_marker_ignored(self):
         """The [DONE] marker is not parsed as JSON."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe("data: [DONE]\n\n")
         assert tracker.images_completed == 0
         assert tracker.captured_usage is None
 
     def test_non_string_chunk_ignored(self):
         """Bytes chunks (e.g. audio) are ignored without error."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(b"bytes-not-relevant")
         assert tracker.images_completed == 0
 
 
 class TestImageStreamUsageTrackerGemini:
-    """_ImageStreamUsageTracker parsing Gemini image streaming responses."""
+    """ImageStreamUsageTracker parsing Gemini image streaming responses."""
 
     def test_counts_inline_data_images_and_captures_usage_metadata(self):
         """Gemini candidates with inlineData image parts are counted, and
         usageMetadata is captured for token billing."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         chunk = _sse(
             {
                 "usageMetadata": {
@@ -143,7 +143,7 @@ class TestImageStreamUsageTrackerGemini:
 
     def test_apply_to_writes_gemini_usage(self):
         """apply_to writes Gemini usageMetadata token counts to the EventContext."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -173,7 +173,7 @@ class TestImageStreamUsageTrackerGemini:
 
     def test_apply_to_gemini_without_total_token_count(self):
         """When totalTokenCount is absent, total is derived from prompt + completion."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -196,7 +196,7 @@ class TestImageStreamUsageTrackerGemini:
 
     def test_non_image_inline_data_not_counted(self):
         """inlineData with a non-image mimeType is not counted as a generated image."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -210,11 +210,11 @@ class TestImageStreamUsageTrackerGemini:
 
 
 class TestImageStreamUsageTrackerGeminiInteractions:
-    """_ImageStreamUsageTracker parsing Gemini Interactions streaming events."""
+    """ImageStreamUsageTracker parsing Gemini Interactions streaming events."""
 
     def test_counts_step_delta_image_content(self):
         """step.delta events with image content increment the image count."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse({"type": "step.delta", "index": 0, "delta": {"type": "image", "data": "B1"}})
         )
@@ -234,7 +234,7 @@ class TestImageStreamUsageTrackerGeminiInteractions:
 
     def test_captures_interaction_completed_usage(self):
         """interaction.completed carries the new-vocabulary usage dict."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -263,7 +263,7 @@ class TestImageStreamUsageTrackerGeminiInteractions:
 
     def test_apply_to_writes_interactions_usage(self):
         """apply_to maps the new usage vocabulary onto the EventContext."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -304,7 +304,7 @@ class TestImageStreamUsageTrackerGeminiInteractions:
 
     def test_apply_to_search_grounding_excludes_tool_use(self):
         """grounding_tool_count flips has_search_grounding like the chat path."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -334,7 +334,7 @@ class TestImageStreamUsageTrackerGeminiInteractions:
 
     def test_apply_to_openai_style_usage_aliases(self):
         """The migration guide streams OpenAI-style usage on completed events."""
-        tracker = _ImageStreamUsageTracker()
+        tracker = ImageStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -357,11 +357,11 @@ class TestImageStreamUsageTrackerGeminiInteractions:
 
 
 class TestTranscriptionStreamUsageTracker:
-    """_TranscriptionStreamUsageTracker parsing STT streaming usage."""
+    """TranscriptionStreamUsageTracker parsing STT streaming usage."""
 
     def test_captures_token_based_usage(self):
         """gpt-4o-transcribe streaming usage (token-based) is captured."""
-        tracker = _TranscriptionStreamUsageTracker()
+        tracker = TranscriptionStreamUsageTracker()
         tracker.observe(
             _sse(
                 {
@@ -378,13 +378,13 @@ class TestTranscriptionStreamUsageTracker:
 
     def test_captures_duration_based_usage(self):
         """whisper duration-based usage is captured."""
-        tracker = _TranscriptionStreamUsageTracker()
+        tracker = TranscriptionStreamUsageTracker()
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 60}}))
         assert tracker.captured_usage == {"type": "duration", "seconds": 60}
 
     def test_apply_to_uses_adapter_parse_usage(self):
         """apply_to delegates to adapter._parse_usage and updates the context."""
-        tracker = _TranscriptionStreamUsageTracker()
+        tracker = TranscriptionStreamUsageTracker()
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 90}}))
 
         adapter = MagicMock()
@@ -401,7 +401,7 @@ class TestTranscriptionStreamUsageTracker:
 
     def test_apply_to_no_usage_is_noop(self):
         """apply_to with no captured usage does not call the adapter."""
-        tracker = _TranscriptionStreamUsageTracker()
+        tracker = TranscriptionStreamUsageTracker()
         adapter = MagicMock()
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
         tracker.apply_to(ctx, adapter)
@@ -409,7 +409,7 @@ class TestTranscriptionStreamUsageTracker:
 
     def test_apply_to_parse_returns_none(self):
         """apply_to is a no-op when _parse_usage returns None."""
-        tracker = _TranscriptionStreamUsageTracker()
+        tracker = TranscriptionStreamUsageTracker()
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 90}}))
 
         adapter = MagicMock()
@@ -421,7 +421,7 @@ class TestTranscriptionStreamUsageTracker:
         assert ctx.audio_duration_seconds is None
 
     def test_done_marker_ignored(self):
-        tracker = _TranscriptionStreamUsageTracker()
+        tracker = TranscriptionStreamUsageTracker()
         tracker.observe("data: [DONE]\n\n")
         assert tracker.captured_usage is None
 

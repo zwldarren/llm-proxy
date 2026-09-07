@@ -51,3 +51,35 @@ clients get the same web-search continuation behavior as the Anthropic and
 OpenResponses streams (the polymorphic `continuation` seam on the streaming
 transformers). The unused `start_index` parameter is interface
 compatibility with that existing seam.
+
+## Amendment: merge reaches transformer state through public verbs
+
+Anthropic-style terminal-event bookkeeping (pending stop_reason /
+stop_sequence / stop_details / container / usage captured from
+``message_delta``-shaped events, flushed on the terminal wire event) was
+hand-implemented twice — provider-side ``AnthropicChunkConverter`` and
+protocol-side ``AnthropicStreamingTransformer`` — with a third partial
+write-only copy in ``OpenResponsesStreamingTransformer``, and
+``merge_continuation_usage`` reached all of it by probing private
+``_pending_*`` fields (plus ``_current_block_index`` for the block cursor)
+across module boundaries. ``streaming/transformer.py`` now holds the single
+definition: the ``PendingTerminalState`` mixin owns the pending fields and
+the capture verbs (``capture_stop_reason`` / ``capture_stop_sequence`` /
+``capture_stop_details`` / ``capture_container`` / ``capture_usage`` /
+``fold_usage``), and ``StreamingTransformer`` exposes the public verbs
+``merge_terminal_state(other)``, ``block_cursor()`` and
+``continuation_start_index(result_count, fallback)``.
+
+- ``merge_continuation_usage`` stays in this module as the continuation-side
+  call, but delegates to ``merge_terminal_state``; the merge rule (sum, per
+  the amendment above) is unchanged. ``sum_usage_dicts`` moved next to its
+  only consumer into ``streaming/transformer.py`` and is re-exported from
+  here.
+- ``_absolute_block_cursor`` reads the public ``block_cursor()`` verb; the
+  protocol-specific cursor semantics (Anthropic: next free block index, so
+  ``cursor + result_count``; OpenResponses: cursor rests on the last emitted
+  item, so ``cursor + 1``) are resolved by the concrete transformer's
+  ``continuation_start_index``.
+- Each inheriting transformer keeps its own flush, because the terminal wire
+  shape is protocol-side or provider-side knowledge (ADR-0003); the mixin is
+  a transformer-internal seam, not a new family module.

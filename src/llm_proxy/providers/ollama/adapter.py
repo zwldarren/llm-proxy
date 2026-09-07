@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import orjson
 
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.http.client import AsyncSession
 from llm_proxy.models import (
@@ -46,25 +46,16 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
     LOBE_ICON_VARIANT = "mono"
 
     DEFAULT_BASE_URL = "http://localhost:11434"
+    #: Fallback identity for direct construction (BaseHttpProvider absorbs the
+    #: former adapter-level ``__init__`` setdefault); the factory path passes
+    #: provider_name explicitly and is unaffected.
+    _DEFAULT_PROVIDER_NAME = "ollama"
     CHAT_ENDPOINT = "/api/chat"
     EMBEDDINGS_ENDPOINT = "/api/embed"
 
     #: Extra keys that are native /api/embed parameters; exempt from the
     #: unknown-fields policy so they survive the merge into the body.
     _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset({"keep_alive", "truncate", "options"})
-
-    def __init__(
-        self,
-        *,
-        config: AdapterConfig | None = None,
-        **kwargs: Any,
-    ):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "ollama")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
     async def _download_images_in_conversation(
         self,

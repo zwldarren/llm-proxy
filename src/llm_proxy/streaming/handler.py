@@ -17,8 +17,6 @@ from typing import cast
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from llm_proxy.core.constants import DEFAULT_DISCONNECT_CHECK_INTERVAL
-
 # How long a disconnect poll waits on the receive channel before concluding
 # the client is still connected. Short enough not to delay detection, long
 # enough to avoid busy-looping on message-event wake-ups.
@@ -61,7 +59,6 @@ class StreamingResponseConfig:
     SSE event format (see streaming/sse_builder.py for SSE formatting).
     """
 
-    disconnect_check_interval: int = DEFAULT_DISCONNECT_CHECK_INTERVAL
     media_type: str = "text/event-stream"
     cache_control: str = "no-cache"
     connection: str = "keep-alive"
@@ -88,11 +85,7 @@ class StreamingHandler:
         sse = SSEBuilder()
 
         async def generate():
-            chunk_count = 0
             async for data in stream:
-                chunk_count += 1
-                if await handler.is_disconnected(request, chunk_count):
-                    break
                 yield sse.data(data)
             yield sse.done()
 
@@ -119,23 +112,6 @@ class StreamingHandler:
             "Connection": self.config.connection,
             "Access-Control-Allow-Origin": self.config.allow_origin,
         }
-
-    async def is_disconnected(self, req: Request, chunk_count: int) -> bool:
-        """Check if the client has disconnected.
-
-        Only performs the check at intervals defined by disconnect_check_interval
-        to avoid performance overhead.
-
-        Args:
-            req: The FastAPI request object
-            chunk_count: Current chunk count
-
-        Returns:
-            True if client is disconnected
-        """
-        if chunk_count % self.config.disconnect_check_interval == 0:
-            return await req.is_disconnected()
-        return False
 
     def create_response(
         self,

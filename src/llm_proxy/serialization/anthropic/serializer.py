@@ -327,7 +327,7 @@ def _ensure_leading_user_message(messages: list[dict[str, Any]]) -> None:
         )
 
 
-def _normalize_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def normalize_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize the outbound message list for Anthropic's API constraints.
 
     Anthropic requires non-empty messages, the first message to be ``user``,
@@ -498,7 +498,7 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
             else:
                 system = [{"type": "text", "text": system}, developer_block]
 
-        messages = _normalize_anthropic_messages(messages)
+        messages = normalize_anthropic_messages(messages)
 
         body: dict[str, Any] = {
             "model": context.model or request.model,

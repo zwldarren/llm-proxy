@@ -27,9 +27,9 @@ import {
 import { useTableFilter } from "@/composables/useTableFilter";
 import { useViewMode } from "@/composables/useViewMode";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
-import { catalogApi } from "@/services/api/catalog";
+import { useCatalogStore } from "@/stores/catalog";
 import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
-import type { ModelCapability, ModelCatalogEntry } from "@/types/schemas";
+import type { ModelCapability } from "@/types/schemas";
 
 defineOptions({ name: "ModelPlazaView" });
 
@@ -37,24 +37,19 @@ const { t } = useI18n();
 
 const viewMode = useViewMode(STORAGE_KEYS.PLAZA_VIEW_MODE);
 
-const models = ref<ModelCatalogEntry[]>([]);
-const isLoading = ref(false);
-const loadError = ref<string | null>(null);
+const catalogStore = useCatalogStore();
+const models = computed(() => catalogStore.models);
+const isLoading = computed(() => catalogStore.loading);
+const loadError = computed(() => catalogStore.error);
 const capabilityFilters = ref<ModelCapability[]>([]);
 
-async function fetchCatalog() {
-  isLoading.value = true;
-  loadError.value = null;
-  try {
-    models.value = await catalogApi.getModels();
-  } catch (error) {
-    loadError.value = error instanceof Error ? error.message : t("plaza.loadError");
-  } finally {
-    isLoading.value = false;
-  }
-}
+// Fetch failures surface through catalogStore.error (empty state + retry);
+// swallow the rejection so it doesn't double-report as unhandled.
+const refreshCatalog = () => catalogStore.fetchModels(true).catch(() => {});
 
-onMounted(fetchCatalog);
+onMounted(() => {
+  catalogStore.fetchModels().catch(() => {});
+});
 
 const {
   searchQuery,
@@ -156,7 +151,7 @@ const sortedModels = computed(() => {
                   size="icon"
                   :disabled="isLoading"
                   :aria-label="t('common.refresh')"
-                  @click="fetchCatalog"
+                  @click="refreshCatalog"
                 >
                   <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />
                 </Button>
@@ -271,7 +266,7 @@ const sortedModels = computed(() => {
         v-else-if="loadError"
         class="h-full flex items-center justify-center animate-fade-in px-6"
       >
-        <EmptyState :text="loadError" :show-retry="true" @retry="fetchCatalog" />
+        <EmptyState :text="loadError" :show-retry="true" @retry="refreshCatalog" />
       </div>
       <div
         v-else-if="models.length === 0"

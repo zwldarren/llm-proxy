@@ -22,7 +22,7 @@ derivation they hang off.
 
 from typing import Any
 
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.models import InternalRequest
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
 
@@ -50,14 +50,6 @@ class DeepSeekAdapter(NativePassthroughChatBase):
     #: the compatibility alias that ``_native_root_base_url`` strips.
     ANTHROPIC_MESSAGES_PATH = "/anthropic/v1/messages"
     RESPONSES_PATH = "/responses"
-
-    def __init__(self, *, config: AdapterConfig | None = None, **kwargs: Any):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "deepseek")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
     # ------------------------------------------------------------------
     # Endpoint routing

@@ -126,7 +126,6 @@ def _build_mock_request():
     req.state.request_id = "req-123"
     req.state.provider = "openai"
     req.state.db_session = None
-    req.is_disconnected = AsyncMock(return_value=False)
     req.url = MagicMock()
     req.url.path = "/v1/chat/completions"
     req.headers = {}
@@ -281,7 +280,7 @@ class TestUnifiedProcessorTracing:
         logged (client still received HTTP 200). Each cleanup step is now
         isolated so ``on_stream_end`` always runs.
         """
-        from llm_proxy.core.processing import streaming_processor as sp_mod
+        from llm_proxy.core.processing import stream_lifecycle as sp_mod
         from llm_proxy.core.processing.strategies import StreamingResponseMarker
         from llm_proxy.core.processing.unified import UnifiedProcessor
         from llm_proxy.observability.event_context import EventContext

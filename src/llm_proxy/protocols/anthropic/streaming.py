@@ -20,7 +20,11 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
 from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import (
+    PendingTerminalState,
+    StreamingTransformer,
+    StreamingUsage,
+)
 
 
 def _message_delta_usage(usage: dict) -> dict:
@@ -37,7 +41,7 @@ def _message_delta_usage(usage: dict) -> dict:
     return {k: v for k, v in usage.items() if k != "service_tier"}
 
 
-class AnthropicStreamingTransformer(StreamingTransformer):
+class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
     """Transform OpenAI SSE chunks to Anthropic SSE format."""
 
     def __init__(
@@ -64,12 +68,9 @@ class AnthropicStreamingTransformer(StreamingTransformer):
         self._tool_id = ""
         self._tool_name = ""
         self._tool_args = ""
-        self._pending_stop_reason: str | None = None
-        self._pending_stop_sequence: str | None = None
-        self._pending_stop_details: dict[str, Any] | None = None
-        self._pending_container: dict[str, Any] | None = None
-        self._pending_usage: dict | None = None
-        self._has_pending_usage = False
+        # Pending terminal state (stop_reason / stop_sequence / stop_details /
+        # container / usage) is owned by ``PendingTerminalState``; captured in
+        # ``_transform_openai_chunk`` and flushed in ``finalize``.
         # Cache-diagnostics beta: message-level object arriving on the
         # canonical channel from the provider converter; replayed inside
         # message_start.message.
@@ -88,6 +89,14 @@ class AnthropicStreamingTransformer(StreamingTransformer):
         instance._sent_message_start = True
         instance._current_block_index = start_index
         return instance
+
+    def block_cursor(self) -> int:
+        """Absolute next content-block index (result blocks don't advance it)."""
+        return self._current_block_index
+
+    def continuation_start_index(self, result_count: int, fallback: int) -> int:
+        """Next free block index after ``result_count`` emitted result blocks."""
+        return self._current_block_index + result_count
 
     def transform(self, chunk: str | dict[str, Any]) -> str | None:
         """Transform OpenAI SSE chunk to Anthropic format.
@@ -136,14 +145,7 @@ class AnthropicStreamingTransformer(StreamingTransformer):
                 self._output_tokens = output_tokens
             # Fold usage before emitting message_start so its ``usage`` block
             # can carry the full Anthropic shape (cache keys, server_tool_use).
-            normalized = self._normalize_usage(usage)
-            if self._pending_usage is not None:
-                for key, value in normalized.items():
-                    if value or key not in self._pending_usage:
-                        self._pending_usage[key] = value
-            else:
-                self._pending_usage = normalized
-                self._has_pending_usage = True
+            self.fold_usage(self._normalize_usage(usage))
         # Cache-diagnostics beta: capture before the message_start emission so
         # the first message (emitted below) already carries it.
         diag = chunk.get("diagnostics")
@@ -381,20 +383,14 @@ class AnthropicStreamingTransformer(StreamingTransformer):
 
                 if finish_reason:
                     self._close_current_open_block(result_chunks)
-                    self._pending_stop_reason = self._map_finish_reason(finish_reason)
+                    self.capture_stop_reason(self._map_finish_reason(finish_reason))
                 # Anthropic-native terminal fields arriving through the
                 # converter's canonical channel: choice["stop_sequence"] and
                 # choice["stop_details"]. Read regardless of finish_reason so
                 # finalize flushes without a stop_reason still replay them.
-                stop_sequence = choice.get("stop_sequence")
-                if stop_sequence is not None:
-                    self._pending_stop_sequence = stop_sequence
-                stop_details = choice.get("stop_details")
-                if stop_details is not None:
-                    self._pending_stop_details = stop_details
-                container = choice.get("container")
-                if container is not None:
-                    self._pending_container = container
+                self.capture_stop_sequence(choice.get("stop_sequence"))
+                self.capture_stop_details(choice.get("stop_details"))
+                self.capture_container(choice.get("container"))
 
         return "".join(result_chunks) if result_chunks else None
 

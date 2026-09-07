@@ -71,6 +71,17 @@ export const useApiKeyStore = defineStore("apiKeys", () => {
     await Promise.all([store.fetchItems(true), fetchSpendSummary(true)]);
   }
 
+  /** Full teardown: factory list state plus the per-key spend cache. Spend is
+   *  per-user billing data — it must not survive logout. Bumping
+   *  spendFetchSeq also discards any in-flight spend fetch. */
+  function reset(): void {
+    store.reset();
+    spendFetchSeq++;
+    spendByKey.value = {};
+    spendLoading.value = false;
+    spendLoaded.value = false;
+  }
+
   return {
     apiKeys: store.items,
     loading: store.loading,
@@ -85,6 +96,6 @@ export const useApiKeyStore = defineStore("apiKeys", () => {
     deleteApiKey: store.deleteItem,
     fetchSpendSummary,
     resetBudget,
-    reset: store.reset,
+    reset,
   };
 });

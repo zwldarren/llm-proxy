@@ -990,7 +990,7 @@ async def test_fallback_rerun_rematerializes_previous_response():
 
     from llm_proxy.config.types.provider import ProviderConfig
     from llm_proxy.core.identity import RequestIdentity
-    from llm_proxy.core.processing.fallback import setup_fallback_provider
+    from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
     from llm_proxy.core.processing.stages.parameter_override import (
         ParameterOverrideService,
     )

@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { costRange, type ModelCostKey } from "@/utils/modelPricing";
 import type { ModelRead } from "@/types/schemas";
 
 /**
@@ -26,21 +27,8 @@ const props = defineProps<{
 
 const { t } = useI18n();
 
-type CostKey =
-  | "input_cost_per_1m"
-  | "output_cost_per_1m"
-  | "cached_read_cost_per_1m"
-  | "cached_write_cost_per_1m"
-  | "audio_input_cost_per_1m"
-  | "audio_output_cost_per_1m"
-  | "image_input_cost_per_1m"
-  | "cost_per_image"
-  | "audio_cost_per_minute"
-  | "tts_cost_per_1m_chars"
-  | "web_search_cost_per_1k";
-
 interface CostField {
-  key: CostKey;
+  key: ModelCostKey;
   labelKey: string;
   /** Short badge shown in the compact cell when this dimension is priced. */
   dimKey?: string;
@@ -90,18 +78,6 @@ const COST_FIELDS: CostField[] = [
 
 const providers = computed(() => props.model.providers ?? []);
 
-/** All configured values for a cost key: provider overrides + model default. */
-function valuesFor(key: CostKey): number[] {
-  const vals: number[] = [];
-  for (const p of providers.value) {
-    const v = p[key];
-    if (v != null) vals.push(v);
-  }
-  const d = props.model[key];
-  if (d != null) vals.push(d);
-  return vals;
-}
-
 function formatCost(v: number): string {
   // Trim to at most 6 decimal places without trailing zeros.
   const formatted = Number.parseFloat(v.toFixed(6));
@@ -110,12 +86,12 @@ function formatCost(v: number): string {
 }
 
 /** Effective price as a single value or "min–max" range. */
-function rangeText(key: CostKey): string | null {
-  const vals = valuesFor(key);
-  if (vals.length === 0) return null;
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  return min === max ? formatCost(min) : `${formatCost(min)}–${formatCost(max)}`;
+function rangeText(key: ModelCostKey): string | null {
+  const range = costRange(props.model, key);
+  if (range == null) return null;
+  return range.min === range.max
+    ? formatCost(range.min)
+    : `${formatCost(range.min)}–${formatCost(range.max)}`;
 }
 
 const inputText = computed(() => rangeText("input_cost_per_1m"));
@@ -131,7 +107,7 @@ const fieldText = computed(() => (props.field ? FIELD_TEXTS[props.field].value :
 const activeDims = computed(() => {
   const dims = new Set<string>();
   for (const f of COST_FIELDS) {
-    if (f.dimKey && valuesFor(f.key).length > 0) dims.add(t(f.dimKey));
+    if (f.dimKey && costRange(props.model, f.key) != null) dims.add(t(f.dimKey));
   }
   return [...dims];
 });

@@ -18,7 +18,11 @@ from typing import Any
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models.finish_reasons import ANTHROPIC_TO_OPENAI
 from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import (
+    PendingTerminalState,
+    StreamingTransformer,
+    StreamingUsage,
+)
 
 
 def _make_openai_chunk(
@@ -48,7 +52,7 @@ def _map_stop_reason(anthropic_reason: str) -> str:
     return ANTHROPIC_TO_OPENAI.get(anthropic_reason, anthropic_reason)
 
 
-class AnthropicChunkConverter(StreamingTransformer):
+class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
     """Convert Anthropic SSE streaming events to canonical OpenAI chunk dicts.
 
     Replaces the ~200 lines of manual SSE parsing that previously lived
@@ -86,11 +90,10 @@ class AnthropicChunkConverter(StreamingTransformer):
         self._created_at: int = int(time.time())
         self._tool_call_index: int = 0
         self._current_tool_index: int = 0
-        self._pending_stop_reason: str | None = None
-        self._pending_stop_sequence: str | None = None
-        self._pending_stop_details: dict[str, Any] | None = None
-        self._pending_container: dict[str, Any] | None = None
-        self._pending_usage: dict[str, Any] | None = None
+        # Pending terminal state (stop_reason / stop_sequence / stop_details /
+        # container / usage) is owned by ``PendingTerminalState``; this
+        # converter captures it in ``_handle_message_delta`` and flushes it in
+        # ``_build_final_chunk``.
         # Set once the final chunk (stop_reason + usage) has been emitted;
         # ``_pending_usage`` is intentionally kept afterwards so that
         # ``get_usage()`` still works when called after the stream ends.
@@ -373,18 +376,12 @@ class AnthropicChunkConverter(StreamingTransformer):
         delta = event.get("delta", {})
         stop_reason = delta.get("stop_reason")
         if stop_reason:
-            self._pending_stop_reason = _map_stop_reason(stop_reason)
-        stop_sequence = delta.get("stop_sequence")
-        if stop_sequence is not None:
-            self._pending_stop_sequence = stop_sequence
-        stop_details = delta.get("stop_details")
-        if stop_details:
-            self._pending_stop_details = stop_details
+            self.capture_stop_reason(_map_stop_reason(stop_reason))
+        self.capture_stop_sequence(delta.get("stop_sequence"))
+        self.capture_stop_details(delta.get("stop_details"))
         # Container info (code execution) rides the canonical channel the
         # same way as stop_details, for the protocol transformer to replay.
-        container = delta.get("container")
-        if container is not None:
-            self._pending_container = container
+        self.capture_container(delta.get("container"))
 
         usage = event.get("usage", {})
         if usage:
@@ -394,7 +391,7 @@ class AnthropicChunkConverter(StreamingTransformer):
                 + self._cache_read_input_tokens
                 + self._cache_creation_input_tokens
             )
-            self._pending_usage = {
+            pending_usage = {
                 "prompt_tokens": total_input,
                 "completion_tokens": self._output_tokens,
                 "total_tokens": total_input + self._output_tokens,
@@ -404,32 +401,33 @@ class AnthropicChunkConverter(StreamingTransformer):
             # Preserve server_tool_use for web search billing (Anthropic)
             server_tool_use = usage.get("server_tool_use")
             if server_tool_use is not None:
-                self._pending_usage["server_tool_use"] = server_tool_use
+                pending_usage["server_tool_use"] = server_tool_use
             # Anthropic-native usage extensions (output_tokens_details.
             # thinking_tokens, service_tier, fast-mode "speed", compaction/
             # fallback "iterations") travel losslessly to the protocol
             # transformer's passthrough channel.
             for key in ANTHROPIC_USAGE_EXTENSION_KEYS:
                 if usage.get(key) is not None:
-                    self._pending_usage[key] = usage[key]
+                    pending_usage[key] = usage[key]
             # Also normalize provider-native counters into the OpenAI-dialect
             # details objects (cached_tokens / cache_write_tokens /
             # reasoning_tokens), so canonical-channel consumers such as the
             # OpenResponses usage folding can read a single dialect instead
             # of special-casing Anthropic keys.
             if self._cache_read_input_tokens:
-                prompt_details = self._pending_usage.setdefault("prompt_tokens_details", {})
+                prompt_details = pending_usage.setdefault("prompt_tokens_details", {})
                 prompt_details["cached_tokens"] = self._cache_read_input_tokens
             if self._cache_creation_input_tokens:
-                prompt_details = self._pending_usage.setdefault("prompt_tokens_details", {})
+                prompt_details = pending_usage.setdefault("prompt_tokens_details", {})
                 prompt_details["cache_write_tokens"] = self._cache_creation_input_tokens
             output_details = usage.get("output_tokens_details")
             thinking_tokens = (
                 output_details.get("thinking_tokens") if isinstance(output_details, dict) else None
             )
             if thinking_tokens is not None:
-                completion_details = self._pending_usage.setdefault("completion_tokens_details", {})
+                completion_details = pending_usage.setdefault("completion_tokens_details", {})
                 completion_details["reasoning_tokens"] = thinking_tokens
+            self.capture_usage(pending_usage)
         return None  # State-only event; chunk emitted on message_stop.
 
     def _handle_error(self, event: dict[str, Any]) -> dict[str, Any] | None:

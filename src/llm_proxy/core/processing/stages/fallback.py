@@ -1,9 +1,14 @@
-"""Shared fallback utilities for provider retry logic.
+"""Shared fallback plumbing for provider retry logic.
 
-Used by both the non-streaming execution path (UnifiedProcessor / RetryExecutor)
-and the streaming path (StreamingProcessor / FallbackHandler) so that retry
-classification, role-transform detection, failure recording, and provider
-swapping behave identically across both.
+Used by both the non-streaming execution path (``stages.request_execution`` /
+RetryExecutor) and the streaming path (``stages.fallback_handler`` /
+FallbackHandler) so that retry classification, role-transform detection,
+failure recording, and provider swapping behave identically across both.
+
+Lives inside the ``stages`` package so it can import the stage composition
+(``stages.composition``) at module level without an import cycle — the
+former ``core/processing/fallback.py`` was imported BY ``stages/*`` and
+therefore had to lazily import the stages it needed to re-run.
 """
 
 from contextlib import AsyncExitStack, suppress
@@ -14,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Request
 
 from llm_proxy.core.exceptions import LLMProxyError, ProviderError
+from llm_proxy.core.processing.stages.composition import rerun_per_provider_stages
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 
@@ -205,74 +211,6 @@ def record_fallback_attempt(
     )
 
 
-async def _rerun_per_provider_stages(
-    selection: Any,
-    adapter: BaseAdapter,
-    req: Request,
-    new_request: InternalRequest,
-    raw_data: dict[str, Any],
-    context: RequestContext,
-) -> None:
-    """Re-run the per-provider request-mutating stages on a freshly parsed request.
-
-    PreviousResponseResolutionStage and WebSearchStage mutate the parsed
-    request (materializing stored conversations, converting web-search tools)
-    and set request flags (``previous_response_materialized``,
-    ``native_request_disabled``) based on the SELECTED provider — e.g. the
-    web-search interception decision depends on the provider's
-    ``native_web_search`` flag. A fallback re-parse starts from the pristine
-    client body, so these decisions must be re-evaluated for the new provider
-    instead of inheriting the failed provider's mutated request.
-
-    Raises:
-        LLMProxyError: when the request is not viable for this provider (e.g.
-            an unresolvable proxy-local ``previous_response_id`` on a
-            non-native upstream). The caller skips to the next provider.
-    """
-    # Lazy imports: fallback.py is imported by stages/*, so importing the
-    # stages package at module level would create an import cycle.
-    from llm_proxy.core.processing.stages.base import PipelineState
-    from llm_proxy.core.processing.stages.previous_response import (
-        PreviousResponseResolutionStage,
-    )
-    from llm_proxy.core.processing.stages.role_normalization import (
-        normalize_developer_roles,
-    )
-    from llm_proxy.core.processing.stages.web_search import WebSearchStage
-
-    event_context = context.event_context
-    if event_context is None:
-        # Direct-adapter/test paths may lack an EventContext; the stages
-        # re-run here never read it, but PipelineState requires the field.
-        event_context = EventContext(
-            request_id=getattr(req.state, "request_id", "") or "",
-            trace_id="",
-            model=None,
-        )
-
-    stage_state = PipelineState(
-        raw_data=raw_data,
-        unified_request=new_request,
-        req=req,
-        strategy=None,
-        trace_id=event_context.trace_id,
-        event_context=event_context,
-        selection=selection,
-        adapter=adapter,
-    )
-    await PreviousResponseResolutionStage().process(stage_state, context)
-    # Role transformation is sticky across providers: mark_role_transformed
-    # clears used_provider_keys so every provider is retried with transformed
-    # roles, but the fallback re-parse starts from the pristine client body.
-    # Re-apply the transform so the fresh request actually carries it.
-    if context.orchestrator.state.role_transformed:
-        normalize_developer_roles(new_request)
-    # The interception decision is per-provider, so reset the shared context
-    # flag and let WebSearchStage recompute it for THIS provider.
-    context.proxy_web_search_active = False
-    await WebSearchStage().process(stage_state, context)
-
-
 async def _create_fallback_adapter(
     selection: Any, req: Any, context: RequestContext
 ) -> BaseAdapter:
@@ -333,7 +271,9 @@ async def setup_fallback_provider(
     attempt applies its own parameter overrides to the original body so the
     failed provider's overrides never leak into the next attempt, then
     re-runs the per-provider request stages (previous-response resolution,
-    web search) on the fresh parse.
+    web search) on the fresh parse via
+    :func:`rerun_per_provider_stages` — the same composition owner the main
+    pipeline consumes.
 
     Providers whose stage re-run rejects the request (e.g. a proxy-local
     ``previous_response_id`` the provider cannot resolve) are skipped and the
@@ -379,7 +319,7 @@ async def setup_fallback_provider(
         )
 
         try:
-            await _rerun_per_provider_stages(
+            await rerun_per_provider_stages(
                 selection, adapter, req, new_request, new_raw_data, context
             )
         except LLMProxyError as e:

@@ -639,3 +639,14 @@ class TestConvertLogprobs:
         assert result is not None
         assert "bytes" not in result["content"][0]
         assert "top_logprobs" not in result["content"][0]
+
+
+def test_direct_construction_defaults_provider_name() -> None:
+    """Direct construction (no factory) must still resolve the ollama identity.
+
+    Guards the BaseHttpProvider-absorbed ``__init__``: the class-level
+    ``_DEFAULT_PROVIDER_NAME`` fallback must not degrade to an empty string
+    (which would be baked into transport, error translator, and retry policy).
+    """
+    adapter = OllamaAdapter()
+    assert adapter.provider_name == "ollama"

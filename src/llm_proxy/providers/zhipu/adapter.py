@@ -16,9 +16,7 @@ llm_proxy.core.conversion, ADR-0002). The Anthropic path is documented with
 ``zhipu-coding`` provider type instead.
 """
 
-from typing import Any
-
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.providers.openai_compatible._glm import GLMBase
 
 
@@ -38,14 +36,6 @@ class ZhipuAdapter(GLMBase):
 
     #: The Anthropic endpoint lives on a different root than the /paas/v4 base.
     ANTHROPIC_MESSAGES_URL = "https://open.bigmodel.cn/api/anthropic/v1/messages"
-
-    def __init__(self, *, config: AdapterConfig | None = None, **kwargs: Any):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "zhipu")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
 
 __all__ = ["ZhipuAdapter"]

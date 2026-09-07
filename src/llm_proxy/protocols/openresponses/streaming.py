@@ -21,7 +21,11 @@ from llm_proxy.protocols.openresponses.serializer import (
 from llm_proxy.protocols.openresponses.streaming_emitter import StreamingContentEmitter
 from llm_proxy.protocols.openresponses.streaming_events import StreamingEventFactory
 from llm_proxy.serialization.responses_toolkit import generate_item_id
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import (
+    PendingTerminalState,
+    StreamingTransformer,
+    StreamingUsage,
+)
 
 logger = get_logger(__name__)
 
@@ -156,7 +160,7 @@ class OpenResponsesStreamingState:
     final_response_payload: dict[str, Any] | None = None
 
 
-class OpenResponsesStreamingTransformer(StreamingTransformer):
+class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransformer):
     """Transformer for converting OpenAI streaming to OpenResponses format.
 
     Generates semantic events per Open Responses spec:
@@ -247,10 +251,10 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
             if ctx.namespace_map is not None:
                 self.state.namespace_map = ctx.namespace_map
 
-        # Attributes used by streaming_processor._merge_transformer_usage
-        self._pending_stop_reason: str | None = None
-        self._pending_usage: dict | None = None
-        self._has_pending_usage: bool = False
+        # Pending terminal usage is owned by ``PendingTerminalState``; the
+        # only writer is ``_message_delta_with_usage`` (web-search usage
+        # updates), and the continuation merge reaches it through the public
+        # ``merge_terminal_state`` verb instead of poking private fields.
 
     @classmethod
     def continuation(
@@ -286,6 +290,18 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
         if web_search_tool_indices is not None:
             instance.state.web_search_tool_indices = set(web_search_tool_indices)
         return instance
+
+    def block_cursor(self) -> int:
+        """Absolute output-item cursor.
+
+        Unlike Anthropic's next-free-index cursor, ``current_item_index`` rests
+        on the last emitted item (the emitters advance it themselves).
+        """
+        return self.state.current_item_index
+
+    def continuation_start_index(self, result_count: int, fallback: int) -> int:
+        """First free item index after the last emitted web-search result item."""
+        return self.state.current_item_index + 1
 
     def _has_pending_web_search_continuation(self) -> bool:
         """Whether an intercepted web search continuation follows this finish.
@@ -943,8 +959,7 @@ class OpenResponsesStreamingTransformer(StreamingTransformer):
         Returns:
             SSE events string
         """
-        self._pending_usage = usage
-        self._has_pending_usage = True
+        self.capture_usage(usage)
         return self._factory._create_response_in_progress_event()
 
 

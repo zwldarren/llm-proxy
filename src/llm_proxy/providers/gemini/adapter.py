@@ -163,12 +163,8 @@ class GeminiAdapter(
         config: AdapterConfig | None = None,
         **kwargs: Any,
     ):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "gemini")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
+        # provider_name / base_url defaults handled by BaseHttpProvider.
+        super().__init__(config=config, **kwargs)
 
         # Upstream API dialect switch (metadata.api_variant). Defaults to the
         # legacy generateContent dialect; "interactions" selects Google's GA

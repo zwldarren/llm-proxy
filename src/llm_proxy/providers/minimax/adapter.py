@@ -14,9 +14,7 @@ configured base URL; the Anthropic endpoint lives on a separate root and uses
 the ``ANTHROPIC_MESSAGES_URL`` constant. ``endpoint_base_urls`` overrides win.
 """
 
-from typing import Any
-
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
 
 
@@ -35,14 +33,6 @@ class MiniMaxAdapter(NativePassthroughChatBase):
     native_protocols = frozenset({"anthropic", "openresponses"})
 
     ANTHROPIC_MESSAGES_URL = "https://api.minimax.io/anthropic/v1/messages"
-
-    def __init__(self, *, config: AdapterConfig | None = None, **kwargs: Any):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "minimax")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
 
 __all__ = ["MiniMaxAdapter"]

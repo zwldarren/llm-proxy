@@ -6,7 +6,9 @@ passing them directly to adapters that now accept InternalRequest.
 
 The processor uses a pipeline of stages to process requests:
 ProviderSelection -> ParameterOverride -> PreviousResponseResolution ->
-WebSearch -> RequestExecution. RoleNormalization is applied on-demand during retry.
+WebSearch -> RequestExecution (the per-provider block comes from
+``stages.composition``, shared with the fallback re-parse path).
+RoleNormalization is applied on-demand during retry.
 """
 
 import asyncio
@@ -32,11 +34,10 @@ from llm_proxy.core.processing.stages import (
     ParameterOverrideService,
     ParameterOverrideStage,
     PipelineState,
-    PreviousResponseResolutionStage,
     ProviderSelectionStage,
     RequestExecutionStage,
-    WebSearchStage,
 )
+from llm_proxy.core.processing.stages.composition import create_per_provider_stages
 from llm_proxy.core.processing.strategies import ProcessingStrategy, get_strategy
 from llm_proxy.core.processing.streaming_processor import StreamingProcessor
 from llm_proxy.core.request_type import RequestType
@@ -63,7 +64,9 @@ class UnifiedProcessor:
 
     Uses a pipeline of stages (ProviderSelection, ParameterOverride,
     PreviousResponseResolution, WebSearch, RequestExecution) to process
-    requests. Each stage is independently testable.
+    requests; the per-provider block is composed once in
+    ``stages.composition`` and consumed by both the main pipeline and the
+    fallback re-parse. Each stage is independently testable.
     """
 
     def __init__(
@@ -88,12 +91,14 @@ class UnifiedProcessor:
             param_override_service=self._param_override_service,
         )
 
-        # Build pipeline stages
+        # Build pipeline stages. The per-provider block (previous-response
+        # resolution, web search) comes from the composition owner shared
+        # with the fallback re-parse path, so a stage added there runs on
+        # BOTH paths.
         self._stages = [
             ProviderSelectionStage(),
             self._param_override_stage,
-            PreviousResponseResolutionStage(),
-            WebSearchStage(),
+            *create_per_provider_stages(),
             RequestExecutionStage(
                 protocol_name=self.protocol_name,
                 protocol_endpoint=protocol_endpoint,

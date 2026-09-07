@@ -11,7 +11,6 @@ from llm_proxy.core.processing.base import (
     ResponseMiddlewareFunc,
     ServiceDependencies,
 )
-from llm_proxy.core.processing.fallback import record_fallback_attempt, setup_fallback_provider
 from llm_proxy.core.processing.stages import (
     ParameterOverrideService,
     ParameterOverrideStage,
@@ -22,6 +21,10 @@ from llm_proxy.core.processing.stages import (
     RetryExecutor,
     WebSearchStage,
     normalize_developer_roles,
+)
+from llm_proxy.core.processing.stages.fallback import (
+    record_fallback_attempt,
+    setup_fallback_provider,
 )
 from llm_proxy.core.processing.strategies import (
     ProcessingStrategy,

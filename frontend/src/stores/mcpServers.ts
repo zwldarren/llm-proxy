@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
-import { shallowRef, ref, computed } from "vue";
+import { ref } from "vue";
 import { configApi } from "@/services/api/config";
+import { createResourceStore } from "@/composables/useResourceStore";
 import type {
   McpServerCapabilities,
   McpServerCreate,
@@ -10,86 +11,22 @@ import type {
 } from "@/types/schemas";
 
 export const useMcpServerStore = defineStore("mcpServers", () => {
-  const mcpServers = shallowRef<McpServerRead[]>([]);
-  const loading = ref(false);
-  const loaded = ref(false);
-  const error = ref<string | null>(null);
+  const store = createResourceStore<McpServerRead, McpServerCreate, McpServerUpdate>({
+    name: "MCP server",
+    fetchFn: () => configApi.getMcpServers(),
+    createFn: (data) => configApi.createMcpServer(data),
+    updateFn: (name, data) => configApi.updateMcpServer(name, data),
+    deleteFn: (name) => configApi.deleteMcpServer(name),
+  });
+
+  // Per-server capability map, keyed by server name. The factory does not
+  // cover this: capabilities are fetched lazily per server, not as a list.
   const mcpServerCapabilities = ref<Record<string, McpServerCapabilities>>({});
   const capabilitiesFailed = ref<Record<string, boolean>>({});
 
-  const ready = computed(() => loaded.value);
-
-  async function fetchMcpServers(force = false): Promise<McpServerRead[]> {
-    if (!force && loaded.value && mcpServers.value.length > 0) {
-      return mcpServers.value;
-    }
-    if (loading.value) return mcpServers.value;
-    loading.value = true;
-    try {
-      const res = await configApi.getMcpServers();
-      mcpServers.value = res;
-      loaded.value = true;
-      error.value = null;
-      return res;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to fetch MCP servers";
-      error.value = errorMsg;
-      console.error("Failed to fetch MCP servers:", err);
-      throw err;
-    } finally {
-      loading.value = false;
-    }
-  }
-
-  function prefetch(): void {
-    if (!loaded.value) {
-      fetchMcpServers().catch((err) => {
-        const errorMsg = err instanceof Error ? err.message : "MCP server prefetch failed";
-        error.value = errorMsg;
-      });
-    }
-  }
-
-  async function createMcpServer(data: McpServerCreate): Promise<McpServerRead> {
-    error.value = null;
-    try {
-      const res = await configApi.createMcpServer(data);
-      await fetchMcpServers(true);
-      return res;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to create MCP server";
-      error.value = errorMsg;
-      console.error("Failed to create MCP server:", err);
-      throw err;
-    }
-  }
-
-  async function updateMcpServer(name: string, data: McpServerUpdate): Promise<McpServerRead> {
-    error.value = null;
-    try {
-      const res = await configApi.updateMcpServer(name, data);
-      await fetchMcpServers(true);
-      return res;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to update MCP server";
-      error.value = errorMsg;
-      console.error("Failed to update MCP server:", err);
-      throw err;
-    }
-  }
-
   async function deleteMcpServer(name: string): Promise<void> {
-    error.value = null;
-    try {
-      await configApi.deleteMcpServer(name);
-      removeCapabilities(name);
-      await fetchMcpServers(true);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to delete MCP server";
-      error.value = errorMsg;
-      console.error("Failed to delete MCP server:", err);
-      throw err;
-    }
+    await store.deleteItem(name);
+    removeCapabilities(name);
   }
 
   async function getMcpServerStatus(name: string): Promise<McpServerStatus> {
@@ -114,24 +51,22 @@ export const useMcpServerStore = defineStore("mcpServers", () => {
   }
 
   function reset(): void {
-    mcpServers.value = [];
-    loading.value = false;
-    loaded.value = false;
+    store.reset();
     mcpServerCapabilities.value = {};
     capabilitiesFailed.value = {};
   }
 
   return {
-    mcpServers,
-    loading,
-    loaded,
-    ready,
+    mcpServers: store.items,
+    loading: store.loading,
+    loaded: store.loaded,
+    ready: store.ready,
     mcpServerCapabilities,
     capabilitiesFailed,
-    fetchMcpServers,
-    prefetch,
-    createMcpServer,
-    updateMcpServer,
+    fetchMcpServers: store.fetchItems,
+    prefetch: store.prefetch,
+    createMcpServer: store.createItem,
+    updateMcpServer: store.updateItem,
     deleteMcpServer,
     getMcpServerStatus,
     getMcpServerCapabilities,

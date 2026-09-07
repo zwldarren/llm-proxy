@@ -41,8 +41,8 @@ from llm_proxy.providers.openai.client_headers import (
     get_client_headers as get_openai_client_headers,
 )
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
-from llm_proxy.serialization.anthropic.serializer import (
-    _normalize_anthropic_messages,
+from llm_proxy.serialization.anthropic import (
+    normalize_anthropic_messages,
     parse_usage_and_provider_extras,
 )
 from llm_proxy.serialization.openai.serializer import parse_usage_from_response
@@ -176,7 +176,7 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
         """
         messages = body.get("messages")
         if isinstance(messages, list):
-            body["messages"] = _normalize_anthropic_messages(copy.deepcopy(messages))
+            body["messages"] = normalize_anthropic_messages(copy.deepcopy(messages))
         return body
 
     # ------------------------------------------------------------------

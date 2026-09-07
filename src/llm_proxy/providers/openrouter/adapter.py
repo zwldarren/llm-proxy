@@ -14,7 +14,7 @@ OpenRouter specific features:
 import base64
 from typing import Any
 
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.models import InternalResponse
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
@@ -43,19 +43,6 @@ class OpenRouterAdapter(OpenAICompatibleBase):
     _REASONING_FIELD = "reasoning"
     # OpenRouter's dedicated Image API is at /images (not /images/generations).
     IMAGES_ENDPOINT = "/images"
-
-    def __init__(
-        self,
-        *,
-        config: AdapterConfig | None = None,
-        **kwargs: Any,
-    ):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "openrouter")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
     def _stream_filter_line(self, line_str: str) -> str | None:
         if line_str.startswith(":"):

@@ -65,12 +65,12 @@ _Avoid_: dialect, flavor, api_version
 _Avoid_: cached_content_tokens, thoughts_tokens (deleted provider-flavored aliases)
 
 **Web-search continuation**:
-The loop that injects proxy-executed search results and re-calls the provider when a streamed turn ends waiting on `web_search` results. Owned by `WebSearchStreamProcessor` (`core/processing/web_search_streaming.py`): result processing, continuation request building, the loop itself (`generate_continuation`), state hand-off (`ContinuationState`), and usage merge (`merge_continuation_usage`).
-_Avoid_: continuation logic in streaming_processor (that was the pre-ADR-0007 arrangement)
+The loop that injects proxy-executed search results and re-calls the provider when a streamed turn ends waiting on `web_search` results. Owned by `WebSearchStreamProcessor` (`core/processing/web_search_streaming.py`): result processing, continuation request building, the loop itself (`generate_continuation`), state hand-off (`ContinuationState`), and usage merge (`merge_continuation_usage`, delegating to the transformer's public `merge_terminal_state` verb).
+_Avoid_: continuation logic in streaming_processor (that was the pre-ADR-0007 arrangement); getattr probes into transformer `_pending_*` / `_current_block_index` (the pending terminal state is `PendingTerminalState` in `streaming/transformer.py`, reached via public verbs)
 
 **Fallback re-parse**:
-Each provider fallback attempt re-parses from the pristine client body (`PipelineState.original_raw_data` / `fallback_raw_data`), re-applies its own parameter overrides, and re-runs the per-provider request stages (`_rerun_per_provider_stages` in `core/processing/fallback.py`) so a failed provider's overrides and stage decisions never leak into the next attempt.
-_Avoid_: fallback reusing the failed provider's mutated request
+Each provider fallback attempt re-parses from the pristine client body (`PipelineState.original_raw_data` / `fallback_raw_data`), re-applies its own parameter overrides, and re-runs the per-provider request stages (`rerun_per_provider_stages` in `core/processing/stages/composition.py`, consuming the single composition owner `create_per_provider_stages` shared with `UnifiedProcessor._stages`) so a failed provider's overrides and stage decisions never leak into the next attempt.
+_Avoid_: fallback reusing the failed provider's mutated request; a second hand-maintained per-provider stage list (composition owner: `stages/composition.py`)
 
 ### Realtime relay
 

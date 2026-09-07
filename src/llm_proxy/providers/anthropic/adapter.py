@@ -7,7 +7,7 @@ from typing import Any
 
 import orjson
 
-from llm_proxy.core.adapter import AdapterConfig, register_adapter
+from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.conversion import plan_conversion
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models import (
@@ -24,8 +24,8 @@ from llm_proxy.providers.anthropic.client_headers import (
 )
 from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
 from llm_proxy.providers.capabilities import ChatCapabilityMixin
-from llm_proxy.serialization.anthropic.serializer import (
-    _normalize_anthropic_messages,
+from llm_proxy.serialization.anthropic import (
+    normalize_anthropic_messages,
     parse_usage_and_provider_extras,
 )
 from llm_proxy.serialization.providers import get_provider_serializer
@@ -52,19 +52,6 @@ class AnthropicAdapter(ChatCapabilityMixin, BaseHttpProvider):
     EXTRA_HEADERS = {"anthropic-version": "2023-06-01"}
     AUTH_HEADER = "x-api-key"
     AUTH_PREFIX = ""
-
-    def __init__(
-        self,
-        *,
-        config: AdapterConfig | None = None,
-        **kwargs: Any,
-    ):
-        if config is not None:
-            super().__init__(config=config)
-        else:
-            kwargs.setdefault("provider_name", "anthropic")
-            kwargs.setdefault("base_url", self.DEFAULT_BASE_URL)
-            super().__init__(**kwargs)
 
     def _build_headers(
         self,
@@ -93,7 +80,7 @@ class AnthropicAdapter(ChatCapabilityMixin, BaseHttpProvider):
         """
         messages = body.get("messages")
         if isinstance(messages, list):
-            body["messages"] = _normalize_anthropic_messages(copy.deepcopy(messages))
+            body["messages"] = normalize_anthropic_messages(copy.deepcopy(messages))
         return body
 
     def _stream_body(self, request: InternalRequest) -> dict[str, Any]:

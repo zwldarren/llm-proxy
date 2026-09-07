@@ -88,8 +88,7 @@ class TestAnthropicFinalizeMessageDelta:
         from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 
         transformer = AnthropicStreamingTransformer(model="claude-x", request_id="r1")
-        transformer._has_pending_usage = True
-        transformer._pending_usage = {"output_tokens": 9}
+        transformer.capture_usage({"output_tokens": 9})
         events = _parse_sse_blocks(transformer.finalize())
         deltas = [d for name, d in events if name == "message_delta"]
         assert deltas == [
@@ -104,8 +103,8 @@ class TestAnthropicFinalizeMessageDelta:
         from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 
         transformer = AnthropicStreamingTransformer(model="claude-x", request_id="r1")
-        transformer._pending_stop_reason = "max_tokens"
-        transformer._pending_usage = {"output_tokens": 3}
+        transformer.capture_stop_reason("max_tokens")
+        transformer.capture_usage({"output_tokens": 3})
         events = _parse_sse_blocks(transformer.finalize())
         deltas = [d for name, d in events if name == "message_delta"]
         assert deltas[0]["delta"] == {"stop_reason": "max_tokens"}
