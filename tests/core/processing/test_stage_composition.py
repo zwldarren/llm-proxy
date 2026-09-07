@@ -15,13 +15,12 @@ from llm_proxy.core.processing.base import RequestContext, ServiceDependencies
 from llm_proxy.core.processing.stages import PipelineStage, PipelineState
 from llm_proxy.core.processing.stages import composition as composition_module
 from llm_proxy.core.processing.stages.composition import create_per_provider_stages
-from llm_proxy.models import Message
-from llm_proxy.models.content_blocks import TextBlock
 from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
 from llm_proxy.core.processing.stages.parameter_override import ParameterOverrideService
 from llm_proxy.core.processing.unified import UnifiedProcessor
 from llm_proxy.core.provider_selector import ProviderSelectionResult
-from llm_proxy.models import InternalRequest
+from llm_proxy.models import InternalRequest, Message
+from llm_proxy.models.content_blocks import TextBlock
 from llm_proxy.protocols.openai.handler import openai_protocol
 from llm_proxy.protocols.registry import get_protocol_serializer
 

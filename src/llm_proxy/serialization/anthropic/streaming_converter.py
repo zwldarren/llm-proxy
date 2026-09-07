@@ -391,7 +391,10 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
                 + self._cache_read_input_tokens
                 + self._cache_creation_input_tokens
             )
-            pending_usage = {
+            # Values mix ints with nested detail dicts (prompt_tokens_details /
+            # completion_tokens_details below), so the value type must stay Any
+            # for the setdefault subscript assignments to type-check.
+            pending_usage: dict[str, Any] = {
                 "prompt_tokens": total_input,
                 "completion_tokens": self._output_tokens,
                 "total_tokens": total_input + self._output_tokens,

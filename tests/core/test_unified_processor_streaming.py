@@ -1351,9 +1351,6 @@ def test_merge_terminal_state_adopts_absent_stop_reason_and_usage() -> None:
     assert continuation._pending_usage == {"input_tokens": 11, "output_tokens": 6}
 
 
-
-
-
 class TestDisconnectIntervalGating:
     """The disconnect poll must run on chunk 1 and every interval-th chunk.
 
