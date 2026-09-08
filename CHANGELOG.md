@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.2](https://github.com/zwldarren/llm-proxy/compare/v0.2.1...v0.2.2) (2026-09-08)
+
+
+### Features
+
+* **frontend:** replace loading spinners with geometry-mirroring skeletons ([e84a723](https://github.com/zwldarren/llm-proxy/commit/e84a7239e40cbfd8c60c5e5a0bb92d50cc053e77))
+* **models:** add models.dev-aligned display attributes to catalog and management ([00ecbea](https://github.com/zwldarren/llm-proxy/commit/00ecbeaf65534bfb01d4351cb2d9510f98fb1191))
+* **models:** sync capability/metadata fields from models.dev alongside pricing ([d0a1196](https://github.com/zwldarren/llm-proxy/commit/d0a11962397c5de2f37b32547eab94786c06efbd))
+* **models:** unify catalog and management behind a single role-switched /models route ([a4b4e6c](https://github.com/zwldarren/llm-proxy/commit/a4b4e6c31e4dee72d058dabda39eea88e72893ac))
+* **streaming:** tolerate no-space SSE field framing from upstreams ([b5afe3f](https://github.com/zwldarren/llm-proxy/commit/b5afe3f093ddab8479dca68fd02904dc5ee3bb8c))
+
+
+### Bug Fixes
+
+* **ci:** type-annotate anthropic pending usage dict; sort test imports ([2ca26a8](https://github.com/zwldarren/llm-proxy/commit/2ca26a8a89c8fd5e1d3e5f18439b45bf403a0ce4))
+* **ci:** use valid GitHub expression for stable tag enable in Docker workflow ([d64afc2](https://github.com/zwldarren/llm-proxy/commit/d64afc23dfecd005c939d844b781b008ec206555))
+* **gemini:** align serialization with the live API (thoughtSignature, tools array, code execution) ([aa2c9ca](https://github.com/zwldarren/llm-proxy/commit/aa2c9cab595b98ee71df805881661f8a6731240a))
+* **gemini:** promote STOP finish reason to tool_calls when tool calls produced ([ad0ac50](https://github.com/zwldarren/llm-proxy/commit/ad0ac501e3ec33a1dfc15be3c23659e94ffa6972))
+* **migrations:** use sa.false() for boolean server defaults ([01209c3](https://github.com/zwldarren/llm-proxy/commit/01209c370595b5d5f7b7d2b9ff3a719cc6cab090))
+
 ## [0.2.1](https://github.com/zwldarren/llm-proxy/compare/v0.2.0...v0.2.1) (2026-09-01)
 
 
