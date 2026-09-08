@@ -1,4 +1,6 @@
 import type {
+  ApplyMetadataRequest,
+  ApplyMetadataResponse,
   ApplyPricingRequest,
   ApplyPricingResponse,
   CircuitBreakerListResponse,
@@ -25,6 +27,7 @@ import type {
   ResilienceConfig,
   SecurityConfig,
   SmartRoutingConfig,
+  SyncMetadataResponse,
   SyncPricingResponse,
   TracingConfig,
   TracingResponse,
@@ -169,4 +172,12 @@ export const pricingApi = {
   // Apply explicitly reviewed per-mapping pricing updates.
   applyPricing: (data: ApplyPricingRequest) =>
     http.post<ApplyPricingResponse>(`${BASE_URL}/models/pricing/apply`, data),
+};
+
+export const metadataApi = {
+  // Fetch a preview of models.dev metadata/capabilities for all configured models.
+  fetchPreview: () => http.post<SyncMetadataResponse>(`${BASE_URL}/models/sync-metadata`, {}),
+  // Apply explicitly reviewed per-model metadata updates.
+  applyMetadata: (data: ApplyMetadataRequest) =>
+    http.post<ApplyMetadataResponse>(`${BASE_URL}/models/metadata/apply`, data),
 };

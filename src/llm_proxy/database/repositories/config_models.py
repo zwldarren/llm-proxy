@@ -321,6 +321,57 @@ class ModelRepository(BaseRepository):
         await self.session.refresh(mapping)
         return mapping
 
+    _APPLY_METADATA_FIELDS = frozenset(
+        {
+            "supports_images",
+            "attachment",
+            "reasoning",
+            "tool_call",
+            "structured_output",
+            "temperature",
+            "open_weights",
+            "status",
+            "family",
+            "knowledge",
+            "release_date",
+            "context_length",
+            "max_output_tokens",
+        }
+    )
+
+    async def apply_model_metadata(
+        self,
+        name: str,
+        updates: dict[str, Any],
+    ) -> ModelRecord | None:
+        """Apply explicit metadata updates to a model.
+
+        Only the keys present in ``updates`` are written (a present ``None``
+        clears the field); absent keys are left untouched. Unknown keys are
+        silently ignored.
+
+        Args:
+            name: The model name to update
+            updates: Mapping of metadata field name to new value (or None to clear)
+
+        Returns:
+            The updated ModelRecord or None if not found
+        """
+        stmt = select(ModelRecord).where(ModelRecord.name == name)
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+
+        if not model:
+            return None
+
+        for field, value in updates.items():
+            if field in self._APPLY_METADATA_FIELDS:
+                setattr(model, field, value)
+
+        await self.session.flush()
+        await self.session.refresh(model)
+        return model
+
     async def delete_model(self, name: str) -> bool:
         """Delete a model configuration."""
         model = await self.get_model(name)

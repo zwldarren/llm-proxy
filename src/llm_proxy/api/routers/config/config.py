@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from llm_proxy.api.routers.config.circuit_breaker import (
     router as circuit_breaker_router,
 )
+from llm_proxy.api.routers.config.metadata import router as metadata_router
 from llm_proxy.api.routers.config.models import (
     public_router as models_public_router,
 )
@@ -38,5 +39,6 @@ router.include_router(models_public_router)
 router.include_router(server_router)
 router.include_router(circuit_breaker_router)
 router.include_router(pricing_router)
+router.include_router(metadata_router)
 
 __all__ = ["router"]

@@ -21,7 +21,7 @@ import {
   ModelProviderList,
   ModelContextCell,
 } from "@/components/models";
-import PricingSyncDialog from "@/components/models/PricingSyncDialog.vue";
+import ModelsSyncDialog from "@/components/models/ModelsSyncDialog.vue";
 import {
   BOUND_CAPABILITIES,
   INFO_CAPABILITIES,
@@ -79,7 +79,7 @@ const modelStore = useModelStore();
 const providerStore = useProviderStore();
 
 const showCreateDialog = ref(false);
-const showPricingSyncDialog = ref(false);
+const showSyncDialog = ref(false);
 const showDeleteDialog = ref(false);
 const deletingModelName = ref("");
 const isEditing = ref(false);
@@ -200,9 +200,9 @@ const confirmDelete = async () => {
       <header class="config-header-bar px-4 sm:px-6 py-4">
         <PageHeader :title="t('models.title')" :description="t('models.description')" :icon="Box">
           <template #actions>
-            <Button variant="outline" @click="showPricingSyncDialog = true">
+            <Button variant="outline" @click="showSyncDialog = true">
               <RefreshCw class="w-4 h-4 mr-2" />
-              {{ t("models.pricingSync.trigger") }}
+              {{ t("models.sync.trigger") }}
             </Button>
             <Button @click="openCreateDialog" class="btn-action">
               <Plus class="w-4 h-4 mr-2" />
@@ -457,8 +457,8 @@ const confirmDelete = async () => {
       @confirm="confirmDelete"
     />
 
-    <!-- Pricing sync dialog (models.dev) -->
-    <PricingSyncDialog v-model:open="showPricingSyncDialog" @applied="modelStore.fetchModels()" />
+    <!-- Sync dialog (models.dev: pricing + capabilities) -->
+    <ModelsSyncDialog v-model:open="showSyncDialog" @applied="modelStore.fetchModels()" />
 
     <!-- Create/Edit Sheet (slides in from the right) -->
     <Sheet v-model:open="showCreateDialog">

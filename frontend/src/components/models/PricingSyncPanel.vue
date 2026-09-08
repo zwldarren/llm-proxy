@@ -6,14 +6,7 @@ import { toast } from "vue-sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -35,12 +28,12 @@ import { useErrorHandler } from "@/composables/useErrorHandler";
 
 import type { PricingUpdateItem, SyncPricingResult, SyncPricingResponse } from "@/types/schemas";
 
-defineOptions({ name: "PricingSyncDialog" });
+defineOptions({ name: "PricingSyncPanel" });
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{
-  "update:open": [value: boolean];
   applied: [];
+  close: [];
 }>();
 
 const { t } = useI18n();
@@ -449,7 +442,7 @@ async function applySelected() {
       return;
     }
     emit("applied");
-    close();
+    emit("close");
   } catch (error) {
     handleError(error);
     step.value = "review";
@@ -457,10 +450,8 @@ async function applySelected() {
 }
 
 // ---- Dialog lifecycle ----
-function close() {
-  emit("update:open", false);
-}
-
+// The panel mounts inside the shell's DialogContent, so it only exists while
+// the dialog is open; `immediate` covers the mount-with-open=true case.
 watch(
   () => props.open,
   (open) => {
@@ -475,7 +466,8 @@ watch(
       // an extra confirmation click only adds friction.
       fetchPreview();
     }
-  }
+  },
+  { immediate: true }
 );
 
 // ---- Formatting ----
@@ -518,368 +510,357 @@ const hasRows = computed(() => displayedRows.value.length > 0);
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="flex h-[86vh] w-[96vw] max-w-[96vw] flex-col gap-0 p-0 sm:max-w-[1500px]">
-      <DialogHeader class="px-6 pt-6 pb-4 border-b border-border">
-        <DialogTitle>{{ t("models.pricingSync.title") }}</DialogTitle>
-        <DialogDescription>{{ t("models.pricingSync.subtitle") }}</DialogDescription>
-      </DialogHeader>
+  <div class="flex min-h-0 flex-1 flex-col">
+    <!-- Step: idle — only reachable after a fetch error; offer retry -->
+    <div
+      v-if="step === 'idle'"
+      class="flex-1 flex flex-col items-center justify-center gap-4 py-16 text-center px-6"
+    >
+      <p class="text-sm text-muted-foreground max-w-md">
+        {{ t("models.pricingSync.idleDescription") }}
+      </p>
+      <p v-if="fetchError" class="text-sm text-status-error">{{ fetchError }}</p>
+      <Button class="btn-action" @click="fetchPreview">
+        <RefreshCw class="w-4 h-4 mr-2" />
+        {{ t("models.pricingSync.retry") }}
+      </Button>
+    </div>
 
-      <!-- Step: idle — only reachable after a fetch error; offer retry -->
-      <div
-        v-if="step === 'idle'"
-        class="flex-1 flex flex-col items-center justify-center gap-4 py-16 text-center px-6"
-      >
-        <p class="text-sm text-muted-foreground max-w-md">
-          {{ t("models.pricingSync.idleDescription") }}
-        </p>
-        <p v-if="fetchError" class="text-sm text-status-error">{{ fetchError }}</p>
-        <Button class="btn-action" @click="fetchPreview">
-          <RefreshCw class="w-4 h-4 mr-2" />
-          {{ t("models.pricingSync.retry") }}
-        </Button>
-      </div>
+    <!-- Step: fetching -->
+    <div
+      v-else-if="step === 'fetching'"
+      class="flex-1 flex items-center justify-center gap-3 py-20"
+    >
+      <RefreshCw class="w-4 h-4 animate-spin text-muted-foreground" />
+      <span class="text-sm text-muted-foreground">{{ t("models.pricingSync.fetching") }}</span>
+    </div>
 
-      <!-- Step: fetching -->
-      <div
-        v-else-if="step === 'fetching'"
-        class="flex-1 flex items-center justify-center gap-3 py-20"
-      >
-        <RefreshCw class="w-4 h-4 animate-spin text-muted-foreground" />
-        <span class="text-sm text-muted-foreground">{{ t("models.pricingSync.fetching") }}</span>
-      </div>
-
-      <!-- Step: review / applying -->
-      <template v-else>
-        <!-- Toolbar: filter tabs + search -->
-        <div class="px-6 py-3 border-b border-border flex flex-wrap items-center gap-3">
-          <div class="flex items-center gap-1 rounded-md bg-muted/40 p-0.5">
-            <button
-              v-for="tab in filterTabs"
-              :key="tab.key"
-              v-show="tab.visible"
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors"
+    <!-- Step: review / applying -->
+    <template v-else>
+      <!-- Toolbar: filter tabs + search -->
+      <div class="px-6 py-3 border-b border-border flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-1 rounded-md bg-muted/40 p-0.5">
+          <button
+            v-for="tab in filterTabs"
+            :key="tab.key"
+            v-show="tab.visible"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors"
+            :class="
+              activeFilter === tab.key
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            "
+            @click="activeFilter = tab.key"
+          >
+            {{ tab.label }}
+            <span
+              class="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
               :class="
                 activeFilter === tab.key
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
+                  ? 'bg-muted text-muted-foreground'
+                  : 'bg-muted/50 text-muted-foreground'
               "
-              @click="activeFilter = tab.key"
             >
-              {{ tab.label }}
-              <span
-                class="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
-                :class="
-                  activeFilter === tab.key
-                    ? 'bg-muted text-muted-foreground'
-                    : 'bg-muted/50 text-muted-foreground'
-                "
-              >
-                {{ tab.count }}
-              </span>
-            </button>
-          </div>
-
-          <div class="ml-auto relative">
-            <Search
-              class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground"
-            />
-            <Input
-              v-model="searchQuery"
-              :placeholder="t('common.searchPlaceholder')"
-              class="h-8 w-56 pl-8 text-sm"
-            />
-          </div>
+              {{ tab.count }}
+            </span>
+          </button>
         </div>
 
-        <!-- Review table -->
-        <div class="flex-1 min-h-0 overflow-auto">
-          <Table v-if="hasRows" class="w-max min-w-full">
-            <TableHeader class="sticky top-0 z-10">
-              <TableRow class="hover:bg-transparent hover:border-l-transparent">
-                <TableHead class="w-10">
-                  <Checkbox
-                    v-if="visibleActionable.length > 0"
-                    :model-value="
-                      allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false
-                    "
-                    :aria-label="t('models.pricingSync.selectAll')"
-                    @update:model-value="onSelectAll"
-                  />
-                </TableHead>
-                <TableHead class="min-w-[220px]">{{ t("models.pricingSync.colModel") }}</TableHead>
-                <TableHead class="w-40">{{ t("models.pricingSync.colSource") }}</TableHead>
-                <TableHead class="w-44 text-right">{{
-                  t("models.pricingSync.colInput")
-                }}</TableHead>
-                <TableHead class="w-44 text-right">{{
-                  t("models.pricingSync.colOutput")
-                }}</TableHead>
-                <TableHead class="min-w-[200px]">{{ t("models.pricingSync.colExtra") }}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow
-                v-for="row in displayedRows"
-                :key="row.key"
-                :data-state="row.selected ? 'selected' : undefined"
-              >
-                <TableCell>
-                  <Checkbox
-                    v-if="step !== 'applying' && isActionable(row)"
-                    v-model="row.selected"
-                    :aria-label="row.result.model_name"
-                  />
-                </TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-2">
-                    <div class="min-w-0">
-                      <div class="font-medium truncate">{{ row.result.model_name }}</div>
-                      <div class="text-xs text-muted-foreground truncate">
-                        {{ row.result.provider }} · {{ row.result.provider_model_name }}
-                      </div>
+        <div class="ml-auto relative">
+          <Search
+            class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground"
+          />
+          <Input
+            v-model="searchQuery"
+            :placeholder="t('common.searchPlaceholder')"
+            class="h-8 w-56 pl-8 text-sm"
+          />
+        </div>
+      </div>
+
+      <!-- Review table -->
+      <div class="flex-1 min-h-0 overflow-auto">
+        <Table v-if="hasRows" class="w-max min-w-full">
+          <TableHeader class="sticky top-0 z-10">
+            <TableRow class="hover:bg-transparent hover:border-l-transparent">
+              <TableHead class="w-10">
+                <Checkbox
+                  v-if="visibleActionable.length > 0"
+                  :model-value="
+                    allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false
+                  "
+                  :aria-label="t('models.pricingSync.selectAll')"
+                  @update:model-value="onSelectAll"
+                />
+              </TableHead>
+              <TableHead class="min-w-[220px]">{{ t("models.pricingSync.colModel") }}</TableHead>
+              <TableHead class="w-40">{{ t("models.pricingSync.colSource") }}</TableHead>
+              <TableHead class="w-44 text-right">{{ t("models.pricingSync.colInput") }}</TableHead>
+              <TableHead class="w-44 text-right">{{ t("models.pricingSync.colOutput") }}</TableHead>
+              <TableHead class="min-w-[200px]">{{ t("models.pricingSync.colExtra") }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow
+              v-for="row in displayedRows"
+              :key="row.key"
+              :data-state="row.selected ? 'selected' : undefined"
+            >
+              <TableCell>
+                <Checkbox
+                  v-if="step !== 'applying' && isActionable(row)"
+                  v-model="row.selected"
+                  :aria-label="row.result.model_name"
+                />
+              </TableCell>
+              <TableCell>
+                <div class="flex items-center gap-2">
+                  <div class="min-w-0">
+                    <div class="font-medium truncate">{{ row.result.model_name }}</div>
+                    <div class="text-xs text-muted-foreground truncate">
+                      {{ row.result.provider }} · {{ row.result.provider_model_name }}
                     </div>
-                    <Badge
-                      v-if="row.status === 'new'"
-                      variant="outline"
-                      class="shrink-0 text-status-success border-status-success/40"
-                    >
-                      {{ t("models.pricingSync.badgeNew") }}
-                    </Badge>
-                    <Badge
-                      v-else-if="row.status === 'changed'"
-                      variant="outline"
-                      class="shrink-0 text-action-amber border-action-amber/40"
-                    >
-                      {{ t("models.pricingSync.badgeChanged") }}
-                    </Badge>
-                    <Badge
-                      v-else-if="row.status === 'nodata'"
-                      variant="outline"
-                      class="shrink-0 text-muted-foreground border-border"
-                    >
-                      {{ t("models.pricingSync.badgeNoData") }}
-                    </Badge>
                   </div>
-                </TableCell>
-                <TableCell>
-                  <Select
+                  <Badge
+                    v-if="row.status === 'new'"
+                    variant="outline"
+                    class="shrink-0 text-status-success border-status-success/40"
+                  >
+                    {{ t("models.pricingSync.badgeNew") }}
+                  </Badge>
+                  <Badge
+                    v-else-if="row.status === 'changed'"
+                    variant="outline"
+                    class="shrink-0 text-action-amber border-action-amber/40"
+                  >
+                    {{ t("models.pricingSync.badgeChanged") }}
+                  </Badge>
+                  <Badge
+                    v-else-if="row.status === 'nodata'"
+                    variant="outline"
+                    class="shrink-0 text-muted-foreground border-border"
+                  >
+                    {{ t("models.pricingSync.badgeNoData") }}
+                  </Badge>
+                </div>
+              </TableCell>
+              <TableCell>
+                <Select
+                  v-if="
+                    step !== 'applying' &&
+                    isActionable(row) &&
+                    row.result.available_sources.length > 1
+                  "
+                  :model-value="row.sourceKey ?? undefined"
+                  @update:model-value="(v) => onSourceChange(row, String(v))"
+                >
+                  <SelectTrigger class="h-8 w-full text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="opt in row.result.available_sources"
+                      :key="opt.source"
+                      :value="opt.source"
+                    >
+                      {{ opt.source }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <span v-else class="text-data text-muted-foreground">
+                  {{ row.sourceKey ?? "—" }}
+                </span>
+              </TableCell>
+              <!-- Input price: old → new (click new value to edit) -->
+              <TableCell class="text-right">
+                <div class="flex items-center justify-end gap-1.5 text-data">
+                  <span class="text-muted-foreground">{{ fmt(row.old.input) }}</span>
+                  <span class="text-muted-foreground">→</span>
+                  <input
                     v-if="
                       step !== 'applying' &&
                       isActionable(row) &&
-                      row.result.available_sources.length > 1
+                      editingCell?.key === row.key &&
+                      editingCell.field === 'input'
                     "
-                    :model-value="row.sourceKey ?? undefined"
-                    @update:model-value="(v) => onSourceChange(row, String(v))"
+                    v-model="editingValue"
+                    type="number"
+                    step="any"
+                    min="0"
+                    class="w-20 h-7 px-1.5 text-right text-data bg-background border border-ring rounded outline-none"
+                    autofocus
+                    @blur="commitEdit(row)"
+                    @keydown.enter="commitEdit(row)"
+                    @keydown.esc="cancelEdit"
+                  />
+                  <button
+                    v-else-if="step !== 'applying' && isActionable(row)"
+                    type="button"
+                    class="hover:bg-muted rounded px-1 -mx-1 cursor-text"
+                    :class="
+                      samePrice(row.candidate.input, row.old.input)
+                        ? ''
+                        : row.candidate.input !== null &&
+                            row.old.input !== null &&
+                            row.candidate.input > row.old.input
+                          ? 'text-action-amber'
+                          : 'text-status-success'
+                    "
+                    @click="startEdit(row, 'input')"
                   >
-                    <SelectTrigger class="h-8 w-full text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem
-                        v-for="opt in row.result.available_sources"
-                        :key="opt.source"
-                        :value="opt.source"
-                      >
-                        {{ opt.source }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <span v-else class="text-data text-muted-foreground">
-                    {{ row.sourceKey ?? "—" }}
+                    {{ fmt(row.candidate.input) }}
+                  </button>
+                  <span v-else class="text-muted-foreground">{{ fmt(row.old.input) }}</span>
+                  <span
+                    v-if="isActionable(row) && pctChange(row.old.input, row.candidate.input)"
+                    class="text-xs"
+                    :class="
+                      (row.candidate.input ?? 0) > (row.old.input ?? 0)
+                        ? 'text-action-amber'
+                        : 'text-status-success'
+                    "
+                  >
+                    {{ pctChange(row.old.input, row.candidate.input) }}
                   </span>
-                </TableCell>
-                <!-- Input price: old → new (click new value to edit) -->
-                <TableCell class="text-right">
-                  <div class="flex items-center justify-end gap-1.5 text-data">
-                    <span class="text-muted-foreground">{{ fmt(row.old.input) }}</span>
-                    <span class="text-muted-foreground">→</span>
-                    <input
-                      v-if="
-                        step !== 'applying' &&
-                        isActionable(row) &&
-                        editingCell?.key === row.key &&
-                        editingCell.field === 'input'
-                      "
-                      v-model="editingValue"
-                      type="number"
-                      step="any"
-                      min="0"
-                      class="w-20 h-7 px-1.5 text-right text-data bg-background border border-ring rounded outline-none"
-                      autofocus
-                      @blur="commitEdit(row)"
-                      @keydown.enter="commitEdit(row)"
-                      @keydown.esc="cancelEdit"
-                    />
-                    <button
-                      v-else-if="step !== 'applying' && isActionable(row)"
-                      type="button"
-                      class="hover:bg-muted rounded px-1 -mx-1 cursor-text"
-                      :class="
-                        samePrice(row.candidate.input, row.old.input)
-                          ? ''
-                          : row.candidate.input !== null &&
-                              row.old.input !== null &&
-                              row.candidate.input > row.old.input
-                            ? 'text-action-amber'
-                            : 'text-status-success'
-                      "
-                      @click="startEdit(row, 'input')"
-                    >
-                      {{ fmt(row.candidate.input) }}
-                    </button>
-                    <span v-else class="text-muted-foreground">{{ fmt(row.old.input) }}</span>
-                    <span
-                      v-if="isActionable(row) && pctChange(row.old.input, row.candidate.input)"
-                      class="text-xs"
-                      :class="
-                        (row.candidate.input ?? 0) > (row.old.input ?? 0)
+                </div>
+              </TableCell>
+              <!-- Output price -->
+              <TableCell class="text-right">
+                <div class="flex items-center justify-end gap-1.5 text-data">
+                  <span class="text-muted-foreground">{{ fmt(row.old.output) }}</span>
+                  <span class="text-muted-foreground">→</span>
+                  <input
+                    v-if="
+                      step !== 'applying' &&
+                      isActionable(row) &&
+                      editingCell?.key === row.key &&
+                      editingCell.field === 'output'
+                    "
+                    v-model="editingValue"
+                    type="number"
+                    step="any"
+                    min="0"
+                    class="w-20 h-7 px-1.5 text-right text-data bg-background border border-ring rounded outline-none"
+                    autofocus
+                    @blur="commitEdit(row)"
+                    @keydown.enter="commitEdit(row)"
+                    @keydown.esc="cancelEdit"
+                  />
+                  <button
+                    v-else-if="step !== 'applying' && isActionable(row)"
+                    type="button"
+                    class="hover:bg-muted rounded px-1 -mx-1 cursor-text"
+                    :class="
+                      samePrice(row.candidate.output, row.old.output)
+                        ? ''
+                        : row.candidate.output !== null &&
+                            row.old.output !== null &&
+                            row.candidate.output > row.old.output
                           ? 'text-action-amber'
                           : 'text-status-success'
-                      "
-                    >
-                      {{ pctChange(row.old.input, row.candidate.input) }}
-                    </span>
-                  </div>
-                </TableCell>
-                <!-- Output price -->
-                <TableCell class="text-right">
-                  <div class="flex items-center justify-end gap-1.5 text-data">
-                    <span class="text-muted-foreground">{{ fmt(row.old.output) }}</span>
-                    <span class="text-muted-foreground">→</span>
-                    <input
-                      v-if="
-                        step !== 'applying' &&
-                        isActionable(row) &&
-                        editingCell?.key === row.key &&
-                        editingCell.field === 'output'
-                      "
-                      v-model="editingValue"
-                      type="number"
-                      step="any"
-                      min="0"
-                      class="w-20 h-7 px-1.5 text-right text-data bg-background border border-ring rounded outline-none"
-                      autofocus
-                      @blur="commitEdit(row)"
-                      @keydown.enter="commitEdit(row)"
-                      @keydown.esc="cancelEdit"
-                    />
-                    <button
-                      v-else-if="step !== 'applying' && isActionable(row)"
-                      type="button"
-                      class="hover:bg-muted rounded px-1 -mx-1 cursor-text"
-                      :class="
-                        samePrice(row.candidate.output, row.old.output)
-                          ? ''
-                          : row.candidate.output !== null &&
-                              row.old.output !== null &&
-                              row.candidate.output > row.old.output
-                            ? 'text-action-amber'
-                            : 'text-status-success'
-                      "
-                      @click="startEdit(row, 'output')"
-                    >
-                      {{ fmt(row.candidate.output) }}
-                    </button>
-                    <span v-else class="text-muted-foreground">{{ fmt(row.old.output) }}</span>
-                    <span
-                      v-if="isActionable(row) && pctChange(row.old.output, row.candidate.output)"
-                      class="text-xs"
-                      :class="
-                        (row.candidate.output ?? 0) > (row.old.output ?? 0)
-                          ? 'text-action-amber'
-                          : 'text-status-success'
-                      "
-                    >
-                      {{ pctChange(row.old.output, row.candidate.output) }}
-                    </span>
-                  </div>
-                </TableCell>
-                <!-- Extra dimensions as chips -->
-                <TableCell>
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      v-for="chip in extraChips(row)"
-                      :key="chip.label"
-                      class="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-data"
-                      :class="samePrice(chip.oldV, chip.newV) ? 'text-muted-foreground' : ''"
-                    >
-                      <span class="text-muted-foreground">{{ chip.label }}</span>
-                      <template v-if="!samePrice(chip.oldV, chip.newV)">
-                        <span class="text-muted-foreground">{{ fmt(chip.oldV) }}</span>
-                        <span class="text-muted-foreground">→</span>
-                      </template>
-                      <span>{{ fmt(chip.newV) }}</span>
-                    </span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+                    "
+                    @click="startEdit(row, 'output')"
+                  >
+                    {{ fmt(row.candidate.output) }}
+                  </button>
+                  <span v-else class="text-muted-foreground">{{ fmt(row.old.output) }}</span>
+                  <span
+                    v-if="isActionable(row) && pctChange(row.old.output, row.candidate.output)"
+                    class="text-xs"
+                    :class="
+                      (row.candidate.output ?? 0) > (row.old.output ?? 0)
+                        ? 'text-action-amber'
+                        : 'text-status-success'
+                    "
+                  >
+                    {{ pctChange(row.old.output, row.candidate.output) }}
+                  </span>
+                </div>
+              </TableCell>
+              <!-- Extra dimensions as chips -->
+              <TableCell>
+                <div class="flex flex-wrap gap-1">
+                  <span
+                    v-for="chip in extraChips(row)"
+                    :key="chip.label"
+                    class="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-data"
+                    :class="samePrice(chip.oldV, chip.newV) ? 'text-muted-foreground' : ''"
+                  >
+                    <span class="text-muted-foreground">{{ chip.label }}</span>
+                    <template v-if="!samePrice(chip.oldV, chip.newV)">
+                      <span class="text-muted-foreground">{{ fmt(chip.oldV) }}</span>
+                      <span class="text-muted-foreground">→</span>
+                    </template>
+                    <span>{{ fmt(chip.newV) }}</span>
+                  </span>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
 
-          <!-- Empty state for the active filter -->
-          <div v-else class="flex flex-col items-center gap-2 py-16 text-center px-6">
-            <p class="text-sm font-medium">{{ emptyStateMessage.title }}</p>
-            <p class="text-sm text-muted-foreground max-w-sm">
-              {{ emptyStateMessage.description }}
-            </p>
-          </div>
+        <!-- Empty state for the active filter -->
+        <div v-else class="flex flex-col items-center gap-2 py-16 text-center px-6">
+          <p class="text-sm font-medium">{{ emptyStateMessage.title }}</p>
+          <p class="text-sm text-muted-foreground max-w-sm">
+            {{ emptyStateMessage.description }}
+          </p>
         </div>
+      </div>
 
-        <!-- Selection hint + footer -->
-        <div class="px-6 py-3 border-t border-border">
-          <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-3">
-            <span class="font-medium text-foreground">
-              {{
-                t("models.pricingSync.selectionSummary", {
-                  selected: selectedCount,
-                  applicable: applicableCount,
-                })
-              }}
-            </span>
-            <span v-if="selectedWithoutChange > 0" class="text-status-warning">
-              {{ t("models.pricingSync.noChangeHint") }}
-            </span>
-            <template v-if="totalActionable > 0">
-              <span>·</span>
-              <button
-                type="button"
-                class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
-                @click="selectAllActionable"
-              >
-                {{ t("models.pricingSync.selectAllActionable") }}
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
-                @click="clearSelection"
-              >
-                {{ t("models.pricingSync.clearSelection") }}
-              </button>
-            </template>
-            <span class="ml-auto">{{ t("models.pricingSync.reviewHint") }}</span>
-          </div>
-          <DialogFooter class="gap-2 sm:gap-2">
-            <Button variant="outline" :disabled="step === 'applying'" @click="close">
-              {{ t("common.cancel") }}
-            </Button>
-            <Button
-              class="btn-action"
-              :disabled="applicableCount === 0 || step === 'applying'"
-              @click="applySelected"
+      <!-- Selection hint + footer -->
+      <div class="px-6 py-3 border-t border-border">
+        <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-3">
+          <span class="font-medium text-foreground">
+            {{
+              t("models.pricingSync.selectionSummary", {
+                selected: selectedCount,
+                applicable: applicableCount,
+              })
+            }}
+          </span>
+          <span v-if="selectedWithoutChange > 0" class="text-status-warning">
+            {{ t("models.pricingSync.noChangeHint") }}
+          </span>
+          <template v-if="totalActionable > 0">
+            <span>·</span>
+            <button
+              type="button"
+              class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
+              @click="selectAllActionable"
             >
-              <RefreshCw v-if="step === 'applying'" class="w-4 h-4 mr-2 animate-spin" />
-              {{
-                step === "applying"
-                  ? t("models.pricingSync.applying")
-                  : t("models.pricingSync.apply", { count: applicableCount })
-              }}
-            </Button>
-          </DialogFooter>
+              {{ t("models.pricingSync.selectAllActionable") }}
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
+              @click="clearSelection"
+            >
+              {{ t("models.pricingSync.clearSelection") }}
+            </button>
+          </template>
+          <span class="ml-auto">{{ t("models.pricingSync.reviewHint") }}</span>
         </div>
-      </template>
-    </DialogContent>
-  </Dialog>
+        <DialogFooter class="gap-2 sm:gap-2">
+          <Button variant="outline" :disabled="step === 'applying'" @click="emit('close')">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button
+            class="btn-action"
+            :disabled="applicableCount === 0 || step === 'applying'"
+            @click="applySelected"
+          >
+            <RefreshCw v-if="step === 'applying'" class="w-4 h-4 mr-2 animate-spin" />
+            {{
+              step === "applying"
+                ? t("models.pricingSync.applying")
+                : t("models.pricingSync.apply", { count: applicableCount })
+            }}
+          </Button>
+        </DialogFooter>
+      </div>
+    </template>
+  </div>
 </template>

@@ -41,6 +41,33 @@ def coerce_float(value: Any) -> float | None:
         return None
 
 
+def build_model_index(data: dict[str, Any]) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    """Index catalog model entries by model id (plus ``/``-suffix alias).
+
+    models.dev nests entries under provider keys (``data[provider]["models"]``);
+    the index inverts that to ``model_id -> [(provider_key, entry), ...]`` so a
+    configured provider model name resolves to every catalog entry claiming
+    that id, regardless of which provider published it. IDs containing ``/``
+    are additionally indexed by their suffix, mirroring the pricing sync
+    aliasing (``org/gpt-4o`` also resolves as ``gpt-4o``).
+    """
+    index: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for provider_key, provider_data in data.items():
+        if not isinstance(provider_data, dict):
+            continue
+        models = provider_data.get("models")
+        if not isinstance(models, dict):
+            continue
+        for model_id, entry in models.items():
+            if not isinstance(entry, dict):
+                continue
+            index.setdefault(model_id, []).append((provider_key, entry))
+            if "/" in model_id:
+                _, suffix = model_id.rsplit("/", 1)
+                index.setdefault(suffix, []).append((provider_key, entry))
+    return index
+
+
 async def fetch_models_dev_data(client: AsyncSession) -> dict[str, Any]:
     """Return the parsed models.dev catalog, using the in-process cache.
 

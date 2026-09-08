@@ -319,6 +319,79 @@ export interface ApplyPricingResponse {
   results: ApplyPricingResult[];
 }
 
+// ---- Metadata/capability sync (models.dev) ----
+
+export interface ModelMetadataOption {
+  /** models.dev provider key ('' for stored values) */
+  source: string;
+  supports_images?: boolean | null;
+  attachment?: boolean | null;
+  reasoning?: boolean | null;
+  tool_call?: boolean | null;
+  structured_output?: boolean | null;
+  temperature?: boolean | null;
+  open_weights?: boolean | null;
+  status?: string | null;
+  family?: string | null;
+  knowledge?: string | null;
+  release_date?: string | null;
+  context_length?: number | null;
+  max_output_tokens?: number | null;
+}
+
+export interface SyncMetadataResult {
+  model_name: string;
+  old: ModelMetadataOption;
+  available_sources: ModelMetadataOption[];
+  selected_source?: string | null;
+  message: string;
+}
+
+export interface SyncMetadataResponse {
+  success: boolean;
+  total_models: number;
+  changed_count: number;
+  unchanged_count: number;
+  nodata_count: number;
+  results: SyncMetadataResult[];
+  error?: string | null;
+}
+
+/** Partial-update contract: only explicitly provided fields are written. */
+export interface MetadataUpdateItem {
+  model_name: string;
+  supports_images?: boolean | null;
+  attachment?: boolean | null;
+  reasoning?: boolean | null;
+  tool_call?: boolean | null;
+  structured_output?: boolean | null;
+  temperature?: boolean | null;
+  open_weights?: boolean | null;
+  status?: string | null;
+  family?: string | null;
+  knowledge?: string | null;
+  release_date?: string | null;
+  context_length?: number | null;
+  max_output_tokens?: number | null;
+}
+
+export interface ApplyMetadataRequest {
+  updates: MetadataUpdateItem[];
+}
+
+interface ApplyMetadataResult {
+  model_name: string;
+  applied: boolean;
+  message: string;
+}
+
+export interface ApplyMetadataResponse {
+  success: boolean;
+  applied_count: number;
+  failed_count: number;
+  results: ApplyMetadataResult[];
+}
+
 interface ProviderBase {
   name: string;
   type: string;
