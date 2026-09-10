@@ -322,6 +322,12 @@ async def calculate_cost(
         # Get all pricing rates with provider-specific fallback
         rates = _get_provider_pricing(model_config, provider_name)
 
+        # Model resolved but no pricing configured at any level: report None
+        # ("unknown") rather than a fake $0.00 that silently under-reports
+        # spend in usage stats.
+        if all(getattr(rates, field) is None for field in _PRICING_FIELDS):
+            return _breakdown_from_usage(token_usage, None)
+
         input_cost = 0.0
         output_cost = 0.0
 

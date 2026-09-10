@@ -583,6 +583,33 @@ class TestCalculateCostPublicAPI:
         assert result.cost_usd is None
 
     @pytest.mark.asyncio
+    async def test_calculate_cost_model_without_pricing(self):
+        """Returns None cost when a resolved model has no pricing at any level."""
+        usage = {"prompt_tokens": 1000, "completion_tokens": 500}
+
+        mock_config_manager = MagicMock()
+        mock_model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(
+                    provider="openai",
+                    priority=0,
+                    provider_model_name="gpt-4",
+                )
+            ]
+        )
+        mock_config_manager.get_model_config = AsyncMock(return_value=mock_model_config)
+
+        result = await calculate_cost(
+            usage=usage,
+            model_name="gpt-4",
+            config_manager=mock_config_manager,
+        )
+
+        assert result.cost_usd is None
+        assert result.prompt_tokens == 1000
+        assert result.completion_tokens == 500
+
+    @pytest.mark.asyncio
     async def test_calculate_cost_with_cache_tokens(self):
         """Cost calculation with cache tokens includes savings."""
         usage = {
