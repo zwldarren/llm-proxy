@@ -72,28 +72,29 @@ class ImageGenerationRequestSchema(BaseModel):
         description="Model to use for image generation (defaults to dall-e-2)",
     )
     n: int | None = Field(None, ge=1, le=10, description="Number of images to generate (1-10)")
-    quality: Literal["standard", "hd", "low", "medium", "high", "auto"] | None = Field(
-        None,
-        description="Quality of the generated image (e.g., standard, hd, low, medium, high, auto)",
+    # GPT Image 2.5 models add the "xhigh" and "max" quality tiers.
+    quality: Literal["standard", "hd", "low", "medium", "high", "xhigh", "max", "auto"] | None = (
+        Field(
+            None,
+            description=(
+                "Quality of the generated image (standard/hd for dall-e-3, "
+                "low/medium/high/xhigh/max/auto for GPT image models)"
+            ),
+        )
     )
     response_format: Literal["url", "b64_json"] | None = Field(
         None, description="Format for returned images (url or b64_json)"
     )
-    size: (
-        Literal[
-            "256x256",
-            "512x512",
-            "1024x1024",
-            "1024x1536",
-            "1536x1024",
-            "1792x1024",
-            "1024x1792",
-            "auto",
-        ]
-        | None
-    ) = Field(
+    # GPT Image 2/2.5 support arbitrary WIDTHxHEIGHT resolutions (both edges
+    # divisible by 16); deeper constraints are enforced by the serializer.
+    size: str | None = Field(
         None,
-        description="Size of the generated images (e.g., 1024x1024, 1536x1024, 1024x1536, auto)",
+        description=(
+            "Size of the generated images: 'auto', a standard size "
+            "(1024x1024, 1536x1024, 1024x1536, 1792x1024, 1024x1792, 256x256, 512x512), "
+            "or a custom WIDTHxHEIGHT resolution"
+        ),
+        pattern=r"^(auto|\d{1,4}x\d{1,4})$",
     )
     style: Literal["vivid", "natural"] | None = Field(
         None, description="Style of the generated images (e.g., vivid, natural)"
@@ -145,20 +146,22 @@ class ImageEditRequestSchema(BaseModel):
     partial_images: int | None = Field(
         None, ge=0, le=3, description="Number of partial images for streaming"
     )
-    quality: Literal["standard", "low", "medium", "high", "auto"] | None = Field(
-        None, description="Image quality (e.g., standard, low, medium, high, auto)"
+    # GPT Image 2.5 models add the "xhigh" and "max" quality tiers.
+    quality: Literal["standard", "low", "medium", "high", "xhigh", "max", "auto"] | None = Field(
+        None,
+        description=(
+            "Image quality (low/medium/high/xhigh/max/auto for GPT image models, "
+            "standard for dall-e-2)"
+        ),
     )
-    size: (
-        Literal[
-            "256x256",
-            "512x512",
-            "1024x1024",
-            "1024x1536",
-            "1536x1024",
-            "auto",
-        ]
-        | None
-    ) = Field(None, description="Image size (e.g., 1024x1024, auto)")
+    size: str | None = Field(
+        None,
+        description=(
+            "Image size: 'auto', a standard size (1024x1024, 1536x1024, 1024x1536, "
+            "256x256, 512x512), or a custom WIDTHxHEIGHT resolution"
+        ),
+        pattern=r"^(auto|\d{1,4}x\d{1,4})$",
+    )
     response_format: Literal["url", "b64_json"] | None = Field(
         None, description="Format for returned images (url or b64_json)"
     )

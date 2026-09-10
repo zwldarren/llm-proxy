@@ -330,11 +330,17 @@ export default {
     size1024x1024: "1024×1024",
     size1536x1024: "1536×1024",
     size1024x1536: "1024×1536",
+    size2048x2048: "2048×2048",
+    size2048x1152: "2048×1152",
+    size3840x2160: "3840×2160",
+    size2160x3840: "2160×3840",
     // Quality options
     qualityAuto: "Auto",
     qualityLow: "Low",
     qualityMedium: "Medium",
     qualityHigh: "High",
+    qualityXhigh: "Extra High",
+    qualityMax: "Max",
     // Upload
     uploadImagesHint:
       "Upload reference images to edit. Without images, a new image will be generated.",

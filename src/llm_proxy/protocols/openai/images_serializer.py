@@ -7,6 +7,7 @@ Registered as both "image_generations" and "image_edits" to resolve the
 serializer lookup crash that occurred when two endpoints shared one serializer.
 """
 
+import re
 from typing import Any, cast
 
 from llm_proxy.core.exceptions import ValidationError
@@ -24,31 +25,15 @@ from llm_proxy.protocols.serializer_base import ProtocolSerializer
 class BaseOpenAIImagesSerializer(ProtocolSerializer):
     """Shared logic for OpenAI Images protocol serializers."""
 
-    _IMAGE_SIZES = frozenset(
-        {
-            "256x256",
-            "512x512",
-            "1024x1024",
-            "1024x1536",
-            "1536x1024",
-            "1792x1024",
-            "1024x1792",
-            "auto",
-        }
-    )
-
-    # Image edits accepts a narrower set per the official SDK: no 1792x1024
-    # or 1024x1792 (those are dall-e-3 generation sizes).
-    _EDIT_SIZES = frozenset(
-        {
-            "256x256",
-            "512x512",
-            "1024x1024",
-            "1024x1536",
-            "1536x1024",
-            "auto",
-        }
-    )
+    # GPT Image 2/2.5 accept arbitrary WIDTHxHEIGHT resolutions. OpenAI's
+    # documented universal constraints: both edges divisible by 16, max edge
+    # 3840 px, aspect ratio between 1:3 and 3:1. Model-specific pixel limits
+    # (e.g. dall-e-2 fixed sizes, gpt-image-1's resolution set) are enforced
+    # by the provider, so the proxy only validates the universal contract.
+    _SIZE_PATTERN = re.compile(r"^(\d{1,4})x(\d{1,4})$")
+    _SIZE_MULTIPLE = 16
+    _SIZE_MAX_EDGE = 3840
+    _SIZE_MAX_RATIO = 3
 
     @staticmethod
     def _validate_choice(value: Any, field: str, choices: frozenset[str]) -> str | None:
@@ -90,16 +75,11 @@ class BaseOpenAIImagesSerializer(ProtocolSerializer):
             )
         return parsed
 
-    def _parse_size(
-        self, size_str: str | None, *, allowed: frozenset[str] | None = None
-    ) -> ImageSize | None:
+    def _parse_size(self, size_str: str | None) -> ImageSize | None:
+        """Parse a size string: 'auto', a standard size, or a custom WxH."""
         if size_str is None:
             return None
-        if (
-            not isinstance(size_str, str)
-            or not size_str
-            or size_str not in (allowed or self._IMAGE_SIZES)
-        ):
+        if not isinstance(size_str, str) or not size_str:
             raise ValidationError(
                 message=f"Invalid size '{size_str}'",
                 code="invalid_request_error",
@@ -107,12 +87,46 @@ class BaseOpenAIImagesSerializer(ProtocolSerializer):
             )
         if size_str == "auto":
             return None
-        try:
-            return ImageSize.parse(size_str)
-        except ValueError as exc:
+        match = self._SIZE_PATTERN.match(size_str)
+        if match is None:
             raise ValidationError(
-                message=str(exc), code="invalid_request_error", status_code=400
-            ) from None
+                message=(
+                    f"Invalid size '{size_str}'. Expected 'auto' or a "
+                    "'WIDTHxHEIGHT' resolution (edges divisible by 16)"
+                ),
+                code="invalid_request_error",
+                status_code=400,
+            )
+        width, height = int(match.group(1)), int(match.group(2))
+        if width < self._SIZE_MULTIPLE or height < self._SIZE_MULTIPLE:
+            raise ValidationError(
+                message=f"Invalid size '{size_str}': edges must be at least "
+                f"{self._SIZE_MULTIPLE} pixels",
+                code="invalid_request_error",
+                status_code=400,
+            )
+        if width % self._SIZE_MULTIPLE or height % self._SIZE_MULTIPLE:
+            raise ValidationError(
+                message=f"Invalid size '{size_str}': width and height must be "
+                f"divisible by {self._SIZE_MULTIPLE}",
+                code="invalid_request_error",
+                status_code=400,
+            )
+        if max(width, height) > self._SIZE_MAX_EDGE:
+            raise ValidationError(
+                message=f"Invalid size '{size_str}': the maximum supported "
+                f"resolution is {self._SIZE_MAX_EDGE}x2160",
+                code="invalid_request_error",
+                status_code=400,
+            )
+        if max(width, height) > self._SIZE_MAX_RATIO * min(width, height):
+            raise ValidationError(
+                message=f"Invalid size '{size_str}': aspect ratio must be between "
+                f"1:{self._SIZE_MAX_RATIO} and {self._SIZE_MAX_RATIO}:1",
+                code="invalid_request_error",
+                status_code=400,
+            )
+        return ImageSize(width=width, height=height)
 
     def _format_image_data(self, response: InternalImageResponse) -> dict[str, Any]:
         data = [
@@ -211,7 +225,7 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
         quality = self._validate_choice(
             data.get("quality"),
             "quality",
-            frozenset({"standard", "hd", "low", "medium", "high", "auto"}),
+            frozenset({"standard", "hd", "low", "medium", "high", "xhigh", "max", "auto"}),
         )
         style = self._validate_choice(data.get("style"), "style", frozenset({"vivid", "natural"}))
         response_format = self._validate_choice(
@@ -274,12 +288,14 @@ class ImageEditsSerializer(BaseOpenAIImagesSerializer):
         return "image_edits"
 
     def parse_request(self, data: dict[str, Any]) -> InternalImageEditRequest:
-        size = self._parse_size(data.get("size"), allowed=self._EDIT_SIZES)
+        size = self._parse_size(data.get("size"))
         size_raw = data.get("size")
 
         n = self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=10) or 1
         quality = self._validate_choice(
-            data.get("quality"), "quality", frozenset({"standard", "low", "medium", "high", "auto"})
+            data.get("quality"),
+            "quality",
+            frozenset({"standard", "low", "medium", "high", "xhigh", "max", "auto"}),
         )
         background = self._validate_choice(
             data.get("background"), "background", frozenset({"transparent", "opaque", "auto"})

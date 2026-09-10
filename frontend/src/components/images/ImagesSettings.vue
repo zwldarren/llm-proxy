@@ -42,6 +42,10 @@ const sizeOptions = [
   { value: "1024x1024", label: t("images.size1024x1024") },
   { value: "1536x1024", label: t("images.size1536x1024") },
   { value: "1024x1536", label: t("images.size1024x1536") },
+  { value: "2048x2048", label: t("images.size2048x2048") },
+  { value: "2048x1152", label: t("images.size2048x1152") },
+  { value: "3840x2160", label: t("images.size3840x2160") },
+  { value: "2160x3840", label: t("images.size2160x3840") },
 ];
 </script>
 
@@ -138,6 +142,8 @@ const sizeOptions = [
                 <SelectItem value="low">{{ t("images.qualityLow") }}</SelectItem>
                 <SelectItem value="medium">{{ t("images.qualityMedium") }}</SelectItem>
                 <SelectItem value="high">{{ t("images.qualityHigh") }}</SelectItem>
+                <SelectItem value="xhigh">{{ t("images.qualityXhigh") }}</SelectItem>
+                <SelectItem value="max">{{ t("images.qualityMax") }}</SelectItem>
               </SelectContent>
             </Select>
           </div>

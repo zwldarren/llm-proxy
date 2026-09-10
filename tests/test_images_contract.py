@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 from starlette.datastructures import FormData, UploadFile
 
+from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.image import ImageData, ImageEditSource, InternalImageResponse
 from llm_proxy.models.types import PromptTokensDetails, Usage
 from llm_proxy.protocols.openai.images_edits_handler import parse_image_edit_request
@@ -36,7 +37,8 @@ def test_edit_requires_at_least_one_json_image():
 
 
 def test_edit_accepts_sdk_size_and_quality_values():
-    # The official SDK allows 256x256/512x512 for edits but not 1792x1024.
+    # The official SDK allows 256x256/512x512 for edits; GPT Image 2/2.5 also
+    # accept custom 16-multiple resolutions such as 1792x1024.
     request = ImageEditRequestSchema.model_validate(
         {
             "prompt": "edit",
@@ -53,7 +55,7 @@ def test_edit_accepts_sdk_size_and_quality_values():
             {
                 "prompt": "edit",
                 "images": [{"image_url": "https://example.com/a.png"}],
-                "size": "1792x1024",
+                "size": "1024",  # not a WIDTHxHEIGHT pair
             }
         )
 
@@ -65,6 +67,93 @@ def test_edit_rejects_singular_image_json_field():
         ImageEditRequestSchema.model_validate(
             {"prompt": "edit", "image": {"image_url": "https://example.com/a.png"}}
         )
+
+
+def test_generation_accepts_gpt_image_2_5_quality_and_custom_sizes():
+    """GPT Image 2.5 adds the xhigh/max quality tiers and custom resolutions."""
+    request = ImageGenerationRequestSchema.model_validate(
+        {"prompt": "cat", "quality": "xhigh", "size": "2048x2048"}
+    )
+    assert request.quality == "xhigh"
+    assert request.size == "2048x2048"
+
+    request = ImageGenerationRequestSchema.model_validate(
+        {"prompt": "cat", "quality": "max", "size": "3840x2160"}
+    )
+    assert request.quality == "max"
+    assert request.size == "3840x2160"
+
+
+@pytest.mark.parametrize(
+    "size",
+    ["1500x1500", "4000x2000", "4000x1000", "100x100", "2048", "2048x2048x2", "nonsense"],
+)
+def test_generation_rejects_invalid_custom_sizes(size):
+    """Sizes violating OpenAI's universal resolution contract are rejected.
+
+    1500x1500 is not 16-divisible, 4000x2000 exceeds the 3840 edge cap, and
+    4000x1000 exceeds the 3:1 aspect ratio limit.
+    """
+    serializer = ImageGenerationsSerializer()
+    with pytest.raises(ValidationError) as exc_info:
+        serializer.parse_request({"prompt": "cat", "size": size})
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    [
+        ("1024x1024", (1024, 1024)),  # legacy square
+        ("1792x1024", (1792, 1024)),  # dall-e-3 landscape
+        ("2048x1152", (2048, 1152)),  # 2K landscape
+        ("3840x2160", (3840, 2160)),  # 4K landscape
+        ("2160x3840", (2160, 3840)),  # 4K portrait
+        ("3840x1280", (3840, 1280)),  # 3:1 ratio boundary
+        ("1536x864", (1536, 864)),  # docs example
+    ],
+)
+def test_generation_accepts_valid_custom_sizes(size, expected):
+    serializer = ImageGenerationsSerializer()
+    result = serializer.parse_request({"prompt": "cat", "size": size})
+    assert result.size is not None
+    assert (result.size.width, result.size.height) == expected
+
+
+def test_gpt_image_2_5_request_forwards_quality_and_custom_size():
+    """New GPT Image 2.5 parameters survive the full outbound translation."""
+    serializer = ImageGenerationsSerializer()
+    internal = serializer.parse_request(
+        {
+            "prompt": "a cat astronaut",
+            "model": "gpt-image-2.5-flare",
+            "quality": "max",
+            "size": "3840x2160",
+            "background": "transparent",
+            "output_format": "webp",
+            "stream": True,
+        }
+    )
+    adapter = OpenAICompatibleBase(api_key="test-key", base_url="https://api.openai.com/v1")
+    outbound = adapter._build_outbound_body(internal, request_type="image_generation")
+    assert outbound.json_body["model"] == "gpt-image-2.5-flare"
+    assert outbound.json_body["quality"] == "max"
+    assert outbound.json_body["size"] == "3840x2160"
+    assert outbound.json_body["background"] == "transparent"
+    assert outbound.json_body["output_format"] == "webp"
+
+
+def test_edit_accepts_gpt_image_2_5_quality():
+    """The edits endpoint accepts the xhigh/max quality tiers too."""
+    request = ImageEditRequestSchema.model_validate(
+        {
+            "prompt": "edit",
+            "images": [{"image_url": "https://example.com/a.png"}],
+            "quality": "xhigh",
+            "size": "2048x2048",
+        }
+    )
+    assert request.quality == "xhigh"
+    assert request.size == "2048x2048"
 
 
 @pytest.mark.asyncio
