@@ -67,7 +67,7 @@ from llm_proxy.core.errors import register_formatter_factory
 from llm_proxy.core.exceptions import NotFoundError
 from llm_proxy.core.utils import install_asyncgen_close_race_filter
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.version import get_version
+from llm_proxy.version import get_display_version
 
 logger = get_logger(__name__)
 
@@ -117,7 +117,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="LLM Proxy",
         description=("A proxy server that unifies different LLM providers to OpenAI format"),
-        version=get_version(),
+        version=get_display_version(),
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

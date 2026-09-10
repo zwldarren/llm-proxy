@@ -13,7 +13,7 @@ from llm_proxy.api.dependencies import get_http_client, require_admin_role
 from llm_proxy.config.settings import get_settings
 from llm_proxy.http.client import DEFAULT_USER_AGENT, AsyncSession
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.version import get_version
+from llm_proxy.version import get_display_version, get_version
 
 logger = get_logger(__name__)
 
@@ -167,12 +167,12 @@ async def get_system_info(request: Request, force: bool = False) -> SystemInfoRe
     "up to date".
     """
     if not get_settings().update_check.enabled:
-        return SystemInfoResponse(version=get_version(), update_check_enabled=False)
+        return SystemInfoResponse(version=get_display_version(), update_check_enabled=False)
 
     client = await get_http_client(request)
     await _refresh_update_state(client, force=force)
     return SystemInfoResponse(
-        version=get_version(),
+        version=get_display_version(),
         update_check_enabled=True,
         latest_version=_state.latest_version,
         update_available=_state.update_available,

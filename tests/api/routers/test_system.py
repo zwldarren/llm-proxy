@@ -19,7 +19,7 @@ from llm_proxy.config.settings import (
     set_settings,
 )
 from llm_proxy.core.exceptions import AuthenticationFailedError
-from llm_proxy.version import get_version
+from llm_proxy.version import get_display_version, get_version
 
 
 @pytest.fixture
@@ -87,7 +87,7 @@ class TestUpdateCheckDisabled:
 
         assert res.status_code == 200
         assert res.json() == {
-            "version": get_version(),
+            "version": get_display_version(),
             "update_check_enabled": False,
             "latest_version": None,
             "update_available": False,
@@ -150,6 +150,27 @@ class TestUpdateCheck:
 
         assert body["latest_version"] == get_version()
         assert body["update_available"] is False
+        assert body["check_failed"] is False
+
+    def test_dev_checkout_compares_on_base_version(
+        self, app, client, mock_github_client, monkeypatch
+    ):
+        """A git-decorated display version must not break the update comparison."""
+        _use_update_check(True)
+        # Tag above the base version: a comparison that wrongly ran on the
+        # decorated display version would parse to None and report no update,
+        # so asserting update_available is True is what discriminates.
+        github = mock_github_client(tags=[{"name": "v999.0.0"}])
+        _mount_github_client(app, github)
+        monkeypatch.setattr(
+            system_module, "get_display_version", lambda: "0.2.1-13-gd64afc23d-dirty"
+        )
+
+        body = client.get("/api/system/info").json()
+
+        assert body["version"] == "0.2.1-13-gd64afc23d-dirty"
+        assert body["latest_version"] == "999.0.0"
+        assert body["update_available"] is True
         assert body["check_failed"] is False
 
     def test_outbound_exception_fails_silently(self, app, client, mock_github_client):
@@ -242,10 +263,10 @@ class TestSystemInfoAuth:
 
 
 class TestVersionSource:
-    def test_fastapi_app_uses_get_version(self):
-        """create_app must source its version from version.get_version, not a literal."""
+    def test_fastapi_app_uses_display_version(self):
+        """create_app must source its version from version.get_display_version."""
         import llm_proxy.api as api_module
 
         sentinel = "0.0.0-hardcode-sentinel"
-        with patch.object(api_module, "get_version", return_value=sentinel):
+        with patch.object(api_module, "get_display_version", return_value=sentinel):
             assert api_module.create_app().version == sentinel

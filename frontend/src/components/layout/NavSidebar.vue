@@ -367,9 +367,11 @@ const prefetchRoute = (href: string) => {
             v-if="!isCollapsed && systemStore.info"
             to="/config/settings"
             :title="t('about.title')"
-            class="flex shrink-0 items-center gap-1 rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/50 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
+            class="flex min-w-0 max-w-36 shrink items-center gap-1 rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/50 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
           >
-            <span>v{{ systemStore.info.version }}</span>
+            <span class="truncate" :title="`v${systemStore.info.version}`">
+              v{{ systemStore.info.version }}
+            </span>
             <template v-if="systemStore.updateAvailable">
               <span role="status" class="flex items-center gap-1">
                 <span
