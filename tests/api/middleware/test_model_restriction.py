@@ -32,6 +32,14 @@ def _make_request(path: str, body: bytes | None = None) -> Request:
     return Request(scope, receive)
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _registered_protocols() -> None:
+    """Populate the protocol registry so alias paths resolve to their protocol."""
+    from llm_proxy.api.routers.protocol import import_registered_protocol_modules
+
+    import_registered_protocol_modules()
+
+
 class TestGetModelFromRequestBody:
     """Extracting the requested model from the request body."""
 
@@ -188,3 +196,25 @@ class TestModelRestrictionMiddleware:
         assert b"claude-3" in payload
         call_next.assert_not_awaited()
         lockout_manager.record_failed_attempt.assert_called_once_with("1.2.3.4")
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/chat/completions",
+            "/messages",
+            "/v1/v1/chat/completions",
+            "/v1/v1/messages",
+        ],
+    )
+    async def test_alias_path_enforces_restriction(self, path, call_next, lockout_manager):
+        """Alias paths carry no /v1 prefix but are API endpoints: a model
+        outside the key's allowlist must still be rejected."""
+        request = _make_request(path, b'{"model": "claude-3"}')
+        request.state.allowed_models = ["gpt-4"]
+        request.state.api_key_name = "my-key"
+
+        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+
+        assert result.status_code == 403
+        assert b"model_not_allowed" in result.body
+        call_next.assert_not_awaited()

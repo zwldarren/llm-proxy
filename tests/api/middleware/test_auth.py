@@ -736,3 +736,45 @@ class TestJwtValidationFailClosed:
             response = client.post("/api/auth/logout", headers={"Authorization": "Bearer x"})
 
         assert response.status_code == 200
+
+
+class TestApiKeyAuthAliasPaths:
+    """Alias paths are API endpoints and must require an API key."""
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/chat/completions", "/messages", "/v1/v1/chat/completions", "/v1/v1/messages"],
+    )
+    def test_alias_path_requires_api_key(self, path: str) -> None:
+        from llm_proxy.api.middleware.api_key_auth import api_key_auth_middleware
+        from llm_proxy.api.routers.protocol import import_registered_protocol_modules
+
+        import_registered_protocol_modules()
+
+        app = FastAPI()
+
+        @app.post(path)
+        async def handler():
+            return {"ok": True}
+
+        app.middleware("http")(api_key_auth_middleware)
+        app.state.config_manager = MagicMock()
+
+        mock_lockout = MagicMock()
+        mock_lockout.is_locked_out.return_value = False
+
+        with (
+            patch(
+                "llm_proxy.api.middleware.api_key_auth.get_api_key_lockout_manager",
+                return_value=mock_lockout,
+            ),
+            patch(
+                "llm_proxy.api.middleware.api_key_auth.add_auth_failure_delay",
+                new=AsyncMock(),
+            ),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            response = client.post(path, json={"model": "m"})
+
+        assert response.status_code == 401, response.text
+        assert response.json()["error"]["type"] == "authentication_error"

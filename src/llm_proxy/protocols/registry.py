@@ -74,6 +74,30 @@ def list_protocols() -> list[str]:
     return sorted(_protocols.list_all())
 
 
+def protocol_name_for_path(path: str) -> str | None:
+    """Resolve a request path to the protocol endpoint that serves it.
+
+    Matches the endpoint's canonical path and every base_url-tolerant alias
+    declared in ``ProtocolEndpoint.paths``, plus its additional routes (e.g.
+    ``/v1/messages/count_tokens``). Sub-paths of a declared route match that
+    route, so ``/v1/messages/count_tokens`` resolves to ``anthropic``.
+
+    Path-gated middleware uses this so alias paths (``/messages``,
+    ``/chat/completions``, ``/v1/v1/...``) receive the same authentication,
+    model restriction, and error envelope as the canonical path.
+    """
+    for name, endpoint in _protocols.get_all().items():
+        route_paths = (
+            *endpoint.paths,
+            *(route[0] for route in endpoint.additional_routes),
+        )
+        if any(
+            path == route_path or path.startswith(f"{route_path}/") for route_path in route_paths
+        ):
+            return name
+    return None
+
+
 def get_protocols_info() -> list[dict[str, str]]:
     info = []
     for endpoint in _protocols.get_all().values():
@@ -166,6 +190,7 @@ __all__ = [
     "get_protocol_serializer",
     "get_protocols_info",
     "list_protocols",
+    "protocol_name_for_path",
     "register_protocol",
     "register_protocol_serializer",
 ]

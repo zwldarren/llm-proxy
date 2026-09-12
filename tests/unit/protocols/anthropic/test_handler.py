@@ -28,9 +28,10 @@ class TestAnthropicProtocolEndpoint:
         assert anthropic_protocol.name == "anthropic"
 
     def test_paths(self):
-        """Test supported paths."""
+        """Test supported paths include the base_url-tolerant aliases."""
         paths = anthropic_protocol.paths
         assert "/v1/messages" in paths
+        assert set(paths) == {"/v1/messages", "/messages", "/v1/v1/messages"}
 
     def test_request_model(self):
         """Test request model is returned."""
@@ -608,16 +609,19 @@ class TestAnthropicProtocolEndpoint:
         assert parsed.model == "claude-3-opus"
 
     def test_additional_routes_count_tokens(self):
-        """Test that additional_routes returns count_tokens endpoint."""
+        """Test that additional_routes returns the count_tokens endpoint and aliases."""
         routes = anthropic_protocol.additional_routes
-        assert len(routes) == 1
-        path, request_model, response_model, handler = routes[0]
-        assert path == "/v1/messages/count_tokens"
-        assert request_model.__name__ == "CountTokensRequest"
-        assert response_model is not None
-        if response_model is not None:
-            assert response_model.__name__ == "CountTokensResponse"
-        assert handler.__name__ == "handle_count_tokens"
+        assert {path for path, *_ in routes} == {
+            "/v1/messages/count_tokens",
+            "/messages/count_tokens",
+            "/v1/v1/messages/count_tokens",
+        }
+        for _path, request_model, response_model, handler in routes:
+            assert request_model.__name__ == "CountTokensRequest"
+            assert response_model is not None
+            if response_model is not None:
+                assert response_model.__name__ == "CountTokensResponse"
+            assert handler.__name__ == "handle_count_tokens"
 
     def test_count_tokens_simple(self):
         """Test count_tokens with simple message."""

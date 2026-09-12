@@ -53,8 +53,17 @@ def _error_type_for_request(request: Request, error_type: str) -> str:
 
 
 def _is_anthropic_path(path: str) -> bool:
-    """Whether a request path belongs to the Anthropic Messages protocol."""
-    return path == "/v1/messages" or path.startswith("/v1/messages/")
+    """Whether a request path belongs to the Anthropic Messages protocol.
+
+    Resolves through the protocol registry, so the base_url-tolerant aliases
+    (``/messages``, ``/v1/v1/messages``) and the count_tokens sub-route get
+    the Anthropic error envelope too.
+    """
+    # Deferred import keeps this middleware module independent of protocol
+    # package registration order during app construction.
+    from llm_proxy.protocols.registry import protocol_name_for_path
+
+    return protocol_name_for_path(path) == "anthropic"
 
 
 def protocol_for_request(request: Request) -> ErrorProtocol:

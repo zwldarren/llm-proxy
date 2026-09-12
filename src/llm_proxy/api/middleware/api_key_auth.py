@@ -21,6 +21,7 @@ from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_r
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database import ApiKeyRepository, get_async_session_context
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.protocols.registry import protocol_name_for_path
 
 logger = get_logger(__name__)
 
@@ -180,12 +181,15 @@ async def _set_session_identity(api_key: str, request: Request) -> str | None:
 async def api_key_auth_middleware(request: Request, call_next):
     """API key authentication middleware.
 
-    Handles API key verification for /v1/* endpoints. /servers/* MCP requests
-    are authenticated by the dedicated MCPProxyMiddleware before they reach
-    the main FastAPI middleware stack.
+    Handles API key verification for /v1/* endpoints (and their alias paths).
+    /servers/* MCP requests are authenticated by the dedicated
+    MCPProxyMiddleware before they reach the main FastAPI middleware stack.
     """
     path = request.url.path
-    if not path.startswith(("/v1/", "/servers/")):
+    # Registered protocol paths include the base_url-tolerant aliases
+    # (``/chat/completions``, ``/messages``, ``/v1/v1/...``); they must be
+    # authenticated like their ``/v1/`` canonical path.
+    if not path.startswith(("/v1/", "/servers/")) and protocol_name_for_path(path) is None:
         return await call_next(request)
 
     # CORS preflight: browsers do not send Authorization on OPTIONS, so the

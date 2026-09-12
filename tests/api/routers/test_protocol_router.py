@@ -14,7 +14,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_proxy.api.routers.protocol import create_protocol_router, require_any_auth
+from llm_proxy.protocols.anthropic.handler import anthropic_protocol
 from llm_proxy.protocols.openai.audio_transcription_handler import transcription_protocol
+from llm_proxy.protocols.openai.handler import openai_protocol
 from llm_proxy.protocols.openai.images_handler import image_generations_protocol
 
 
@@ -118,3 +120,128 @@ def test_additional_routes_run_protocol_middleware(app):
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"input_tokens": 7}
     assert ran == {"middleware": True, "handler": True}
+
+
+class TestBaseUrlTolerantPathAliases:
+    """Chat endpoints answer on aliases that tolerate a misconfigured base_url.
+
+    A client whose base_url omits /v1 (requests ``/messages``) or double-writes
+    it (``{base}/v1`` + ``/v1/messages``) must reach the same handler instead of
+    the frontend catch-all's bare 405.
+    """
+
+    @pytest.mark.parametrize(
+        ("endpoint", "expected_post_paths"),
+        [
+            (
+                anthropic_protocol,
+                {
+                    "/v1/messages",
+                    "/v1/messages/",
+                    "/messages",
+                    "/messages/",
+                    "/v1/v1/messages",
+                    "/v1/v1/messages/",
+                    "/v1/messages/count_tokens",
+                    "/v1/messages/count_tokens/",
+                    "/messages/count_tokens",
+                    "/messages/count_tokens/",
+                    "/v1/v1/messages/count_tokens",
+                    "/v1/v1/messages/count_tokens/",
+                },
+            ),
+            (
+                openai_protocol,
+                {
+                    "/v1/chat/completions",
+                    "/v1/chat/completions/",
+                    "/chat/completions",
+                    "/chat/completions/",
+                    "/v1/v1/chat/completions",
+                    "/v1/v1/chat/completions/",
+                },
+            ),
+        ],
+    )
+    def test_alias_routes_are_registered(self, endpoint, expected_post_paths):
+        router = create_protocol_router(endpoint)
+        post_paths = {route.path for route in router.routes if "POST" in (route.methods or set())}
+        assert post_paths == expected_post_paths
+
+    def test_alias_posts_reach_the_chat_handlers(self, app):
+        openai_processor = _install_processor(app, "openai")
+        anthropic_processor = _install_processor(app, "anthropic")
+        app.include_router(create_protocol_router(openai_protocol))
+        app.include_router(create_protocol_router(anthropic_protocol))
+
+        chat_body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+        messages_body = {
+            "model": "m",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+        with (
+            patch(
+                "llm_proxy.api.routers.protocol._NON_CHAT_CONTEXT_BUILDERS",
+                {"openai": _dummy_context, "anthropic": _dummy_context},
+            ),
+            TestClient(app) as client,
+        ):
+            for path in (
+                "/v1/chat/completions",
+                "/chat/completions",
+                "/v1/v1/chat/completions",
+                "/v1/chat/completions/",
+                "/chat/completions/",
+                "/v1/v1/chat/completions/",
+            ):
+                resp = client.post(path, json=chat_body)
+                assert resp.status_code == 200, (path, resp.text)
+            for path in (
+                "/v1/messages",
+                "/messages",
+                "/v1/v1/messages",
+                "/v1/messages/",
+                "/messages/",
+                "/v1/v1/messages/",
+            ):
+                resp = client.post(path, json=messages_body)
+                assert resp.status_code == 200, (path, resp.text)
+
+        assert openai_processor.process.await_count == 6
+        assert anthropic_processor.process.await_count == 6
+
+    def test_trailing_slash_posts_beat_the_spa_catch_all(self, app):
+        """POST /v1/messages/ must not be answered by the frontend catch-all.
+
+        The catch-all (``GET /{full_path:path}``) partial-matches ahead of
+        Starlette's ``redirect_slashes``, so without a real trailing-slash
+        route the request 405s; a 307 would also fail for SDKs that do not
+        follow redirects.
+        """
+        anthropic_processor = _install_processor(app, "anthropic")
+        app.include_router(create_protocol_router(anthropic_protocol))
+
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str):
+            return {"spa": full_path}
+
+        messages_body = {
+            "model": "m",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+
+        with (
+            patch(
+                "llm_proxy.api.routers.protocol._NON_CHAT_CONTEXT_BUILDERS",
+                {"anthropic": _dummy_context},
+            ),
+            TestClient(app, follow_redirects=False) as client,
+        ):
+            for path in ("/v1/messages/", "/messages/", "/v1/v1/messages/"):
+                resp = client.post(path, json=messages_body)
+                assert resp.status_code == 200, (path, resp.text)
+
+        assert anthropic_processor.process.await_count == 3

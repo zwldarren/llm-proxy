@@ -1,6 +1,7 @@
 """Model restriction middleware.
 
-Handles per-API-key model restrictions for client API endpoints (/v1/*, /servers/*).
+Handles per-API-key model restrictions for client API endpoints (/v1/*,
+/servers/*, and base_url-tolerant alias paths such as /chat/completions).
 """
 
 import orjson
@@ -12,6 +13,7 @@ from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.protocols.registry import protocol_name_for_path
 
 logger = get_logger(__name__)
 
@@ -73,7 +75,10 @@ async def model_restriction_middleware(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
-    if not path.startswith("/v1/") and not path.startswith("/servers/"):
+    # Alias paths (``/chat/completions``, ``/messages``, ``/v1/v1/...``) carry
+    # no ``/v1/`` prefix but are API endpoints and must be restricted too.
+    is_api_path = path.startswith("/v1/") or protocol_name_for_path(path) is not None
+    if not is_api_path and not path.startswith("/servers/"):
         return await call_next(request)
 
     # /servers/* uses JSON-RPC (no "model" field) and reading the body

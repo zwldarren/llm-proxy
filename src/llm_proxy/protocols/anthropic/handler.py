@@ -203,9 +203,15 @@ def _estimate_count_tokens(request: CountTokensRequest) -> CountTokensResponse:
     return CountTokensResponse(input_tokens=total_tokens)
 
 
+# Path aliases: clients whose base_url is missing /v1 or double-writes it
+# ("{base}/v1" + "/v1/messages") still reach the endpoint. The count_tokens
+# sub-route gets the same aliases. Mirrors the openresponses protocol.
+_MESSAGES_PATHS = ("/v1/messages", "/messages", "/v1/v1/messages")
+
+
 anthropic_protocol = ProtocolEndpoint(
     name="anthropic",
-    paths=["/v1/messages"],
+    paths=list(_MESSAGES_PATHS),
     request_model=MessagesRequest,
     streaming_transformer=AnthropicStreamingTransformer,
     middleware=[_capture_client_headers],
@@ -214,11 +220,12 @@ anthropic_protocol = ProtocolEndpoint(
     on_provider_selected=_strip_claude_cli_billing_header,
     additional_routes=[
         (
-            "/v1/messages/count_tokens",
+            f"{messages_path}/count_tokens",
             CountTokensRequest,
             CountTokensResponse,
             handle_count_tokens,
-        ),
+        )
+        for messages_path in _MESSAGES_PATHS
     ],
 )
 

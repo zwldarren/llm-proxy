@@ -352,6 +352,23 @@ def _log_background_task_failure(task: asyncio.Task) -> None:
         logger.error(f"Background OpenResponses task failed: {exc}", exc_info=exc)
 
 
+def _with_trailing_slash_variants(paths: list[str]) -> list[str]:
+    """Expand paths with their trailing-slash forms, preserving order.
+
+    The SPA catch-all (``GET /{full_path:path}``) partial-matches ahead of
+    Starlette's ``redirect_slashes``, so a POST to ``/v1/messages/`` (what a
+    client sends when its base URL ends in a slash) would otherwise 405
+    instead of reaching the endpoint. Registering the trailing-slash form
+    removes that shadowing without relying on clients following a 307.
+    """
+    variants: list[str] = []
+    for path in paths:
+        variants.append(path)
+        if not path.endswith("/"):
+            variants.append(f"{path}/")
+    return list(dict.fromkeys(variants))
+
+
 def create_protocol_router(
     endpoint: ProtocolEndpoint,
     *,
@@ -393,11 +410,12 @@ def create_protocol_router(
         dependencies=[Depends(require_any_auth)],
     )
 
-    # Register path aliases (paths[1:]) on the same handler: clients with a
-    # misconfigured base_url that omits or double-writes /v1 still reach the
-    # endpoint. Wrap endpoint_fn once (create_standard_router wraps its own
-    # handler; aliases need the same single wrap).
-    for alias_path in paths[1:]:
+    # Register path aliases — the declared aliases (paths[1:]) plus the
+    # trailing-slash form of every path — on the same handler. Clients with a
+    # base_url that omits or double-writes /v1, or that ends in a slash, still
+    # reach the endpoint. Wrap endpoint_fn once (create_standard_router wraps
+    # its own handler; aliases need the same single wrap).
+    for alias_path in _with_trailing_slash_variants(paths)[1:]:
         alias_handler = create_traced_handler(
             f"http_request:{endpoint.name}:alias", endpoint_fn, request_model
         )
@@ -427,19 +445,22 @@ def create_protocol_router(
                 await mw(request, fastapi_request)
             return await _handler(request, fastapi_request)
 
-        route_trace_name = f"http_request:{endpoint.name}:{route_path}"
-        traced_route_handler = create_traced_handler(
-            route_trace_name, middleware_route_handler, route_request_model
-        )
-        endpoint_kwargs: dict[str, Any] = {
-            "path": route_path,
-            "name": f"{endpoint.name}_{route_path.replace('/', '_')}",
-        }
-        if route_response_model is not None:
-            endpoint_kwargs["response_model"] = route_response_model
+        # Trailing-slash variants ride along so the SPA catch-all cannot
+        # shadow them (see _with_trailing_slash_variants).
+        for variant_path in _with_trailing_slash_variants([route_path]):
+            route_trace_name = f"http_request:{endpoint.name}:{variant_path}"
+            traced_route_handler = create_traced_handler(
+                route_trace_name, middleware_route_handler, route_request_model
+            )
+            endpoint_kwargs: dict[str, Any] = {
+                "path": variant_path,
+                "name": f"{endpoint.name}_{variant_path.replace('/', '_')}",
+            }
+            if route_response_model is not None:
+                endpoint_kwargs["response_model"] = route_response_model
 
-        router.post(**endpoint_kwargs)(traced_route_handler)
-        logger.debug(f"Added additional route '{route_path}' to protocol '{endpoint.name}'")
+            router.post(**endpoint_kwargs)(traced_route_handler)
+            logger.debug(f"Added additional route '{variant_path}' to protocol '{endpoint.name}'")
 
     if include_docs_endpoint:
         _add_protocol_info_endpoint(router, endpoint)

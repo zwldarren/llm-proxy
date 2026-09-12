@@ -30,9 +30,14 @@ class TestOpenAIProtocolEndpoint:
         assert openai_protocol.name == "openai"
 
     def test_paths(self):
-        """Test supported paths."""
+        """Test supported paths include the base_url-tolerant aliases."""
         paths = openai_protocol.paths
         assert "/v1/chat/completions" in paths
+        assert set(paths) == {
+            "/v1/chat/completions",
+            "/chat/completions",
+            "/v1/v1/chat/completions",
+        }
 
     def test_request_model(self):
         """Test request model is returned."""
