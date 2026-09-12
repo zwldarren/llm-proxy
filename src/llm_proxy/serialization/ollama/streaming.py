@@ -3,7 +3,11 @@
 import time
 from typing import Any
 
-from llm_proxy.serialization.ollama.metrics import extract_ollama_metrics
+from llm_proxy.serialization.ollama.metrics import (
+    extract_ollama_cached_tokens,
+    extract_ollama_metrics,
+    extract_ollama_token_counts,
+)
 from llm_proxy.serialization.ollama.tool_utils import convert_logprobs, normalize_tool_calls
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
@@ -76,19 +80,30 @@ class OllamaStreamingMixin:
         }
 
         if chunk.get("done"):
-            prompt_eval_count = chunk.get("prompt_eval_count")
-            eval_count = chunk.get("eval_count")
-            if prompt_eval_count is not None or eval_count is not None:
-                openai_chunk["usage"] = {
-                    "prompt_tokens": prompt_eval_count or 0,
-                    "completion_tokens": eval_count or 0,
-                    "total_tokens": (prompt_eval_count or 0) + (eval_count or 0),
+            counts = extract_ollama_token_counts(chunk)
+            if counts is not None:
+                input_tokens, output_tokens = counts
+                usage: dict[str, Any] = {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
                 }
+                # Cache-read tokens are a subset of prompt_tokens, so they are
+                # never added to it. Emit them in both dialects, mirroring the
+                # Anthropic provider converter: the flat canonical key feeds
+                # billing, the OpenAI-dialect details object is what protocol
+                # transformers (e.g. OpenResponses) fold into client usage.
+                cached_tokens = extract_ollama_cached_tokens(chunk, input_tokens)
+                if cached_tokens is not None:
+                    usage["cache_read_input_tokens"] = cached_tokens
+                    if cached_tokens:
+                        usage["prompt_tokens_details"] = {"cached_tokens": cached_tokens}
                 # Preserve Ollama native duration metrics (nanoseconds) in the
                 # final chunk so observability/billing can access them.
                 duration_metrics = extract_ollama_metrics(chunk)
                 if duration_metrics:
-                    openai_chunk["usage"]["ollama_metrics"] = duration_metrics
+                    usage["ollama_metrics"] = duration_metrics
+                openai_chunk["usage"] = usage
 
         if chunk.get("logprobs"):
             converted = self.convert_logprobs(chunk.get("logprobs"))
@@ -155,13 +170,16 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         # billing even when the protocol-side transformer did not observe the
         # final usage chunk.
         if chunk.get("done"):
-            prompt_eval_count = chunk.get("prompt_eval_count")
-            eval_count = chunk.get("eval_count")
-            if prompt_eval_count is not None or eval_count is not None:
+            counts = extract_ollama_token_counts(chunk)
+            if counts is not None:
+                input_tokens, output_tokens = counts
                 self._usage = StreamingUsage(
-                    input_tokens=prompt_eval_count or 0,
-                    output_tokens=eval_count or 0,
-                    total_tokens=(prompt_eval_count or 0) + (eval_count or 0),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                    # Canonical flat field only: the internal record carries the
+                    # cache count once, in the field billing reads.
+                    cache_read_input_tokens=extract_ollama_cached_tokens(chunk, input_tokens),
                 )
 
         # Override tool call indices with sequential values (Ollama can emit

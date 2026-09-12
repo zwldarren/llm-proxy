@@ -18,7 +18,11 @@ from llm_proxy.models.embedding import (
     InternalEmbeddingResponse,
 )
 from llm_proxy.models.types import ChoiceLogprobs, ImageSource, Usage
-from llm_proxy.serialization.ollama.metrics import extract_ollama_metrics
+from llm_proxy.serialization.ollama.metrics import (
+    extract_ollama_cached_tokens,
+    extract_ollama_metrics,
+    extract_ollama_token_counts,
+)
 from llm_proxy.serialization.ollama.tool_utils import (
     normalize_logprob_entries,
     normalize_tool_calls,
@@ -89,12 +93,18 @@ class OllamaResponseParserMixin:
             provider_info["done_reason"] = done_reason
 
         usage = None
-        if response.get("prompt_eval_count") is not None or response.get("eval_count") is not None:
+        counts = extract_ollama_token_counts(response)
+        if counts is not None:
+            input_tokens, output_tokens = counts
             usage = Usage(
-                input_tokens=response.get("prompt_eval_count") or 0,
-                output_tokens=response.get("eval_count") or 0,
-                total_tokens=(response.get("prompt_eval_count") or 0)
-                + (response.get("eval_count") or 0),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                # Cached tokens are a subset of input_tokens (Ollama keeps
+                # prompt_eval_count as the logical input total), so they are
+                # expressed once, in the flat canonical field, keeping billing
+                # from applying the cache rate twice.
+                cache_read_input_tokens=extract_ollama_cached_tokens(response, input_tokens),
             )
 
         response_id = response.get("id") or generate_response_id()

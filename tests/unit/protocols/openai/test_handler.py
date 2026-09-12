@@ -8,6 +8,7 @@ from llm_proxy.models import (
     FunctionTool,
     ImageBlock,
     InternalResponse,
+    PromptTokensDetails,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -186,6 +187,50 @@ class TestOpenAIProtocolEndpoint:
         assert "usage" in result
         assert result["usage"]["prompt_tokens"] == 100
         assert result["usage"]["completion_tokens"] == 50
+
+    @staticmethod
+    def _format_usage(model: str = "gemma4", **usage_fields):
+        """Format a minimal response and return its usage payload."""
+        response = InternalResponse(
+            id="resp_123",
+            model=model,
+            output=[TextBlock(text="Hello")],
+            usage=Usage(**usage_fields),
+        )
+        return _openai_serializer.format_response(response)["usage"]
+
+    def test_format_response_omits_details_without_cache_tokens(self):
+        """No cache reporting means no fabricated details object."""
+        usage = self._format_usage(input_tokens=100, output_tokens=50)
+        assert "prompt_tokens_details" not in usage
+
+    def test_format_response_omits_zero_hit_cache_details(self):
+        """A provider-reported zero stays a zero in the canonical record; no
+        empty dialect object is fabricated around it."""
+        usage = self._format_usage(input_tokens=11, output_tokens=18, cache_read_input_tokens=0)
+        assert usage["prompt_tokens"] == 11
+        assert "prompt_tokens_details" not in usage
+
+    def test_format_response_folds_canonical_cache_read_into_details(self):
+        """Provider serializers outside the OpenAI family (Anthropic, Gemini,
+        Ollama) report cache reads in the canonical flat field. OpenAI clients
+        must still see the dialect object."""
+        usage = self._format_usage(input_tokens=11, output_tokens=18, cache_read_input_tokens=8)
+        # Cache tokens stay a subset of prompt_tokens — never added on top.
+        assert usage["prompt_tokens"] == 11
+        assert usage["prompt_tokens_details"] == {"cached_tokens": 8}
+
+    def test_format_response_prefers_openai_dialect_cached_tokens(self):
+        """When the provider already reported the OpenAI dialect, it wins —
+        the flat fallback must not overwrite it."""
+        usage = self._format_usage(
+            model="gpt-4",
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_input_tokens=500,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=400),
+        )
+        assert usage["prompt_tokens_details"]["cached_tokens"] == 400
 
     def test_streaming_transformer(self):
         """Test that streaming transformer is returned."""

@@ -149,13 +149,26 @@ class OpenAIFormattingMixin:
                     ]
                     if v is not None
                 }
-            if response.usage.prompt_tokens_details:
-                details = response.usage.prompt_tokens_details
+            # Cache-read tokens reach the canonical Usage record either in the
+            # OpenAI-dialect details object (OpenAI-family providers) or in the
+            # flat canonical field (Anthropic/Gemini/Ollama provider
+            # serializers). Fold the flat field into the dialect object so
+            # OpenAI clients read ``prompt_tokens_details.cached_tokens``
+            # regardless of provider, mirroring the OpenResponses builder and
+            # the streaming path.
+            prompt_details = response.usage.prompt_tokens_details
+            cached_tokens = prompt_details.cached_tokens if prompt_details else None
+            if cached_tokens is None:
+                cached_tokens = response.usage.cache_read_input_tokens
+            # Fabricate a details object only when there is something to report:
+            # a provider-sent object, or observed cache reads. A reported zero
+            # stays in the canonical record without an empty dialect object.
+            if prompt_details is not None or cached_tokens:
                 usage_dict["prompt_tokens_details"] = {
                     k: v
                     for k, v in [
-                        ("audio_tokens", details.audio_tokens),
-                        ("cached_tokens", details.cached_tokens),
+                        ("audio_tokens", prompt_details.audio_tokens if prompt_details else None),
+                        ("cached_tokens", cached_tokens),
                     ]
                     if v is not None
                 }

@@ -529,6 +529,74 @@ class TestResponseDurationMetrics:
         }
 
 
+class TestResponseCachedTokens:
+    """Ollama v0.33.3+ reports cache-read prompt tokens as
+    ``prompt_eval_cached_count``, a subset of ``prompt_eval_count``."""
+
+    @staticmethod
+    def _response(**overrides):
+        """Minimal terminal response; ``overrides`` carries the token counters."""
+        return {
+            "message": {"role": "assistant", "content": "Hello"},
+            "done": True,
+            "done_reason": "stop",
+            "prompt_eval_count": 11,
+            "eval_count": 18,
+            **overrides,
+        }
+
+    def test_cached_count_mapped_to_canonical_field(self, serializer):
+        result = serializer.parse_provider_response(
+            self._response(prompt_eval_cached_count=8), model="gemma4"
+        )
+
+        assert result.usage is not None
+        # prompt_eval_count stays the logical input total; cached tokens are a
+        # subset of it and never added on top.
+        assert result.usage.input_tokens == 11
+        assert result.usage.cache_read_input_tokens == 8
+        assert result.usage.total_tokens == 29
+
+    def test_cached_count_absent_is_none(self, serializer):
+        """Pre-v0.33.3 servers omit the field entirely."""
+        result = serializer.parse_provider_response(self._response(), model="gemma4")
+
+        assert result.usage is not None
+        # None distinguishes "not reported" from "reported zero hits".
+        assert result.usage.cache_read_input_tokens is None
+
+    def test_reported_zero_hits_is_zero_not_none(self, serializer):
+        result = serializer.parse_provider_response(
+            self._response(prompt_eval_cached_count=0), model="gemma4"
+        )
+
+        assert result.usage is not None
+        assert result.usage.cache_read_input_tokens == 0
+
+    def test_cached_count_clamped_to_input_tokens(self, serializer):
+        """A provider violating the subset invariant must not yield a
+        negative or oversized count."""
+        result = serializer.parse_provider_response(
+            self._response(prompt_eval_count=5, prompt_eval_cached_count=99), model="gemma4"
+        )
+
+        assert result.usage is not None
+        assert result.usage.cache_read_input_tokens == 5
+
+    def test_cached_count_not_expressed_in_openai_details(self, serializer):
+        """The canonical record expresses cache-read tokens once.
+
+        Populating ``prompt_tokens_details.cached_tokens`` alongside the flat
+        field would make billing apply the cache-rate adjustment twice.
+        """
+        result = serializer.parse_provider_response(
+            self._response(prompt_eval_cached_count=8), model="gemma4"
+        )
+
+        assert result.usage is not None
+        assert result.usage.prompt_tokens_details is None
+
+
 class TestResponseDoneReason:
     """Raw done_reason is preserved for observability even when it does not
     map to an OpenAI finish_reason."""
