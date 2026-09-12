@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.3](https://github.com/zwldarren/llm-proxy/compare/v0.2.2...v0.2.3) (2026-09-12)
+
+
+### Features
+
+* surfaced provider cache-read tokens in usage records ([cb7a030](https://github.com/zwldarren/llm-proxy/commit/cb7a03081e539c71de81d5726c39e20a3c5744a3))
+* **version:** show exact git commit when checkout is not a clean tagged release ([b468078](https://github.com/zwldarren/llm-proxy/commit/b46807873ae721338e7b41626d6e622f5cd0c7f9))
+
+
+### Bug Fixes
+
+* **billing:** report unknown cost instead of fake $0.00 for unpriced models ([3f9b6a6](https://github.com/zwldarren/llm-proxy/commit/3f9b6a62b617fa904d5fb3592391fb3cab983d59))
+* **images:** support GPT Image 2.5 quality tiers and custom resolutions ([8311645](https://github.com/zwldarren/llm-proxy/commit/83116450cb0f303884ce60274fc332021e0d4c0f))
+
 ## [0.2.2](https://github.com/zwldarren/llm-proxy/compare/v0.2.1...v0.2.2) (2026-09-08)
 
 
