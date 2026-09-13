@@ -283,6 +283,8 @@ class OpenAIRequestBuilder:
         if request.extra:
             # Responses-API-only keys have no Chat Completions equivalent and
             # must not leak into the upstream body.
+            # Proxy-internal translation markers are dropped at the outbound
+            # chokepoint instead (see INTERNAL_EXTRA_KEYS).
             dropped = [
                 k
                 for k in request.extra

@@ -82,3 +82,42 @@ def test_build_outbound_body_chat_applies_policy():
     req = _req({"__unknown__": True})
     with pytest.raises(ProviderError, match="unknown request fields"):
         a._build_outbound_body(req, request_type="chat")
+
+
+@pytest.mark.parametrize("policy", ["ignore", "passthrough"])
+def test_finalize_body_strips_builder_merged_internal_marker(policy):
+    """Open-merge dialects write the marker into the body; it must not survive.
+
+    ``disable_parallel_tool_use`` is synthesized by the OpenAI protocol parser
+    for the Anthropic serializer to consume and is not a provider field: under
+    "passthrough" the policy would forward it verbatim.
+    """
+    a = _adapter(policy)
+    req = _req({"disable_parallel_tool_use": True})
+    body = a._finalize_body(
+        {"model": "m", "disable_parallel_tool_use": True}, req, merge_extra=False
+    )
+    assert body == {"model": "m"}
+
+
+def test_finalize_body_does_not_merge_internal_marker():
+    a = _adapter("passthrough")
+    req = _req({"disable_parallel_tool_use": True, "top_k": 40})
+    body = a._finalize_body({"model": "m"}, req, merge_extra=True)
+    assert body == {"model": "m", "top_k": 40}
+
+
+def test_error_policy_ignores_internal_marker():
+    """The marker is proxy-internal, not a client field the policy may reject."""
+    a = _adapter("error")
+    body = a._finalize_body({"model": "m"}, _req({"disable_parallel_tool_use": True}))
+    assert body == {"model": "m"}
+
+
+def test_parallel_tool_calls_is_not_internal():
+    """``parallel_tool_calls`` is a real OpenAI field (and the Anthropic
+    protocol's translation channel for ``disable_parallel_tool_use``), so it
+    survives passthrough instead of being treated as an internal marker."""
+    a = _adapter("passthrough")
+    body = a._finalize_body({"model": "m"}, _req({"parallel_tool_calls": False}))
+    assert body["parallel_tool_calls"] is False

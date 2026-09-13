@@ -459,6 +459,24 @@ class TestExtraFieldFiltering:
         )
         assert "previous_response_id" not in body
 
+    def test_parallel_tool_calls_is_filtered(self, builder, basic_request):
+        """Anthropic's disable_parallel_tool_use arrives as ``parallel_tool_calls``.
+
+        generateContent has no parallel-tool-call control and Google rejects
+        unknown top-level fields, so the translated flag is dropped rather than
+        forwarded.
+        """
+        import copy
+
+        from llm_proxy.serialization.context import BuildContext
+
+        request = copy.deepcopy(basic_request)
+        request.extra = {"parallel_tool_calls": False}
+        body = builder._build_provider_request(
+            request, BuildContext.from_request(request, base_url="https://test.example.com")
+        )
+        assert "parallel_tool_calls" not in body
+
 
 # ---------------------------------------------------------------------------
 # generationConfig from gemini_params.generation_config

@@ -29,6 +29,7 @@ from llm_proxy.models import (
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.components import ErrorTranslator, HttpTransport, RetryPolicy
 from llm_proxy.serialization.openai.serializer import parse_usage_from_response
+from llm_proxy.serialization.providers.field_utils import INTERNAL_EXTRA_KEYS
 
 if TYPE_CHECKING:
     from llm_proxy.models import (
@@ -773,7 +774,17 @@ class BaseHttpProvider(BaseAdapter, ABC):
         exempt_keys: set[str] | None = None,
         merge_extra: bool = True,
     ) -> dict[str, Any]:
-        extra = getattr(request, "extra", None)
+        extra = getattr(request, "extra", None) or {}
+        internal_keys = INTERNAL_EXTRA_KEYS.intersection(extra)
+        if internal_keys:
+            # Proxy-internal translation markers (see INTERNAL_EXTRA_KEYS) ride
+            # ``request.extra`` to the serializer that consumes them; they are
+            # never provider fields, so drop them from the body and from the
+            # policy's view of extra. This chokepoint covers every endpoint,
+            # dialect and policy: "passthrough" would forward the marker
+            # verbatim and "error" would reject a field the client never sent.
+            body = {k: v for k, v in body.items() if k not in internal_keys}
+            extra = {k: v for k, v in extra.items() if k not in internal_keys}
         if merge_extra:
             body = self._merge_extra(body, extra)
         # Automatically exempt keys injected by parameter overrides so they

@@ -6,6 +6,24 @@ duplicated across mixins and serializers into a single place.
 
 from typing import Any
 
+#: Keys that protocol parsers place in ``InternalRequest.extra`` purely as a
+#: cross-protocol translation channel. They are read *from the request* by the
+#: target provider serializer (the Anthropic serializer folds
+#: ``disable_parallel_tool_use`` into ``tool_choice.disable_parallel_tool_use``)
+#: and have no meaning on any provider's wire API, so they are dropped at the
+#: outbound chokepoint (``BaseHttpProvider._finalize_body``).
+#:
+#: ``disable_parallel_tool_use`` is synthesized by the OpenAI protocol parser
+#: when the client sends ``parallel_tool_calls: false`` (the client's own field
+#: already lives in ``params.openai.parallel_tool_calls``), so dropping the
+#: marker loses nothing for an OpenAI-shaped destination.
+#:
+#: ``parallel_tool_calls`` is NOT internal: the Anthropic protocol parser
+#: synthesizes it as the channel for Anthropic's
+#: ``tool_choice.disable_parallel_tool_use``, a real field of the OpenAI Chat
+#: Completions and Responses APIs.
+INTERNAL_EXTRA_KEYS: frozenset[str] = frozenset({"disable_parallel_tool_use"})
+
 
 def extract_extra_fields(data: dict[str, Any], known_fields: set[str]) -> dict[str, Any]:
     """Return fields from *data* that are not in *known_fields*.
@@ -31,6 +49,7 @@ def extract_unknown_response_fields(
 
 
 __all__ = [
+    "INTERNAL_EXTRA_KEYS",
     "extract_extra_fields",
     "extract_unknown_response_fields",
 ]

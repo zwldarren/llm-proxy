@@ -162,6 +162,11 @@ class GeminiRequestBuilderMixin:
                     "responses_tools",
                     "text",
                     "responses_raw_fields",
+                    # Synthesized by the Anthropic protocol parser from
+                    # ``tool_choice.disable_parallel_tool_use``; generateContent
+                    # has no parallel-tool-call control and rejects unknown
+                    # top-level fields.
+                    "parallel_tool_calls",
                 }
             )
             # Warn about reasoning fields that are silently dropped because
