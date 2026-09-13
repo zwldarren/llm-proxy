@@ -623,6 +623,19 @@ export default {
     perMillionChars: "每 1M 字符",
     per1kSearches: "每 1,000 次搜索",
     defaultPricingNote: "模型的默认成本。配置后会优先使用提供商级别的覆盖设置。",
+    pricingTiers: "上下文分档价格",
+    pricingTiersHelp:
+      "按输入 token 阈值分档计价：请求输入达到某档阈值后，整个请求按该档价格计费；未填写的维度继承上方基础价格。对应 models.dev 的 cost.tiers（如 OpenAI 的 ≥272k 分档价格）。",
+    pricingTiersEmpty: "暂无分档 — 所有请求按上方基础价格计费。",
+    addPricingTier: "添加分档",
+    removePricingTier: "删除分档",
+    pricingTierThreshold: "分档阈值",
+    pricingTierTokens: "输入 token",
+    pricingTierInherit: "继承",
+    pricingTierMoreDims: "音频与图像维度",
+    pricingTiersDuplicate: "阈值重复：{thresholds}。每个阈值必须唯一。",
+    pricingTierFrom: "≥ {tokens} tokens",
+    pricingTiersSection: "上下文分档",
     editProvider: "编辑提供商",
     providerCosts: "提供商费用",
     // Smart routing fields
@@ -687,6 +700,7 @@ export default {
       selectAllActionable: "全选",
       clearSelection: "清除选择",
       reviewHint: "点击任意价格可手动修改；只有真正发生变化的行会被更新。",
+      tierChip: "分档",
     },
     sync: {
       trigger: "从 models.dev 同步",

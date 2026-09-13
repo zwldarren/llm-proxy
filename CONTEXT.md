@@ -89,3 +89,9 @@ _Avoid_: realtime usage format, audio usage
 **Realtime close code**:
 The WebSocket close code a Realtime connection ends with, from the endpoint's own table (`api/routers/realtime.py`). Two codes follow the official OpenAI Realtime scheme (4000-4009 client errors, 4100-4108 server errors) where a semantic match exists (4004 invalid model, 4007 rate limited); the rest are proxy conventions in the RFC 6455 private-use range, matching the OpenResponses WebSocket transport (4401 auth failure, 4403 forbidden, 1011 upstream/provider failure) — the official 4005 invalid-authentication and 4100-4108 server-error codes are intentionally not used so both proxy WS transports share one close-code language. The reason always precedes the close as a Realtime `error` event.
 _Avoid_: reusing HTTP status codes as close codes
+
+### Billing
+
+**Context pricing tier**:
+A price band that applies once a request's input token count reaches its threshold: the whole request is billed at the band's rates, and any dimension the band leaves unset inherits the base rate. Stored per model and per provider mapping (`pricing_tiers` JSON), edited in the model form, and synced from models.dev `cost.tiers`; thresholds are inclusive and must be unique. See ADR-0014.
+_Avoid_: long-context surcharge, tier pricing (ambiguous with routing quality tiers), marginal overage pricing

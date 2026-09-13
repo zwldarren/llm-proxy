@@ -33,14 +33,6 @@ _cache_expires_at: float = 0.0
 _fetch_lock = asyncio.Lock()
 
 
-def coerce_float(value: Any) -> float | None:
-    """Best-effort float coercion for optional models.dev payload fields."""
-    try:
-        return float(value) if value is not None else None
-    except ValueError, TypeError:
-        return None
-
-
 def build_model_index(data: dict[str, Any]) -> dict[str, list[tuple[str, dict[str, Any]]]]:
     """Index catalog model entries by model id (plus ``/``-suffix alias).
 

@@ -239,6 +239,24 @@ class TestModelRepository:
         assert mock_mapping.output_cost_per_1m == 2.5
 
     @pytest.mark.asyncio
+    async def test_update_model_provider_pricing_replaces_tiers(
+        self, repo, mock_session, mock_mapping
+    ):
+        """Tiers are replaced wholesale, and an empty list clears them."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_mapping
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.refresh = AsyncMock()
+        mock_mapping.pricing_tiers = [{"threshold": 100, "input_cost_per_1m": 1.0}]
+
+        tiers = [{"threshold": 272000, "input_cost_per_1m": 5.0}]
+        await repo.update_model_provider_pricing(mapping_id=1, pricing_tiers=tiers)
+        assert mock_mapping.pricing_tiers == tiers
+
+        await repo.update_model_provider_pricing(mapping_id=1, pricing_tiers=[])
+        assert mock_mapping.pricing_tiers is None
+
+    @pytest.mark.asyncio
     async def test_update_model_provider_pricing_not_found(self, repo, mock_session):
         """Test updating pricing for non-existent mapping."""
         mock_result = MagicMock()

@@ -7,6 +7,9 @@ the column → config-model mapping from the DB/manager orchestration.
 
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from llm_proxy.config.mappers import (
     map_model_provider_record,
     map_model_record,
@@ -50,6 +53,7 @@ def _mapping(**overrides) -> SimpleNamespace:
         audio_cost_per_minute=None,
         tts_cost_per_1m_chars=None,
         web_search_cost_per_1k=None,
+        pricing_tiers=None,
         parameter_overrides={"temperature": 0.5},
     )
     defaults.update(overrides)
@@ -73,6 +77,7 @@ def _model_record(mappings, **overrides) -> SimpleNamespace:
         audio_cost_per_minute=None,
         tts_cost_per_1m_chars=None,
         web_search_cost_per_1k=None,
+        pricing_tiers=None,
         auto_eligible=True,
         quality_tier="premium",
         routing_assignments=["auto"],
@@ -139,7 +144,9 @@ def test_map_provider_record_empty_api_key():
 
 
 def test_map_model_provider_record_maps_all_pricing():
-    mapping = _mapping()
+    mapping = _mapping(
+        pricing_tiers=[{"threshold": 272000, "input_cost_per_1m": 5.0, "output_cost_per_1m": 22.5}]
+    )
     config = map_model_provider_record(mapping)
 
     assert isinstance(config, ModelProviderConfig)
@@ -151,6 +158,16 @@ def test_map_model_provider_record_maps_all_pricing():
     assert config.cached_read_cost_per_1m == 2.5
     assert config.cached_write_cost_per_1m == 7.5
     assert config.parameter_overrides == {"temperature": 0.5}
+    assert len(config.pricing_tiers) == 1
+    assert config.pricing_tiers[0].threshold == 272000
+    assert config.pricing_tiers[0].input_cost_per_1m == 5.0
+
+
+def test_map_model_provider_record_null_pricing_tiers_defaults_to_empty():
+    mapping = _mapping(pricing_tiers=None)
+    config = map_model_provider_record(mapping)
+
+    assert config.pricing_tiers == []
 
 
 def test_map_model_provider_record_null_overrides_defaults_to_empty():
@@ -161,7 +178,10 @@ def test_map_model_provider_record_null_overrides_defaults_to_empty():
 
 
 def test_map_model_record_with_providers():
-    record = _model_record([_mapping()])
+    record = _model_record(
+        [_mapping()],
+        pricing_tiers=[{"threshold": 200000, "input_cost_per_1m": 6.0}],
+    )
     config = map_model_record(record)
 
     assert isinstance(config, ModelConfig)
@@ -174,6 +194,9 @@ def test_map_model_record_with_providers():
     assert config.supports_images is True
     assert config.input_cost_per_1m == 5.0
     assert config.context_length is None
+    assert len(config.pricing_tiers) == 1
+    assert config.pricing_tiers[0].threshold == 200000
+    assert config.pricing_tiers[0].input_cost_per_1m == 6.0
 
 
 def test_map_model_record_no_providers_returns_none():
@@ -221,3 +244,30 @@ def test_map_model_record_context_length_none():
     config = map_model_record(record)
 
     assert config.context_length is None
+
+
+def test_map_model_provider_record_orders_tiers_by_threshold():
+    """Stored bands load ascending, however the JSON column happened to order them."""
+    mapping = _mapping(
+        pricing_tiers=[
+            {"threshold": 272000, "input_cost_per_1m": 5.0},
+            {"threshold": 128000, "input_cost_per_1m": 2.0},
+        ]
+    )
+
+    config = map_model_provider_record(mapping)
+
+    assert [tier.threshold for tier in config.pricing_tiers] == [128000, 272000]
+
+
+def test_map_model_provider_record_rejects_duplicate_tier_thresholds():
+    """Duplicate bands are ambiguous and must fail loudly at config load."""
+    mapping = _mapping(
+        pricing_tiers=[
+            {"threshold": 1000, "input_cost_per_1m": 1.0},
+            {"threshold": 1000, "input_cost_per_1m": 2.0},
+        ]
+    )
+
+    with pytest.raises(ValidationError, match="unique"):
+        map_model_provider_record(mapping)

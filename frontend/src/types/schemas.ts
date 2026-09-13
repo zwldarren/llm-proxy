@@ -1,3 +1,19 @@
+/**
+ * One context-based pricing tier: applies from `threshold` input tokens up.
+ * Unset dimensions inherit the model/provider base price.
+ */
+export interface PricingTier {
+  /** Input token count at which this tier starts applying. */
+  threshold: number;
+  input_cost_per_1m?: number | null;
+  output_cost_per_1m?: number | null;
+  cached_read_cost_per_1m?: number | null;
+  cached_write_cost_per_1m?: number | null;
+  audio_input_cost_per_1m?: number | null;
+  audio_output_cost_per_1m?: number | null;
+  image_input_cost_per_1m?: number | null;
+}
+
 export interface ModelProviderMapping {
   provider_name: string;
   /**
@@ -54,6 +70,10 @@ export interface ModelProviderMapping {
    */
   web_search_cost_per_1k?: number | null;
   /**
+   * Context-based pricing tiers (override model-level tiers).
+   */
+  pricing_tiers?: PricingTier[] | null;
+  /**
    * Parameter overrides to enforce for requests via this provider.
    */
   parameter_overrides?: Record<string, unknown>;
@@ -95,6 +115,11 @@ interface ModelBase {
    * Default cost per 1k web search requests in USD.
    */
   web_search_cost_per_1k?: number | null;
+  /**
+   * Context-based pricing tiers: each entry applies from its threshold up,
+   * inheriting base rates for any unset dimension.
+   */
+  pricing_tiers?: PricingTier[] | null;
   icon_url?: string | null;
   /** Smart routing: eligible for automatic candidate pool selection */
   auto_eligible?: boolean;
@@ -166,6 +191,7 @@ export interface ModelUpdate {
   audio_cost_per_minute?: number | null;
   tts_cost_per_1m_chars?: number | null;
   web_search_cost_per_1k?: number | null;
+  pricing_tiers?: PricingTier[] | null;
   icon_url?: string | null;
   auto_eligible?: boolean | null;
   supports_images?: boolean | null;
@@ -249,6 +275,7 @@ interface PricingOption {
   cached_write_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
+  tiers?: PricingTier[] | null;
 }
 
 export interface SyncPricingResult {
@@ -269,6 +296,8 @@ export interface SyncPricingResult {
   new_audio_input_cost?: number | null;
   old_audio_output_cost?: number | null;
   new_audio_output_cost?: number | null;
+  old_pricing_tiers?: PricingTier[] | null;
+  new_pricing_tiers?: PricingTier[] | null;
   updated: boolean;
   message: string;
   available_sources: PricingOption[];
@@ -300,6 +329,7 @@ export interface PricingUpdateItem {
   audio_cost_per_minute?: number | null;
   tts_cost_per_1m_chars?: number | null;
   web_search_cost_per_1k?: number | null;
+  pricing_tiers?: PricingTier[] | null;
 }
 
 export interface ApplyPricingRequest {

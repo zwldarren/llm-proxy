@@ -12,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from llm_proxy.config.types.model import ProviderSelectionStrategy
+from llm_proxy.config.types.model import ProviderSelectionStrategy, normalize_pricing_tiers
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.provider import ProviderModelInfo
 from llm_proxy.security.passwords import validate_password_strength
@@ -55,6 +55,39 @@ class ValidatorMixin:
     @classmethod
     def convert_empty_base_url_to_none(cls, v):
         return None if v == "" else v
+
+
+class PricingTier(BaseModel):
+    """Context-based pricing tier.
+
+    Applies when a request's input token count reaches ``threshold``. Unset
+    rates inherit the model/provider base rate for the same dimension.
+    """
+
+    threshold: int = Field(
+        ..., ge=0, description="Input token count at which this tier starts applying"
+    )
+    input_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M input tokens in USD"
+    )
+    output_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M output tokens in USD"
+    )
+    cached_read_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M cached read tokens in USD"
+    )
+    cached_write_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M cached write tokens in USD"
+    )
+    audio_input_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M audio input tokens in USD"
+    )
+    audio_output_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M audio output tokens in USD"
+    )
+    image_input_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M image input tokens in USD"
+    )
 
 
 class ModelProviderMapping(BaseModel, ValidatorMixin):
@@ -131,10 +164,22 @@ class ModelProviderMapping(BaseModel, ValidatorMixin):
         ge=0,
         description="Cost per 1k web search requests in USD (overrides model pricing)",
     )
+    pricing_tiers: list[PricingTier] | None = Field(
+        None,
+        description=(
+            "Context-based pricing tiers (overrides model-level tiers): each entry "
+            "applies from its input-token threshold up, with unset rates inherited"
+        ),
+    )
     parameter_overrides: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameter overrides to enforce for requests via this provider",
     )
+
+    @field_validator("pricing_tiers", mode="before")
+    @classmethod
+    def validate_pricing_tiers(cls, v):
+        return normalize_pricing_tiers(v)
 
 
 # --- Model Schemas ---
@@ -277,6 +322,13 @@ class ModelBase(BaseModel, ValidatorMixin):
         ge=0,
         description="Default cost per 1k web search requests in USD",
     )
+    pricing_tiers: list[PricingTier] | None = Field(
+        None,
+        description=(
+            "Context-based pricing tiers: each entry applies from its input-token "
+            "threshold up, with unset rates inherited from the base pricing above"
+        ),
+    )
     auto_eligible: bool = Field(default=False)
     quality_tier: str | None = Field(default=None)
     icon_url: str | None = Field(
@@ -377,6 +429,11 @@ class ModelBase(BaseModel, ValidatorMixin):
         description="Smart routing assignments (virtual model names like 'auto', 'fast', 'best')",
     )
 
+    @field_validator("pricing_tiers", mode="before")
+    @classmethod
+    def validate_pricing_tiers(cls, v):
+        return normalize_pricing_tiers(v)
+
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, v: object) -> str | None:
@@ -426,6 +483,10 @@ class ModelUpdate(BaseModel):
     audio_cost_per_minute: float | None = Field(None, ge=0)
     tts_cost_per_1m_chars: float | None = Field(None, ge=0)
     web_search_cost_per_1k: float | None = Field(None, ge=0)
+    pricing_tiers: list[PricingTier] | None = Field(
+        None,
+        description="Context-based pricing tiers for this model",
+    )
     supports_images: bool | None = None
     supports_image_generation: bool | None = None
     supports_tts: bool | None = None
@@ -451,6 +512,11 @@ class ModelUpdate(BaseModel):
     description: str | None = None
     homepage_url: str | None = None
     context_length: int | None = Field(None, ge=0)
+
+    @field_validator("pricing_tiers", mode="before")
+    @classmethod
+    def validate_pricing_tiers(cls, v):
+        return normalize_pricing_tiers(v)
 
     @field_validator("homepage_url", mode="before")
     @classmethod
@@ -546,6 +612,10 @@ class ModelRead(BaseModel):
         None,
         ge=0,
         description="Default cost per 1k web search requests in USD",
+    )
+    pricing_tiers: list[PricingTier] | None = Field(
+        None,
+        description="Context-based pricing tiers for this model",
     )
     auto_eligible: bool = Field(default=False)
     quality_tier: str | None = Field(default=None)

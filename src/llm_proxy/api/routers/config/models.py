@@ -88,6 +88,7 @@ def model_record_to_read(model) -> ModelRead:
             audio_cost_per_minute=mapping.audio_cost_per_minute,
             tts_cost_per_1m_chars=mapping.tts_cost_per_1m_chars,
             web_search_cost_per_1k=mapping.web_search_cost_per_1k,
+            pricing_tiers=mapping.pricing_tiers,
             parameter_overrides=mapping.parameter_overrides or {},
         )
         for mapping in model.provider_mappings
@@ -115,6 +116,7 @@ def model_record_to_read(model) -> ModelRead:
         audio_cost_per_minute=model.audio_cost_per_minute,
         tts_cost_per_1m_chars=model.tts_cost_per_1m_chars,
         web_search_cost_per_1k=model.web_search_cost_per_1k,
+        pricing_tiers=model.pricing_tiers,
         icon_url=model.icon_url,
         auto_eligible=model.auto_eligible,
         quality_tier=model.quality_tier,
@@ -163,6 +165,7 @@ def _build_providers_list(
             "audio_cost_per_minute": p.get("audio_cost_per_minute"),
             "tts_cost_per_1m_chars": p.get("tts_cost_per_1m_chars"),
             "web_search_cost_per_1k": p.get("web_search_cost_per_1k"),
+            "pricing_tiers": p.get("pricing_tiers"),
             "parameter_overrides": p.get("parameter_overrides"),
         }
         for p in providers_data

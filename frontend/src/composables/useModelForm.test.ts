@@ -145,6 +145,23 @@ describe("useModelForm seeding", () => {
     form.openForEdit(savedModel({ parameter_overrides: { temperature: 0.7 } }));
     expect(form.parameterOverrides.value).toEqual({ temperature: 0.7 });
   });
+
+  it("openForEdit seeds model and provider pricing tiers", () => {
+    const form = useModelForm();
+    form.openForEdit(
+      savedModel({
+        pricing_tiers: [{ threshold: 272000, input_cost_per_1m: 5 }],
+        providers: [
+          savedProvider({ pricing_tiers: [{ threshold: 200000, input_cost_per_1m: 6 }] }),
+        ],
+      })
+    );
+
+    expect(form.form.value.pricing_tiers).toEqual([{ threshold: 272000, input_cost_per_1m: 5 }]);
+    expect(form.form.value.providers[0]!.pricing_tiers).toEqual([
+      { threshold: 200000, input_cost_per_1m: 6 },
+    ]);
+  });
 });
 
 describe("useModelForm cross-field rules", () => {
@@ -252,5 +269,23 @@ describe("useModelForm buildPayload", () => {
         parameter_overrides: {},
       })
     );
+  });
+
+  it("sends null pricing tiers when none are configured", () => {
+    const payload = validDraft().buildPayload();
+    expect(payload.pricing_tiers).toBeNull();
+    expect(payload.providers[0]!.pricing_tiers).toBeNull();
+  });
+
+  it("passes pricing tiers through for the model and its providers", () => {
+    const form = validDraft();
+    form.form.value.pricing_tiers = [{ threshold: 272000, input_cost_per_1m: 5 }];
+    form.form.value.providers[0]!.pricing_tiers = [{ threshold: 200000, input_cost_per_1m: 6 }];
+
+    const payload = form.buildPayload();
+    expect(payload.pricing_tiers).toEqual([{ threshold: 272000, input_cost_per_1m: 5 }]);
+    expect(payload.providers[0]!.pricing_tiers).toEqual([
+      { threshold: 200000, input_cost_per_1m: 6 },
+    ]);
   });
 });

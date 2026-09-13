@@ -81,6 +81,7 @@ def map_model_provider_record(mapping: ModelProviderRecord) -> ModelProviderConf
         audio_cost_per_minute=mapping.audio_cost_per_minute,
         tts_cost_per_1m_chars=mapping.tts_cost_per_1m_chars,
         web_search_cost_per_1k=mapping.web_search_cost_per_1k,
+        pricing_tiers=mapping.pricing_tiers or [],
         parameter_overrides=mapping.parameter_overrides or {},
     )
 
@@ -118,6 +119,7 @@ def map_model_record(record: ModelRecord) -> ModelConfig | None:
         audio_cost_per_minute=record.audio_cost_per_minute,
         tts_cost_per_1m_chars=record.tts_cost_per_1m_chars,
         web_search_cost_per_1k=record.web_search_cost_per_1k,
+        pricing_tiers=record.pricing_tiers or [],
         auto_eligible=record.auto_eligible,
         quality_tier=record.quality_tier,
         routing_assignments=record.routing_assignments,

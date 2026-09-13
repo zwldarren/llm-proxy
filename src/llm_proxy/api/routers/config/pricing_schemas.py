@@ -1,6 +1,41 @@
 """Pydantic schemas for model pricing sync from models.dev API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from llm_proxy.config.types.model import normalize_pricing_tiers
+
+
+class PricingTierOption(BaseModel):
+    """A context-based pricing tier from models.dev's ``cost.tiers``.
+
+    Applies from ``threshold`` input tokens up; unset dimensions inherit the
+    entry's base cost.
+    """
+
+    threshold: int = Field(
+        ..., ge=0, description="Input token count at which this tier starts applying"
+    )
+    input_cost_per_1m: float | None = Field(None, description="Input cost per 1M tokens")
+    output_cost_per_1m: float | None = Field(None, description="Output cost per 1M tokens")
+    cached_read_cost_per_1m: float | None = Field(
+        None, description="Cached read cost per 1M tokens"
+    )
+    cached_write_cost_per_1m: float | None = Field(
+        None, description="Cached write cost per 1M tokens"
+    )
+    audio_input_cost_per_1m: float | None = Field(
+        None, description="Audio input cost per 1M tokens"
+    )
+    audio_output_cost_per_1m: float | None = Field(
+        None, description="Audio output cost per 1M tokens"
+    )
+    image_input_cost_per_1m: float | None = Field(
+        None,
+        description=(
+            "Image input cost per 1M tokens; models.dev's tiers never set it, "
+            "so it inherits the base rate unless edited by hand"
+        ),
+    )
 
 
 class ModelPricingInfo(BaseModel):
@@ -21,6 +56,9 @@ class ModelPricingInfo(BaseModel):
     )
     audio_output_cost_per_1m: float | None = Field(
         None, description="Audio output cost per 1M tokens"
+    )
+    tiers: list[PricingTierOption] = Field(
+        default_factory=list, description="Context-based pricing tiers"
     )
 
 
@@ -66,6 +104,9 @@ class PricingOption(BaseModel):
     audio_output_cost_per_1m: float | None = Field(
         None, description="Audio output cost per 1M tokens"
     )
+    tiers: list[PricingTierOption] = Field(
+        default_factory=list, description="Context-based pricing tiers"
+    )
 
 
 class SyncPricingResult(BaseModel):
@@ -102,6 +143,12 @@ class SyncPricingResult(BaseModel):
     )
     new_audio_output_cost: float | None = Field(
         None, description="New audio output cost per 1M tokens"
+    )
+    old_pricing_tiers: list[PricingTierOption] | None = Field(
+        None, description="Previous context-based pricing tiers"
+    )
+    new_pricing_tiers: list[PricingTierOption] | None = Field(
+        None, description="New context-based pricing tiers"
     )
     updated: bool = Field(..., description="Whether the model was updated")
     message: str = Field(..., description="Status message")
@@ -151,6 +198,14 @@ class PricingUpdateItem(BaseModel):
     web_search_cost_per_1k: float | None = Field(
         None, ge=0, description="Cost per 1k web search requests in USD"
     )
+    pricing_tiers: list[PricingTierOption] | None = Field(
+        None, description="Context-based pricing tiers (null clears them)"
+    )
+
+    @field_validator("pricing_tiers")
+    @classmethod
+    def validate_pricing_tiers(cls, v):
+        return normalize_pricing_tiers(v)
 
 
 class ApplyPricingRequest(BaseModel):

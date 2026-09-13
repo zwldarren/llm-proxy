@@ -26,7 +26,12 @@ import {
 import { pricingApi } from "@/services/api/config";
 import { useErrorHandler } from "@/composables/useErrorHandler";
 
-import type { PricingUpdateItem, SyncPricingResult, SyncPricingResponse } from "@/types/schemas";
+import type {
+  PricingTier,
+  PricingUpdateItem,
+  SyncPricingResult,
+  SyncPricingResponse,
+} from "@/types/schemas";
 
 defineOptions({ name: "PricingSyncPanel" });
 
@@ -56,6 +61,7 @@ interface Candidate {
   cachedWrite: number | null;
   audioInput: number | null;
   audioOutput: number | null;
+  tiers: PricingTier[];
 }
 
 interface ReviewRow {
@@ -83,6 +89,7 @@ function candidateFrom(r: SyncPricingResult): Candidate {
     cachedWrite: r.new_cached_write_cost ?? null,
     audioInput: r.new_audio_input_cost ?? null,
     audioOutput: r.new_audio_output_cost ?? null,
+    tiers: r.new_pricing_tiers ?? [],
   };
 }
 
@@ -94,6 +101,7 @@ function oldFrom(r: SyncPricingResult): Candidate {
     cachedWrite: r.old_cached_write_cost ?? null,
     audioInput: r.old_audio_input_cost ?? null,
     audioOutput: r.old_audio_output_cost ?? null,
+    tiers: r.old_pricing_tiers ?? [],
   };
 }
 
@@ -107,6 +115,7 @@ function candidateFromSource(r: SyncPricingResult, sourceKey: string): Candidate
     cachedWrite: opt.cached_write_cost_per_1m ?? null,
     audioInput: opt.audio_input_cost_per_1m ?? null,
     audioOutput: opt.audio_output_cost_per_1m ?? null,
+    tiers: opt.tiers ?? [],
   };
 }
 
@@ -122,14 +131,44 @@ function isUnchanged(old: Candidate, next: Candidate): boolean {
     samePrice(old.cachedRead, next.cachedRead) &&
     samePrice(old.cachedWrite, next.cachedWrite) &&
     samePrice(old.audioInput, next.audioInput) &&
-    samePrice(old.audioOutput, next.audioOutput)
+    samePrice(old.audioOutput, next.audioOutput) &&
+    tiersEqual(old.tiers, next.tiers)
+  );
+}
+
+const TIER_RATE_KEYS: Array<Exclude<keyof PricingTier, "threshold">> = [
+  "input_cost_per_1m",
+  "output_cost_per_1m",
+  "cached_read_cost_per_1m",
+  "cached_write_cost_per_1m",
+  "audio_input_cost_per_1m",
+  "audio_output_cost_per_1m",
+  "image_input_cost_per_1m",
+];
+
+/** Order-insensitive equality over every tier dimension, for diff detection. */
+function tiersEqual(a: PricingTier[], b: PricingTier[]): boolean {
+  if (a.length !== b.length) return false;
+  const normalize = (tiers: PricingTier[]) =>
+    [...tiers]
+      .map((tier) => ({
+        threshold: tier.threshold,
+        rates: TIER_RATE_KEYS.map((key) => tier[key] ?? null),
+      }))
+      .sort((x, y) => x.threshold - y.threshold);
+  const left = normalize(a);
+  const right = normalize(b);
+  return left.every(
+    (tier, i) =>
+      tier.threshold === right[i]!.threshold &&
+      tier.rates.every((rate, j) => samePrice(rate, right[i]!.rates[j]!))
   );
 }
 
 function deriveStatus(r: SyncPricingResult, old: Candidate, next: Candidate): RowStatus {
   if (!r.selected_source || r.available_sources.length === 0) return "nodata";
   if (isUnchanged(old, next)) return "unchanged";
-  if (old.input === null && old.output === null) return "new";
+  if (old.input === null && old.output === null && old.tiers.length === 0) return "new";
   return "changed";
 }
 
@@ -269,7 +308,8 @@ function rowHasDiff(row: ReviewRow): boolean {
     !samePrice(row.candidate.cachedRead, row.old.cachedRead) ||
     !samePrice(row.candidate.cachedWrite, row.old.cachedWrite) ||
     !samePrice(row.candidate.audioInput, row.old.audioInput) ||
-    !samePrice(row.candidate.audioOutput, row.old.audioOutput)
+    !samePrice(row.candidate.audioOutput, row.old.audioOutput) ||
+    !tiersEqual(row.candidate.tiers, row.old.tiers)
   );
 }
 
@@ -414,6 +454,7 @@ function buildUpdates(): PricingUpdateItem[] {
       item.audio_input_cost_per_1m = row.candidate.audioInput;
     if (!samePrice(row.candidate.audioOutput, row.old.audioOutput))
       item.audio_output_cost_per_1m = row.candidate.audioOutput;
+    if (!tiersEqual(row.candidate.tiers, row.old.tiers)) item.pricing_tiers = row.candidate.tiers;
     // Skip rows where the user reverted everything back to current values.
     const hasChange =
       "input_cost_per_1m" in item ||
@@ -421,7 +462,8 @@ function buildUpdates(): PricingUpdateItem[] {
       "cached_read_cost_per_1m" in item ||
       "cached_write_cost_per_1m" in item ||
       "audio_input_cost_per_1m" in item ||
-      "audio_output_cost_per_1m" in item;
+      "audio_output_cost_per_1m" in item ||
+      "pricing_tiers" in item;
     if (hasChange) updates.push(item);
   }
   return updates;
@@ -504,6 +546,43 @@ function extraChips(row: ReviewRow): ExtraChip[] {
     chips.push({ label: d.label, oldV, newV });
   }
   return chips;
+}
+
+interface TierChip {
+  key: number;
+  label: string;
+  oldText: string | null;
+  newText: string;
+  changed: boolean;
+}
+
+function fmtTierRates(tier: PricingTier | undefined): string | null {
+  if (!tier) return null;
+  return `${fmt(tier.input_cost_per_1m ?? null)} / ${fmt(tier.output_cost_per_1m ?? null)}`;
+}
+
+/** One line per threshold seen on either side, marking changed bands. */
+function tierChips(row: ReviewRow): TierChip[] {
+  const oldByThreshold = new Map(row.old.tiers.map((tier) => [tier.threshold, tier]));
+  const newByThreshold = new Map(row.candidate.tiers.map((tier) => [tier.threshold, tier]));
+  const thresholds = [...new Set([...oldByThreshold.keys(), ...newByThreshold.keys()])].sort(
+    (a, b) => a - b
+  );
+  return thresholds.map((threshold) => {
+    const oldTier = oldByThreshold.get(threshold);
+    const newTier = newByThreshold.get(threshold);
+    const changed =
+      !oldTier ||
+      !newTier ||
+      TIER_RATE_KEYS.some((key) => !samePrice(oldTier[key] ?? null, newTier[key] ?? null));
+    return {
+      key: threshold,
+      label: t("models.pricingTierFrom", { tokens: threshold.toLocaleString("en-US") }),
+      oldText: fmtTierRates(oldTier),
+      newText: fmtTierRates(newTier) ?? "—",
+      changed,
+    };
+  });
 }
 
 const hasRows = computed(() => displayedRows.value.length > 0);
@@ -794,6 +873,22 @@ const hasRows = computed(() => displayedRows.value.length > 0);
                     </template>
                     <span>{{ fmt(chip.newV) }}</span>
                   </span>
+                </div>
+                <div v-if="tierChips(row).length" class="mt-1 space-y-0.5">
+                  <div
+                    v-for="tier in tierChips(row)"
+                    :key="tier.key"
+                    class="flex items-center gap-1 text-[11px] text-data"
+                  >
+                    <span class="text-muted-foreground">
+                      {{ t("models.pricingSync.tierChip") }} {{ tier.label }}
+                    </span>
+                    <template v-if="tier.changed && tier.oldText">
+                      <span class="text-muted-foreground">{{ tier.oldText }}</span>
+                      <span class="text-muted-foreground">→</span>
+                    </template>
+                    <span :class="tier.changed ? 'text-action-amber' : ''">{{ tier.newText }}</span>
+                  </div>
                 </div>
               </TableCell>
             </TableRow>

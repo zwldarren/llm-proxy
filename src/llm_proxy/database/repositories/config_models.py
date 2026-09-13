@@ -71,6 +71,7 @@ class ModelRepository(BaseRepository):
                     audio_cost_per_minute=prov_config.get("audio_cost_per_minute"),
                     tts_cost_per_1m_chars=prov_config.get("tts_cost_per_1m_chars"),
                     web_search_cost_per_1k=prov_config.get("web_search_cost_per_1k"),
+                    pricing_tiers=prov_config.get("pricing_tiers"),
                     parameter_overrides=prov_config.get("parameter_overrides"),
                 )
                 self.session.add(mapping)
@@ -94,7 +95,7 @@ class ModelRepository(BaseRepository):
                 input_cost_per_1m (float | None), output_cost_per_1m (float | None),
                 cached_read_cost_per_1m (float | None), cached_write_cost_per_1m (float | None),
                 audio_input_cost_per_1m (float | None), audio_output_cost_per_1m (float | None),
-                parameter_overrides (dict | None)
+                pricing_tiers (list[dict] | None), parameter_overrides (dict | None)
             **kwargs: Additional model configuration options
 
         Returns:
@@ -177,7 +178,8 @@ class ModelRepository(BaseRepository):
                 audio_input_cost_per_1m (float | None), audio_output_cost_per_1m (float | None),
                 image_input_cost_per_1m (float | None), cost_per_image (float | None),
                 audio_cost_per_minute (float | None), tts_cost_per_1m_chars (float | None),
-                web_search_cost_per_1k (float | None), parameter_overrides (dict | None)
+                web_search_cost_per_1k (float | None), pricing_tiers (list[dict] | None),
+                parameter_overrides (dict | None)
             new_name: Optional new name to rename the model
             **kwargs: Additional model configuration options (any ModelRecord column,
                 including the unit-based pricing fields cost_per_image,
@@ -231,6 +233,7 @@ class ModelRepository(BaseRepository):
         cached_write_cost_per_1m: float | None = None,
         audio_input_cost_per_1m: float | None = None,
         audio_output_cost_per_1m: float | None = None,
+        pricing_tiers: list[dict[str, Any]] | None = None,
     ) -> ModelProviderRecord | None:
         """Update the pricing for a specific model-provider mapping.
 
@@ -246,6 +249,8 @@ class ModelRepository(BaseRepository):
                 (only updated when not None)
             audio_output_cost_per_1m: New audio output cost per 1M tokens
                 (only updated when not None)
+            pricing_tiers: New context tiers, replacing the stored list (an
+                empty/None value clears it so stale tiers never linger)
 
         Returns:
             The updated ModelProviderRecord or None if not found
@@ -267,6 +272,7 @@ class ModelRepository(BaseRepository):
             mapping.audio_input_cost_per_1m = audio_input_cost_per_1m
         if audio_output_cost_per_1m is not None:
             mapping.audio_output_cost_per_1m = audio_output_cost_per_1m
+        mapping.pricing_tiers = pricing_tiers or None
 
         await self.session.flush()
         await self.session.refresh(mapping)
@@ -285,13 +291,14 @@ class ModelRepository(BaseRepository):
             "audio_cost_per_minute",
             "tts_cost_per_1m_chars",
             "web_search_cost_per_1k",
+            "pricing_tiers",
         }
     )
 
     async def apply_mapping_pricing(
         self,
         mapping_id: int,
-        updates: dict[str, float | None],
+        updates: dict[str, Any],
     ) -> ModelProviderRecord | None:
         """Apply explicit pricing updates to a model-provider mapping.
 

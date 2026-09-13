@@ -106,6 +106,18 @@ def safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def coerce_float(value: Any) -> float | None:
+    """Best-effort float coercion for optional payload fields.
+
+    Returns ``None`` for a missing value or anything that cannot be read as a
+    float, so callers can tell "unset" apart from a real zero.
+    """
+    try:
+        return float(value) if value is not None else None
+    except ValueError, TypeError:
+        return None
+
+
 def safe_float(value: Any, default: float = 0.0) -> float:
     """Convert value to float safely, returning default on failure.
 
@@ -116,12 +128,8 @@ def safe_float(value: Any, default: float = 0.0) -> float:
     Returns:
         Converted float, or default on failure
     """
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError, TypeError:
-        return default
+    coerced = coerce_float(value)
+    return default if coerced is None else coerced
 
 
 # Data URI regex pattern for parsing base64 data URLs

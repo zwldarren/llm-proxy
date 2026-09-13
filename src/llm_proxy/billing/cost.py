@@ -1,9 +1,10 @@
 """Cost calculation utilities."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.billing.tokens import TokenUsage, extract_tokens_from_usage
+from llm_proxy.core.utils import coerce_float
 from llm_proxy.observability.logger import get_logger
 
 if TYPE_CHECKING:
@@ -36,6 +37,24 @@ class PricingRates:
 
 
 @dataclass
+class PricingTier:
+    """Context-based pricing tier: rates that apply from ``threshold`` input tokens up.
+
+    ``None`` rates fall back to the base rate of the same dimension, so a tier
+    only needs to carry the dimensions it actually changes.
+    """
+
+    threshold: int
+    input_cost_per_1m: float | None = None
+    output_cost_per_1m: float | None = None
+    cached_read_cost_per_1m: float | None = None
+    cached_write_cost_per_1m: float | None = None
+    audio_input_cost_per_1m: float | None = None
+    audio_output_cost_per_1m: float | None = None
+    image_input_cost_per_1m: float | None = None
+
+
+@dataclass
 class CostBreakdown:
     """Result of cost calculation: total cost plus every usage dimension.
 
@@ -62,6 +81,18 @@ class CostBreakdown:
 
 
 _PRICING_FIELDS = tuple(PricingRates.__dataclass_fields__)
+
+# Token rates a context tier may override. Unit-based pricing (per image, per
+# minute, per character, per search) is never tiered, matching models.dev.
+_TIER_RATE_FIELDS = (
+    "input_cost_per_1m",
+    "output_cost_per_1m",
+    "cached_read_cost_per_1m",
+    "cached_write_cost_per_1m",
+    "audio_input_cost_per_1m",
+    "audio_output_cost_per_1m",
+    "image_input_cost_per_1m",
+)
 
 
 def _get_provider_pricing(
@@ -91,6 +122,76 @@ def _get_provider_pricing(
             )
 
     return PricingRates(**{field: _rate(model_config, field) for field in _PRICING_FIELDS})
+
+
+def _coerce_pricing_tier(raw: Any) -> PricingTier | None:
+    """Coerce a config model or stored JSON dict into a :class:`PricingTier`.
+
+    Returns ``None`` for entries without a usable threshold so malformed rows
+    are ignored instead of crashing the billing path.
+    """
+    if isinstance(raw, PricingTier):
+        return raw
+
+    def read(key: str) -> Any:
+        if isinstance(raw, dict):
+            return raw.get(key)
+        return getattr(raw, key, None)
+
+    threshold = coerce_float(read("threshold"))
+    if threshold is None:
+        logger.warning(f"Ignoring pricing tier without threshold: {raw!r}")
+        return None
+    return PricingTier(
+        threshold=int(threshold),
+        **{field: coerce_float(read(field)) for field in _TIER_RATE_FIELDS},
+    )
+
+
+def _get_pricing_tiers(
+    model_config: Any,
+    provider_name: str | None,
+) -> list[PricingTier]:
+    """Get the effective tier list: provider tiers win over model-level ones."""
+    raw_tiers: Any = None
+    if provider_name:
+        provider_config = next(
+            (p for p in model_config.providers if p.provider == provider_name),
+            None,
+        )
+        if provider_config:
+            raw_tiers = getattr(provider_config, "pricing_tiers", None)
+
+    if not raw_tiers:
+        raw_tiers = getattr(model_config, "pricing_tiers", None)
+
+    if not raw_tiers:
+        return []
+    return [tier for tier in (_coerce_pricing_tier(raw) for raw in raw_tiers) if tier is not None]
+
+
+def _select_tier_rates(
+    base: PricingRates,
+    tiers: list[PricingTier],
+    input_tokens: int,
+) -> PricingRates:
+    """Overlay the highest tier the input token count has reached onto base rates.
+
+    Thresholds are inclusive: a request with exactly ``threshold`` input tokens
+    already bills at that band. Unset tier dimensions inherit the base rate.
+    """
+    selected: PricingTier | None = None
+    for tier in sorted(tiers, key=lambda t: t.threshold):
+        if input_tokens >= tier.threshold:
+            selected = tier
+    if selected is None:
+        return base
+    overrides = {
+        field: value
+        for field in _TIER_RATE_FIELDS
+        if (value := getattr(selected, field)) is not None
+    }
+    return replace(base, **overrides)
 
 
 def _calculate_cache_cost(
@@ -321,11 +422,12 @@ async def calculate_cost(
 
         # Get all pricing rates with provider-specific fallback
         rates = _get_provider_pricing(model_config, provider_name)
+        tiers = _get_pricing_tiers(model_config, provider_name)
 
         # Model resolved but no pricing configured at any level: report None
         # ("unknown") rather than a fake $0.00 that silently under-reports
         # spend in usage stats.
-        if all(getattr(rates, field) is None for field in _PRICING_FIELDS):
+        if not tiers and all(getattr(rates, field) is None for field in _PRICING_FIELDS):
             return _breakdown_from_usage(token_usage, None)
 
         input_cost = 0.0
@@ -341,6 +443,12 @@ async def calculate_cost(
             effective_prompt_tokens = (token_usage.prompt_tokens or 0) + (
                 token_usage.cached_prompt_tokens or 0
             )
+
+        # Context-tier pricing keys off the request's whole input, before the
+        # audio/image token carve-outs below shrink the billable text input.
+        rates = _select_tier_rates(rates, tiers, effective_prompt_tokens)
+        if all(getattr(rates, field) is None for field in _PRICING_FIELDS):
+            return _breakdown_from_usage(token_usage, None)
 
         # Audio tokens are already in prompt_tokens (OpenAI gpt-4o-audio-preview).
         # Subtract them so they are charged at the audio rate only, not double-charged

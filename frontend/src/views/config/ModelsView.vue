@@ -22,6 +22,7 @@ import {
   ModelContextCell,
 } from "@/components/models";
 import ModelsSyncDialog from "@/components/models/ModelsSyncDialog.vue";
+import PricingTierEditor from "@/components/models/PricingTierEditor.vue";
 import {
   BOUND_CAPABILITIES,
   INFO_CAPABILITIES,
@@ -844,6 +845,8 @@ const confirmDelete = async () => {
                 </div>
               </div>
 
+              <PricingTierEditor v-model="newModel.pricing_tiers" />
+
               <!-- Other pricing dimensions (non-token modalities) -->
               <div class="border-t border-border pt-4 mt-2">
                 <div class="mb-3">
@@ -1529,6 +1532,8 @@ const confirmDelete = async () => {
               </div>
             </div>
           </div>
+
+          <PricingTierEditor v-model="editingProviderData.pricing_tiers" />
 
           <div class="border-t pt-4">
             <Label class="text-sm font-medium mb-3 block">{{

@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { costRange, type ModelCostKey } from "@/utils/modelPricing";
-import type { ModelRead } from "@/types/schemas";
+import type { ModelRead, PricingTier } from "@/types/schemas";
 
 /**
  * Pricing cell for the models table/list.
@@ -85,6 +85,27 @@ function formatCost(v: number): string {
   return `$${formatted}`;
 }
 
+function fmtRate(v: number | null | undefined): string {
+  return v == null ? "—" : formatCost(v);
+}
+
+/** "≥ 272,000 tokens" label for one tier. */
+function tierLabel(tier: PricingTier): string {
+  return t("models.pricingTierFrom", { tokens: tier.threshold.toLocaleString("en-US") });
+}
+
+/** IN/OUT (+ cached read when set) summary for one tier. */
+function tierText(tier: PricingTier): string {
+  const parts = [
+    `${t("models.inputShort")} ${fmtRate(tier.input_cost_per_1m)}`,
+    `${t("models.outputShort")} ${fmtRate(tier.output_cost_per_1m)}`,
+  ];
+  if (tier.cached_read_cost_per_1m != null) {
+    parts.push(`${t("models.cachedShort")} ${formatCost(tier.cached_read_cost_per_1m)}`);
+  }
+  return parts.join(" · ");
+}
+
 /** Effective price as a single value or "min–max" range. */
 function rangeText(key: ModelCostKey): string | null {
   const range = costRange(props.model, key);
@@ -109,6 +130,7 @@ const activeDims = computed(() => {
   for (const f of COST_FIELDS) {
     if (f.dimKey && costRange(props.model, f.key) != null) dims.add(t(f.dimKey));
   }
+  if (hasTiers.value) dims.add(t("models.pricingTiersSection"));
   return [...dims];
 });
 
@@ -130,6 +152,9 @@ const defaultRows = computed<CostRow[]>(() =>
   })
 );
 
+/** Model-level context tiers (empty when none configured). */
+const defaultTiers = computed<PricingTier[]>(() => props.model.pricing_tiers ?? []);
+
 /** Per-provider override rows (only providers with at least one override). */
 const providerGroups = computed(() =>
   providers.value
@@ -139,12 +164,17 @@ const providerGroups = computed(() =>
         const v = p[f.key];
         return v != null ? [{ ...f, value: v }] : [];
       }),
+      tiers: p.pricing_tiers ?? [],
     }))
-    .filter((g) => g.rows.length > 0)
+    .filter((g) => g.rows.length > 0 || g.tiers.length > 0)
+);
+
+const hasTiers = computed(
+  () => defaultTiers.value.length > 0 || providerGroups.value.some((g) => g.tiers.length > 0)
 );
 
 const hasAnyPricing = computed(
-  () => defaultRows.value.length > 0 || providerGroups.value.length > 0
+  () => defaultRows.value.length > 0 || providerGroups.value.length > 0 || hasTiers.value
 );
 </script>
 
@@ -217,7 +247,7 @@ const hasAnyPricing = computed(
 
       <div class="max-h-80 space-y-4 overflow-y-auto p-3.5">
         <!-- Model default pricing -->
-        <section v-if="defaultRows.length">
+        <section v-if="defaultRows.length || defaultTiers.length">
           <p
             class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
@@ -231,6 +261,23 @@ const hasAnyPricing = computed(
             >
               <span class="text-xs text-muted-foreground">{{ t(row.labelKey) }}</span>
               <span class="text-data text-xs text-foreground">{{ formatCost(row.value) }}</span>
+            </div>
+          </div>
+          <div v-if="defaultTiers.length" class="mt-2.5">
+            <p
+              class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              {{ t("models.pricingTiersSection") }}
+            </p>
+            <div class="divide-y divide-border/40">
+              <div
+                v-for="tier in defaultTiers"
+                :key="tier.threshold"
+                class="flex items-baseline justify-between gap-3 py-1"
+              >
+                <span class="text-xs text-muted-foreground">{{ tierLabel(tier) }}</span>
+                <span class="text-data text-xs text-foreground">{{ tierText(tier) }}</span>
+              </div>
             </div>
           </div>
         </section>
@@ -255,6 +302,23 @@ const hasAnyPricing = computed(
             >
               <span class="text-xs text-muted-foreground">{{ t(row.labelKey) }}</span>
               <span class="text-data text-xs text-foreground">{{ formatCost(row.value) }}</span>
+            </div>
+          </div>
+          <div v-if="group.tiers.length" class="mt-2">
+            <p
+              class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              {{ t("models.pricingTiersSection") }}
+            </p>
+            <div class="divide-y divide-border/40">
+              <div
+                v-for="tier in group.tiers"
+                :key="tier.threshold"
+                class="flex items-baseline justify-between gap-3 py-1"
+              >
+                <span class="text-xs text-muted-foreground">{{ tierLabel(tier) }}</span>
+                <span class="text-data text-xs text-foreground">{{ tierText(tier) }}</span>
+              </div>
             </div>
           </div>
         </section>

@@ -32,6 +32,7 @@ export function emptyModelForm(): ModelCreate {
     audio_cost_per_minute: null,
     tts_cost_per_1m_chars: null,
     web_search_cost_per_1k: null,
+    pricing_tiers: null,
     icon_url: null,
     parameter_overrides: null,
     auto_eligible: false,
@@ -78,6 +79,7 @@ function emptyProviderMapping(): ModelProviderMapping {
     audio_cost_per_minute: null,
     tts_cost_per_1m_chars: null,
     web_search_cost_per_1k: null,
+    pricing_tiers: null,
     parameter_overrides: {},
   };
 }
@@ -238,6 +240,7 @@ export function useModelForm() {
               audio_cost_per_minute: p.audio_cost_per_minute ?? null,
               tts_cost_per_1m_chars: p.tts_cost_per_1m_chars ?? null,
               web_search_cost_per_1k: p.web_search_cost_per_1k ?? null,
+              pricing_tiers: p.pricing_tiers ?? null,
               parameter_overrides: p.parameter_overrides ?? {},
             }))
         : [],
@@ -252,6 +255,7 @@ export function useModelForm() {
       audio_cost_per_minute: model.audio_cost_per_minute ?? null,
       tts_cost_per_1m_chars: model.tts_cost_per_1m_chars ?? null,
       web_search_cost_per_1k: model.web_search_cost_per_1k ?? null,
+      pricing_tiers: model.pricing_tiers ?? null,
       icon_url: model.icon_url,
       parameter_overrides: model.parameter_overrides ?? null,
       auto_eligible: model.auto_eligible ?? false,
@@ -325,6 +329,7 @@ export function useModelForm() {
         audio_cost_per_minute: p.audio_cost_per_minute ?? null,
         tts_cost_per_1m_chars: p.tts_cost_per_1m_chars ?? null,
         web_search_cost_per_1k: p.web_search_cost_per_1k ?? null,
+        pricing_tiers: p.pricing_tiers ?? null,
         parameter_overrides: p.parameter_overrides ?? {},
       })),
       parameter_overrides:

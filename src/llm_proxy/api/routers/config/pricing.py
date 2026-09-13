@@ -1,5 +1,8 @@
 """Model pricing sync from models.dev API."""
 
+import json
+from typing import Any
+
 import httpx2
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,20 +15,91 @@ from llm_proxy.api.routers.config.pricing_schemas import (
     ApplyPricingResult,
     ModelPricingInfo,
     PricingOption,
+    PricingTierOption,
     SyncPricingRequest,
     SyncPricingResponse,
     SyncPricingResult,
 )
-from llm_proxy.core.models_dev import coerce_float, fetch_models_dev_data
+from llm_proxy.core.models_dev import fetch_models_dev_data
+from llm_proxy.core.utils import coerce_float
 
 router = APIRouter(
     prefix="/models", tags=["configuration"], dependencies=[Depends(require_admin_role)]
+)
+
+# Fields that define one context-pricing tier; used to build a canonical
+# signature for change detection over stored dicts and parsed options alike.
+# models.dev's cost tiers carry no image dimension (see ``_parse_cost_tiers``),
+# so a parsed band always leaves ``image_input_cost_per_1m`` unset; keeping the
+# field here still reports a hand-edited image rate as the difference it is.
+_TIER_FIELDS = (
+    "threshold",
+    "input_cost_per_1m",
+    "output_cost_per_1m",
+    "cached_read_cost_per_1m",
+    "cached_write_cost_per_1m",
+    "audio_input_cost_per_1m",
+    "audio_output_cost_per_1m",
+    "image_input_cost_per_1m",
 )
 
 
 def _is_valid_pricing(input_cost: float | None, output_cost: float | None) -> bool:
     """Check if pricing is valid (not both zero or missing)."""
     return bool(input_cost) or bool(output_cost)
+
+
+def _parse_cost_tiers(cost: dict[str, Any]) -> list[PricingTierOption]:
+    """Parse models.dev's ``cost.tiers`` into ordered context-pricing bands.
+
+    Each entry carries a ``tier.size`` threshold where the band starts; entries
+    with a missing/foreign tier type or size are dropped rather than guessed at.
+    """
+    raw_tiers = cost.get("tiers")
+    if not isinstance(raw_tiers, list):
+        return []
+
+    tiers: list[PricingTierOption] = []
+    for raw in raw_tiers:
+        if not isinstance(raw, dict):
+            continue
+        tier_info = raw.get("tier")
+        tier_info = tier_info if isinstance(tier_info, dict) else {}
+        if tier_info.get("type", "context") != "context":
+            continue
+        threshold = coerce_float(tier_info.get("size"))
+        if threshold is None:
+            continue
+        # models.dev's cost schema has no image-input key, so image pricing is
+        # deliberately left unset here and inherits the entry's base rate.
+        tiers.append(
+            PricingTierOption(
+                threshold=int(threshold),
+                input_cost_per_1m=coerce_float(raw.get("input")),
+                output_cost_per_1m=coerce_float(raw.get("output")),
+                cached_read_cost_per_1m=coerce_float(raw.get("cache_read")),
+                cached_write_cost_per_1m=coerce_float(raw.get("cache_write")),
+                audio_input_cost_per_1m=coerce_float(raw.get("input_audio")),
+                audio_output_cost_per_1m=coerce_float(raw.get("output_audio")),
+            )
+        )
+    tiers.sort(key=lambda tier: tier.threshold)
+    return tiers
+
+
+def _tier_signature(tiers: Any) -> str | None:
+    """Canonical comparable form for stored dicts or Pydantic tier options."""
+    if not tiers:
+        return None
+    rows = []
+    for tier in tiers:
+        row = {
+            field: (tier.get(field) if isinstance(tier, dict) else getattr(tier, field, None))
+            for field in _TIER_FIELDS
+        }
+        rows.append(row)
+    rows.sort(key=lambda row: row["threshold"] or 0)
+    return json.dumps(rows, sort_keys=True, default=str)
 
 
 async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPricingInfo]]:
@@ -76,6 +150,7 @@ async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPri
                 cached_write_cost_per_1m=cache_write_f,
                 audio_input_cost_per_1m=input_audio_f,
                 audio_output_cost_per_1m=output_audio_f,
+                tiers=_parse_cost_tiers(cost),
             )
 
             if model_id not in pricing_data:
@@ -197,6 +272,7 @@ async def sync_model_pricing(
             old_cached_write = mapping.cached_write_cost_per_1m
             old_audio_input = mapping.audio_input_cost_per_1m
             old_audio_output = mapping.audio_output_cost_per_1m
+            old_pricing_tiers = mapping.pricing_tiers
 
             if request_data.preserve_custom_pricing and (
                 old_input_cost is not None
@@ -205,6 +281,7 @@ async def sync_model_pricing(
                 or old_cached_write is not None
                 or old_audio_input is not None
                 or old_audio_output is not None
+                or old_pricing_tiers
             ):
                 skipped_count += 1
                 results.append(
@@ -240,6 +317,7 @@ async def sync_model_pricing(
                     cached_write_cost_per_1m=opt.cached_write_cost_per_1m,
                     audio_input_cost_per_1m=opt.audio_input_cost_per_1m,
                     audio_output_cost_per_1m=opt.audio_output_cost_per_1m,
+                    tiers=opt.tiers,
                 )
                 for opt in all_options
             ]
@@ -272,6 +350,7 @@ async def sync_model_pricing(
                 or old_cached_write != found_pricing.cached_write_cost_per_1m
                 or old_audio_input != found_pricing.audio_input_cost_per_1m
                 or old_audio_output != found_pricing.audio_output_cost_per_1m
+                or _tier_signature(old_pricing_tiers) != _tier_signature(found_pricing.tiers)
             )
 
             if not pricing_changed:
@@ -294,6 +373,8 @@ async def sync_model_pricing(
                         new_audio_input_cost=found_pricing.audio_input_cost_per_1m,
                         old_audio_output_cost=old_audio_output,
                         new_audio_output_cost=found_pricing.audio_output_cost_per_1m,
+                        old_pricing_tiers=old_pricing_tiers,
+                        new_pricing_tiers=found_pricing.tiers,
                         updated=False,
                         message="Pricing unchanged",
                         available_sources=available_sources,
@@ -312,6 +393,7 @@ async def sync_model_pricing(
                     cached_write_cost_per_1m=found_pricing.cached_write_cost_per_1m,
                     audio_input_cost_per_1m=found_pricing.audio_input_cost_per_1m,
                     audio_output_cost_per_1m=found_pricing.audio_output_cost_per_1m,
+                    pricing_tiers=[tier.model_dump() for tier in found_pricing.tiers] or None,
                 )
 
             updated_count += 1
@@ -333,6 +415,8 @@ async def sync_model_pricing(
                     new_audio_input_cost=found_pricing.audio_input_cost_per_1m,
                     old_audio_output_cost=old_audio_output,
                     new_audio_output_cost=found_pricing.audio_output_cost_per_1m,
+                    old_pricing_tiers=old_pricing_tiers,
+                    new_pricing_tiers=found_pricing.tiers,
                     updated=not request_data.dry_run,
                     message="Updated" if not request_data.dry_run else "Would update",
                     available_sources=available_sources,

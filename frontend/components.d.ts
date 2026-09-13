@@ -149,6 +149,7 @@ declare module 'vue' {
     PopoverTrigger: typeof import('./src/components/ui/popover/PopoverTrigger.vue')['default']
     PreferenceSection: typeof import('./src/components/settings/sections/PreferenceSection.vue')['default']
     PricingSyncPanel: typeof import('./src/components/models/PricingSyncPanel.vue')['default']
+    PricingTierEditor: typeof import('./src/components/models/PricingTierEditor.vue')['default']
     ProviderDialog: typeof import('./src/components/config/ProviderDialog.vue')['default']
     ProviderListItem: typeof import('./src/components/providers/ProviderListItem.vue')['default']
     ProviderModelSelector: typeof import('./src/components/common/ProviderModelSelector.vue')['default']

@@ -89,3 +89,50 @@ def test_model_read_derives_capabilities() -> None:
         experimental=True,
     )
     assert read.capabilities == ["vision", "tts", "reasoning", "experimental"]
+
+
+# --- Context-tier pricing tests ---
+
+
+def test_model_update_sorts_pricing_tiers_by_threshold() -> None:
+    update = ModelUpdate(
+        pricing_tiers=[
+            {"threshold": 272000, "input_cost_per_1m": 5.0},
+            {"threshold": 128000, "input_cost_per_1m": 2.0},
+        ]
+    )
+    assert update.pricing_tiers is not None
+    assert [tier.threshold for tier in update.pricing_tiers] == [128000, 272000]
+
+
+def test_model_update_rejects_duplicate_tier_thresholds() -> None:
+    with pytest.raises(ValidationError, match="unique"):
+        ModelUpdate(
+            pricing_tiers=[
+                {"threshold": 1000, "input_cost_per_1m": 1.0},
+                {"threshold": 1000, "input_cost_per_1m": 2.0},
+            ]
+        )
+
+
+def test_model_provider_mapping_carries_pricing_tiers() -> None:
+    from llm_proxy.api.schemas.admin import ModelProviderMapping
+
+    mapping = ModelProviderMapping(
+        provider_name="openai",
+        provider_model_name="gpt-5.4",
+        pricing_tiers=[{"threshold": 272000, "input_cost_per_1m": 5.0, "output_cost_per_1m": 22.5}],
+    )
+    assert mapping.pricing_tiers is not None
+    assert mapping.pricing_tiers[0].threshold == 272000
+    assert mapping.pricing_tiers[0].output_cost_per_1m == 22.5
+
+
+def test_model_create_accepts_pricing_tiers() -> None:
+    model = ModelCreate(
+        name="m",
+        providers=[{"provider_name": "openai", "provider_model_name": "m"}],
+        pricing_tiers=[{"threshold": 200000, "input_cost_per_1m": 6.0}],
+    )
+    assert model.pricing_tiers is not None
+    assert model.pricing_tiers[0].threshold == 200000

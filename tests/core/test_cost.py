@@ -6,15 +6,19 @@ import pytest
 
 from llm_proxy.billing.cost import (
     PricingRates,
+    PricingTier,
     _calculate_audio_cost,
     _calculate_cache_cost,
     _calculate_image_token_cost,
     _calculate_unit_costs,
+    _coerce_pricing_tier,
+    _get_pricing_tiers,
     _get_provider_pricing,
+    _select_tier_rates,
     calculate_cost,
 )
 from llm_proxy.billing.tokens import TokenUsage
-from llm_proxy.config.types.model import ModelConfig, ModelProviderConfig
+from llm_proxy.config.types.model import ModelConfig, ModelProviderConfig, PricingTierConfig
 
 
 class TestGetProviderPricing:
@@ -1416,3 +1420,292 @@ class TestEdgeCases:
         # No input_rate or output_rate, so only cache costs apply.
         expected = (400 / 1_000_000) * 1.0 + (200 / 1_000_000) * 2.5
         assert abs(result.cost_usd - expected) < 0.0001
+
+
+class TestPricingTierSelection:
+    """Context-band selection over a tier list."""
+
+    def _base(self) -> PricingRates:
+        return PricingRates(
+            input_cost_per_1m=1.25,
+            output_cost_per_1m=10.0,
+            cached_read_cost_per_1m=0.125,
+        )
+
+    def test_below_all_thresholds_uses_base(self):
+        tiers = [PricingTier(threshold=272000, input_cost_per_1m=5.0, output_cost_per_1m=22.5)]
+
+        rates = _select_tier_rates(self._base(), tiers, 271999)
+
+        assert rates.input_cost_per_1m == 1.25
+        assert rates.output_cost_per_1m == 10.0
+
+    def test_threshold_is_inclusive(self):
+        tiers = [PricingTier(threshold=272000, input_cost_per_1m=5.0)]
+
+        assert _select_tier_rates(self._base(), tiers, 272000).input_cost_per_1m == 5.0
+
+    def test_unset_tier_dimensions_inherit_base(self):
+        tiers = [PricingTier(threshold=200000, input_cost_per_1m=6.0)]
+
+        rates = _select_tier_rates(self._base(), tiers, 300000)
+
+        assert rates.input_cost_per_1m == 6.0
+        assert rates.output_cost_per_1m == 10.0
+        assert rates.cached_read_cost_per_1m == 0.125
+
+    def test_highest_reached_tier_wins(self):
+        tiers = [
+            PricingTier(threshold=128000, input_cost_per_1m=2.0),
+            PricingTier(threshold=272000, input_cost_per_1m=5.0),
+        ]
+
+        assert _select_tier_rates(self._base(), tiers, 200000).input_cost_per_1m == 2.0
+        assert _select_tier_rates(self._base(), tiers, 300000).input_cost_per_1m == 5.0
+
+    def test_empty_tier_list_returns_base(self):
+        rates = _select_tier_rates(self._base(), [], 10_000_000)
+
+        assert rates is not None
+        assert rates.input_cost_per_1m == 1.25
+
+
+class TestCoercePricingTier:
+    """Tier coercion accepts config models, stored dicts, and rejects junk."""
+
+    def test_coerces_stored_dict(self):
+        tier = _coerce_pricing_tier(
+            {"threshold": 200000, "input_cost_per_1m": 6.0, "output_cost_per_1m": None}
+        )
+
+        assert tier is not None
+        assert tier.threshold == 200000
+        assert tier.input_cost_per_1m == 6.0
+        assert tier.output_cost_per_1m is None
+
+    def test_coerces_config_model(self):
+        tier = _coerce_pricing_tier(PricingTierConfig(threshold=1000, output_cost_per_1m=3.0))
+
+        assert tier is not None
+        assert tier.threshold == 1000
+        assert tier.output_cost_per_1m == 3.0
+
+    def test_missing_threshold_is_ignored(self):
+        assert _coerce_pricing_tier({"input_cost_per_1m": 1.0}) is None
+        assert _coerce_pricing_tier({"threshold": "nope"}) is None
+
+
+class TestGetPricingTiers:
+    """Provider tiers take precedence; model tiers are the fallback."""
+
+    def _model_config(self, **overrides) -> ModelConfig:
+        defaults = dict(
+            providers=[
+                ModelProviderConfig(
+                    provider="openai",
+                    priority=0,
+                    provider_model_name="gpt-5.4",
+                )
+            ],
+            input_cost_per_1m=2.5,
+            output_cost_per_1m=15.0,
+            pricing_tiers=[PricingTierConfig(threshold=272000, input_cost_per_1m=5.0)],
+        )
+        defaults.update(overrides)
+        return ModelConfig(**defaults)
+
+    def test_model_tiers_used_by_default(self):
+        tiers = _get_pricing_tiers(self._model_config(), "openai")
+
+        assert len(tiers) == 1
+        assert tiers[0].threshold == 272000
+        assert tiers[0].input_cost_per_1m == 5.0
+
+    def test_provider_tiers_override_model_tiers(self):
+        model_config = self._model_config(
+            providers=[
+                ModelProviderConfig(
+                    provider="openai",
+                    priority=0,
+                    provider_model_name="gpt-5.4",
+                    pricing_tiers=[PricingTierConfig(threshold=100000, input_cost_per_1m=9.0)],
+                )
+            ]
+        )
+
+        tiers = _get_pricing_tiers(model_config, "openai")
+
+        assert len(tiers) == 1
+        assert tiers[0].threshold == 100000
+        assert tiers[0].input_cost_per_1m == 9.0
+
+    def test_no_tiers_returns_empty(self):
+        model_config = self._model_config(pricing_tiers=[])
+
+        assert _get_pricing_tiers(model_config, "openai") == []
+
+
+class TestPricingTierConfig:
+    """Config-load normalization for tier lists."""
+
+    def _providers(self) -> list[ModelProviderConfig]:
+        return [ModelProviderConfig(provider="openai", priority=0, provider_model_name="m")]
+
+    def test_tiers_are_sorted_by_threshold(self):
+        config = ModelConfig(
+            providers=self._providers(),
+            pricing_tiers=[
+                PricingTierConfig(threshold=272000, input_cost_per_1m=5.0),
+                PricingTierConfig(threshold=128000, input_cost_per_1m=2.0),
+            ],
+        )
+
+        assert [tier.threshold for tier in config.pricing_tiers] == [128000, 272000]
+
+    def test_duplicate_thresholds_are_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="unique"):
+            ModelProviderConfig(
+                provider="openai",
+                priority=0,
+                pricing_tiers=[
+                    PricingTierConfig(threshold=1000, input_cost_per_1m=1.0),
+                    PricingTierConfig(threshold=1000, input_cost_per_1m=2.0),
+                ],
+            )
+
+    def test_negative_rates_are_rejected(self):
+        with pytest.raises(Exception, match="greater than or equal to 0"):
+            PricingTierConfig(threshold=1000, input_cost_per_1m=-1.0)
+
+
+class TestCalculateCostTiered:
+    """End-to-end tier billing through calculate_cost."""
+
+    def _manager(self, model_config: ModelConfig) -> MagicMock:
+        manager = MagicMock()
+        manager.get_model_config = AsyncMock(return_value=model_config)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_under_threshold_uses_base_rates(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(provider="openai", priority=0, provider_model_name="gpt-5.4")
+            ],
+            input_cost_per_1m=2.5,
+            output_cost_per_1m=15.0,
+            pricing_tiers=[
+                PricingTierConfig(threshold=272000, input_cost_per_1m=5.0, output_cost_per_1m=22.5)
+            ],
+        )
+
+        result = await calculate_cost(
+            usage={"prompt_tokens": 100000, "completion_tokens": 1000},
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        expected = (100000 / 1_000_000) * 2.5 + (1000 / 1_000_000) * 15.0
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - expected) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_over_threshold_reprices_whole_request(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(provider="openai", priority=0, provider_model_name="gpt-5.4")
+            ],
+            input_cost_per_1m=2.5,
+            output_cost_per_1m=15.0,
+            cached_read_cost_per_1m=0.25,
+            pricing_tiers=[
+                PricingTierConfig(
+                    threshold=272000,
+                    input_cost_per_1m=5.0,
+                    output_cost_per_1m=22.5,
+                    cached_read_cost_per_1m=0.5,
+                )
+            ],
+        )
+
+        result = await calculate_cost(
+            usage={"prompt_tokens": 300000, "completion_tokens": 1000},
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        expected = (300000 / 1_000_000) * 5.0 + (1000 / 1_000_000) * 22.5
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - expected) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_cached_tokens_use_tier_cache_rate(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(provider="openai", priority=0, provider_model_name="gpt-5.4")
+            ],
+            input_cost_per_1m=2.5,
+            output_cost_per_1m=15.0,
+            cached_read_cost_per_1m=0.25,
+            pricing_tiers=[
+                PricingTierConfig(
+                    threshold=272000, input_cost_per_1m=5.0, cached_read_cost_per_1m=0.5
+                )
+            ],
+        )
+
+        result = await calculate_cost(
+            usage={
+                "prompt_tokens": 300000,
+                "completion_tokens": 0,
+                "prompt_tokens_details": {"cached_tokens": 100000},
+            },
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        expected = (200000 / 1_000_000) * 5.0 + (100000 / 1_000_000) * 0.5
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - expected) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_tiers_only_below_threshold_is_unknown(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(provider="openai", priority=0, provider_model_name="gpt-5.4")
+            ],
+            pricing_tiers=[PricingTierConfig(threshold=1000, input_cost_per_1m=5.0)],
+        )
+
+        result = await calculate_cost(
+            usage={"prompt_tokens": 500, "completion_tokens": 10},
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        assert result.cost_usd is None
+
+    @pytest.mark.asyncio
+    async def test_tiers_only_above_threshold_is_billable(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(provider="openai", priority=0, provider_model_name="gpt-5.4")
+            ],
+            pricing_tiers=[PricingTierConfig(threshold=1000, input_cost_per_1m=5.0)],
+        )
+
+        result = await calculate_cost(
+            usage={"prompt_tokens": 2000, "completion_tokens": 0},
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - (2000 / 1_000_000) * 5.0) < 0.000001

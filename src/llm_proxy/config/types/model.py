@@ -33,6 +33,76 @@ class ProviderSelectionStrategy(StrEnum):
     BALANCED = "balanced"
 
 
+class PricingTierConfig(BaseModel):
+    """Context-based pricing tier.
+
+    Applies when a request's input token count reaches ``threshold``. Any rate
+    left unset falls back to the model/provider base rate it overrides, so a
+    tier can change only the input/output price and inherit cache pricing.
+    """
+
+    threshold: int = Field(
+        ..., ge=0, description="Input token count at which this tier starts applying"
+    )
+    input_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M input tokens in USD"
+    )
+    output_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M output tokens in USD"
+    )
+    cached_read_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M cached read tokens in USD"
+    )
+    cached_write_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M cached write tokens in USD"
+    )
+    audio_input_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M audio input tokens in USD"
+    )
+    audio_output_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M audio output tokens in USD"
+    )
+    image_input_cost_per_1m: float | None = Field(
+        default=None, ge=0, description="Cost per 1M image input tokens in USD"
+    )
+
+
+def _tier_threshold(tier: Any) -> int | None:
+    """Threshold of a validated tier model or a raw tier payload."""
+    return tier.get("threshold") if isinstance(tier, dict) else getattr(tier, "threshold", None)
+
+
+def normalize_pricing_tiers(tiers: Any) -> Any:
+    """Order tier bands ascending by threshold, rejecting duplicate thresholds.
+
+    Duplicate thresholds are ambiguous (which band applies?) and would make
+    billing order-dependent, so they fail loudly. Every boundary that accepts
+    tiers runs this: config load validates models, the admin schemas validate
+    raw payloads, and the pricing-apply schema validates its own tier options,
+    so both shapes are accepted here.
+
+    A falsy value is returned unchanged — ``None`` keeps meaning "clear the
+    field" — and a payload whose thresholds cannot be read is likewise
+    returned unchanged, for field validation to report the offending path.
+    """
+    if not tiers:
+        return tiers
+
+    thresholds: list[int] = []
+    for tier in tiers:
+        threshold = _tier_threshold(tier)
+        if threshold is None:
+            return tiers
+        thresholds.append(threshold)
+
+    if len(set(thresholds)) != len(thresholds):
+        raise ValidationError("pricing_tiers thresholds must be unique")
+
+    return [
+        tier for _, tier in sorted(zip(thresholds, tiers, strict=True), key=lambda pair: pair[0])
+    ]
+
+
 class ModelProviderConfig(BaseModel):
     """Configuration for a provider associated with a model."""
 
@@ -101,10 +171,19 @@ class ModelProviderConfig(BaseModel):
         ge=0,
         description="Cost per 1k web search requests in USD for this specific provider",
     )
+    pricing_tiers: list[PricingTierConfig] = Field(
+        default_factory=list,
+        description="Context-based pricing tiers for this specific provider",
+    )
     parameter_overrides: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameter overrides to enforce for requests via this provider",
     )
+
+    @field_validator("pricing_tiers")
+    @classmethod
+    def validate_pricing_tiers(cls, v):
+        return normalize_pricing_tiers(v)
 
     @field_validator("parameter_overrides")
     @classmethod
@@ -190,6 +269,10 @@ class ModelConfig(BaseModel):
         ge=0,
         description="Cost per 1k web search requests in USD",
     )
+    pricing_tiers: list[PricingTierConfig] = Field(
+        default_factory=list,
+        description="Context-based pricing tiers (fallback when the provider sets none)",
+    )
     auto_eligible: bool = Field(
         default=False, description="Eligible for smart routing candidate pool"
     )
@@ -248,6 +331,11 @@ class ModelConfig(BaseModel):
             if not isinstance(key, str):
                 raise ValidationError("Parameter override keys must be strings")
         return v
+
+    @field_validator("pricing_tiers")
+    @classmethod
+    def validate_pricing_tiers(cls, v):
+        return normalize_pricing_tiers(v)
 
     @field_validator("routing_assignments", mode="before")
     @classmethod

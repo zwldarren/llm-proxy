@@ -640,6 +640,19 @@ export default {
     per1kSearches: "Per 1,000 searches",
     defaultPricingNote:
       "Default costs for the model. Provider-level overrides take precedence when configured.",
+    pricingTiers: "Context pricing tiers",
+    pricingTiersHelp:
+      "Tiered rates by input size: a request that reaches a threshold's input tokens is billed at that tier for the whole request. Blank dimensions inherit the base price above. Matches models.dev cost.tiers (e.g. OpenAI's ≥272k pricing).",
+    pricingTiersEmpty: "No tiers — every request bills at the base rates above.",
+    addPricingTier: "Add tier",
+    removePricingTier: "Remove tier",
+    pricingTierThreshold: "Tier threshold",
+    pricingTierTokens: "input tokens",
+    pricingTierInherit: "Inherit",
+    pricingTierMoreDims: "Audio & image dimensions",
+    pricingTiersDuplicate: "Duplicate thresholds: {thresholds}. Each threshold must be unique.",
+    pricingTierFrom: "≥ {tokens} tokens",
+    pricingTiersSection: "Context tiers",
     editProvider: "Edit Provider",
     providerCosts: "Provider Costs",
     // Smart routing fields
@@ -705,6 +718,7 @@ export default {
       selectAllActionable: "Select all",
       clearSelection: "Clear selection",
       reviewHint: "Click any price to edit it; only rows with actual changes will be updated.",
+      tierChip: "tiers",
     },
     sync: {
       trigger: "Sync from models.dev",
