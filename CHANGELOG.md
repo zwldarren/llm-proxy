@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.4](https://github.com/zwldarren/llm-proxy/compare/v0.2.3...v0.2.4) (2026-09-13)
+
+
+### Features
+
+* **pricing:** added context-based pricing tiers ([495cd75](https://github.com/zwldarren/llm-proxy/commit/495cd7562fd9a253c7c5db022b27b2c1da505ebd))
+* **providers:** add vLLM and SGLang adapters ([7d790c5](https://github.com/zwldarren/llm-proxy/commit/7d790c5e6fa7b561ec958c12c0b52e199b6e0c05))
+
+
+### Bug Fixes
+
+* **frontend:** let the provider dialog create keyless providers ([b4d3285](https://github.com/zwldarren/llm-proxy/commit/b4d3285e09c8e3ca53612860b4897ddbabbbc9c8))
+* **protocols:** accept base_url aliases and trailing slashes on API paths ([8edd3ae](https://github.com/zwldarren/llm-proxy/commit/8edd3aefc760a509997aec2fc3ca69787f72f69e))
+* **serialization:** drop proxy-internal markers at the outbound chokepoint ([a137392](https://github.com/zwldarren/llm-proxy/commit/a137392b71e54a220d958b0e821ce257066ed5d1))
+
 ## [0.2.3](https://github.com/zwldarren/llm-proxy/compare/v0.2.2...v0.2.3) (2026-09-12)
 
 
