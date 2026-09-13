@@ -17,9 +17,12 @@ its native endpoints as data:
   path means the protocol is not natively supported.
 
 ``endpoint_base_urls`` overrides (keys ``anthropic_messages`` / ``responses``)
-always win over the class constants, and the ``native_passthrough: false``
-provider-metadata flag disables passthrough entirely. The Chat Completions
-client protocol never takes the native tier (native_protocols covers only
+always win over the class constants. The ``native_passthrough``
+provider-metadata flag enables the tier by default (``false`` disables it);
+adapters whose native endpoints need a recent engine version or are only
+partially implemented set ``NATIVE_PASSTHROUGH_DEFAULT = False``, making
+``native_passthrough: true`` an explicit opt-in. The Chat Completions client
+protocol never takes the native tier (native_protocols covers only
 Anthropic/OpenResponses), so the reasoning-echo guarantee keeps applying.
 """
 
@@ -51,6 +54,12 @@ from llm_proxy.serialization.openai.serializer import parse_usage_from_response
 class NativePassthroughChatBase(OpenAICompatibleBase):
     """OpenAI-compatible chat base + declared native Anthropic/Responses endpoints."""
 
+    #: Default of the ``native_passthrough`` provider-metadata switch. Adapters
+    #: whose native endpoints need a recent engine version (or are only
+    #: partially implemented) set this to False, making the flag an explicit
+    #: opt-in (``native_passthrough: true``) instead of a kill switch.
+    NATIVE_PASSTHROUGH_DEFAULT: bool = True
+
     #: Full default URL of the native Anthropic Messages endpoint. None falls
     #: back to ``{native_root}{ANTHROPIC_MESSAGES_PATH}``.
     ANTHROPIC_MESSAGES_URL: str | None = None
@@ -70,12 +79,12 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
     # ------------------------------------------------------------------
 
     def _native_passthrough_enabled(self) -> bool:
-        """Provider-metadata kill switch (``native_passthrough: false``).
+        """Provider-metadata switch (``native_passthrough``).
 
         Relays that mirror only the Chat Completions endpoint can opt out;
         both the request and the stream side honor the flag.
         """
-        return bool(self._extra_config.get("native_passthrough", True))
+        return bool(self._extra_config.get("native_passthrough", self.NATIVE_PASSTHROUGH_DEFAULT))
 
     def supports_native_request(
         self, protocol_name: str | None, request: InternalRequest | None = None

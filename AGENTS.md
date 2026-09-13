@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-LLM API proxy with multi-provider support (OpenAI, Anthropic, Gemini, Ollama, OpenRouter), protocol translation, streaming, rate limiting, MCP integration, and Vue 3 admin UI.
+LLM API proxy with multi-provider support (OpenAI, Anthropic, Gemini, Ollama, vLLM, SGLang, OpenRouter), protocol translation, streaming, rate limiting, MCP integration, and Vue 3 admin UI.
 
 ## COMMANDS
 

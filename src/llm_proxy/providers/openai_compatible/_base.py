@@ -36,7 +36,10 @@ from llm_proxy.providers.reasoning import (
 )
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
-from llm_proxy.serialization.openai.components.response_parser import OpenAIResponseParser
+from llm_proxy.serialization.openai.components.response_parser import (
+    OpenAIResponseParser,
+    fold_top_level_reasoning_tokens,
+)
 from llm_proxy.serialization.providers import get_provider_serializer
 
 logger = get_logger(__name__)
@@ -265,7 +268,15 @@ class OpenAICompatibleBase(
             model=context.get("model"),
             response_model=chunk.get("model"),
         )
-        return normalize_reasoning_in_stream_chunk(chunk)
+        chunk = normalize_reasoning_in_stream_chunk(chunk)
+        usage = chunk.get("usage")
+        if isinstance(usage, dict):
+            # Streaming counterpart of the parse_usage fold (SGLang): fold
+            # provider-side so every client protocol transformer (OpenAI,
+            # Anthropic, OpenResponses) reads the nested OpenAI details for
+            # billing and usage records.
+            chunk["usage"] = fold_top_level_reasoning_tokens(usage)
+        return chunk
 
     async def stream_chat_completion(
         self,

@@ -22,8 +22,9 @@ router = APIRouter(
     dependencies=[Depends(require_admin_role)],
 )
 
-# Providers that don't require authentication for listing models
-_NO_AUTH_PROVIDERS: set[str] = {"ollama"}
+# Providers that don't require an API key for listing models.
+# vLLM and SGLang serve /v1/models unauthenticated unless started with --api-key.
+_NO_AUTH_PROVIDERS: set[str] = {"ollama", "vllm", "sglang"}
 
 
 @router.get("", response_model=ProviderModelsResponse)

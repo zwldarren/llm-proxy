@@ -495,4 +495,6 @@ class TestDeclarationPartition:
             "zhipu-coding",
             "qwen",
             "qwen-intl",
+            "vllm",
+            "sglang",
         }

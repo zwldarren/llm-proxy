@@ -38,6 +38,37 @@ from llm_proxy.serialization.openai.components.request_builder import (
 logger = get_logger(__name__)
 
 
+def fold_top_level_reasoning_tokens(usage: dict[str, Any]) -> dict[str, Any]:
+    """Fold SGLang-style top-level ``reasoning_tokens`` into the nested OpenAI details.
+
+    SGLang reports reasoning tokens as a top-level ``usage.reasoning_tokens``
+    field — on both the non-streaming response and the streaming terminal
+    usage chunk — instead of OpenAI's nested
+    ``usage.completion_tokens_details.reasoning_tokens``. Every consumer
+    (billing, usage records, the Anthropic protocol transformer) reads the
+    nested OpenAI shape, so the split is folded there while the provider's own
+    top-level field stays on the wire verbatim.
+
+    A zero or negative report adds nothing (an absent details block already
+    means "no reasoning tokens"), and an existing nested ``reasoning_tokens``
+    wins. The input dict is never mutated — a new dict is returned when a fold
+    applies, so callers may fold a response body without editing it.
+    """
+    reasoning_tokens = usage.get("reasoning_tokens")
+    if not isinstance(reasoning_tokens, int) or reasoning_tokens <= 0:
+        return usage
+
+    details = usage.get("completion_tokens_details")
+    if not isinstance(details, dict):
+        details = {}
+    if details.get("reasoning_tokens") is not None:
+        return usage
+    return {
+        **usage,
+        "completion_tokens_details": {**details, "reasoning_tokens": reasoning_tokens},
+    }
+
+
 def fold_deepseek_cache_hits(cached_tokens: int | None, cache_hits: Any) -> int | None:
     """Fold DeepSeek-style top-level ``prompt_cache_hit_tokens`` into ``cached_tokens``.
 
@@ -332,7 +363,9 @@ class OpenAIResponseParser:
         if "usage" not in response:
             return None
 
-        usage_data = response["usage"]
+        # Fold SGLang's top-level reasoning_tokens (pure — the body stays
+        # untouched).
+        usage_data = fold_top_level_reasoning_tokens(response["usage"])
 
         completion_details = None
         ctd = usage_data.get("completion_tokens_details")
