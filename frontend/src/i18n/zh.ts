@@ -1067,7 +1067,6 @@ export default {
     deleteFailed: "删除失败",
     validation: {
       nameRequired: "名称不能为空",
-      apiKeyRequired: "API Key 不能为空",
     },
     somethingWrong: "出错了",
     unexpectedError: "发生意外错误，请重试。",

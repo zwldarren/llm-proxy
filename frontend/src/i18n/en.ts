@@ -1105,7 +1105,6 @@ export default {
     deleteFailed: "Failed to delete",
     validation: {
       nameRequired: "Name is required",
-      apiKeyRequired: "API Key is required",
     },
     somethingWrong: "Something went wrong",
     unexpectedError: "An unexpected error occurred. Please try again.",

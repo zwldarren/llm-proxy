@@ -207,14 +207,6 @@ function buildProviderMetadata(values: ProviderFormValues): Record<string, unkno
 }
 
 const onSubmit = handleSubmit(async (values) => {
-  // Validate api_key for create mode
-  if (!isEditing.value && !values.api_key?.trim()) {
-    toast.error(t("common.error"), {
-      description: t("errors.validation.apiKeyRequired"),
-    });
-    return;
-  }
-
   isLoading.value = true;
   try {
     const providerData: ProviderCreate = {
