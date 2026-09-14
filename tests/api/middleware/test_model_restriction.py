@@ -32,14 +32,6 @@ def _make_request(path: str, body: bytes | None = None) -> Request:
     return Request(scope, receive)
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _registered_protocols() -> None:
-    """Populate the protocol registry so alias paths resolve to their protocol."""
-    from llm_proxy.api.routers.protocol import import_registered_protocol_modules
-
-    import_registered_protocol_modules()
-
-
 class TestGetModelFromRequestBody:
     """Extracting the requested model from the request body."""
 

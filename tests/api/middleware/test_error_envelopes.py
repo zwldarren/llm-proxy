@@ -24,14 +24,6 @@ def _make_request(path: str) -> Request:
     return Request(scope)
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _registered_protocols() -> None:
-    """Populate the protocol registry so alias paths resolve to a protocol."""
-    from llm_proxy.api.routers.protocol import import_registered_protocol_modules
-
-    import_registered_protocol_modules()
-
-
 @pytest.mark.parametrize(
     "path",
     [

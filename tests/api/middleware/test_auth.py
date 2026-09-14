@@ -747,9 +747,6 @@ class TestApiKeyAuthAliasPaths:
     )
     def test_alias_path_requires_api_key(self, path: str) -> None:
         from llm_proxy.api.middleware.api_key_auth import api_key_auth_middleware
-        from llm_proxy.api.routers.protocol import import_registered_protocol_modules
-
-        import_registered_protocol_modules()
 
         app = FastAPI()
 
