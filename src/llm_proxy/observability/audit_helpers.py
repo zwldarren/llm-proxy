@@ -228,8 +228,6 @@ async def write_member_audit_log(
         from llm_proxy.observability.service import RequestLogCreate, RequestLogService
 
         config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-        if not config.enable_database_logging:
-            return
 
         # The audit write runs after a successful operation (failures are
         # captured by the exception-handler audit path), so the recorded
@@ -289,8 +287,6 @@ async def write_provider_key_reveal_audit_log(
         from llm_proxy.observability.service import RequestLogCreate, RequestLogService
 
         config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-        if not config.enable_database_logging:
-            return
 
         log_data = RequestLogCreate(
             request_id=getattr(request.state, "request_id", None) or "unknown",

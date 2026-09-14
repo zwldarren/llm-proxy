@@ -136,8 +136,6 @@ def _write_audit_log(
         from llm_proxy.observability.service import RequestLogCreate, RequestLogService
 
         config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-        if not config.enable_database_logging:
-            return
 
         path = request.url.path
         method = request.method
@@ -148,6 +146,13 @@ def _write_audit_log(
         response_body = getattr(request.state, "response_body", {})
         request_headers = getattr(request.state, "request_headers", {})
         response_headers = getattr(request.state, "response_headers", {})
+
+        resource_id = determine_resource_id(path, request_body)
+        if not config.enable_database_logging:
+            # log_input_output=false keeps the metadata row but scrubs bodies.
+            # resource_id is derived from the real body above, before scrubbing.
+            request_body = {"_sampled_out": True}
+            response_body = {"_sampled_out": True}
 
         log_data = RequestLogCreate(
             request_id=request_id,
@@ -170,7 +175,7 @@ def _write_audit_log(
             event_type=determine_event_type(path),
             action_category=determine_action_category(method),
             resource_type=determine_resource_type(path),
-            resource_id=determine_resource_id(path, request_body),
+            resource_id=resource_id,
             outcome=determine_outcome(status_code, error_message),
             log_metadata={"is_api_endpoint": True},
             request_headers=request_headers,

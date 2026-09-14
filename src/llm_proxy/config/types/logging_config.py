@@ -10,7 +10,8 @@ if TYPE_CHECKING:
 
 class LoggingConfig(BaseModel):
     enable_database_logging: bool = Field(
-        default=True, description="Persist request logs to the database"
+        default=True,
+        description="Log request/response bodies; when off, rows persist with bodies scrubbed",
     )
     retention_days: int = Field(
         default=30,

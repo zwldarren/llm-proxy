@@ -539,7 +539,12 @@ onUnmounted(() => {
             <PreferenceSection />
           </div>
 
-          <div v-show="activeSection === 'general'" id="server" class="space-y-6 mt-0 scroll-mt-20">
+          <div
+            v-if="authStore.isAdmin"
+            v-show="activeSection === 'general'"
+            id="server"
+            class="space-y-6 mt-0 scroll-mt-20"
+          >
             <ServerLogsSection
               :auto-save="loggingAutoSave"
               :is-admin="authStore.isAdmin"

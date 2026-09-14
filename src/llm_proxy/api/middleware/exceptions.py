@@ -310,8 +310,6 @@ def _write_error_log_to_db(
         )
 
         config = _get_logging_config(request)
-        if not config.enable_database_logging:
-            return
 
         request_id = getattr(request.state, "request_id", None)
         provider = getattr(request.state, "provider", None)
@@ -329,6 +327,9 @@ def _write_error_log_to_db(
 
         # Backfill request data for early failures.
         request_headers, request_body = _capture_early_failure_request_data(request)
+        if not config.enable_database_logging:
+            # log_input_output=false keeps the metadata row but scrubs the body.
+            request_body = {"_sampled_out": True}
 
         # Reuse the shared classifier so outcome semantics stay in one place.
         log_data = RequestLogCreate(

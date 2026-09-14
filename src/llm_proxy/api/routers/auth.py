@@ -75,8 +75,6 @@ async def _write_login_audit_log(
         from llm_proxy.observability.service import RequestLogCreate, RequestLogService
 
         config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-        if not config.enable_database_logging:
-            return
 
         request_id = getattr(request.state, "request_id", None) or "unknown"
 

@@ -311,11 +311,6 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
             extra={"request_id": data.request_id, "endpoint": data.endpoint},
         )
 
-    def enqueue(self, data: RequestLogCreate) -> None:
-        if not bool(self._config.enable_database_logging):
-            return
-        super().enqueue(data)
-
     def _on_batch_size_changed(
         self, old_batch_size: int, old_flush_interval: int, queue_size: int
     ) -> None:
@@ -573,10 +568,6 @@ class RequestLogService:
         self._config = config
         self._last_retention_cleanup_ts: float = 0.0
 
-    @property
-    def enabled(self) -> bool:
-        return bool(self._config.enable_database_logging)
-
     async def create_log(self, data: RequestLogCreate) -> None:
         """Create a new log entry. Safe to call from request paths.
 
@@ -585,10 +576,6 @@ class RequestLogService:
         applied. If called directly with ``log_type=AUDIT``, this method
         delegates to the background writer automatically.
         """
-
-        if not self.enabled:
-            return
-
         # AUDIT logs must go through the background writer for hash chain integrity
         if data.log_type == LogType.AUDIT:
             self.create_log_background(data)
@@ -606,9 +593,6 @@ class RequestLogService:
 
     def create_log_background(self, data: RequestLogCreate) -> None:
         """Create a log entry using a background queue. MUST NOT block."""
-
-        if not self.enabled:
-            return
 
         # AUDIT logs go to a dedicated writer/queue so high-volume ENDPOINT
         # traffic cannot crowd out compliance-critical audit records, and so

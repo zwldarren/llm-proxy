@@ -53,8 +53,6 @@ def _write_auth_failure_audit_log(
         )
 
         config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-        if not config.enable_database_logging:
-            return
 
         log_data = RequestLogCreate(
             request_id=request_id,

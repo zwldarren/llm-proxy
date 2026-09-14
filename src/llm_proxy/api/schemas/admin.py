@@ -934,7 +934,10 @@ class ProviderTypeRead(BaseModel):
 class LoggingConfigUpdate(BaseModel):
     """Schema for updating logging config."""
 
-    log_input_output: bool = Field(default=True, description="Enable input/output logging")
+    log_input_output: bool = Field(
+        default=True,
+        description="Log request/response bodies; when off, rows persist with bodies scrubbed",
+    )
     log_retention_days: int | None = Field(
         None, ge=0, description="Log retention days (0 = keep indefinitely)"
     )

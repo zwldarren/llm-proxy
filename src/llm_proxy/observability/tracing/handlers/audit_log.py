@@ -617,6 +617,8 @@ class AuditLogHandler(TracingHandler):
         """Build RequestLogCreate for error case."""
         base = self._build_log_base(context, default_status_code=500)
         request_headers, request_body = self._mask_request_data(context)
+        if not context.should_log_input_output:
+            request_body = {"_sampled_out": True}
 
         log_metadata = self._build_log_metadata(
             context, extra={"error_details": context.error_details}
@@ -644,6 +646,9 @@ class AuditLogHandler(TracingHandler):
 
         if not context.should_capture_full_body:
             response_body = {"streaming": True, "truncated": context.streaming_truncated}
+        elif not context.should_log_input_output:
+            request_body = {"_sampled_out": True}
+            response_body = {"_sampled_out": True}
 
         log_metadata = self._build_log_metadata(
             context,
