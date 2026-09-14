@@ -645,12 +645,15 @@ onMounted(() => {
               </TableCell>
               <TableCell>
                 <div class="flex flex-wrap gap-1.5">
-                  <Badge
-                    v-if="!key.allowed_models || key.allowed_models.length === 0"
-                    variant="secondary"
-                    class="font-normal"
-                  >
+                  <Badge v-if="key.allowed_models === null" variant="secondary" class="font-normal">
                     {{ t("apiKeys.allModels") }}
+                  </Badge>
+                  <Badge
+                    v-else-if="key.allowed_models.length === 0"
+                    variant="outline"
+                    class="border-status-warning/40 text-status-warning font-normal"
+                  >
+                    {{ t("apiKeys.noModels") }}
                   </Badge>
                   <template v-else>
                     <Badge
@@ -674,11 +677,18 @@ onMounted(() => {
               <TableCell class="hidden lg:table-cell">
                 <div class="flex flex-wrap gap-1.5">
                   <Badge
-                    v-if="!key.allowed_mcp_servers || key.allowed_mcp_servers.length === 0"
+                    v-if="key.allowed_mcp_servers === null"
                     variant="secondary"
                     class="font-normal"
                   >
                     {{ t("apiKeys.allMcpServers") }}
+                  </Badge>
+                  <Badge
+                    v-else-if="key.allowed_mcp_servers.length === 0"
+                    variant="outline"
+                    class="border-status-warning/40 text-status-warning font-normal"
+                  >
+                    {{ t("apiKeys.noMcpServers") }}
                   </Badge>
                   <template v-else>
                     <Badge

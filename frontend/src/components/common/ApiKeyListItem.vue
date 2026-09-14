@@ -30,10 +30,12 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const allowedModels = computed(() => props.apiKey.allowed_models ?? []);
-// Keys are two-state: null or empty both mean unrestricted (allow all).
-const isAllModels = computed(() => allowedModels.value.length === 0);
+// Keys are three-state: null = allow all, [] = deny-all, non-empty = allowlist.
+const isAllModels = computed(() => props.apiKey.allowed_models === null);
+const isDenyAllModels = computed(() => props.apiKey.allowed_models?.length === 0);
 const allowedMcpServers = computed(() => props.apiKey.allowed_mcp_servers ?? []);
-const isAllMcpServers = computed(() => allowedMcpServers.value.length === 0);
+const isAllMcpServers = computed(() => props.apiKey.allowed_mcp_servers === null);
+const isDenyAllMcpServers = computed(() => props.apiKey.allowed_mcp_servers?.length === 0);
 
 const isExpired = computed(() => isApiKeyExpired(props.apiKey.expires_at));
 const status = computed(() => getApiKeyStatus(props.apiKey));
@@ -118,6 +120,13 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
           <Badge v-if="isAllModels" variant="secondary" class="font-normal text-[11px] px-1.5 py-0">
             {{ t("apiKeys.allModels") }}
           </Badge>
+          <Badge
+            v-else-if="isDenyAllModels"
+            variant="outline"
+            class="border-status-warning/40 text-status-warning font-normal text-[11px] px-1.5 py-0"
+          >
+            {{ t("apiKeys.noModels") }}
+          </Badge>
           <template v-else>
             <Badge
               v-for="model in allowedModels.slice(0, 2)"
@@ -142,6 +151,14 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
           >
             <Server class="w-3 h-3 mr-1" />
             {{ t("apiKeys.allMcpServers") }}
+          </Badge>
+          <Badge
+            v-else-if="isDenyAllMcpServers"
+            variant="outline"
+            class="border-status-warning/40 text-status-warning font-normal text-[11px] px-1.5 py-0 flex items-center gap-1"
+          >
+            <Server class="w-2.5 h-2.5" />
+            {{ t("apiKeys.noMcpServers") }}
           </Badge>
           <Badge
             v-else
