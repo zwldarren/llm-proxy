@@ -62,5 +62,5 @@ container/console logs:
 - **Audit trail** — admin operations and security events are in Logs → Audit Logs, with
   **Verify Integrity** to prove the chain is intact.
 - **Provider failures** — errors surface with the upstream status and message; 502
-  means provider/network/parse failure, 504 a timeout (provider `timeout` default
-  300 s when created through the UI/API).
+  means provider/network/parse failure, 504 a timeout (upstream calls use a fixed
+  600 s read timeout with a 10 s connect; the provider `timeout` field is not applied).

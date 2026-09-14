@@ -1,6 +1,24 @@
 <script setup lang="ts">
 import DefaultTheme from 'vitepress/theme'
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
+
+// One pending label reset per button, so a repeat click replaces its own reset
+// timer instead of letting the older one flip the label back mid-feedback.
+const copyResetTimers = new WeakMap<HTMLElement, number>()
+
+const flashLabel = (target: HTMLElement, label: string) => {
+  window.clearTimeout(copyResetTimers.get(target))
+  target.classList.toggle('is-copied', label === 'Copied')
+  target.textContent = label
+  copyResetTimers.set(
+    target,
+    window.setTimeout(() => {
+      target.classList.remove('is-copied')
+      target.textContent = 'Copy'
+      copyResetTimers.delete(target)
+    }, 1500),
+  )
+}
 
 // Copy-path buttons on the API endpoint header cards. The buttons are emitted
 // by a markdown-it renderer (plain HTML, no component), so clicks are handled
@@ -16,14 +34,12 @@ const onDocumentClick = (event: MouseEvent) => {
     ?.textContent
   if (!path) return
 
-  void copyText(path).finally(() => {
-    target.classList.add('is-copied')
-    target.textContent = 'Copied'
-    window.setTimeout(() => {
-      target.classList.remove('is-copied')
-      target.textContent = 'Copy'
-    }, 1500)
-  })
+  // Never claim a copy that did not happen: a failed clipboard write reports
+  // the failure instead of the success label.
+  void copyText(path).then(
+    () => flashLabel(target, 'Copied'),
+    () => flashLabel(target, 'Copy failed'),
+  )
 }
 
 // Async Clipboard API requires a secure context and permissions; fall back to a
@@ -36,15 +52,17 @@ const copyText = (text: string): Promise<void> => {
     textarea.style.opacity = '0'
     document.body.append(textarea)
     textarea.select()
-    document.execCommand('copy')
+    const copied = document.execCommand('copy')
     textarea.remove()
+    if (!copied) throw new Error('execCommand("copy") failed')
   }
   return navigator.clipboard?.writeText
     ? navigator.clipboard.writeText(text).catch(fallback)
-    : Promise.resolve(fallback())
+    : Promise.resolve().then(fallback)
 }
 
 onMounted(() => document.addEventListener('click', onDocumentClick))
+onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 </script>
 
 <template>

@@ -51,10 +51,10 @@ that is created at sign-in. Real client traffic uses the API keys you create in
 | **Team** (`/team`) | Create members, assign roles, per-user model allowlists and account budgets |
 | **Chat** (`/chat`) | Playground: test any model with streaming, tools, vision, and reasoning |
 | **Images** (`/images`) | Playground: image generation and edits |
-
-![Chat playground](../screenshots/chat.png)
 | **Settings** (`/config/settings`) | Theme and language, logging, web search, tracing, and all server-wide policy sections |
 | **About** (Settings → General) | Version and update check |
+
+![Chat playground](../screenshots/chat.png)
 
 ## Logs tabs
 

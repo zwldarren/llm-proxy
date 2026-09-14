@@ -12,6 +12,7 @@
   },
   "type": "module",
   "devDependencies": {
+    "markdown-it": "^14.1.0",
     "vitepress": "^1.6.4"
   }
 }

@@ -84,24 +84,13 @@ See [MCP Servers](../admin/mcp.md#security-policy).
 | --- | --- | --- |
 | Rotate an API key | None beyond the key | Create replacement, switch clients, delete old |
 | Reset a user password | Sessions revoked, forced change at next sign-in | Admin: Team → Reset password |
-| Rotate `JWT_SECRET` | All console sessions invalidated | Set a new ≥ 32-char value, restart |
-| Rotate `ENCRYPTION_KEY` | **Stored provider keys become undecryptable** | Set the new value, restart, re-enter every provider key |
 | Rotate provider API keys | None | Edit the provider (reveal is audited) |
 
-Secrets are readable for escrow; the `server_config.value` column is JSON and holds
-the secret in its `key` field:
-
-PostgreSQL:
-
-```sql
-SELECT key, value->>'key' AS secret FROM server_config WHERE key IN ('jwt_secret','encryption_key_store');
-```
-
-SQLite:
-
-```sql
-SELECT key, json_extract(value, '$.key') AS secret FROM server_config WHERE key IN ('jwt_secret','encryption_key_store');
-```
+Rotating `JWT_SECRET` or `ENCRYPTION_KEY` reaches beyond the console —
+`ENCRYPTION_KEY` in particular makes stored provider keys undecryptable until they
+are re-entered. Both are auto-generated on first run, and the escrow/migration SQL
+for reading them back out of the database lives in
+[Upgrades & Backups → Secrets: what rotation breaks](../deployment/upgrades.md#secrets-what-rotation-breaks).
 
 ## Air-gapped or privacy-strict deployments
 

@@ -359,7 +359,3 @@ text with a .kicker-<category> class in their frontmatter pageClass. */
     max-width: 860px;
   }
 }
-
-.api-code-panel--inline + .api-code-panel--inline {
-  margin-top: 1rem;
-}
