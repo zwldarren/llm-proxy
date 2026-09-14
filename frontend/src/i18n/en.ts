@@ -810,7 +810,7 @@ export default {
     setZeroToKeepIndefinitely: "Set to 0 to keep logs indefinitely",
     logInputOutput: "Log Input/Output",
     logInputOutputDescription:
-      "Enable or disable logging of request and response bodies. When disabled, only metadata is logged.",
+      "Enable or disable logging of request and response bodies. When disabled, log rows are still written with bodies scrubbed — endpoint, MCP, web-search and audit metadata is kept. Usage and cost accounting is unaffected.",
     maskSensitiveData: "Mask Sensitive Data",
     maskSensitiveDataDescription:
       "Mask sensitive fields (API keys, tokens, passwords) in stored logs.",
@@ -1475,8 +1475,8 @@ export default {
     sortCreated: "Created (Newest)",
     sortLastUsed: "Last Used (Recent)",
     never: "Never",
-    emptyModelsInfo: "No models selected — this key will allow all models.",
-    emptyMcpServersInfo: "No servers selected — this key will allow all MCP servers.",
+    emptyModelsInfo: "No models selected — this key will deny all model requests.",
+    emptyMcpServersInfo: "No servers selected — this key will deny all MCP requests.",
     status: "Status",
     expired: "Expired",
     expires: "Expires",
