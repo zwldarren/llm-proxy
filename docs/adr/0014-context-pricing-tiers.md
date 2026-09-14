@@ -1,5 +1,9 @@
 # Context-based pricing tiers
 
+## Status
+
+Accepted (2026-09).
+
 ## Context
 
 Several upstreams price by request size: OpenAI's GPT-5.x family doubles input and 1.5x output prices once a request's input reaches 272k tokens, Anthropic long-context models do the same at 200k. models.dev publishes these bands as `cost.tiers` (each entry carries `tier.size`, the input threshold where the band starts; the `context_over_200k` field is a legacy output-only convenience that does not carry the threshold).
