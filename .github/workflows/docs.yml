@@ -13,8 +13,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
@@ -23,6 +21,12 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Builds run PR-supplied code, so they get read-only Pages access and
+    # never an OIDC token; the deploy job below holds the write permissions.
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@v7
       - name: Set up bun
@@ -44,6 +48,10 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
