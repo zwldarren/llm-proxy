@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
+import { tierThresholdLabel, type TierRateKey } from "@/utils/pricingTiers";
 import type { PricingTier } from "@/types/schemas";
 
 /**
@@ -27,16 +28,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-type RateKey = Exclude<keyof PricingTier, "threshold">;
-
-const PRIMARY_FIELDS: Array<{ key: RateKey; labelKey: string }> = [
+const PRIMARY_FIELDS: Array<{ key: TierRateKey; labelKey: string }> = [
   { key: "input_cost_per_1m", labelKey: "models.costDimInput" },
   { key: "output_cost_per_1m", labelKey: "models.costDimOutput" },
   { key: "cached_read_cost_per_1m", labelKey: "models.costDimCachedRead" },
   { key: "cached_write_cost_per_1m", labelKey: "models.costDimCachedWrite" },
 ];
 
-const EXTRA_FIELDS: Array<{ key: RateKey; labelKey: string }> = [
+const EXTRA_FIELDS: Array<{ key: TierRateKey; labelKey: string }> = [
   { key: "audio_input_cost_per_1m", labelKey: "models.costDimAudioInput" },
   { key: "audio_output_cost_per_1m", labelKey: "models.costDimAudioOutput" },
   { key: "image_input_cost_per_1m", labelKey: "models.costDimImageInput" },
@@ -66,7 +65,7 @@ function setThreshold(index: number, value: number | null) {
   emitUpdate(list);
 }
 
-function setRate(index: number, key: RateKey, value: number | null) {
+function setRate(index: number, key: TierRateKey, value: number | null) {
   const list = tiers.value.map((tier) => ({ ...tier }));
   list[index]![key] = value;
   emitUpdate(list);
@@ -100,6 +99,15 @@ function toggleExpanded(index: number) {
 
 function isExpanded(index: number): boolean {
   return expanded.value.has(index) || EXTRA_FIELDS.some((f) => tiers.value[index]?.[f.key] != null);
+}
+
+/**
+ * Rate inputs repeat once per tier, so the accessible name carries the tier's
+ * threshold; the visible `<Label>` alone would not tell two tiers apart.
+ */
+function rateAriaLabel(index: number, field: { key: TierRateKey; labelKey: string }): string {
+  const threshold = tiers.value[index]?.threshold ?? 0;
+  return `${t(field.labelKey)} · ${tierThresholdLabel(t, threshold)}`;
 }
 </script>
 
@@ -159,7 +167,7 @@ function isExpanded(index: number): boolean {
           </span>
           <button
             type="button"
-            class="ml-auto rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
+            class="ml-auto rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             :disabled="disabled"
             :aria-label="t('models.removePricingTier')"
             @click="removeTier(index)"
@@ -178,6 +186,7 @@ function isExpanded(index: number): boolean {
               :disabled="disabled"
               :placeholder="t('models.pricingTierInherit')"
               class="h-8 text-data text-xs"
+              :aria-label="rateAriaLabel(index, field)"
               @update:model-value="(value) => setRate(index, field.key, value)"
             />
           </div>
@@ -186,7 +195,7 @@ function isExpanded(index: number): boolean {
         <div class="px-3 pb-2">
           <button
             type="button"
-            class="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            class="inline-flex items-center gap-1 rounded text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             @click="toggleExpanded(index)"
           >
             <component :is="isExpanded(index) ? ChevronUp : ChevronDown" class="w-3 h-3" />
@@ -204,6 +213,7 @@ function isExpanded(index: number): boolean {
               :disabled="disabled"
               :placeholder="t('models.pricingTierInherit')"
               class="h-8 text-data text-xs"
+              :aria-label="rateAriaLabel(index, field)"
               @update:model-value="(value) => setRate(index, field.key, value)"
             />
           </div>

@@ -67,4 +67,15 @@ describe("PricingTierEditor", () => {
 
     expect(wrapper.findAll('[aria-label="Remove tier"]')).toHaveLength(2);
   });
+
+  it("names each rate input after its field and tier band", () => {
+    const wrapper = mountEditor([
+      { threshold: 128000, input_cost_per_1m: 2 },
+      { threshold: 272000, input_cost_per_1m: 5 },
+    ]);
+
+    // Rate inputs repeat per tier, so the accessible name has to carry the band.
+    expect(wrapper.find('[aria-label="Input · ≥ 128,000 tokens"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="Input · ≥ 272,000 tokens"]').exists()).toBe(true);
+  });
 });

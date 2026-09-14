@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { pricingApi } from "@/services/api/config";
 import { useErrorHandler } from "@/composables/useErrorHandler";
+import { TIER_RATE_KEYS, tierThresholdLabel } from "@/utils/pricingTiers";
 
 import type {
   PricingTier,
@@ -135,16 +136,6 @@ function isUnchanged(old: Candidate, next: Candidate): boolean {
     tiersEqual(old.tiers, next.tiers)
   );
 }
-
-const TIER_RATE_KEYS: Array<Exclude<keyof PricingTier, "threshold">> = [
-  "input_cost_per_1m",
-  "output_cost_per_1m",
-  "cached_read_cost_per_1m",
-  "cached_write_cost_per_1m",
-  "audio_input_cost_per_1m",
-  "audio_output_cost_per_1m",
-  "image_input_cost_per_1m",
-];
 
 /** Order-insensitive equality over every tier dimension, for diff detection. */
 function tiersEqual(a: PricingTier[], b: PricingTier[]): boolean {
@@ -577,7 +568,7 @@ function tierChips(row: ReviewRow): TierChip[] {
       TIER_RATE_KEYS.some((key) => !samePrice(oldTier[key] ?? null, newTier[key] ?? null));
     return {
       key: threshold,
-      label: t("models.pricingTierFrom", { tokens: threshold.toLocaleString("en-US") }),
+      label: tierThresholdLabel(t, threshold),
       oldText: fmtTierRates(oldTier),
       newText: fmtTierRates(newTier) ?? "—",
       changed,
