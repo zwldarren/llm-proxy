@@ -197,11 +197,16 @@ router.afterEach((to) => {
   ];
 
   // Define which routes are admin-only
-  const adminRoutes = new Set(["providers", "mcpServers", "team", "circuitBreaker"]);
+  const ADMIN_ROUTES: Record<string, true> = {
+    providers: true,
+    mcpServers: true,
+    team: true,
+    circuitBreaker: true,
+  };
 
   // Filter out the page we just navigated to, and admin-only pages for non-admins
   const viewsToPrefetch = allViews.filter(
-    (v) => v.name !== to.name && (!adminRoutes.has(v.name as string) || authStore.isAdmin)
+    (v) => v.name !== to.name && (!((v.name as string) in ADMIN_ROUTES) || authStore.isAdmin)
   );
 
   // Prefetch them sequentially with staggered timeouts when browser is idle
