@@ -30,6 +30,11 @@ _ALLOWED_HEADERS = [
     "Accept-Language",
     "Accept-Encoding",
 ]
+
+# Response headers browser JS is allowed to read on cross-origin requests.
+# Trace ids are how a client correlates its own request with the console's log
+# detail view, so they must be readable from the response.
+_EXPOSED_HEADERS = ["X-Trace-ID", "X-Langfuse-Trace-ID"]
 _PREFLIGHT_MAX_AGE_SECONDS = 600
 
 
@@ -79,6 +84,7 @@ async def cors_middleware(
     if origin in allowed:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = ", ".join(_EXPOSED_HEADERS)
         vary = response.headers.get("Vary")
         if not vary:
             response.headers["Vary"] = "Origin"

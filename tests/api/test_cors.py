@@ -76,6 +76,19 @@ def test_cors_rejects_unconfigured_origin():
     assert "access-control-allow-origin" not in response.headers
 
 
+def test_cors_exposes_trace_headers():
+    """Browser clients on an allowed origin can read the trace id headers."""
+    client = TestClient(_app_with_cors_origins(["https://admin.example.com"]))
+    response = client.get(
+        "/api/health/live",
+        headers={"origin": "https://admin.example.com"},
+    )
+    assert response.status_code == 200
+    exposed = response.headers["access-control-expose-headers"]
+    assert "X-Trace-ID" in exposed
+    assert "X-Langfuse-Trace-ID" in exposed
+
+
 def test_cors_disabled_without_origins():
     """With no configured origins, no CORS headers are emitted at all."""
     client = TestClient(_app_with_cors_origins([]))
