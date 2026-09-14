@@ -98,7 +98,7 @@ def load_logging_config(
     settings = get_settings().logging
     overrides = overrides or {}
 
-    enable_database_logging = _parse_bool(overrides.get("log_input_output", True))
+    log_input_output = _parse_bool(overrides.get("log_input_output", True))
 
     try:
         retention_days = int(overrides.get("log_retention_days", 30))
@@ -145,7 +145,7 @@ def load_logging_config(
     log_level = settings.level.upper()
 
     return LoggingConfig(
-        enable_database_logging=enable_database_logging,
+        log_input_output=log_input_output,
         retention_days=retention_days,
         mask_sensitive_data=mask_sensitive_data,
         log_level=log_level,

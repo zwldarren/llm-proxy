@@ -148,7 +148,7 @@ def _write_audit_log(
         response_headers = getattr(request.state, "response_headers", {})
 
         resource_id = determine_resource_id(path, request_body)
-        if not config.enable_database_logging:
+        if not config.log_input_output:
             # log_input_output=false keeps the metadata row but scrubs bodies.
             # resource_id is derived from the real body above, before scrubbing.
             request_body = {"_sampled_out": True}

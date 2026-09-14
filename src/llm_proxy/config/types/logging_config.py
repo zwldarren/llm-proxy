@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class LoggingConfig(BaseModel):
-    enable_database_logging: bool = Field(
+    log_input_output: bool = Field(
         default=True,
         description="Log request/response bodies; when off, rows persist with bodies scrubbed",
     )

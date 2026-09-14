@@ -146,7 +146,7 @@ class UnifiedProcessor:
             path=request.url.path,
         )
 
-        should_log_input_output = logging_config.enable_database_logging
+        should_log_input_output = logging_config.log_input_output
 
         request_headers = dict(request.headers)
         identity = get_request_identity(request)

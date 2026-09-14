@@ -884,7 +884,7 @@ class TestModelEchoConsistency:
 
         monkeypatch.setattr(
             "llm_proxy.core.processing.unified.load_logging_config",
-            lambda: LoggingConfig(enable_database_logging=True),
+            lambda: LoggingConfig(log_input_output=True),
         )
 
         processor = UnifiedProcessor(protocol_endpoint=protocol_endpoint)

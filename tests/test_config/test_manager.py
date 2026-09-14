@@ -62,7 +62,7 @@ class TestLoadLoggingConfig:
     def test_default_values(self):
         with patch.dict(os.environ, {}, clear=False):
             result = load_logging_config()
-            assert result.enable_database_logging is True
+            assert result.log_input_output is True
             assert result.retention_days == 30
             assert result.mask_sensitive_data is True
 
@@ -76,7 +76,7 @@ class TestLoadLoggingConfig:
         env = {"LOG_LEVEL": "DEBUG"}
         with patch.dict(os.environ, env, clear=False):
             result = load_logging_config(overrides)
-            assert result.enable_database_logging is False
+            assert result.log_input_output is False
             assert result.retention_days == 60
             assert result.mask_sensitive_data is False
             assert result.log_level == "DEBUG"
@@ -90,7 +90,7 @@ class TestLoadLoggingConfig:
     def test_with_log_input_output_override(self):
         overrides = {"log_input_output": False}
         result = load_logging_config(overrides)
-        assert result.enable_database_logging is False
+        assert result.log_input_output is False
 
     def test_verbose_routing_logs_default_is_false(self):
         result = load_logging_config()

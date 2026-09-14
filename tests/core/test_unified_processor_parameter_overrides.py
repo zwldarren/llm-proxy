@@ -63,7 +63,7 @@ async def test_event_context_request_body_reflects_applied_overrides(monkeypatch
 
     monkeypatch.setattr(
         "llm_proxy.core.processing.unified.load_logging_config",
-        lambda: LoggingConfig(enable_database_logging=True),
+        lambda: LoggingConfig(log_input_output=True),
     )
 
     request_model = ChatCompletionRequest(
@@ -137,7 +137,7 @@ async def _run_processor(selection, adapter, request_model, monkeypatch):
 
     monkeypatch.setattr(
         "llm_proxy.core.processing.unified.load_logging_config",
-        lambda: LoggingConfig(enable_database_logging=True),
+        lambda: LoggingConfig(log_input_output=True),
     )
 
     response = await processor.process(request_model, req, context)

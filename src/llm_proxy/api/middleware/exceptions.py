@@ -37,6 +37,7 @@ from llm_proxy.protocols.openresponses.errors import (
     is_openresponses_path,
     openresponses_error_code,
 )
+from llm_proxy.protocols.registry import protocol_name_for_path
 
 logger = get_logger(__name__)
 
@@ -59,10 +60,6 @@ def _is_anthropic_path(path: str) -> bool:
     (``/messages``, ``/v1/v1/messages``) and the count_tokens sub-route get
     the Anthropic error envelope too.
     """
-    # Deferred import keeps this middleware module independent of protocol
-    # package registration order during app construction.
-    from llm_proxy.protocols.registry import protocol_name_for_path
-
     return protocol_name_for_path(path) == "anthropic"
 
 
@@ -327,7 +324,7 @@ def _write_error_log_to_db(
 
         # Backfill request data for early failures.
         request_headers, request_body = _capture_early_failure_request_data(request)
-        if not config.enable_database_logging:
+        if not config.log_input_output:
             # log_input_output=false keeps the metadata row but scrubs the body.
             request_body = {"_sampled_out": True}
 
