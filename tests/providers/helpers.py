@@ -29,6 +29,25 @@ def make_request(raw: dict, *, model: str, protocol_name: str) -> InternalReques
     return req
 
 
+def chat_request(
+    model: str = "Qwen/Qwen3-8B",
+    *,
+    params: GenerationParams | None = None,
+    **kw,
+) -> InternalRequest:
+    """An OpenAI-protocol Chat Completions request against a local engine."""
+    req = InternalRequest(
+        model=model,
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="hi")])]
+        ),
+        params=params or GenerationParams(),
+        **kw,
+    )
+    req.metadata.protocol_name = "openai"
+    return req
+
+
 def raw_anthropic(**overrides) -> dict:
     """A client-sent Anthropic Messages body (post model_dump)."""
     raw = {
