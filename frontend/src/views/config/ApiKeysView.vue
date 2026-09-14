@@ -288,9 +288,7 @@ const availableMcpServers = computed(() =>
 const openCreateDialog = () => {
   newKeyName.value = "";
   fetchModelNames();
-  if (authStore.isAdmin) {
-    fetchMcpServerNames();
-  }
+  fetchMcpServerNames();
   newKeyModels.value = null;
   newKeyMcpServers.value = null;
   newKeyNeverExpires.value = true;
@@ -393,10 +391,11 @@ const openEditDialog = (key: ApiKeyRead) => {
   editingKey.value = key;
   editKeyName.value = key.name;
   editIsActive.value = key.is_active;
-  // Keys have two effective states (allow-all vs. allowlist): an empty stored
-  // list is normalized to null so it displays as "Allow all models".
-  editKeyModels.value = key.allowed_models?.length ? [...key.allowed_models] : null;
-  editKeyMcpServers.value = key.allowed_mcp_servers?.length ? [...key.allowed_mcp_servers] : null;
+  // Scope: null = allow all, [] = deny-all, non-empty = allowlist. Preserve the
+  // stored [] so the picker shows the deny-all warning instead of silently
+  // rendering the key as unrestricted.
+  editKeyModels.value = key.allowed_models ? [...key.allowed_models] : null;
+  editKeyMcpServers.value = key.allowed_mcp_servers ? [...key.allowed_mcp_servers] : null;
   editNeverExpires.value = key.expires_at === null;
   // Normalize to the same ISO shape DateTimePicker emits, so the unchanged
   // comparison in updateApiKey() compares instants, not string formatting.
@@ -406,9 +405,7 @@ const openEditDialog = (key: ApiKeyRead) => {
   editBudgetResetDay.value = key.budget_reset_day ?? 1;
   editRateLimitRpm.value = key.rate_limit_rpm;
   fetchModelNames();
-  if (authStore.isAdmin) {
-    fetchMcpServerNames();
-  }
+  fetchMcpServerNames();
   showEditDialog.value = true;
 };
 
@@ -445,9 +442,11 @@ const updateApiKey = async () => {
     if (editIsActive.value !== original.is_active) {
       data.is_active = editIsActive.value;
     }
-    // Empty selection means "no restriction" (null = allow all), not deny-all.
-    data.allowed_models = editKeyModels.value?.length ? editKeyModels.value : null;
-    data.allowed_mcp_servers = editKeyMcpServers.value?.length ? editKeyMcpServers.value : null;
+    // The picker's value maps 1:1 onto the API's scope field: null = allow all,
+    // [] = deny-all, non-empty = allowlist (an emptied selection means deny-all
+    // and is warned about in the picker).
+    data.allowed_models = editKeyModels.value;
+    data.allowed_mcp_servers = editKeyMcpServers.value;
 
     // Expiry: only send when the effective value changed. Clearing sends an
     // explicit null (the backend treats it as "remove the expiry").
@@ -798,11 +797,12 @@ onMounted(() => {
               :empty-available-text="t('apiKeys.noModelsAvailable')"
               :empty-search-text="t('apiKeys.noModelsFound')"
               :empty-text="t('apiKeys.emptyModelsInfo')"
+              empty-meaning="deny"
               mono
             />
           </div>
-          <!-- MCP Servers (admin only) -->
-          <div v-if="authStore.isAdmin" class="space-y-2">
+          <!-- MCP Servers -->
+          <div class="space-y-2">
             <Label>{{ t("apiKeys.allowedMcpServers") }}</Label>
             <AccessScopePicker
               v-model="newKeyMcpServers"
@@ -813,6 +813,7 @@ onMounted(() => {
               :empty-available-text="t('apiKeys.noMcpServersAvailable')"
               :empty-search-text="t('apiKeys.noMcpServersFound')"
               :empty-text="t('apiKeys.emptyMcpServersInfo')"
+              empty-meaning="deny"
               :icon="Server"
             />
           </div>
@@ -953,11 +954,12 @@ onMounted(() => {
               :empty-available-text="t('apiKeys.noModelsAvailable')"
               :empty-search-text="t('apiKeys.noModelsFound')"
               :empty-text="t('apiKeys.emptyModelsInfo')"
+              empty-meaning="deny"
               mono
             />
           </div>
-          <!-- MCP Servers (admin only) -->
-          <div v-if="authStore.isAdmin" class="space-y-2">
+          <!-- MCP Servers -->
+          <div class="space-y-2">
             <Label>{{ t("apiKeys.allowedMcpServers") }}</Label>
             <AccessScopePicker
               v-model="editKeyMcpServers"
@@ -968,6 +970,7 @@ onMounted(() => {
               :empty-available-text="t('apiKeys.noMcpServersAvailable')"
               :empty-search-text="t('apiKeys.noMcpServersFound')"
               :empty-text="t('apiKeys.emptyMcpServersInfo')"
+              empty-meaning="deny"
               :icon="Server"
             />
           </div>

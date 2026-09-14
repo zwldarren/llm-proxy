@@ -176,10 +176,17 @@ async def app_and_db(monkeypatch, request):
     # Build the app
     app = FastAPI()
 
-    # Override the session dependency so router-level code uses our engine
+    # Override the session dependency so router-level code uses our engine.
+    # Mirrors production get_async_session(): auto-commit on success, rollback
+    # on error (routers such as the MCP CRUD rely on the dependency to commit).
     async def _override_get_session():
         async with session_factory() as s:
-            yield s
+            try:
+                yield s
+                await s.commit()
+            except BaseException:
+                await s.rollback()
+                raise
 
     app.dependency_overrides[get_async_session] = _override_get_session
 
@@ -191,6 +198,8 @@ async def app_and_db(monkeypatch, request):
     # Mock MCP manager
     mock_mcp_manager = MagicMock()
     mock_mcp_manager.list_active_servers = AsyncMock(return_value=[])
+    mock_mcp_manager.start_server = AsyncMock()
+    mock_mcp_manager.stop_server = AsyncMock()
     app.state.mcp_manager = mock_mcp_manager
 
     # Add JWT middleware
@@ -1125,8 +1134,8 @@ class TestApiKeyMcpAllowAllDefault:
     """
 
     @pytest.mark.asyncio
-    async def test_non_admin_cannot_set_mcp_servers(self, app_and_db, client):
-        """Non-admin members cannot configure MCP server permissions on their keys."""
+    async def test_non_admin_can_set_mcp_servers(self, app_and_db, client):
+        """Non-admin members can configure MCP server restrictions on their keys."""
         await _seed_user(app_and_db, "viewer1")
         token = _make_token("viewer1")
 
@@ -1135,9 +1144,8 @@ class TestApiKeyMcpAllowAllDefault:
             json={"name": "k1", "allowed_mcp_servers": ["github_mcp"]},
             headers=_auth_header(token),
         )
-        # Request succeeds but MCP servers are stripped for non-admins
         assert resp.status_code == 201, resp.text
-        assert resp.json()["allowed_mcp_servers"] is None
+        assert resp.json()["allowed_mcp_servers"] == ["github_mcp"]
 
     @pytest.mark.asyncio
     async def test_unconfigured_key_defaults_to_allow_all(self, app_and_db, client):
@@ -1161,25 +1169,42 @@ class TestApiKeyMcpAllowAllDefault:
         await _seed_user(app_and_db, "viewer1")
         token = _make_token("viewer1")
 
-        # Non-admin creates a key - MCP servers are stripped (admin-only)
+        # Non-admin creates a restricted key; the restriction is stored.
         resp = await client.post(
             "/api/api-keys",
             json={"name": "restricted", "allowed_mcp_servers": ["github_mcp"]},
             headers=_auth_header(token),
         )
         assert resp.status_code == 201, resp.text
-        assert resp.json()["allowed_mcp_servers"] is None
+        assert resp.json()["allowed_mcp_servers"] == ["github_mcp"]
 
-        # Non-admin cannot update MCP servers - the update is ignored.
-        # An omitted field preserves the stored value (rename keeps None).
+        # An update omitting allowed_mcp_servers preserves the stored value.
         resp = await client.put(
             "/api/api-keys/restricted",
             json={"name": "renamed"},
             headers=_auth_header(token),
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["allowed_mcp_servers"] is None
+        assert resp.json()["allowed_mcp_servers"] == ["github_mcp"]
         assert resp.json()["name"] == "renamed"
+
+        # The owner can also change the restriction via the /models endpoint.
+        resp = await client.put(
+            "/api/api-keys/renamed/models",
+            json={"allowed_mcp_servers": ["filesystem_mcp"]},
+            headers=_auth_header(token),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["allowed_mcp_servers"] == ["filesystem_mcp"]
+
+        # An explicit null resets the restriction back to allow-all.
+        resp = await client.put(
+            "/api/api-keys/renamed",
+            json={"allowed_mcp_servers": None},
+            headers=_auth_header(token),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["allowed_mcp_servers"] is None
 
     @pytest.mark.asyncio
     async def test_update_models_only_does_not_rename(self, app_and_db, client):
@@ -1205,8 +1230,8 @@ class TestApiKeyMcpAllowAllDefault:
         assert data["allowed_models"] == ["gpt-4"]
 
     @pytest.mark.asyncio
-    async def test_update_models_endpoint_strips_mcp_for_non_admin(self, app_and_db, client):
-        """Non-admins cannot change MCP servers via PUT /{name}/models."""
+    async def test_update_models_forbidden_for_non_owner(self, app_and_db, client):
+        """A member cannot change another user's key via PUT /{name}/models."""
         await _seed_user(app_and_db, "admin", role="admin")
         admin_token = _make_token("admin")
         await _seed_user(app_and_db, "viewer1")
@@ -1220,7 +1245,7 @@ class TestApiKeyMcpAllowAllDefault:
         )
         assert resp.status_code == 201, resp.text
 
-        # Non-admin trying to widen MCP access gets ignored.
+        # Keys are strictly owner-managed: a non-owner is rejected outright.
         resp = await client.put(
             "/api/api-keys/admin-key/models",
             json={"allowed_mcp_servers": ["filesystem_mcp"]},

@@ -158,7 +158,7 @@ async def create_api_key(
         name=data.name,
         key_hash=key_hash,
         allowed_models=data.allowed_models,
-        allowed_mcp_servers=data.allowed_mcp_servers if is_admin else None,
+        allowed_mcp_servers=data.allowed_mcp_servers,
         user_id=user_id,
         expires_at=data.expires_at,
         budget_usd=data.budget_usd,
@@ -315,14 +315,12 @@ async def update_api_key_models(
 
     # Only fields the caller explicitly provided are forwarded to the repo so
     # that omitted fields preserve the stored value, while an explicit ``null``
-    # means "allow all" (the new permissive default). Non-admin members cannot
-    # grant MCP server permissions; they may still set allowed_models.
+    # means "allow all" (the new permissive default).
     update_fields = data.model_dump(exclude_unset=True)
-    allowed_mcp = update_fields.get("allowed_mcp_servers", _UNSET) if is_admin else _UNSET
     success = await repo.update_api_key_models(
         name,
         allowed_models=update_fields.get("allowed_models", _UNSET),
-        allowed_mcp_servers=allowed_mcp,
+        allowed_mcp_servers=update_fields.get("allowed_mcp_servers", _UNSET),
     )
     if not success:
         logger.error(f"Failed to update API key models for '{name}'")
@@ -359,7 +357,6 @@ async def update_api_key(
     # that omitted fields preserve the stored value, while an explicit ``null``
     # means "allow all" (the new permissive default).
     update_fields = data.model_dump(exclude_unset=True)
-    allowed_mcp = update_fields.get("allowed_mcp_servers", _UNSET) if is_admin else _UNSET
 
     # Key-level budgets are purely self-service: the owner may raise, lower,
     # or clear them freely. Spend is ultimately bounded by the admin-set
@@ -398,7 +395,7 @@ async def update_api_key(
         current_name=name,
         new_name=update_fields.get("name", _UNSET),
         allowed_models=update_fields.get("allowed_models", _UNSET),
-        allowed_mcp_servers=allowed_mcp,
+        allowed_mcp_servers=update_fields.get("allowed_mcp_servers", _UNSET),
         is_active=update_fields.get("is_active", _UNSET),
         expires_at=update_fields.get("expires_at", _UNSET),
         budget_usd=new_budget_usd,

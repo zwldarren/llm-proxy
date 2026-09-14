@@ -144,8 +144,8 @@ class TestApiKeyRouter:
         assert data["allowed_mcp_servers"] == ["github_mcp"]
 
     @pytest.mark.asyncio
-    async def test_non_admin_cannot_set_mcp_servers(self, client, mock_repo):
-        """Non-admin members cannot grant MCP server permissions on their own keys."""
+    async def test_non_admin_can_set_mcp_servers(self, client, mock_repo):
+        """Non-admin members can restrict MCP servers on their own keys."""
         mock_user = MagicMock()
         mock_user.role = "member"
         with (
@@ -155,7 +155,7 @@ class TestApiKeyRouter:
         ):
             mock_repo.get_api_key_by_name = AsyncMock(return_value=None)
             mock_key = make_api_key("member-key")
-            mock_key.allowed_mcp_servers = None  # Non-admins cannot set MCP servers
+            mock_key.allowed_mcp_servers = ["github_mcp"]
             mock_repo.create_api_key = AsyncMock(return_value=("sk_member", mock_key))
 
             with patch.object(api_keys_module, "get_api_key_repository", return_value=mock_repo):
@@ -169,12 +169,11 @@ class TestApiKeyRouter:
 
         assert response.status_code == 201
         data = response.json()
-        # Non-admin cannot set MCP servers - field is stripped to None
-        assert data["allowed_mcp_servers"] is None
-        # Ensure repository was called with None (not the requested value).
+        assert data["allowed_mcp_servers"] == ["github_mcp"]
+        # The requested restriction is forwarded to the repository as-is.
         mock_repo.create_api_key.assert_called_once()
         call_kwargs = mock_repo.create_api_key.call_args.kwargs
-        assert call_kwargs["allowed_mcp_servers"] is None
+        assert call_kwargs["allowed_mcp_servers"] == ["github_mcp"]
 
     @pytest.mark.asyncio
     async def test_create_api_key_conflict(self, client, mock_repo):
