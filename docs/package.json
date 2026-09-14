@@ -1,0 +1,17 @@
+{
+  "name": "llm-proxy-docs",
+  "description": "User documentation site for LLM Proxy (VitePress).",
+  "engines": {
+    "node": ">=22"
+  },
+  "private": true,
+  "scripts": {
+    "docs:dev": "vitepress dev --port 9912",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview --port 9913"
+  },
+  "type": "module",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

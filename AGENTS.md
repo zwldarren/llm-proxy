@@ -24,6 +24,19 @@ uv run llm-proxy-dev              # Start backend + frontend dev servers concurr
 uv run ruff check --fix && uv run ruff format && uv run ty check && uv run pytest
 ```
 
+### Documentation
+
+User documentation lives in `docs/` — a VitePress site published to GitHub Pages by
+`.github/workflows/docs.yml` (`docs/adr/` and `docs/agents/` are excluded from the
+site via `srcExclude`).
+
+```bash
+cd docs
+bun install          # Install the VitePress toolchain
+bun run docs:dev     # Preview at http://localhost:9912/llm-proxy/
+bun run docs:build   # Build docs/.vitepress/dist
+```
+
 ## ARCHITECTURE
 
 ### Request Flow

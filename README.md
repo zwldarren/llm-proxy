@@ -5,11 +5,25 @@
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-333.svg)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-333.svg)](https://github.com/zwldarren/llm-proxy/pkgs/container/llm-proxy)
 [![Ruff](https://img.shields.io/badge/code%20style-ruff-000.svg)](https://github.com/astral-sh/ruff)
+[![Docs](https://img.shields.io/badge/docs-zwldarren.github.io-333.svg)](https://zwldarren.github.io/llm-proxy/)
 [![License](https://img.shields.io/badge/license-MIT-333.svg)](LICENSE)
 
 ![Usage dashboard](docs/screenshots/usage.png)
 
 LLM Proxy is a self-hostable LLM API gateway. Point your existing OpenAI or Anthropic SDK at it and instantly gain access to every configured provider — with automatic failover, cost-aware routing, per-key budgets, request logging, and an admin dashboard to manage it all without restarts.
+
+## Documentation
+
+**Full documentation: <https://zwldarren.github.io/llm-proxy/>**
+
+| | |
+| --- | --- |
+| [Getting started](https://zwldarren.github.io/llm-proxy/getting-started/installation.html) | Install, first-run setup, connect a client, core concepts |
+| [Deployment](https://zwldarren.github.io/llm-proxy/deployment/docker.html) | Docker Compose, PostgreSQL & Redis, reverse proxy, upgrades & backups |
+| [Admin console](https://zwldarren.github.io/llm-proxy/admin/overview.html) | Providers, models & pricing, API keys, users, MCP, every server setting |
+| [API reference](https://zwldarren.github.io/llm-proxy/api/authentication.html) | Auth, endpoints, streaming, tools & web search, routing, errors |
+| [Guides](https://zwldarren.github.io/llm-proxy/guides/cost-control.html) | Cost control, monitoring & alerting, security hardening |
+| [Reference](https://zwldarren.github.io/llm-proxy/reference/environment.html) | Environment variables, FAQ |
 
 ## Why LLM Proxy?
 
@@ -43,9 +57,9 @@ Speak any client protocol; the proxy normalizes it to a unified internal model a
 
 Intercept `web_search` tool calls from any client and answer them through your own search backend (SearXNG or Ollama) — results are injected back in the client's native format, Anthropic-compatible included. Every model becomes web-aware without provider-specific tooling.
 
-### 🛠 MCP Tool Bridging
+### 🛠 MCP Server Hosting
 
-Attach [Model Context Protocol](https://modelcontextprotocol.io) servers (stdio or HTTP) and expose their tools to any model through any client protocol. Per-key MCP allowlists plus a security policy (command/env allowlists, private-IP and dangerous-command blocking) keep it safe. MCP servers are proxied under `/servers/*`.
+Attach [Model Context Protocol](https://modelcontextprotocol.io) servers (stdio or HTTP) once and let every MCP client in your team use them through the proxy at `/servers/<name>/mcp` — authenticated with the same API keys, budgets, rate limits, and logs as model traffic. Per-key MCP allowlists plus a deny-by-default security policy (command/env allowlists, SSRF and dangerous-command blocking) keep it safe. See the [MCP guide](https://zwldarren.github.io/llm-proxy/admin/mcp.html).
 
 ### 💰 Cost Control & Billing
 
@@ -56,7 +70,7 @@ Attach [Model Context Protocol](https://modelcontextprotocol.io) servers (stdio 
 ### 📊 Observability
 
 - **Live request logs** — Every call with TTFT, duration, tokens, cost, status; filter by key, user, model, provider, or status. Live-monitoring mode included.
-- **Usage analytics** — Trends, provider/model breakdowns, token distribution, cache efficiency, latency and throughput percentiles over 7/30/90 days.
+- **Usage analytics** — Trends, provider/model breakdowns, token distribution, cache efficiency, average latency and throughput over configurable date ranges.
 - **Audit log with integrity verification** — Tamper-evident audit chain, plus Langfuse tracing integration and per-user self-service tracing.
 - **Privacy controls** — Log retention periods, body/audit sampling rates, and sensitive-field masking (API keys, tokens, passwords, plus your own extra keys).
 
@@ -96,13 +110,15 @@ A dark-first Vue 3 console (English & 中文, light/dark/system themes):
 ```bash
 git clone https://github.com/zwldarren/llm-proxy.git
 cd llm-proxy
-
-# Set a database password, then start everything
-echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > .env
 docker compose up -d
 ```
 
-This starts the proxy (prebuilt image), PostgreSQL, and Redis. Open **http://localhost:8080** — the first-run setup screen creates your admin account, then add a provider and you're live.
+This starts the proxy (prebuilt image), PostgreSQL, and Redis — no configuration
+needed for a local trial. The database password defaults to `llmproxy`; set your
+own in `.env` **before the first start** if the stack is reachable by anyone else
+(Postgres applies it when the volume is initialized). Open **http://localhost:8080**
+— the first-run setup screen creates your admin account, then add a provider and
+you're live.
 
 ### Option B — From source
 
@@ -153,6 +169,12 @@ client.messages.create(model="deepseek-v4-flash", max_tokens=1024, messages=[...
 
 `model="auto"` (or `fast` / `best`) engages smart routing; a concrete model name goes straight to its configured provider with fallback.
 
+### Coding agents
+
+Claude Code, OpenAI Codex, OpenCode, Pi, OMP, and Hermes Agent all work through the proxy with a base URL and an API key. Copy-paste configs for each: [Connect an AI Agent](https://zwldarren.github.io/llm-proxy/getting-started/connect-an-agent.html).
+
+Full API reference: [endpoints](https://zwldarren.github.io/llm-proxy/api/endpoints.html), [streaming](https://zwldarren.github.io/llm-proxy/api/streaming.html), [tools & web search](https://zwldarren.github.io/llm-proxy/api/tools.html), [errors & rate limits](https://zwldarren.github.io/llm-proxy/api/errors.html).
+
 ## Configuration
 
 Configuration is split into two channels:
@@ -169,12 +191,14 @@ Configuration is split into two channels:
   `ENCRYPTION_KEY` overrides (when unset, both are auto-generated and persisted
   in the database on first run).
 
+Every dashboard section is documented in the [admin console docs](https://zwldarren.github.io/llm-proxy/admin/overview.html); the complete variable list is in the [environment reference](https://zwldarren.github.io/llm-proxy/reference/environment.html).
+
 ### Key Environment Variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | SQLite in the user data dir | Database connection string (PostgreSQL supported) |
-| `REDIS_ENABLED` / `REDIS_URL` | `false` / `redis://localhost:6379` | Redis for rate limiting, caching, and log shipping |
+| `REDIS_ENABLED` / `REDIS_URL` | `false` / `redis://localhost:6379` | Redis for shared rate limiting (`REDIS_RATE_LIMIT_ENABLED`), config caching, routing/session state, and the stored-Responses API |
 | `JWT_SECRET` | auto-generated | Explicit override for the JWT signing secret |
 | `ENCRYPTION_KEY` | auto-generated | Explicit override for the API-key encryption key |
 | `TRUSTED_PROXIES` | private/loopback ranges | Networks trusted to set `X-Forwarded-For` |
