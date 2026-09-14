@@ -37,7 +37,7 @@ class PricingRates:
 
 
 @dataclass
-class PricingTier:
+class CostTier:
     """Context-based pricing tier: rates that apply from ``threshold`` input tokens up.
 
     ``None`` rates fall back to the base rate of the same dimension, so a tier
@@ -124,13 +124,13 @@ def _get_provider_pricing(
     return PricingRates(**{field: _rate(model_config, field) for field in _PRICING_FIELDS})
 
 
-def _coerce_pricing_tier(raw: Any) -> PricingTier | None:
-    """Coerce a config model or stored JSON dict into a :class:`PricingTier`.
+def _coerce_pricing_tier(raw: Any) -> CostTier | None:
+    """Coerce a config model or stored JSON dict into a :class:`CostTier`.
 
     Returns ``None`` for entries without a usable threshold so malformed rows
     are ignored instead of crashing the billing path.
     """
-    if isinstance(raw, PricingTier):
+    if isinstance(raw, CostTier):
         return raw
 
     def read(key: str) -> Any:
@@ -142,7 +142,7 @@ def _coerce_pricing_tier(raw: Any) -> PricingTier | None:
     if threshold is None:
         logger.warning(f"Ignoring pricing tier without threshold: {raw!r}")
         return None
-    return PricingTier(
+    return CostTier(
         threshold=int(threshold),
         **{field: coerce_float(read(field)) for field in _TIER_RATE_FIELDS},
     )
@@ -151,7 +151,7 @@ def _coerce_pricing_tier(raw: Any) -> PricingTier | None:
 def _get_pricing_tiers(
     model_config: Any,
     provider_name: str | None,
-) -> list[PricingTier]:
+) -> list[CostTier]:
     """Get the effective tier list: provider tiers win over model-level ones."""
     raw_tiers: Any = None
     if provider_name:
@@ -172,7 +172,7 @@ def _get_pricing_tiers(
 
 def _select_tier_rates(
     base: PricingRates,
-    tiers: list[PricingTier],
+    tiers: list[CostTier],
     input_tokens: int,
 ) -> PricingRates:
     """Overlay the highest tier the input token count has reached onto base rates.
@@ -180,7 +180,7 @@ def _select_tier_rates(
     Thresholds are inclusive: a request with exactly ``threshold`` input tokens
     already bills at that band. Unset tier dimensions inherit the base rate.
     """
-    selected: PricingTier | None = None
+    selected: CostTier | None = None
     for tier in sorted(tiers, key=lambda t: t.threshold):
         if input_tokens >= tier.threshold:
             selected = tier
