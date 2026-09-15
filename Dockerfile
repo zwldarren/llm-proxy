@@ -29,7 +29,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Install dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
+# Explicit cache id: the default cache-mount id is the target path, which is
+# shared by every Dockerfile on this host using /root/.cache/uv — cross-project
+# sharing has been observed to serve corrupted package files (requests/compat.py
+# truncated vs its RECORD hash). A per-project id isolates the cache.
+RUN --mount=type=cache,id=llm-proxy-uv,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project --extra smart-routing
@@ -41,7 +45,7 @@ COPY . /app
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Sync the project
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=llm-proxy-uv,target=/root/.cache/uv \
     uv sync --locked --extra smart-routing
 
 # Expose port

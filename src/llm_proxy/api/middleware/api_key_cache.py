@@ -3,6 +3,7 @@
 In-memory cache for API keys with TTL to reduce database lookups.
 """
 
+import asyncio
 import hashlib
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,80 @@ from llm_proxy.core.constants import API_KEY_CACHE_TTL_SECONDS
 # per key per TTL window. A short TTL keeps the enforced spend close to the
 # real (asynchronously written) usage.
 BUDGET_SPEND_CACHE_TTL_SECONDS = 15.0
+
+# ``last_used_at`` is purely informational (the admin UI's "last used" column).
+# Persisting it on every authenticated request cost one pooled DB connection
+# per request and, under sustained load, let connection-checkout waiters pile
+# up faster than the pool could drain — a 30s checkout timeout death spiral
+# that surfaced as 500s and multi-second tail latency. Updates are throttled
+# per key, per process, instead.
+LAST_USED_UPDATE_INTERVAL_S = 60.0
+# Bound on the throttle map: a long tail of one-off key names must not grow it
+# without limit. Clearing loses only throttling state, never correctness.
+LAST_USED_TRACKED_MAX = 100_000
+_last_used_updates: dict[str, float] = {}
+_last_used_updates_lock = Lock()
+
+
+def claim_last_used_update(key_name: str) -> bool:
+    """Return True when ``last_used_at`` for *key_name* is due for persistence.
+
+    Marks the key as updated, so concurrent callers inside the interval are
+    rejected. Callers must only schedule the DB write when this returns True;
+    a throttled call must not create a background task or open a session.
+    """
+    now = time.monotonic()
+    with _last_used_updates_lock:
+        previous = _last_used_updates.get(key_name)
+        if previous is not None and now - previous < LAST_USED_UPDATE_INTERVAL_S:
+            return False
+        if len(_last_used_updates) >= LAST_USED_TRACKED_MAX:
+            _last_used_updates.clear()
+        _last_used_updates[key_name] = now
+        return True
+
+
+async def update_key_last_used(key_name: str) -> None:
+    """Persist ``last_used_at`` for *key_name*, throttled per key.
+
+    Callers schedule this as a background task; a throttled call returns
+    before opening a database session (see :func:`claim_last_used_update`).
+    """
+    if not claim_last_used_update(key_name):
+        return
+
+    from llm_proxy.database import ApiKeyRepository, get_async_session_context
+    from llm_proxy.observability.logger import get_logger
+
+    try:
+        async with get_async_session_context() as session:
+            await ApiKeyRepository(session).update_last_used(key_name)
+    except Exception as e:
+        get_logger(__name__).warning(f"Failed to update last_used for API key '{key_name}': {e}")
+
+
+# Single-flight guards: when a TTL window rolls over, every in-flight request
+# on a worker sees the same expired cache. Without these locks each one would
+# independently refresh from the DB / re-run bcrypt, multiplying the burst by
+# the concurrency level.
+_api_key_refresh_lock: asyncio.Lock | None = None
+_key_verification_lock: asyncio.Lock | None = None
+
+
+def get_api_key_refresh_lock() -> asyncio.Lock:
+    """Process-wide lock serializing API-key cache refreshes."""
+    global _api_key_refresh_lock
+    if _api_key_refresh_lock is None:
+        _api_key_refresh_lock = asyncio.Lock()
+    return _api_key_refresh_lock
+
+
+def get_key_verification_lock() -> asyncio.Lock:
+    """Process-wide lock serializing bcrypt key verification on cache misses."""
+    global _key_verification_lock
+    if _key_verification_lock is None:
+        _key_verification_lock = asyncio.Lock()
+    return _key_verification_lock
 
 
 @dataclass
@@ -59,6 +134,10 @@ class VerifiedKeyInfo:
     user_budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
     rate_limit_rpm: int | None = None
     verified_at: float = field(default_factory=time.time)
+    # bcrypt hash of the key that matched. Retained so an expired entry can be
+    # re-validated by looking the hash up in the refreshed key snapshot
+    # instead of re-running bcrypt over every key.
+    key_hash: str | None = None
 
 
 @dataclass
@@ -93,13 +172,21 @@ class ApiKeyCache:
             self._all_keys = keys
             self._last_refresh = time.time()
 
-    def get_verified_key(self, api_key_sha256: str) -> VerifiedKeyInfo | None:
-        """Get verified key info from cache if available (O(1) lookup)."""
+    def get_verified_key(
+        self, api_key_sha256: str, *, allow_stale: bool = False
+    ) -> VerifiedKeyInfo | None:
+        """Get verified key info from cache if available (O(1) lookup).
+
+        With ``allow_stale`` the entry is returned even past its TTL, so the
+        caller can re-validate it cheaply (by recorded bcrypt hash) instead of
+        falling back to a full bcrypt search. A fresh lookup still evicts and
+        returns ``None`` once expired.
+        """
         with self._lock:
             info = self._verified_keys.get(api_key_sha256)
             if info is None:
                 return None
-            if time.time() - info.verified_at > self.ttl:
+            if not allow_stale and time.time() - info.verified_at > self.ttl:
                 del self._verified_keys[api_key_sha256]
                 return None
             return info
@@ -116,6 +203,7 @@ class ApiKeyCache:
         budget: BudgetEnvelope | None = None,
         user_budget: BudgetEnvelope | None = None,
         rate_limit_rpm: int | None = None,
+        key_hash: str | None = None,
     ) -> None:
         """Cache a verified API key for fast future lookups."""
         with self._lock:
@@ -128,6 +216,7 @@ class ApiKeyCache:
                 budget=BudgetEnvelope() if budget is None else budget,
                 user_budget=BudgetEnvelope() if user_budget is None else user_budget,
                 rate_limit_rpm=rate_limit_rpm,
+                key_hash=key_hash,
             )
 
     def evict_verified_key(self, api_key_sha256: str) -> None:
@@ -186,17 +275,31 @@ def _user_snapshot(user_map: dict[int, UserSnapshot], user_id: int | None) -> Us
 
 
 async def get_cached_api_keys() -> list[CachedApiKey]:
-    """Get API keys from cache or database."""
-    from llm_proxy.database import ApiKeyRepository, get_async_session_context
-    from llm_proxy.observability.logger import get_logger
+    """Get API keys from cache or database.
 
-    logger = get_logger(__name__)
-
+    A miss triggers one refresh; concurrent callers wait on a single-flight
+    lock and then re-read the cache rather than each issuing their own query.
+    """
     cache = get_api_key_cache()
     cached_keys = cache.get_all_keys()
 
     if cached_keys is not None:
         return cached_keys
+
+    async with get_api_key_refresh_lock():
+        # Another coroutine may have refreshed while we waited for the lock.
+        cached_keys = cache.get_all_keys()
+        if cached_keys is not None:
+            return cached_keys
+        return await _refresh_cached_api_keys(cache)
+
+
+async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
+    """Load all API keys (and owner snapshots) from the database into *cache*."""
+    from llm_proxy.database import ApiKeyRepository, get_async_session_context
+    from llm_proxy.observability.logger import get_logger
+
+    logger = get_logger(__name__)
 
     async with get_async_session_context() as session:
         repo = ApiKeyRepository(session)

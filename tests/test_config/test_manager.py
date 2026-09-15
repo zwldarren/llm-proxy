@@ -365,3 +365,74 @@ class TestGetProviderConfig:
 
         with pytest.raises(ProviderNotConfiguredError, match="missing-provider"):
             await manager.get_provider_config("missing-provider")
+
+
+class TestInMemoryConfigPrecedesRedis:
+    """The in-memory ProxyConfig is authoritative; Redis is only a fallback.
+
+    Regression guard: both lookups used to consult Redis *first*, which put a
+    network round trip on every proxy request for data ``get_config()``
+    already held in memory.
+    """
+
+    @staticmethod
+    def _manager() -> DatabaseConfigManager:
+        from llm_proxy.config.types import (
+            ModelConfig,
+            ModelProviderConfig,
+            ProviderConfig,
+            ProxyAuthConfig,
+            ProxyConfig,
+            ServerParams,
+        )
+
+        manager = DatabaseConfigManager()
+        cache = MagicMock()
+        cache.get_model_config = AsyncMock(return_value=None)
+        cache.get_provider_config = AsyncMock(return_value=None)
+        manager.enable_cache(cache)
+        manager.get_config = AsyncMock(
+            return_value=ProxyConfig(
+                server_params=ServerParams(auth=ProxyAuthConfig(jwt_secret="a" * 32)),
+                provider_configs={"openai": ProviderConfig(type="openai")},
+                models={
+                    "gpt-4o": ModelConfig(
+                        providers=[ModelProviderConfig(provider="openai")],
+                    )
+                },
+            )
+        )
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_model_config_does_not_touch_redis_on_hit(self):
+        manager = self._manager()
+
+        model_config = await manager.get_model_config("gpt-4o")
+
+        assert model_config is not None
+        assert model_config.providers[0].provider == "openai"
+        manager._redis_cache.get_model_config.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_provider_config_does_not_touch_redis_on_hit(self):
+        manager = self._manager()
+
+        provider_config = await manager.get_provider_config("openai")
+
+        assert provider_config.type == "openai"
+        manager._redis_cache.get_provider_config.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_redis_still_consulted_when_memory_misses(self):
+        """A model absent from the in-memory snapshot falls back to Redis."""
+        from llm_proxy.config.types import ModelConfig, ModelProviderConfig
+
+        manager = self._manager()
+        cached = ModelConfig(providers=[ModelProviderConfig(provider="from-redis")])
+        manager._redis_cache.get_model_config = AsyncMock(return_value=cached)
+
+        model_config = await manager.get_model_config("not-in-memory")
+
+        assert model_config is cached
+        manager._redis_cache.get_model_config.assert_awaited_once_with("not-in-memory")

@@ -9,6 +9,11 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from llm_proxy.api.middleware.api_key_auth import add_auth_failure_delay
+from llm_proxy.api.middleware.asgi_utils import (
+    BodyReader,
+    CoreASGIMiddleware,
+    adapt_http_middleware,
+)
 from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
@@ -63,7 +68,7 @@ def check_model_restriction(
     )
 
 
-async def model_restriction_middleware(request: Request, call_next):
+async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     """Check API key model restrictions.
 
     Validates that the requested model is allowed for the provided API key.
@@ -72,30 +77,36 @@ async def model_restriction_middleware(request: Request, call_next):
     # Skip if JWT authenticated (JWT is only for /api/* admin panel, not /v1/*)
     identity = get_request_identity(request)
     if identity.auth_method == "jwt":
-        return await call_next(request)
+        return None
 
     path = request.url.path
     # Alias paths (``/chat/completions``, ``/messages``, ``/v1/v1/...``) carry
     # no ``/v1/`` prefix but are API endpoints and must be restricted too.
     is_api_path = path.startswith("/v1/") or protocol_name_for_path(path) is not None
     if not is_api_path and not path.startswith("/servers/"):
-        return await call_next(request)
+        return None
 
     # /servers/* uses JSON-RPC (no "model" field) and reading the body
     # would starve the mounted MCP proxy ASGI app.
     if path.startswith("/servers/"):
-        return await call_next(request)
+        return None
 
     allowed_models: list[str] | None = getattr(request.state, "allowed_models", None)
 
     # None means unrestricted; an empty list means deny-all and must still
     # be enforced below.
     if allowed_models is None:
-        return await call_next(request)
+        return None
 
     api_key_name: str = getattr(request.state, "api_key_name", None) or "unknown"
 
     # Extract model name from request body, handling both JSON and multipart/form-data.
+    # The body is always buffered first so the downstream handler still sees it.
+    try:
+        raw_body = await body.read()
+    except Exception:
+        raw_body = b""
+
     if "multipart/form-data" in request.headers.get("content-type", "").lower():
         try:
             form = await request.form()
@@ -106,7 +117,7 @@ async def model_restriction_middleware(request: Request, call_next):
         except Exception:
             requested_model = None
     else:
-        requested_model = get_model_from_request_body(await request.body())
+        requested_model = get_model_from_request_body(raw_body)
     is_allowed, error_msg = check_model_restriction(
         api_key_name,
         allowed_models,
@@ -129,4 +140,15 @@ async def model_restriction_middleware(request: Request, call_next):
             },
         )
 
-    return await call_next(request)
+    return None
+
+
+class ModelRestrictionMiddleware(CoreASGIMiddleware):
+    """Pure-ASGI per-key model restriction enforcement."""
+
+    async def dispatch(self, request: Request, body: BodyReader) -> JSONResponse | None:
+        return await _dispatch(request, body)
+
+
+#: ``(request, call_next)`` adapter kept for existing call sites and tests.
+model_restriction_middleware = adapt_http_middleware(_dispatch)

@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import ipaddress
+import time
 from importlib.metadata import version as _distribution_version
 from types import MappingProxyType
 from typing import Any, Final
@@ -13,6 +14,7 @@ import httpx2
 from llm_proxy.config.settings import get_settings
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.core.utils import quiet_aclose
+from llm_proxy.http.upstream_timing import current_upstream_timer
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -169,13 +171,21 @@ def _is_banned_resolved_ip(host: str) -> bool:
     return False
 
 
+def _allowed_hosts() -> frozenset[str]:
+    """Admin-configured hosts exempt from the SSRF ban (HTTP_ALLOWED_HOSTS)."""
+    raw = get_settings().http.allowed_hosts
+    return frozenset(h.strip().lower().rstrip(".") for h in raw.split(",") if h.strip())
+
+
 def validate_server_url(url: str, *, label: str = "URL", resolve_dns: bool = True) -> None:
     """Validate a server-side outbound URL before storing or fetching.
 
     Rejects non-http(s) schemes, URLs containing credentials, literal banned
     hosts/IPs, and (by default) hostnames that resolve to banned networks. This
     prevents SSRF via base_url configurations such as cloud metadata endpoints or
-    private services.
+    private services. Hosts listed in ``HTTP_ALLOWED_HOSTS`` skip the ban checks
+    (scheme/credential rules still apply) so self-hosted providers on private
+    networks can be configured explicitly.
 
     Args:
         url: The URL to validate.
@@ -184,6 +194,11 @@ def validate_server_url(url: str, *, label: str = "URL", resolve_dns: bool = Tru
             resolved IPs. Disable only when DNS is unavailable or the URL is
             already known to be safe.
     """
+    if isinstance(url, str):
+        parsed_host = urlparse(url).hostname
+        if parsed_host and parsed_host.lower().rstrip(".") in _allowed_hosts():
+            validate_url_format(url, label=label)
+            return
     _, host = _validate_url_common(url, label=label)
     if resolve_dns and _is_banned_resolved_ip(host):
         raise ValidationError(
@@ -348,13 +363,21 @@ class AsyncSession:
             connect, read = timeout
             timeout = httpx2.Timeout(connect=connect, read=read, write=60.0, pool=60.0)
 
-        if stream:
-            ctx = self._client.stream(method, url, timeout=timeout, **kwargs)
-            resp = await ctx.__aenter__()
-            return Response(resp, context_manager=ctx)
-        else:
-            resp = await self._client.request(method, url, timeout=timeout, **kwargs)
-            return Response(resp)
+        # Accumulate upstream wait into the current request's timer (if any)
+        # so the overhead header can subtract it from total wall time.
+        timer = current_upstream_timer()
+        started = time.perf_counter() if timer is not None else 0.0
+        try:
+            if stream:
+                ctx = self._client.stream(method, url, timeout=timeout, **kwargs)
+                resp = await ctx.__aenter__()
+                return Response(resp, context_manager=ctx)
+            else:
+                resp = await self._client.request(method, url, timeout=timeout, **kwargs)
+                return Response(resp)
+        finally:
+            if timer is not None:
+                timer.add((time.perf_counter() - started) * 1000.0)
 
     async def get(self, url, **kwargs):
         return await self.request("GET", url, **kwargs)

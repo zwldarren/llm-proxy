@@ -1,0 +1,13 @@
+FROM python:3.14-slim
+
+WORKDIR /app
+# uvloop/httptools keep the fake upstream from becoming the load-test ceiling
+# (a single-process h11 server saturates around 250 RPS on this host).
+RUN pip install --no-cache-dir "fastapi" "uvicorn[standard]" orjson
+
+COPY loadtest/fake_upstream.py .
+
+EXPOSE 8900
+# Multiple workers so the upstream can absorb more concurrent load than the
+# proxy under test; otherwise the upstream, not the gateway, is measured.
+CMD ["sh", "-c", "exec uvicorn fake_upstream:app --host 0.0.0.0 --port 8900 --workers ${FAKE_UPSTREAM_WORKERS:-4}"]

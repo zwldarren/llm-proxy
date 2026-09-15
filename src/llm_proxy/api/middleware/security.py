@@ -8,13 +8,15 @@ This module provides:
 
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING
 
 from fastapi import Request, Response
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from llm_proxy.api.middleware.asgi_utils import merge_response_headers
 from llm_proxy.config.types.server import SecurityParams
 from llm_proxy.core.constants import LOCKOUT_CLEANUP_INTERVAL_SECONDS
 from llm_proxy.observability.logger import get_logger
@@ -251,19 +253,33 @@ def build_security_headers(config_manager: DatabaseConfigManager | None = None) 
     return headers
 
 
-async def security_headers_middleware(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-    """Add security headers to all responses."""
-    response = await call_next(request)
+class SecurityHeadersMiddleware:
+    """Pure-ASGI middleware adding security headers to every response.
 
-    for header, value in build_security_headers(
-        getattr(request.app.state, "config_manager", None)
-    ).items():
-        response.headers[header] = value
+    A plain ASGI callable instead of ``BaseHTTPMiddleware``: it only touches
+    the ``http.response.start`` message and never re-pumps the body, which
+    matters because this layer wraps short-circuited responses (401/413/429)
+    on every request.
+    """
 
-    return response
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        app = scope.get("app")
+        config_manager = getattr(app.state, "config_manager", None) if app is not None else None
+        headers = build_security_headers(config_manager)
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                merge_response_headers(message, headers)
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 async def rate_limit_exceeded_handler(

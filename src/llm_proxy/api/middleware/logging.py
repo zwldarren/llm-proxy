@@ -10,7 +10,15 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import Request
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from llm_proxy.api.middleware.asgi_utils import (
+    BodyBuffer,
+    get_request_state,
+    merge_response_headers,
+    set_request_state,
+)
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.observability.audit_helpers import (
@@ -24,7 +32,7 @@ from llm_proxy.observability.audit_helpers import (
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.sampling import should_exclude_from_logging
 from llm_proxy.observability.types import LogType
-from llm_proxy.security.passwords import SENSITIVE_KEYS, mask_sensitive
+from llm_proxy.security.passwords import SENSITIVE_KEYS, mask_headers, mask_sensitive
 
 logger = get_logger(__name__)
 
@@ -71,6 +79,10 @@ def _should_log_audit(path: str, method: str) -> bool:
     return False
 
 
+#: Cap on the number of response body bytes captured for an audit entry.
+_MAX_CAPTURED_BYTES = 10 * 1024 * 1024
+
+
 def _capture_and_mask_body(body_bytes: bytes) -> Any:
     """Parse JSON body and mask sensitive fields."""
     if not body_bytes:
@@ -84,43 +96,6 @@ def _capture_and_mask_body(body_bytes: bytes) -> Any:
         return body_data
     except Exception:
         return body_bytes.decode("utf-8", errors="replace")
-
-
-async def _iterate_chunks(chunks: list[bytes]):
-    """Iterate over captured response chunks."""
-    for chunk in chunks:
-        yield chunk
-
-
-async def _capture_response_body(response, max_size: int = 10 * 1024 * 1024) -> bytes:
-    """Capture response body from a streaming or static response.
-
-    Args:
-        response: The response object.
-        max_size: Maximum number of bytes to capture (default 10 MB).
-                  Prevents unbounded memory usage on large streaming responses.
-
-    Returns:
-        Captured response body bytes.
-    """
-    if hasattr(response, "body_iterator"):
-        chunks = []
-        total = 0
-        async for chunk in response.body_iterator:
-            if total + len(chunk) > max_size:
-                chunks.append(chunk[: max_size - total])
-                break
-            chunks.append(chunk)
-            total += len(chunk)
-
-        response.body_iterator = _iterate_chunks(chunks)
-        return b"".join(chunks)
-    elif hasattr(response, "body"):
-        body = response.body
-        if isinstance(body, bytes) and len(body) > max_size:
-            return body[:max_size]
-        return body
-    return b""
 
 
 def _write_audit_log(
@@ -190,8 +165,8 @@ def _write_audit_log(
         logger.debug("Failed to write audit log to database", exc_info=True)
 
 
-async def http_logging_middleware(request: Request, call_next):
-    """FastAPI middleware for request ID, response headers, and audit logging.
+class HttpLoggingMiddleware:
+    """Pure-ASGI request-id/audit middleware.
 
     For admin API requests (/api/*):
     - Generates audit log entries with event type, action category, etc.
@@ -200,67 +175,84 @@ async def http_logging_middleware(request: Request, call_next):
     For all other requests:
     - Generates request_id if not already set
     - Attaches X-Request-Id header to responses
+
+    The response body is captured by teeing ``http.response.body`` messages as
+    they stream past, so the audit entry is written after the client already
+    has its bytes and no re-pump is needed.
     """
-    request_id = getattr(request.state, "request_id", None) or uuid4().hex
-    request.state.request_id = request_id
 
-    path = request.url.path
-    should_audit = _should_log_audit(path, request.method)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-    start_time = time.perf_counter()
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-    if should_audit:
-        try:
-            from llm_proxy.security.passwords import mask_headers
+        existing_request_id = get_request_state(scope, "request_id")
+        request_id = existing_request_id if isinstance(existing_request_id, str) else uuid4().hex
+        set_request_state(scope, "request_id", request_id)
 
-            # Capture and mask request headers
-            request.state.request_headers = mask_headers(dict(request.headers))
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+        should_audit = _should_log_audit(path, method)
 
-            # Capture and mask request body
-            body_bytes = await request.body()
-            request.state.request_body = _capture_and_mask_body(body_bytes)
-        except Exception as e:
-            logger.debug(f"Failed to capture audit request data: {e}")
+        start_time = time.perf_counter()
+        body = BodyBuffer(receive)
+        request = Request(scope, body)
 
-    response = await call_next(request)
+        if should_audit:
+            try:
+                # Capture and mask request headers
+                set_request_state(scope, "request_headers", mask_headers(dict(request.headers)))
 
-    try:
-        response_time_ms = int((time.perf_counter() - start_time) * 1000)
-    except Exception:
-        response_time_ms = 0
+                # Capture and mask request body
+                set_request_state(scope, "request_body", _capture_and_mask_body(await body.read()))
+            except Exception as e:
+                logger.debug(f"Failed to capture audit request data: {e}")
 
-    if should_audit and not getattr(request.state, "audit_log_written", False):
-        try:
-            from llm_proxy.security.passwords import mask_headers
+        status_code = 0
+        captured_headers: dict[str, str] = {}
+        captured_body = bytearray() if should_audit and method != "GET" else None
 
-            # Capture and mask response headers
-            request.state.response_headers = mask_headers(dict(response.headers))
+        async def send_with_request_id(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                if should_audit:
+                    captured_headers.update(
+                        mask_headers(dict(Headers(raw=message.get("headers", []))))
+                    )
+                merge_response_headers(message, {"X-Request-Id": request_id})
+            elif message["type"] == "http.response.body" and captured_body is not None:
+                remaining = _MAX_CAPTURED_BYTES - len(captured_body)
+                if remaining > 0:
+                    captured_body.extend(message.get("body", b"")[:remaining])
+            await send(message)
 
-            if request.method == "GET":
-                # Read-only audits record the access event only. Do not persist the
-                # response body: list-valued responses (e.g. /api/api-keys) are not
-                # masked by _capture_and_mask_body and may contain secrets.
-                request.state.response_body = {"_read_audit": True}
+        await self.app(scope, body, send_with_request_id)
+
+        if should_audit and not get_request_state(scope, "audit_log_written", False):
+            response_time_ms = int((time.perf_counter() - start_time) * 1000)
+            set_request_state(scope, "response_headers", captured_headers)
+            if method == "GET":
+                # Read-only audits record the access event only. Do not persist
+                # the response body: list-valued responses (e.g. /api/api-keys)
+                # are not masked by _capture_and_mask_body and may contain
+                # secrets.
+                set_request_state(scope, "response_body", {"_read_audit": True})
             else:
-                # Capture and mask response body
-                body_bytes = await _capture_response_body(response)
-                request.state.response_body = _capture_and_mask_body(body_bytes)
-        except Exception as e:
-            logger.debug(f"Failed to capture audit response data: {e}")
-            request.state.response_body = {}
-            request.state.response_headers = {}
+                set_request_state(
+                    scope,
+                    "response_body",
+                    _capture_and_mask_body(bytes(captured_body or b"")),
+                )
 
-        status_code = response.status_code
-        error_message = getattr(request.state, "error_message", None)
-
-        _write_audit_log(
-            request=request,
-            request_id=request_id,
-            status_code=status_code,
-            response_time_ms=response_time_ms,
-            error_message=error_message,
-        )
-
-    response.headers["X-Request-Id"] = request_id
-
-    return response
+            error_message = get_request_state(scope, "error_message")
+            _write_audit_log(
+                request=request,
+                request_id=request_id,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                error_message=error_message if isinstance(error_message, str) else None,
+            )

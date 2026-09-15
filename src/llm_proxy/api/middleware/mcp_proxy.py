@@ -34,7 +34,11 @@ from llm_proxy.api.middleware.api_key_cache import (
     get_api_key_cache,
     get_budget_spend_cache,
     get_cached_api_keys,
+    get_key_verification_lock,
     hash_api_key_for_cache,
+)
+from llm_proxy.api.middleware.api_key_cache import (
+    update_key_last_used as _update_key_last_used,
 )
 from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 from llm_proxy.api.middleware.security import (
@@ -43,7 +47,7 @@ from llm_proxy.api.middleware.security import (
 )
 from llm_proxy.core.budget import BudgetEnvelope
 from llm_proxy.core.request_utils import get_client_ip
-from llm_proxy.database import ApiKeyRepository, get_async_session_context
+from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.security.model_acl import intersect_model_lists
 from llm_proxy.security.passwords import verify_api_key
@@ -64,16 +68,6 @@ async def _add_auth_failure_delay() -> None:
     delay_seconds = delay_ms / 1000.0
     jitter = delay_seconds * 0.1
     await asyncio.sleep(max(0, delay_seconds + random.uniform(-jitter, jitter)))
-
-
-async def _update_key_last_used(key_name: str) -> None:
-    """Update the last_used timestamp for an API key in the background."""
-    try:
-        async with get_async_session_context() as session:
-            repo = ApiKeyRepository(session)
-            await repo.update_last_used(key_name)
-    except Exception as e:
-        logger.warning(f"Failed to update last_used for API key '{key_name}': {e}")
 
 
 async def _verify_session_api_key(api_key: str) -> dict[str, Any] | None:
@@ -143,27 +137,61 @@ def _auth_info_from_key_record(
     }
 
 
-async def verify_api_key_for_mcp(api_key: str) -> dict[str, Any] | None:
-    """Verify an API key string and return auth info for MCP access.
+async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> dict[str, Any] | None:
+    """Resolve *api_key* from the verified cache, or verify it against the DB.
 
-    Returns ``None`` when the key is invalid, inactive, or expired. The result
-    dict has the same shape as the ``llm_proxy_auth`` scope entry created by
-    the main API-key middleware, plus the key's budget configuration so the
-    caller can enforce the spending cap.
+    Must be called with the key-verification lock held when the verified
+    cache is cold, so a TTL rollover cannot start one bcrypt burst per
+    in-flight request.
     """
     cache = get_api_key_cache()
-    api_key_sha256 = hash_api_key_for_cache(api_key)
-    verified_info = cache.get_verified_key(api_key_sha256)
+    entry = cache.get_verified_key(api_key_sha256, allow_stale=True)
 
-    if verified_info is not None:
+    if entry is not None:
         # Expiry is re-checked on every request: a key may pass its expiry
         # time while its verified-cache entry is still fresh.
-        if _is_key_expired(verified_info.expires_at):
+        if _is_key_expired(entry.expires_at):
             cache.evict_verified_key(api_key_sha256)
             return None
-        return _auth_info_from_key_record(verified_info, verified_info.allowed_models)
+        if time.time() - entry.verified_at <= cache.ttl:
+            return _auth_info_from_key_record(entry, entry.allowed_models)
+        # else: the verified TTL lapsed — fall through to cheap revalidation.
 
     cached_keys = await get_cached_api_keys()
+
+    # Cheap revalidation: an entry whose verified-TTL lapsed can be trusted
+    # again without bcrypt if the exact bcrypt hash it matched is still
+    # present, active, and unexpired in the refreshed snapshot. The key string
+    # cannot have changed (same sha256) and the record is the same one, so the
+    # prior verification still holds. Without this, every TTL rollover re-ran
+    # bcrypt over all keys and stalled the worker.
+    if entry is not None and entry.key_hash is not None:
+        match = next((k for k in cached_keys if k.key_hash == entry.key_hash), None)
+        if (
+            match is not None
+            and match.is_active
+            and match.user_is_active
+            and not _is_key_expired(match.expires_at)
+        ):
+            effective_models = intersect_model_lists(
+                match.allowed_models, match.user_allowed_models
+            )
+            cache.set_verified_key(
+                api_key_sha256,
+                match.name,
+                effective_models,
+                allowed_mcp_servers=match.allowed_mcp_servers,
+                user_id=match.user_id,
+                expires_at=match.expires_at,
+                budget=match.budget,
+                user_budget=match.user_budget,
+                rate_limit_rpm=match.rate_limit_rpm,
+                key_hash=match.key_hash,
+            )
+            return _auth_info_from_key_record(match, effective_models)
+        # The recorded hash is gone or now invalid (key rotated/deactivated):
+        # fall through to a full verification against the current snapshot.
+
     for key_record in cached_keys:
         # Keys owned by a disabled user are rejected alongside inactive keys;
         # expired keys are rejected as well.
@@ -188,6 +216,7 @@ async def verify_api_key_for_mcp(api_key: str) -> dict[str, Any] | None:
                 budget=key_record.budget,
                 user_budget=key_record.user_budget,
                 rate_limit_rpm=key_record.rate_limit_rpm,
+                key_hash=key_record.key_hash,
             )
             return _auth_info_from_key_record(key_record, effective_models)
 
@@ -196,6 +225,34 @@ async def verify_api_key_for_mcp(api_key: str) -> dict[str, Any] | None:
         return session_auth
 
     return None
+
+
+async def verify_api_key_for_mcp(api_key: str) -> dict[str, Any] | None:
+    """Verify an API key string and return auth info for MCP access.
+
+    Returns ``None`` when the key is invalid, inactive, or expired. The result
+    dict has the same shape as the ``llm_proxy_auth`` scope entry created by
+    the main API-key middleware, plus the key's budget configuration so the
+    caller can enforce the spending cap.
+
+    Verification is single-flight: a *fresh* verified-cache entry is served
+    without locking; everything else (stale, missing, or invalid) is resolved
+    under one lock so a burst of concurrent requests cannot multiply the
+    bcrypt + DB cost by the concurrency level.
+    """
+    api_key_sha256 = hash_api_key_for_cache(api_key)
+    cache = get_api_key_cache()
+
+    # Lock-free fast path, but only for an entry that is still fresh: a stale
+    # entry must go through _resolve_verified_key under the lock so it can be
+    # revalidated (or verified once, for an invalid key) without a second
+    # unlocked bcrypt attempt racing it.
+    entry = cache.get_verified_key(api_key_sha256, allow_stale=True)
+    if entry is not None and time.time() - entry.verified_at <= cache.ttl:
+        return await _resolve_verified_key(api_key, api_key_sha256)
+
+    async with get_key_verification_lock():
+        return await _resolve_verified_key(api_key, api_key_sha256)
 
 
 class BudgetCheckUnavailableError(Exception):

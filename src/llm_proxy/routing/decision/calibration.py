@@ -10,8 +10,6 @@ online re-fitting once the explicit feedback loop has accumulated enough
 calibration samples, and is covered by unit tests.
 """
 
-from __future__ import annotations
-
 import json
 import math
 from dataclasses import dataclass

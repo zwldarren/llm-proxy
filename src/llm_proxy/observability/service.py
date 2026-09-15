@@ -202,9 +202,19 @@ class _BackgroundBatchWriter[T](ABC):
             async with self._lock:
                 batch_size = self._current_batch_size
 
-            while len(batch) < batch_size and time.time() < deadline:
-                with suppress(asyncio.QueueEmpty):
-                    batch.append(self._queue.get_nowait())
+            # Accumulate up to batch_size or the flush deadline. Await each
+            # item instead of spinning on get_nowait: a busy loop here blocks
+            # the event loop for up to flush_interval per batch, starving
+            # every in-flight request (~1s added latency observed under load).
+            while len(batch) < batch_size:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                try:
+                    item = await asyncio.wait_for(self._queue.get(), timeout=remaining)
+                except TimeoutError:
+                    break
+                batch.append(item)
 
             try:
                 await self._write_batch(batch)

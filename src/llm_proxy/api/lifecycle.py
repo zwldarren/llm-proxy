@@ -264,11 +264,26 @@ async def startup_provider_stats(app: FastAPI) -> None:
 async def startup_embedding_signal(app: FastAPI) -> None:
     """Eagerly initialize the embedding signal to avoid cold-start latency.
 
-    The BGE embedding model takes 2-5 seconds to load on first use.
-    Warming it up at startup prevents that latency on the first smart-routed request.
+    Only when smart routing is enabled. The BGE tokenizer + ONNX session cost
+    on the order of 500 MB of RSS *per worker*, and a cold cache downloads
+    ~130 MB from HuggingFace Hub — so warming this up for a proxy whose smart
+    routing is off (the default) burns memory, delays readiness, and makes
+    startup depend on an external network for a code path that can never run:
+    ``orchestrate_smart_routing`` returns early unless
+    ``smart_routing.enabled`` is set.
+
     Loading runs in a thread so the event loop is not blocked.
     """
     try:
+        config_manager = getattr(app.state, "config_manager", None)
+        if config_manager is None:
+            logger.debug("Embedding warm-up skipped: no config manager yet")
+            return
+        smart_routing = await config_manager.get_smart_routing_config()
+        if not smart_routing.enabled:
+            logger.debug("Smart routing disabled; skipping embedding warm-up")
+            return
+
         from llm_proxy.routing.signals.embedding import get_embedding_signal
 
         await get_embedding_signal(app.state)

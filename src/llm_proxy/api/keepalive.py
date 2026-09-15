@@ -204,29 +204,34 @@ async def _disconnect_monitor(
     task: asyncio.Task[Response],
     stop_event: asyncio.Event,
 ) -> None:
-    """Poll the client connection for disconnects during heartbeat mode.
+    """Wait for a client disconnect during heartbeat mode.
 
     Runs as its own task, independent of the response generator: once the
     client is gone, uvicorn's middleware stops pulling the generator, so the
     generator itself can never observe the disconnect. On detection the
     in-flight pipeline task is cancelled with the abandonment flagged, so
     the pipeline records it as a failure instead of a clean success.
-    """
-    from llm_proxy.streaming.handler import check_client_disconnected
 
+    The wait is event-driven (:class:`ClientDisconnectWatcher`) rather than a
+    poll loop, so heartbeat mode costs one parked task instead of a wake-up
+    every ``_DISCONNECT_RECEIVE_WAIT_SECONDS``.
+    """
+    from llm_proxy.streaming.handler import ClientDisconnectWatcher
+
+    watcher = ClientDisconnectWatcher(request)
     try:
-        while True:
-            if await check_client_disconnected(request):
-                setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
-                stop_event.set()
-                if not task.done():
-                    task.cancel()
-                return
-            await asyncio.sleep(0)
+        await watcher.wait()
+        setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
+        stop_event.set()
+        if not task.done():
+            task.cancel()
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 - a failed poll must not kill the request
         logger.debug("Keepalive disconnect monitor failed", exc_info=True)
+    finally:
+        with suppress(Exception):
+            await watcher.aclose()
 
 
 async def _heartbeat_body(

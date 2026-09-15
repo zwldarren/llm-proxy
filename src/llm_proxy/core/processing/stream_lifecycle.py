@@ -40,6 +40,7 @@ from llm_proxy.core.utils import quiet_aclose
 from llm_proxy.observability.cost import finalize_event_cost
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.streaming.handler import ClientDisconnectWatcher
 from llm_proxy.streaming.sse_parse import contains_sse_event
 
 logger = get_logger(__name__)
@@ -76,11 +77,17 @@ async def check_client_disconnect(
     chunk_count: int,
     cancel_token: asyncio.Event | None,
     interval: int = DEFAULT_DISCONNECT_CHECK_INTERVAL,
+    watcher: ClientDisconnectWatcher | None = None,
 ) -> bool:
     """Poll the client connection every *interval* chunks (always on the first).
 
     On disconnect, set *cancel_token* so the provider-side stream loop stops
     pushing data into a dead connection.
+
+    When *watcher* is supplied the check is a synchronous flag read on a
+    background receive task — see :class:`ClientDisconnectWatcher`. Without
+    it, this falls back to the legacy timed poll, which blocks the response
+    pump for ``_DISCONNECT_RECEIVE_WAIT_SECONDS`` on every healthy stream.
     """
     # Always check the very first chunk: a client that vanished while the
     # (potentially minutes-long) pre-response pipeline ran would otherwise
@@ -88,18 +95,21 @@ async def check_client_disconnect(
     if req is None or (chunk_count % interval != 0 and chunk_count != 1):
         return False
     try:
-        from llm_proxy.streaming.handler import check_client_disconnected
+        if watcher is not None:
+            disconnected = await watcher.poll()
+        else:
+            from llm_proxy.streaming.handler import check_client_disconnected
 
-        if await check_client_disconnected(req):
-            logger.debug(
-                "Client disconnected during stream, signalling cancel_token to stop provider"
-            )
-            if cancel_token:
-                cancel_token.set()
-            return True
+            disconnected = await check_client_disconnected(req)
     except Exception:
         logger.debug("Failed to check client disconnect", exc_info=True)
-    return False
+        return False
+    if not disconnected:
+        return False
+    logger.debug("Client disconnected during stream, signalling cancel_token to stop provider")
+    if cancel_token:
+        cancel_token.set()
+    return True
 
 
 async def iterate_chunks_with_comments(
@@ -194,6 +204,9 @@ class StreamLifecycle:
         self.exit_stack = exit_stack
         self.req = req
         self.cancel_token = cancel_token
+        # Watches the ASGI receive channel on a background task so the chunk
+        # pump never blocks waiting for a disconnect that is not coming.
+        self.disconnect_watcher = ClientDisconnectWatcher(req) if req is not None else None
         self.native_streaming = native_streaming
         self.protocol_name = protocol_name
         self.config_manager = config_manager
@@ -365,7 +378,9 @@ class StreamLifecycle:
 
     async def _poll_disconnect(self) -> bool:
         """Check for client disconnect; on hit, record the abandonment."""
-        if await check_client_disconnect(self.req, self.chunk_count, self.cancel_token):
+        if await check_client_disconnect(
+            self.req, self.chunk_count, self.cancel_token, watcher=self.disconnect_watcher
+        ):
             self._mark_disconnected()
             return True
         return False
@@ -456,6 +471,11 @@ class StreamLifecycle:
             )
 
     async def _teardown(self) -> None:
+        if self.disconnect_watcher is not None:
+            await safe_cleanup(
+                self.disconnect_watcher.aclose(),
+                "Failed to stop client disconnect watcher",
+            )
         if self.stream is not None:
             await safe_cleanup(
                 asyncio.shield(quiet_aclose(self.stream)),

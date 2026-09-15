@@ -1,0 +1,73 @@
+# Load-test topology overlay: local build + deterministic fake upstream.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.loadtest.yaml up -d --build
+#   uv run loadtest/seed.py
+#   uv run locust -f loadtest/locustfile.py --host http://localhost:8180 ...
+#
+# The fake upstream answers with zero model latency so measurements isolate
+# gateway overhead. It is also exposed on the host (:8900) so locust can run
+# against it directly for a no-proxy baseline.
+services:
+  llm-proxy:
+    # Build from source instead of pulling the published image so the load
+    # test measures the current working tree.
+    build: .
+    image: llm-proxy:loadtest
+    # Worker count is parameterized for A/B scaling runs (per-process state —
+    # rate limits, key lockout, circuit breakers — is per-worker; see
+    # docs/getting-started/installation.md).
+    command: ["sh", "-c", "exec uv run llm-proxy --workers $${LOADTEST_WORKERS:-1}"]
+    ports: !override
+      - "8180:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fake-upstream:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-llmproxy}:${POSTGRES_PASSWORD:-llmproxy}@db:5432/${POSTGRES_DB:-llmproxy}
+      # REDIS_ENABLED is parameterized: the Redis config cache is consulted on
+      # every request, so A/B runs with it off isolate its contention cost.
+      - REDIS_ENABLED=${LOADTEST_REDIS:-true}
+      - REDIS_URL=redis://redis:6379
+      - UPDATE_CHECK__ENABLED=false
+      # Parameterized for A/B runs: at high RPS the per-request INFO logging
+      # (+ uvicorn access log) writes synchronously to the container stdout
+      # pipe; WARNING silences both to isolate that cost.
+      - LOG_LEVEL=${LOADTEST_LOG_LEVEL:-INFO}
+      - LOADTEST_WORKERS=${LOADTEST_WORKERS:-1}
+      # Pool sizing is parameterized for A/B runs (the default derives from
+      # the container's CPU count).
+      - DB_POOL_SIZE=${LOADTEST_DB_POOL_SIZE:-25}
+      - DB_MAX_OVERFLOW=${LOADTEST_DB_MAX_OVERFLOW:-25}
+      # The fake upstream lives on the private compose network; exempt it from
+      # the SSRF private-address ban (load-test only, never set in production).
+      - HTTP_ALLOWED_HOSTS=fake-upstream
+    # To attribute CPU inside a saturating run, temporarily add
+    # `cap_add: [SYS_PTRACE]` + `security_opt: [seccomp=unconfined]`
+    # here, then: docker exec llm-proxy-llm-proxy-1 uv pip install
+    # py-spy --python /app/.venv/bin/python
+
+  fake-upstream:
+    build:
+      context: .
+      dockerfile: loadtest/Dockerfile.fake-upstream
+    ports:
+      - "8900:8900"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8900/health', timeout=2)\"",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Expose Postgres on the host so a locally-running, profiler-instrumented
+  # proxy process can be benchmarked against the same database engine.
+  db:
+    ports:
+      - "5433:5432"

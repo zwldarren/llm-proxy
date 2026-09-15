@@ -5,7 +5,13 @@ Handles JWT bearer token verification for admin API endpoints.
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
+from llm_proxy.api.middleware.asgi_utils import (
+    BodyReader,
+    CoreASGIMiddleware,
+    adapt_http_middleware,
+)
 from llm_proxy.core.exceptions import ConfigurationError
 from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.observability.logger import get_logger
@@ -30,8 +36,8 @@ _PASSWORD_CHANGE_ALLOWED_PATHS: frozenset[str] = frozenset(
 )
 
 
-async def jwt_auth_middleware(request: Request, call_next):
-    """JWT authentication middleware.
+async def _dispatch(request: Request, body: BodyReader) -> Response | None:
+    """JWT authentication.
 
     Handles JWT verification for /api/* paths (admin panel).
     Note: JWT is NOT accepted for /v1/* or /servers/* — those require API key authentication.
@@ -42,16 +48,16 @@ async def jwt_auth_middleware(request: Request, call_next):
     path = request.url.path
 
     if path == "/api/health" or path.startswith("/api/health/"):
-        return await call_next(request)
+        return None
 
     # CORS preflight: browsers do not send Authorization on OPTIONS, so the
     # request must reach the CORS middleware (innermost) without auth.
     if request.method == "OPTIONS":
-        return await call_next(request)
+        return None
 
     config_manager = getattr(request.app.state, "config_manager", None)
     if config_manager is None:
-        return await call_next(request)
+        return None
 
     config = await config_manager.get_config()
     auth_config = config.server_params.auth
@@ -65,7 +71,7 @@ async def jwt_auth_middleware(request: Request, call_next):
 
         # For optional auth paths (e.g. /api/auth/logout), allow request without token
         if is_optional_auth and not auth_header:
-            return await call_next(request)
+            return None
 
         # If no auth header and not optional auth, require it
         if not auth_header:
@@ -84,7 +90,7 @@ async def jwt_auth_middleware(request: Request, call_next):
         # reject for mandatory auth paths.
         if not token:
             if is_optional_auth:
-                return await call_next(request)
+                return None
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Authorization header missing"},
@@ -117,7 +123,7 @@ async def jwt_auth_middleware(request: Request, call_next):
                 # Optional-auth paths stay lenient (logout must always work).
                 logger.warning("JWT subject validation failed due to database error")
                 if is_optional_auth:
-                    return await call_next(request)
+                    return None
                 return JSONResponse(
                     status_code=503,
                     content={
@@ -128,7 +134,7 @@ async def jwt_auth_middleware(request: Request, call_next):
             else:
                 if rejection is not None:
                     if is_optional_auth:
-                        return await call_next(request)
+                        return None
                     return rejection
                 if user is None:
                     raise RuntimeError(
@@ -150,13 +156,24 @@ async def jwt_auth_middleware(request: Request, call_next):
         except (ValueError, ConfigurationError) as e:
             # For optional auth paths, treat invalid token as no token (allow request)
             if is_optional_auth:
-                return await call_next(request)
+                return None
             return JSONResponse(
                 status_code=401,
                 content={"detail": str(e)},
             )
 
-    return await call_next(request)
+    return None
+
+
+class JWTAuthMiddleware(CoreASGIMiddleware):
+    """Pure-ASGI JWT authentication for the admin API."""
+
+    async def dispatch(self, request: Request, body: BodyReader) -> Response | None:
+        return await _dispatch(request, body)
+
+
+#: ``(request, call_next)`` adapter kept for existing call sites and tests.
+jwt_auth_middleware = adapt_http_middleware(_dispatch)
 
 
 def _validate_token_user(user, payload: dict) -> JSONResponse | None:

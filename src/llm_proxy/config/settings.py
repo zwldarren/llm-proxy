@@ -95,6 +95,12 @@ class HTTPSettings(BaseSettings):
         ge=0,
     )
     disable_http2: bool = Field(default=True, alias="HTTP_DISABLE_HTTP2")
+    # Comma-separated hostnames/IPs exempt from the SSRF private-address ban
+    # in validate_server_url. Needed for self-hosted providers on private
+    # networks (e.g. Ollama/vLLM on a LAN host, or a fake upstream inside a
+    # docker-compose network). Off by default: every entry weakens SSRF
+    # protection, so list only what you control.
+    allowed_hosts: str = Field(default="", alias="HTTP_ALLOWED_HOSTS")
 
 
 # Networks trusted to set forwarded headers (X-Forwarded-For / X-Real-IP).

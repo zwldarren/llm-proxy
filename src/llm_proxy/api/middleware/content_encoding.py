@@ -8,18 +8,25 @@ unsupported encodings with a 400 ``invalid_request`` error instead of
 letting the downstream parser fail with a confusing 422.
 
 Decompression output is capped at the configured request body limit (the
-same value ``body_size_limit_middleware`` enforces) as a zip-bomb guard;
-overflow is rejected with 413 in the same envelope as the size limiter.
+same value :class:`~llm_proxy.api.middleware.body_limit.BodySizeLimitMiddleware`
+enforces) as a zip-bomb guard; overflow is rejected with 413 in the same
+envelope as the size limiter.
 
-Registered to run before ``body_size_limit_middleware`` so the size check
-applies to the decompressed body, and before ``form_encoded_middleware``
+Registered to run before ``BodySizeLimitMiddleware`` so the size check
+applies to the decompressed body, and before ``FormEncodedMiddleware``
 so a compressed form-encoded body is still converted.
 """
 
 import zlib
 
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from llm_proxy.api.middleware.asgi_utils import (
+    BodyReader,
+    CoreASGIMiddleware,
+    adapt_http_middleware,
+)
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -130,17 +137,17 @@ def _error_response(status: int, message: str, type_: str, code: str) -> JSONRes
     )
 
 
-async def content_encoding_middleware(request, call_next):
+async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     """Decompress request bodies carrying a Content-Encoding header.
 
     Stacked encodings (e.g. ``gzip, zstd``) are listed in application order
     per RFC 9110 and are decoded in reverse.
     """
     if request.method not in ("POST", "PUT", "PATCH"):
-        return await call_next(request)
+        return None
     header = request.headers.get("content-encoding")
     if not header or header.lower().strip() == _IDENTITY:
-        return await call_next(request)
+        return None
 
     encodings = [e.strip().lower() for e in header.split(",") if e.strip()]
     for encoding in encodings:
@@ -163,12 +170,12 @@ async def content_encoding_middleware(request, call_next):
     cap = max_size if max_size > 0 else _MAX_DECOMPRESSED_BYTES
 
     try:
-        body = await request.body()
+        body_bytes = await body.read()
     except Exception:
         return _error_response(
             400, "Failed to read request body.", "invalid_request", "invalid_body"
         )
-    if len(body) > cap:
+    if len(body_bytes) > cap:
         return _error_response(
             413,
             f"Request body exceeds maximum size of {cap} bytes",
@@ -176,7 +183,7 @@ async def content_encoding_middleware(request, call_next):
             "body_size_exceeded",
         )
 
-    data = body
+    data = body_bytes
     try:
         for encoding in reversed(encodings):
             if encoding == _IDENTITY:
@@ -206,16 +213,26 @@ async def content_encoding_middleware(request, call_next):
     logger.debug(
         "Decompressed request body",
         encodings=",".join(encodings),
-        compressed=len(body),
+        compressed=len(body_bytes),
         decompressed=len(data),
         path=request.url.path,
     )
 
-    # Replace the cached body in place (BaseHTTPMiddleware replays it to the
-    # downstream app) and rewrite the entity headers to match the plain body.
-    request._body = data
+    # Replace the body and rewrite the entity headers to match the plain body.
+    body.replace(data)
     request.scope["headers"] = [
         (b"content-length", str(len(data)).encode()),
         *[h for h in request.scope.get("headers", []) if h[0].lower() not in _STRIPPED_HEADERS],
     ]
-    return await call_next(request)
+    return None
+
+
+class ContentEncodingMiddleware(CoreASGIMiddleware):
+    """Pure-ASGI request body decompression."""
+
+    async def dispatch(self, request: Request, body: BodyReader) -> JSONResponse | None:
+        return await _dispatch(request, body)
+
+
+#: ``(request, call_next)`` adapter kept for existing call sites and tests.
+content_encoding_middleware = adapt_http_middleware(_dispatch)

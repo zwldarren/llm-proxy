@@ -1,7 +1,7 @@
 """FastAPI server package."""
 
 import asyncio
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -25,19 +25,21 @@ from llm_proxy.api.lifecycle import (
     startup_tracing,
     startup_web_search,
 )
-from llm_proxy.api.middleware.api_key_auth import api_key_auth_middleware
-from llm_proxy.api.middleware.body_limit import body_size_limit_middleware
-from llm_proxy.api.middleware.content_encoding import content_encoding_middleware
-from llm_proxy.api.middleware.cors import cors_middleware
+from llm_proxy.api.middleware.api_key_auth import ApiKeyAuthMiddleware
+from llm_proxy.api.middleware.body_limit import BodySizeLimitMiddleware
+from llm_proxy.api.middleware.content_encoding import ContentEncodingMiddleware
+from llm_proxy.api.middleware.context_reset import ContextResetMiddleware
+from llm_proxy.api.middleware.cors import CORSMiddleware
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
-from llm_proxy.api.middleware.form_encoded import form_encoded_middleware
-from llm_proxy.api.middleware.jwt_auth import jwt_auth_middleware
-from llm_proxy.api.middleware.logging import http_logging_middleware
+from llm_proxy.api.middleware.form_encoded import FormEncodedMiddleware
+from llm_proxy.api.middleware.jwt_auth import JWTAuthMiddleware
+from llm_proxy.api.middleware.logging import HttpLoggingMiddleware
 from llm_proxy.api.middleware.mcp_proxy import MCPProxyMiddleware
-from llm_proxy.api.middleware.model_restriction import model_restriction_middleware
+from llm_proxy.api.middleware.model_restriction import ModelRestrictionMiddleware
+from llm_proxy.api.middleware.overhead import OverheadHeaderMiddleware
 from llm_proxy.api.middleware.security import (
+    SecurityHeadersMiddleware,
     rate_limit_exceeded_handler,
-    security_headers_middleware,
 )
 from llm_proxy.api.routers import (
     api_keys_router,
@@ -62,7 +64,6 @@ from llm_proxy.api.routers import (
     system_router,
     team_router,
 )
-from llm_proxy.core.context import reset_context
 from llm_proxy.core.errors import register_formatter_factory
 from llm_proxy.core.exceptions import NotFoundError
 from llm_proxy.core.utils import install_asyncgen_close_race_filter
@@ -124,45 +125,44 @@ def create_app() -> FastAPI:
         openapi_url=None,
     )
 
+    # All function middlewares are plain ASGI callables (see
+    # api/middleware/asgi_utils.py): Starlette's BaseHTTPMiddleware allocates a
+    # memory stream plus two task groups per request even when a middleware only
+    # passes through, which dominated the proxy's tail latency under load.
+    #
     # CORS with hot-reloadable, UI-managed origins (server_config
     # "cors_origins" key). Registered first among the function middlewares so
     # it sits innermost, matching the previous add_middleware(CORSMiddleware)
     # position. When no origins are configured it passes through without
     # emitting any CORS headers.
-    app.middleware("http")(cors_middleware)
+    app.add_middleware(CORSMiddleware)
 
     # Add authentication middleware chain
-    # NOTE: Starlette's app.middleware("http") inserts at position 0, so the
-    # LAST registered middleware runs FIRST on the request. Registration order
-    # is the reverse of execution order. The auth chain executes as:
+    # NOTE: add_middleware inserts at position 0, so the LAST registered
+    # middleware runs FIRST on the request. Registration order is the reverse of
+    # execution order. The auth chain executes as:
     # jwt_auth (validates JWT for /api/*, sets jwt_verified flag for client API)
     #   -> api_key_auth (validates API keys for /v1/* if JWT not present)
     #   -> model_restriction (checks model restrictions using api_key_auth info)
     # http_logging and form_encoded are registered after jwt_auth, so they run
     # before the auth chain.
-    app.middleware("http")(model_restriction_middleware)
-    app.middleware("http")(api_key_auth_middleware)
-    app.middleware("http")(jwt_auth_middleware)
-    app.middleware("http")(http_logging_middleware)
-    app.middleware("http")(form_encoded_middleware)
+    app.add_middleware(ModelRestrictionMiddleware)
+    app.add_middleware(ApiKeyAuthMiddleware)
+    app.add_middleware(JWTAuthMiddleware)
+    app.add_middleware(HttpLoggingMiddleware)
+    app.add_middleware(FormEncodedMiddleware)
 
-    @app.middleware("http")
-    async def context_reset_middleware(request, call_next):
-        try:
-            return await call_next(request)
-        finally:
-            with suppress(Exception):
-                reset_context()
+    app.add_middleware(ContextResetMiddleware)
 
     # Body size limit must run very early (before audit logging buffers the body).
-    # app.middleware("http") inserts at position 0, so registering this after
-    # context_reset_middleware makes it the outermost layer.
-    app.middleware("http")(body_size_limit_middleware)
+    # add_middleware inserts at position 0, so registering this after
+    # context_reset makes it the outermost layer among these.
+    app.add_middleware(BodySizeLimitMiddleware)
 
     # Content-Encoding decompression runs before the body size limit so the
     # limit applies to the decompressed body, and before form_encoded so a
     # compressed form body is still converted (Codex Desktop sends zstd).
-    app.middleware("http")(content_encoding_middleware)
+    app.add_middleware(ContentEncodingMiddleware)
 
     # Security headers must be the OUTERMOST function-middleware layer
     # (registered last) so that even short-circuited responses from the layers
@@ -170,7 +170,7 @@ def create_app() -> FastAPI:
     # layer further out is MCPProxyMiddleware (registered via add_middleware
     # below), a pure-ASGI short-circuit for /servers/* that adds the same
     # header set itself (see build_security_headers).
-    app.middleware("http")(security_headers_middleware)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 
@@ -221,6 +221,12 @@ def create_app() -> FastAPI:
         async def serve_frontend(full_path: str):
             """Serve frontend files or fallback to index.html for SPA."""
             return serve_frontend_response(static_root, full_path)
+
+    # Overhead accounting: measures wall time minus upstream wait and reports
+    # it as x-llm-proxy-overhead-duration-ms. Pure ASGI (no BaseHTTPMiddleware
+    # re-pump). Registered before MCPProxyMiddleware so it sits just inside it
+    # and covers the whole function-middleware stack.
+    app.add_middleware(OverheadHeaderMiddleware)
 
     # The MCP proxy must be handled before the main FastAPI middleware stack.
     # StreamableHTTPSessionManager creates its own anyio task groups; wrapping

@@ -461,8 +461,11 @@ class DatabaseConfigManager:
     async def get_provider_config(self, provider: str) -> ProviderConfig:
         """Get configuration for a specific provider.
 
-        This method first checks the Redis cache (if enabled), then falls
-        back to the in-memory/database configuration.
+        Reads the in-memory :class:`ProxyConfig` first — it is loaded in full at
+        startup and swapped on every settings change, so it is authoritative.
+        The Redis cache is consulted only when the in-memory snapshot does not
+        have the entry, which keeps a per-request Redis round trip off the hot
+        path for data that ``get_config()`` already holds.
 
         Args:
             provider: Provider name
@@ -473,6 +476,10 @@ class DatabaseConfigManager:
         Raises:
             ProviderNotConfiguredError: If provider is not configured
         """
+        config = await self.get_config()
+        if provider in config.provider_configs:
+            return config.provider_configs[provider]
+
         if self._cache_enabled and self._redis_cache:
             try:
                 cached = await self._redis_cache.get_provider_config(provider)
@@ -481,26 +488,14 @@ class DatabaseConfigManager:
             except Exception as e:
                 logger.warning(f"Cache lookup failed for provider {provider}: {e}")
 
-        # Fall back to in-memory/database config
-        config = await self.get_config()
-        if provider not in config.provider_configs:
-            raise ProviderNotConfiguredError(provider)
-
-        provider_config = config.provider_configs[provider]
-
-        if self._cache_enabled and self._redis_cache:
-            try:
-                await self._redis_cache.set_provider_config(provider, provider_config)
-            except Exception as e:
-                logger.warning(f"Failed to cache provider config {provider}: {e}")
-
-        return provider_config
+        raise ProviderNotConfiguredError(provider)
 
     async def get_model_config(self, model: str) -> ModelConfig | None:
         """Get configuration for a specific model.
 
-        This method first checks the Redis cache (if enabled), then falls
-        back to the in-memory/database configuration.
+        In-memory :class:`ProxyConfig` first (authoritative, loaded in full and
+        swapped on reload); Redis only as a fallback for models the in-memory
+        snapshot does not carry.
 
         Args:
             model: Model name
@@ -508,6 +503,11 @@ class DatabaseConfigManager:
         Returns:
             Model configuration or None if not found
         """
+        config = await self.get_config()
+        model_config = config.models.get(model)
+        if model_config is not None:
+            return model_config
+
         if self._cache_enabled and self._redis_cache:
             try:
                 cached = await self._redis_cache.get_model_config(model)
@@ -516,16 +516,7 @@ class DatabaseConfigManager:
             except Exception as e:
                 logger.warning(f"Cache lookup failed for model {model}: {e}")
 
-        config = await self.get_config()
-        model_config = config.models.get(model)
-
-        if model_config is not None and self._cache_enabled and self._redis_cache:
-            try:
-                await self._redis_cache.set_model_config(model, model_config)
-            except Exception as e:
-                logger.warning(f"Failed to cache model config {model}: {e}")
-
-        return model_config
+        return None
 
     async def get_all_models(self) -> dict[str, ModelConfig]:
         """Get all model configurations."""

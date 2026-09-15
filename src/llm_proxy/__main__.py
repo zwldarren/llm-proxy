@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import uvicorn
@@ -207,8 +208,26 @@ async def main() -> None:
 
 
 def main_wrapper() -> None:
-    """Sync wrapper to run the async main function."""
-    asyncio.run(main())
+    """Sync wrapper to run the async main function.
+
+    The loop factory is passed explicitly because ``uvicorn.run()``
+    (:mod:`uvicorn.main`) only installs it in the ``--reload``/``--workers``
+    branches; ``uvicorn.Server.run()`` does it via ``Config.get_loop_factory``,
+    but the single-worker branch below awaits ``Server.serve()`` inside our own
+    ``asyncio.run()``, where the loop already exists by the time uvicorn is
+    involved. Without this, uvloop would silently be ignored for the default
+    one-worker deployment.
+    """
+    asyncio.run(main(), loop_factory=_loop_factory())
+
+
+def _loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
+    """Prefer uvloop, falling back to the stdlib loop when it is unavailable."""
+    try:
+        import uvloop
+    except ImportError:  # pragma: no cover - uvloop is a standard extra on POSIX
+        return None
+    return uvloop.new_event_loop
 
 
 def main_wrapper_dev() -> None:

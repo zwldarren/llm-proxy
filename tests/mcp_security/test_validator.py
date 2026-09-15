@@ -1,7 +1,5 @@
 """Tests for McpSecurityValidator."""
 
-from __future__ import annotations
-
 import pytest
 
 from llm_proxy.core.exceptions import MCPSecurityError

@@ -10,16 +10,23 @@ import time
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
 from llm_proxy.api.error_responses import (
     ErrorResponseBuilder,
     rate_limit_exceeded_error_body,
 )
+from llm_proxy.api.middleware.api_key_cache import update_key_last_used as _update_key_last_used
+from llm_proxy.api.middleware.asgi_utils import (
+    BodyReader,
+    CoreASGIMiddleware,
+    adapt_http_middleware,
+)
 from llm_proxy.api.middleware.exceptions import protocol_for_request
 from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.core.request_utils import get_client_ip
-from llm_proxy.database import ApiKeyRepository, get_async_session_context
+from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.registry import protocol_name_for_path
 
@@ -121,16 +128,6 @@ async def _auth_failure_response(
     )
 
 
-async def _update_key_last_used(key_name: str) -> None:
-    """Update the last_used timestamp for an API key in the background."""
-    try:
-        async with get_async_session_context() as session:
-            repo = ApiKeyRepository(session)
-            await repo.update_last_used(key_name)
-    except Exception as e:
-        logger.warning(f"Failed to update last_used for API key '{key_name}': {e}")
-
-
 async def _set_session_identity(api_key: str, request: Request) -> str | None:
     """Verify a session API key and set request identity.
 
@@ -176,8 +173,8 @@ async def _set_session_identity(api_key: str, request: Request) -> str | None:
     return None
 
 
-async def api_key_auth_middleware(request: Request, call_next):
-    """API key authentication middleware.
+async def _dispatch(request: Request, body: BodyReader) -> Response | None:
+    """API key authentication.
 
     Handles API key verification for /v1/* endpoints (and their alias paths).
     /servers/* MCP requests are authenticated by the dedicated
@@ -188,17 +185,17 @@ async def api_key_auth_middleware(request: Request, call_next):
     # (``/chat/completions``, ``/messages``, ``/v1/v1/...``); they must be
     # authenticated like their ``/v1/`` canonical path.
     if not path.startswith(("/v1/", "/servers/")) and protocol_name_for_path(path) is None:
-        return await call_next(request)
+        return None
 
     # CORS preflight: browsers do not send Authorization on OPTIONS, so the
     # request must reach the CORS middleware (innermost) without auth.
     # (MCPProxyMiddleware already passes OPTIONS through for /servers/*.)
     if request.method == "OPTIONS":
-        return await call_next(request)
+        return None
 
     config_manager = getattr(request.app.state, "config_manager", None)
     if config_manager is None:
-        return await call_next(request)
+        return None
 
     # JWT is only for the /api/* admin panel — /v1/* and /servers/* always
     # require API key authentication, even when a valid JWT is present.
@@ -356,4 +353,15 @@ async def api_key_auth_middleware(request: Request, call_next):
     }
     request.scope["llm_proxy_auth"] = scope_auth
 
-    return await call_next(request)
+    return None
+
+
+class ApiKeyAuthMiddleware(CoreASGIMiddleware):
+    """Pure-ASGI API key authentication."""
+
+    async def dispatch(self, request: Request, body: BodyReader) -> Response | None:
+        return await _dispatch(request, body)
+
+
+#: ``(request, call_next)`` adapter kept for existing call sites and tests.
+api_key_auth_middleware = adapt_http_middleware(_dispatch)

@@ -215,3 +215,27 @@ def test_get_client_ip_public_peer_ignores_forwarded_headers_by_default(reset_se
         headers={"X-Forwarded-For": "1.2.3.4"},
     )
     assert get_client_ip(request) == "203.0.113.5"
+
+
+def test_trusted_network_parsing_is_memoised() -> None:
+    """Per-request IP resolution must not rebuild ip_network objects.
+
+    ``get_client_ip``/``peer_is_trusted_proxy`` run on every request, and
+    ``ipaddress.ip_network`` costs a regex parse plus integer arithmetic.
+    Parsing result used to be recomputed per call; it is now keyed on the
+    configured tuple.
+    """
+    from llm_proxy.core import request_utils
+
+    request_utils._parse_trusted_networks_cached.cache_clear()
+    first = request_utils._parse_trusted_networks(["10.0.0.0/8"])
+    second = request_utils._parse_trusted_networks(["10.0.0.0/8"])
+
+    assert first == second
+    info = request_utils._parse_trusted_networks_cached.cache_info()
+    assert info.hits == 1
+
+    # A different configuration must not reuse the cached parse.
+    request_utils._parse_trusted_networks_cached.cache_clear()
+    other = request_utils._parse_trusted_networks(["192.168.0.0/16"])
+    assert other != first

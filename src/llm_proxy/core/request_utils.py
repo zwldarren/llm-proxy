@@ -6,6 +6,7 @@ reverse dependencies (core importing from api).
 
 import ipaddress
 import logging
+from functools import lru_cache
 
 from fastapi import Request
 
@@ -20,14 +21,27 @@ MAX_XFF_HOPS = 50
 def _parse_trusted_networks(
     trusted_proxies: list[str],
 ) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    """Pre-parse trusted proxy network strings into ip_network objects."""
+    """Pre-parse trusted proxy network strings into ip_network objects.
+
+    Memoised on the configured value: this runs from per-request helpers
+    (:func:`get_client_ip`, :func:`peer_is_trusted_proxy`), and constructing
+    ``ip_network`` objects is not cheap (regex parse + integer arithmetic) for
+    a value that only changes when settings are reloaded.
+    """
+    return list(_parse_trusted_networks_cached(tuple(trusted_proxies)))
+
+
+@lru_cache(maxsize=8)
+def _parse_trusted_networks_cached(
+    trusted_proxies: tuple[str, ...],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
     networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
     for network in trusted_proxies:
         try:
             networks.append(ipaddress.ip_network(network, strict=False))
         except ValueError:
             _logger.warning("Invalid trusted proxy network configured: %s", network)
-    return networks
+    return tuple(networks)
 
 
 def _is_trusted_proxy(

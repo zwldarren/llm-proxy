@@ -217,6 +217,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 .worktrees/
+loadtest/.api_key*
+loadtest/results/
 
 # AI agents
 .agents/

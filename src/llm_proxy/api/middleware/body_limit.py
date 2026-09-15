@@ -8,6 +8,11 @@ body is read into memory.
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from llm_proxy.api.middleware.asgi_utils import (
+    BodyReader,
+    CoreASGIMiddleware,
+    adapt_http_middleware,
+)
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,7 +29,7 @@ def _get_content_length(request: Request) -> int | None:
         return None
 
 
-async def body_size_limit_middleware(request: Request, call_next):
+async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     """Reject requests whose declared body size exceeds the configured limit.
 
     The limit is UI-managed (server_config ``security`` key, default 10 MiB)
@@ -38,7 +43,7 @@ async def body_size_limit_middleware(request: Request, call_next):
         getattr(request.app.state, "config_manager", None)
     ).max_request_body_size_bytes
     if max_size <= 0:
-        return await call_next(request)
+        return None
 
     # Reject chunked transfer-encoding when body limit is active
     # (Content-Length based check alone is bypassable via chunked encoding).
@@ -96,4 +101,15 @@ async def body_size_limit_middleware(request: Request, call_next):
             },
         )
 
-    return await call_next(request)
+    return None
+
+
+class BodySizeLimitMiddleware(CoreASGIMiddleware):
+    """Pure-ASGI middleware enforcing the configured request body limit."""
+
+    async def dispatch(self, request: Request, body: BodyReader) -> JSONResponse | None:
+        return await _dispatch(request, body)
+
+
+#: ``(request, call_next)`` adapter kept for existing call sites and tests.
+body_size_limit_middleware = adapt_http_middleware(_dispatch)
