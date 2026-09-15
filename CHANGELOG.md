@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.2.4](https://github.com/zwldarren/llm-proxy/compare/v0.2.3...v0.2.4) (2026-09-15)
+
+
+### Features
+
+* **api-keys:** added deny-all states for api key model and mcp server lists ([b53dfdb](https://github.com/zwldarren/llm-proxy/commit/b53dfdb611837a0e244e2e0eb57994b4e7e85c34))
+* **api-keys:** allowed members to restrict MCP servers on their own keys ([8d5284f](https://github.com/zwldarren/llm-proxy/commit/8d5284fd9e42b57896f84f9076f8778c3a84b658))
+* **cors:** exposed trace headers to browser clients ([8474694](https://github.com/zwldarren/llm-proxy/commit/84746945d383dd711788f193b6b8e147aeb2df67))
+* **observability:** kept log rows with scrubbed bodies when body logging disabled ([621a0d0](https://github.com/zwldarren/llm-proxy/commit/621a0d09c50bc6e9a76a65f3eda3bf1d4a60964c))
+* **pricing:** added context-based pricing tiers ([495cd75](https://github.com/zwldarren/llm-proxy/commit/495cd7562fd9a253c7c5db022b27b2c1da505ebd))
+* **providers:** add vLLM and SGLang adapters ([7d790c5](https://github.com/zwldarren/llm-proxy/commit/7d790c5e6fa7b561ec958c12c0b52e199b6e0c05))
+
+
+### Bug Fixes
+
+* **docker:** allowed docker compose to run without a .env file ([967b192](https://github.com/zwldarren/llm-proxy/commit/967b192ed8add3242d35d84eb6483aa979009585))
+* **frontend:** let the provider dialog create keyless providers ([b4d3285](https://github.com/zwldarren/llm-proxy/commit/b4d3285e09c8e3ca53612860b4897ddbabbbc9c8))
+* **protocols:** accept base_url aliases and trailing slashes on API paths ([8edd3ae](https://github.com/zwldarren/llm-proxy/commit/8edd3aefc760a509997aec2fc3ca69787f72f69e))
+* **router:** used hasOwn for admin route prefetch filter ([5fa5e79](https://github.com/zwldarren/llm-proxy/commit/5fa5e7967e85454f85ed80186c180a829e2baaf9))
+* **serialization:** drop proxy-internal markers at the outbound chokepoint ([a137392](https://github.com/zwldarren/llm-proxy/commit/a137392b71e54a220d958b0e821ce257066ed5d1))
+
+
+### Performance Improvements
+
+* **api:** replaced BaseHTTPMiddleware stack with pure ASGI middlewares ([56c9400](https://github.com/zwldarren/llm-proxy/commit/56c94007428ce3216f4f7ed37b54be6305870b10))
+
+
+### Documentation
+
+* added VitePress documentation site with GitHub Pages deployment ([9599a89](https://github.com/zwldarren/llm-proxy/commit/9599a895eee68214170dde01020162737ee94931))
+* **adr:** accepted context pricing tiers design ([79bb119](https://github.com/zwldarren/llm-proxy/commit/79bb1194bdf9b8bc0f79b406110413ed237b6af9))
+* **docs:** polished docs theme, guides, and markdown-it dependency ([6d3fa64](https://github.com/zwldarren/llm-proxy/commit/6d3fa64fdda76dcde37af829d6a1a5feb002f147))
+
 ## [0.2.3](https://github.com/zwldarren/llm-proxy/compare/v0.2.2...v0.2.3) (2026-09-12)
 
 
