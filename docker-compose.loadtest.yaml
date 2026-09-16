@@ -1,8 +1,16 @@
 # Load-test topology overlay: local build + deterministic fake upstream.
 #
+#   uv run loadtest/run.sh --headless -u 100 -r 20 -t 60s
+#
+# Manual equivalent (note the restart: config is per-worker in memory, so
+# every worker must reload the topology seeded after the stack came up):
+#
 #   docker compose -f docker-compose.yaml -f docker-compose.loadtest.yaml up -d --build
 #   uv run loadtest/seed.py
+#   docker compose -f docker-compose.yaml -f docker-compose.loadtest.yaml restart llm-proxy
 #   uv run locust -f loadtest/locustfile.py --host http://localhost:8180 ...
+#
+# See loadtest/README.md for the full matrix and scenario selection.
 #
 # The fake upstream answers with zero model latency so measurements isolate
 # gateway overhead. It is also exposed on the host (:8900) so locust can run
@@ -38,10 +46,9 @@ services:
       # pipe; WARNING silences both to isolate that cost.
       - LOG_LEVEL=${LOADTEST_LOG_LEVEL:-INFO}
       - LOADTEST_WORKERS=${LOADTEST_WORKERS:-1}
-      # Pool sizing is parameterized for A/B runs (the default derives from
-      # the container's CPU count).
-      - DB_POOL_SIZE=${LOADTEST_DB_POOL_SIZE:-25}
-      - DB_MAX_OVERFLOW=${LOADTEST_DB_MAX_OVERFLOW:-25}
+      # Pool sizing is left to the app (safe per-worker default derived from
+      # the CPU count and connection budget). For an A/B run that forces a
+      # specific pool, set DB_POOL_SIZE / DB_MAX_OVERFLOW in .env.
       # The fake upstream lives on the private compose network; exempt it from
       # the SSRF private-address ban (load-test only, never set in production).
       - HTTP_ALLOWED_HOSTS=fake-upstream
@@ -54,6 +61,10 @@ services:
     build:
       context: .
       dockerfile: loadtest/Dockerfile.fake-upstream
+    environment:
+      # Chunk count per streaming response; bump (e.g. =100) to expose
+      # per-chunk SSE processing cost in the proxy under test.
+      - FAKE_STREAM_CHUNKS=${FAKE_STREAM_CHUNKS:-8}
     ports:
       - "8900:8900"
     healthcheck:

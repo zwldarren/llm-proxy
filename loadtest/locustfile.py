@@ -1,36 +1,62 @@
-"""Locust load test for llm-proxy — mirrors the LiteLLM benchmark shape.
+"""Locust load test for llm-proxy — the conversion-tier matrix.
 
-Prereqs: seed the proxy once (creates admin, provider, model, API key):
+The proxy's cost per request depends on the *conversion tier* the pipeline
+picks for a (client protocol, provider dialect) pair: native passthrough,
+wire reuse, or full conversion. This harness drives the matrix in
+``loadtest/scenarios.py`` so each tier, protocol and provider can be measured
+separately or as a weighted mix.
+
+Prereqs: seed the proxy once (creates every provider/model in the matrix and
+an API key with access to all of them):
 
     uv run loadtest/seed.py
 
-Against the proxy (default port 8080):
+Run the curated core mix against the proxy (port 8180):
 
-    uv run locust -f loadtest/locustfile.py --host http://localhost:8180 \
-        --headless -u 200 -r 50 -t 60s
+    uv run locust -f loadtest/locustfile.py --host http://localhost:8180 \\
+        --headless -u 100 -r 20 -t 60s
 
-Baseline against the fake upstream directly (same routes, auth ignored):
+Pick scenarios by key or group (protocol / provider / tier / stream):
 
-    uv run locust -f loadtest/locustfile.py --host http://localhost:8900 \
-        --headless -u 200 -r 50 -t 60s
+    LOADTEST_SCENARIOS=messages,responses uv run locust -f loadtest/locustfile.py ...
+    LOADTEST_SCENARIOS=native uv run locust ...
+    LOADTEST_SCENARIOS=chat_openai_compat_stream uv run locust ...
+    LOADTEST_SCENARIOS=all uv run locust ...
+
+No-proxy baseline (the fake upstream serves the same wire dialects directly):
+
+    uv run locust -f loadtest/locustfile.py --host http://localhost:8900 ...
 
 Think time matters: with wait_time between 0.5–1s, N users offer ~N/0.86 RPS
-and hold roughly N * response_time in flight. Report RPS alongside latency —
-see docs.litellm.ai/docs/benchmarks#locust-settings.
+and hold roughly N * response_time in flight. Report RPS alongside latency.
 """
 
-import contextlib
-import hashlib
-import os
-import uuid
+import random
+import sys
+import time
 from pathlib import Path
 
 from locust import HttpUser, between, events, task
 
-TEST_MODEL = os.getenv("TEST_MODEL", "fake-model")
+# Import the scenario matrix from the repo root regardless of how locust was
+# invoked (`uv run locust -f loadtest/locustfile.py` does not put the repo root
+# on sys.path).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from loadtest.scenarios import (  # noqa: E402
+    build_headers,
+    build_payload,
+    select_scenarios,
+)
+
+SCENARIOS = select_scenarios()
+_WEIGHTS = [s.weight for s in SCENARIOS]
 
 
 def _load_api_key(host: str | None) -> str:
+    import hashlib
+    import os
+
     key = os.getenv("API_KEY")
     if key:
         return key
@@ -46,63 +72,106 @@ def _load_api_key(host: str | None) -> str:
     return "sk-loadtest"
 
 
-# Custom metric: proxy-reported overhead (wall time minus upstream wait),
-# parsed from the x-llm-proxy-overhead-duration-ms response header.
-@events.request.add_listener
-def on_request(response=None, request_type=None, **kwargs):
-    # The custom metric is fired from inside this listener with no response
-    # object; skip it so re-entry does not recurse or raise.
-    if request_type == "Custom" or response is None or not hasattr(response, "headers"):
+@events.test_start.add_listener
+def on_test_start(environment, **_kwargs):
+    print(f"llm-proxy load test: {len(SCENARIOS)} scenario(s) selected")
+    for scenario in SCENARIOS:
+        print(f"  - {scenario.key:44s} tier={scenario.expected_tier}")
+
+
+def _report_overhead(response, scenario) -> None:
+    """Emit the proxy-reported overhead (wall time minus upstream wait) as a
+    per-scenario custom metric. llm-proxy emits x-llm-proxy-overhead-duration-ms;
+    LiteLLM emits x-litellm-overhead-duration-ms (checked so the same harness
+    can A/B both gateways)."""
+    for header in ("x-llm-proxy-overhead-duration-ms", "x-litellm-overhead-duration-ms"):
+        value = response.headers.get(header)
+        if not value:
+            continue
+        try:
+            overhead = float(value)
+        except TypeError, ValueError:
+            return
+        events.request.fire(
+            request_type="Custom",
+            name=f"overhead:{scenario.key}",
+            response_time=overhead,
+            response_length=0,
+        )
         return
-    overhead = response.headers.get("x-llm-proxy-overhead-duration-ms")
-    if overhead:
-        with contextlib.suppress(ValueError, TypeError):
-            events.request.fire(
-                request_type="Custom",
-                name="Proxy Overhead (ms)",
-                response_time=float(overhead),
-                response_length=0,
-            )
-
-
-def _payload(stream: bool) -> dict:
-    payload = {
-        "model": TEST_MODEL,
-        # UUID prefix defeats any response caching; long body exercises the
-        # serialization hot path.
-        "messages": [{"role": "user", "content": f"{uuid.uuid4()} This is a load test " * 30}],
-    }
-    if stream:
-        payload["stream"] = True
-        payload["stream_options"] = {"include_usage": True}
-    return payload
 
 
 class ProxyUser(HttpUser):
     wait_time = between(0.5, 1)
 
     def on_start(self):
-        self.client.headers.update({"Authorization": f"Bearer {_load_api_key(self.host)}"})
+        self.api_key = _load_api_key(self.host)
 
-    @task(4)
-    def chat_completion(self):
-        with self.client.post(
-            "/v1/chat/completions", json=_payload(stream=False), catch_response=True
-        ) as resp:
-            if resp.status_code != 200:
-                resp.failure(f"status={resp.status_code} body={resp.text[:200]}")
+    @task
+    def run_scenario(self):
+        scenario = random.choices(SCENARIOS, weights=_WEIGHTS, k=1)[0]
+        payload = build_payload(scenario)
+        headers = build_headers(scenario, self.api_key)
+        if scenario.stream:
+            self._run_streaming(scenario, payload, headers)
+        else:
+            self._run_unary(scenario, payload, headers)
 
-    @task(1)
-    def chat_completion_stream(self):
+    def _run_unary(self, scenario, payload, headers):
         with self.client.post(
-            "/v1/chat/completions",
-            json=_payload(stream=True),
+            scenario.path,
+            json=payload,
+            headers=headers,
+            name=scenario.stat_name,
+            catch_response=True,
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"status={response.status_code} body={response.text[:200]}")
+                return
+            _report_overhead(response, scenario)
+            if scenario.protocol == "embeddings" and '"embedding"' not in response.text:
+                response.failure(f"embeddings body missing 'embedding': {response.text[:200]}")
+
+    def _run_streaming(self, scenario, payload, headers):
+        start = time.perf_counter()
+        with self.client.post(
+            scenario.path,
+            json=payload,
+            headers=headers,
+            name=scenario.stat_name,
             stream=True,
             catch_response=True,
-        ) as resp:
-            if resp.status_code != 200:
-                resp.failure(f"status={resp.status_code} body={resp.text[:200]}")
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"status={response.status_code} body={response.text[:200]}")
                 return
-            # Consume the full SSE body so the measurement covers the stream.
-            for _ in resp.iter_lines():
-                pass
+            _report_overhead(response, scenario)
+
+            marker = scenario.terminal_marker
+            seen_marker = False
+            first_line = True
+            for line in response.iter_lines():
+                # locust's requests-based client yields bytes unless asked to
+                # decode; normalise so marker matching works for both.
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                if first_line:
+                    # TTFB is locust's own response_time for streamed responses;
+                    # this is the first *body* line, a stricter TTFT signal.
+                    events.request.fire(
+                        request_type="Custom",
+                        name=f"ttft:{scenario.key}",
+                        response_time=(time.perf_counter() - start) * 1000,
+                        response_length=0,
+                    )
+                    first_line = False
+                if marker and marker in line:
+                    seen_marker = True
+            events.request.fire(
+                request_type="Custom",
+                name=f"stream_total:{scenario.key}",
+                response_time=(time.perf_counter() - start) * 1000,
+                response_length=0,
+            )
+            if marker and not seen_marker:
+                response.failure(f"stream ended without terminal marker {marker!r}")

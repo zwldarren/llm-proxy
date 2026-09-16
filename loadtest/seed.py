@@ -1,28 +1,44 @@
-"""Seed a fresh llm-proxy container for load testing.
+"""Seed a fresh llm-proxy container with the full load-test topology.
 
-Creates (idempotently): admin account -> fake-openai provider -> fake-model ->
-loadtest API key (written to loadtest/.api_key, auto-loaded by locustfile.py).
+Creates (idempotently) the admin account, every provider/model in
+``loadtest/scenarios.py`` (OpenAI Chat Completions, OpenAI Responses, Anthropic
+Messages, DeepSeek multi-dialect, Gemini and Ollama), and one API key with
+access to all of them. The key is written to ``loadtest/.api_key-<host>`` and
+auto-loaded by ``locustfile.py``.
 
     uv run loadtest/seed.py
 
-Env overrides: PROXY_BASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD, UPSTREAM_URL.
-UPSTREAM_URL must resolve from INSIDE the proxy container.
+Then smoke-tests every selected scenario through the proxy so a broken wire
+dialect fails here, not in the middle of a load run.
+
+Env overrides: PROXY_BASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD,
+FAKE_UPSTREAM_URL (must resolve from INSIDE the proxy container),
+SEED_SMOKE (0 to skip), SEED_SMOKE_SCENARIOS (default ``all``).
 """
 
 import hashlib
 import os
 import sys
 import time
+from pathlib import Path
 
 import httpx
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from loadtest.scenarios import (  # noqa: E402
+    PROVIDERS,
+    ProviderSpec,
+    build_headers,
+    build_payload,
+    select_scenarios,
+)
+
 BASE = os.getenv("PROXY_BASE_URL", "http://localhost:8180").rstrip("/")
-UPSTREAM_URL = os.getenv("UPSTREAM_URL", "http://fake-upstream:8900/v1")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Loadtest-Admin-2026!")
-PROVIDER_NAME = "fake-openai"
-MODEL_NAME = "fake-model"
 KEY_NAME = "loadtest"
+UPSTREAM_API_KEY = "sk-fake-upstream"
 
 
 def key_file_for(base: str) -> str:
@@ -65,55 +81,69 @@ def admin_token(client: httpx.Client) -> str:
     return resp.json()["access_token"]
 
 
-def ensure_provider_and_model(client: httpx.Client, headers: dict) -> None:
+def _provider_payload(spec: ProviderSpec) -> dict:
+    return {
+        "type": spec.type,
+        "base_url": spec.base_url,
+        "api_key": UPSTREAM_API_KEY,
+        "timeout": 300.0,
+        "enabled": True,
+        "provider_metadata": spec.metadata,
+        "endpoint_base_urls": spec.endpoint_base_urls,
+    }
+
+
+def ensure_provider(client: httpx.Client, headers: dict, spec: ProviderSpec) -> None:
     providers = client.get(f"{BASE}/api/config/providers", headers=headers)
     providers.raise_for_status()
-    existing = next((p for p in providers.json() if p["name"] == PROVIDER_NAME), None)
+    existing = next((p for p in providers.json() if p["name"] == spec.name), None)
+    payload = _provider_payload(spec)
     if existing is None:
         resp = client.post(
             f"{BASE}/api/config/providers",
             headers=headers,
-            json={
-                "name": PROVIDER_NAME,
-                # openai-compatible targets {base_url}/chat/completions; the
-                # "openai" type natively targets the Responses API instead.
-                "type": "openai-compatible",
-                "base_url": UPSTREAM_URL,
-                "api_key": "sk-fake-upstream",
-                "timeout": 300.0,
-                "enabled": True,
-            },
+            json={"name": spec.name, **payload},
         )
         resp.raise_for_status()
-        print(f"created provider {PROVIDER_NAME} -> {UPSTREAM_URL}")
-    elif existing["type"] != "openai-compatible" or existing["base_url"] != UPSTREAM_URL:
-        resp = client.put(
-            f"{BASE}/api/config/providers/{PROVIDER_NAME}",
-            headers=headers,
-            json={"type": "openai-compatible", "base_url": UPSTREAM_URL, "enabled": True},
-        )
-        resp.raise_for_status()
-        print(f"updated provider {PROVIDER_NAME} -> {UPSTREAM_URL}")
+        print(f"created provider {spec.name} ({spec.type}) -> {spec.base_url}")
+        return
+    # Re-apply on every seed: provider metadata / base URL drift is exactly the
+    # kind of thing a stale load-test stack gets wrong.
+    resp = client.put(f"{BASE}/api/config/providers/{spec.name}", headers=headers, json=payload)
+    resp.raise_for_status()
+    print(f"updated provider {spec.name} ({spec.type}) -> {spec.base_url}")
 
+
+def ensure_model(client: httpx.Client, headers: dict, spec: ProviderSpec) -> None:
+    desired = {
+        "providers": [
+            {
+                "provider_name": spec.name,
+                "provider_model_name": spec.provider_model,
+                "priority": 1,
+            }
+        ],
+        "supports_embedding": spec.supports_embeddings,
+    }
     models = client.get(f"{BASE}/api/config/models", headers=headers)
     models.raise_for_status()
-    if not any(m["name"] == MODEL_NAME for m in models.json()):
+    existing = next((m for m in models.json() if m["name"] == spec.model), None)
+    if existing is None:
         resp = client.post(
             f"{BASE}/api/config/models",
             headers=headers,
-            json={
-                "name": MODEL_NAME,
-                "providers": [
-                    {
-                        "provider_name": PROVIDER_NAME,
-                        "provider_model_name": MODEL_NAME,
-                        "priority": 1,
-                    }
-                ],
-            },
+            json={"name": spec.model, **desired},
         )
         resp.raise_for_status()
-        print(f"created model {MODEL_NAME}")
+        print(f"created model {spec.model} -> {spec.name}")
+        return
+    resp = client.put(
+        f"{BASE}/api/config/models/{spec.model}",
+        headers=headers,
+        json=desired,
+    )
+    resp.raise_for_status()
+    print(f"updated model {spec.model} -> {spec.name}")
 
 
 def key_works(client: httpx.Client, key: str) -> bool:
@@ -121,7 +151,7 @@ def key_works(client: httpx.Client, key: str) -> bool:
         f"{BASE}/v1/chat/completions",
         headers={"Authorization": f"Bearer {key}"},
         json={
-            "model": MODEL_NAME,
+            "model": PROVIDERS["openai_compat"].model,
             "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 1,
         },
@@ -155,32 +185,76 @@ def ensure_api_key(client: httpx.Client, headers: dict) -> str:
     return key
 
 
+_EXPECTED_BODY_FRAGMENTS = {
+    "chat": '"choices"',
+    "messages": '"content"',
+    "responses": '"output"',
+    "embeddings": '"embedding"',
+}
+
+
+def smoke_test(client: httpx.Client, key: str, scenarios) -> list[str]:
+    """Drive each scenario end-to-end and record failures."""
+    failures: list[str] = []
+    for scenario in scenarios:
+        payload = build_payload(scenario)
+        headers = build_headers(scenario, key)
+        try:
+            with client.stream(
+                "POST",
+                f"{BASE}{scenario.path}",
+                json=payload,
+                headers=headers,
+                timeout=60.0,
+            ) as resp:
+                body = "".join(resp.iter_text())
+                status = resp.status_code
+        except httpx.HTTPError as exc:
+            failures.append(f"{scenario.key}: transport error {exc}")
+            continue
+
+        # Cheap shape check: a 200 with a malformed body is still a broken
+        # conversion, and would only surface as a client parse error under load.
+        expected_fragment = _EXPECTED_BODY_FRAGMENTS.get(scenario.protocol, "")
+        marker = scenario.terminal_marker
+        if status != 200:
+            failures.append(f"{scenario.key}: status={status} body={body[:200]}")
+        elif scenario.stream and marker and marker not in body:
+            failures.append(f"{scenario.key}: missing terminal marker {marker!r}")
+        elif not scenario.stream and expected_fragment and expected_fragment not in body:
+            failures.append(f"{scenario.key}: body missing {expected_fragment!r}: {body[:200]}")
+    return failures
+
+
 def main() -> None:
+    smoke_spec = os.getenv("SEED_SMOKE_SCENARIOS", "all")
     with httpx.Client(timeout=15.0) as client:
         wait_ready(client)
         token = admin_token(client)
         headers = {"Authorization": f"Bearer {token}"}
-        ensure_provider_and_model(client, headers)
+
+        for spec in PROVIDERS.values():
+            ensure_provider(client, headers, spec)
+        for spec in PROVIDERS.values():
+            ensure_model(client, headers, spec)
+
         key = ensure_api_key(client, headers)
 
-        # End-to-end smoke: non-streaming and streaming through the proxy.
-        for stream in (False, True):
-            payload = {
-                "model": MODEL_NAME,
-                "messages": [{"role": "user", "content": "hello"}],
-            }
-            if stream:
-                payload["stream"] = True
-            resp = client.post(
-                f"{BASE}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}"},
-                json=payload,
-                timeout=30.0,
-            )
-            overhead = resp.headers.get("x-llm-proxy-overhead-duration-ms", "?")
-            print(f"smoke stream={stream}: status={resp.status_code} overhead={overhead}ms")
-            if resp.status_code != 200:
-                sys.exit(f"smoke test failed: {resp.text[:500]}")
+        if os.getenv("SEED_SMOKE", "1") == "0":
+            print("seed complete (smoke skipped)")
+            return
+
+        scenarios = select_scenarios(smoke_spec)
+        print(f"smoke-testing {len(scenarios)} scenario(s) ...")
+        failures = smoke_test(client, key, scenarios)
+        for scenario in scenarios:
+            status = "FAIL" if any(f.startswith(scenario.key + ":") for f in failures) else "ok"
+            print(f"  smoke {scenario.key:44s} {status}")
+        if failures:
+            print("\nsmoke failures:")
+            for failure in failures:
+                print(f"  - {failure}")
+            sys.exit(1)
 
     print("seed complete")
 
