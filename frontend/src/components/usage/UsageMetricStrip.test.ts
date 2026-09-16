@@ -129,4 +129,20 @@ describe("UsageMetricStrip", () => {
     });
     expect(wrapper.text()).toContain("0.0%");
   });
+
+  it("caps cache hit rate at 100% when data is corrupted", () => {
+    // Duplicated cache columns (rows with both cache_read and cached_prompt
+    // set for the same tokens) can push the ratio past 100; the display
+    // must never show more than a full share.
+    const corruptedSummary: UsageSummary = {
+      ...summary,
+      total_cache_read_tokens: 15000,
+      total_cached_prompt_tokens: 15000,
+    };
+    const wrapper = mount(UsageMetricStrip, {
+      props: { summary: corruptedSummary, byProvider },
+    });
+    expect(wrapper.text()).toContain("100.0%");
+    expect(wrapper.text()).not.toContain("157.0%");
+  });
 });

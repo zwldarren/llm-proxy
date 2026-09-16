@@ -702,12 +702,28 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
 
         if self._input_tokens or self._output_tokens:
             pending_usage = self._pending_usage
+            cache_read = (
+                pending_usage.get("cache_read_input_tokens") if pending_usage else None
+            ) or 0
+            cache_create = (
+                pending_usage.get("cache_creation_input_tokens") if pending_usage else None
+            ) or 0
             # Extract nested details (OpenAI-style cached_tokens, audio_tokens)
             prompt_details = None
             if pending_usage:
                 ptd = pending_usage.get("prompt_tokens_details")
                 if isinstance(ptd, dict) and any(v is not None for v in ptd.values()):
                     prompt_details = {k: v for k, v in ptd.items() if v is not None}
+                # One fact, one field: provider converters copy the flat
+                # cache-read count into cached_tokens for wire-dialect
+                # consumers; that duplicate must not reach the canonical
+                # StreamingUsage or the same tokens persist twice.
+                if cache_read and prompt_details and "cached_tokens" in prompt_details:
+                    prompt_details = {
+                        k: v for k, v in prompt_details.items() if k != "cached_tokens"
+                    }
+                    if not prompt_details:
+                        prompt_details = None
                 ctd = pending_usage.get("completion_tokens_details")
                 completion_details = (
                     {k: v for k, v in ctd.items() if v is not None}
@@ -715,12 +731,6 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                     else None
                 )
 
-            cache_read = (
-                pending_usage.get("cache_read_input_tokens") if pending_usage else None
-            ) or 0
-            cache_create = (
-                pending_usage.get("cache_creation_input_tokens") if pending_usage else None
-            ) or 0
             return StreamingUsage(
                 input_tokens=self._input_tokens,
                 output_tokens=self._output_tokens,

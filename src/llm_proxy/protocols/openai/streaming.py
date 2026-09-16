@@ -566,6 +566,14 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             if provider_cost is not None and not isinstance(provider_cost, int | float):
                 provider_cost = None
 
+            # Canonical cache-read fact (flat field). Provider converters may
+            # ALSO copy it into prompt_tokens_details.cached_tokens for
+            # wire-dialect consumers; that duplicate must not reach the
+            # canonical StreamingUsage or the same tokens land in both
+            # cache_read_input_tokens and cached_prompt_tokens downstream.
+            cache_read = self._pending_usage.get("cache_read_input_tokens") or 0
+            cache_create = self._pending_usage.get("cache_creation_input_tokens") or 0
+
             # Extract nested details (OpenAI-style cached_tokens, audio_tokens)
             prompt_details: dict[str, int] | None = None
             ptd = self._pending_usage.get("prompt_tokens_details")
@@ -580,6 +588,13 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             )
             if folded is not None:
                 prompt_details = {**(prompt_details or {}), "cached_tokens": folded}
+
+            # One fact, one field: the flat cache-read wins; the nested
+            # dialect copy is dropped so it cannot be persisted twice.
+            if cache_read and prompt_details and "cached_tokens" in prompt_details:
+                prompt_details = {k: v for k, v in prompt_details.items() if k != "cached_tokens"}
+                if not prompt_details:
+                    prompt_details = None
 
             completion_details: dict[str, int] | None = None
             ctd = self._pending_usage.get("completion_tokens_details")
@@ -598,10 +613,8 @@ class OpenAIStreamingTransformer(StreamingTransformer):
                 input_tokens=self._pending_usage.get("prompt_tokens", 0),
                 output_tokens=self._pending_usage.get("completion_tokens", 0),
                 total_tokens=self._pending_usage.get("total_tokens", 0),
-                cache_read_input_tokens=self._pending_usage.get("cache_read_input_tokens", 0),
-                cache_creation_input_tokens=self._pending_usage.get(
-                    "cache_creation_input_tokens", 0
-                ),
+                cache_read_input_tokens=cache_read,
+                cache_creation_input_tokens=cache_create,
                 prompt_tokens_details=prompt_details,
                 completion_tokens_details=completion_details,
                 provider_reported_cost=provider_cost,

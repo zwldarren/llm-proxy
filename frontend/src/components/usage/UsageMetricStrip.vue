@@ -61,7 +61,10 @@ const cacheEligibleInputTokens = computed(() => {
 });
 const cacheHitRate = computed(() => {
   if (cacheEligibleInputTokens.value === 0) return 0;
-  return (totalCacheHitTokens.value / cacheEligibleInputTokens.value) * 100;
+  // The rate is a share of eligible input tokens; corrupted rows (e.g.
+  // duplicated cache columns in historical data) can push it past 100 —
+  // cap the display so the bar and percentage never overstate the share.
+  return Math.min(100, (totalCacheHitTokens.value / cacheEligibleInputTokens.value) * 100);
 });
 
 // Success tier → semantic status tokens. Color is never the sole signal:
