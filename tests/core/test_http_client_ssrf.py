@@ -47,9 +47,9 @@ def test_validate_server_url_allows_public_http() -> None:
 @pytest.mark.asyncio
 async def test_redirect_hook_blocks_private_target() -> None:
     """A redirect to a private address is rejected by the event hook."""
-    from llm_proxy.http.client import AsyncSession
+    from llm_proxy.http.client import _HttpxSession
 
-    session = AsyncSession()
+    session = _HttpxSession()
     hook = session._client._event_hooks["response"][0]
     response = MagicMock()
     response.has_redirect_location = True
@@ -63,9 +63,9 @@ async def test_redirect_hook_blocks_private_target() -> None:
 @pytest.mark.asyncio
 async def test_redirect_hook_allows_public_target() -> None:
     """A redirect to another public address is allowed."""
-    from llm_proxy.http.client import AsyncSession
+    from llm_proxy.http.client import _HttpxSession
 
-    session = AsyncSession()
+    session = _HttpxSession()
     hook = session._client._event_hooks["response"][0]
     response = MagicMock()
     response.has_redirect_location = True
@@ -79,9 +79,9 @@ async def test_redirect_hook_allows_public_target() -> None:
 @pytest.mark.asyncio
 async def test_redirect_hook_allows_non_redirect_response() -> None:
     """A normal response without a Location header is ignored."""
-    from llm_proxy.http.client import AsyncSession
+    from llm_proxy.http.client import _HttpxSession
 
-    session = AsyncSession()
+    session = _HttpxSession()
     hook = session._client._event_hooks["response"][0]
     response = MagicMock()
     response.has_redirect_location = False
@@ -100,9 +100,9 @@ async def test_direct_localhost_request_is_allowed() -> None:
     requests to admin-configured endpoints (web search, tracing, providers)
     are not blocked.
     """
-    from llm_proxy.http.client import AsyncSession
+    from llm_proxy.http.client import _HttpxSession
 
-    session = AsyncSession()
+    session = _HttpxSession()
     hook = session._client._event_hooks["response"][0]
     response = MagicMock()
     response.has_redirect_location = False

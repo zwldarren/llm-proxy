@@ -1,4 +1,9 @@
-"""HTTP client wrapping httpx2 with connection pool management."""
+"""Outbound HTTP client with connection pool management.
+
+The provider-facing :class:`AsyncSession` dispatches to one of two backends:
+httpx2 (default) or aiohttp, selected by ``HTTP_CLIENT_BACKEND``. See
+:mod:`llm_proxy.http.aiohttp_backend` for the faster implementation.
+"""
 
 import asyncio
 import base64
@@ -317,7 +322,7 @@ async def _on_redirect(response: httpx2.Response) -> None:
     validate_server_url(target, label="redirect target", resolve_dns=False)
 
 
-class AsyncSession:
+class _HttpxSession:
     """HTTP client wrapping httpx2.AsyncClient with connection pool management."""
 
     def __init__(
@@ -387,6 +392,61 @@ class AsyncSession:
 
     async def close(self):
         await self._client.aclose()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc, value, _tb):
+        await self.close()
+
+
+class AsyncSession:
+    """Outbound HTTP session that dispatches to the configured backend.
+
+    ``HTTP_CLIENT_BACKEND`` selects the implementation: ``httpx2`` (default) or
+    ``aiohttp``. Both expose the same surface, and the aiohttp backend
+    translates transport failures into httpx2 exceptions so retry and error
+    classification are unchanged.
+    """
+
+    def __init__(
+        self,
+        timeout=None,
+        disable_http2: bool = True,
+        max_connections: int | None = None,
+        max_keepalive_connections: int | None = None,
+        **kwargs,
+    ):
+        if get_settings().http.client_backend == "aiohttp":
+            from llm_proxy.http.aiohttp_backend import AiohttpSession
+
+            self._impl = AiohttpSession(
+                timeout=timeout,
+                disable_http2=disable_http2,
+                max_connections=max_connections,
+                max_keepalive_connections=max_keepalive_connections,
+                **kwargs,
+            )
+        else:
+            self._impl = _HttpxSession(
+                timeout=timeout,
+                disable_http2=disable_http2,
+                max_connections=max_connections,
+                max_keepalive_connections=max_keepalive_connections,
+                **kwargs,
+            )
+
+    async def request(self, method, url, **kwargs):
+        return await self._impl.request(method, url, **kwargs)
+
+    async def get(self, url, **kwargs):
+        return await self._impl.get(url, **kwargs)
+
+    async def post(self, url, **kwargs):
+        return await self._impl.post(url, **kwargs)
+
+    async def close(self):
+        await self._impl.close()
 
     async def __aenter__(self):
         return self
