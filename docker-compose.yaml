@@ -12,6 +12,12 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-llmproxy}:${POSTGRES_PASSWORD:-llmproxy}@db:5432/${POSTGRES_DB:-llmproxy}
       - REDIS_ENABLED=true
       - REDIS_URL=redis://redis:6379
+      # Required for more than one worker: rate-limit windows, the spend budget
+      # and the config cache are shared through Redis instead of per-process.
+      - REDIS_RATE_LIMIT_ENABLED=true
+      - REDIS_CACHE_ENABLED=true
+    # Worker count is auto-selected (CPU budget, capped at 16) because the
+    # backing store is PostgreSQL; override with UVICORN_WORKERS in .env.
     env_file:
       # Optional: create a .env only to override defaults (see .env.example)
       - path: .env

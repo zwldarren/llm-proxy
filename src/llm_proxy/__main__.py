@@ -12,6 +12,7 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 
+from llm_proxy.cli.workers import resolve_workers
 from llm_proxy.config import DatabaseConfigManager
 from llm_proxy.config.settings import get_settings
 from llm_proxy.database import close_db, init_db
@@ -109,8 +110,11 @@ async def main() -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=1,
-        help="Number of uvicorn worker processes (default: 1)",
+        default=None,
+        help=(
+            "Number of uvicorn worker processes "
+            "(default: auto — CPU budget capped at 16, 1 for SQLite)"
+        ),
     )
     parser.add_argument(
         "--reload",
@@ -131,6 +135,10 @@ async def main() -> None:
         os.environ["LLM_PROXY_DB_PATH"] = args.config
 
     await init_db()
+    # The launching process owns the schema: uvicorn spawns workers as fresh
+    # interpreters, so each would otherwise re-run Alembic. Propagate the
+    # completion so spawned workers only connect (see database.init_db).
+    os.environ["LLM_PROXY_MIGRATIONS_DONE"] = "1"
 
     from llm_proxy.config import ensure_secrets
 
@@ -155,9 +163,25 @@ async def main() -> None:
     # uvicorn.run() so that worker processes (uvicorn --reload) inherit it —
     # they import the app directly and never go through main().
     os.environ["LLM_PROXY_LOG_LEVEL"] = log_level
+    # Propagate the worker count so each worker process can size its database
+    # connection pool against the host total (see
+    # database/connection.py::_calculate_pool_size). Internal propagation,
+    # like LLM_PROXY_LOG_LEVEL — not a user-facing config entry.
+    workers = resolve_workers(args.workers, reload=args.reload)
+    os.environ["LLM_PROXY_WORKER_COUNT"] = str(workers)
     from llm_proxy.observability.logger import get_logging_manager
 
     get_logging_manager().set_level(log_level)
+    if workers > 1 and not (
+        get_settings().redis.enabled and get_settings().redis.rate_limit_enabled
+    ):
+        # Per-worker windows/counters multiply with the worker count; Redis
+        # keeps them exact across processes.
+        LOGGER.warning(
+            f"Running {workers} uvicorn workers without Redis rate limiting: "
+            "rate limits, account lockout and circuit-breaker state are per worker. "
+            "Enable REDIS_RATE_LIMIT_ENABLED or set UVICORN_WORKERS=1."
+        )
 
     if args.log_file:
         # Also propagate via env var so uvicorn --reload workers pick it up.
@@ -167,7 +191,7 @@ async def main() -> None:
     timeout_keep_alive = get_settings().uvicorn.timeout_keepalive
 
     if args.reload:
-        if args.workers > 1:
+        if args.workers is not None and args.workers > 1:
             print("Warning: --reload and --workers > 1 are incompatible, ignoring --workers")
         import llm_proxy as llm_proxy_module
 
@@ -182,12 +206,12 @@ async def main() -> None:
             timeout_keep_alive=timeout_keep_alive,
             **_proxy_header_kwargs(),
         )
-    elif args.workers > 1:
+    elif workers > 1:
         uvicorn.run(
             "llm_proxy.api:app",
             host=host,
             port=port,
-            workers=args.workers,
+            workers=workers,
             log_level=log_level.lower(),
             timeout_keep_alive=timeout_keep_alive,
             **_proxy_header_kwargs(),

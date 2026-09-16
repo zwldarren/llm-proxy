@@ -111,5 +111,5 @@ secret.
 | Topology | Requirements |
 | --- | --- |
 | One process | SQLite is fine; in-memory rate limits and circuit breaker apply |
-| Multiple workers/replicas | PostgreSQL + `REDIS_ENABLED=true` + `REDIS_RATE_LIMIT_ENABLED=true`; avoid concurrent automatic migration (migrate once, then scale) |
+| Multiple workers/replicas | PostgreSQL + `REDIS_ENABLED=true` + `REDIS_RATE_LIMIT_ENABLED=true` (the shipped compose sets both); workers auto-scale on PostgreSQL. Migrations run once per launch — migrate before adding replicas |
 | Behind a CDN | Keep keepalive enabled (default) to avoid 524s — see [Reverse Proxy & TLS](reverse-proxy.md) |

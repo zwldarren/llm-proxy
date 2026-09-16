@@ -41,11 +41,11 @@ volume.
   service starts on the built-in defaults.
 - **Startup order** is enforced with healthchecks: the proxy starts only after
   `pg_isready` succeeds and `redis-cli ping` answers.
-- **Redis is enabled** (`REDIS_ENABLED=true`, `REDIS_URL=redis://redis:6379`), which
-  turns on the routing/session stores and the OpenResponses response store.
-  Shared rate limiting and the config cache stay **off** until you also set
-  `REDIS_RATE_LIMIT_ENABLED=true` / `REDIS_CACHE_ENABLED=true` in `.env`
-  (see [PostgreSQL & Redis](databases.md)).
+- **Redis is enabled** (`REDIS_ENABLED=true`, `REDIS_URL=redis://redis:6379`) with
+  shared rate limiting and the config cache already on
+  (`REDIS_RATE_LIMIT_ENABLED=true`, `REDIS_CACHE_ENABLED=true`) — the
+  prerequisite for the auto-selected multi-worker default. See
+  [PostgreSQL & Redis](databases.md).
 - **Redis eviction** is `allkeys-lru` with AOF persistence — safe for the
   reconstructible data the proxy stores there.
 

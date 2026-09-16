@@ -25,8 +25,8 @@ for any multi-worker or multi-replica deployment.
 
 Migrations are the **only** schema source. There is no `create_all` fallback.
 
-- At startup the proxy runs `alembic upgrade head` (once per process) before binding
-  the port. If the database is unreachable or a migration fails, the process exits —
+- At startup the proxy runs `alembic upgrade head` (once per launch, in the top-level
+  process) before binding the port. If the database is unreachable or a migration fails, the process exits —
   loudly, with the migration error.
 - `alembic.ini` must exist: it is looked up in the current directory, then at the repo
   root. A wheel install without it fails at startup with
@@ -38,11 +38,12 @@ uv run alembic upgrade head   # apply migrations
 uv run alembic current        # show the current revision
 ```
 
-::: warning Multiple workers run migrations concurrently
-With `--workers N`, each worker process starts its own lifespan and runs
-`alembic upgrade head`. The parent process has already migrated, but concurrent
-DDL against one database is still risky. Prefer a single process, or migrate
-once before scaling out.
+::: info Migrations run once, in the launching process
+With `--workers N`, the top-level process runs `alembic upgrade head` before
+uvicorn spawns the workers, and the spawned workers skip it (the completion is
+propagated via the internal `LLM_PROXY_MIGRATIONS_DONE` flag). Migrations
+run exactly once per launch. With several replicas, still migrate once before
+scaling out — each replica is its own launcher.
 :::
 
 ## Redis

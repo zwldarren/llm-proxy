@@ -18,23 +18,51 @@ _async_session_factory = None
 _db_initialized = False
 _migrations_run = False
 
+#: Total PostgreSQL connections the automatic pool sizing allocates across all
+#: worker processes (pool + overflow). Kept under PostgreSQL's default
+#: ``max_connections=100`` with headroom for the launcher, migrations and
+#: administrative connections.
+_DB_CONNECTION_BUDGET = 80
+
+
+def _get_worker_count() -> int:
+    """Number of uvicorn worker processes sharing this database.
+
+    Propagated via the LLM_PROXY_WORKER_COUNT env var by ``__main__`` before
+    uvicorn forks workers; defaults to 1 for direct ``uvicorn`` launches and
+    tests. Never below 1.
+    """
+    try:
+        return max(1, int(os.environ.get("LLM_PROXY_WORKER_COUNT", "1")))
+    except ValueError:
+        return 1
+
 
 def _calculate_pool_size() -> int:
-    """Calculate optimal database pool size based on CPU cores.
+    """Calculate the per-worker database pool size.
 
-    Uses the formula: pool_size = cpu_cores * 2 + 1
-    This provides enough connections for concurrent operations without
-    over-allocating resources.
+    Two bounds are computed and the smaller one wins:
+
+    * CPU-derived — ``(cpu_cores * 2 + 1) / workers``: scales concurrency
+      with the machine, but because every worker builds its own pool the
+      *total* grows with the CPU count.
+    * Budget-derived — ``_DB_CONNECTION_BUDGET / (2 * workers)`` (overflow
+      defaults to the pool size, hence the factor of two): caps the total
+      connection count regardless of host size, so a many-core host cannot
+      overrun PostgreSQL's ``max_connections``.
 
     Returns:
-        Recommended pool size.
+        Recommended per-worker pool size (never below 1).
     """
     try:
         cpu_count = os.cpu_count() or 4
     except Exception:
         logger.debug("Failed to get CPU count, defaulting to 4", exc_info=True)
         cpu_count = 4
-    return cpu_count * 2 + 1
+    workers = _get_worker_count()
+    cpu_pool = max(3, (cpu_count * 2 + 1) // workers)
+    budget_pool = max(1, _DB_CONNECTION_BUDGET // (2 * workers))
+    return min(cpu_pool, budget_pool)
 
 
 def get_engine():
@@ -70,7 +98,8 @@ def get_engine():
             logger.info(
                 f"Database connection pool configured: "
                 f"pool_size={pool_size}, max_overflow={max_overflow}, "
-                f"pool_recycle={pool_recycle}s, pool_timeout={pool_timeout}s"
+                f"pool_recycle={pool_recycle}s, pool_timeout={pool_timeout}s "
+                f"(workers={_get_worker_count()})"
             )
 
         _engine = create_async_engine(db_url, **engine_kwargs)
@@ -225,6 +254,16 @@ def run_migrations() -> None:
     logger.info("Database migrations completed successfully")
 
 
+def _migrations_done_by_launcher() -> bool:
+    """True when the launching process already migrated the schema.
+
+    ``__main__`` runs the migrations before ``uvicorn.run()`` starts worker
+    processes; uvicorn spawns those as fresh interpreters (not forks), so
+    without this flag every worker would re-run Alembic concurrently.
+    """
+    return os.environ.get("LLM_PROXY_MIGRATIONS_DONE") == "1"
+
+
 async def init_db() -> None:
     """Initialize the database by running Alembic migrations.
 
@@ -239,8 +278,12 @@ async def init_db() -> None:
     import asyncio
 
     if not _migrations_run:
-        await asyncio.to_thread(run_migrations)
-        _migrations_run = True
+        if _migrations_done_by_launcher():
+            # Spawned worker of a launcher that already migrated: connect only.
+            _migrations_run = True
+        else:
+            await asyncio.to_thread(run_migrations)
+            _migrations_run = True
 
     _db_initialized = True
 

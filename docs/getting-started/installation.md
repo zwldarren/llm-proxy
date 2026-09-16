@@ -71,15 +71,18 @@ uv run llm-proxy --help
 | `--log-level` | `INFO` | Overrides `LOG_LEVEL` |
 | `--log-file` | — | Also write logs to this file |
 | `--config` | — | Path to a SQLite database file (sets `LLM_PROXY_DB_PATH`; ignored when `DATABASE_URL` is set) |
-| `--workers` | `1` | Uvicorn worker processes. Ignored with a warning when combined with `--reload` |
+| `--workers` | auto | Uvicorn worker processes. Auto = CPU budget (cgroup-aware) capped at 16 on PostgreSQL, always 1 on SQLite; `UVICORN_WORKERS` changes the default. Ignored with a warning when combined with `--reload` |
 | `--reload` | off | Dev auto-reload, watches the package directory |
 | `--build-frontend` | off | Build `frontend/dist` before starting (requires bun) |
 
-::: warning One process is the default for a reason
-Rate-limit windows, circuit-breaker state, and provider statistics are
-per-process. Run multiple workers or replicas only with
-`REDIS_ENABLED=true` **and** `REDIS_RATE_LIMIT_ENABLED=true`, and use
-PostgreSQL instead of SQLite. See [PostgreSQL & Redis](../deployment/databases.md).
+::: warning Multi-worker state is shared through Redis
+Rate-limit windows, account-lockout counters, and circuit-breaker state are
+per-process. Auto selection therefore only scales past one process on
+PostgreSQL (SQLite stays single-process), and the shipped `docker-compose.yaml`
+enables `REDIS_ENABLED=true` + `REDIS_RATE_LIMIT_ENABLED=true` so the limits are
+shared. With Redis rate limiting disabled, pin `UVICORN_WORKERS=1` (or expect
+N× the configured limits). Circuit-breaker state and provider statistics still
+remain per worker. See [PostgreSQL & Redis](../deployment/databases.md).
 :::
 
 ## Development servers

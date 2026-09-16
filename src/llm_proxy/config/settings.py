@@ -73,7 +73,9 @@ class RedisSettings(BaseSettings):
 class DBSettings(BaseSettings):
     """Database-related environment variables."""
 
-    model_config = SettingsConfigDict(env_prefix="", extra="forbid")
+    # env_ignore_empty: an exported-but-empty DB_* var (e.g. a compose overlay
+    # passing ``DB_POOL_SIZE=${X:-}``) means "unset", not "0".
+    model_config = SettingsConfigDict(env_prefix="", extra="forbid", env_ignore_empty=True)
 
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
     db_path: str | None = Field(default=None, alias="LLM_PROXY_DB_PATH")
@@ -202,6 +204,9 @@ class UvicornSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="")
 
     timeout_keepalive: int = Field(default=600, alias="UVICORN_TIMEOUT_KEEPALIVE")
+    # Unset = auto: the CPU budget (capped at 16) on PostgreSQL, 1 on SQLite.
+    # See llm_proxy.cli.workers.resolve_workers for the precedence rules.
+    workers: int | None = Field(default=None, alias="UVICORN_WORKERS", ge=1)
 
 
 class UpdateCheckSettings(BaseSettings):
