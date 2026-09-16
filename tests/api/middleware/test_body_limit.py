@@ -61,13 +61,16 @@ def test_body_size_limit_rejects_negative_content_length():
     assert response.json()["error"]["code"] == "invalid_content_length"
 
 
-def test_body_size_limit_rejects_chunked_encoding():
-    """Chunked transfer encoding is rejected when body size limit is active."""
+def test_body_size_limit_allows_chunked_within_limit():
+    """Chunked bodies are measured while they stream, not rejected outright."""
     client = TestClient(_build_app(1024))
-    response = client.post(
-        "/echo",
-        content=b"x" * 100,
-        headers={"Transfer-Encoding": "chunked"},
-    )
+    response = client.post("/echo", content=iter([b"x" * 100]))
+    assert response.status_code == 200
+
+
+def test_body_size_limit_rejects_oversized_chunked():
+    """A chunked body that crosses the cap is rejected while it streams."""
+    client = TestClient(_build_app(1024))
+    response = client.post("/echo", content=iter([b"x" * 1024, b"y" * 1024]))
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "body_size_exceeded"

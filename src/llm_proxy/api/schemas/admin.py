@@ -1073,11 +1073,17 @@ class RateLimitsConfig(BaseModel):
 
 
 class KeepaliveConfig(BaseModel):
-    """Schema for non-streaming response keepalive configuration."""
+    """Schema for non-streaming response keepalive configuration.
 
-    enabled: bool = Field(default=False, description="Enable non-streaming keepalive heartbeats")
+    Defaults must stay in step with
+    :class:`~llm_proxy.config.types.server.KeepaliveParams` (the runtime type the
+    config manager actually uses): this schema is what the settings UI reads, so
+    a divergence would make the panel report a state that is not in effect.
+    """
+
+    enabled: bool = Field(default=True, description="Enable non-streaming keepalive heartbeats")
     grace_seconds: float = Field(
-        default=30.0,
+        default=60.0,
         gt=0,
         description="Seconds to wait for normal completion before heartbeat mode",
     )
@@ -1091,6 +1097,15 @@ class KeepaliveConfig(BaseModel):
 class SecurityConfig(BaseModel):
     """Schema for security / rate-limiting configuration (server_config ``security``)."""
 
+    login_lockout_enabled: bool = Field(
+        default=False,
+        description=(
+            "Lock an account after repeated failed logins (keyed by username). "
+            "Off by default: a hard per-account lockout lets anyone who knows the "
+            "admin username lock the account out on purpose. Per-IP throttling "
+            "(auth.login bucket) and the auth failure delay still apply when off."
+        ),
+    )
     max_failed_login_attempts: int = Field(
         default=5, ge=1, description="Failed login attempts before account lockout"
     )
@@ -1119,7 +1134,13 @@ class SecurityConfig(BaseModel):
     )
     hsts_max_age: int = Field(default=31536000, ge=0, description="HSTS max-age in seconds")
     max_request_body_size_bytes: int = Field(
-        default=10 * 1024 * 1024, ge=0, description="Maximum request body size in bytes"
+        default=64 * 1024 * 1024,
+        ge=0,
+        description=(
+            "Maximum request body size in bytes. 64 MiB leaves headroom for "
+            "multimodal and batch payloads (base64 images/audio/PDFs) while "
+            "bounding the memory a single request can pin. 0 disables the limit."
+        ),
     )
 
 

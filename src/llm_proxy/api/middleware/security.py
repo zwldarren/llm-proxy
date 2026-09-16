@@ -57,7 +57,9 @@ class BaseLockoutManager:
     ``max_attempts``/``lockout_duration`` are resolved dynamically when a
     ``params_getter`` is provided (the production singletons use this so
     UI-managed changes apply immediately); otherwise the static constructor
-    arguments / class defaults are used.
+    arguments / class defaults are used. Lockout can be turned off entirely by
+    an ``enabled_getter`` (checked per call, so the toggle is hot-reloadable);
+    when disabled the manager records nothing and never reports a lockout.
     """
 
     default_max_attempts: int = 5
@@ -70,14 +72,23 @@ class BaseLockoutManager:
         max_attempts: int | None = None,
         lockout_duration: int | None = None,
         params_getter: Callable[[], tuple[int, int]] | None = None,
+        enabled_getter: Callable[[], bool] | None = None,
     ):
         self._static_max_attempts = max_attempts
         self._static_lockout_duration = lockout_duration
         self._params_getter = params_getter
+        self._enabled_getter = enabled_getter
         self._failed_attempts: dict[str, list[float]] = defaultdict(list)
         self._lock = Lock()
         self._last_cleanup = time.time()
         self._cleanup_counter = 0
+
+    @property
+    def enabled(self) -> bool:
+        """Whether lockout is active (resolved per call when a getter is set)."""
+        if self._enabled_getter is not None:
+            return self._enabled_getter()
+        return True
 
     @property
     def max_attempts(self) -> int:
@@ -122,6 +133,8 @@ class BaseLockoutManager:
 
     def record_failed_attempt(self, identifier: str) -> None:
         """Record a failed authentication attempt for the given identifier."""
+        if not self.enabled:
+            return
         with self._lock:
             if self._should_cleanup():
                 self._cleanup_expired()
@@ -139,6 +152,8 @@ class BaseLockoutManager:
 
     def is_locked_out(self, identifier: str) -> bool:
         """Check if the identifier is currently locked out"""
+        if not self.enabled:
+            return False
         with self._lock:
             current_time = time.time()
             attempts = self._failed_attempts.get(identifier, [])
@@ -151,6 +166,8 @@ class BaseLockoutManager:
 
     def get_lockout_remaining(self, identifier: str) -> int:
         """Get remaining lockout time in seconds."""
+        if not self.enabled:
+            return 0
         with self._lock:
             if not self._failed_attempts[identifier]:
                 return 0
@@ -171,7 +188,8 @@ class AccountLockoutManager(BaseLockoutManager):
             params_getter=lambda: (
                 get_security_params().max_failed_login_attempts,
                 get_security_params().lockout_duration_seconds,
-            )
+            ),
+            enabled_getter=lambda: get_security_params().login_lockout_enabled,
         )
         self.log_prefix = "Login"
 

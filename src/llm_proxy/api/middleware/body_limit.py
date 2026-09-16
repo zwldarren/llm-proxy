@@ -1,8 +1,11 @@
 """Request body size limit middleware.
 
-Prevents memory exhaustion from unbounded request bodies by rejecting
-requests whose Content-Length exceeds the configured maximum before the
-body is read into memory.
+Prevents memory exhaustion from unbounded request bodies. A trustworthy
+``Content-Length`` is checked from the header before the body is read; a body
+that does not declare one (chunked transfer encoding, or a compressed body
+whose decompressed size is unknown) is measured as it streams and abandoned
+the moment it crosses the cap, so the proxy never buffers an oversized body
+just to reject it.
 """
 
 from fastapi import Request
@@ -10,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
+    BodyTooLargeError,
     CoreASGIMiddleware,
     adapt_http_middleware,
 )
@@ -29,13 +33,40 @@ def _get_content_length(request: Request) -> int | None:
         return None
 
 
-async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
-    """Reject requests whose declared body size exceeds the configured limit.
+def _is_chunked(request: Request) -> bool:
+    """Whether the request declares ``Transfer-Encoding: chunked``.
 
-    The limit is UI-managed (server_config ``security`` key, default 10 MiB)
-    and hot-reloaded. A value of 0 disables the limit. Requests with
-    ``Transfer-Encoding: chunked`` are rejected when a body size limit is
-    active, because a Content-Length-based check alone is bypassable.
+    A chunked body carries no trustworthy length — and per RFC 9112 a
+    ``Content-Length`` sent alongside it must be ignored — so its size can only
+    be enforced while it is read.
+    """
+    return "chunked" in request.headers.get("transfer-encoding", "").lower()
+
+
+def _too_large_response(max_size: int) -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={
+            "error": {
+                "message": f"Request body exceeds maximum size of {max_size} bytes",
+                "type": "request_too_large",
+                "code": "body_size_exceeded",
+            }
+        },
+    )
+
+
+async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
+    """Reject a request body that exceeds the configured limit.
+
+    A trustworthy ``Content-Length`` is decided from the header alone, without
+    touching the body. Otherwise — chunked transfer encoding, HTTP/2 without a
+    declared length, or a body whose decompressed size is unknown — the bytes
+    are measured as they arrive, so an oversized stream is abandoned mid-read
+    rather than buffered in full.
+
+    The limit is UI-managed (server_config ``security`` key) and hot-reloaded.
+    A value of 0 disables the limit.
     """
     from llm_proxy.config.manager import resolve_security_params
 
@@ -44,25 +75,6 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     ).max_request_body_size_bytes
     if max_size <= 0:
         return None
-
-    # Reject chunked transfer-encoding when body limit is active
-    # (Content-Length based check alone is bypassable via chunked encoding).
-    if request.headers.get("transfer-encoding", "").lower() == "chunked":
-        logger.warning(
-            "Chunked transfer encoding rejected",
-            method=request.method,
-            path=request.url.path,
-        )
-        return JSONResponse(
-            status_code=413,
-            content={
-                "error": {
-                    "message": "Chunked transfer encoding not allowed with body size limit",
-                    "type": "request_too_large",
-                    "code": "body_size_exceeded",
-                }
-            },
-        )
 
     content_length = _get_content_length(request)
     if content_length is not None and content_length < 0:
@@ -82,25 +94,29 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
             },
         )
 
-    if content_length is not None and content_length > max_size:
+    if content_length is not None and not _is_chunked(request):
+        if content_length > max_size:
+            logger.warning(
+                "Request body too large",
+                content_length=content_length,
+                max_size=max_size,
+                method=request.method,
+                path=request.url.path,
+            )
+            return _too_large_response(max_size)
+        return None
+
+    # No trustworthy declared length: measure the bytes as they stream.
+    try:
+        await body.read_limited(max_size)
+    except BodyTooLargeError:
         logger.warning(
             "Request body too large",
-            content_length=content_length,
             max_size=max_size,
             method=request.method,
             path=request.url.path,
         )
-        return JSONResponse(
-            status_code=413,
-            content={
-                "error": {
-                    "message": f"Request body exceeds maximum size of {max_size} bytes",
-                    "type": "request_too_large",
-                    "code": "body_size_exceeded",
-                }
-            },
-        )
-
+        return _too_large_response(max_size)
     return None
 
 

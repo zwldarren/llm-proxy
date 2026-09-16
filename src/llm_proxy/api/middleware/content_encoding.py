@@ -10,7 +10,10 @@ letting the downstream parser fail with a confusing 422.
 Decompression output is capped at the configured request body limit (the
 same value :class:`~llm_proxy.api.middleware.body_limit.BodySizeLimitMiddleware`
 enforces) as a zip-bomb guard; overflow is rejected with 413 in the same
-envelope as the size limiter.
+envelope as the size limiter. The compressed *input* is read with the same cap
+(``read_limited``), so a stream that declares no trustworthy length — chunked,
+or a highly compressed body — is abandoned mid-read instead of being buffered
+in full first.
 
 Registered to run before ``BodySizeLimitMiddleware`` so the size check
 applies to the decompressed body, and before ``FormEncodedMiddleware``
@@ -24,6 +27,7 @@ from starlette.responses import JSONResponse
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
+    BodyTooLargeError,
     CoreASGIMiddleware,
     adapt_http_middleware,
 )
@@ -170,17 +174,19 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     cap = max_size if max_size > 0 else _MAX_DECOMPRESSED_BYTES
 
     try:
-        body_bytes = await body.read()
-    except Exception:
-        return _error_response(
-            400, "Failed to read request body.", "invalid_request", "invalid_body"
-        )
-    if len(body_bytes) > cap:
+        # Bounded read: the compressed stream is dropped as soon as it crosses
+        # the cap rather than being materialised in full first.
+        body_bytes = await body.read_limited(cap)
+    except BodyTooLargeError:
         return _error_response(
             413,
             f"Request body exceeds maximum size of {cap} bytes",
             "request_too_large",
             "body_size_exceeded",
+        )
+    except Exception:
+        return _error_response(
+            400, "Failed to read request body.", "invalid_request", "invalid_body"
         )
 
     data = body_bytes

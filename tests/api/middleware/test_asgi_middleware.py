@@ -19,6 +19,7 @@ from starlette.types import Message, Receive, Scope
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyBuffer,
+    BodyTooLargeError,
     CoreASGIMiddleware,
     get_response_header,
     merge_response_headers,
@@ -37,12 +38,14 @@ def _scope(headers: list[tuple[bytes, bytes]] | None = None) -> Scope:
     }
 
 
-def _receive_from(chunks: list[bytes]) -> Receive:
+def _receive_from(chunks: list[bytes], consumed: list[bytes] | None = None) -> Receive:
     pending = list(chunks)
 
     async def receive() -> Message:
         if pending:
             body = pending.pop(0)
+            if consumed is not None:
+                consumed.append(body)
             return {"type": "http.request", "body": body, "more_body": bool(pending)}
         return {"type": "http.disconnect"}
 
@@ -100,6 +103,37 @@ class TestBodyBuffer:
         message = await buffer()
         assert message["body"] == b"onetwo"
         assert message["more_body"] is False
+
+    @pytest.mark.asyncio
+    async def test_read_limited_returns_body_within_cap(self) -> None:
+        buffer = BodyBuffer(_receive_from([b"one", b"two"]))
+
+        assert await buffer.read_limited(100) == b"onetwo"
+        # Cached for replay exactly like read().
+        assert (await buffer())["body"] == b"onetwo"
+
+    @pytest.mark.asyncio
+    async def test_read_limited_stops_at_cap(self) -> None:
+        """An oversized stream raises without draining the rest of the body."""
+        consumed: list[bytes] = []
+        buffer = BodyBuffer(_receive_from([b"a" * 8, b"b" * 8, b"c" * 8], consumed))
+
+        with pytest.raises(BodyTooLargeError):
+            await buffer.read_limited(10)
+
+        # Reading stopped the moment the cap was crossed: the third chunk was
+        # never pulled off the channel, so a huge body cannot be buffered.
+        assert len(consumed) == 2
+
+    @pytest.mark.asyncio
+    async def test_read_limited_honours_replacement(self) -> None:
+        buffer = BodyBuffer(_receive_from([b"original"]))
+        await buffer.read()
+        buffer.replace(b"replacement")
+
+        assert await buffer.read_limited(100) == b"replacement"
+        with pytest.raises(BodyTooLargeError):
+            await buffer.read_limited(4)
 
     @pytest.mark.asyncio
     async def test_replace_substitutes_downstream_body(self) -> None:
@@ -208,6 +242,20 @@ class TestBodyLimitRunsAsPureASGI:
         response = client.post("/echo", content=b"hi")
         assert response.status_code == 200
         assert response.json() == {"body": "hi"}
+
+    def test_chunked_body_within_limit_passes(self) -> None:
+        """A chunked body under the cap reaches the handler intact."""
+        client = TestClient(self._build_app())
+        response = client.post("/echo", content=iter([b"hi"]))
+        assert response.status_code == 200
+        assert response.json() == {"body": "hi"}
+
+    def test_chunked_body_over_limit_rejected(self) -> None:
+        """A chunked body over the cap is rejected without being buffered."""
+        client = TestClient(self._build_app())
+        response = client.post("/echo", content=iter([b"x" * 16, b"y" * 16]))
+        assert response.status_code == 413
+        assert response.json()["error"]["code"] == "body_size_exceeded"
 
 
 class TestFormEncodedRunsAsPureASGI:

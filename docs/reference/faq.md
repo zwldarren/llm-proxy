@@ -62,11 +62,12 @@ Without Redis, rate limits, circuit breaker state, and provider statistics are
 per-process. Migrations run at startup per process — migrate once before scaling.
 See [PostgreSQL & Redis](../deployment/databases.md).
 
-## The keepalive section shows "disabled", but keepalive seems active. Which is true?
+## Is response keepalive on by default?
 
-Both are: with no stored configuration the runtime uses **enabled / 60 s grace /
-15 s interval**, while the Settings form shows its own defaults. Saving the section
-applies exactly what the form shows. Review the values before saving.
+Yes. With no stored configuration the runtime uses **enabled / 60 s grace /
+15 s interval**, and the Settings form shows those same values, so the panel
+reflects what is actually in effect. Turn it off there if a client cannot
+tolerate the whitespace heartbeats.
 
 ## Does the proxy inject MCP tools into model requests?
 
@@ -82,14 +83,14 @@ point.
 
 ## I'm locked out of the console. How do I get back in?
 
+- Login lockout is **off by default**, so a wrong password normally just returns 401.
+  If you enabled it and are locked out, wait out the 15-minute window — or restart
+  the proxy, since the lockout counters live in process memory.
 - Another admin can reset your password from **Team** (which forces a change at next
   sign-in).
-- If you are the **last admin** and locked out (lockout expires by default after
-  15 minutes; a forgotten password is worse): there is no CLI recovery command —
-  edit the database directly. Passwords are stored as bcrypt hashes in the
+- If you are the **last admin** with a forgotten password: there is no CLI recovery
+  command — edit the database directly. Passwords are stored as bcrypt hashes in the
   `users.password_hash` column, so replacing the hash is the supported-by-hand route.
-- Lockout counters live in process memory, so restarting the proxy also clears a
-  lockout.
 
 ## Which languages does the console support?
 

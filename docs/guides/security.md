@@ -22,7 +22,7 @@ reviewing before exposing it to the internet.
 | HSTS | **on**, `max-age=31536000; includeSubDomains` | Keep on; disable only for local HTTP development |
 | Security headers | `nosniff`, `DENY`, `Referrer-Policy`, `Permissions-Policy`, CSP `default-src 'self'` (script/style allow `unsafe-inline`) | Emitted by the app; no edge duplication needed |
 | `TRUSTED_PROXIES` | RFC1918 + loopback + link-local | Replace with your actual proxy networks — it **replaces**, not extends. Spoofed `X-Forwarded-For` from untrusted peers is ignored by design |
-| Request body limit | 10 MiB, chunked rejected | Keep in sync with the reverse proxy's own limit |
+| Request body limit | 64 MiB, enforced while streaming (chunked measured, not rejected) | Keep in sync with the reverse proxy's own limit |
 | CORS | Disabled (empty origin list) | Add only origins that genuinely need browser access |
 
 ## Abuse protection
@@ -32,7 +32,7 @@ reviewing before exposing it to the internet.
 | Rate limiting | Enabled (in-memory) | Setting `rate_limit_disabled` warns loudly and exposes brute-force/DoS |
 | Shared rate limits | Off until `REDIS_RATE_LIMIT_ENABLED=true` | Required for multi-worker/multi-replica deployments |
 | Redis fail mode | `redis_rate_limit_fail_closed=true` | Requests blocked when Redis errors — safer for public deployments |
-| Login lockout | 5 failures / 15 min, keyed by **username** | IP rotation does not bypass it |
+| Login lockout | **Off by default.** When enabled: 5 failures / 15 min, keyed by username | Off because a hard per-account lockout lets anyone who knows the username lock the account out. The per-IP `auth.login` limit and the auth failure delay apply regardless |
 | API-key lockout | 10 failures / 5 min, keyed by **client IP** | Applies to `/v1/*` and `/servers/*` |
 | Auth failure delay | 100 ms ±10% jitter | Slows brute force; keep enabled on public instances |
 | Console auth buckets | `auth.login` 5/min, `auth.setup` 5/min, `auth.setup_status` 10/min | Tunable per bucket |

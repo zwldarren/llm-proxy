@@ -126,13 +126,14 @@ reset. Counters are per process and reset on restart.
 
 | Field | Default | Effect |
 | --- | --- | --- |
-| Max failed login attempts / lockout duration | `5` / `900` s | Login lockout, keyed by username |
-| Max failed API-key attempts / lockout duration | `10` / `300` s | Key lockout, keyed by client IP |
+| Login lockout enabled | off | Lock an account after repeated failed logins (keyed by username). Off by default — a hard per-account lockout lets anyone who knows the username lock the account out on purpose |
+| Max failed login attempts / lockout duration | `5` / `900` s | Used only when login lockout is enabled |
+| Max failed API-key attempts / lockout duration | `10` / `300` s | Key lockout, keyed by client IP (always on) |
 | Auth failure delay | `100` ms | Artificial delay on failed auth (±10% jitter) |
 | Rate limiting disabled | off | Master switch. The UI warns loudly when disabled — the proxy becomes brute-force/DoS-exposed |
 | Redis fail-closed | on | With Redis rate limiting, block requests when Redis errors (instead of allowing them) |
 | HSTS enabled / max-age | on / `31536000` | `Strict-Transport-Security` header. Disable only for local HTTP development |
-| Max request body size | `10485760` (10 MiB) | `0` disables. Chunked requests are rejected while a limit is active |
+| Max request body size | `67108864` (64 MiB) | `0` disables. A declared `Content-Length` is checked up front; chunked or undeclared bodies are measured as they stream and rejected only if they exceed the limit |
 
 Lockout counters live in-process; a restart clears them. Rate-limit windows are
 in-memory unless Redis-backed rate limiting is enabled.

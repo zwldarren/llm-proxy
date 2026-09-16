@@ -26,6 +26,18 @@ const { t } = useI18n();
     :description="t('security.description')"
   >
     <SettingsItem
+      :title="t('security.loginLockoutEnabled')"
+      :description="t('security.loginLockoutEnabledDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <Switch v-model="state.login_lockout_enabled" />
+      </template>
+    </SettingsItem>
+
+    <SettingsItem
+      v-if="state.login_lockout_enabled"
       :title="t('security.maxFailedLoginAttempts')"
       :description="t('security.maxFailedLoginAttemptsDescription')"
       :loading="pending"
@@ -43,6 +55,7 @@ const { t } = useI18n();
     </SettingsItem>
 
     <SettingsItem
+      v-if="state.login_lockout_enabled"
       :title="t('security.lockoutDurationSeconds')"
       :description="t('security.lockoutDurationSecondsDescription')"
       :loading="pending"
@@ -182,7 +195,7 @@ const { t } = useI18n();
       <template #action>
         <NumberStepper
           :model-value="Math.floor(state.max_request_body_size_bytes / (1024 * 1024))"
-          :min="1"
+          :min="0"
           suffix="MB"
           @update:model-value="
             state.max_request_body_size_bytes =

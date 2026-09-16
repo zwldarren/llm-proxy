@@ -28,10 +28,24 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 NextHandler = Callable[[Request], Awaitable[Response]]
 
 
+class BodyTooLargeError(Exception):
+    """The request body crossed a caller's byte cap while it was being read.
+
+    Raised by :meth:`BodyReader.read_limited` so a middleware can reject an
+    oversized stream *without* first buffering it in full.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        super().__init__(f"request body exceeds {max_bytes} bytes")
+        self.max_bytes = max_bytes
+
+
 class BodyReader(Protocol):
     """Read, and optionally replace, the request body."""
 
     async def read(self) -> bytes: ...
+
+    async def read_limited(self, max_bytes: int) -> bytes: ...
 
     def replace(self, body: bytes) -> None: ...
 
@@ -49,6 +63,14 @@ class FunctionalBodyReader:
     async def read(self) -> bytes:
         return await self._request.body()
 
+    async def read_limited(self, max_bytes: int) -> bytes:
+        # The body is already materialised by ``BaseHTTPMiddleware``; the cap
+        # is checked after the fact rather than enforced during the read.
+        body = await self.read()
+        if len(body) > max_bytes:
+            raise BodyTooLargeError(max_bytes)
+        return body
+
     def replace(self, body: bytes) -> None:
         self._request._body = body
 
@@ -56,10 +78,10 @@ class FunctionalBodyReader:
 class BodyBuffer:
     """ASGI receive wrapper that buffers the request body on demand.
 
-    The buffer stays transparent until ``read`` or ``replace`` is used, so a
-    streaming request body is never materialised for requests that do not need
-    it. Each middleware buffers only on its own narrow predicate (e.g. a
-    ``Content-Encoding`` header, or an audited admin path).
+    The buffer stays transparent until ``read``/``read_limited``/``replace`` is
+    used, so a streaming request body is never materialised for requests that
+    do not need it. Each middleware buffers only on its own narrow predicate
+    (e.g. a ``Content-Encoding`` header, or an audited admin path).
     """
 
     def __init__(self, receive: Receive) -> None:
@@ -68,20 +90,62 @@ class BodyBuffer:
         self._replacement: bytes | None = None
         self._replayed = False
 
+    async def _drain(self, max_bytes: int | None = None) -> bytes:
+        """Pull the body off the receive channel, enforcing ``max_bytes`` if set.
+
+        Raises :class:`BodyTooLargeError` as soon as the accumulated body
+        crosses the cap, so the remainder is never pulled off the channel.
+        """
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            message = await self._receive()
+            if message["type"] == "http.disconnect":
+                break
+            if message["type"] != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            total += len(chunk)
+            if max_bytes is not None and total > max_bytes:
+                raise BodyTooLargeError(max_bytes)
+            chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+        return b"".join(chunks)
+
     async def read(self) -> bytes:
-        """Drain the body from the receive channel and cache it for replay."""
+        """Drain the body from the receive channel and cache it for replay.
+
+        Unlike :meth:`read_limited` and :meth:`__call__`, this ignores
+        :meth:`replace` and always returns the bytes the client actually sent,
+        so a middleware inspecting the body (logging, model restriction, form
+        parsing) sees the original. Callers that must observe the effective
+        body should use :meth:`read_limited`.
+        """
         if self._body is None:
-            chunks: list[bytes] = []
-            while True:
-                message = await self._receive()
-                if message["type"] == "http.disconnect":
-                    break
-                if message["type"] != "http.request":
-                    continue
-                chunks.append(message.get("body", b""))
-                if not message.get("more_body", False):
-                    break
-            self._body = b"".join(chunks)
+            self._body = await self._drain()
+        return self._body
+
+    async def read_limited(self, max_bytes: int) -> bytes:
+        """Drain the body, abandoning it as soon as it exceeds ``max_bytes``.
+
+        Unlike :meth:`read`, this never accumulates more than ``max_bytes`` of
+        body before raising :class:`BodyTooLargeError`, so a caller can put a
+        hard memory bound on an untrusted stream. This matters for bodies
+        whose size is not declared up front (chunked transfer encoding) or not
+        trustworthy (a compressed body whose decompressed size is unknown).
+
+        Once the body is already buffered, the cap is checked after the fact —
+        those bytes are in memory by then — and a pending :meth:`replace` is
+        preferred over the buffered body, since it is what downstream receives.
+        """
+        if self._body is not None:
+            body = self._replacement if self._replacement is not None else self._body
+            if len(body) > max_bytes:
+                raise BodyTooLargeError(max_bytes)
+            return body
+        # A failed drain must not leave a partial body cached for replay.
+        self._body = await self._drain(max_bytes)
         return self._body
 
     def replace(self, body: bytes) -> None:

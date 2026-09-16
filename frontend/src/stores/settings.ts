@@ -159,6 +159,7 @@ export const useSettingsStore = defineStore("settings", () => {
   function normalizeSecurity(res: unknown): SecurityConfig {
     const data = res as Partial<SecurityConfig> | undefined;
     return {
+      login_lockout_enabled: data?.login_lockout_enabled ?? DEFAULT_SECURITY.login_lockout_enabled,
       max_failed_login_attempts:
         data?.max_failed_login_attempts ?? DEFAULT_SECURITY.max_failed_login_attempts,
       lockout_duration_seconds:

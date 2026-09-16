@@ -106,6 +106,7 @@ class TestSecurityConfigAPI:
             assert res.status_code == 200
             data = res.json()
             assert data["max_failed_login_attempts"] == 5
+            assert data["login_lockout_enabled"] is False
             assert data["hsts_enabled"] is True
         finally:
             app.dependency_overrides.pop(get_async_session_dep, None)

@@ -1598,6 +1598,9 @@ export default {
       "Brute-force lockout, HSTS, request size limit, and rate-limit behavior. Changes apply immediately.",
     seconds: "s",
     ms: "ms",
+    loginLockoutEnabled: "Login Lockout",
+    loginLockoutEnabledDescription:
+      "Lock an account after repeated failed logins. Off by default — a hard lockout lets anyone who knows the username lock the account out on purpose. Per-IP throttling still applies when off.",
     maxFailedLoginAttempts: "Max Failed Login Attempts",
     maxFailedLoginAttemptsDescription:
       "Consecutive failed login attempts before the account is locked out.",
@@ -1619,7 +1622,7 @@ export default {
       "Rate limiting is disabled. Your proxy is vulnerable to brute-force and DoS attacks.",
     redisRateLimitFailClosed: "Rate Limiter Fail-Closed",
     redisRateLimitFailClosedDescription:
-      "When the Redis rate limiter errors, block the request (on) or let it through (off).",
+      "When the Redis rate limiter errors, block the request (on) or let it through (off). Only takes effect once Redis-backed rate limiting is enabled (REDIS_RATE_LIMIT_ENABLED).",
     hstsEnabled: "HSTS",
     hstsEnabledDescription:
       "Send the Strict-Transport-Security header. Disable only for local HTTP development.",

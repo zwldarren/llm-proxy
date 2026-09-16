@@ -1551,6 +1551,9 @@ export default {
     description: "暴力破解锁定、HSTS、请求体大小限制与限流行为。修改立即生效。",
     seconds: "秒",
     ms: "毫秒",
+    loginLockoutEnabled: "登录锁定",
+    loginLockoutEnabledDescription:
+      "连续登录失败后锁定账户。默认关闭——硬锁定会让任何知道用户名的人故意锁死该账户；关闭时仍按 IP 限流。",
     maxFailedLoginAttempts: "最大登录失败次数",
     maxFailedLoginAttemptsDescription: "连续登录失败达到该次数后账户将被锁定。",
     lockoutDurationSeconds: "登录锁定时长",
@@ -1565,7 +1568,8 @@ export default {
     rateLimitDisabledDescription: "关闭所有限流。危险——仅用于测试。",
     rateLimitDisabledWarning: "限流已关闭，代理易受暴力破解和 DoS 攻击。",
     redisRateLimitFailClosed: "限流器故障时拒绝",
-    redisRateLimitFailClosedDescription: "当 Redis 限流器出错时，拒绝请求（开）或放行（关）。",
+    redisRateLimitFailClosedDescription:
+      "当 Redis 限流器出错时，拒绝请求（开）或放行（关）。仅在启用 Redis 限流（REDIS_RATE_LIMIT_ENABLED）后生效。",
     hstsEnabled: "HSTS",
     hstsEnabledDescription: "发送 Strict-Transport-Security 头。仅在本地 HTTP 开发时关闭。",
     hstsMaxAge: "HSTS 最大时长",

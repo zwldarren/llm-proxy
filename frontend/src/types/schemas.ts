@@ -1057,6 +1057,7 @@ export interface ResilienceConfig {
 }
 
 export interface SecurityConfig {
+  login_lockout_enabled: boolean;
   max_failed_login_attempts: number;
   lockout_duration_seconds: number;
   max_failed_api_key_attempts: number;

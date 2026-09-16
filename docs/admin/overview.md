@@ -15,8 +15,8 @@ every screen; each configuration screen is documented in its own page.
 | Admin created your account, or reset your password | **Set a New Password** (`/force-change-password`) — every other screen is blocked until you change it |
 
 Passwords must be 8–72 characters with at least one uppercase letter, one lowercase
-letter, one digit, and one special character. Accounts lock temporarily after too many
-failed logins (default: 5 attempts, 15 minutes — see
+letter, one digit, and one special character. Failed logins are throttled per IP;
+account lockout is available but **off by default** (see
 [Server Settings](settings.md#security-rate-limiting)).
 
 ::: info Two different credentials

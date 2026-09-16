@@ -37,7 +37,7 @@ container/console logs:
 | `500 configuration_error` mentioning a virtual model | `auto`/`fast`/`best` used while smart routing is **disabled**, or on a non-chat endpoint | Enable smart routing, or use a concrete model name |
 | `429 rate_limit_exceeded` | Per-key RPM cap or an auth bucket | Raise `rate_limit_rpm`, or wait for the fixed 60 s window |
 | `429 budget_exceeded` / `user_budget_exceeded` | Key or account budget exhausted | Raise the budget or reset it (account budgets only by an admin) |
-| `413 body_size_exceeded` | Body above `max_request_body_size_bytes` (10 MiB default) or chunked encoding | Raise the limit or shrink the request; chunked requests are rejected on purpose |
+| `413 body_size_exceeded` | Body above `max_request_body_size_bytes` (64 MiB default) | Raise the limit or shrink the request |
 | `499 client_disconnected` in logs | Client/CDN gave up mid-request | Usually a CDN timeout — keep keepalive enabled, or stream instead of waiting on a long non-streaming call |
 | Response arrives as **200 with an error JSON body** | Keepalive heartbeat mode had already committed 200 before the failure | Expected tradeoff; check the body, and the real error is in the logs. See [Reverse Proxy & TLS](../deployment/reverse-proxy.md) |
 | Browser reports a CORS failure instead of a real status | Auth/body/rate-limit middleware run **outside** CORS | Reproduce with `curl` to see the true status; then fix the underlying error |

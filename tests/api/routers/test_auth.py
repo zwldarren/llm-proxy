@@ -336,6 +336,23 @@ class TestLoginLockout:
             error_msg = response.json().get("error", {}).get("message", "").lower()
             assert "locked" in error_msg
 
+    def test_disabled_lockout_never_returns_account_locked(self, auth_client):
+        """With login lockout off, repeated failures stay plain 401s."""
+        client, mock_repo = auth_client
+        mock_repo.get_by_username = AsyncMock(return_value=None)
+
+        disabled_lockout = BaseLockoutManager(
+            max_attempts=1, lockout_duration=60, enabled_getter=lambda: False
+        )
+
+        with patch("llm_proxy.api.routers.auth.get_lockout_manager", return_value=disabled_lockout):
+            for _ in range(5):
+                response = client.post(
+                    "/api/auth/login",
+                    json={"username": "admin", "password": "wrong-password-1"},
+                )
+                assert response.status_code == 401
+
 
 class TestLogout:
     """Tests for the logout endpoint."""

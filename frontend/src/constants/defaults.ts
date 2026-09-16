@@ -102,6 +102,7 @@ export const DEFAULT_RESILIENCE: ResilienceConfig = {
 };
 
 export const DEFAULT_SECURITY: SecurityConfig = {
+  login_lockout_enabled: false,
   max_failed_login_attempts: 5,
   lockout_duration_seconds: 900,
   max_failed_api_key_attempts: 10,
@@ -111,12 +112,14 @@ export const DEFAULT_SECURITY: SecurityConfig = {
   redis_rate_limit_fail_closed: true,
   hsts_enabled: true,
   hsts_max_age: 31536000,
-  max_request_body_size_bytes: 10 * 1024 * 1024,
+  max_request_body_size_bytes: 64 * 1024 * 1024,
 };
 
 export const DEFAULT_KEEPALIVE: KeepaliveConfig = {
-  enabled: false,
-  grace_seconds: 30.0,
+  // Must match the runtime KeepaliveParams defaults (enabled / 60s / 15s);
+  // this panel mirrors the effective config, it does not choose it.
+  enabled: true,
+  grace_seconds: 60.0,
   interval_seconds: 15.0,
 };
 

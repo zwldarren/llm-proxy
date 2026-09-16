@@ -83,8 +83,12 @@ Safety rules enforced by the proxy:
 ## Sign-in protection
 
 - `POST /api/auth/login` is rate-limited per IP (default 5 requests/minute).
-- Failed logins are counted **per username**: after 5 failures the account is locked
-  for 15 minutes, and rotating source IPs does not bypass the lockout.
+- Account lockout is **off by default**. When enabled, failed logins are counted
+  **per username**: after 5 failures the account is locked for 15 minutes, and
+  rotating source IPs does not bypass the lockout. It is off by default because a
+  hard per-account lockout is itself a denial-of-service vector — anyone who knows
+  the username can lock the account out. The per-IP limit above and the auth failure
+  delay apply either way.
 - Usernames that do not exist still pay the same bcrypt cost, so timing does not
   reveal whether an account exists.
 - Successful sign-in clears the failure counter and is recorded in the audit log.

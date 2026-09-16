@@ -65,7 +65,7 @@ server logs.
 | 403 | `model_not_allowed`, `forbidden`, `password_change_required` | Not permitted by allowlist/role/account state; deactivated accounts get `{"detail": "Account is disabled"}` on `/api/*` |
 | 404 | `model_not_found`, `not_found`, `mcp_server_not_found`, `provider_not_configured` | Unknown model/response/server; stored responses expire after 24 h |
 | 409 | `conflict` | Duplicate feedback, cancel of a non-cancellable response |
-| 413 | `body_size_exceeded` | Over `max_request_body_size_bytes` (default 10 MiB), or chunked transfer while the limit is active |
+| 413 | `body_size_exceeded` | Over `max_request_body_size_bytes` (default 64 MiB) |
 | 429 | `rate_limit_exceeded`, `too_many_auth_failures`, `budget_exceeded`, `user_budget_exceeded` | Rate limit, lockout, or budget cap. Rate-limit, per-key RPM, and `/v1/*` lockout 429s carry `Retry-After`; the `/servers/*` MCP lockout 429 and budget rejections do not |
 | 499 | `client_disconnected` | Client/CDN gave up; upstream cancelled (logged as failure) |
 | 500 | `configuration_error`, `internal_error` | Bad configuration (e.g. smart routing disabled, missing model), routing constraints unsatisfiable, or upstream responses that fail to parse (500 `api_error`) |
@@ -94,7 +94,7 @@ the server-generated id.
 | `auth.setup` | Client IP | 5/minute |
 | `auth.setup_status` | Client IP | 10/minute |
 | Failed API-key attempts | Client IP | 10 failures → 300 s lockout (`too_many_auth_failures`) |
-| Failed logins | Username | 5 failures → 900 s lockout (`account_locked`) |
+| Failed logins | Username | Off by default; when enabled, 5 failures → 900 s lockout (`account_locked`) |
 
 - The auth buckets are configurable per bucket in
   [Settings → Advanced → Rate Limits](../admin/settings.md#rate-limits) using `N/period`

@@ -51,11 +51,10 @@ Consequences you must know:
 - If the client or CDN gives up, the proxy cancels the upstream call and logs the
   request as **499** instead of silently succeeding.
 
-::: note Runtime default vs Settings form
+::: note Keepalive defaults
 With nothing stored, the runtime defaults are **enabled, 60 s grace, 15 s
-interval**. The Settings form shows its own defaults (disabled, 30 s) until the
-section is saved, and saving applies exactly what the form shows. Review the
-values before saving if you never touched this section.
+interval** — and the Settings form now shows those same values, so what you see
+is what is in effect. Saving the section applies exactly what the form shows.
 :::
 
 ## Example: nginx
@@ -68,7 +67,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/llm.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/llm.example.com/privkey.pem;
 
-    client_max_body_size 10m;   # keep in sync with max_request_body_size_bytes
+    client_max_body_size 64m;   # keep in sync with max_request_body_size_bytes
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -128,8 +127,11 @@ setups.
 
 ## Request body size
 
-`max_request_body_size_bytes` defaults to **10 MiB** and is enforced with a Content-Length
-check plus an actual byte count (chunked transfer encoding is rejected — it would
-bypass the check). Configure it in
+`max_request_body_size_bytes` defaults to **64 MiB** — enough headroom for
+multimodal and batch payloads (base64 images/audio/PDFs) while still bounding the
+memory a single request can pin. A trustworthy `Content-Length` is checked from the
+header; a body without one (chunked transfer encoding, or an HTTP/2 body with no
+declared length) is measured as it streams and dropped the moment it crosses the
+cap, so an oversized upload is never buffered in full. Configure it in
 [Server Settings](../admin/settings.md#security-rate-limiting) and keep the reverse
 proxy's own body limit at or above the same value.
