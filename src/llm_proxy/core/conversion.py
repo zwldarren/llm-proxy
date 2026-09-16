@@ -57,6 +57,7 @@ wire-shape conversion.
 """
 
 import copy
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -74,6 +75,12 @@ if TYPE_CHECKING:
     from llm_proxy.serialization.context import BuildContext
 
 logger = get_logger(__name__)
+
+# Top-level ``model`` field of a chat-completion SSE frame. The key precedes
+# ``choices``/content in every known upstream's serialization order, so the
+# first match is the frame's model; count=1 keeps generated text that happens
+# to contain the same shape untouched.
+_OPENAI_CHUNK_MODEL_RE = re.compile(r'("model"\s*:\s*")(?:[^"\\]|\\.)*(")')
 
 
 @dataclass(frozen=True)
@@ -138,7 +145,9 @@ def plan_conversion(
     # the upstream's response stream is still protocol-native.
     stream_mode = (
         ConversionTier.NATIVE_PASSTHROUGH
-        if not disabled and adapter.supports_native_streaming(protocol or "")
+        if not disabled
+        and adapter.supports_native_streaming(protocol or "")
+        and not adapter.native_streaming_veto(request)
         else ConversionTier.FULL_CONVERSION
     )
     if native_request:
@@ -460,6 +469,72 @@ class NativePassthroughHandler:
             event_context.total_tokens = (
                 event_context.prompt_tokens + event_context.completion_tokens
             )
+
+    @staticmethod
+    def handle_native_openai_chunk(
+        chunk: Any,
+        stream_request: Any,
+        event_context: EventContext | None,
+    ) -> Any:
+        """Bookkeeping for native chat-completions (OpenAI protocol) frames.
+
+        The frame is forwarded verbatim except for the top-level ``model``
+        field, which is rewritten to the client-requested alias
+        (``InternalRequest.echo_model``) like the transformer path does.
+        Terminal usage frames are forwarded too (matching
+        ``OpenAIStreamingTransformer.finalize``, which always emits the
+        pending usage chunk) and their usage is captured into the
+        EventContext so cost accounting keeps working without the
+        transformer.
+        """
+        if not isinstance(chunk, str):
+            return chunk
+        if '"usage"' in chunk:
+            NativePassthroughHandler._capture_openai_stream_usage(chunk, event_context)
+        alias = getattr(stream_request, "echo_model", None)
+        if alias and alias != getattr(stream_request, "model", None):
+            chunk = _OPENAI_CHUNK_MODEL_RE.sub(
+                lambda m: m.group(1) + alias + m.group(2), chunk, count=1
+            )
+        return chunk
+
+    @staticmethod
+    def _capture_openai_stream_usage(chunk: str, event_context: EventContext | None) -> None:
+        """Extract usage from a native chat-completions usage frame.
+
+        The upstream is asked for ``stream_options.include_usage`` (ADR-0008),
+        so the terminal frame carries a ``usage`` object with an empty
+        ``choices`` array. Only frames containing a ``"usage"`` substring are
+        parsed, keeping regular delta frames on the verbatim fast path.
+        """
+        if event_context is None:
+            return
+        for _event_type, parsed in iter_sse_data_events(chunk):
+            if not isinstance(parsed, dict):
+                continue
+            usage = parsed.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            prompt_tokens = usage.get("prompt_tokens")
+            completion_tokens = usage.get("completion_tokens")
+            if prompt_tokens is not None:
+                event_context.prompt_tokens = prompt_tokens
+            if completion_tokens is not None:
+                event_context.completion_tokens = completion_tokens
+            total = usage.get("total_tokens")
+            if total is not None:
+                event_context.total_tokens = total
+            elif prompt_tokens is not None and completion_tokens is not None:
+                event_context.total_tokens = prompt_tokens + completion_tokens
+            prompt_details = usage.get("prompt_tokens_details")
+            if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens") is not None:
+                event_context.cache_read_input_tokens = prompt_details["cached_tokens"]
+            completion_details = usage.get("completion_tokens_details")
+            if (
+                isinstance(completion_details, dict)
+                and completion_details.get("reasoning_tokens") is not None
+            ):
+                event_context.reasoning_tokens = completion_details["reasoning_tokens"]
 
     @staticmethod
     def maybe_capture_native_streaming_usage(

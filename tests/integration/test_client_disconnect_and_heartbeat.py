@@ -27,7 +27,10 @@ from integration._server_harness import (
 
 PROXY_API_KEY = "sk-it-disconnect-test"
 UPSTREAM_FIRST_BYTE_DELAY = 3.0
-CLIENT_TIMEOUT = 0.5
+# Deliberately below the streaming heartbeat floor (0.5s, see
+# streaming_processor) so a client timeout can never race the first SSE
+# comment heartbeat on paths that emit them before upstream data.
+CLIENT_TIMEOUT = 0.2
 
 
 async def _poll_logs(db_path: Path, min_rows: int = 1, timeout: float = 25.0):

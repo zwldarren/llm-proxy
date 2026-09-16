@@ -170,7 +170,11 @@ class TestPlanConversion:
         plan = plan_conversion(adapter, req, context=adapter._build_chat_context(req))
 
         assert plan.request_tier == ConversionTier.FULL_CONVERSION
-        assert plan.stream_mode == ConversionTier.FULL_CONVERSION
+        # The stream side answers a different question: the upstream speaks
+        # Chat Completions SSE natively, so frames pass through verbatim even
+        # when the request body had to be rebuilt (no reasoning-echo marker
+        # in this model name, so the request-scoped veto does not fire).
+        assert plan.stream_mode == ConversionTier.NATIVE_PASSTHROUGH
         assert plan.response_mode == ConversionTier.WIRE_REUSE
 
     def test_response_passthrough_kill_switch(self):

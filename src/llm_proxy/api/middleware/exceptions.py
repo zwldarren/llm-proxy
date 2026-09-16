@@ -257,6 +257,11 @@ def _capture_early_failure_request_data(request: Request) -> tuple[dict[str, Any
         body: Any = {}
         parsed_body = getattr(request.state, "parsed_request_body", None)
         if parsed_body is not None:
+            # The protocol handlers stash the parsed pydantic model (not a
+            # dict) so the happy path avoids an extra model_dump — dump it
+            # here, on the failure path only.
+            if hasattr(parsed_body, "model_dump"):
+                parsed_body = parsed_body.model_dump()
             # Multipart uploads stash raw file bytes (see protocol.py); strip them
             # so the log stays JSON-safe and we never persist binary blobs.
             parsed_body = _strip_bytes(parsed_body)

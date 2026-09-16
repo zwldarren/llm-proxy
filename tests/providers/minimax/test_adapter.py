@@ -49,9 +49,12 @@ class TestNativeProtocols:
         assert adapter.supports_native_streaming("anthropic") is True
         assert adapter.supports_native_streaming("openresponses") is True
 
-    def test_openai_chat_not_native(self, adapter):
+    def test_openai_chat_native_streaming_capability(self, adapter):
+        # Request side stays serializer-built; the stream side may pass
+        # through verbatim (non-reasoning-echo models only — MiniMax model
+        # names carry no echo marker, so the veto does not fire here).
         assert adapter.supports_native_request("openai") is False
-        assert adapter.supports_native_streaming("openai") is False
+        assert adapter.supports_native_streaming("openai") is True
 
     def test_kill_switch(self):
         gated = MiniMaxAdapter(api_key="k", native_passthrough=False)

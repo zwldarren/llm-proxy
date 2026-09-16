@@ -51,15 +51,13 @@ def claim_last_used_update(key_name: str) -> bool:
         return True
 
 
-async def update_key_last_used(key_name: str) -> None:
-    """Persist ``last_used_at`` for *key_name*, throttled per key.
+async def persist_key_last_used(key_name: str) -> None:
+    """Persist ``last_used_at`` for *key_name* (unthrottled).
 
-    Callers schedule this as a background task; a throttled call returns
-    before opening a database session (see :func:`claim_last_used_update`).
+    Callers must gate scheduling with :func:`claim_last_used_update` *before*
+    creating a background task, so throttled requests never pay task-creation
+    cost. Prefer this over :func:`update_key_last_used` on hot paths.
     """
-    if not claim_last_used_update(key_name):
-        return
-
     from llm_proxy.database import ApiKeyRepository, get_async_session_context
     from llm_proxy.observability.logger import get_logger
 
@@ -68,6 +66,17 @@ async def update_key_last_used(key_name: str) -> None:
             await ApiKeyRepository(session).update_last_used(key_name)
     except Exception as e:
         get_logger(__name__).warning(f"Failed to update last_used for API key '{key_name}': {e}")
+
+
+async def update_key_last_used(key_name: str) -> None:
+    """Persist ``last_used_at`` for *key_name*, throttled per key.
+
+    Compatibility wrapper: claims the throttle slot and then persists.
+    Hot-path callers should claim synchronously and schedule
+    :func:`persist_key_last_used` only when the claim succeeds.
+    """
+    if claim_last_used_update(key_name):
+        await persist_key_last_used(key_name)
 
 
 # Single-flight guards: when a TTL window rolls over, every in-flight request

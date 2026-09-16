@@ -53,6 +53,7 @@ from llm_proxy.models import (
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.streaming.handler import StreamingHandler
+from llm_proxy.streaming.sse_parse import iter_sse_data_events
 
 logger = get_logger(__name__)
 
@@ -176,13 +177,23 @@ class StreamingProcessor:
                 proxy_web_search_active = context.proxy_web_search_active
 
                 stream_plan = plan_conversion(current_adapter, unified_request)
-                native = stream_plan.stream_mode == ConversionTier.NATIVE_PASSTHROUGH
+                # Server-side web search interception needs the streaming
+                # transformer to observe every chunk (tool-call interception
+                # plus the accumulated output continuations are built from),
+                # so it pins the attempt to the converted path even when the
+                # plan allows native passthrough.
+                native = (
+                    stream_plan.stream_mode == ConversionTier.NATIVE_PASSTHROUGH
+                    and not proxy_web_search_active
+                )
                 # Stamp the response-side tier for observability: streaming
                 # responses never pass through _parse_response /
                 # _build_passthrough_response (the non-stream chokepoints),
                 # so mirror_conversion_tier below reads the stream mode
                 # instead. Re-stamped per attempt like conversion_tier.
-                unified_request.response_tier = stream_plan.stream_mode
+                unified_request.response_tier = (
+                    stream_plan.stream_mode if native else ConversionTier.FULL_CONVERSION
+                )
 
                 include_obfuscation = None
                 if hasattr(unified_request, "stream_options") and unified_request.stream_options:
@@ -211,94 +222,110 @@ class StreamingProcessor:
                         stream = await current_adapter.stream_chat_completion_native(
                             unified_request, cancel_token=stream_cancel_token
                         )
-                        first_chunks: list[str] = []
-                        stream_started = True
-                        context_exceeded = False
-                        retryable_stream_finish_reason = None
+                        if protocol_name == "openai":
+                            # Peek at the leading blocks (the role block and
+                            # the first content block) so upstream failures —
+                            # HTTP errors raised when the generator starts,
+                            # context-length/retryable finish reasons, empty
+                            # streams including 200-with-error-payload bodies
+                            # that never yield meaningful content — still
+                            # trigger the provider-fallback handlers below,
+                            # before any byte reaches the client. Only the
+                            # leading blocks are parsed; the rest of the
+                            # stream flows through verbatim.
+                            prefetch = await self._prefetch_native_blocks(stream)
+                        else:
+                            # Anthropic/Responses native tiers keep their
+                            # established semantics: no pre-response sniffing
+                            # (their failures are framed in-band).
+                            prefetch = _PrefetchResult(
+                                first_chunks=[], stream_started=True, context_exceeded=False
+                            )
                     else:
                         stream = await current_adapter.stream_chat_completion(
                             unified_request, cancel_token=stream_cancel_token
                         )
 
                         prefetch = await self._prefetch_stream_chunks(stream, transformer)
-                        first_chunks = prefetch.first_chunks
-                        stream_started = prefetch.stream_started
-                        context_exceeded = prefetch.context_exceeded
-                        context_exceeded_reason = prefetch.context_exceeded_reason
-                        retryable_stream_finish_reason = prefetch.retryable_stream_finish_reason
 
-                        if context_exceeded and context_exceeded_reason:
-                            await self._close_stream(stream)
-                            stream = None
-                            should_continue = await self._fallback_handler.handle_context_exceeded(
-                                context_exceeded_reason,
+                    first_chunks = prefetch.first_chunks
+                    stream_started = prefetch.stream_started
+                    context_exceeded = prefetch.context_exceeded
+                    context_exceeded_reason = prefetch.context_exceeded_reason
+                    retryable_stream_finish_reason = prefetch.retryable_stream_finish_reason
+
+                    if context_exceeded and context_exceeded_reason:
+                        await self._close_stream(stream)
+                        stream = None
+                        should_continue = await self._fallback_handler.handle_context_exceeded(
+                            context_exceeded_reason,
+                            current_adapter,
+                            context,
+                            unified_request,
+                            raw_request_data,
+                            req,
+                        )
+                        if should_continue:
+                            await self._fallback_handler.switch_adapter(
+                                _exit_stack, current_adapter, should_continue[0]
+                            )
+                            current_adapter = should_continue[0]
+                            unified_request = should_continue[1]
+                            continue
+                        final_error = self._error_handler.create_context_length_error(
+                            current_adapter.provider_name, context_exceeded_reason
+                        )
+                        result_response = self._error_handler.format_response(final_error)
+                        break
+
+                    if retryable_stream_finish_reason:
+                        await self._close_stream(stream)
+                        stream = None
+                        should_continue = (
+                            await self._fallback_handler.handle_retryable_finish_reason(
+                                retryable_stream_finish_reason,
                                 current_adapter,
                                 context,
                                 unified_request,
                                 raw_request_data,
                                 req,
                             )
-                            if should_continue:
-                                await self._fallback_handler.switch_adapter(
-                                    _exit_stack, current_adapter, should_continue[0]
-                                )
-                                current_adapter = should_continue[0]
-                                unified_request = should_continue[1]
-                                continue
-                            final_error = self._error_handler.create_context_length_error(
-                                current_adapter.provider_name, context_exceeded_reason
+                        )
+                        if should_continue:
+                            await self._fallback_handler.switch_adapter(
+                                _exit_stack, current_adapter, should_continue[0]
                             )
-                            result_response = self._error_handler.format_response(final_error)
-                            break
+                            current_adapter = should_continue[0]
+                            unified_request = should_continue[1]
+                            continue
+                        final_error = self._error_handler.create_retryable_stream_error(
+                            current_adapter.provider_name, retryable_stream_finish_reason
+                        )
+                        result_response = self._error_handler.format_response(final_error)
+                        break
 
-                        if retryable_stream_finish_reason:
-                            await self._close_stream(stream)
-                            stream = None
-                            should_continue = (
-                                await self._fallback_handler.handle_retryable_finish_reason(
-                                    retryable_stream_finish_reason,
-                                    current_adapter,
-                                    context,
-                                    unified_request,
-                                    raw_request_data,
-                                    req,
-                                )
+                    if not stream_started:
+                        await self._close_stream(stream)
+                        stream = None
+                        should_continue = await self._fallback_handler.handle_empty_stream(
+                            current_adapter,
+                            context,
+                            unified_request,
+                            raw_request_data,
+                            req,
+                        )
+                        if should_continue:
+                            await self._fallback_handler.switch_adapter(
+                                _exit_stack, current_adapter, should_continue[0]
                             )
-                            if should_continue:
-                                await self._fallback_handler.switch_adapter(
-                                    _exit_stack, current_adapter, should_continue[0]
-                                )
-                                current_adapter = should_continue[0]
-                                unified_request = should_continue[1]
-                                continue
-                            final_error = self._error_handler.create_retryable_stream_error(
-                                current_adapter.provider_name, retryable_stream_finish_reason
-                            )
-                            result_response = self._error_handler.format_response(final_error)
-                            break
-
-                        if not stream_started:
-                            await self._close_stream(stream)
-                            stream = None
-                            should_continue = await self._fallback_handler.handle_empty_stream(
-                                current_adapter,
-                                context,
-                                unified_request,
-                                raw_request_data,
-                                req,
-                            )
-                            if should_continue:
-                                await self._fallback_handler.switch_adapter(
-                                    _exit_stack, current_adapter, should_continue[0]
-                                )
-                                current_adapter = should_continue[0]
-                                unified_request = should_continue[1]
-                                continue
-                            final_error = self._error_handler.create_empty_stream_error(
-                                current_adapter.provider_name
-                            )
-                            result_response = self._error_handler.format_response(final_error)
-                            break
+                            current_adapter = should_continue[0]
+                            unified_request = should_continue[1]
+                            continue
+                        final_error = self._error_handler.create_empty_stream_error(
+                            current_adapter.provider_name
+                        )
+                        result_response = self._error_handler.format_response(final_error)
+                        break
 
                     should_clean_stream = False
                     should_clean_exit_stack = False
@@ -450,6 +477,59 @@ class StreamingProcessor:
                     ):
                         stream_started = True
                         break
+        except Exception:
+            await self._close_stream(stream)
+            raise
+
+        return _PrefetchResult(
+            first_chunks=first_chunks,
+            stream_started=stream_started,
+            context_exceeded=context_exceeded,
+            context_exceeded_reason=context_exceeded_reason,
+            retryable_stream_finish_reason=retryable_stream_finish_reason,
+        )
+
+    async def _prefetch_native_blocks(self, stream) -> _PrefetchResult:
+        """Peek at the leading SSE blocks of a native passthrough stream.
+
+        Mirrors ``_prefetch_stream_chunks``' stop condition (first block with
+        meaningful content) and fallback signals, but keeps the blocks raw:
+        only the leading blocks — typically the role block plus the first
+        content block — are parsed, and everything after the peek flows
+        through verbatim. Only meaningful for Chat Completions-shaped
+        streams (the openai protocol native tier); callers gate on that.
+        """
+        first_chunks: list[str] = []
+        stream_started = False
+        context_exceeded = False
+        context_exceeded_reason: str | None = None
+        retryable_stream_finish_reason: str | None = None
+
+        try:
+            async for block in stream:
+                if not isinstance(block, str):
+                    continue
+                first_chunks.append(block)
+                for _event_type, parsed in iter_sse_data_events(block):
+                    if not isinstance(parsed, dict):
+                        continue
+                    for choice in parsed.get("choices", []):
+                        if not isinstance(choice, dict):
+                            continue
+                        finish_reason = choice.get("finish_reason")
+                        if is_context_length_finish_reason(finish_reason):
+                            context_exceeded = True
+                            context_exceeded_reason = finish_reason
+                            break
+                        if is_retryable_stream_finish_reason(
+                            finish_reason
+                        ) and not self._chunk_parser.choice_has_non_role_output(choice):
+                            retryable_stream_finish_reason = finish_reason
+                            break
+                    if self._chunk_parser.chunk_has_meaningful_content(parsed):
+                        stream_started = True
+                if context_exceeded or retryable_stream_finish_reason or stream_started:
+                    break
         except Exception:
             await self._close_stream(stream)
             raise

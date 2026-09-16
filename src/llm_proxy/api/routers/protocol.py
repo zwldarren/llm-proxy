@@ -9,7 +9,6 @@ that integrate with the UnifiedProcessor infrastructure.
 """
 
 import asyncio
-import contextlib
 import secrets
 import time
 from collections.abc import Awaitable, Callable
@@ -101,11 +100,11 @@ def _create_endpoint_fn(
                     "parse_http_request function"
                 )
 
-        # Stash parsed body for early-failure logging (multipart protocols
-        # bypass the stash in create_traced_handler).
+        # Stash the parsed model for early-failure logging (multipart protocols
+        # bypass the stash in create_traced_handler). Dumped lazily on the
+        # failure path; see exceptions._capture_early_failure_request_data.
         if request is not None and hasattr(request, "model_dump"):
-            with contextlib.suppress(Exception):
-                fastapi_request.state.parsed_request_body = request.model_dump()
+            fastapi_request.state.parsed_request_body = request
 
         for mw in middleware:
             await mw(request, fastapi_request)

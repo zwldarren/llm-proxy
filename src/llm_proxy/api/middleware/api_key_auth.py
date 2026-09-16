@@ -16,7 +16,12 @@ from llm_proxy.api.error_responses import (
     ErrorResponseBuilder,
     rate_limit_exceeded_error_body,
 )
-from llm_proxy.api.middleware.api_key_cache import update_key_last_used as _update_key_last_used
+from llm_proxy.api.middleware.api_key_cache import (
+    claim_last_used_update,
+)
+from llm_proxy.api.middleware.api_key_cache import (
+    persist_key_last_used as _update_key_last_used,
+)
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
     CoreASGIMiddleware,
@@ -320,7 +325,10 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
             logger.info(f"Request rejected: {rejection.log_message}")
             return JSONResponse(status_code=rejection.status_code, content=rejection.error_body)
 
-    asyncio.create_task(_update_key_last_used(matched_key_name))
+    # Claim the throttle slot synchronously so throttled requests never pay
+    # asyncio task-creation cost on the hot path.
+    if matched_key_name is not None and claim_last_used_update(matched_key_name):
+        asyncio.create_task(_update_key_last_used(matched_key_name))
 
     lockout_manager.clear_failed_attempts(client_ip)
 

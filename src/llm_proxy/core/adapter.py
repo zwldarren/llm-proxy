@@ -164,6 +164,17 @@ class BaseAdapter(ABC):
         """
         return protocol_name in self.native_protocols
 
+    def native_streaming_veto(self, request: InternalRequest) -> bool:
+        """Request-scoped veto for the native streaming tier (default: none).
+
+        Consulted by ``plan_conversion`` after ``supports_native_streaming``
+        accepts the protocol, so adapters can keep specific requests on the
+        converted path — e.g. OpenAICompatibleBase vetoes reasoning-echo
+        models because the transformer's accumulation feeds the reasoning
+        cache that the next turn's request body is built from.
+        """
+        return False
+
     async def stream_chat_completion_native(
         self,
         request: InternalRequest,

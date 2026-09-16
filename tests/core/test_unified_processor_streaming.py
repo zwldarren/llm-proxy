@@ -455,6 +455,69 @@ class TestWebSearchStreaming:
         assert sent_request.tools[0].name == "web_search"
 
     @pytest.mark.asyncio
+    async def test_proxy_web_search_vetoes_native_passthrough(self) -> None:
+        """Server-side web search pins the attempt to the converted path even
+        when the adapter supports native openai streaming: the transformer
+        must observe every chunk (tool-call interception and the accumulated
+        output continuations are built from), which passthrough bypasses."""
+
+        async def _provider_stream():
+            yield {
+                "id": "chatcmpl-ws-veto",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": "hi"}}],
+            }
+            yield {
+                "id": "chatcmpl-ws-veto",
+                "object": "chat.completion.chunk",
+                "created": 2,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            yield "[DONE]"
+
+        adapter = MagicMock()
+        adapter.supports_native_streaming = MagicMock(return_value=True)
+        adapter.supports_native_request = MagicMock(return_value=False)
+        adapter.native_streaming_veto = MagicMock(return_value=False)
+        adapter.provider_name = "openai-compatible"
+        adapter.stream_chat_completion = AsyncMock(return_value=_provider_stream())
+        adapter.stream_chat_completion_native = AsyncMock()
+
+        orchestrator = MagicMock()
+        orchestrator.should_retry.return_value = False
+        orchestrator.select_next_provider.return_value = None
+        orchestrator.needs_role_transform.return_value = False
+        orchestrator.exhausted = False
+
+        interceptor = WebSearchInterceptor(_FakeWebSearchProvider())
+        context = RequestContext(
+            orchestrator=orchestrator,
+            services=ServiceDependencies(
+                adapter_factory=AsyncMock(return_value=adapter),
+                web_search_interceptor=interceptor,
+            ),
+            protocol_name="openai",
+            proxy_web_search_active=True,
+        )
+
+        processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
+        streaming_marker = StreamingResponseMarker(_build_request_with_web_search(), adapter)
+        response = await processor._streaming_processor.process(
+            streaming_marker=streaming_marker,
+            raw_request_data={"model": "glm-5", "stream": True},
+            req=_build_mock_request(),
+            context=context,
+            trace_id="trace-ws-veto",
+        )
+        await _collect_stream_text(response)
+
+        adapter.stream_chat_completion.assert_called_once()
+        adapter.stream_chat_completion_native.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_client_web_search_function_tool_not_intercepted(self) -> None:
         """A client-defined function tool named 'web_search' must NOT be hijacked.
 
@@ -967,6 +1030,7 @@ class TestModelEchoConsistency:
 
         adapter = MagicMock()
         adapter.supports_native_streaming = MagicMock(return_value=True)
+        adapter.native_streaming_veto = MagicMock(return_value=False)
         adapter.provider_name = "anthropic"
         adapter.stream_chat_completion_native = AsyncMock(return_value=_mock_native_stream())
 

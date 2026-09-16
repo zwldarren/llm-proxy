@@ -293,6 +293,60 @@ class OpenAICompatibleBase(
             self, request, cancel_token=cancel_token, context=context, **kwargs
         )
 
+    # ------------------------------------------------------------------
+    # Native chat-completions streaming (openai protocol passthrough)
+    # ------------------------------------------------------------------
+
+    #: Default of the ``native_passthrough`` provider-metadata switch. Adapters
+    #: whose upstream deviates from the chat-completions wire format set this
+    #: to False, making ``native_passthrough: true`` an explicit opt-in.
+    NATIVE_PASSTHROUGH_DEFAULT: bool = True
+
+    def _native_passthrough_enabled(self) -> bool:
+        """Provider-metadata switch (``native_passthrough``) — the kill switch
+        for every native tier (request, response, stream)."""
+        return bool(self._extra_config.get("native_passthrough", self.NATIVE_PASSTHROUGH_DEFAULT))
+
+    def supports_native_streaming(self, protocol_name: str) -> bool:
+        if protocol_name == "openai":
+            # The upstream speaks Chat Completions SSE natively by definition
+            # of this adapter family, so the openai client protocol can be
+            # served verbatim: frames are forwarded untouched except the
+            # top-level model echo and usage capture (see
+            # NativePassthroughHandler.handle_native_openai_chunk).
+            return self._native_passthrough_enabled()
+        return super().supports_native_streaming(protocol_name)
+
+    def native_streaming_veto(self, request: InternalRequest) -> bool:
+        # Reasoning-echo models (DeepSeek-style) stay on the converted path:
+        # the streaming transformer's accumulation feeds the reasoning cache
+        # that ``_enforce_reasoning_echo`` reads when building the next turn.
+        return self._requires_reasoning_echo(request)
+
+    async def stream_chat_completion_native(
+        self,
+        request: InternalRequest,
+        cancel_token=None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream Chat Completions SSE blocks verbatim from the upstream.
+
+        The request body is built by the regular converted-path builder, so
+        provider-specific request logic (reasoning normalization, reasoning
+        echo) still applies; only the response side skips the per-chunk
+        dict → transformer round-trip. ``include_usage`` is forced so the
+        terminal usage frame keeps billing working (ADR-0008).
+        """
+        url = self._stream_url(request)
+        body = self._stream_body(request)
+        stream_options = dict(body.get("stream_options") or {})
+        stream_options["include_usage"] = True
+        body["stream_options"] = stream_options
+        return self._with_retry_generator(
+            lambda: self._stream_raw_sse(url, body, cancel_token),
+            cancel_token=cancel_token,
+        )
+
     async def image_generation(
         self, request: InternalImageRequest, **kwargs: Any
     ) -> InternalImageResponse:

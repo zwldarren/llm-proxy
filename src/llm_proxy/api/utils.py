@@ -1,6 +1,5 @@
 """API utility functions."""
 
-import contextlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -40,9 +39,12 @@ def create_traced_handler(
         request: BaseModel,
         fastapi_request: Request,
     ) -> Any:
-        # Stash parsed body for early-failure logging (before processor.process() runs).
-        with contextlib.suppress(Exception):
-            fastapi_request.state.parsed_request_body = request.model_dump()
+        # Stash the parsed model for early-failure logging (before
+        # processor.process() runs). The dump is deferred to the failure path
+        # (see exceptions._capture_early_failure_request_data) so the happy
+        # path pays for a single model_dump — the one in
+        # UnifiedProcessor.process.
+        fastapi_request.state.parsed_request_body = request
         return await handler_func(request, fastapi_request)
 
     traced_handler.__annotations__["request"] = request_model

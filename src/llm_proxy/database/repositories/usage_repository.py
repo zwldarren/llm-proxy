@@ -57,12 +57,17 @@ class UsageRepository(BaseUsageRepository):
 
         dialect_name = self.session.bind.dialect.name if self.session.bind else "sqlite"
 
+        # Pass the dicts as executemany parameters instead of
+        # ``.values(list_of_dicts)``: a multi-row VALUES clause bakes the row
+        # count into the statement's cache key, so every distinct batch size
+        # recompiled the full INSERT (a measurable CPU hotspot under load).
+        # The single-row form compiles once and is reused for any batch size.
         if dialect_name == "postgresql":
-            stmt = pg_insert(UsageRecord).values(values)
+            stmt = pg_insert(UsageRecord)
         else:
-            stmt = sqlite_insert(UsageRecord).values(values)
+            stmt = sqlite_insert(UsageRecord)
 
-        await self.session.execute(stmt)
+        await self.session.execute(stmt, values)
         return len(values)
 
     async def delete_old_usage(self, *, older_than_ts: float) -> int:

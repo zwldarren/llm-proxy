@@ -80,12 +80,16 @@ class TestSupportsNativeProtocols:
         assert adapter.supports_native_streaming("anthropic") is True
         assert adapter.supports_native_streaming("openresponses") is True
 
-    def test_chat_completions_protocol_not_native(self, adapter):
-        # The openai protocol stays on the serializer fast path so the
-        # reasoning-echo guarantee keeps applying.
+    def test_chat_completions_protocol_native_capability(self, adapter):
+        # The openai protocol is native-streaming capable (verbatim SSE
+        # passthrough), but the request side stays on the serializer path,
+        # and the request-scoped veto keeps every DeepSeek model on the
+        # converted stream so the reasoning-echo guarantee keeps applying.
         assert adapter.supports_native_request("openai") is False
         assert adapter.supports_native_request(None) is False
-        assert adapter.supports_native_streaming("openai") is False
+        assert adapter.supports_native_streaming("openai") is True
+        req = _request(raw_anthropic(), protocol_name="openai")
+        assert adapter.native_streaming_veto(req) is True
 
     def test_materialized_previous_response_vetoed(self, adapter):
         req = _request(raw_responses(), protocol_name="openresponses")
@@ -666,7 +670,7 @@ class TestNativeStreaming:
 
     @pytest.mark.asyncio
     async def test_unknown_protocol_raises(self, adapter):
-        req = _request(raw_anthropic(), protocol_name="openai")
+        req = _request(raw_anthropic(), protocol_name="gemini")
         with pytest.raises(NotImplementedError):
             await adapter.stream_chat_completion_native(req)
 

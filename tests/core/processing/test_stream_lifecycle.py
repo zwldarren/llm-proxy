@@ -356,6 +356,86 @@ class TestStreamLifecycleNativePassthrough:
 
         assert "data: [DONE]" not in "".join(frames)
 
+    async def test_native_openai_frames_pass_through_verbatim(self) -> None:
+        frames_in = [
+            'data: {"id":"1","model":"glm-5","choices":[{"delta":{"content":"hi"}}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+        lifecycle = _lifecycle(
+            stream=_stream(*frames_in),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="glm-5"),
+        )
+
+        frames = await _collect(lifecycle.events())
+
+        assert frames == frames_in
+
+    async def test_native_openai_rewrites_model_to_client_alias(self) -> None:
+        lifecycle = _lifecycle(
+            stream=_stream(
+                'data: {"id":"1","model":"upstream-m","choices":[{"delta":{"content":"hi"}}]}\n\n'
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="upstream-m", echo_model="alias-m"),
+        )
+
+        frames = await _collect(lifecycle.events())
+
+        payload = "".join(frames)
+        assert '"model":"alias-m"' in payload
+        assert '"model":"upstream-m"' not in payload
+
+    async def test_native_openai_usage_frame_captured_and_forwarded(self) -> None:
+        usage_frame = (
+            'data: {"id":"1","model":"glm-5","choices":[],"usage":'
+            '{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}\n\n'
+        )
+        ctx = _context()
+        lifecycle = _lifecycle(
+            stream=_stream(
+                'data: {"id":"1","model":"glm-5","choices":[{"delta":{"content":"hi"}}]}\n\n',
+                usage_frame,
+                "data: [DONE]\n\n",
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="glm-5"),
+            event_context=ctx,
+        )
+
+        frames = await _collect(lifecycle.events())
+
+        assert usage_frame in frames
+        assert ctx.prompt_tokens == 3
+        assert ctx.completion_tokens == 5
+        assert ctx.total_tokens == 8
+
+    async def test_native_openai_replayed_first_chunks_get_shaped(self) -> None:
+        """Blocks buffered by the streaming processor's native peek are
+        replayed through the same shaping as pumped blocks: the model alias
+        rewrite and usage capture must not be skipped for them."""
+        peeked = (
+            'data: {"id":"1","model":"upstream-m","choices":[{"delta":{"role":"assistant"}}]}\n\n'
+        )
+        lifecycle = _lifecycle(
+            first_chunks=[peeked],
+            stream=_stream(
+                'data: {"id":"1","model":"upstream-m","choices":[{"delta":{"content":"hi"}}]}\n\n'
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="upstream-m", echo_model="alias-m"),
+        )
+
+        frames = await _collect(lifecycle.events())
+
+        payload = "".join(frames)
+        assert '"model":"upstream-m"' not in payload
+        assert payload.count('"model":"alias-m"') == 2
+
     async def test_native_openresponses_done_marker_skipped_after_cancel(self) -> None:
         token = asyncio.Event()
         token.set()
@@ -568,6 +648,21 @@ class TestIterateChunksWithComments:
         assert "comment" in kinds
         assert got[-1] == ("chunk", "a")
         assert sum(1 for kind, _ in got if kind == "comment") >= 2
+
+    async def test_chunk_arriving_at_timeout_boundary_is_not_lost(self) -> None:
+        """Regression: when the pump finishes between the heartbeat timeout
+        and the consumer's next read, the queued chunks must still drain
+        (the pump-done early return must only fire on an empty queue)."""
+        for _ in range(20):
+            got = [
+                (kind, payload)
+                async for kind, payload in iterate_chunks_with_comments(
+                    _stream("a", delay=0.02), interval=0.01, comment=": ping\n\n"
+                )
+            ]
+            assert ("chunk", "a") in got
+            # The chunk is always the last data frame before exhaustion.
+            assert got[-1] == ("chunk", "a")
 
     async def test_non_positive_interval_falls_back_to_default(self) -> None:
         got = [

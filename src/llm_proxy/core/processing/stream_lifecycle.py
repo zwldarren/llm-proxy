@@ -120,36 +120,55 @@ async def iterate_chunks_with_comments(
 ):
     """Iterate stream chunks, emitting an SSE comment during silent gaps.
 
-    The upstream iterator itself is never cancelled: a cancelled ``anext``
-    would inject a ``CancelledError`` into the provider stream and
-    truncate it. One racing task is instead awaited repeatedly between
-    comment emissions, so silence yields comments and data resumes from
-    the same in-flight read.
+    A single pump task owns the upstream iterator and feeds a bounded queue,
+    so the per-chunk cost is a queue handoff rather than a fresh task plus
+    ``asyncio.wait`` per chunk. The upstream iterator itself is never
+    cancelled mid-stream: the pump is only cancelled here in the teardown
+    path (equivalent to the stream close the lifecycle performs anyway), and
+    heartbeat timeouts only interrupt the consumer's ``queue.get``, which is
+    cancellation-safe and loses no data. The bounded queue preserves
+    backpressure for slow clients.
     """
     if interval <= 0:
         interval = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
-    iterator = aiter(stream)
-    while True:
-        chunk_task: asyncio.Task = asyncio.ensure_future(anext(iterator))
+
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=256)
+
+    async def _pump() -> None:
         try:
-            while True:
-                done, _ = await asyncio.wait({chunk_task}, timeout=interval)
-                if done:
-                    try:
-                        chunk = chunk_task.result()
-                    except StopAsyncIteration:
-                        return
-                    yield ("chunk", chunk)
-                    break
+            async for chunk in stream:
+                await queue.put(("chunk", chunk))
+            await queue.put(("end", None))
+        except Exception as e:
+            await queue.put(("error", e))
+
+    pump_task = asyncio.ensure_future(_pump())
+    try:
+        while True:
+            try:
+                kind, payload = await asyncio.wait_for(queue.get(), timeout=interval)
+            except TimeoutError:
+                if pump_task.done() and queue.empty():
+                    # The pump died without delivering end/error (only
+                    # possible via external cancellation): stop instead of
+                    # heartbeating forever. A done pump with a non-empty
+                    # queue is just a consumer lagging behind — drain on.
+                    return
                 if comment is not None:
                     # Comments bypass the chunk transformer: they are not
                     # protocol data, just raw SSE comment frames.
                     yield ("comment", comment)
-        finally:
-            if not chunk_task.done():
-                chunk_task.cancel()
-                with suppress(Exception):
-                    await chunk_task
+                continue
+            if kind == "end":
+                return
+            if kind == "error":
+                raise payload
+            yield ("chunk", payload)
+    finally:
+        if not pump_task.done():
+            pump_task.cancel()
+            with suppress(Exception, asyncio.CancelledError):
+                await pump_task
 
 
 class StreamLifecycle:
@@ -304,6 +323,12 @@ class StreamLifecycle:
 
     async def _replay_first_chunks(self) -> AsyncIterator[str]:
         for chunk in self.first_chunks:
+            if self.native_streaming:
+                # Peeked native blocks must get the same bookkeeping as
+                # pumped ones (model-alias rewrite, usage capture).
+                chunk = self._shape_native_chunk(chunk)
+                if chunk is None:
+                    continue
             if self.first_chunk_time is None:
                 self.first_chunk_time = datetime.now(UTC)
             if self.event_context is not None:
@@ -332,6 +357,10 @@ class StreamLifecycle:
 
             if self.native_streaming:
                 chunk = self._shape_native_chunk(chunk)
+                if chunk is None:
+                    # Bookkeeping-only frame (e.g. a usage frame the client
+                    # did not ask for): captured, not emitted.
+                    continue
                 await self.tracing_registry.on_stream_chunk(
                     self.stream_request, chunk, self.event_context
                 )
@@ -352,7 +381,11 @@ class StreamLifecycle:
                     break
 
     def _shape_native_chunk(self, chunk: Any) -> Any:
-        """Rewrite a native passthrough chunk per protocol before emitting."""
+        """Rewrite a native passthrough chunk per protocol before emitting.
+
+        Returns the frame to emit, or None to swallow it (bookkeeping-only
+        frames).
+        """
         handler = self.native_passthrough_handler
         if isinstance(chunk, str) and contains_sse_event(chunk, "message_start"):
             # Mask the upstream's internal model name with the
@@ -362,6 +395,10 @@ class StreamLifecycle:
             )
         if self.protocol_name == "anthropic":
             handler.maybe_capture_native_streaming_usage(chunk, self.event_context)
+        elif self.protocol_name == "openai":
+            chunk = handler.handle_native_openai_chunk(
+                chunk, self.stream_request, self.event_context
+            )
         elif self.protocol_name == "openresponses":
             # The snapshot's model is rewritten to the client-requested
             # alias (see InternalRequest.echo_model) so the native stream

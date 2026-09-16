@@ -54,12 +54,6 @@ from llm_proxy.serialization.openai.serializer import parse_usage_from_response
 class NativePassthroughChatBase(OpenAICompatibleBase):
     """OpenAI-compatible chat base + declared native Anthropic/Responses endpoints."""
 
-    #: Default of the ``native_passthrough`` provider-metadata switch. Adapters
-    #: whose native endpoints need a recent engine version (or are only
-    #: partially implemented) set this to False, making the flag an explicit
-    #: opt-in (``native_passthrough: true``) instead of a kill switch.
-    NATIVE_PASSTHROUGH_DEFAULT: bool = True
-
     #: Full default URL of the native Anthropic Messages endpoint. None falls
     #: back to ``{native_root}{ANTHROPIC_MESSAGES_PATH}``.
     ANTHROPIC_MESSAGES_URL: str | None = None
@@ -77,14 +71,10 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
     # ------------------------------------------------------------------
     # Passthrough gate & veto
     # ------------------------------------------------------------------
-
-    def _native_passthrough_enabled(self) -> bool:
-        """Provider-metadata switch (``native_passthrough``).
-
-        Relays that mirror only the Chat Completions endpoint can opt out;
-        both the request and the stream side honor the flag.
-        """
-        return bool(self._extra_config.get("native_passthrough", self.NATIVE_PASSTHROUGH_DEFAULT))
+    # ``_native_passthrough_enabled`` / ``NATIVE_PASSTHROUGH_DEFAULT`` live on
+    # OpenAICompatibleBase (shared with the chat-completions native stream
+    # tier); relays that mirror only the Chat Completions endpoint can opt
+    # out, and both the request and the stream side honor the flag.
 
     def supports_native_request(
         self, protocol_name: str | None, request: InternalRequest | None = None
@@ -257,7 +247,14 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
         """Stream protocol-native SSE blocks verbatim from the native endpoint.
 
         Only called when ``plan_conversion`` (stream_mode) accepted the request.
+        Chat Completions (openai) frames delegate to the OpenAICompatibleBase
+        implementation; Anthropic/Responses frames use the declared native
+        endpoints.
         """
+        if request.protocol_name == "openai":
+            return await super().stream_chat_completion_native(
+                request, cancel_token=cancel_token, **kwargs
+            )
         url, body = self._native_request_parts(request, stream=True)
         return self._with_retry_generator(
             lambda: self._stream_raw_sse(url, body, cancel_token),

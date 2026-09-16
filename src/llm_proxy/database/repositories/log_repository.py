@@ -258,17 +258,21 @@ class LogRepository(BaseUsageRepository):
 
         values = await self._build_filtered_insert_values(logs)
 
-        # Detect dialect and use appropriate upsert syntax
+        # Detect dialect and use appropriate upsert syntax. The dicts are
+        # passed as executemany parameters (no ``.values(list)``) so the
+        # statement compiles once regardless of batch size — a multi-row
+        # VALUES clause keys the compilation cache on the row count and would
+        # recompile for every distinct batch size.
         dialect_name = self.session.bind.dialect.name if self.session.bind else "sqlite"
 
         if dialect_name == "postgresql":
             # PostgreSQL: use ON CONFLICT DO NOTHING
-            stmt = pg_insert(RequestLog).values(values).on_conflict_do_nothing()
+            stmt = pg_insert(RequestLog).on_conflict_do_nothing()
         else:
             # SQLite: use OR IGNORE prefix
-            stmt = sqlite_insert(RequestLog).values(values).prefix_with("OR IGNORE")
+            stmt = sqlite_insert(RequestLog).prefix_with("OR IGNORE")
 
-        await self.session.execute(stmt)
+        await self.session.execute(stmt, values)
         return len(values)
 
     async def _supports_integrity(self) -> bool:

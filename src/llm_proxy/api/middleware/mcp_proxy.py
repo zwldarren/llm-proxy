@@ -31,6 +31,7 @@ from llm_proxy.api.error_responses import (
 from llm_proxy.api.middleware.api_key_cache import (
     CachedApiKey,
     VerifiedKeyInfo,
+    claim_last_used_update,
     get_api_key_cache,
     get_budget_spend_cache,
     get_cached_api_keys,
@@ -38,7 +39,7 @@ from llm_proxy.api.middleware.api_key_cache import (
     hash_api_key_for_cache,
 )
 from llm_proxy.api.middleware.api_key_cache import (
-    update_key_last_used as _update_key_last_used,
+    persist_key_last_used as _update_key_last_used,
 )
 from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 from llm_proxy.api.middleware.security import (
@@ -656,7 +657,10 @@ class MCPProxyMiddleware:
             return
 
         lockout_manager.clear_failed_attempts(client_ip)
-        asyncio.create_task(_update_key_last_used(auth_info["principal_id"]))
+        # Claim the throttle slot synchronously so throttled requests never
+        # pay asyncio task-creation cost (mirrors api_key_auth dispatch).
+        if claim_last_used_update(auth_info["principal_id"]):
+            asyncio.create_task(_update_key_last_used(auth_info["principal_id"]))
 
         # Surface the main FastAPI app in the scope so the mounted MCP proxy can
         # reach app.state.mcp_manager.
