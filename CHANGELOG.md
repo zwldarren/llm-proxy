@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.5](https://github.com/zwldarren/llm-proxy/compare/v0.2.4...v0.2.5) (2026-09-17)
+
+
+### Features
+
+* **chat:** made the console protocol-aware per endpoint ([e9217fe](https://github.com/zwldarren/llm-proxy/commit/e9217fed90423b4ce5007e757d7003dce96e1216))
+
+
+### Bug Fixes
+
+* **security:** disable login lockout by default and stream-measure body limits ([ada53a5](https://github.com/zwldarren/llm-proxy/commit/ada53a5c82de99dd22f59ff38d04d4c7ffba0e78))
+* **usage:** dedup cache-read tokens across dialect columns ([8999150](https://github.com/zwldarren/llm-proxy/commit/8999150cf94abdee7974bbccdf0e9a59b32b4838))
+
+
+### Performance Improvements
+
+* **api:** skip idle middleware and trim per-request allocations ([90f1881](https://github.com/zwldarren/llm-proxy/commit/90f188198df8d57f1274a7c7d1d53bc23348eb84))
+* **deploy:** multi-worker defaults and a bounded database pool ([8836ddc](https://github.com/zwldarren/llm-proxy/commit/8836ddc23b6780324f01ed849a7475ea1c3ecd9c))
+* **http:** added an aiohttp outbound backend ([902d76e](https://github.com/zwldarren/llm-proxy/commit/902d76e88ea799980287614d5255a1da72a3eccb))
+* **proxy:** cut per-request CPU on the gateway hot path ([17f7322](https://github.com/zwldarren/llm-proxy/commit/17f732254db1aa53e9108555bd2b6b013351431b))
+
 ## [0.2.4](https://github.com/zwldarren/llm-proxy/compare/v0.2.3...v0.2.4) (2026-09-15)
 
 
