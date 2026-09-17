@@ -787,8 +787,10 @@ def test_build_provider_request_stream_without_stream_options_injects_include_us
     terminal usage chunk otherwise, so message_delta usage arrives as zeros
     and input/output/cache billing is silently lost (estimation fallback is
     less accurate than provider-reported usage). Non-streaming bodies stay
-    untouched, and clients that explicitly sent stream_options keep their
-    exact semantics (see the include_usage=false test above)."""
+    untouched, and an explicit ``include_usage=false`` is overridden too (see
+    ``test_build_provider_request_respects_stream_usage_false`` above) — the
+    adapter applies the same rule to the raw-reuse tiers, which never reach this
+    builder (tests/core/test_conversion_tiers.py::TestTierIndependentStreamUsage)."""
     request = InternalRequest(
         model="gpt-4",
         conversation=ConversationContext(

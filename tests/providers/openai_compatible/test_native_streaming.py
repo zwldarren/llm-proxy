@@ -1,17 +1,27 @@
 """Native chat-completions streaming passthrough (openai protocol).
 
 Covers the OpenAICompatibleBase native stream tier: capability gating
-(``native_passthrough`` flag, reasoning-echo veto), body preparation
-(forced ``include_usage``), and the verbatim-frame bookkeeping in
-``NativePassthroughHandler.handle_native_openai_chunk``.
+(``native_passthrough`` flag, reasoning-echo veto), body preparation (the native
+stream sends the body the converted-path builder produced, including the forced
+``include_usage`` — the forcing itself lives on the shared convergence point and
+is covered by ``tests/core/test_conversion_tiers.py``), and the verbatim-frame
+bookkeeping in ``NativePassthroughHandler.handle_native_openai_chunk``.
 """
 
+import copy
 from unittest.mock import MagicMock
 
 import pytest
 
 from llm_proxy.core.conversion import NativePassthroughHandler, plan_conversion
-from llm_proxy.models import ConversionTier
+from llm_proxy.models import (
+    ConversationContext,
+    ConversionTier,
+    InternalRequest,
+    Message,
+    TextBlock,
+)
+from llm_proxy.models.types import StreamOptions
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
 
 
@@ -29,6 +39,28 @@ def _request(model: str = "glm-5") -> MagicMock:
     req.protocol_name = "openai"
     req.native_request_disabled = False
     req._raw_protocol_data = None
+    return req
+
+
+def _request_with_stash(
+    raw: dict, model: str = "glm-5", stream_options: StreamOptions | None = None
+) -> InternalRequest:
+    """A real request (not a MagicMock) so ``_stream_body`` can actually build.
+
+    The native-stream tests below must exercise the real builder: the forced
+    ``include_usage`` is applied on the shared convergence point inside it, and a
+    stubbed ``_stream_body`` would test a path that no longer exists.
+    """
+    req = InternalRequest(
+        model=model,
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="hi")])]
+        ),
+        stream=True,
+        stream_options=stream_options,
+    )
+    req.metadata.protocol_name = "openai"
+    req._raw_protocol_data = copy.deepcopy(raw)
     return req
 
 
@@ -61,7 +93,12 @@ class TestNativeStreamingGate:
 
 
 class TestNativeStreamBody:
-    async def test_forces_include_usage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_body_is_the_builder_output_with_forced_include_usage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The native stream sends exactly what the converted-path builder built:
+        a client body that omitted ``stream_options`` arrives with
+        ``include_usage`` forced on."""
         adapter = _adapter()
         captured: dict = {}
 
@@ -76,19 +113,23 @@ class TestNativeStreamBody:
             return gen()
 
         monkeypatch.setattr(adapter, "_stream_raw_sse", fake_raw_sse)
-        monkeypatch.setattr(
-            adapter,
-            "_stream_body",
-            lambda request: {"model": request.model, "stream": True},
-        )
 
-        stream = await adapter.stream_chat_completion_native(_request())
+        req = _request_with_stash(
+            {
+                "model": "glm-5",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            }
+        )
+        stream = await adapter.stream_chat_completion_native(req)
         assert [chunk async for chunk in stream] == ["data: [DONE]\n\n"]
 
         assert captured["url"] == "https://upstream.example/v1/chat/completions"
         assert captured["body"]["stream_options"] == {"include_usage": True}
 
     async def test_preserves_client_stream_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A client's other ``stream_options`` keys survive the forced-usage rule
+        (it overrides ``include_usage`` only)."""
         adapter = _adapter()
         captured: dict = {}
 
@@ -102,21 +143,21 @@ class TestNativeStreamBody:
             return gen()
 
         monkeypatch.setattr(adapter, "_stream_raw_sse", fake_raw_sse)
-        monkeypatch.setattr(
-            adapter,
-            "_stream_body",
-            lambda request: {
-                "model": request.model,
-                "stream": True,
-                "stream_options": {"include_obfuscation": False},
-            },
-        )
 
-        stream = await adapter.stream_chat_completion_native(_request())
+        req = _request_with_stash(
+            {
+                "model": "glm-5",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+                "stream_options": {"include_usage": False, "include_obfuscation": False},
+            },
+            stream_options=StreamOptions(include_usage=False, include_obfuscation=False),
+        )
+        stream = await adapter.stream_chat_completion_native(req)
         assert [chunk async for chunk in stream] == []
         assert captured["body"]["stream_options"] == {
-            "include_obfuscation": False,
             "include_usage": True,
+            "include_obfuscation": False,
         }
 
 

@@ -47,6 +47,28 @@ The composition now has a single owner, `core/processing/stages/composition.py`:
 
 A regression test (`tests/core/processing/test_stage_composition.py`) pins the contract: a sentinel stage appended to the composition runs on the fallback re-parse path and appears in `UnifiedProcessor._stages`.
 
+## Addendum: the forced usage chunk was missing on the raw-reuse path (2026-09-17)
+
+This ADR declared `stream_options.include_usage` non-client-controllable, and its own
+commit removed the enforcement that made that true for the wire-compatible fast path:
+the forcing step sat *after* `build_provider_request`'s fast-path/rebuild branch, and
+the commit deleted it while adding the rule to two tier-specific sites (the request
+builder's `_build_stream_options` and `stream_chat_completion_native`). The fast path —
+later `prepare_wire_reuse_body`, after ADR-0011 — was left uncovered.
+
+Effect: every openai-protocol streaming request whose provider could not serve a
+native stream lost the terminal usage chunk unless it asked for it explicitly, so
+billing fell back to tiktoken estimation. That covered DeepSeek (whose
+`_requires_reasoning_echo` always vetoes native streaming), vLLM and SGLang (which set
+`NATIVE_PASSTHROUGH_DEFAULT = False`) and OpenAI-compatible providers serving
+`deepseek`/`kimi`-marked models. ADR-0011's seam test then pinned the preserved
+`include_usage: false` while asserting an unrelated (copy-discipline) property, so the
+violation was enforced rather than caught.
+
+The rule now lives on a path all tiers converge on
+(`OpenAICompatibleBase._force_include_usage`), and a tier field-parity test guards the
+whole class — see ADR-0017. The claim in Consequences below holds again for every tier.
+
 ## Consequences
 
 - Fallback attempts are independent: each provider re-parses from the pristine body, re-applies its own overrides, and re-evaluates per-provider stages.

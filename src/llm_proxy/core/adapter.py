@@ -52,6 +52,14 @@ class BaseAdapter(ABC):
     #: Also keep this set disjoint from the provider serializer's
     #: ``compatible_protocols`` (wire-reuse tier); tests/core/test_conversion_tiers.py
     #: enforces both properties.
+    #:
+    #: This list covers *repairs* the canonical path performs. It deliberately
+    #: omits fields the proxy FORCES on the outbound body (e.g.
+    #: ``stream_options.include_usage``): a forced field is tier-independent and
+    #: must be enforced on a path that every tier converges on, so it is not a
+    #: bypass-list entry in the first place. Putting one in a single tier's
+    #: builder is the bug ADR-0017 records, and
+    #: ``TestTierFieldParity`` fails if the tiers' field sets diverge.
     native_protocols: ClassVar[frozenset[str]] = frozenset()
 
     def __init__(self, **kwargs: Any) -> None:

@@ -100,7 +100,40 @@ class OpenAICompatibleBase(
         preferred = self._reasoning_field_preference()
         model = body.get("model")
         body = builder.normalize_reasoning_for_request(body, self._base_url, preferred, model=model)
-        return self._enforce_reasoning_echo(body, request, preferred, model=model)
+        body = self._enforce_reasoning_echo(body, request, preferred, model=model)
+        return self._force_include_usage(body)
+
+    @staticmethod
+    def _force_include_usage(body: dict[str, Any]) -> dict[str, Any]:
+        """Force ``stream_options.include_usage`` on streaming bodies (ADR-0008).
+
+        The client must not be able to disable the terminal usage chunk: without
+        it billing silently degrades to token estimation (``observability/cost``).
+        The invariant was enforced on the rebuild tier
+        (``OpenAIRequestBuilder._build_stream_options``) and on the native-stream
+        tier (a copy in ``stream_chat_completion_native``, since removed) only, so
+        the wire-reuse tier — whose body is copied verbatim from the client stash —
+        bypassed both and dropped the chunk for every streaming request that did not
+        already ask for it (deepseek/kimi models, vLLM, SGLang). Every tier's
+        streaming body converges here, so the rule lives here rather than being
+        replicated per tier.
+
+        Rebuilds the nested ``stream_options`` dict rather than mutating it in
+        place: on the wire-reuse tier that dict is shared with the stashed raw
+        protocol body (ADR-0005, ADR-0011).
+
+        ``stream_options`` is a Chat Completions field, and the body reaching
+        this method is always this family's own Chat Completions build: a
+        verbatim native Anthropic Messages / Responses body is prepared by
+        ``prepare_native_body`` and never routed here (see
+        ``NativePassthroughChatBase._native_request_parts``).
+        """
+        if not body.get("stream"):
+            return body
+        stream_options = dict(body.get("stream_options") or {})
+        stream_options["include_usage"] = True
+        body["stream_options"] = stream_options
+        return body
 
     def _enforce_reasoning_echo(
         self,
@@ -334,14 +367,12 @@ class OpenAICompatibleBase(
         The request body is built by the regular converted-path builder, so
         provider-specific request logic (reasoning normalization, reasoning
         echo) still applies; only the response side skips the per-chunk
-        dict → transformer round-trip. ``include_usage`` is forced so the
-        terminal usage frame keeps billing working (ADR-0008).
+        dict → transformer round-trip. The forced ``include_usage`` is
+        inherited from ``_stream_body`` → ``_build_request_body`` — the
+        convergence point every tier shares (ADR-0017).
         """
         url = self._stream_url(request)
         body = self._stream_body(request)
-        stream_options = dict(body.get("stream_options") or {})
-        stream_options["include_usage"] = True
-        body["stream_options"] = stream_options
         return self._with_retry_generator(
             lambda: self._stream_raw_sse(url, body, cancel_token),
             cancel_token=cancel_token,
