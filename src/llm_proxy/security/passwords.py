@@ -63,11 +63,19 @@ SENSITIVE_KEYS: frozenset[str] = frozenset(
     }
 )
 
+#: Equivalent to ``any(pattern in key.lower() for pattern in SENSITIVE_KEYS)``
+#: but evaluated as one case-insensitive substring scan per header instead of
+#: 17 ``in`` checks. Header masking runs on every logged request (request and
+#: response headers), so this is a measurable hot-path saving.
+_SENSITIVE_HEADER_RE = re.compile(
+    "|".join(re.escape(pattern) for pattern in sorted(SENSITIVE_KEYS)),
+    re.IGNORECASE,
+)
+
 
 def mask_headers(headers: dict[str, str]) -> dict[str, str]:
     return {
-        key: "***" if any(pattern in key.lower() for pattern in SENSITIVE_KEYS) else value
-        for key, value in headers.items()
+        key: "***" if _SENSITIVE_HEADER_RE.search(key) else value for key, value in headers.items()
     }
 
 

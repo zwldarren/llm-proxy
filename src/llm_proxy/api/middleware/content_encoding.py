@@ -24,12 +24,14 @@ import zlib
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.types import Scope
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
     BodyTooLargeError,
     CoreASGIMiddleware,
     adapt_http_middleware,
+    get_scope_header,
 )
 from llm_proxy.observability.logger import get_logger
 
@@ -235,6 +237,12 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
 
 class ContentEncodingMiddleware(CoreASGIMiddleware):
     """Pure-ASGI request body decompression."""
+
+    def should_handle(self, scope: Scope) -> bool:
+        if scope.get("method") not in ("POST", "PUT", "PATCH"):
+            return False
+        header = get_scope_header(scope, "content-encoding")
+        return bool(header) and header.lower().strip() != _IDENTITY
 
     async def dispatch(self, request: Request, body: BodyReader) -> JSONResponse | None:
         return await _dispatch(request, body)

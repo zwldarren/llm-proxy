@@ -403,10 +403,11 @@ class _HttpxSession:
 class AsyncSession:
     """Outbound HTTP session that dispatches to the configured backend.
 
-    ``HTTP_CLIENT_BACKEND`` selects the implementation: ``httpx2`` (default) or
-    ``aiohttp``. Both expose the same surface, and the aiohttp backend
-    translates transport failures into httpx2 exceptions so retry and error
-    classification are unchanged.
+    ``HTTP_CLIENT_BACKEND`` selects the implementation: ``auto`` (default),
+    ``httpx2`` or ``aiohttp``. ``auto`` picks aiohttp unless an outbound proxy
+    is configured (see ``HTTPSettings.effective_client_backend``). Both expose
+    the same surface, and the aiohttp backend translates transport failures
+    into httpx2 exceptions so retry and error classification are unchanged.
     """
 
     def __init__(
@@ -417,7 +418,7 @@ class AsyncSession:
         max_keepalive_connections: int | None = None,
         **kwargs,
     ):
-        if get_settings().http.client_backend == "aiohttp":
+        if get_settings().http.effective_client_backend() == "aiohttp":
             from llm_proxy.http.aiohttp_backend import AiohttpSession
 
             self._impl = AiohttpSession(

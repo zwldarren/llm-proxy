@@ -6,6 +6,7 @@ Dynamic runtime configuration (providers, models, server config from DB)
 continues to live in ``DatabaseConfigManager``.
 """
 
+import os
 import threading
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -85,6 +86,18 @@ class DBSettings(BaseSettings):
     pool_timeout_seconds: int = Field(default=30, alias="DB_POOL_TIMEOUT_SECONDS", ge=1)
 
 
+#: Environment variables that, when set, mean an outbound proxy is in use.
+#: Kept at module scope so the Pydantic settings model does not treat it as a field.
+_PROXY_ENV_VARS: tuple[str, ...] = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+
+
 class HTTPSettings(BaseSettings):
     """HTTP client-related environment variables."""
 
@@ -97,11 +110,15 @@ class HTTPSettings(BaseSettings):
         ge=0,
     )
     disable_http2: bool = Field(default=True, alias="HTTP_DISABLE_HTTP2")
-    # Outbound HTTP backend. "httpx2" is the default; "aiohttp" is a faster
-    # implementation of the same surface (see llm_proxy.http.aiohttp_backend),
-    # measured at ~3.5x lower CPU per request on the gateway hot path.
-    client_backend: Literal["httpx2", "aiohttp"] = Field(
-        default="httpx2", alias="HTTP_CLIENT_BACKEND"
+    # Outbound HTTP backend. "auto" (default) picks aiohttp unless an outbound
+    # proxy is configured; "httpx2"/"aiohttp" force one implementation.
+    # aiohttp (see llm_proxy.http.aiohttp_backend) is a faster implementation
+    # of the same surface — measured at ~1.6x the throughput and ~45% lower
+    # CPU per request on the gateway hot path — but it does not honour
+    # HTTP_PROXY/HTTPS_PROXY, so "auto" falls back to httpx2 when a proxy is
+    # set. See :meth:`HTTPSettings.effective_client_backend`.
+    client_backend: Literal["auto", "httpx2", "aiohttp"] = Field(
+        default="auto", alias="HTTP_CLIENT_BACKEND"
     )
     # Comma-separated hostnames/IPs exempt from the SSRF private-address ban
     # in validate_server_url. Needed for self-hosted providers on private
@@ -109,6 +126,20 @@ class HTTPSettings(BaseSettings):
     # docker-compose network). Off by default: every entry weakens SSRF
     # protection, so list only what you control.
     allowed_hosts: str = Field(default="", alias="HTTP_ALLOWED_HOSTS")
+
+    def effective_client_backend(self) -> Literal["httpx2", "aiohttp"]:
+        """Resolve the backend to use, applying the ``auto`` policy.
+
+        ``auto`` selects aiohttp unless an outbound proxy environment variable
+        is set: aiohttp's connector does not read the proxy variables, so
+        silently switching a proxy-routed deployment to it would bypass the
+        proxy. In that case httpx2 (which honours them) is kept.
+        """
+        if self.client_backend != "auto":
+            return self.client_backend
+        if any(os.environ.get(var) for var in _PROXY_ENV_VARS):
+            return "httpx2"
+        return "aiohttp"
 
 
 # Networks trusted to set forwarded headers (X-Forwarded-For / X-Real-IP).

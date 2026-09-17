@@ -16,6 +16,7 @@ from urllib.parse import parse_qsl
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.types import Scope
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
@@ -24,6 +25,9 @@ from llm_proxy.api.middleware.asgi_utils import (
 )
 
 _FORM_ENCODED = "application/x-www-form-urlencoded"
+
+#: Only this canonical path accepts form encoding; the alias paths do not.
+_RESPONSES_PATH = "/v1/responses"
 
 # Form fields whose values are structured (JSON) rather than plain strings.
 _JSON_FIELDS = frozenset(
@@ -54,7 +58,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     content_type = request.headers.get("content-type", "")
     if not (
         request.method == "POST"
-        and request.url.path == "/v1/responses"
+        and request.url.path == _RESPONSES_PATH
         and content_type.startswith(_FORM_ENCODED)
     ):
         return None
@@ -85,6 +89,9 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
 
 class FormEncodedMiddleware(CoreASGIMiddleware):
     """Pure-ASGI form-encoded to JSON conversion for /v1/responses."""
+
+    def should_handle(self, scope: Scope) -> bool:
+        return scope.get("path") == _RESPONSES_PATH and scope.get("method") == "POST"
 
     async def dispatch(self, request: Request, body: BodyReader) -> JSONResponse | None:
         return await _dispatch(request, body)

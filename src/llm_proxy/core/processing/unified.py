@@ -148,7 +148,11 @@ class UnifiedProcessor:
 
         should_log_input_output = logging_config.log_input_output
 
-        request_headers = dict(request.headers)
+        # Only snapshot the headers when the sampler will actually keep them:
+        # the audit handler masks request headers only for captured requests
+        # and stores `{}` for sampled-out ones, so the copy would be wasted on
+        # the (default) high-volume path where full bodies are dropped.
+        request_headers = dict(request.headers) if sampling.should_capture_full_body else {}
         identity = get_request_identity(request)
 
         event_context = EventContext(

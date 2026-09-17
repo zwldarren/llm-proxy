@@ -27,6 +27,7 @@ from llm_proxy.api.context import (
     build_translation_request_context,
 )
 from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
+from llm_proxy.api.fast_path import FastPathEntry
 from llm_proxy.api.keepalive import (
     await_with_disconnect_monitor,
     await_with_keepalive,
@@ -372,6 +373,7 @@ def create_protocol_router(
     endpoint: ProtocolEndpoint,
     *,
     include_docs_endpoint: bool = False,
+    fast_path_registry: dict[str, FastPathEntry] | None = None,
 ) -> APIRouter:
     """Create a FastAPI router for a protocol endpoint.
 
@@ -381,6 +383,9 @@ def create_protocol_router(
     Args:
         endpoint: The protocol endpoint configuration
         include_docs_endpoint: Whether to include a protocol info endpoint
+        fast_path_registry: When provided, every JSON-body path of this endpoint
+            is registered for the exact-path ASGI fast path (see
+            :mod:`llm_proxy.api.fast_path`).
 
     Returns:
         Configured APIRouter instance
@@ -394,6 +399,15 @@ def create_protocol_router(
     request_model = endpoint.request_model
 
     endpoint_fn = _create_endpoint_fn(endpoint, middleware)
+
+    # Register the JSON-body paths for the exact-path ASGI fast path. Endpoints
+    # without a request_model (multipart uploads) parse the HTTP request
+    # themselves, so they stay on the FastAPI route.
+    if fast_path_registry is not None and request_model is not None:
+        for fast_path in _with_trailing_slash_variants(paths):
+            fast_path_registry[fast_path] = FastPathEntry(
+                request_model=request_model, handler=endpoint_fn
+            )
 
     # create_standard_router wraps the handler with create_traced_handler
     # itself; pre-wrapping here would double-wrap request_model=None endpoints
@@ -500,6 +514,7 @@ def create_protocol_list_router() -> APIRouter:
 
 def create_all_protocol_routers(
     include_docs_endpoint: bool = False,
+    fast_path_registry: dict[str, FastPathEntry] | None = None,
 ) -> list[APIRouter]:
     """Create routers for all registered protocols.
 
@@ -508,6 +523,8 @@ def create_all_protocol_routers(
 
     Args:
         include_docs_endpoint: Whether to include protocol info endpoints
+        fast_path_registry: Optional sink populated with exact-path fast-path
+            entries for every JSON-body protocol endpoint.
 
     Returns:
         List of APIRouter instances, one per registered protocol
@@ -524,7 +541,11 @@ def create_all_protocol_routers(
             logger.warning(f"Could not get protocol endpoint for '{protocol_name}'")
             continue
 
-        router = create_protocol_router(endpoint, include_docs_endpoint=include_docs_endpoint)
+        router = create_protocol_router(
+            endpoint,
+            include_docs_endpoint=include_docs_endpoint,
+            fast_path_registry=fast_path_registry,
+        )
         routers.append(router)
 
     logger.debug(f"Created {len(routers)} protocol routers")

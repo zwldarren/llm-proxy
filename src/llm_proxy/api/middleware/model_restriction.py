@@ -7,6 +7,7 @@ Handles per-API-key model restrictions for client API endpoints (/v1/*,
 import orjson
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.types import Scope
 
 from llm_proxy.api.middleware.api_key_auth import add_auth_failure_delay
 from llm_proxy.api.middleware.asgi_utils import (
@@ -145,6 +146,14 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
 
 class ModelRestrictionMiddleware(CoreASGIMiddleware):
     """Pure-ASGI per-key model restriction enforcement."""
+
+    def should_handle(self, scope: Scope) -> bool:
+        path = scope.get("path", "")
+        # /servers/* is JSON-RPC (no "model" field); reading its body would
+        # starve the mounted MCP proxy ASGI app.
+        if path.startswith("/servers/"):
+            return False
+        return path.startswith("/v1/") or protocol_name_for_path(path) is not None
 
     async def dispatch(self, request: Request, body: BodyReader) -> JSONResponse | None:
         return await _dispatch(request, body)

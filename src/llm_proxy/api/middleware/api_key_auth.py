@@ -11,6 +11,7 @@ import time
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
+from starlette.types import Scope
 
 from llm_proxy.api.error_responses import (
     ErrorResponseBuilder,
@@ -366,6 +367,14 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
 
 class ApiKeyAuthMiddleware(CoreASGIMiddleware):
     """Pure-ASGI API key authentication."""
+
+    def should_handle(self, scope: Scope) -> bool:
+        # CORS preflight carries no Authorization and must reach the CORS
+        # middleware; the path gate mirrors the dispatch-time early return.
+        if scope.get("method") == "OPTIONS":
+            return False
+        path = scope.get("path", "")
+        return path.startswith(("/v1/", "/servers/")) or protocol_name_for_path(path) is not None
 
     async def dispatch(self, request: Request, body: BodyReader) -> Response | None:
         return await _dispatch(request, body)

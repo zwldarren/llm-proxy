@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
 from llm_proxy import providers  # noqa: F401
+from llm_proxy.api.fast_path import FastPathEntry, install_protocol_fast_path
 from llm_proxy.api.lifecycle import (
     shutdown_services,
     startup_background_services,
@@ -204,7 +205,8 @@ def create_app() -> FastAPI:
 
     app.include_router(create_protocol_list_router())
 
-    for router in create_all_protocol_routers():
+    fast_path_registry: dict[str, FastPathEntry] = {}
+    for router in create_all_protocol_routers(fast_path_registry=fast_path_registry):
         app.include_router(router)
 
     register_exception_handlers(app)
@@ -238,6 +240,11 @@ def create_app() -> FastAPI:
         main_app=app,
         mcp_app=mcp_proxy_app,
     )
+
+    # Exact-path dispatch for the hot protocol endpoints, installed on the
+    # router so it runs inside the middleware stack and FastAPI's exception
+    # middleware. See llm_proxy.api.fast_path.
+    install_protocol_fast_path(app, fast_path_registry)
 
     return app
 

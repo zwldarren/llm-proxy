@@ -33,7 +33,7 @@ Pool sizes, timeouts, and background writer tuning. Change only if you know why.
 | `HTTP_MAX_CONNECTIONS` | `200` | httpx pool size for provider calls |
 | `HTTP_MAX_KEEPALIVE` | `200` | httpx keep-alive pool size |
 | `HTTP_DISABLE_HTTP2` | `true` | HTTP/2 is disabled by default |
-| `HTTP_CLIENT_BACKEND` | `httpx2` | Outbound HTTP backend: `httpx2` or `aiohttp`. `aiohttp` measured ~1.8x the throughput at ~45% lower CPU per request on the gateway hot path, but it does not honour `HTTP_PROXY`/`HTTPS_PROXY` |
+| `HTTP_CLIENT_BACKEND` | `auto` | Outbound HTTP backend: `auto`, `httpx2` or `aiohttp`. `auto` selects `aiohttp` (measured ~1.6x the throughput at ~45% lower CPU per request on the gateway hot path) unless an outbound proxy is configured, in which case it keeps `httpx2` because aiohttp does not honour `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` |
 | `DB_POOL_SIZE` | `min((cpu_count * 2 + 1) / workers, 80 / (2 * workers))`, min 1 | PostgreSQL pool size per worker process (ignored for SQLite). The second bound caps the total at ~80 connections (overflow defaults to the pool size) so N workers don't overrun `max_connections`. The `DB_POOL_SIZE=10` / `DB_MAX_OVERFLOW=10` lines in `.env.example` are examples, not the defaults |
 | `DB_MAX_OVERFLOW` | same as pool size | PostgreSQL overflow |
 | `DB_POOL_RECYCLE_SECONDS` | `3600` (min 60) | PostgreSQL connection recycle |

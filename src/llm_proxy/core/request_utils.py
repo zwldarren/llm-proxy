@@ -14,6 +14,10 @@ from llm_proxy.config.settings import get_settings
 
 _logger = logging.getLogger(__name__)
 
+# Per-request cache keys (live in the ASGI scope state).
+_CLIENT_IP_KEY = "_resolved_client_ip"
+_PEER_TRUSTED_KEY = "_peer_is_trusted_proxy"
+
 # Limit the number of X-Forwarded-For hops parsed to avoid O(n*m) DoS.
 MAX_XFF_HOPS = 50
 
@@ -89,18 +93,46 @@ def _rightmost_untrusted_ip(
     return last_valid_hop
 
 
+def _scope_state(request: Request) -> dict[str, object] | None:
+    """Return the per-request ASGI scope state dict, or None when unavailable.
+
+    Production requests always carry a mutable ``scope`` dict, so IP/trust
+    resolution computed once can be reused by every later call in the same
+    request (auth, rate limiting, audit). Test doubles may not expose
+    ``scope``; those fall back to recomputing on every call.
+    """
+    scope = getattr(request, "scope", None)
+    if not isinstance(scope, dict):
+        return None
+    return scope.setdefault("state", {})
+
+
 def peer_is_trusted_proxy(request: Request) -> bool:
     """Check whether the immediate TCP peer is in the configured TRUSTED_PROXIES.
 
     Returns False when the request has no client info or the peer IP is not a
     member of any configured trusted-proxy network. Use this to decide whether
     session/identity headers forwarded by a proxy may be trusted.
+
+    Memoised on the request scope: this is called several times per request
+    (context assembly, IP resolution) for a value that cannot change.
     """
+    state = _scope_state(request)
+    if state is not None:
+        cached = state.get(_PEER_TRUSTED_KEY)
+        if isinstance(cached, bool):
+            return cached
+
     if not request.client:
-        return False
-    peer_ip = request.client.host
-    trusted_networks = _parse_trusted_networks(get_settings().security.trusted_proxies)
-    return _is_trusted_proxy(peer_ip, trusted_networks)
+        result = False
+    else:
+        peer_ip = request.client.host
+        trusted_networks = _parse_trusted_networks(get_settings().security.trusted_proxies)
+        result = _is_trusted_proxy(peer_ip, trusted_networks)
+
+    if state is not None:
+        state[_PEER_TRUSTED_KEY] = result
+    return result
 
 
 def get_client_ip(request: Request) -> str:
@@ -120,6 +152,22 @@ def get_client_ip(request: Request) -> str:
     Set ``TRUSTED_PROXIES=`` (empty) to trust nobody and always use the peer IP
     — useful when the service is directly exposed to the public internet.
     """
+    # Memoised on the request scope: auth, rate limiting and audit each
+    # resolve the client IP, and the value is constant for the request.
+    state = _scope_state(request)
+    if state is not None:
+        cached = state.get(_CLIENT_IP_KEY)
+        if isinstance(cached, str):
+            return cached
+
+    client_ip = _compute_client_ip(request)
+
+    if state is not None:
+        state[_CLIENT_IP_KEY] = client_ip
+    return client_ip
+
+
+def _compute_client_ip(request: Request) -> str:
     if not request.client:
         _logger.warning("Request has no client info; cannot determine peer IP")
         return "unknown"

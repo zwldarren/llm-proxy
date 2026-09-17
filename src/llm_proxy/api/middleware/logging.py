@@ -199,9 +199,9 @@ class HttpLoggingMiddleware:
 
         start_time = time.perf_counter()
         body = BodyBuffer(receive)
-        request = Request(scope, body)
 
         if should_audit:
+            request = Request(scope, body)
             try:
                 # Capture and mask request headers
                 set_request_state(scope, "request_headers", mask_headers(dict(request.headers)))
@@ -250,7 +250,7 @@ class HttpLoggingMiddleware:
 
             error_message = get_request_state(scope, "error_message")
             _write_audit_log(
-                request=request,
+                request=Request(scope, body),
                 request_id=request_id,
                 status_code=status_code,
                 response_time_ms=response_time_ms,

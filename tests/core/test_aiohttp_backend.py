@@ -56,10 +56,25 @@ def test_translate_maps_transport_errors_to_httpx_types() -> None:
 def test_dispatcher_selects_aiohttp_backend(monkeypatch) -> None:
     import llm_proxy.http.client as client_module
 
-    settings = SimpleNamespace(http=SimpleNamespace(client_backend="aiohttp"))
+    settings = SimpleNamespace(http=SimpleNamespace(effective_client_backend=lambda: "aiohttp"))
     monkeypatch.setattr(client_module, "get_settings", lambda: settings)
     session = client_module.AsyncSession()
     assert isinstance(session._impl, AiohttpSession)
+
+
+def test_dispatcher_selects_httpx_backend(monkeypatch) -> None:
+    import llm_proxy.http.client as client_module
+
+    settings = SimpleNamespace(
+        http=SimpleNamespace(
+            effective_client_backend=lambda: "httpx2",
+            max_connections=200,
+            max_keepalive=200,
+        )
+    )
+    monkeypatch.setattr(client_module, "get_settings", lambda: settings)
+    session = client_module.AsyncSession()
+    assert not isinstance(session._impl, AiohttpSession)
 
 
 @pytest.fixture

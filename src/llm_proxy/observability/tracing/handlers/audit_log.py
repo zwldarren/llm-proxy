@@ -106,7 +106,31 @@ class AuditLogHandler(TracingHandler):
         self._config = config
         self._config_manager = config_manager
         self._usage_service = UsageService(retention_days=365)
+        # Lowercased sensitive-key set memoised against the LoggingConfig
+        # object it was derived from. ``resolve_logging_config`` returns the
+        # cached config object, so identity is stable until settings change;
+        # rebuilding this set on every request (as it did before) was a
+        # measurable per-request cost on the masking hot path.
+        self._sensitive_keys_cache: tuple[LoggingConfig, frozenset[str]] | None = None
         # Note: RequestLogService needs to be created lazily when config is available
+
+    def _sensitive_keys(self) -> frozenset[str]:
+        """Return the lowercased sensitive-key set for the current config.
+
+        The result is cached per LoggingConfig instance: the config object is
+        stable while a cached ProxyConfig is in force, so this avoids
+        rebuilding the lowered set twice per request. A config refresh swaps
+        in a new object and naturally invalidates the cache.
+        """
+        config = self._config
+        if config is None:
+            return frozenset()
+        cached = self._sensitive_keys_cache
+        if cached is not None and cached[0] is config:
+            return cached[1]
+        keys = frozenset(k.lower() for k in config.sensitive_keys)
+        self._sensitive_keys_cache = (config, keys)
+        return keys
 
     def _get_request_log_service(self):
         """Get or create RequestLogService.
@@ -357,10 +381,9 @@ class AuditLogHandler(TracingHandler):
         request_body = context.request_body
 
         if self._config and self._config.mask_sensitive_data:
-            sensitive_keys = frozenset(k.lower() for k in self._config.sensitive_keys)
             request_headers = mask_headers(request_headers)
             if context.should_capture_full_body and isinstance(request_body, dict):
-                request_body = mask_sensitive(request_body, sensitive_keys)
+                request_body = mask_sensitive(request_body, self._sensitive_keys())
 
         if not context.should_capture_full_body:
             return {}, {"_sampled_out": True}
@@ -383,10 +406,9 @@ class AuditLogHandler(TracingHandler):
         response_body = context.response_body
 
         if self._config and self._config.mask_sensitive_data:
-            sensitive_keys = frozenset(k.lower() for k in self._config.sensitive_keys)
             response_headers = mask_headers(response_headers)
             if context.should_capture_full_body and isinstance(response_body, dict):
-                response_body = mask_sensitive(response_body, sensitive_keys)
+                response_body = mask_sensitive(response_body, self._sensitive_keys())
 
         return response_headers, response_body
 

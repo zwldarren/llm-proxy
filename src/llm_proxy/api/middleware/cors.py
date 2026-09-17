@@ -52,6 +52,11 @@ def _resolve_allowed_origins(request: Request) -> list[str]:
     return []
 
 
+def _has_origin_header(scope: Scope) -> bool:
+    """Whether the raw ASGI headers carry an ``Origin`` (lowercased name)."""
+    return any(key == b"origin" for key, _ in scope.get("headers", ()))
+
+
 class CORSMiddleware:
     """Pure-ASGI CORS handling against the configured origins."""
 
@@ -60,6 +65,14 @@ class CORSMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast path: without an Origin header the request can never need CORS
+        # handling, so skip building a Request and resolving the config.
+        # Non-browser clients (SDKs) never send Origin, so this is the common
+        # path on the proxy's API traffic.
+        if not _has_origin_header(scope):
             await self.app(scope, receive, send)
             return
 

@@ -169,11 +169,22 @@ class CoreASGIMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
+    def should_handle(self, scope: Scope) -> bool:
+        """Cheap precondition checked before building a ``Request``.
+
+        Subclasses override this to skip request construction and dispatch on
+        scopes they can never affect (path/method/header gates). It must be a
+        pure check over the raw scope — no body reads, no config lookups — so
+        that bypassing is strictly cheaper than dispatching. Defaults to
+        ``True``, preserving the always-run behaviour.
+        """
+        return True
+
     async def dispatch(self, request: Request, body: BodyReader) -> Response | None:
         raise NotImplementedError
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or not self.should_handle(scope):
             await self.app(scope, receive, send)
             return
 
@@ -225,6 +236,19 @@ def get_response_header(message: Message, name: str) -> str | None:
     """Return a response header value from an ``http.response.start`` message."""
     wanted = name.lower().encode("latin-1")
     for key, value in message.get("headers", []):
+        if key.lower() == wanted:
+            return value.decode("latin-1")
+    return None
+
+
+def get_scope_header(scope: Scope, name: str) -> str | None:
+    """Return a request header value from a raw ASGI scope (case-insensitive).
+
+    Used by ``should_handle`` gates to inspect a header without constructing a
+    ``Request``.
+    """
+    wanted = name.lower().encode("latin-1")
+    for key, value in scope.get("headers", ()):
         if key.lower() == wanted:
             return value.decode("latin-1")
     return None

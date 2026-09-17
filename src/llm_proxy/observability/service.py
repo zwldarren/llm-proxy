@@ -510,13 +510,49 @@ def _json_safe(value: Any) -> Any:
     whole batch write fails, eventually tripping the writer's circuit
     breaker. Binary values are replaced with a small placeholder that keeps
     the byte count for forensics without bloating the log row.
+
+    Containers that need no substitution are returned as the *same object*
+    (no defensive copy): this runs on every log row and most payloads are
+    plain JSON scalars/nested dicts with no bytes, so avoiding the recursion
+    and the copies is a measurable hot-path saving. Callers must therefore
+    treat the result as read-only when they also hold the input.
     """
     if isinstance(value, (bytes, bytearray)):
         return {"$binary": True, "size": len(value)}
     if isinstance(value, dict):
-        return {key: _json_safe(item) for key, item in value.items()}
+        result: dict[Any, Any] | None = None
+        for key, item in value.items():
+            if isinstance(item, (bytes, bytearray)):
+                if result is None:
+                    result = dict(value)
+                result[key] = {"$binary": True, "size": len(item)}
+            elif isinstance(item, (dict, list, tuple)):
+                safe = _json_safe(item)
+                if safe is not item:
+                    if result is None:
+                        result = dict(value)
+                    result[key] = safe
+        return value if result is None else result
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
+        converted: list[Any] = []
+        changed = False
+        for item in value:
+            if isinstance(item, (bytes, bytearray)):
+                converted.append({"$binary": True, "size": len(item)})
+                changed = True
+            elif isinstance(item, (dict, list, tuple)):
+                safe = _json_safe(item)
+                converted.append(safe)
+                if safe is not item:
+                    changed = True
+            else:
+                converted.append(item)
+        # Lists that needed no substitution are reused; tuples always become
+        # lists (JSON array semantics), so a plain list is only reused when
+        # the input already was one.
+        if not changed and isinstance(value, list):
+            return value
+        return converted
     return value
 
 

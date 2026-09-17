@@ -6,6 +6,7 @@ Handles JWT bearer token verification for admin API endpoints.
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
+from starlette.types import Scope
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
@@ -167,6 +168,17 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
 
 class JWTAuthMiddleware(CoreASGIMiddleware):
     """Pure-ASGI JWT authentication for the admin API."""
+
+    def should_handle(self, scope: Scope) -> bool:
+        """JWT is only ever relevant to the ``/api/*`` admin surface.
+
+        ``/v1/*`` and ``/servers/*`` authenticate with API keys, so skipping
+        here avoids a ``Request`` plus a config fetch per proxy request. The
+        dispatch-time ``set_request_identity(RequestIdentity())`` is not lost:
+        ``get_request_identity`` falls back to an unauthenticated identity
+        when no middleware has set one.
+        """
+        return scope.get("path", "").startswith("/api/")
 
     async def dispatch(self, request: Request, body: BodyReader) -> Response | None:
         return await _dispatch(request, body)
