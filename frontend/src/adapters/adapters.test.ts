@@ -191,6 +191,21 @@ describe("Protocol Adapters", () => {
       expect(reasoning).toEqual(["thinking..."]);
     });
 
+    it("extracts reasoning summary deltas emitted by the proxy", () => {
+      const reasoning: string[] = [];
+      openResponsesAdapter.parseStreamChunk(
+        {
+          type: "response.reasoning_summary_text.delta",
+          output_index: 0,
+          summary_index: 0,
+          delta: "weighing options",
+        },
+        "",
+        { onChunk: () => {}, onReasoningChunk: (c) => reasoning.push(c) }
+      );
+      expect(reasoning).toEqual(["weighing options"]);
+    });
+
     it("extracts function call arguments delta", () => {
       const toolCalls: Array<[number, string, string, string]> = [];
       openResponsesAdapter.parseStreamChunk(

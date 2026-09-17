@@ -44,6 +44,16 @@ import type { ChatMessage as ChatMessageType, ContentPart } from "@/types/schema
 import { useChat, type ChatOptions } from "@/composables/useChat";
 import type { WebSearchConfig } from "@/composables/useChat";
 import { getDefaultWebSearchConfig, loadWebSearchConfig } from "@/composables/useChat";
+import {
+  CHAT_ENDPOINTS,
+  DEFAULT_CHAT_ENDPOINT,
+  DEFAULT_GENERATION_VALUES,
+  collectSettingEffects,
+  getEndpointProfile,
+  isChatEndpoint,
+  type GenerationSettings,
+  type ReasoningEffort,
+} from "@/adapters/endpointProfiles";
 import { chatApi } from "@/services/api/chat";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
@@ -68,7 +78,8 @@ const loadSelectedModel = (): string | null => {
 };
 
 const loadSelectedEndpoint = (): string => {
-  return localStorage.getItem(STORAGE_KEYS.CHAT_ENDPOINT) || "/v1/chat/completions";
+  const stored = localStorage.getItem(STORAGE_KEYS.CHAT_ENDPOINT);
+  return stored && isChatEndpoint(stored) ? stored : DEFAULT_CHAT_ENDPOINT;
 };
 
 const models = ref<ModelOption[]>([]);
@@ -286,19 +297,19 @@ const handleBlur = () => {
 
 // Settings
 const defaultSettings = {
-  temperature: 0.7,
+  temperature: DEFAULT_GENERATION_VALUES.temperature,
   temperatureEnabled: true,
   maxTokens: null,
   maxTokensEnabled: false,
-  topP: 1.0,
+  topP: DEFAULT_GENERATION_VALUES.topP,
   topPEnabled: false,
-  frequencyPenalty: 0,
+  frequencyPenalty: DEFAULT_GENERATION_VALUES.frequencyPenalty,
   frequencyPenaltyEnabled: false,
-  presencePenalty: 0,
+  presencePenalty: DEFAULT_GENERATION_VALUES.presencePenalty,
   presencePenaltyEnabled: false,
   systemPrompt: "",
   systemPromptEnabled: true,
-  reasoningEffort: "" as "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "",
+  reasoningEffort: "" as ReasoningEffort | "",
   reasoningEffortEnabled: false,
 };
 
@@ -422,26 +433,89 @@ const resetSettings = () => {
   webSearch.value = getDefaultWebSearchConfig();
 };
 
-// Computed
-const hasActiveSettings = computed(() => {
-  return (
-    temperatureEnabled.value !== defaultSettings.temperatureEnabled ||
-    temperature.value !== defaultSettings.temperature ||
-    maxTokensEnabled.value !== defaultSettings.maxTokensEnabled ||
-    maxTokens.value !== defaultSettings.maxTokens ||
-    topPEnabled.value !== defaultSettings.topPEnabled ||
-    topP.value !== defaultSettings.topP ||
-    frequencyPenaltyEnabled.value !== defaultSettings.frequencyPenaltyEnabled ||
-    frequencyPenalty.value !== defaultSettings.frequencyPenalty ||
-    presencePenaltyEnabled.value !== defaultSettings.presencePenaltyEnabled ||
-    presencePenalty.value !== defaultSettings.presencePenalty ||
-    systemPromptEnabled.value !== defaultSettings.systemPromptEnabled ||
-    systemPrompt.value !== defaultSettings.systemPrompt ||
-    reasoningEffortEnabled.value !== defaultSettings.reasoningEffortEnabled ||
-    reasoningEffort.value !== defaultSettings.reasoningEffort ||
-    customVariables.value.some((v) => v.enabled) ||
-    tools.value.some((t) => t.enabled && t.name.trim())
+const activeEndpoint = computed(() => getEndpointProfile(selectedEndpoint.value));
+
+/** Panel values that are switched on and reach the request body. */
+const collectSettings = (): GenerationSettings => {
+  const settings: GenerationSettings = {};
+  if (systemPromptEnabled.value && systemPrompt.value.trim()) {
+    settings.systemPrompt = systemPrompt.value.trim();
+  }
+  if (temperatureEnabled.value) settings.temperature = temperature.value;
+  if (maxTokensEnabled.value && maxTokens.value !== null) settings.maxTokens = maxTokens.value;
+  if (topPEnabled.value) settings.topP = topP.value;
+  if (frequencyPenaltyEnabled.value) settings.frequencyPenalty = frequencyPenalty.value;
+  if (presencePenaltyEnabled.value) settings.presencePenalty = presencePenalty.value;
+  if (reasoningEffortEnabled.value && reasoningEffort.value) {
+    settings.reasoningEffort = reasoningEffort.value;
+  }
+  return settings;
+};
+
+const collectCustomParams = (): Record<string, unknown> => {
+  const params: Record<string, unknown> = {};
+  for (const variable of customVariables.value) {
+    if (!variable.enabled || !variable.key.trim()) continue;
+    let value: string | number | boolean = variable.value;
+    if (variable.type === "number") {
+      const num = Number(variable.value);
+      if (!isNaN(num)) value = num;
+    } else if (variable.type === "boolean") {
+      value = variable.value.toLowerCase() === "true" || variable.value === "1";
+    }
+    params[variable.key.trim()] = value;
+  }
+  return params;
+};
+
+const activeTools = computed(() => tools.value.filter((tool) => tool.enabled && tool.name.trim()));
+
+/**
+ * What the selected endpoint will do with each configured value. Shared with
+ * `useChat` (through the same `planChatRequest` implementation), so the header
+ * indicator and the panel hints describe the request that actually goes out.
+ */
+const requestEffects = computed(() =>
+  collectSettingEffects({
+    endpoint: selectedEndpoint.value,
+    settings: collectSettings(),
+    tools: activeTools.value,
+    webSearch: webSearch.value,
+    customParams: collectCustomParams(),
+  })
+);
+
+/**
+ * The request a freshly opened panel produces. The indicator lights only for
+ * values beyond this baseline, so a control that ships switched on (temperature
+ * at 0.7, always sent) never keeps the dot lit on its own.
+ */
+const BASELINE_SETTINGS: Record<string, unknown> = {
+  temperature: DEFAULT_GENERATION_VALUES.temperature,
+};
+
+const changedSettings = computed(() => {
+  const current = collectSettings() as Record<string, unknown>;
+  return requestEffects.value.filter(
+    (effect) => effect.status !== "sent" || current[effect.id] !== BASELINE_SETTINGS[effect.id]
   );
+});
+
+const hasActiveSettings = computed(() => changedSettings.value.length > 0);
+
+/** Configured values the current endpoint cannot carry — surfaced in amber. */
+const ignoredSettings = computed(() =>
+  requestEffects.value.filter((effect) => effect.status !== "sent")
+);
+
+// Switching protocols can strand configured values the new endpoint has no
+// field for (e.g. repetition penalties on /v1/messages) — say so out loud
+// instead of quietly dropping them.
+watch(selectedEndpoint, (val, previous) => {
+  if (!previous || previous === val || ignoredSettings.value.length === 0) return;
+  toast.warning(t("chat.endpointSwitchIgnored", { count: ignoredSettings.value.length }), {
+    description: t("chat.endpointSwitchIgnoredHelp", { endpoint: val }),
+  });
 });
 
 const canSend = computed(
@@ -585,55 +659,17 @@ const toggleSettings = () => {
   if (showSettings.value) selectedRunId.value = null;
 };
 
-const getBaseChatOptions = () => {
-  const opts: ChatOptions = {};
-  if (systemPromptEnabled.value && systemPrompt.value.trim()) {
-    opts.system_prompt = systemPrompt.value.trim();
-  }
-  if (temperatureEnabled.value) {
-    opts.temperature = temperature.value;
-  }
-  if (maxTokensEnabled.value && maxTokens.value !== null) {
-    opts.max_tokens = maxTokens.value;
-  }
-  if (topPEnabled.value) {
-    opts.top_p = topP.value;
-  }
-  if (frequencyPenaltyEnabled.value) {
-    opts.frequency_penalty = frequencyPenalty.value;
-  }
-  if (presencePenaltyEnabled.value) {
-    opts.presence_penalty = presencePenalty.value;
-  }
-  if (reasoningEffortEnabled.value && reasoningEffort.value) {
-    opts.reasoning_effort = reasoningEffort.value;
-  }
-  customVariables.value.forEach((v) => {
-    if (v.enabled && v.key.trim()) {
-      let val: string | number | boolean = v.value;
-      if (v.type === "number") {
-        const num = Number(v.value);
-        if (!isNaN(num)) val = num;
-      } else if (v.type === "boolean") {
-        val = v.value.toLowerCase() === "true" || v.value === "1";
-      }
-      opts[v.key.trim()] = val;
-    }
-  });
-
-  const activeTools = tools.value.filter((t) => t.enabled && t.name.trim());
-  if (activeTools.length > 0) {
-    opts.tools = activeTools;
-  }
-
-  opts.webSearch = webSearch.value;
+const getBaseChatOptions = (): ChatOptions => {
+  const opts: ChatOptions = {
+    settings: collectSettings(),
+    tools: activeTools.value.length > 0 ? activeTools.value : undefined,
+    customParams: collectCustomParams(),
+    webSearch: webSearch.value,
+  };
 
   if (selectedEndpoint.value === "/v1/audio/speech") {
     opts.voice = speechVoice.value;
     opts.speed = speechSpeed.value;
-  } else {
-    delete opts.voice;
-    delete opts.speed;
   }
 
   return opts;
@@ -1017,25 +1053,36 @@ watch(
           <!-- Hairline divider between the primary model picker and the secondary endpoint -->
           <div class="hidden sm:block h-4 w-px bg-border/60 shrink-0" aria-hidden="true" />
 
-          <!-- Endpoint Selector (secondary, mono) -->
+          <!-- Endpoint Selector: protocol name first, wire path second -->
           <Select v-model="selectedEndpoint">
             <SelectTrigger
-              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground flex items-center font-mono text-[11px]"
+              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground flex items-center text-[11px] max-w-[46vw] sm:max-w-none"
+              :aria-label="t('chat.protocolEndpoint')"
             >
-              <div class="flex items-center gap-2">
-                <span class="text-muted-foreground font-mono text-[11px] select-none">API</span>
-                <span class="font-medium text-muted-foreground">{{ selectedEndpoint }}</span>
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="font-medium text-foreground truncate">
+                  {{ t(activeEndpoint.labelKey) }}
+                </span>
+                <span class="hidden md:inline text-muted-foreground font-mono text-[11px] truncate">
+                  {{ activeEndpoint.path }}
+                </span>
               </div>
             </SelectTrigger>
-            <SelectContent class="rounded-md border border-border/80 shadow-md">
-              <SelectItem value="/v1/chat/completions" class="font-mono text-[11px] rounded-sm">
-                /v1/chat/completions
-              </SelectItem>
-              <SelectItem value="/v1/messages" class="font-mono text-[11px] rounded-sm">
-                /v1/messages
-              </SelectItem>
-              <SelectItem value="/v1/responses" class="font-mono text-[11px] rounded-sm">
-                /v1/responses
+            <SelectContent class="rounded-md border border-border/80 shadow-md min-w-60">
+              <SelectItem
+                v-for="endpointOption in CHAT_ENDPOINTS"
+                :key="endpointOption.path"
+                :value="endpointOption.path"
+                class="rounded-sm"
+              >
+                <div class="flex items-center justify-between gap-3 w-full min-w-0">
+                  <span class="text-[12px] font-medium text-foreground truncate">
+                    {{ t(endpointOption.labelKey) }}
+                  </span>
+                  <span class="font-mono text-[10px] text-muted-foreground shrink-0">
+                    {{ endpointOption.path }}
+                  </span>
+                </div>
               </SelectItem>
             </SelectContent>
           </Select>
@@ -1056,12 +1103,16 @@ watch(
                 <Settings2 class="w-4 h-4" />
                 <span
                   v-if="hasActiveSettings && !showSettings"
-                  class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full ring-2 ring-background"
+                  class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full ring-2 ring-background"
+                  :class="ignoredSettings.length > 0 ? 'bg-action-amber' : 'bg-primary'"
                 />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <p>{{ t("chat.advancedSettings") }}</p>
+              <p v-if="ignoredSettings.length > 0" class="text-action-amber text-[11px] mt-0.5">
+                {{ t("chat.endpointSwitchIgnored", { count: ignoredSettings.length }) }}
+              </p>
             </TooltipContent>
           </Tooltip>
 
@@ -1105,6 +1156,7 @@ watch(
             <ChatEmptyState
               v-if="messages.length === 0"
               :has-model="!!selectedModel"
+              :endpoint="selectedEndpoint"
               @prompt="setQuickPrompt"
             />
 
@@ -1428,6 +1480,8 @@ watch(
 
       <ChatSettings
         v-model:open="showSettings"
+        :endpoint="selectedEndpoint"
+        :effects="requestEffects"
         v-model:temperature="temperature"
         v-model:temperatureEnabled="temperatureEnabled"
         v-model:maxTokens="maxTokens"

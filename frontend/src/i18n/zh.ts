@@ -222,6 +222,12 @@ export default {
     attachedFiles: "已附加文件",
     // Advanced Settings
     advancedSettings: "高级设置",
+    endpointSwitchIgnored: "有 1 项设置不会被该端点发送 | 有 {count} 项设置不会被该端点发送",
+    endpointSwitchIgnoredHelp:
+      "这些值仍保留在面板中，切回后即可重新生效。{endpoint} 没有对应的字段可以承载它们。",
+    notSentShort: "不发送",
+    notSentByEndpoint: "由 {endpoint} 请求时不发送",
+    settingsSentCount: "无参数 | 1 个参数 | {count} 个参数",
     resetSettings: "重置",
     systemPrompt: "系统提示词",
     systemPromptPlaceholder: "你是一个有帮助的助手...",
@@ -249,7 +255,29 @@ export default {
     sendMessage: "发送消息",
     reasoningEffort: "推理强度 (Reasoning Effort)",
     reasoningEffortHelp: "控制模型执行推理的程度（适用于支持的推理模型，如 o1/o3-mini 等）。",
+    reasoningHelpResponses:
+      "以 `reasoning.effort` 发送，并附带 `summary: auto`——摘要会流式写入「思考过程」面板。",
+    reasoningHelpAnthropic:
+      "以 `reasoning_effort` 发送；代理会转换为 Anthropic 扩展思考并分配相应的 token 预算——请让最大 Token 数高于该预算。",
     reasoningEffortDefault: "默认（不发送）",
+    endpoints: {
+      chatCompletions: "Chat Completions",
+      chatCompletionsHint:
+        "OpenAI 兼容格式：messages[]、max_tokens、reasoning_effort、web_search_options。",
+      messages: "Messages",
+      messagesHint:
+        "Anthropic 格式：顶层 system、max_tokens，不支持重复惩罚，使用 web_search 工具。",
+      responses: "Responses",
+      responsesHint:
+        "OpenAI Responses 格式：input[]、instructions、max_output_tokens、reasoning.effort，内置 web_search 工具。",
+    },
+    settingsEffects: {
+      temperatureClamped: "已限制为 {value}——该端点不接受更高的温度值。",
+      notSentByEndpoint: "由 {endpoint} 请求时不发送：该协议没有对应字段。",
+      customParamRejected: "`{key}` 是请求体保留字段，未发送。",
+      reasoningResponses: '写入 `reasoning`，并附带 `summary: "auto"`，以便前端渲染思考流。',
+      reasoningAnthropic: "以 `reasoning_effort` 发送；代理会将其转换为 Anthropic 扩展思考。",
+    },
     customVariables: "自定义参数",
     add: "添加参数",
     noCustomVariables: "尚未添加任何自定义参数。",
@@ -266,15 +294,16 @@ export default {
     speechVoice: "声音/音色",
     speechSpeed: "语速",
     ttsSettings: "语音合成 (TTS) 设置",
+    ttsPlaybackOnly: "仅用于播放——这些设置作用于助手消息的朗读按钮，不参与聊天请求。",
     ttsModel: "TTS 模型",
     browserTts: "浏览器 TTS",
     selectVoice: "选择一个声音",
     webSearchHelp:
-      "启用原生网络搜索。对 Anthropic /v1/messages 会注入 web_search 工具；对 OpenAI /v1/responses 会添加托管的 web_search 工具。",
+      "启用原生网络搜索。工具形态随所选端点变化：Chat Completions 使用 web_search_options，Messages 使用 web_search 工具，Responses 使用内置的 web_search 工具。",
     webSearchMaxUses: "最大搜索次数",
-    webSearchMaxUsesHelp: "限制单次请求中可执行的搜索次数（仅 Anthropic）。",
+    webSearchMaxUsesHelp: "限制单次请求中可执行的搜索次数。",
     webSearchContextSize: "搜索上下文大小",
-    webSearchContextSizeHelp: "提供给模型的搜索结果上下文量（仅 OpenAI Responses）。",
+    webSearchContextSizeHelp: "每条搜索结果提供给模型的上下文量。",
     webSearchIncludeSources: "包含来源 URL",
     webSearchIncludeSourcesHelp: "在响应中返回模型引用的完整 URL 列表（仅 OpenAI Responses）。",
     playground: "活跃 API 测试区",

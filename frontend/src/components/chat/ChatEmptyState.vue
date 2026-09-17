@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
+import { computed } from "vue";
+import StatusBadge from "@/components/common/StatusBadge.vue";
+import { getEndpointProfile } from "@/adapters/endpointProfiles";
 
 const { t } = useI18n();
 
-defineProps<{
+const props = defineProps<{
   hasModel: boolean;
+  /** Protocol endpoint the console will hit, e.g. "/v1/responses". */
+  endpoint: string;
 }>();
 
 const emit = defineEmits<{
   prompt: [text: string];
 }>();
+
+const endpointProfile = computed(() => getEndpointProfile(props.endpoint));
 
 const templates = [
   {
@@ -47,6 +54,15 @@ const templates = [
       <p class="text-sm text-muted-foreground leading-relaxed max-w-md">
         {{ t("chat.apiConsoleSubtitle") }}
       </p>
+      <!-- What the next request will actually hit -->
+      <div class="flex flex-wrap items-center gap-2 mt-4">
+        <StatusBadge variant="http" http-method="POST" class="font-mono text-[11px]">
+          POST
+        </StatusBadge>
+        <code class="font-mono text-[11px] text-foreground/80">{{ endpoint }}</code>
+        <span class="text-[11px] text-muted-foreground" aria-hidden="true">·</span>
+        <span class="text-[11px] text-muted-foreground">{{ t(endpointProfile.hintKey) }}</span>
+      </div>
     </div>
 
     <!-- Request templates -->

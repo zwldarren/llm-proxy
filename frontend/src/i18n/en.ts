@@ -224,6 +224,13 @@ export default {
     attachedFiles: "Attached files",
     // Advanced Settings
     advancedSettings: "Advanced Settings",
+    endpointSwitchIgnored:
+      "1 setting is not sent by this endpoint | {count} settings are not sent by this endpoint",
+    endpointSwitchIgnoredHelp:
+      "The values stay in the panel and apply again once you switch back. {endpoint} has no matching field for them.",
+    notSentShort: "not sent",
+    notSentByEndpoint: "Not sent by {endpoint}",
+    settingsSentCount: "no parameters | 1 parameter | {count} parameters",
     resetSettings: "Reset",
     systemPrompt: "System Prompt",
     systemPromptPlaceholder: "You are a helpful assistant...",
@@ -252,7 +259,31 @@ export default {
     reasoningEffort: "Reasoning Effort",
     reasoningEffortHelp:
       "Controls how much reasoning the model should perform (for models that support it).",
+    reasoningHelpResponses:
+      "Sent inside `reasoning` as both `effort` and `summary: auto` — the summary is what streams into the Thinking panel.",
+    reasoningHelpAnthropic:
+      "Sent as `reasoning_effort`; the proxy maps it to Anthropic extended thinking with a matching token budget — keep Max Tokens above that budget.",
     reasoningEffortDefault: "Default (not sent)",
+    endpoints: {
+      chatCompletions: "Chat Completions",
+      chatCompletionsHint:
+        "OpenAI-compatible wire format: messages[], max_tokens, reasoning_effort, web_search_options.",
+      messages: "Messages",
+      messagesHint:
+        "Anthropic wire format: top-level system, max_tokens, no repetition penalties, web_search tool.",
+      responses: "Responses",
+      responsesHint:
+        "OpenAI Responses wire format: input[], instructions, max_output_tokens, reasoning.effort, hosted web_search tool.",
+    },
+    settingsEffects: {
+      temperatureClamped: "Clamped to {value} — the endpoint rejects higher temperatures.",
+      notSentByEndpoint: "Not sent by {endpoint}: the protocol has no equivalent field.",
+      customParamRejected: "`{key}` is reserved by the request body and was not sent.",
+      reasoningResponses:
+        'Sent inside `reasoning` together with `summary: "auto"` so the thinking stream renders.',
+      reasoningAnthropic:
+        "Sent as `reasoning_effort`; the proxy converts it to Anthropic extended thinking.",
+    },
     customVariables: "Custom Parameters",
     add: "Add Option",
     noCustomVariables: "No custom parameters added.",
@@ -270,15 +301,17 @@ export default {
     speechVoice: "Voice",
     speechSpeed: "Speed",
     ttsSettings: "Text-to-Speech (TTS)",
+    ttsPlaybackOnly:
+      "Playback only — these drive the speaker button on assistant messages, not the chat request.",
     ttsModel: "TTS Model",
     browserTts: "Browser TTS",
     selectVoice: "Select a voice",
     webSearchHelp:
-      "Enable native web search. For Anthropic /v1/messages this injects the web_search tool; for OpenAI /v1/responses it adds the web_search hosted tool.",
+      "Enable native web search. The tool is shaped for the selected endpoint: web_search_options on Chat Completions, a web_search tool on Messages, a hosted web_search tool on Responses.",
     webSearchMaxUses: "Max Search Uses",
-    webSearchMaxUsesHelp: "Cap the number of web searches per request (Anthropic only).",
+    webSearchMaxUsesHelp: "Cap the number of web searches performed in a single request.",
     webSearchContextSize: "Search Context Size",
-    webSearchContextSizeHelp: "Amount of web context to provide (OpenAI Responses only).",
+    webSearchContextSizeHelp: "How much search context the model receives with each result.",
     webSearchIncludeSources: "Include Source URLs",
     webSearchIncludeSourcesHelp:
       "Return the full list of consulted URLs in the response (OpenAI Responses only).",

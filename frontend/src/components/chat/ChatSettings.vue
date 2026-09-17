@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  AlertTriangle,
   Brain,
   ChevronDown,
   ChevronUp,
@@ -37,9 +38,20 @@ import {
 } from "@/components/ui/select";
 import type { WebSearchConfig, WebSearchContextSize } from "@/composables/useChat";
 import type { CustomVariable, ToolDefinition } from "@/adapters/types";
+import {
+  SETTING_LABEL_KEYS,
+  getEndpointProfile,
+  type AdvancedSettingId,
+  type ReasoningEffort,
+  type SettingEffect,
+} from "@/adapters/endpointProfiles";
 
 const props = defineProps<{
   open: boolean;
+  /** Selected protocol endpoint; drives every per-protocol hint in this panel. */
+  endpoint: string;
+  /** What the next request will do with the configured values. */
+  effects: SettingEffect[];
   temperature: number;
   temperatureEnabled: boolean;
   maxTokens: number | null;
@@ -52,7 +64,7 @@ const props = defineProps<{
   presencePenaltyEnabled: boolean;
   systemPrompt: string;
   systemPromptEnabled: boolean;
-  reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "";
+  reasoningEffort: ReasoningEffort | "";
   reasoningEffortEnabled: boolean;
   customVariables: CustomVariable[];
   tools: ToolDefinition[];
@@ -76,10 +88,7 @@ const emit = defineEmits<{
   (e: "update:presencePenaltyEnabled", value: boolean): void;
   (e: "update:systemPrompt", value: string): void;
   (e: "update:systemPromptEnabled", value: boolean): void;
-  (
-    e: "update:reasoningEffort",
-    value: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | ""
-  ): void;
+  (e: "update:reasoningEffort", value: ReasoningEffort | ""): void;
   (e: "update:reasoningEffortEnabled", value: boolean): void;
   (e: "update:customVariables", value: CustomVariable[]): void;
   (e: "update:tools", value: ToolDefinition[]): void;
@@ -92,7 +101,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-type ReasoningEffort = typeof props.reasoningEffort;
+type ReasoningEffortValue = ReasoningEffort | "";
 
 const emitUpdate = (name: keyof typeof props, value: unknown) => {
   (emit as (e: string, v: unknown) => void)(`update:${name}`, value);
@@ -117,7 +126,7 @@ const localPresencePenalty = syncProp<number>("presencePenalty");
 const localPresencePenaltyEnabled = syncProp<boolean>("presencePenaltyEnabled");
 const localSystemPrompt = syncProp<string>("systemPrompt");
 const localSystemPromptEnabled = syncProp<boolean>("systemPromptEnabled");
-const localReasoningEffort = syncProp<ReasoningEffort>("reasoningEffort");
+const localReasoningEffort = syncProp<ReasoningEffortValue>("reasoningEffort");
 const localReasoningEffortEnabled = syncProp<boolean>("reasoningEffortEnabled");
 const localCustomVariables = syncProp<CustomVariable[]>("customVariables");
 const localTools = syncProp<ToolDefinition[]>("tools");
@@ -318,6 +327,78 @@ const updateWebSearch = (
   emit("update:webSearch", { ...localWebSearch.value, [field]: value });
 };
 
+// ---- Per-endpoint protocol awareness -------------------------------------
+
+const profile = computed(() => getEndpointProfile(props.endpoint));
+
+/** Rows in the protocol card: the settings whose wire field differs per endpoint. */
+const MAPPING_ROW_IDS: AdvancedSettingId[] = [
+  "systemPrompt",
+  "maxTokens",
+  "reasoningEffort",
+  "webSearch",
+  "frequencyPenalty",
+  "presencePenalty",
+];
+
+const mappingRows = computed(() =>
+  MAPPING_ROW_IDS.map((id) => ({ id, field: profile.value.fields[id] }))
+);
+
+const supportsFrequencyPenalty = computed(() => profile.value.fields.frequencyPenalty !== null);
+const supportsPresencePenalty = computed(() => profile.value.fields.presencePenalty !== null);
+
+/** Web search knobs that only exist on one of the three protocols. */
+const supportsWebSearchMaxUses = computed(() => profile.value.path === "/v1/messages");
+const supportsWebSearchContextSize = computed(() => profile.value.path !== "/v1/messages");
+const supportsWebSearchSources = computed(() => profile.value.path === "/v1/responses");
+
+const REASONING_EFFORTS: ReasoningEffort[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+const reasoningHelpKey = computed(() => {
+  if (profile.value.path === "/v1/responses") return "chat.reasoningHelpResponses";
+  if (profile.value.path === "/v1/messages") return "chat.reasoningHelpAnthropic";
+  return "chat.reasoningEffortHelp";
+});
+
+/** Notes the panel renders in amber because the endpoint changed the value. */
+const WARNING_NOTE_KEYS = new Set([
+  "chat.settingsEffects.temperatureClamped",
+  "chat.settingsEffects.notSentByEndpoint",
+  "chat.settingsEffects.customParamRejected",
+]);
+
+/** Per-setting note for the configured values, keyed by panel control id. */
+const panelNotes = computed(() => {
+  const notes: Record<
+    string,
+    { key: string; params: Record<string, string | number>; warn: boolean }
+  > = {};
+  for (const effect of props.effects) {
+    if (!effect.noteKey) continue;
+    notes[effect.id] = {
+      key: effect.noteKey,
+      params: effect.noteParams ?? {},
+      warn: WARNING_NOTE_KEYS.has(effect.noteKey) || effect.status !== "sent",
+    };
+  }
+  return notes;
+});
+
+const effectLabel = (effect: SettingEffect) =>
+  effect.id === "customParams" && effect.key ? effect.key : t(SETTING_LABEL_KEYS[effect.id]);
+
+const sentEffects = computed(() => props.effects.filter((effect) => effect.status === "sent"));
+const ignoredEffects = computed(() => props.effects.filter((effect) => effect.status !== "sent"));
+
 const close = () => emit("update:open", false);
 </script>
 
@@ -372,6 +453,33 @@ const close = () => emit("update:open", false);
 
         <!-- Settings Content -->
         <div class="flex-1 overflow-y-auto p-4 space-y-5">
+          <!-- Protocol card: where this endpoint puts each setting -->
+          <div class="rounded-md border border-border/50 bg-muted/15 p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[11px] font-medium text-foreground">
+                {{ t(profile.labelKey) }}
+              </span>
+              <span class="font-mono text-[10px] text-muted-foreground">{{ profile.path }}</span>
+            </div>
+            <dl class="space-y-1">
+              <div
+                v-for="row in mappingRows"
+                :key="row.id"
+                class="flex items-baseline justify-between gap-3 border-b border-border/25 pb-1 last:border-0 last:pb-0"
+              >
+                <dt class="text-[11px] text-muted-foreground truncate">
+                  {{ t(SETTING_LABEL_KEYS[row.id]) }}
+                </dt>
+                <dd
+                  class="font-mono text-[10px] shrink-0"
+                  :class="row.field ? 'text-foreground/70' : 'text-action-amber'"
+                >
+                  {{ row.field ?? t("chat.notSentShort") }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
           <!-- System Prompt -->
           <div class="space-y-2">
             <div class="flex items-center justify-between">
@@ -390,6 +498,9 @@ const close = () => emit("update:open", false);
                 rows="3"
               />
               <p class="text-[11px] text-muted-foreground mt-1">{{ t("chat.systemPromptHelp") }}</p>
+              <p class="font-mono text-[10px] text-foreground/70 mt-0.5">
+                → {{ profile.fields.systemPrompt }}
+              </p>
             </div>
           </div>
 
@@ -419,7 +530,7 @@ const close = () => emit("update:open", false);
                 :model-value="[localTemperature]"
                 @update:model-value="localTemperature = ($event as number[])[0] ?? 0"
                 :min="0"
-                :max="2"
+                :max="profile.temperatureMax"
                 :step="0.01"
                 :disabled="!localTemperatureEnabled"
                 class="w-full"
@@ -428,6 +539,13 @@ const close = () => emit("update:open", false);
                 <span>{{ t("chat.precise") }}</span>
                 <span>{{ t("chat.creative") }}</span>
               </div>
+              <p
+                v-if="panelNotes.temperature"
+                class="text-[11px]"
+                :class="panelNotes.temperature.warn ? 'text-action-amber' : 'text-muted-foreground'"
+              >
+                {{ t(panelNotes.temperature.key, panelNotes.temperature.params) }}
+              </p>
             </div>
           </div>
 
@@ -465,6 +583,9 @@ const close = () => emit("update:open", false);
                 min="1"
               />
               <p class="text-[11px] text-muted-foreground mt-1">{{ t("chat.maxTokensHelp") }}</p>
+              <p class="font-mono text-[10px] text-foreground/70 mt-0.5">
+                → {{ profile.fields.maxTokens }}
+              </p>
             </div>
           </div>
 
@@ -518,11 +639,18 @@ const close = () => emit("update:open", false);
                 >
                   {{ localFrequencyPenalty.toFixed(2) }}
                 </Badge>
-                <Switch v-model="localFrequencyPenaltyEnabled" class="scale-75" />
+                <Switch
+                  v-model="localFrequencyPenaltyEnabled"
+                  class="scale-75"
+                  :disabled="!supportsFrequencyPenalty"
+                />
               </div>
             </div>
             <div
-              :class="{ 'opacity-50 pointer-events-none': !localFrequencyPenaltyEnabled }"
+              :class="{
+                'opacity-50 pointer-events-none':
+                  !localFrequencyPenaltyEnabled && supportsFrequencyPenalty,
+              }"
               class="space-y-1.5"
             >
               <Slider
@@ -531,11 +659,14 @@ const close = () => emit("update:open", false);
                 :min="-2"
                 :max="2"
                 :step="0.01"
-                :disabled="!localFrequencyPenaltyEnabled"
+                :disabled="!localFrequencyPenaltyEnabled || !supportsFrequencyPenalty"
                 class="w-full"
               />
-              <p class="text-[11px] text-muted-foreground mt-1">
+              <p v-if="supportsFrequencyPenalty" class="text-[11px] text-muted-foreground mt-1">
                 {{ t("chat.frequencyPenaltyHelp") }}
+              </p>
+              <p v-else class="text-[11px] text-action-amber mt-1">
+                {{ t("chat.notSentByEndpoint", { endpoint: profile.path }) }}
               </p>
             </div>
           </div>
@@ -555,11 +686,18 @@ const close = () => emit("update:open", false);
                 >
                   {{ localPresencePenalty.toFixed(2) }}
                 </Badge>
-                <Switch v-model="localPresencePenaltyEnabled" class="scale-75" />
+                <Switch
+                  v-model="localPresencePenaltyEnabled"
+                  class="scale-75"
+                  :disabled="!supportsPresencePenalty"
+                />
               </div>
             </div>
             <div
-              :class="{ 'opacity-50 pointer-events-none': !localPresencePenaltyEnabled }"
+              :class="{
+                'opacity-50 pointer-events-none':
+                  !localPresencePenaltyEnabled && supportsPresencePenalty,
+              }"
               class="space-y-1.5"
             >
               <Slider
@@ -568,11 +706,14 @@ const close = () => emit("update:open", false);
                 :min="-2"
                 :max="2"
                 :step="0.01"
-                :disabled="!localPresencePenaltyEnabled"
+                :disabled="!localPresencePenaltyEnabled || !supportsPresencePenalty"
                 class="w-full"
               />
-              <p class="text-[11px] text-muted-foreground mt-1">
+              <p v-if="supportsPresencePenalty" class="text-[11px] text-muted-foreground mt-1">
                 {{ t("chat.presencePenaltyHelp") }}
+              </p>
+              <p v-else class="text-[11px] text-action-amber mt-1">
+                {{ t("chat.notSentByEndpoint", { endpoint: profile.path }) }}
               </p>
             </div>
           </div>
@@ -589,26 +730,23 @@ const close = () => emit("update:open", false);
             <div :class="{ 'opacity-50 pointer-events-none': !localReasoningEffortEnabled }">
               <Select
                 :model-value="localReasoningEffort"
-                @update:model-value="localReasoningEffort = $event as ReasoningEffort"
+                @update:model-value="localReasoningEffort = $event as ReasoningEffortValue"
                 :disabled="!localReasoningEffortEnabled"
               >
                 <SelectTrigger class="h-9 text-sm">
                   <SelectValue :placeholder="t('chat.reasoningEffortDefault')" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">none</SelectItem>
-                  <SelectItem value="minimal">minimal</SelectItem>
-                  <SelectItem value="low">low</SelectItem>
-                  <SelectItem value="medium">medium</SelectItem>
-                  <SelectItem value="high">high</SelectItem>
-                  <SelectItem value="xhigh">xhigh</SelectItem>
+                  <SelectItem v-for="effort in REASONING_EFFORTS" :key="effort" :value="effort">
+                    {{ effort }}
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <p class="text-[11px] text-muted-foreground mt-1">
-                {{
-                  t("chat.reasoningEffortHelp") ||
-                  "Controls the reasoning effort for models supporting reasoning capabilities."
-                }}
+                {{ t(reasoningHelpKey) }}
+              </p>
+              <p class="font-mono text-[10px] text-foreground/70 mt-0.5">
+                → {{ profile.fields.reasoningEffort }}
               </p>
             </div>
           </div>
@@ -620,6 +758,7 @@ const close = () => emit("update:open", false);
               <Volume2 class="w-3.5 h-3.5 text-muted-foreground" />
               {{ t("chat.ttsSettings") }}
             </Label>
+            <p class="text-[11px] text-muted-foreground/80">{{ t("chat.ttsPlaybackOnly") }}</p>
 
             <!-- TTS Model Selection -->
             <div class="space-y-1">
@@ -844,10 +983,11 @@ const close = () => emit("update:open", false);
                     :model-value="localWebSearch.maxUses !== null"
                     @update:model-value="updateWebSearch('maxUses', $event ? 5 : null)"
                     class="scale-75"
+                    :disabled="!supportsWebSearchMaxUses"
                   />
                 </div>
                 <NumberInput
-                  v-if="localWebSearch.maxUses !== null"
+                  v-if="localWebSearch.maxUses !== null && supportsWebSearchMaxUses"
                   :model-value="localWebSearch.maxUses"
                   @update:model-value="updateWebSearch('maxUses', $event)"
                   min="1"
@@ -855,8 +995,11 @@ const close = () => emit("update:open", false);
                   step="1"
                   class="h-8 text-xs bg-background"
                 />
-                <p class="text-[11px] text-muted-foreground">
+                <p v-if="supportsWebSearchMaxUses" class="text-[11px] text-muted-foreground">
                   {{ t("chat.webSearchMaxUsesHelp") }}
+                </p>
+                <p v-else class="text-[11px] text-action-amber">
+                  {{ t("chat.notSentByEndpoint", { endpoint: profile.path }) }}
                 </p>
               </div>
 
@@ -870,6 +1013,7 @@ const close = () => emit("update:open", false);
                   @update:model-value="
                     updateWebSearch('searchContextSize', $event as WebSearchContextSize)
                   "
+                  :disabled="!supportsWebSearchContextSize"
                 >
                   <SelectTrigger class="h-8 text-xs">
                     <SelectValue />
@@ -880,21 +1024,30 @@ const close = () => emit("update:open", false);
                     <SelectItem value="high">high</SelectItem>
                   </SelectContent>
                 </Select>
-                <p class="text-[11px] text-muted-foreground">
+                <p v-if="supportsWebSearchContextSize" class="text-[11px] text-muted-foreground">
                   {{ t("chat.webSearchContextSizeHelp") }}
+                </p>
+                <p v-else class="text-[11px] text-action-amber">
+                  {{ t("chat.notSentByEndpoint", { endpoint: profile.path }) }}
                 </p>
               </div>
 
               <!-- OpenAI: include sources -->
-              <div class="flex items-center justify-between">
-                <Label class="text-[11px] text-muted-foreground">{{
-                  t("chat.webSearchIncludeSources")
-                }}</Label>
-                <Switch
-                  :model-value="localWebSearch.includeSources"
-                  @update:model-value="updateWebSearch('includeSources', $event)"
-                  class="scale-75"
-                />
+              <div class="space-y-1">
+                <div class="flex items-center justify-between">
+                  <Label class="text-[11px] text-muted-foreground">{{
+                    t("chat.webSearchIncludeSources")
+                  }}</Label>
+                  <Switch
+                    :model-value="localWebSearch.includeSources"
+                    @update:model-value="updateWebSearch('includeSources', $event)"
+                    class="scale-75"
+                    :disabled="!supportsWebSearchSources"
+                  />
+                </div>
+                <p v-if="!supportsWebSearchSources" class="text-[11px] text-action-amber">
+                  {{ t("chat.notSentByEndpoint", { endpoint: profile.path }) }}
+                </p>
               </div>
             </div>
           </div>
@@ -1012,10 +1165,39 @@ const close = () => emit("update:open", false);
 
         <!-- Panel Footer -->
         <Separator />
-        <div class="p-4 bg-muted/20">
-          <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Sparkles class="w-3 h-3" />
-            <span>{{ t("chat.settingsApplyNextMessage") }}</span>
+        <div class="p-4 bg-muted/20 space-y-2">
+          <div class="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span class="flex items-center gap-2">
+              <Sparkles class="w-3 h-3" />
+              <span>{{ t("chat.settingsApplyNextMessage") }}</span>
+            </span>
+            <span class="font-mono text-[10px]">
+              {{ t("chat.settingsSentCount", { count: sentEffects.length }) }}
+            </span>
+          </div>
+
+          <!-- What the next request will actually carry -->
+          <div
+            v-if="sentEffects.length > 0"
+            class="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px]"
+          >
+            <span
+              v-for="effect in sentEffects"
+              :key="effect.key ?? effect.id"
+              class="inline-flex items-center gap-1"
+            >
+              <span class="text-muted-foreground">{{ effectLabel(effect) }}</span>
+              <span class="text-muted-foreground/70" aria-hidden="true">→</span>
+              <span class="text-foreground/75">{{ effect.fields.join(", ") }}</span>
+            </span>
+          </div>
+
+          <div
+            v-if="ignoredEffects.length > 0"
+            class="flex items-start gap-1.5 text-[11px] text-action-amber"
+          >
+            <AlertTriangle class="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
+            <span>{{ t("chat.endpointSwitchIgnored", { count: ignoredEffects.length }) }}</span>
           </div>
         </div>
       </div>

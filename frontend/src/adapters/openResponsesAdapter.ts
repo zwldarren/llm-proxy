@@ -142,7 +142,13 @@ function parseStreamChunk(
   } else if (type === "response.output_text.delta") {
     const content = stringOrEmpty(parsedData.delta);
     if (content) onChunk(content);
-  } else if (type === "response.reasoning_text.delta") {
+  } else if (
+    type === "response.reasoning_text.delta" ||
+    type === "response.reasoning_summary_text.delta"
+  ) {
+    // The proxy normalizes upstream reasoning to the summary event family
+    // (`response.reasoning_summary_text.delta`); raw providers and older
+    // payloads use `response.reasoning_text.delta`. Both carry `delta`.
     const reasoning = stringOrEmpty(parsedData.delta);
     if (reasoning && onReasoningChunk) onReasoningChunk(reasoning);
   } else if (type === "response.function_call_arguments.delta") {

@@ -3,11 +3,12 @@ import { useI18n } from "vue-i18n";
 import { storeToRefs } from "pinia";
 import { chatApi } from "@/services/api/chat";
 import { useChatStore } from "@/stores/chat";
-import { getAdapterForEndpoint } from "@/adapters";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import type { ChatMessage, ContentPart } from "@/types/schemas";
 import type { ChatRun, ChatRunStatus } from "@/types/runs";
 import type { ToolDefinition } from "@/adapters/types";
+import type { GenerationSettings } from "@/adapters/endpointProfiles";
+import { planChatRequest } from "@/adapters/endpointProfiles";
 import { makeRunId } from "@/utils/runs";
 
 export type WebSearchContextSize = "low" | "medium" | "high";
@@ -56,21 +57,22 @@ export function loadWebSearchConfig(): WebSearchConfig {
 }
 
 /**
- * Advanced chat options for model parameters
+ * Advanced chat options for a single request.
+ *
+ * `settings` carries protocol-neutral panel values; `adapters/endpointProfiles`
+ * maps them onto the wire format of the selected endpoint.
  */
 export interface ChatOptions {
-  temperature?: number;
-  max_tokens?: number;
-  top_p?: number;
-  frequency_penalty?: number;
-  presence_penalty?: number;
-  system_prompt?: string;
-  reasoning_effort?: string;
+  settings?: GenerationSettings;
   tools?: ToolDefinition[];
+  /** Free-form parameters from the panel; merged last, reserved keys rejected. */
+  customParams?: Record<string, unknown>;
   isToolResponse?: boolean;
   webSearch?: WebSearchConfig;
-  // Allow arbitrary custom parameters
-  [key: string]: unknown;
+  // Speech-only options for /v1/audio/speech
+  voice?: string;
+  speed?: number;
+  response_format?: string;
 }
 
 export function useChat() {
@@ -128,93 +130,19 @@ export function useChat() {
       store.pushMessage(userMessage);
     }
 
-    // Get the protocol adapter for this endpoint
-    const adapter = getAdapterForEndpoint(endpoint);
-    const systemPrompt = options?.system_prompt;
-    const requestMessages = adapter.formatMessages(store.messages, systemPrompt);
-
-    // Build endpoint request payload
-    const requestPayload: Record<string, unknown> = {
+    // Build the endpoint request body. Every protocol-specific mapping (max
+    // tokens, system prompt placement, reasoning, web search) lives in
+    // `adapters/endpointProfiles` so the payload, the settings indicator, and
+    // the panel hints can never disagree.
+    const { payload: requestPayload } = planChatRequest({
+      endpoint,
       model,
-    };
-
-    if (endpoint.includes("chat/completions") || endpoint.includes("messages")) {
-      requestPayload["messages"] = requestMessages;
-      if (endpoint.includes("messages") && systemPrompt?.trim()) {
-        requestPayload["system"] = systemPrompt.trim();
-      }
-    } else if (endpoint.includes("responses")) {
-      requestPayload["input"] = requestMessages;
-    }
-
-    // Pass additional options
-    if (options) {
-      const skipOptions = new Set([
-        "system_prompt",
-        "tools",
-        "isToolResponse",
-        "temperatureEnabled",
-        "maxTokensEnabled",
-        "topPEnabled",
-        "frequencyPenaltyEnabled",
-        "presencePenaltyEnabled",
-        "reasoningEffortEnabled",
-        "webSearch",
-      ]);
-      for (const [k, v] of Object.entries(options)) {
-        if (!skipOptions.has(k) && v !== undefined && v !== null && v !== "") {
-          requestPayload[k] = v;
-        }
-      }
-
-      // Format native web search tools for Anthropic/OpenAI endpoints
-      const wsConfig = options.webSearch;
-      if (wsConfig?.enabled) {
-        if (endpoint.includes("messages")) {
-          const anthropicTool: Record<string, unknown> = {
-            type: "web_search_20260318",
-            name: "web_search",
-          };
-          if (wsConfig.maxUses !== null) {
-            anthropicTool["max_uses"] = wsConfig.maxUses;
-          }
-          const existingTools = Array.isArray(requestPayload["tools"])
-            ? requestPayload["tools"]
-            : [];
-          requestPayload["tools"] = [...existingTools, anthropicTool];
-        } else if (endpoint.includes("responses")) {
-          const openaiTool: Record<string, unknown> = {
-            type: "web_search",
-            search_context_size: wsConfig.searchContextSize,
-          };
-          if (wsConfig.includeSources) {
-            const include = Array.isArray(requestPayload["include"])
-              ? requestPayload["include"]
-              : [];
-            requestPayload["include"] = [...include, "web_search_call.action.sources"];
-          }
-          const existingTools = Array.isArray(requestPayload["tools"])
-            ? requestPayload["tools"]
-            : [];
-          requestPayload["tools"] = [...existingTools, openaiTool];
-        } else if (endpoint.includes("chat/completions")) {
-          requestPayload["web_search_options"] = {
-            search_context_size: wsConfig.searchContextSize,
-          };
-        }
-      }
-
-      // Format user-defined tools via the adapter
-      if (options.tools && options.tools.length > 0) {
-        const formatted = adapter.formatTools(options.tools);
-        if (formatted) {
-          const currentTools = Array.isArray(requestPayload["tools"])
-            ? requestPayload["tools"]
-            : [];
-          requestPayload["tools"] = [...currentTools, ...formatted];
-        }
-      }
-    }
+      messages: store.messages,
+      settings: options?.settings ?? {},
+      tools: options?.tools,
+      webSearch: options?.webSearch,
+      customParams: options?.customParams,
+    });
 
     // Create abort controller for this request
     const controller = createAbortController();
