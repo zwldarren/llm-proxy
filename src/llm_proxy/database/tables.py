@@ -12,7 +12,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    LargeBinary,
     String,
     Text,
     false,
@@ -452,14 +451,6 @@ class RequestLog(Base):
     api_key_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Time to first token
-
-    # Compression support for large request/response bodies
-    request_body_compressed: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    response_body_compressed: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    request_body_compression: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    response_body_compression: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    request_body_original_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    response_body_original_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Audit fields - Who (user/client identification)
     client_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv6 max length
