@@ -374,7 +374,7 @@ def _write_error_log_to_db(
 
         # Also write to usage_records so that UsageRepository metrics
         # (success_rate, etc.) are correct
-        usage_service = UsageService(retention_days=config.retention_days)
+        usage_service = UsageService()
         usage_data = UsageRecordCreate(
             timestamp=time.time(),
             request_id=request_id or "unknown",

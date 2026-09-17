@@ -14,13 +14,14 @@ from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 
+from llm_proxy.config.manager import resolve_logging_config
 from llm_proxy.config.settings import (
     LogBatchWriterSettings,
     Settings,
     UsageBatchWriterSettings,
     get_settings,
 )
-from llm_proxy.config.types.logging_config import LoggingConfig
+from llm_proxy.config.types.logging_config import DEFAULT_RETENTION_DAYS, LoggingConfig
 from llm_proxy.database import RequestLog, UsageRecord, get_async_session_context
 from llm_proxy.database.repositories import LogRepository, UsageRepository
 from llm_proxy.observability.logger import get_logger
@@ -747,9 +748,22 @@ class _BackgroundUsageWriter(_BackgroundBatchWriter["UsageRecordCreate"]):
     def _get_batch_settings(self, settings: Settings) -> UsageBatchWriterSettings:
         return settings.usage_batch
 
-    def __init__(self, retention_days: int = 365) -> None:
+    def __init__(self, retention_days: int, config_manager: Any = None) -> None:
         self._retention_days = retention_days
+        self._config_manager = config_manager
         super().__init__()
+
+    def _effective_retention_days(self) -> int:
+        """Resolve the retention window for one sweep.
+
+        The startup ``retention_days`` is only a fallback for when no config
+        manager is available (lazy/embedded callers). With a manager, the
+        UI-managed logging config — re-read from the manager's cache, which is
+        refreshed on every settings change — governs the window.
+        """
+        if self._config_manager is not None:
+            return resolve_logging_config(self._config_manager).retention_days
+        return self._retention_days
 
     def _on_queue_full(self, data: UsageRecordCreate) -> None:
         self._logger.warning(
@@ -796,14 +810,15 @@ class _BackgroundUsageWriter(_BackgroundBatchWriter["UsageRecordCreate"]):
     async def _cleanup_loop(self) -> None:
         await asyncio.sleep(1)
         while not self._stop_event.is_set():
-            if self._retention_days > 0:
-                cutoff = time.time() - (self._retention_days * 24 * 60 * 60)
-                try:
+            try:
+                retention_days = self._effective_retention_days()
+                if retention_days > 0:
+                    cutoff = time.time() - (retention_days * 24 * 60 * 60)
                     async with get_async_session_context() as session:
                         repo = UsageRepository(session)
                         await repo.delete_old_usage(older_than_ts=cutoff)
-                except Exception as e:
-                    self._logger.error("Failed to cleanup old usage", extra={"error": str(e)})
+            except Exception as e:
+                self._logger.error("Failed to cleanup old usage", extra={"error": str(e)})
 
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=24 * 60 * 60)
@@ -814,10 +829,24 @@ class _BackgroundUsageWriter(_BackgroundBatchWriter["UsageRecordCreate"]):
 _background_usage_writer: _BackgroundUsageWriter | None = None
 
 
-def start_background_usage_writer(retention_days: int = 365) -> None:
+def start_background_usage_writer(retention_days: int, config_manager: Any = None) -> None:
+    """Start the usage writer, which prunes usage records past the retention window.
+
+    Fixed at startup: the fallback ``retention_days`` (used only when no config
+    manager is available, e.g. lazy/embedded callers) and the config manager
+    itself. The effective window is re-resolved from the manager on every sweep,
+    so UI-managed changes to the logging retention apply to usage records without
+    a restart. ``0`` still keeps rows indefinitely.
+    """
     global _background_usage_writer
     if _background_usage_writer is None:
-        _background_usage_writer = _BackgroundUsageWriter(retention_days=retention_days)
+        _background_usage_writer = _BackgroundUsageWriter(
+            retention_days=retention_days, config_manager=config_manager
+        )
+    elif _background_usage_writer._config_manager is None and config_manager is not None:
+        # The writer was lazily created without a manager; adopt the one from
+        # app startup. Never overwrite an already-resolved manager with None.
+        _background_usage_writer._config_manager = config_manager
     _background_usage_writer.start()
 
 
@@ -833,15 +862,17 @@ class UsageService:
     """Service for recording usage statistics.
 
     Unlike RequestLogService, this service always records usage data
-    regardless of whether logging is enabled or not.
+    regardless of whether logging is enabled or not. Retention is owned by the
+    background writer, which app startup configures from the logging config.
     """
-
-    def __init__(self, retention_days: int = 365):
-        self._retention_days = retention_days
 
     def create_usage_background(self, data: UsageRecordCreate) -> None:
         """Create a usage record using a background queue. MUST NOT block."""
-        start_background_usage_writer(self._retention_days)
-        if _background_usage_writer is None:
+        writer = _background_usage_writer
+        if writer is None:
+            # Lazily created outside app startup (tests, embedded callers).
+            start_background_usage_writer(DEFAULT_RETENTION_DAYS)
+            writer = _background_usage_writer
+        if writer is None:
             return
-        _background_usage_writer.enqueue(data)
+        writer.enqueue(data)

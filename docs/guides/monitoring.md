@@ -72,10 +72,10 @@ are CORS-exposed for browser clients.
 
 ## Operational hygiene
 
-- **Retention**: logs default to 30 days, audit inherits that, usage records 365 days.
-  Adjust in [Settings → Log Management](../admin/settings.md#log-management), or delete
-  manually with `DELETE /api/logs/cleanup?older_than_days=N` (admin-only; without the
-  parameter it applies the configured retention window).
+- **Retention**: logs default to 30 days, audit inherits that, and usage records share the
+  same window. Adjust in [Settings → Log Management](../admin/settings.md#log-management),
+  or delete manually with `DELETE /api/logs/cleanup?older_than_days=N` (admin-only;
+  without the parameter it applies the configured retention window).
 - **Sampling**: keep `sampling_rate` at 1.0 while investigating; lower it to cut
   storage without losing metadata.
 - **Backups**: usage and logs live in the database — see

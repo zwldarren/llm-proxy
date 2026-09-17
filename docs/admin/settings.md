@@ -18,9 +18,9 @@ the server.
 
 | Field | Default | Effect |
 | --- | --- | --- |
-| **Log Input/Output** | on | Master switch for persisting request logs. Turning it off disables database log persistence **entirely** — the Logs screen empties, not just bodies |
+| **Log Input/Output** | on | Master switch for persisting bodies. Turning it off keeps the log rows (status, tokens, cost, routing, audit metadata) but stores bodies as `{"_sampled_out": true}` |
 | **Log Raw Stream** | off | Store the raw SSE text of streaming responses. Off, a streamed response is reassembled into the same JSON a non-streaming call would return — smaller, masked like any other body, and rendered without SSE parsing. The native-passthrough tiers are reassembled too (Chat Completions, Anthropic and Responses frames are each rebuilt into their non-streaming shape); generic image streams keep their raw frames, since they have no non-streaming shape to rebuild. Turn on (or send `x-log-full: true` for one request) to inspect the exact wire frames |
-| **Log Retention Period** | `30` | Rows older than this are deleted by a sweep per log type that runs once a day; `0` keeps logs forever |
+| **Log Retention Period** | `30` | Rows older than this are deleted by a sweep per log type that runs once a day; `0` keeps logs forever. Usage records (the numbers behind the dashboard) share this window |
 | **Audit Retention Days** | inherits | Separate retention for audit rows |
 | **Body Sampling Rate** | `1.0` | Fraction of requests whose bodies are stored. Sampling gates **body capture only** — metadata is always recorded. A client can force full capture for one request with `x-log-full: true` |
 | **Audit Sampling Rate** | inherits | Same, for audit rows |
@@ -28,8 +28,8 @@ the server.
 | **Extra Sensitive Keys** | empty | Extra comma-separated field names to mask, on top of the built-in list (`authorization`, `api_key`, `password`, `token`, `access_token`, `refresh_token`, `jwt_secret`, …) |
 | **Manual Cleanup** | — | The **Cleanup Logs** action permanently deletes rows older than the chosen age. Irreversible |
 
-Usage records (the numbers behind the dashboard) are stored separately and kept for
-365 days regardless of log retention.
+Usage records (the numbers behind the dashboard) are stored separately but pruned on the
+same window as the logs; set **Log Retention Period** to `0` to keep both forever.
 
 ### Web Search
 

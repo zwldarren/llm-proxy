@@ -71,8 +71,8 @@ See [MCP Servers](../admin/mcp.md#security-policy).
   Masked values keep their first 3 and last 4 characters (≤ 8 chars → `***`).
 - **Sampling** reduces body capture without losing metadata; `x-log-full: true` forces
   full capture for a single request when debugging.
-- **Retention** defaults to 30 days (logs and audit); usage records are kept 365 days.
-  Shorten both for sensitive workloads.
+- **Retention** defaults to 30 days for logs, audit and usage records alike. Shorten it
+  for sensitive workloads.
 - **Audit chain**: verify integrity from Logs → Audit Logs → **Verify Integrity** on a
   schedule, and store the result. A failing chain means the audit history was altered.
 - **No export endpoint exists** — treat database access as access to all logs, and

@@ -98,6 +98,10 @@ _Avoid_: streaming body, raw stream (that is the opt-in raw form), SSE log
 
 The reassembled body also carries the provider extras a non-streaming response would: the lifecycle reads the transformer's `get_terminal_provider_info()` verb before `finalize()` clears the pending state and hands the result to the protocol formatter as `provider_info`, so beta terminal fields (`stop_sequence`, `stop_details`, `container`, `diagnostics`) are not lost to streaming.
 
+**Log retention window**:
+The single UI-managed retention setting (`logging.retention_days`, Settings → Log Management) that governs `request_logs`, the audit rows that inherit it, and `usage_records`; `0` keeps rows indefinitely. See ADR-0016.
+_Avoid_: usage retention, per-table retention
+
 ### Billing
 
 **Context pricing tier**:

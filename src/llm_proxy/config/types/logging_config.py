@@ -8,6 +8,11 @@ if TYPE_CHECKING:
     from llm_proxy.observability.types import LogType
 
 
+#: Default retention window (days) for request logs, for audit logs that inherit
+#: it, and for usage records. ``0`` keeps rows indefinitely.
+DEFAULT_RETENTION_DAYS = 30
+
+
 class LoggingConfig(BaseModel):
     log_input_output: bool = Field(
         default=True,
@@ -23,7 +28,7 @@ class LoggingConfig(BaseModel):
         ),
     )
     retention_days: int = Field(
-        default=30,
+        default=DEFAULT_RETENTION_DAYS,
         description="How many days to retain request logs",
     )
     mask_sensitive_data: bool = Field(default=True, description="Mask sensitive fields in logs")

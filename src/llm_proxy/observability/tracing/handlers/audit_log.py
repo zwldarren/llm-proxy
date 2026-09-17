@@ -105,7 +105,7 @@ class AuditLogHandler(TracingHandler):
         super().__init__(enabled=enabled)
         self._config = config
         self._config_manager = config_manager
-        self._usage_service = UsageService(retention_days=365)
+        self._usage_service = UsageService()
         # Lowercased sensitive-key set memoised against the LoggingConfig
         # object it was derived from. ``resolve_logging_config`` returns the
         # cached config object, so identity is stable until settings change;

@@ -44,7 +44,7 @@ container/console logs:
 | Streaming request stalls with no data | Upstream silence; the proxy is sending `: keep-alive` comment frames | This is normal. If your reverse proxy buffers responses, disable buffering |
 | Admin UI missing at `/` (API works) | `frontend/dist` did not exist at startup | Run `uv run llm-proxy --build-frontend` and restart |
 | Logs screen shows rows but bodies are `{"_sampled_out": true}` | `log_input_output` is off (bodies scrubbed, metadata rows still written), or `sampling_rate < 1.0` | Re-enable in Settings → Log Management, or send `x-log-full: true` on a request to force full capture for it |
-| Usage stats empty but logs exist | Usage and logs are written separately | Check the date range; usage records are kept 365 days |
+| Usage stats empty but logs exist | Usage and logs are written separately | Check the date range; usage records are pruned on the log retention window |
 | `503 redis_not_available` on Responses endpoints | Redis is not enabled, but stored responses need it | Enable Redis, or avoid the response-storage endpoints |
 | MCP server refuses to start | Deny-by-default policy: its command or env var is not allowlisted | Allowlist the exact command in Settings → Advanced → MCP Security (see [MCP Servers](../admin/mcp.md)) |
 | MCP `403 Access denied to MCP server` | Key allowlist excludes the server | Update the key's MCP allowlist |

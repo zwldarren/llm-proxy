@@ -77,6 +77,8 @@ class TestStartupBackgroundServices:
     async def test_starts_writers_and_tool_log_service(self):
         app = FastAPI()
         get_tool_log_service = MagicMock()
+        logging_config = MagicMock()
+        logging_config.retention_days = 45
         with (
             patch.object(lifecycle, "start_background_log_writer", MagicMock()) as start_log,
             patch.object(lifecycle, "start_background_usage_writer", MagicMock()) as start_usage,
@@ -84,12 +86,16 @@ class TestStartupBackgroundServices:
                 lifecycle, "get_tool_log_service", return_value=get_tool_log_service
             ) as set_tool_log,
             patch("llm_proxy.observability.service.RequestLogService", MagicMock()),
-            patch.object(lifecycle, "resolve_logging_config", MagicMock()),
+            patch.object(
+                lifecycle, "resolve_logging_config", MagicMock(return_value=logging_config)
+            ),
         ):
             await lifecycle.startup_background_services(app)
 
         start_log.assert_called_once()
-        start_usage.assert_called_once()
+        # Usage records share the UI-managed retention window and get the config
+        # manager so later settings changes are picked up per sweep.
+        start_usage.assert_called_once_with(45, None)
         set_tool_log.assert_called_once()
 
 

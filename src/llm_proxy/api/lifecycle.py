@@ -220,7 +220,8 @@ async def startup_background_services(app: FastAPI) -> None:
     logging_config = resolve_logging_config(config_manager)
 
     start_background_log_writer(logging_config)
-    start_background_usage_writer()
+    # Usage records follow the same UI-managed retention window as the logs.
+    start_background_usage_writer(logging_config.retention_days, config_manager)
 
     tool_log_service = RequestLogService(logging_config)
     get_tool_log_service(tool_log_service)
