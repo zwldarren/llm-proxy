@@ -34,6 +34,13 @@ class SamplingDecision:
 def determine_log_type(path: str) -> LogType:
     """Determine log type based on request path.
 
+    Every model/inference endpoint under ``/v1/`` — including the catalog read
+    ``GET /v1/models`` — is an ENDPOINT request. It used to be the one ``/v1/``
+    exception, classified as AUDIT and pushed through the audit hash chain,
+    which made a routine (and frequently polled) model listing look like a
+    compliance event. Non-``/v1/`` paths are the admin/console API and stay
+    audit-classified.
+
     Args:
         path: The request path
 
@@ -43,8 +50,6 @@ def determine_log_type(path: str) -> LogType:
     from llm_proxy.observability.types import LogType
 
     if path.startswith("/v1/"):
-        if path.startswith("/v1/models"):
-            return LogType.AUDIT
         return LogType.ENDPOINT
     return LogType.AUDIT
 
