@@ -1,0 +1,51 @@
+# Head-to-head benchmark overlay: llm-proxy vs LiteLLM under identical
+# resources.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.loadtest.yaml \
+#     -f loadtest/docker-compose.bench.yaml up -d db redis fake-upstream
+#   docker compose ... up -d llm-proxy     # gateway A
+#   docker compose ... up -d litellm       # gateway B  (never both at once)
+#
+# Both gateways get the SAME cpu quota, the SAME worker count, the SAME
+# upstream, the SAME Postgres and Redis, and the SAME log verbosity, so a
+# measured difference is gateway cost and not deployment skew.
+#
+# `cpus: 8` on a 12-core host = one core per uvicorn worker. The quota is
+# applied to both sides symmetrically, which also keeps background noise on
+# this (busy) host from being charged to only one of the two.
+
+services:
+  llm-proxy:
+    cpus: 8.0
+    environment:
+      - LOADTEST_WORKERS=8
+      - LOADTEST_LOG_LEVEL=WARNING
+    command: ["sh", "-c", "exec uv run llm-proxy --workers $${LOADTEST_WORKERS:-8}"]
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    cpus: 8.0
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "8"]
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fake-upstream:
+        condition: service_healthy
+    volumes:
+      - ./loadtest/litellm/config.yaml:/app/config.yaml:ro
+    environment:
+      # llm-proxy runs at WARNING; keep LiteLLM's own logger equally quiet.
+      - LITELLM_LOG=ERROR
+      - LITELLM_MASTER_KEY=sk-litellm-loadtest
+      - STORE_MODEL_IN_DB=False
+      # Standalone Redis for the spend transaction buffer + cross-worker
+      # routing state. Used instead of `litellm_settings.cache` so that
+      # LiteLLM's RESPONSE cache stays OFF (llm-proxy has none either).
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    # LiteLLM's proxy needs a reachable upstream on a private address; the
+    # fake upstream is exempted from the SSRF ban on the llm-proxy side.

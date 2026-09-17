@@ -31,8 +31,10 @@ Think time matters: with wait_time between 0.5–1s, N users offer ~N/0.86 RPS
 and hold roughly N * response_time in flight. Report RPS alongside latency.
 """
 
+import os
 import random
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -51,6 +53,16 @@ from loadtest.scenarios import (  # noqa: E402
 
 SCENARIOS = select_scenarios()
 _WEIGHTS = [s.weight for s in SCENARIOS]
+
+# Per-request latency dump. When LOADTEST_LATENCY_DUMP is set, every POST
+# request is appended as "<elapsed_s>,<stat_name>,<response_time_ms>" so the
+# analysis can compute exact percentiles over any time window — locust's own
+# summary CSV only carries whole-run cumulative percentiles, which the
+# connection storm in the first seconds of a run otherwise dominates at p99.
+_LATENCY_PATH = os.getenv("LOADTEST_LATENCY_DUMP")
+_latency_fh = None
+_latency_start = 0.0
+_latency_lock = threading.Lock()
 
 
 def _load_api_key(host: str | None) -> str:
@@ -74,9 +86,30 @@ def _load_api_key(host: str | None) -> str:
 
 @events.test_start.add_listener
 def on_test_start(environment, **_kwargs):
+    global _latency_fh, _latency_start
+    if _LATENCY_PATH:
+        # Held open for the whole test run and closed in the test_stop listener.
+        _latency_fh = open(_LATENCY_PATH, "w", buffering=1 << 16)  # noqa: SIM115
+        _latency_start = time.perf_counter()
     print(f"llm-proxy load test: {len(SCENARIOS)} scenario(s) selected")
     for scenario in SCENARIOS:
         print(f"  - {scenario.key:44s} tier={scenario.expected_tier}")
+
+
+@events.test_stop.add_listener
+def on_test_stop(environment, **_kwargs):
+    if _latency_fh is not None:
+        _latency_fh.close()
+
+
+@events.request.add_listener
+def on_request(request_type, name, response_time, exception, **_kwargs):
+    """Record every gateway request (not the Custom overhead/ttft events)."""
+    if _latency_fh is None or request_type != "POST":
+        return
+    elapsed = time.perf_counter() - _latency_start
+    with _latency_lock:
+        _latency_fh.write(f"{elapsed:.3f},{name},{response_time:.3f}\n")
 
 
 def _report_overhead(response, scenario) -> None:

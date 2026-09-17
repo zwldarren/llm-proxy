@@ -1,0 +1,55 @@
+# LiteLLM proxy config for the head-to-head gateway benchmark.
+#
+# Mirrors the llm-proxy load-test topology in loadtest/scenarios.py: every
+# model_name below is the SAME alias the locust harness sends, so both
+# gateways answer the identical client protocol against the identical
+# deterministic upstream (fake-upstream:8900, zero model latency).
+#
+# Fairness notes (must stay in sync with the llm-proxy side):
+#   - no response caching on either gateway (LiteLLM's `cache:` is a RESPONSE
+#     cache; llm-proxy only caches provider config, so it stays off here)
+#   - batched spend writes, matching llm-proxy's usage batch writer
+#   - Redis carries cross-worker state, matching llm-proxy's config cache
+#   - no retries: a failed request must surface as a failure, not a retry
+model_list:
+  # Chat Completions + embeddings dialect (llm-proxy: `openai-compatible`).
+  - model_name: fake-model
+    litellm_params:
+      model: openai/fake-model
+      api_base: http://fake-upstream:8900/v1
+      api_key: sk-fake-upstream
+
+  # Anthropic Messages dialect (llm-proxy: `anthropic`).
+  - model_name: fake-anthropic
+    litellm_params:
+      model: anthropic/fake-anthropic
+      api_base: http://fake-upstream:8900
+      api_key: sk-fake-upstream
+
+  # OpenAI Responses dialect (llm-proxy: `openai`).
+  - model_name: fake-openai
+    litellm_params:
+      model: openai/fake-openai
+      api_base: http://fake-upstream:8900/v1
+      api_key: sk-fake-upstream
+
+general_settings:
+  master_key: sk-litellm-loadtest
+  database_url: postgresql://llmproxy:llmproxy@db:5432/litellm
+  # docs/proxy/prod: batch spend writes instead of per-request DB writes.
+  proxy_batch_write_at: 60
+  disable_error_logs: true
+  database_connection_pool_limit: 10
+  # docs/proxy/prod: route spend updates through Redis at high RPS.
+  use_redis_transaction_buffer: true
+
+router_settings:
+  routing_strategy: simple-shuffle
+  redis_host: redis
+  redis_port: 6379
+
+litellm_settings:
+  num_retries: 0
+  request_timeout: 600
+  set_verbose: false
+  json_logs: true
