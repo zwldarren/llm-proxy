@@ -30,6 +30,16 @@ from typing import Any
 from llm_proxy.core.constants import DEFAULT_DISCONNECT_CHECK_INTERVAL
 from llm_proxy.core.conversion import NativePassthroughHandler
 from llm_proxy.core.exceptions import ClientDisconnectedError
+from llm_proxy.core.processing.stream_assembly import (
+    accumulate_native_frame,
+    assemble_stream_response_body,
+    can_accumulate_native_frames,
+    collect_accumulated_output,
+    first_native_log_body,
+    flush_pending_accumulation,
+    terminal_finish_reason,
+    terminal_provider_info,
+)
 from llm_proxy.core.processing.web_search_streaming import (
     ContinuationState,
     WebSearchStreamProcessor,
@@ -246,6 +256,12 @@ class StreamLifecycle:
         self.client_disconnected = False
         self.chunk_count = 0
         self.first_chunk_time: datetime | None = None
+        # Terminal stop/finish reason read before ``finalize()`` clears it
+        # (protocols flush and reset their pending reason there).
+        self._finish_reason: str | None = None
+        # Provider extras (stop_sequence, stop_details, container,
+        # diagnostics) read at the same moment, for the same reason.
+        self._terminal_provider_info: dict[str, Any] | None = None
         self.state = ContinuationState(transformer=transformer, stream_request=stream_request)
 
     async def events(self) -> AsyncIterator[str]:
@@ -254,6 +270,16 @@ class StreamLifecycle:
             if self.event_context is not None:
                 self.event_context.is_streaming = True
                 self.event_context.transformer = self.transformer
+                # Native passthrough frames bypass the transformer entirely.
+                # Protocols whose transformer rebuilds a body from those frames
+                # still get a reassembled log body; the rest keep the raw SSE
+                # rather than losing it.
+                if (
+                    self.native_streaming
+                    and self._native_raw_capture_needed()
+                    and self.event_context.should_capture_full_body
+                ):
+                    self.event_context.should_capture_raw_stream = True
             await self.tracing_registry.on_stream_start(self.stream_request, self.event_context)
 
             async for frame in self._replay_first_chunks():
@@ -393,6 +419,10 @@ class StreamLifecycle:
             chunk = handler.inject_model_into_anthropic_message_start(
                 chunk, self.stream_request.echo_model
             )
+        # Feed the request-log accumulator for every native tier; each
+        # transformer decides what it can rebuild from the frames (see
+        # ``native_frame_accumulation``).
+        self._accumulate_native_chunk(chunk)
         if self.protocol_name == "anthropic":
             handler.maybe_capture_native_streaming_usage(chunk, self.event_context)
         elif self.protocol_name == "openai":
@@ -412,6 +442,31 @@ class StreamLifecycle:
             if rewritten is not None:
                 chunk = rewritten
         return chunk
+
+    def _accumulate_native_chunk(self, chunk: Any) -> None:
+        """Feed a native frame to the transformer's request-log accumulator.
+
+        Skipped when the body is not being captured, or when raw SSE capture was
+        requested (the raw text is stored instead, so reassembly would be
+        wasted work).
+        """
+        context = self.event_context
+        if (
+            context is None
+            or context.should_capture_raw_stream
+            or not context.should_capture_full_body
+        ):
+            return
+        accumulate_native_frame(self.transformer, chunk)
+
+    def _native_raw_capture_needed(self) -> bool:
+        """Whether a native stream has to buffer its raw SSE for the log.
+
+        Only when the protocol's transformer cannot rebuild a body from the
+        native frames; otherwise the reassembled body is stored and per-chunk
+        buffering is skipped entirely.
+        """
+        return not can_accumulate_native_frames(self.transformer)
 
     async def _poll_disconnect(self) -> bool:
         """Check for client disconnect; on hit, record the abandonment."""
@@ -454,6 +509,11 @@ class StreamLifecycle:
         if state.depth > 0 and self.transformer is not state.transformer:
             merge_continuation_usage(self.transformer, state.transformer)
 
+        # Read before finalize(): protocols flush and clear their pending stop
+        # reason there, and the reassembled log body needs the real reason
+        # (``length``, ``max_tokens``) rather than the formatter's default.
+        self._finish_reason = terminal_finish_reason(state.transformer)
+        self._terminal_provider_info = terminal_provider_info(state.transformer)
         final_chunk = state.transformer.finalize()
         if final_chunk:
             await self.tracing_registry.on_stream_chunk(
@@ -507,6 +567,50 @@ class StreamLifecycle:
                 self.transformer, self.web_search_interceptor, self.web_search_tool_config
             )
 
+    def _assemble_logged_response_body(self) -> None:
+        """Reassemble the streamed response for the request log.
+
+        Stored in place of the raw SSE text unless the operator opted into raw
+        capture (``logging.log_raw_stream``), the client forced it with
+        ``x-log-full``, or the request took a native-passthrough tier whose
+        transformer cannot rebuild the body from native frames. Best-effort:
+        when reassembly fails the audit handler stores a marker rather than
+        dropping the log row.
+        """
+        context = self.event_context
+        if context is None or not context.should_capture_full_body:
+            return
+        if context.should_capture_raw_stream:
+            # Per-chunk capture already holds the raw SSE text.
+            return
+        transformers = [self.transformer, self.state.transformer]
+        # Content buffered by a stream that ended before its terminal event
+        # (client abort, upstream cut) has to be flushed on every tier: the
+        # converted path skips ``_finalize_and_cache`` — and with it
+        # ``finalize()`` — on exactly those paths. No-op once ``finalize()``
+        # ran (it clears the buffers) and where a transformer buffers nothing.
+        flush_pending_accumulation(transformers)
+        if self.native_streaming:
+            # A protocol that carries the whole response on its terminal event
+            # needs no reassembly at all. A native tier whose transformer cannot
+            # rebuild the body from frames buffered the raw SSE instead, which
+            # ``events`` recorded by arming ``should_capture_raw_stream`` (and
+            # this method returned on above).
+            snapshot = first_native_log_body(transformers)
+            if snapshot is not None:
+                context.assembled_response_body = snapshot
+                return
+        context.assembled_response_body = assemble_stream_response_body(
+            context,
+            protocol_name=self.protocol_name,
+            response_id=getattr(self.transformer, "response_id", "") or "",
+            model=getattr(self.stream_request, "user_facing_model", None) or context.model or "",
+            output=collect_accumulated_output(transformers),
+            finish_reason=self._finish_reason or terminal_finish_reason(self.state.transformer),
+            provider_info=self._terminal_provider_info
+            or terminal_provider_info(self.state.transformer),
+        )
+
     async def _teardown(self) -> None:
         if self.disconnect_watcher is not None:
             await safe_cleanup(
@@ -540,6 +644,10 @@ class StreamLifecycle:
                 self.on_request_completed(self.event_context, experience_success),
                 "Failed to call on_request_completed",
             )
+        # Reassemble the streamed body for the request log. No-op when raw
+        # capture is enabled or the body was sampled out; runs after cost
+        # finalization so token usage is already on the context.
+        self._assemble_logged_response_body()
         await safe_cleanup(
             self.tracing_registry.on_stream_end(
                 self.state.stream_request,
@@ -559,6 +667,11 @@ class GenericStreamLifecycle:
     streams have no transformer (they may carry binary audio payloads) and
     no heartbeat, so the pump is a plain pass-through with an optional
     per-chunk observer used for billing capture.
+
+    Logging is raw where a protocol handler asked for it: with
+    ``trace_chunks`` the lifecycle arms ``should_capture_raw_stream`` (nothing
+    here can reassemble a body), so the frames the client received are what the
+    request log stores.
     """
 
     def __init__(
@@ -587,6 +700,16 @@ class GenericStreamLifecycle:
         self.stream_error: Exception | None = None
 
     async def events(self) -> AsyncIterator[Any]:
+        if self.event_context is not None and self.trace_chunks:
+            # Generic streams have no transformer and no reassembly step, so the
+            # SSE frames are the only body the request log can store: raw
+            # capture is what makes them reach it, exactly as a native tier
+            # whose transformer cannot rebuild the body arms it. ``trace_chunks``
+            # is set by the protocol handler that asked for per-chunk capture;
+            # the sampling decision has already gated it on full-body capture.
+            self.event_context.should_capture_raw_stream = (
+                self.event_context.should_capture_full_body
+            )
         await self.tracing_registry.on_stream_start(self.stream_request, self.event_context)
         try:
             async for chunk in self.stream:

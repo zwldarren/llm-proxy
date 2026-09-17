@@ -1016,6 +1016,8 @@ export interface LoggingConfig {
   audit_retention_days: number | null;
   /** Comma-separated extra key names to mask in logs. */
   sensitive_keys: string;
+  /** Store raw SSE text for streaming responses instead of the reassembled JSON. */
+  log_raw_stream: boolean;
 }
 
 export interface SmartRoutingConfig {

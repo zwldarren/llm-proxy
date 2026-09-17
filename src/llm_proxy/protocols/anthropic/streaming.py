@@ -19,7 +19,11 @@ from llm_proxy.models import (
     ToolUseBlock,
 )
 from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
-from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
+from llm_proxy.serialization.anthropic import (
+    ANTHROPIC_USAGE_EXTENSION_KEYS,
+    parse_usage_and_provider_extras,
+)
+from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
@@ -43,6 +47,11 @@ def _message_delta_usage(usage: dict) -> dict:
 
 class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
     """Transform OpenAI SSE chunks to Anthropic SSE format."""
+
+    # Native Anthropic frames carry the same content the canonical path builds
+    # blocks from, so the native-passthrough tier can be logged as a
+    # reassembled body too (see accumulate_native_frame).
+    native_frame_accumulation = True
 
     def __init__(
         self,
@@ -75,6 +84,224 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         # canonical channel from the provider converter; replayed inside
         # message_start.message.
         self._pending_diagnostics: dict[str, Any] | None = None
+        # Cache-diagnostics beta for the request log, kept apart from
+        # ``_pending_diagnostics`` (``message_start`` consumes and clears that
+        # one): an explicit ``null`` is a meaningful state, so presence is
+        # tracked rather than truthiness.
+        self._has_log_diagnostics = False
+        self._log_diagnostics: Any = None
+        # Native-frame accumulation for the request log (see
+        # accumulate_native_frame): the content block being built, keyed by its
+        # wire ``index``, plus its buffered ``input_json_delta`` payload.
+        self._native_blocks: dict[int, dict[str, Any]] = {}
+        self._native_partial_json: dict[int, str] = {}
+        # Native blocks already closed, keyed by wire index: a flush re-queues
+        # them so the logged body stays in index order even when the stream
+        # ended with several blocks open (see flush_pending_accumulation).
+        self._native_log_blocks: dict[int, RawBlock] = {}
+        # Where the native blocks start in ``_accumulated_output``; ``None``
+        # until the first one is queued.
+        self._native_output_start: int | None = None
+        # Raw usage payloads from native ``message_start``/``message_delta``
+        # frames, kept for the usage-level provider extras the non-streaming
+        # parser collects (see _provider_extras).
+        self._native_usage: dict[str, Any] = {}
+        # Top-level ``service_tier`` off the ``message_start`` message (the
+        # non-streaming parse reads it there, with usage as the primary source).
+        self._native_service_tier: str | None = None
+
+    def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
+        """Accumulate one Anthropic-native frame for the request log.
+
+        Native passthrough forwards upstream events verbatim, so the
+        accumulation :meth:`transform` performs as a side effect never runs for
+        those requests. The events reconstruct each content block exactly as
+        the client received it; a closed block is stored as a ``RawBlock``
+        holding its Anthropic payload, which the protocol serializer emits
+        verbatim — including beta blocks the internal model does not represent
+        (server tool results, citations, cache control).
+
+        Args:
+            frame: One native SSE frame (``event: ...`` + ``data: {...}``,
+                possibly carrying several events) or an already-parsed event
+                payload.
+        """
+        if isinstance(frame, dict):
+            self._accumulate_native_event("", frame)
+            return
+        if not isinstance(frame, str) or not frame.strip():
+            return
+        for event_type, payload in iter_sse_data_events(frame):
+            if isinstance(payload, dict):
+                self._accumulate_native_event(event_type, payload)
+
+    def flush_pending_accumulation(self) -> None:
+        """Queue blocks left open when the stream ended before ``content_block_stop``.
+
+        Called before the response log is reassembled: a client abort or an
+        upstream cut ends the stream without the closing events, so the partial
+        block would otherwise be missing from the log entirely. The queued blocks
+        are re-emitted in wire ``index`` order — a block that closed after a
+        higher-index one would otherwise be logged out of order.
+        """
+        for index in sorted(self._native_blocks):
+            self._close_native_block(index)
+        if self._native_output_start is None:
+            return
+        self._accumulated_output[self._native_output_start :] = [
+            self._native_log_blocks[index] for index in sorted(self._native_log_blocks)
+        ]
+        self._native_log_blocks.clear()
+        self._native_output_start = None
+
+    def get_terminal_provider_info(self) -> dict[str, Any] | None:
+        """Beta terminal extras for the reassembled request-log body.
+
+        Mirrors the non-streaming Anthropic response's ``provider_info`` (see
+        ``AnthropicProviderSerializer.parse_provider_response``) so a streamed
+        and a non-streamed call log the same fields — the terminal extras and
+        the usage-level ones (``server_tool_use``, ``service_tier``, …) that the
+        formatter re-emits inside ``usage``. Read before ``finalize`` flushes the
+        pending terminal state.
+        """
+        info: dict[str, Any] = self._provider_extras()
+        if self._pending_stop_sequence:
+            info["stop_sequence"] = self._pending_stop_sequence
+        if self._pending_stop_details:
+            info["stop_details"] = self._pending_stop_details
+        if self._pending_container:
+            info["container"] = self._pending_container
+        if self._has_log_diagnostics:
+            info["diagnostics"] = self._log_diagnostics
+        return info or None
+
+    def _provider_extras(self) -> dict[str, Any]:
+        """Usage-level extras the non-streaming parse puts in ``provider_info``.
+
+        ``parse_usage_and_provider_extras`` is the single source of truth for
+        which usage keys belong there, so feeding it the accumulated usage keeps
+        the streamed and non-streamed bodies equal. ``_pending_usage`` is the
+        converted path's normalized usage; ``_native_usage`` the raw payloads off
+        the native frames. Only one of them is ever filled.
+        """
+        _, extras = parse_usage_and_provider_extras(
+            {"usage": {**(self._pending_usage or {}), **self._native_usage}}
+        )
+        if self._native_service_tier is not None:
+            # Same precedence as the non-streaming parse: usage wins, the
+            # top-level field fills in when usage carries none.
+            extras.setdefault("service_tier", self._native_service_tier)
+        return extras
+
+    def _merge_native_usage(self, usage: Any) -> None:
+        """Fold one native ``usage`` payload into the logged body's extras."""
+        if not isinstance(usage, dict):
+            return
+        for key, value in usage.items():
+            if value is not None:
+                self._native_usage[key] = value
+
+    def _accumulate_native_event(self, event_type: str | None, payload: dict[str, Any]) -> None:
+        """Route one parsed Anthropic event into the request-log accumulator."""
+        event = payload.get("type") or event_type
+        if event == "message_start":
+            message = payload.get("message")
+            if isinstance(message, dict):
+                message_id = message.get("id")
+                if isinstance(message_id, str) and message_id:
+                    # Native frames are forwarded verbatim, so the client saw
+                    # the upstream's id; the logged body echoes it rather than
+                    # the proxy's generated one.
+                    self.response_id = message_id
+                if "diagnostics" in message:
+                    self._has_log_diagnostics = True
+                    self._log_diagnostics = message["diagnostics"]
+                # ``message`` is the full response shape, so the terminal extras
+                # a non-streaming parse reads off it are captured here too.
+                self._merge_native_usage(message.get("usage"))
+                self.capture_stop_sequence(message.get("stop_sequence"))
+                self.capture_stop_details(message.get("stop_details"))
+                self.capture_container(message.get("container"))
+                service_tier = message.get("service_tier")
+                if isinstance(service_tier, str) and service_tier:
+                    self._native_service_tier = service_tier
+        elif event == "content_block_start":
+            index = payload.get("index")
+            block = payload.get("content_block")
+            if isinstance(index, int) and isinstance(block, dict):
+                self._native_blocks[index] = dict(block)
+        elif event == "content_block_delta":
+            self._accumulate_native_delta(payload)
+        elif event == "content_block_stop":
+            self._close_native_block(payload.get("index"))
+        elif event == "message_delta":
+            delta = payload.get("delta")
+            if isinstance(delta, dict):
+                # Kept for the reassembled log body: the formatter would
+                # otherwise default every stream to ``end_turn``, hiding
+                # truncation (``max_tokens``) and tool turns.
+                self.capture_stop_reason(delta.get("stop_reason"))
+                self.capture_stop_sequence(delta.get("stop_sequence"))
+                self.capture_stop_details(delta.get("stop_details"))
+                self.capture_container(delta.get("container"))
+            self._merge_native_usage(payload.get("usage"))
+
+    def _accumulate_native_delta(self, payload: dict[str, Any]) -> None:
+        """Apply a ``content_block_delta`` to the block it belongs to."""
+        index = payload.get("index")
+        delta = payload.get("delta")
+        if not isinstance(index, int) or not isinstance(delta, dict):
+            return
+        block = self._native_blocks.get(index)
+        if block is None:
+            return
+        delta_type = delta.get("type", "")
+        if delta_type == "input_json_delta":
+            partial = delta.get("partial_json")
+            if isinstance(partial, str):
+                self._native_partial_json[index] = (
+                    self._native_partial_json.get(index, "") + partial
+                )
+            return
+        if delta_type == "citations_delta":
+            citation = delta.get("citation")
+            if isinstance(citation, dict):
+                citations = block.setdefault("citations", [])
+                if isinstance(citations, list):
+                    citations.append(citation)
+            return
+        # ``text_delta``, ``thinking_delta``, ``signature_delta`` and any
+        # future delta append onto the matching key of the block opened by
+        # ``content_block_start``.
+        for key, value in delta.items():
+            if key == "type":
+                continue
+            existing = block.get(key)
+            if isinstance(existing, str) and isinstance(value, str):
+                block[key] = existing + value
+            else:
+                block[key] = value
+
+    def _close_native_block(self, index: Any) -> None:
+        """Finish a native content block and queue it for the logged body."""
+        if not isinstance(index, int):
+            return
+        block = self._native_blocks.pop(index, None)
+        if block is None:
+            return
+        partial = self._native_partial_json.pop(index, "")
+        if partial:
+            try:
+                block["input"] = orjson.loads(partial)
+            except orjson.JSONDecodeError:
+                block["input"] = {}
+        raw = RawBlock(provider_type=f"anthropic:{block.get('type', 'unknown')}", data=block)
+        if self._native_output_start is None:
+            # First native block: everything queued from here on is native, so a
+            # flush can re-queue the tail in wire order.
+            self._native_output_start = len(self._accumulated_output)
+        self._native_log_blocks[index] = raw
+        self._accumulated_output.append(raw)
 
     @classmethod
     def continuation(
@@ -148,9 +375,12 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             self.fold_usage(self._normalize_usage(usage))
         # Cache-diagnostics beta: capture before the message_start emission so
         # the first message (emitted below) already carries it.
-        diag = chunk.get("diagnostics")
-        if diag is not None:
-            self._pending_diagnostics = diag
+        if "diagnostics" in chunk:
+            diag = chunk["diagnostics"]
+            if diag is not None:
+                self._pending_diagnostics = diag
+            self._has_log_diagnostics = True
+            self._log_diagnostics = diag
 
         # Send message_start on first chunk with content
         if not self._sent_message_start and (choices or usage):

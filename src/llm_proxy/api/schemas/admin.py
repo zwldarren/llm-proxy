@@ -938,6 +938,13 @@ class LoggingConfigUpdate(BaseModel):
         default=True,
         description="Log request/response bodies; when off, rows persist with bodies scrubbed",
     )
+    log_raw_stream: bool | None = Field(
+        default=None,
+        description=(
+            "Store raw SSE text for streaming responses; when off, the reassembled "
+            "non-streaming response body is stored instead"
+        ),
+    )
     log_retention_days: int | None = Field(
         None, ge=0, description="Log retention days (0 = keep indefinitely)"
     )

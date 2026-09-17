@@ -46,6 +46,18 @@ const { t } = useI18n();
 
     <SettingsItem
       v-if="isAdmin"
+      :title="t('settings.logRawStream')"
+      :description="t('settings.logRawStreamDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <Switch v-model="state.log_raw_stream" />
+      </template>
+    </SettingsItem>
+
+    <SettingsItem
+      v-if="isAdmin"
       :title="t('settings.logRetentionDays')"
       :description="t('settings.setZeroToKeepIndefinitely')"
       :loading="pending"

@@ -20,6 +20,7 @@ export const DEFAULT_TRACING: TracingConfig = {
 
 export const DEFAULT_LOGGING: LoggingConfig = {
   log_input_output: true,
+  log_raw_stream: false,
   log_retention_days: 30,
   verbose_routing_logs: false,
   mask_sensitive_data: true,

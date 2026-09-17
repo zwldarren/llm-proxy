@@ -84,6 +84,7 @@ export const useSettingsStore = defineStore("settings", () => {
     const data = res as Partial<LoggingConfig> | undefined;
     return {
       log_input_output: data?.log_input_output ?? DEFAULT_LOGGING.log_input_output,
+      log_raw_stream: data?.log_raw_stream ?? DEFAULT_LOGGING.log_raw_stream,
       log_retention_days: data?.log_retention_days ?? DEFAULT_LOGGING.log_retention_days,
       verbose_routing_logs: data?.verbose_routing_logs ?? DEFAULT_LOGGING.verbose_routing_logs,
       mask_sensitive_data: data?.mask_sensitive_data ?? DEFAULT_LOGGING.mask_sensitive_data,

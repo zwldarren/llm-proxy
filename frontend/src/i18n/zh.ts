@@ -820,6 +820,9 @@ export default {
     logInputOutput: "记录输入/输出",
     logInputOutputDescription:
       "启用或禁用请求与响应正文记录。禁用后日志行仍会写入，但正文会被清除——端点、MCP、网络搜索与审计元数据保留；用量与费用统计不受影响。",
+    logRawStream: "记录原始流",
+    logRawStreamDescription:
+      "存储流式响应的原始 SSE 文本。默认关闭：响应会被重组为与非流式调用完全相同的 JSON，体积更小且无需 SSE 解析即可阅读。需要检查原始线格式帧时再开启。",
     maskSensitiveData: "脱敏敏感数据",
     maskSensitiveDataDescription: "在存储的日志中脱敏敏感字段（API 密钥、令牌、密码）。",
     samplingRate: "请求体采样率",

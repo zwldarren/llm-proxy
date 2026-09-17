@@ -844,6 +844,9 @@ export default {
     logInputOutput: "Log Input/Output",
     logInputOutputDescription:
       "Enable or disable logging of request and response bodies. When disabled, log rows are still written with bodies scrubbed — endpoint, MCP, web-search and audit metadata is kept. Usage and cost accounting is unaffected.",
+    logRawStream: "Log Raw Stream",
+    logRawStreamDescription:
+      "Store the raw SSE text of streaming responses. Off by default: the response is reassembled into the same JSON a non-streaming call would return, which is smaller and readable without SSE parsing. Turn on to inspect the exact wire frames.",
     maskSensitiveData: "Mask Sensitive Data",
     maskSensitiveDataDescription:
       "Mask sensitive fields (API keys, tokens, passwords) in stored logs.",

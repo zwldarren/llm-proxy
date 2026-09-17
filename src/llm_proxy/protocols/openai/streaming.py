@@ -27,6 +27,7 @@ from llm_proxy.models.types import AudioSource
 from llm_proxy.serialization.openai.components.response_parser import (
     fold_deepseek_cache_hits,
 )
+from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
 # Keys prefixed with ``_`` are proxy-internal and are stripped at every level
@@ -64,6 +65,11 @@ _CHUNK_ENVELOPE_FIELDS = frozenset(
 class OpenAIStreamingTransformer(StreamingTransformer):
     """Transform StreamEvents to OpenAI SSE format."""
 
+    # Native Chat Completions frames carry the same ``choices[].delta`` payloads
+    # the canonical path accumulates, so the native-passthrough tier can be
+    # logged as a reassembled body too (see accumulate_native_frame).
+    native_frame_accumulation = True
+
     def __init__(
         self,
         model: str = "",
@@ -93,6 +99,61 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         self._audio_data_buffer: str = ""
         self._audio_transcript_buffer: str = ""
         self._include_obfuscation: bool | None = include_obfuscation
+        self._finish_reason: str | None = None
+        self._system_fingerprint: str | None = None
+        self._service_tier: str | None = None
+
+    def get_finish_reason(self) -> str | None:
+        """Return the finish_reason seen on the terminal chunk, if any."""
+        return self._finish_reason
+
+    def get_terminal_provider_info(self) -> dict[str, Any] | None:
+        """Envelope fields for the reassembled request-log body.
+
+        Mirrors the non-streaming OpenAI response's ``provider_info`` (see
+        ``response_parser.parse_provider_response``) so a streamed and a
+        non-streamed call log the same fields. Read before ``finalize``,
+        which flushes the pending terminal state.
+        """
+        info: dict[str, Any] = {}
+        if self._system_fingerprint:
+            info["system_fingerprint"] = self._system_fingerprint
+        if self._service_tier:
+            info["service_tier"] = self._service_tier
+        return info or None
+
+    def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
+        """Accumulate a protocol-native chat-completions frame for logging.
+
+        The native-passthrough tier forwards upstream frames verbatim (see
+        ``NativePassthroughHandler.handle_native_openai_chunk``), so the
+        accumulation that :meth:`transform` performs as a side effect never runs
+        for those requests. The frames are ordinary ``chat.completion.chunk``
+        payloads, so they feed the same bookkeeping — letting the request log
+        store the reassembled body instead of the raw SSE text.
+
+        Args:
+            frame: One native SSE frame (``data: {...}\n\n``, possibly carrying
+                several data lines) or an already-parsed chunk dict.
+        """
+        if isinstance(frame, dict):
+            self._accumulate_from_chunk(frame)
+            return
+        if not isinstance(frame, str):
+            return
+        for _event_type, payload in iter_sse_data_events(frame):
+            if isinstance(payload, dict):
+                self._accumulate_from_chunk(payload)
+
+    def flush_pending_accumulation(self) -> None:
+        """Finalize content still buffered when the stream ended early.
+
+        Called before the response log is reassembled: a native stream that
+        never delivered a terminal ``finish_reason`` (client abort, upstream
+        cut) would otherwise log nothing. ``finalize`` flushes the same buffers
+        on the converted path, which is skipped for native streams.
+        """
+        self._finalize_accumulation()
 
     @classmethod
     def continuation(
@@ -226,6 +287,17 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         if not original_chunk:
             return
 
+        # Captured for the reassembled log body: the OpenAI formatter emits
+        # system_fingerprint/service_tier from provider_info, which reassembly
+        # has no provider response to fill — the transformer supplies the
+        # values seen on the chunk envelope instead. First non-empty wins.
+        fingerprint = original_chunk.get("system_fingerprint")
+        if fingerprint and self._system_fingerprint is None:
+            self._system_fingerprint = fingerprint
+        service_tier = original_chunk.get("service_tier")
+        if service_tier and self._service_tier is None:
+            self._service_tier = service_tier
+
         # Capture encrypted reasoning state from OpenAI Responses provider.
         # This can arrive as a top-level field (response.completed fallback)
         # or inside a delta; either way it must survive to the OpenResponses
@@ -344,6 +416,10 @@ class OpenAIStreamingTransformer(StreamingTransformer):
                     self._audio_transcript_buffer += audio["transcript"]
 
             if finish_reason:
+                # Kept for the reassembled log body: the wire finish_reason is
+                # otherwise discarded, and the formatter would default it to
+                # "stop" even for a truncated (``length``) stream.
+                self._finish_reason = finish_reason
                 self._finalize_accumulation()
 
     def _finalize_accumulation(self) -> None:

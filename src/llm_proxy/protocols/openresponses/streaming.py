@@ -21,6 +21,7 @@ from llm_proxy.protocols.openresponses.serializer import (
 from llm_proxy.protocols.openresponses.streaming_emitter import StreamingContentEmitter
 from llm_proxy.protocols.openresponses.streaming_events import StreamingEventFactory
 from llm_proxy.serialization.responses_toolkit import generate_item_id
+from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
@@ -158,6 +159,13 @@ class OpenResponsesStreamingState:
     # Final response snapshot from response.completed / response.incomplete,
     # reused by the streaming processor to persist store=true responses.
     final_response_payload: dict[str, Any] | None = None
+    # ── Native passthrough accumulation for the request log ──
+    # Native frames never reach the transformer, so the response skeleton from
+    # response.created plus the items closed by response.output_item.done are
+    # all a stream cut off before its terminal event leaves behind (see
+    # OpenResponsesStreamingTransformer.accumulate_native_frame).
+    native_created_payload: dict[str, Any] | None = None
+    native_output_items: dict[int, dict[str, Any]] = field(default_factory=dict)
 
 
 class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransformer):
@@ -176,6 +184,12 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
     - response.failed
     - response.incomplete
     """
+
+    # Native Responses frames carry the whole response on their terminal event
+    # (and a complete skeleton plus finished items before it), so the
+    # native-passthrough tier is logged as a reassembled body too (see
+    # accumulate_native_frame / native_log_body).
+    native_frame_accumulation = True
 
     def __init__(
         self,
@@ -255,6 +269,69 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # only writer is ``_message_delta_with_usage`` (web-search usage
         # updates), and the continuation merge reaches it through the public
         # ``merge_terminal_state`` verb instead of poking private fields.
+
+    def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
+        """Accumulate one native Responses frame for the request log.
+
+        Native passthrough forwards upstream events verbatim. The terminal
+        ``response.completed`` / ``response.incomplete`` / ``response.failed``
+        event carries the whole response and is stashed by the passthrough
+        handler into :attr:`state.final_response_payload`; the events captured
+        here are the fallback for a stream cut off before it — the
+        ``response.created`` skeleton (a complete ``ResponseResource`` with
+        ``status: in_progress`` and no output) plus every item closed by
+        ``response.output_item.done``, which carries the finished item.
+
+        Args:
+            frame: One native SSE frame (``event: ...`` + ``data: {...}``,
+                possibly carrying several events) or an already-parsed event
+                payload.
+        """
+        if isinstance(frame, dict):
+            self._accumulate_native_event("", frame)
+            return
+        if not isinstance(frame, str) or not frame.strip():
+            return
+        for event_type, payload in iter_sse_data_events(frame):
+            if isinstance(payload, dict):
+                self._accumulate_native_event(event_type, payload)
+
+    def native_log_body(self) -> dict[str, Any] | None:
+        """Return the native stream's response body for the request log.
+
+        The terminal snapshot is authoritative (it is the exact body a
+        non-streaming call would have returned). When the stream never reached
+        it, the ``response.created`` skeleton with the items that did close is
+        logged instead, marked ``incomplete`` — the same outcome the client
+        observed.
+        """
+        snapshot = self.state.final_response_payload
+        if snapshot is not None:
+            return snapshot
+        skeleton = self.state.native_created_payload
+        if skeleton is None:
+            return None
+        body = dict(skeleton)
+        body["output"] = [item for _, item in sorted(self.state.native_output_items.items())]
+        body["status"] = "incomplete"
+        if self.model:
+            # The client-requested alias (the passthrough handler rewrites the
+            # terminal snapshot's model the same way).
+            body["model"] = self.model
+        return body
+
+    def _accumulate_native_event(self, event_type: str | None, payload: dict[str, Any]) -> None:
+        """Route one parsed Responses event into the request-log accumulator."""
+        event = payload.get("type") or event_type
+        if event in ("response.created", "response.in_progress"):
+            response = payload.get("response")
+            if isinstance(response, dict) and self.state.native_created_payload is None:
+                self.state.native_created_payload = response
+        elif event == "response.output_item.done":
+            item = payload.get("item")
+            index = payload.get("output_index")
+            if isinstance(item, dict) and isinstance(index, int):
+                self.state.native_output_items[index] = item
 
     @classmethod
     def continuation(

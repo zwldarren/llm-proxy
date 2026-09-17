@@ -13,6 +13,15 @@ class LoggingConfig(BaseModel):
         default=True,
         description="Log request/response bodies; when off, rows persist with bodies scrubbed",
     )
+    log_raw_stream: bool = Field(
+        default=False,
+        description=(
+            "Store the raw SSE text of streaming responses. Off by default: the "
+            "reassembled non-streaming response body is stored instead — an order "
+            "of magnitude smaller (the SSE envelope repeats on every delta) and "
+            "renderable without client-side SSE parsing"
+        ),
+    )
     retention_days: int = Field(
         default=30,
         description="How many days to retain request logs",

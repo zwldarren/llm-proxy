@@ -21,10 +21,13 @@ class SamplingDecision:
 
     Attributes:
         should_capture_full_body: Whether to capture full request/response body
+        should_capture_raw_stream: Whether to buffer the raw SSE text; when off,
+            the stream lifecycle reassembles the non-streaming body instead
         log_type: The determined log type for this request
     """
 
     should_capture_full_body: bool
+    should_capture_raw_stream: bool
     log_type: LogType
 
 
@@ -97,7 +100,13 @@ def make_sampling_decision(
     # Make sampling decision
     should_capture_full_body = force_full or (random.random() < sampling_rate)
 
+    # Raw SSE capture is opt-in: it duplicates the reassembled body at roughly
+    # twice the size. Sampled-out requests never buffer it, and the
+    # ``x-log-full`` debugging escape hatch forces it alongside full capture.
+    should_capture_raw_stream = should_capture_full_body and (force_full or config.log_raw_stream)
+
     return SamplingDecision(
         should_capture_full_body=should_capture_full_body,
+        should_capture_raw_stream=should_capture_raw_stream,
         log_type=log_type,
     )

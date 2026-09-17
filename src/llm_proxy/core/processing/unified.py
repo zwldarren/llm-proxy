@@ -168,6 +168,7 @@ class UnifiedProcessor:
             log_type=sampling.log_type.value,
             is_api_endpoint=request.url.path.startswith("/api/"),
             should_capture_full_body=sampling.should_capture_full_body,
+            should_capture_raw_stream=sampling.should_capture_raw_stream,
             should_log_input_output=should_log_input_output,
             start_time=time.perf_counter(),
             start_timestamp=time.time(),

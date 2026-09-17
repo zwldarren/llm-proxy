@@ -90,6 +90,14 @@ _Avoid_: realtime usage format, audio usage
 The WebSocket close code a Realtime connection ends with, from the endpoint's own table (`api/routers/realtime.py`). Two codes follow the official OpenAI Realtime scheme (4000-4009 client errors, 4100-4108 server errors) where a semantic match exists (4004 invalid model, 4007 rate limited); the rest are proxy conventions in the RFC 6455 private-use range, matching the OpenResponses WebSocket transport (4401 auth failure, 4403 forbidden, 1011 upstream/provider failure) — the official 4005 invalid-authentication and 4100-4108 server-error codes are intentionally not used so both proxy WS transports share one close-code language. The reason always precedes the close as a Realtime `error` event.
 _Avoid_: reusing HTTP status codes as close codes
 
+### Request logging
+
+**Logged response body**:
+The response-side content stored on a request-log row. For a streaming request it is the protocol-native non-streaming body: reassembled from the streaming transformer's accumulated content blocks on the converted tiers, or from the native passthrough frames when the client's protocol and the provider speak the same wire format (`native_frame_accumulation` — accumulated Chat Completions chunks, rebuilt Anthropic blocks, or the Responses terminal snapshot). Raw SSE text is stored only when raw capture is on (`log_raw_stream`, or `x-log-full: true` for one request). See ADR-0015.
+_Avoid_: streaming body, raw stream (that is the opt-in raw form), SSE log
+
+The reassembled body also carries the provider extras a non-streaming response would: the lifecycle reads the transformer's `get_terminal_provider_info()` verb before `finalize()` clears the pending state and hands the result to the protocol formatter as `provider_info`, so beta terminal fields (`stop_sequence`, `stop_details`, `container`, `diagnostics`) are not lost to streaming.
+
 ### Billing
 
 **Context pricing tier**:

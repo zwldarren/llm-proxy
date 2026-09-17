@@ -21,7 +21,7 @@ the routing decision.
 | `cost_usd` / `cache_savings_usd` | Billed cost and the estimated saving from cache reads |
 | `log_metadata` | `fallback_attempts`/`fallback_count`/`fallback_providers`, `retry_attempts`/`retry_count`, routing fields, `provider_model_name` |
 | `client_ip`, `user_agent`, `auth_method` | Attribution, computed through trusted-proxy resolution |
-| Bodies | JSON, or `{"$binary": true, "size": N}` for binary payloads |
+| Bodies | JSON, or `{"$binary": true, "size": N}` for binary payloads. Streaming responses are reassembled into the protocol's non-streaming JSON unless **Log Raw Stream** is on |
 
 **Filtering** (`GET /api/logs`): page or cursor pagination (max 200 per page), free-text
 `search`, date range, exact status or status range, model, provider, user, API key,
@@ -34,6 +34,24 @@ Configured in [Settings → Log Management](settings.md#log-management):
 - **Sampling** (`sampling_rate`, default 1.0) limits **body capture**: sampled-out
   bodies are stored as `{"_sampled_out": true}` while metadata is still recorded.
   `x-log-full: true` forces full capture for one request.
+- **Raw stream** (`log_raw_stream`, default off) controls how a *streaming* response is
+  stored. Off, the accumulated content blocks are reassembled through the protocol
+  serializer into the exact JSON a non-streaming call would have returned — the SSE
+  envelope (`id`, `model`, `object`, `choices[0].index`, …) repeats on every delta, so
+  the reassembled body is an order of magnitude smaller, and unlike the SSE text it is
+  maskable and searchable. Measured on representative streams: ~45× smaller for Chat
+  Completions, ~20× for Anthropic. On, the raw SSE frames are stored verbatim as a
+  string. `x-log-full: true` forces raw for one request.
+  The **native-passthrough** tier (the default for OpenAI-compatible providers on the
+  `openai` protocol, and for Anthropic/OpenResponses-native providers) forwards
+  upstream frames without running the content transformer. It still logs the
+  reassembled body — each protocol rebuilds it from its own frames: native Chat
+  Completions frames *are* `chat.completion.chunk` payloads, native Anthropic frames
+  rebuild the message block by block, and a native Responses stream carries the whole
+  response on its terminal event. Raw frames are kept only where there is no way to
+  rebuild the body: a native tier whose protocol transformer cannot, and the generic
+  streams (image generation and edit) whose payloads carry no content model. Nothing is
+  stored only when the request was sampled out or `log_input_output` is off.
 - **Masking** (`mask_sensitive_data`, default on) replaces credentials in headers,
   bodies, and MCP/tool arguments. Values ≤ 8 chars become `***`; longer values keep
   their first 3 and last 4 characters. Add your own field names via **Extra Sensitive Keys**.
@@ -56,8 +74,9 @@ The **Usage** dashboard and `GET /api/logs/usage-stats` aggregate:
   time, average TTFT, average tokens/second, cache creation/read tokens, cache savings.
 - Breakdowns by provider and by model, plus a daily series.
 
-Metrics come from the dedicated `usage_records` table (kept 365 days), which survives
-log deletion; request counts and success rate come from `request_logs` when available.
+Metrics come from the dedicated `usage_records` table, which is pruned on the same
+retention window as the logs and survives the manual **Cleanup Logs** action; request
+counts and success rate come from `request_logs` when available.
 Averages are the only latency/throughput statistics reported — no percentiles. Cache
 savings require a `cached_read_cost_per_1m` price on the model; without it the metric
 is skipped with a warning.

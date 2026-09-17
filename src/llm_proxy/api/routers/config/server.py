@@ -42,6 +42,7 @@ def _build_request_policy_response(value: dict | None) -> dict:
 # stored (legacy) rows are filled from these defaults on read.
 _LOGGING_CONFIG_DEFAULTS: dict[str, Any] = {
     "log_input_output": True,
+    "log_raw_stream": False,
     "log_retention_days": 30,
     "verbose_routing_logs": False,
     "mask_sensitive_data": True,

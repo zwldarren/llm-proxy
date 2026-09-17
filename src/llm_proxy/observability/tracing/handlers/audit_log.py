@@ -324,24 +324,11 @@ class AuditLogHandler(TracingHandler):
         if context.cost_usd is None and context.has_billable_data() and self._config_manager:
             await self._calculate_cost(context)
 
-        # Set response body from captured streaming data
+        # Response body: the reassembled non-streaming JSON by default, the raw
+        # SSE text only when the operator opted in (``log_raw_stream``) or the
+        # client forced full capture with ``x-log-full``.
         if context.should_capture_full_body:
-            streaming_body = context.get_streaming_body()
-            # Convert bytes to string for JSON serialization
-            if streaming_body:
-                try:
-                    # Try to decode as UTF-8 text (SSE chunks are text)
-                    context.response_body = streaming_body.decode("utf-8")
-                except UnicodeDecodeError:
-                    # If not valid UTF-8, store as base64
-                    import base64
-
-                    context.response_body = {
-                        "encoding": "base64",
-                        "data": base64.b64encode(streaming_body).decode("ascii"),
-                    }
-            else:
-                context.response_body = None
+            context.response_body = self._logged_stream_body(context)
 
         # Build and write log
         log_data = self._build_streaming_log_create(request, context)
@@ -350,6 +337,36 @@ class AuditLogHandler(TracingHandler):
         # Always create usage record
         usage_record = self._build_usage_record(context)
         self._usage_service.create_usage_background(usage_record)
+
+    @staticmethod
+    def _logged_stream_body(context: EventContext) -> Any:
+        """Pick the response body stored for a finished stream.
+
+        Raw capture (``log_raw_stream`` / ``x-log-full``) stores the buffered
+        SSE text, preserving the legacy shape the Logs UI parses client-side.
+        Otherwise the stream lifecycle's reassembled non-streaming body is
+        stored. A stream that could not be reassembled — a generic binary
+        stream, or an unregistered protocol — is marked explicitly so the Logs
+        UI can say so rather than showing an empty body.
+        """
+        if context.should_capture_raw_stream:
+            streaming_body = context.get_streaming_body()
+            if not streaming_body:
+                return None
+            try:
+                # Try to decode as UTF-8 text (SSE chunks are text)
+                return streaming_body.decode("utf-8")
+            except UnicodeDecodeError:
+                # If not valid UTF-8, store as base64
+                import base64
+
+                return {
+                    "encoding": "base64",
+                    "data": base64.b64encode(streaming_body).decode("ascii"),
+                }
+        if context.assembled_response_body is not None:
+            return context.assembled_response_body
+        return {"streaming": True, "_assembled": False}
 
     async def _calculate_cost(self, context: EventContext) -> None:
         """Calculate cost for the request if not already populated.

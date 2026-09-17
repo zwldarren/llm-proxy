@@ -99,6 +99,7 @@ def load_logging_config(
     overrides = overrides or {}
 
     log_input_output = _parse_bool(overrides.get("log_input_output", True))
+    log_raw_stream = _parse_bool(overrides.get("log_raw_stream", False))
 
     try:
         retention_days = int(overrides.get("log_retention_days", 30))
@@ -146,6 +147,7 @@ def load_logging_config(
 
     return LoggingConfig(
         log_input_output=log_input_output,
+        log_raw_stream=log_raw_stream,
         retention_days=retention_days,
         mask_sensitive_data=mask_sensitive_data,
         log_level=log_level,

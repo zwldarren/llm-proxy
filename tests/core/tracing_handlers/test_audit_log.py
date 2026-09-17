@@ -586,3 +586,79 @@ class TestRetryMetadata:
 
         assert "retry_attempts" in log_metadata
         assert log_metadata["retry_count"] == 1
+
+
+class TestLoggedStreamBody:
+    """Which response body a finished stream stores in the request log."""
+
+    def _make_context(self) -> EventContext:
+        return EventContext(
+            request_id="req-stream",
+            trace_id="trace-stream",
+            model="gpt-4o",
+            log_type="endpoint",
+        )
+
+    def test_default_stores_the_reassembled_json(self):
+        context = self._make_context()
+        context.assembled_response_body = {"object": "chat.completion", "choices": []}
+
+        assert AuditLogHandler._logged_stream_body(context) == {
+            "object": "chat.completion",
+            "choices": [],
+        }
+
+    def test_unassembled_stream_is_marked_explicitly(self):
+        """Generic binary streams cannot be reassembled; say so instead of {}."""
+        context = self._make_context()
+
+        assert AuditLogHandler._logged_stream_body(context) == {
+            "streaming": True,
+            "_assembled": False,
+        }
+
+    def test_raw_capture_stores_the_sse_text(self):
+        context = self._make_context()
+        context.should_capture_raw_stream = True
+        context.capture_streaming_chunk('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n')
+
+        body = AuditLogHandler._logged_stream_body(context)
+
+        assert isinstance(body, str)
+        assert body.startswith("data: ")
+
+    def test_raw_capture_without_buffered_frames_stores_nothing(self):
+        context = self._make_context()
+        context.should_capture_raw_stream = True
+
+        assert AuditLogHandler._logged_stream_body(context) is None
+
+    def test_non_utf8_raw_capture_falls_back_to_base64(self):
+        context = self._make_context()
+        context.should_capture_raw_stream = True
+        context.capture_streaming_chunk(b"\xff\xfe\x00binary")
+
+        body = AuditLogHandler._logged_stream_body(context)
+
+        assert body["encoding"] == "base64"
+        assert body["data"]
+
+
+class TestStreamingRawCaptureGate:
+    """Default sampling must not buffer SSE bytes at all."""
+
+    def _make_context(self) -> EventContext:
+        return EventContext(request_id="req-gate", trace_id="trace-gate", model="m")
+
+    def test_chunks_are_not_buffered_without_raw_capture(self):
+        context = self._make_context()
+
+        assert context.capture_streaming_chunk("data: x\n\n") is False
+        assert context.get_streaming_body() == b""
+
+    def test_chunks_are_buffered_with_raw_capture(self):
+        context = self._make_context()
+        context.should_capture_raw_stream = True
+
+        assert context.capture_streaming_chunk("data: x\n\n") is True
+        assert context.get_streaming_body() == b"data: x\n\n"

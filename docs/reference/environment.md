@@ -57,7 +57,8 @@ Pool sizes, timeouts, and background writer tuning. Change only if you know why.
 These live in the admin console (database-backed, hot-reloaded) — deliberately, so
 they can change without a restart:
 
-- **Logging policy**: retention, body logging, masking, sampling, sensitive keys
+- **Logging policy**: retention, body logging, raw stream capture, masking, sampling,
+  sensitive keys
 - **Security**: lockout thresholds, HSTS, request body size, auth failure delay,
   rate-limit buckets
 - **Network behavior**: CORS origins, response keepalive

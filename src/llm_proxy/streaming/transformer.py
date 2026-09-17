@@ -3,7 +3,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import orjson
 
@@ -66,6 +66,14 @@ class PendingTerminalState:
         """Record a pending stop_reason (later captures overwrite earlier ones)."""
         if stop_reason:
             self._pending_stop_reason = stop_reason
+
+    def get_finish_reason(self) -> str | None:
+        """Read-side of :meth:`capture_stop_reason` for observability.
+
+        Lets the reassembled logged response body echo the terminal reason
+        without reaching into ``_pending_*`` directly (see ADR-0007).
+        """
+        return self._pending_stop_reason
 
     def capture_stop_sequence(self, stop_sequence: str | None) -> None:
         """Record a pending stop_sequence."""
@@ -172,6 +180,17 @@ class StreamingTransformer(ABC):
                 yield chunk
         yield "[DONE]"
     """
+
+    #: True when the transformer can rebuild the request-log body from the
+    #: *protocol-native* frames the passthrough tier forwards. That tier hands
+    #: upstream frames to the client verbatim, so ``transform`` — which
+    #: accumulates as a side effect — never runs for those requests. Protocols
+    #: rebuild either from accumulated content blocks (``accumulate_native_frame``
+    #: overrides, e.g. OpenAI and Anthropic) or from a terminal snapshot the
+    #: native events carry (``native_log_body``, e.g. OpenResponses). A
+    #: transformer that declares neither leaves the request log no choice but
+    #: the raw SSE text.
+    native_frame_accumulation: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -322,6 +341,60 @@ class StreamingTransformer(ABC):
         tracks no cursor.
         """
         return fallback
+
+    def get_finish_reason(self) -> str | None:
+        """Terminal finish/stop reason observed while streaming, if tracked.
+
+        Consumed when reassembling the logged response body so a truncated
+        stream logs ``length`` rather than the formatter's ``stop`` default.
+        Protocols whose terminal state is not modeled here inherit this
+        ``None``; OpenAI and Anthropic-style protocols override it.
+        """
+        return None
+
+    def get_terminal_provider_info(self) -> dict[str, Any] | None:
+        """Provider-specific terminal extras for the logged response body.
+
+        The protocol formatter reads beta/terminal fields (``stop_sequence``,
+        ``stop_details``, ``container``, ``diagnostics``) from
+        ``InternalResponse.provider_info``, which the non-streaming path fills
+        from the provider response. Reassembly has no provider response to read,
+        so it asks the transformer instead. Protocols that track no such extras
+        inherit ``None``.
+
+        Read before :meth:`finalize`, which clears the pending terminal state.
+        """
+        return None
+
+    def accumulate_native_frame(self, frame: Any) -> None:
+        """Accumulate one protocol-native frame for the request log.
+
+        Only called on transformers that declare
+        ``native_frame_accumulation``; the frame is either one SSE frame
+        (``event: ...\ndata: {...}\n\n``, possibly carrying several events) or
+        an already-parsed event payload. Default no-op: protocols that rebuild
+        the body from a terminal snapshot override ``native_log_body``
+        instead.
+        """
+        return None
+
+    def flush_pending_accumulation(self) -> None:
+        """Finalize content still buffered when the stream ended early.
+
+        Called before the logged body is assembled: a client abort or an
+        upstream cut ends the stream without its terminal events, so buffered
+        content would otherwise be missing from the log. Default no-op.
+        """
+        return None
+
+    def native_log_body(self) -> dict[str, Any] | None:
+        """The response body a native passthrough stream already carries.
+
+        Snapshot protocols — whose terminal event holds the whole response —
+        return it here. Delta protocols return ``None`` and let the caller
+        assemble a body from ``get_accumulated_output()``. Default no-op.
+        """
+        return None
 
     def _make_chunk(self, data: dict[str, Any]) -> str:
         """Create a SSE chunk string from a dictionary.

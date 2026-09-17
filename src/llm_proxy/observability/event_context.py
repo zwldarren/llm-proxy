@@ -68,6 +68,10 @@ class EventContext:
     # === Sampling decision (made once at creation) ===
     should_capture_full_body: bool = True
     should_log_input_output: bool = True
+    # Raw SSE capture is opt-in (``logging.log_raw_stream``); ``x-log-full``
+    # forces it for a single request. When off, the stream lifecycle assembles
+    # ``assembled_response_body`` instead of buffering every chunk.
+    should_capture_raw_stream: bool = False
 
     # === Timing data ===
     start_time: float = field(default_factory=time.perf_counter)
@@ -104,6 +108,10 @@ class EventContext:
     request_body: Any = None
     response_headers: dict[str, Any] = field(default_factory=dict)
     response_body: Any = None
+    # Non-streaming wire shape reassembled from the streaming transformer's
+    # accumulated blocks. Set by the stream lifecycle when raw capture is off;
+    # the audit handler stores it in place of the raw SSE text.
+    assembled_response_body: dict[str, Any] | None = None
     response_status_code: int | None = None
 
     # === Error information ===
@@ -276,7 +284,7 @@ class EventContext:
         Returns:
             True if captured, False if truncated/skipped
         """
-        if not self.should_capture_full_body:
+        if not self.should_capture_raw_stream:
             return False
 
         chunk_bytes = chunk.encode("utf-8") if isinstance(chunk, str) else chunk

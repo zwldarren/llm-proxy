@@ -8,8 +8,10 @@ retry, web-search continuation, model-echo through the real stages) live in
 """
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import orjson
 import pytest
 
 from llm_proxy.core.conversion import NativePassthroughHandler
@@ -18,7 +20,55 @@ from llm_proxy.core.processing.stream_lifecycle import (
     StreamLifecycle,
     iterate_chunks_with_comments,
 )
+from llm_proxy.models.content_blocks import TextBlock
 from llm_proxy.observability.event_context import EventContext
+from llm_proxy.observability.tracing.handlers.audit_log import AuditLogHandler
+from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
+from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
+from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
+from llm_proxy.protocols.registry import get_protocol_serializer
+from llm_proxy.serialization import get_provider_serializer
+
+
+def _non_streaming_anthropic_body(content: list, usage: dict) -> dict[str, Any]:
+    """Format a non-streaming Anthropic call through the same provider→client path.
+
+    The streamed log body is supposed to match it (ADR-0015), so the tests
+    compare against what the parser plus formatter actually produce.
+    """
+    response = get_provider_serializer("anthropic").parse_provider_response(
+        {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-real",
+            "content": content,
+            "stop_reason": "end_turn",
+            "usage": usage,
+        }
+    )
+    return get_protocol_serializer("anthropic").format_response(response)
+
+
+def _non_streaming_openai_chat_body(message: dict, envelope: dict) -> dict[str, Any]:
+    """Format a non-streaming Chat Completions call through the provider→client path.
+
+    ``openrouter`` is registered to the OpenAI **Chat Completions** provider
+    serializer (the ``openai`` name is the Responses one), which is the
+    non-streaming counterpart of the streamed body under test — its parser is
+    what fills ``system_fingerprint``/``service_tier``.
+    """
+    response = get_provider_serializer("openrouter").parse_provider_response(
+        {
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "upstream-model",
+            "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+            **envelope,
+        }
+    )
+    return get_protocol_serializer("openai").format_response(response)
 
 
 def _registry() -> MagicMock:
@@ -39,7 +89,90 @@ def _request(model: str = "glm-5", echo_model: str | None = None) -> MagicMock:
     req = MagicMock()
     req.model = model
     req.echo_model = echo_model or model
+    req.user_facing_model = echo_model or model
     return req
+
+
+def _native_frame(delta: dict, finish_reason: str | None = None, **envelope) -> str:
+    """A native ``chat.completion.chunk`` SSE frame as an upstream sends it.
+
+    Extra keyword arguments land on the chunk envelope, where providers put
+    ``system_fingerprint``/``service_tier``.
+    """
+    payload = {
+        "id": "chatcmpl-native",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "upstream-model",
+        **envelope,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+    return f"data: {orjson.dumps(payload).decode()}\n\n"
+
+
+def _sse(event: str, payload: dict) -> str:
+    """A named-event SSE frame (Anthropic and Responses native tiers)."""
+    return f"event: {event}\ndata: {orjson.dumps(payload).decode()}\n\n"
+
+
+def _anthropic_native_stream() -> list[str]:
+    """A complete native Anthropic stream: thinking, text, then a tool call."""
+    return [
+        _sse(
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_upstream_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-upstream-model",
+                    "content": [],
+                    "stop_reason": None,
+                    "usage": {"input_tokens": 12, "output_tokens": 1},
+                },
+            },
+        ),
+        _sse(
+            "content_block_start",
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+        ),
+        _sse(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Hello"},
+            },
+        ),
+        _sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        _sse(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"type": "tool_use", "id": "toolu_1", "name": "lookup"},
+            },
+        ),
+        _sse(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": '{"city": "SF"}'},
+            },
+        ),
+        _sse("content_block_stop", {"type": "content_block_stop", "index": 1}),
+        _sse(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+                "usage": {"output_tokens": 25},
+            },
+        ),
+        _sse("message_stop", {"type": "message_stop"}),
+    ]
 
 
 class _FakeTransformer:
@@ -582,6 +715,48 @@ class TestGenericStreamLifecycle:
         traced = [call.args[1] for call in registry.on_stream_chunk.call_args_list]
         assert traced == ["a", "b"]
 
+    async def test_traced_chunks_are_buffered_for_the_request_log(self) -> None:
+        """Generic streams have no reassembly step, so their frames are the body."""
+        context = _context()
+        registry = _registry()
+        registry.on_stream_chunk = AsyncMock(
+            side_effect=lambda _request, chunk, ctx: ctx.capture_streaming_chunk(chunk)
+        )
+        lifecycle = self._generic(
+            _stream("data: frame-a\n\n", "data: frame-b\n\n"),
+            tracing_registry=registry,
+            event_context=context,
+            trace_chunks=True,
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is True
+        assert context.get_streaming_body() == b"data: frame-a\n\ndata: frame-b\n\n"
+        assert AuditLogHandler._logged_stream_body(context) == "data: frame-a\n\ndata: frame-b\n\n"
+
+    async def test_untraced_chunks_are_not_buffered(self) -> None:
+        """Speech/transcription streams never ask for per-chunk capture."""
+        context = _context()
+        lifecycle = self._generic(_stream(b"\x00audio-bytes"), event_context=context)
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        assert context.get_streaming_body() == b""
+
+    async def test_sampled_out_generic_stream_buffers_nothing(self) -> None:
+        context = _context()
+        context.should_capture_full_body = False
+        lifecycle = self._generic(
+            _stream("data: frame\n\n"), event_context=context, trace_chunks=True
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        assert context.get_streaming_body() == b""
+
     async def test_observer_called_per_chunk_and_never_fatal(self) -> None:
         seen: list = []
 
@@ -693,3 +868,675 @@ class TestStreamLifecycleTracingOrder:
         await _collect(lifecycle.events())
 
         assert order == ["start", "chunk", "chunk", "end"]
+
+
+class _BlocksTransformer(_FakeTransformer):
+    """Transformer fake that reports accumulated content blocks."""
+
+    def __init__(self, blocks: list) -> None:
+        super().__init__()
+        self._blocks = blocks
+
+    def get_accumulated_output(self) -> list:
+        return self._blocks
+
+
+class _FlushableTransformer(_FakeTransformer):
+    """Transformer fake that only materializes its content when flushed.
+
+    Mirrors the real transformers, whose pending buffers are the only thing a
+    truncated stream leaves behind.
+    """
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self._text = text
+        self._pending = True
+        self._blocks: list = []
+
+    def flush_pending_accumulation(self) -> None:
+        if self._pending:
+            self._pending = False
+            self._blocks.append(TextBlock(text=self._text))
+
+    def get_accumulated_output(self) -> list:
+        return list(self._blocks)
+
+
+class TestStreamLifecycleLoggedBody:
+    """Raw SSE vs reassembled JSON: which the lifecycle prepares for the log."""
+
+    async def test_converted_stream_is_reassembled_not_buffered(self) -> None:
+        from llm_proxy.models.content_blocks import TextBlock
+
+        context = _context()
+        lifecycle = _lifecycle(
+            stream=_stream({"delta": {"content": "hi"}}, "[DONE]"),
+            transformer=_BlocksTransformer([TextBlock(text="hi")]),
+            event_context=context,
+            protocol_name="openai",
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        assert context.get_streaming_body() == b""
+        assert context.assembled_response_body is not None
+        assert context.assembled_response_body["choices"][0]["message"]["content"] == "hi"
+
+    async def test_native_stream_without_a_body_source_keeps_the_raw_sse(self) -> None:
+        """A transformer that cannot rebuild a body from native frames keeps raw SSE."""
+        context = _context()
+        context.should_capture_full_body = True
+        lifecycle = _lifecycle(
+            stream=_stream(_native_frame({"content": "hi"})),
+            native_streaming=True,
+            protocol_name="anthropic",
+            transformer=_FakeTransformer(),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        # Raw capture is armed (the tracing handler then buffers each frame)
+        # and no reassembled body is produced.
+        assert context.should_capture_raw_stream is True
+        assert context.assembled_response_body is None
+
+    async def test_native_openai_stream_is_reassembled_not_buffered(self) -> None:
+        """Native OpenAI frames are chat.completion.chunks, so the accumulator
+        rebuilds the non-streaming body and the raw SSE is not kept."""
+        context = _context()
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                _native_frame({"role": "assistant", "content": ""}),
+                _native_frame({"content": "Hel"}),
+                _native_frame({"content": "lo"}),
+                _native_frame({}, finish_reason="stop"),
+                "data: [DONE]\n\n",
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            transformer=transformer,
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        assert context.get_streaming_body() == b""
+        assert context.assembled_response_body is not None
+        choice = context.assembled_response_body["choices"][0]
+        assert choice["message"]["content"] == "Hello"
+        assert choice["finish_reason"] == "stop"
+        assert context.assembled_response_body["model"] == "glm-5"
+
+    async def test_native_openai_truncated_stream_logs_what_was_delivered(self) -> None:
+        """A stream cut off before its terminal chunk is flushed for the log."""
+        context = _context()
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
+        lifecycle = _lifecycle(
+            stream=_stream(_native_frame({"content": "partial"})),
+            native_streaming=True,
+            protocol_name="openai",
+            transformer=transformer,
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.assembled_response_body is not None
+        assert context.assembled_response_body["choices"][0]["message"]["content"] == "partial"
+
+    async def test_native_openai_stream_is_not_accumulated_when_sampled_out(self) -> None:
+        context = _context()
+        context.should_capture_full_body = False
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
+        lifecycle = _lifecycle(
+            stream=_stream(_native_frame({"content": "hi"})),
+            native_streaming=True,
+            protocol_name="openai",
+            transformer=transformer,
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        # The frame never reached the accumulator: flushing what is left yields
+        # nothing (the buffers are where accumulation lands before a finalize).
+        transformer.flush_pending_accumulation()
+        assert transformer.get_accumulated_output() == []
+        assert context.should_capture_raw_stream is False
+        assert context.assembled_response_body is None
+
+    async def test_native_openai_explicit_raw_capture_skips_accumulation(self) -> None:
+        context = _context()
+        context.should_capture_raw_stream = True
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
+        lifecycle = _lifecycle(
+            stream=_stream(_native_frame({"content": "hi"})),
+            native_streaming=True,
+            protocol_name="openai",
+            transformer=transformer,
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        transformer.flush_pending_accumulation()
+        assert transformer.get_accumulated_output() == []
+        assert context.assembled_response_body is None
+
+    async def test_native_anthropic_stream_is_reassembled_not_buffered(self) -> None:
+        """Native Anthropic frames rebuild the message the client received."""
+        context = _context()
+        transformer = AnthropicStreamingTransformer(
+            model="claude-alias", request_id="chatcmpl-proxy"
+        )
+        lifecycle = _lifecycle(
+            stream=_stream(*_anthropic_native_stream()),
+            native_streaming=True,
+            protocol_name="anthropic",
+            transformer=transformer,
+            stream_request=_request(model="claude-real", echo_model="claude-alias"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        assert context.get_streaming_body() == b""
+        body = context.assembled_response_body
+        assert body is not None
+        # The upstream's message id, not the proxy's generated one.
+        assert body["id"] == "msg_upstream_1"
+        assert body["model"] == "claude-alias"
+        assert body["stop_reason"] == "tool_use"
+        assert body["content"] == [
+            {"type": "text", "text": "Hello"},
+            {"type": "tool_use", "id": "toolu_1", "name": "lookup", "input": {"city": "SF"}},
+        ]
+        # Usage is captured from the frames into the event context.
+        assert body["usage"]["output_tokens"] == 25
+
+    async def test_native_anthropic_truncated_stream_logs_what_was_delivered(self) -> None:
+        """A stream cut off before content_block_stop is flushed for the log."""
+        context = _context()
+        frames = _anthropic_native_stream()
+        transformer = AnthropicStreamingTransformer(
+            model="claude-alias", request_id="chatcmpl-proxy"
+        )
+        lifecycle = _lifecycle(
+            stream=_stream(*frames[:3]),
+            native_streaming=True,
+            protocol_name="anthropic",
+            transformer=transformer,
+            stream_request=_request(model="claude-real", echo_model="claude-alias"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        body = context.assembled_response_body
+        assert body is not None
+        # The mid-flight text block was flushed; nothing after it was sent.
+        assert body["content"] == [{"type": "text", "text": "Hello"}]
+        # No message_delta arrived, so the formatter's default stands.
+        assert body["stop_reason"] == "end_turn"
+
+    async def test_native_anthropic_beta_terminal_extras_reach_the_logged_body(self) -> None:
+        """Terminal beta fields are re-emitted from the transformer's state.
+
+        The formatter reads them from ``provider_info``, which the reassembled
+        body has no provider response to fill (ADR-0015), so the native frames'
+        own terminal extras are what the log records.
+        """
+        context = _context()
+        transformer = AnthropicStreamingTransformer(
+            model="claude-alias", request_id="chatcmpl-proxy"
+        )
+        lifecycle = _lifecycle(
+            stream=_stream(
+                _sse(
+                    "message_start",
+                    {
+                        "type": "message_start",
+                        "message": {
+                            "id": "msg_upstream_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "claude-upstream-model",
+                            "content": [],
+                            "stop_reason": None,
+                            "stop_sequence": None,
+                            "usage": {"input_tokens": 12, "output_tokens": 1},
+                            "diagnostics": {"cache_divergence": False},
+                        },
+                    },
+                ),
+                _sse(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                ),
+                _sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": "done"},
+                    },
+                ),
+                _sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                _sse(
+                    "message_delta",
+                    {
+                        "type": "message_delta",
+                        "delta": {
+                            "stop_reason": "stop_sequence",
+                            "stop_sequence": "</answer>",
+                            "stop_details": {"type": "stop_sequence"},
+                            "container": {"type": "code_execution", "id": "c1"},
+                        },
+                        "usage": {"output_tokens": 25},
+                    },
+                ),
+            ),
+            native_streaming=True,
+            protocol_name="anthropic",
+            transformer=transformer,
+            stream_request=_request(model="claude-real", echo_model="claude-alias"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        body = context.assembled_response_body
+        assert body is not None
+        assert body["stop_reason"] == "stop_sequence"
+        assert body["stop_sequence"] == "</answer>"
+        assert body["stop_details"] == {"type": "stop_sequence"}
+        assert body["container"] == {"type": "code_execution", "id": "c1"}
+        assert body["diagnostics"] == {"cache_divergence": False}
+
+    async def test_converted_anthropic_beta_terminal_extras_reach_the_logged_body(self) -> None:
+        """The converted path reads its terminal state before ``finalize`` clears it."""
+        context = _context()
+        transformer = AnthropicStreamingTransformer(
+            model="claude-alias", request_id="chatcmpl-proxy"
+        )
+        lifecycle = _lifecycle(
+            stream=_stream(
+                {
+                    "id": "chatcmpl-proxy",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "claude-alias",
+                    "diagnostics": {"cache_divergence": True},
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "done"},
+                            "finish_reason": "stop",
+                            "stop_sequence": "</answer>",
+                            "stop_details": {"type": "stop_sequence"},
+                            "container": {"type": "code_execution", "id": "c1"},
+                        }
+                    ],
+                },
+                "data: [DONE]\n\n",
+            ),
+            protocol_name="anthropic",
+            transformer=transformer,
+            stream_request=_request(model="claude-real", echo_model="claude-alias"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        body = context.assembled_response_body
+        assert body is not None
+        assert body["stop_sequence"] == "</answer>"
+        assert body["stop_details"] == {"type": "stop_sequence"}
+        assert body["container"] == {"type": "code_execution", "id": "c1"}
+        assert body["diagnostics"] == {"cache_divergence": True}
+
+    async def test_native_openresponses_stream_logs_the_terminal_snapshot(self) -> None:
+        """The terminal event carries the whole response; no blocks are built."""
+        context = _context()
+        snapshot = {
+            "id": "resp_upstream",
+            "object": "response",
+            "created_at": 1,
+            "status": "completed",
+            "model": "gpt-5",
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Hello", "annotations": []}],
+                }
+            ],
+            "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+        }
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5", request_id="resp-proxy")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                _sse(
+                    "response.output_text.delta",
+                    {"type": "response.output_text.delta", "output_index": 0, "delta": "Hello"},
+                ),
+                _sse(
+                    "response.completed",
+                    {"type": "response.completed", "response": snapshot},
+                ),
+            ),
+            native_streaming=True,
+            protocol_name="openresponses",
+            transformer=transformer,
+            stream_request=_request(model="gpt-5-upstream", echo_model="gpt-5"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        body = context.assembled_response_body
+        assert body is not None
+        assert body["status"] == "completed"
+        assert body["output"] == snapshot["output"]
+        assert body["usage"] == snapshot["usage"]
+        # The snapshot's upstream model name is masked with the client's alias,
+        # the same way the transformer path rewrites it.
+        assert body["model"] == "gpt-5"
+
+    async def test_native_openresponses_truncated_stream_logs_the_partial_response(self) -> None:
+        """Items closed before the cut are logged, marked as incomplete."""
+        context = _context()
+        skeleton = {
+            "id": "resp_upstream",
+            "object": "response",
+            "created_at": 1,
+            "status": "in_progress",
+            "model": "gpt-5-upstream",
+            "output": [],
+        }
+        item = {
+            "type": "message",
+            "id": "msg_1",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Hel", "annotations": []}],
+        }
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5", request_id="resp-proxy")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                _sse("response.created", {"type": "response.created", "response": skeleton}),
+                _sse(
+                    "response.output_item.done",
+                    {"type": "response.output_item.done", "output_index": 0, "item": item},
+                ),
+            ),
+            native_streaming=True,
+            protocol_name="openresponses",
+            transformer=transformer,
+            stream_request=_request(model="gpt-5-upstream", echo_model="gpt-5"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        body = context.assembled_response_body
+        assert body is not None
+        assert body["status"] == "incomplete"
+        assert body["model"] == "gpt-5"
+        assert body["output"] == [item]
+
+    async def test_native_stream_is_not_buffered_when_the_body_was_sampled_out(self) -> None:
+        context = _context()
+        context.should_capture_full_body = False
+        lifecycle = _lifecycle(
+            stream=_stream(_native_frame({"content": "hi"})),
+            native_streaming=True,
+            protocol_name="anthropic",
+            transformer=_FakeTransformer(),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.should_capture_raw_stream is False
+        assert context.get_streaming_body() == b""
+
+    async def test_explicit_raw_capture_skips_reassembly(self) -> None:
+        from llm_proxy.models.content_blocks import TextBlock
+
+        context = _context()
+        context.should_capture_raw_stream = True
+        lifecycle = _lifecycle(
+            stream=_stream({"delta": {"content": "hi"}}, "[DONE]"),
+            transformer=_BlocksTransformer([TextBlock(text="hi")]),
+            event_context=context,
+            protocol_name="openai",
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.assembled_response_body is None
+        # The explicit raw request is what the handler stores; the frames are
+        # buffered by the tracing handler rather than here.
+        assert context.should_capture_raw_stream is True
+
+    async def test_converted_stream_error_logs_what_was_delivered(self) -> None:
+        """An upstream cut skips ``finalize()``, so the buffered tail is flushed.
+
+        Without the flush the reassembly sees an empty accumulator and the
+        handler stores ``{"streaming": true, "_assembled": false}`` — the
+        delivered text would be lost from the log.
+        """
+        context = _context()
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-cut")
+
+        async def _broken():
+            yield {"choices": [{"index": 0, "delta": {"content": "partial"}}]}
+            raise RuntimeError("upstream cut")
+
+        lifecycle = _lifecycle(
+            stream=_broken(),
+            transformer=transformer,
+            event_context=context,
+            protocol_name="openai",
+        )
+
+        await _collect(lifecycle.events())
+
+        assert context.assembled_response_body is not None
+        assert context.assembled_response_body["choices"][0]["message"]["content"] == "partial"
+
+    async def test_converted_stream_client_disconnect_logs_what_was_delivered(self) -> None:
+        context = _context()
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-cut")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                {"choices": [{"index": 0, "delta": {"content": "head"}}]},
+                {"choices": [{"index": 0, "delta": {"content": "-tail"}}]},
+            ),
+            transformer=transformer,
+            event_context=context,
+            protocol_name="openai",
+        )
+
+        stream = lifecycle.events()
+        await anext(stream)
+        await stream.aclose()
+
+        assert lifecycle.client_disconnected is True
+        assert context.assembled_response_body is not None
+        assert context.assembled_response_body["choices"][0]["message"]["content"] == "head"
+
+    async def test_a_continuation_flushes_and_concatenates_both_transformers(self) -> None:
+        """Web-search continuations split one response across two transformers.
+
+        Both segments have to be flushed and logged in wire order (original
+        first), the same order the reasoning-cache path reads them in.
+        """
+        context = _context()
+        original = _FlushableTransformer("first")
+        continuation = _FlushableTransformer("second")
+        lifecycle = _lifecycle(
+            stream=_stream(),
+            transformer=original,
+            event_context=context,
+            protocol_name="openai",
+        )
+        lifecycle.state.transformer = continuation
+        lifecycle.state.depth = 1
+
+        await _collect(lifecycle.events())
+
+        assert context.assembled_response_body is not None
+        assert context.assembled_response_body["choices"][0]["message"]["content"] == "first second"
+
+    async def test_native_anthropic_usage_extras_match_a_non_streaming_call(self) -> None:
+        """A streamed web-search turn logs the usage extras a non-streamed one does."""
+        context = _context()
+        transformer = AnthropicStreamingTransformer(model="claude-alias", request_id="gen")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                _sse(
+                    "message_start",
+                    {
+                        "type": "message_start",
+                        "message": {
+                            "id": "msg_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                            "usage": {
+                                "input_tokens": 12,
+                                "output_tokens": 1,
+                                "service_tier": "standard",
+                            },
+                        },
+                    },
+                ),
+                _sse(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                ),
+                _sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": "hi"},
+                    },
+                ),
+                _sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                _sse(
+                    "message_delta",
+                    {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn"},
+                        "usage": {
+                            "output_tokens": 25,
+                            "server_tool_use": {"web_search_requests": 1},
+                        },
+                    },
+                ),
+            ),
+            native_streaming=True,
+            protocol_name="anthropic",
+            transformer=transformer,
+            stream_request=_request(model="claude-real", echo_model="claude-alias"),
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        streamed = context.assembled_response_body
+        assert streamed is not None
+        non_streaming = _non_streaming_anthropic_body(
+            [{"type": "text", "text": "hi"}],
+            {
+                "input_tokens": 12,
+                "output_tokens": 25,
+                "service_tier": "standard",
+                "server_tool_use": {"web_search_requests": 1},
+            },
+        )
+        assert streamed["usage"]["server_tool_use"] == non_streaming["usage"]["server_tool_use"]
+        assert streamed["usage"]["service_tier"] == non_streaming["usage"]["service_tier"]
+
+    async def test_native_openai_envelope_fields_match_a_non_streaming_call(self) -> None:
+        context = _context()
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                _native_frame(
+                    {"role": "assistant", "content": "Hello"},
+                    system_fingerprint="fp_abc",
+                    service_tier="flex",
+                ),
+                _native_frame({}, finish_reason="stop"),
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            transformer=transformer,
+            event_context=context,
+        )
+
+        await _collect(lifecycle.events())
+
+        streamed = context.assembled_response_body
+        assert streamed is not None
+        non_streaming = _non_streaming_openai_chat_body(
+            {"role": "assistant", "content": "Hello"},
+            {"system_fingerprint": "fp_abc", "service_tier": "flex"},
+        )
+        assert streamed["system_fingerprint"] == non_streaming["system_fingerprint"]
+        assert streamed["service_tier"] == non_streaming["service_tier"]
+
+    async def test_converted_openai_envelope_fields_match_a_non_streaming_call(self) -> None:
+        """The converted tier reads the envelope off the provider chunks too."""
+        context = _context()
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-1")
+        lifecycle = _lifecycle(
+            stream=_stream(
+                {
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "glm-5",
+                    "system_fingerprint": "fp_abc",
+                    "service_tier": "flex",
+                    "choices": [{"index": 0, "delta": {"content": "Hello"}, "finish_reason": None}],
+                },
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                "[DONE]",
+            ),
+            transformer=transformer,
+            event_context=context,
+            protocol_name="openai",
+        )
+
+        await _collect(lifecycle.events())
+
+        streamed = context.assembled_response_body
+        assert streamed is not None
+        non_streaming = _non_streaming_openai_chat_body(
+            {"role": "assistant", "content": "Hello"},
+            {"system_fingerprint": "fp_abc", "service_tier": "flex"},
+        )
+        assert streamed["system_fingerprint"] == non_streaming["system_fingerprint"]
+        assert streamed["service_tier"] == non_streaming["service_tier"]
