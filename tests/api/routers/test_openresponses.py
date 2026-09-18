@@ -643,8 +643,7 @@ class TestCompactPassthrough:
         forwarded verbatim and the upstream response returned as-is."""
 
         class FakeAdapter:
-            def _target_endpoint(self):
-                return "responses"
+            is_native_responses_upstream = True
 
             async def __aenter__(self):
                 return self
@@ -676,8 +675,7 @@ class TestCompactPassthrough:
         instead of surfacing the upstream error."""
 
         class FakeAdapter:
-            def _target_endpoint(self):
-                return "responses"
+            is_native_responses_upstream = True
 
             async def __aenter__(self):
                 return self
@@ -699,8 +697,7 @@ class TestCompactPassthrough:
         """Non-native providers keep the local lossless packing behavior."""
 
         class FakeAdapter:
-            def _target_endpoint(self):
-                return "chat_completions"
+            is_native_responses_upstream = False
 
             async def __aenter__(self):
                 return self

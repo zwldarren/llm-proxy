@@ -1,11 +1,13 @@
 """Pipeline stage: resolve openresponses previous_response_id after overrides."""
 
-from typing import Any
-
 from llm_proxy.core import reasoning_cache
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.processing.base import RequestContext
-from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
+from llm_proxy.core.processing.stages.base import (
+    PipelineStage,
+    PipelineState,
+    is_native_responses_upstream,
+)
 from llm_proxy.models.content_blocks import ThinkingBlock, ToolUseBlock
 from llm_proxy.observability.logger import get_logger
 
@@ -110,7 +112,7 @@ class PreviousResponseResolutionStage(PipelineStage):
             # strip the id and the client would lose the prior context without
             # any error. Per the OpenResponses spec, fail the turn loudly with
             # previous_response_not_found instead.
-            if _is_native_responses_upstream(state.adapter):
+            if is_native_responses_upstream(state.adapter):
                 logger.info(
                     f"previous_response_id '{prev_id}' not resolvable locally "
                     "(response storage disabled); forwarding to native Responses upstream"
@@ -140,7 +142,7 @@ class PreviousResponseResolutionStage(PipelineStage):
                 # response server-side (created outside this proxy, streamed
                 # before persistence existed, or stored upstream-only).
                 # Forward the id instead of failing.
-                if _is_native_responses_upstream(state.adapter):
+                if is_native_responses_upstream(state.adapter):
                     logger.info(
                         f"previous_response_id '{prev_id}' not in local store; "
                         "forwarding to native Responses upstream"
@@ -163,7 +165,7 @@ class PreviousResponseResolutionStage(PipelineStage):
             # Replay the stored response's items into the conversation and
             # splice any item_reference targets that point into the stored turn.
             unresolved = req._unresolved_item_references
-            replay_stored_response(prev_response, req.conversation, unresolved)
+            replay_stored_response(prev_response, req.conversation, unresolved, req)
             # The raw protocol body still carries the proxy-local
             # previous_response_id (popped from ``extra`` below) and none of
             # the materialized items; disable native request passthrough so
@@ -176,7 +178,7 @@ class PreviousResponseResolutionStage(PipelineStage):
             # rebuilt body is Chat Completions-shaped) cannot consume a native
             # Responses stream with a rebuilt body — disable native handling on
             # both sides so the whole request falls back to translation.
-            if not _is_native_responses_upstream(state.adapter):
+            if not is_native_responses_upstream(state.adapter):
                 state.unified_request.native_request_disabled = True
             # The prior context is now materialized in the conversation; drop
             # the id so a native Responses provider does not load it again and
@@ -216,14 +218,3 @@ def _populate_cache_from_response(prev_response: dict) -> None:
             pending = None
         else:
             pending = None
-
-
-def _is_native_responses_upstream(adapter: Any) -> bool:
-    """Whether the selected adapter talks to a native OpenAI Responses API endpoint."""
-    target = getattr(adapter, "_target_endpoint", None)
-    if not callable(target):
-        return False
-    try:
-        return target() == "responses"
-    except Exception:
-        return False

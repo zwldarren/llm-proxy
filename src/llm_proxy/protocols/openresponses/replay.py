@@ -13,6 +13,7 @@ from typing import Any
 from llm_proxy.models import ConversationContext, Message, SystemMessage
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.openresponses.serializer import (
+    DiscoveredToolsCollector,
     _dispatch_input_item,
     _flush_pending_turn,
 )
@@ -24,6 +25,7 @@ def replay_stored_response(
     stored: dict[str, Any],
     conversation: ConversationContext,
     unresolved_refs: list[tuple[int, str]] | None = None,
+    request: Any | None = None,
 ) -> int:
     """Prepend a stored response's items to the conversation.
 
@@ -37,6 +39,10 @@ def replay_stored_response(
     When ``unresolved_refs`` (``(message_index, ref_id)`` pairs recorded at
     parse time) is given, the referenced items are spliced into the
     conversation at their recorded positions after the prepend.
+
+    When ``request`` is given, tools discovered by ``tool_search_output`` items in
+    the stored turn are attached to it (via ``attach_discovered_tools``) so they
+    stay callable for providers that bridge ``tool_search`` to a function tool.
 
     Returns the number of messages prepended.
     """
@@ -58,6 +64,7 @@ def replay_stored_response(
     # re-declares its own tools) instead of polluting InternalRequest.tools
     # with raw dicts.
     tools_sink = SimpleNamespace(tools=None)
+    discovered = DiscoveredToolsCollector()
 
     for source in (stored.get("input"), stored.get("output")):
         if isinstance(source, str):
@@ -81,9 +88,13 @@ def replay_stored_response(
                 tools_sink,
                 seen_items,
                 None,
+                discovered,
             )
 
     _flush_pending_turn(pending_blocks, pending_ws, prev_messages, pending_phase)
+
+    if request is not None:
+        discovered.attach_to(request)
 
     if prev_system:
         conversation.system_messages = [*prev_system, *conversation.system_messages]
@@ -92,7 +103,7 @@ def replay_stored_response(
 
     prepended_count = len(prev_messages)
     if unresolved_refs:
-        _splice_item_references(stored, conversation, unresolved_refs, prepended_count)
+        _splice_item_references(stored, conversation, unresolved_refs, prepended_count, request)
     return prepended_count
 
 
@@ -101,6 +112,7 @@ def _splice_item_references(
     conversation: ConversationContext,
     unresolved_refs: list[tuple[int, str]],
     prepended_count: int,
+    request: Any | None = None,
 ) -> None:
     """Splice item_reference targets from a stored response into the conversation.
 
@@ -137,6 +149,7 @@ def _splice_item_references(
         # polluting InternalRequest.tools with raw dicts — same treatment as
         # replay_stored_response's tools_sink.
         tools_sink = SimpleNamespace(tools=None)
+        discovered = DiscoveredToolsCollector()
         try:
             _dispatch_input_item(
                 dict(item),
@@ -147,11 +160,15 @@ def _splice_item_references(
                 pending_phase,
                 tools_sink,
                 {},
+                None,
+                discovered,
             )
             _flush_pending_turn(pending_blocks, pending_ws, produced, pending_phase)
         except Exception:
             logger.warning(f"Failed to resolve item_reference '{ref_id}'", exc_info=True)
             continue
+        if request is not None:
+            discovered.attach_to(request)
         if not produced:
             continue
         pos = min(prepended_count + msg_index + inserted, len(conversation.messages))

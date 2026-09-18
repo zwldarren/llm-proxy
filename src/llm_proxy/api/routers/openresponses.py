@@ -144,9 +144,7 @@ async def _try_native_compact_passthrough(request: Request) -> JSONResponse | No
     the passthrough attempt itself fails), letting the caller fall back to
     the proxy's local lossless packing.
     """
-    from llm_proxy.core.processing.stages.previous_response import (
-        _is_native_responses_upstream,
-    )
+    from llm_proxy.core.processing.stages.base import is_native_responses_upstream
 
     try:
         raw_body = orjson.loads(await request.body())
@@ -185,7 +183,7 @@ async def _try_native_compact_passthrough(request: Request) -> JSONResponse | No
             return None
         adapter = await context.adapter_factory(request, selection)
         async with adapter:
-            if not _is_native_responses_upstream(adapter):
+            if not is_native_responses_upstream(adapter):
                 return None
             compact = getattr(adapter, "compact_response", None)
             if compact is None:

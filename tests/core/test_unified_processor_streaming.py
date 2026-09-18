@@ -1323,12 +1323,12 @@ async def test_setup_fallback_provider_skips_provider_rejecting_stage_rerun() ->
     bad_adapter.provider_name = "bad"
     bad_adapter.close = AsyncMock()
     # Non-native upstream: cannot resolve a proxy-local previous_response_id.
-    bad_adapter._target_endpoint = lambda: "chat_completions"
+    bad_adapter.is_native_responses_upstream = False
     good_adapter = MagicMock()
     good_adapter.provider_name = "good"
     good_adapter.close = AsyncMock()
     # Native Responses upstream: forwards the id server-side, no rejection.
-    good_adapter._target_endpoint = lambda: "responses"
+    good_adapter.is_native_responses_upstream = True
     context = RequestContext(
         orchestrator=orchestrator,
         services=ServiceDependencies(

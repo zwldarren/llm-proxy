@@ -294,7 +294,7 @@ async def test_stage_disables_native_streaming_for_chat_upstream():
     Completions-shaped, so a native Responses stream cannot consume it — the
     whole request must fall back to translation."""
     chat_adapter = MagicMock()
-    chat_adapter._target_endpoint.return_value = "chat_completions"
+    chat_adapter.is_native_responses_upstream = False
 
     state, ctx, req = _materialization_harness(chat_adapter)
     await PreviousResponseResolutionStage().process(state, ctx)
@@ -308,7 +308,7 @@ async def test_stage_keeps_native_streaming_for_responses_upstream():
     """Materialization with a native Responses upstream (OpenAI) rebuilds a
     Responses-shaped body, so the stream side may stay native."""
     native_adapter = MagicMock()
-    native_adapter._target_endpoint.return_value = "responses"
+    native_adapter.is_native_responses_upstream = True
 
     state, ctx, req = _materialization_harness(native_adapter)
     await PreviousResponseResolutionStage().process(state, ctx)
@@ -453,7 +453,7 @@ async def test_stage_forwards_to_native_upstream_when_not_found():
     fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
 
     native_adapter = MagicMock()
-    native_adapter._target_endpoint.return_value = "responses"
+    native_adapter.is_native_responses_upstream = True
 
     state = PipelineState(
         raw_data={},
@@ -488,7 +488,7 @@ async def test_stage_raises_when_store_disabled_and_chat_upstream():
     fake_req.extra = {"previous_response_id": "resp_local_only"}
 
     chat_adapter = MagicMock()
-    chat_adapter._target_endpoint.return_value = "chat_completions"
+    chat_adapter.is_native_responses_upstream = False
 
     state = PipelineState(
         raw_data={},
@@ -519,7 +519,7 @@ async def test_stage_forwards_when_store_disabled_and_native_upstream():
     fake_req.extra = {"previous_response_id": "resp_upstream_only"}
 
     native_adapter = MagicMock()
-    native_adapter._target_endpoint.return_value = "responses"
+    native_adapter.is_native_responses_upstream = True
 
     state = PipelineState(
         raw_data={},
@@ -558,7 +558,7 @@ async def test_stage_raises_for_chat_upstream_when_not_found():
     fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
 
     chat_adapter = MagicMock()
-    chat_adapter._target_endpoint.return_value = "chat_completions"
+    chat_adapter.is_native_responses_upstream = False
 
     state = PipelineState(
         raw_data={},

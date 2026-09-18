@@ -22,7 +22,7 @@ Covered here:
   translation path;
 * streaming: both protocols yield raw SSE blocks; cancel token; retry wrapper;
 * the previous-response stage treats DeepSeek as a *stateless* Responses
-  upstream (``_is_native_responses_upstream`` stays False) so an unresolved
+  upstream (``is_native_responses_upstream`` stays False) so an unresolved
   ``previous_response_id`` fails loudly instead of being silently dropped.
 """
 
@@ -32,7 +32,7 @@ from unittest.mock import AsyncMock, patch
 import orjson
 import pytest
 
-from llm_proxy.core.processing.stages.previous_response import _is_native_responses_upstream
+from llm_proxy.core.processing.stages.base import is_native_responses_upstream
 from llm_proxy.core.processing.strategies.chat import ChatStrategy
 from llm_proxy.models import (
     InternalRequest,
@@ -683,7 +683,8 @@ class TestNativeStreaming:
 class TestStatelessResponsesUpstream:
     def test_not_a_native_responses_upstream(self, adapter):
         # DeepSeek's Responses endpoint does not support previous_response_id;
-        # keeping _target_endpoint at "chat_completions" makes the pipeline
-        # fail unresolved ids loudly instead of silently dropping context.
-        assert _is_native_responses_upstream(adapter) is False
-        assert _is_native_responses_upstream(DeepSeekAdapter(api_key="k")) is False
+        # the adapter keeps _target_endpoint at "chat_completions", so the public
+        # predicate stays False and the pipeline fails unresolved ids loudly
+        # instead of silently dropping context.
+        assert is_native_responses_upstream(adapter) is False
+        assert is_native_responses_upstream(DeepSeekAdapter(api_key="k")) is False

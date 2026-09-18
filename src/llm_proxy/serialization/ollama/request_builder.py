@@ -6,7 +6,13 @@ from typing import Any
 
 from llm_proxy.core.thinking import convert_to_ollama, resolve_thinking
 from llm_proxy.models import InternalEmbeddingRequest, InternalRequest
-from llm_proxy.models.tools import CustomTool, FunctionTool, OpenAIToolSearchTool, ToolDefinition
+from llm_proxy.models.tools import (
+    CustomTool,
+    FunctionTool,
+    OpenAIToolSearchTool,
+    ToolDefinition,
+    custom_tool_bridge_description,
+)
 from llm_proxy.models.types import unwrap_json_schema_wrapper
 from llm_proxy.serialization.context import BuildContext
 
@@ -246,8 +252,11 @@ class OllamaRequestBuilderMixin:
                     # Convert CustomTool to a function tool for Ollama.
                     # Custom (freeform) tools are not natively supported, so we
                     # wrap them as function tools with a simple "content" string
-                    # parameter. The OpenResponses serializer unwraps the
-                    # {"content": "..."} wrapper on the response side.
+                    # parameter, with the grammar carried in the description (see
+                    # ``custom_tool_bridge_description``). The OpenResponses
+                    # serializer unwraps the {"content": "..."} wrapper on the
+                    # response side.
+                    description = custom_tool_bridge_description(tool)
                     function_def: dict[str, Any] = {
                         "name": tool.name,
                         "parameters": {
@@ -273,8 +282,9 @@ class OllamaRequestBuilderMixin:
                         "name": tool.name,
                         "parameters": tool.parameters,
                     }
-                if tool.description:
-                    function_def["description"] = tool.description
+                    description = tool.description
+                if description:
+                    function_def["description"] = description
                 tools_list.append(
                     {
                         "type": "function",

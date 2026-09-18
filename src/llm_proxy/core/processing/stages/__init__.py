@@ -20,6 +20,7 @@ from llm_proxy.core.processing.stages.request_execution import (
     RetryExecutor,
 )
 from llm_proxy.core.processing.stages.role_normalization import normalize_developer_roles
+from llm_proxy.core.processing.stages.tool_search import ToolSearchStage
 from llm_proxy.core.processing.stages.web_search import WebSearchStage
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "ProviderSelectionStage",
     "RequestExecutionStage",
     "RetryExecutor",
+    "ToolSearchStage",
     "WebSearchStage",
     "create_per_provider_stages",
     "normalize_developer_roles",

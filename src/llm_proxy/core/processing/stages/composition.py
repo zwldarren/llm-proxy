@@ -30,6 +30,7 @@ from llm_proxy.core.processing.stages.previous_response import (
     PreviousResponseResolutionStage,
 )
 from llm_proxy.core.processing.stages.role_normalization import normalize_developer_roles
+from llm_proxy.core.processing.stages.tool_search import ToolSearchStage
 from llm_proxy.core.processing.stages.web_search import WebSearchStage
 from llm_proxy.observability.event_context import EventContext
 
@@ -51,6 +52,7 @@ def create_per_provider_stages() -> list[PipelineStage]:
     return [
         PreviousResponseResolutionStage(),
         WebSearchStage(),
+        ToolSearchStage(),
     ]
 
 
@@ -64,10 +66,11 @@ async def rerun_per_provider_stages(
 ) -> None:
     """Re-run the per-provider request-mutating stages on a freshly parsed request.
 
-    PreviousResponseResolutionStage and WebSearchStage mutate the parsed
-    request (materializing stored conversations, converting web-search tools)
-    and set request flags (``previous_response_materialized``,
-    ``native_request_disabled``) based on the SELECTED provider — e.g. the
+    PreviousResponseResolutionStage, WebSearchStage and ToolSearchStage mutate
+    the parsed request (materializing stored conversations, converting
+    web-search tools, appending tool_search-discovered tools) and set request
+    flags (``previous_response_materialized``, ``native_request_disabled``,
+    ``_discovered_tools_materialized``) based on the SELECTED provider — e.g. the
     web-search interception decision depends on the provider's
     ``native_web_search`` flag. A fallback re-parse starts from the pristine
     client body, so these decisions must be re-evaluated for the new provider

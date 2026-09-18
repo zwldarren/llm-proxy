@@ -79,3 +79,9 @@ class ToolResultBlock(ContentBlock):
     name: str | None = None
     toolset_name: str | None = None
     cache_control: Any | None = None
+    # Raw tool definitions carried by an OpenResponses ``tool_search_output`` item.
+    # ``content`` holds their JSON rendering (the tool result text other providers
+    # receive); this is the structured copy, so the materialize round-trip
+    # (``conversation_to_input_items``) never has to re-parse the text to re-emit
+    # the ``tool_search_output`` item. None for every other tool result.
+    discovered_tools: list[dict[str, Any]] | None = None

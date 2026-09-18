@@ -201,3 +201,81 @@ class TestEndToEndParseAndBuild:
         assert "functions__exec" in def_names
         assert call_names <= def_names
         assert result_names <= def_names
+
+
+class TestAdditionalToolsDedup:
+    """Top-level ``tools`` and ``additional_tools`` must not double-declare.
+
+    Codex's Responses Lite path puts tools in ``additional_tools`` only, but
+    clients may declare a tool both at the top level and in ``additional_tools``.
+    The top-level entries validate into pydantic models while the
+    ``additional_tools`` entries stay raw dicts, so name-based duplicate
+    detection must handle both shapes — otherwise the provider receives the
+    same tool twice (and a flattened-name collision downstream).
+    """
+
+    def _parse(self, raw):
+        from llm_proxy.protocols.openresponses.serializer import (
+            OpenResponsesProtocolSerializer,
+        )
+
+        return OpenResponsesProtocolSerializer().parse_request(raw)
+
+    def test_duplicate_function_tool_not_declared_twice(self):
+        raw = {
+            "model": "m",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "shell",
+                    "description": "top",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "input": [
+                {"type": "message", "role": "user", "content": "hi"},
+                {
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "shell",
+                            "description": "additional",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                },
+            ],
+        }
+        unified = self._parse(raw)
+        names = [t.name for t in (unified.tools or [])]
+        assert names == ["shell"], f"duplicate tool declarations leaked: {names}"
+
+    def test_non_duplicate_additional_tool_is_added(self):
+        raw = {
+            "model": "m",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "shell",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "input": [
+                {"type": "message", "role": "user", "content": "hi"},
+                {
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "grep",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                },
+            ],
+        }
+        unified = self._parse(raw)
+        assert {t.name for t in (unified.tools or [])} == {"shell", "grep"}

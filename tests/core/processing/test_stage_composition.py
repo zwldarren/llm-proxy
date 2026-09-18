@@ -183,11 +183,12 @@ def test_unified_processor_pipeline_consumes_composition(monkeypatch) -> None:
 
 def test_composition_owner_list_matches_documented_pipeline() -> None:
     """The composition owner produces the documented per-provider order:
-    PreviousResponseResolution -> WebSearch."""
+    PreviousResponseResolution -> WebSearch -> ToolSearch."""
     stages = create_per_provider_stages()
     assert [type(s).__name__ for s in stages] == [
         "PreviousResponseResolutionStage",
         "WebSearchStage",
+        "ToolSearchStage",
     ]
     # Fresh instances per call — stages must not share mutable state across
     # the main pipeline and the fallback re-run.

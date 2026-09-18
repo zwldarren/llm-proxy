@@ -37,6 +37,24 @@ class CustomTool(ToolDefinition):
     grammar_syntax: str | None = None
 
 
+def custom_tool_bridge_description(tool: CustomTool) -> str:
+    """Description to use when bridging a ``CustomTool`` to a function tool.
+
+    Providers without freeform/grammar tool support wrap a custom tool as a
+    function tool with a single ``content`` string parameter. The grammar must
+    then travel in the description, or models that cannot enforce grammars lose
+    the expected output format (Codex's ``apply_patch``/``exec`` rely on it).
+
+    Single owner of that encoding, used by every bridge that carries the grammar:
+    the OpenAI Chat Completions tools handler and the Ollama request builder.
+    """
+    description = tool.description or ""
+    if tool.format_type == "grammar" and tool.grammar_definition:
+        syntax = tool.grammar_syntax or ""
+        description += f"\n\nFormat:\n```{syntax}\n{tool.grammar_definition}\n```"
+    return description
+
+
 # Tool choice types
 
 

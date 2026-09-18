@@ -17,6 +17,7 @@ from llm_proxy.models.tools import (
     ToolChoiceCustom,
     ToolChoiceFunction,
     ToolDefinition,
+    custom_tool_bridge_description,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,11 +199,7 @@ class OpenAIToolsHandler:
 
         Mirrors LiteLLM's ``convert_custom_tool_to_function_tool``.
         """
-        description = tool.description or ""
-        if tool.format_type == "grammar" and tool.grammar_definition:
-            syntax = tool.grammar_syntax or ""
-            definition = tool.grammar_definition
-            description += f"\n\nFormat:\n```{syntax}\n{definition}\n```"
+        description = custom_tool_bridge_description(tool)
         return {
             "name": tool.name,
             "description": description,

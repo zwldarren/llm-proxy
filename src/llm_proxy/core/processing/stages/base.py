@@ -56,3 +56,16 @@ class PipelineStage(ABC):
     async def process(self, state: PipelineState, context: RequestContext) -> None:
         """Process the pipeline state. Set state.response or state.error when done."""
         ...
+
+
+def is_native_responses_upstream(adapter: Any) -> bool:
+    """Whether the selected adapter talks to a native OpenAI Responses API endpoint.
+
+    Reads the adapter's public ``is_native_responses_upstream`` predicate (see
+    ``BaseHttpProvider``), which derives the answer from ``_target_endpoint``.
+    Adapters and test doubles that don't declare it count as non-native; the
+    ``is True`` identity check (not truthiness) is what keeps an undeclared
+    attribute on a ``MagicMock``, which returns a truthy mock for any name, from
+    reading as native.
+    """
+    return getattr(adapter, "is_native_responses_upstream", False) is True

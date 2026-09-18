@@ -8,7 +8,8 @@ protocols/openresponses/converters.py, now properly registered as a ProtocolSeri
 import logging
 import secrets
 import time
-from dataclasses import asdict
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import orjson
@@ -195,6 +196,35 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
     return result if result else [TextBlock(text="")]
 
 
+def _tool_search_call_item(
+    block_id: str | None,
+    arguments: Any,
+    *,
+    client_executed: bool,
+) -> dict[str, Any]:
+    """Build a ``tool_search_call`` input item.
+
+    The two shapes are intentional. A ``tool_search`` call parsed as a plain
+    ``ToolUseBlock`` (Codex sends one) was executed by the client, so its item
+    carries ``call_id`` + ``status`` + ``execution``. A ``ServerToolUseBlock``
+    came from the upstream's own hosted tool_search, whose native input item
+    carries ``id`` only.
+    """
+    if client_executed:
+        return {
+            "type": "tool_search_call",
+            "call_id": block_id,
+            "status": "completed",
+            "execution": "client",
+            "arguments": arguments,
+        }
+    return {
+        "type": "tool_search_call",
+        "id": block_id,
+        "arguments": arguments if isinstance(arguments, dict) else {},
+    }
+
+
 def conversation_to_input_items(
     conversation: ConversationContext,
     *,
@@ -209,10 +239,11 @@ def conversation_to_input_items(
 
     System/developer messages are serialized first (their natural position),
     then reasoning blocks become ``reasoning`` items, tool calls become
-    ``function_call`` / ``custom_tool_call`` items, tool results become
-    ``function_call_output`` items, and text/image/refusal content becomes a
-    ``message`` item (keeping the assistant ``phase``). Content that has no
-    round-trippable item shape (audio/video/file) is skipped.
+    ``function_call`` / ``custom_tool_call`` / ``tool_search_call`` items, tool
+    results become ``function_call_output`` / ``tool_search_output`` items, and
+    text/image/refusal content becomes a ``message`` item (keeping the assistant
+    ``phase``). Content that has no round-trippable item shape (audio/video/file)
+    is skipped.
 
     ``exclude_system_text``: skip the first system message whose text matches
     this value. Used by storage call sites to avoid serializing the
@@ -269,14 +300,27 @@ def conversation_to_input_items(
                     }
                 )
             elif isinstance(block, ToolUseBlock):
-                tool_call_items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": block.id,
-                        "name": block.name,
-                        "arguments": orjson.dumps(block.input).decode(),
-                    }
-                )
+                if block.name == "tool_search":
+                    # A hosted tool_search call from the request input: keep its
+                    # native item type so a ``previous_response_id`` continuation
+                    # replays it as a tool_search call rather than an ordinary
+                    # function call (the client's lazy-loading semantics).
+                    tool_call_items.append(
+                        _tool_search_call_item(
+                            block.id,
+                            block.input,
+                            client_executed=True,
+                        )
+                    )
+                else:
+                    tool_call_items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": block.id,
+                            "name": block.name,
+                            "arguments": orjson.dumps(block.input).decode(),
+                        }
+                    )
             elif isinstance(block, CustomToolUseBlock):
                 tool_call_items.append(
                     {
@@ -307,12 +351,11 @@ def conversation_to_input_items(
                         "action": dict(upstream_action),
                     }
                 elif block.name == "tool_search":
-                    arguments = block.input.get("arguments", block.input)
-                    item = {
-                        "type": "tool_search_call",
-                        "id": block.id,
-                        "arguments": arguments if isinstance(arguments, dict) else {},
-                    }
+                    item = _tool_search_call_item(
+                        block.id,
+                        block.input.get("arguments", block.input),
+                        client_executed=False,
+                    )
                 else:
                     item = {
                         "type": "custom_tool_call",
@@ -325,6 +368,20 @@ def conversation_to_input_items(
                         ),
                     }
                 tool_call_items.append(item)
+            elif isinstance(block, ToolResultBlock) and block.discovered_tools is not None:
+                # A ``tool_search_output`` result: re-emit it natively from the
+                # definitions the block carries, not from their JSON rendering
+                # in ``content`` (which is what non-Responses providers get as
+                # the tool result text).
+                tool_output_items.append(
+                    {
+                        "type": "tool_search_output",
+                        "call_id": block.tool_use_id,
+                        "status": "completed",
+                        "execution": "client",
+                        "tools": block.discovered_tools,
+                    }
+                )
             elif isinstance(block, ToolResultBlock):
                 output: Any = block.content
                 if isinstance(output, list):
@@ -510,11 +567,13 @@ def _tool_output_like_item_to_result_block(item_dict: dict[str, Any]) -> ToolRes
             content=function_call_output_to_text(item_dict.get("output", "")),
         )
     if item_type == "tool_search_output":
-        tools = item_dict.get("tools")
-        content = orjson.dumps(tools).decode() if tools else ""
+        # ``discovered_tools`` is the structured copy of these definitions, so the
+        # materialize round-trip re-emits them without re-parsing ``content``.
+        tools = _discovered_tools_from_item(item_dict)
         return ToolResultBlock(
             tool_use_id=item_dict.get("call_id") or generate_item_id(),
-            content=content,
+            content=orjson.dumps(tools).decode() if tools else "",
+            discovered_tools=tools or None,
         )
     return None
 
@@ -656,6 +715,88 @@ def _process_tool_call_like_item(
         pending_assistant_blocks.append(use_block)
 
 
+def _discovered_tools_from_item(item_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the tool definitions carried by a ``tool_search_output`` item."""
+    tools = item_dict.get("tools")
+    if not isinstance(tools, list):
+        return []
+    return [tool for tool in tools if isinstance(tool, dict)]
+
+
+def _convert_discovered_tools(
+    declared_raw_tools: list[dict[str, Any]],
+    discovered_raw_tools: list[dict[str, Any]],
+) -> tuple[list[ToolDefinition], dict[str, list[str]]]:
+    """Convert ``tool_search_output`` tools into internal definitions.
+
+    Discovered definitions that duplicate a declared tool (same raw ``name``) or
+    an earlier discovered tool are dropped — the common case, where a
+    ``tool_search`` result re-lists already-declared tools, therefore adds
+    nothing. Returns the discovered ``ToolDefinition`` list plus the namespace
+    mapping they introduce (flat name -> [namespace, original_name]).
+    """
+    if not discovered_raw_tools:
+        return [], {}
+    names = {name for tool in declared_raw_tools if (name := _tool_entry_name(tool))}
+    unique = _unique_raw_tools(discovered_raw_tools, names)
+    if not unique:
+        return [], {}
+    from llm_proxy.protocols.openresponses.tool_converter import convert_responses_tools
+
+    tools, mapping, _ = convert_responses_tools(unique)
+    return tools, mapping.to_dict() if mapping is not None else {}
+
+
+def attach_discovered_tools(request: Any, discovered_raw_tools: list[dict[str, Any]]) -> None:
+    """Convert and attach ``tool_search``-discovered tools to a parsed request.
+
+    Shared by the request-parse path and by stored-response replay. Discovered
+    definitions are converted with the same namespace flattening used for
+    declared tools (so provider-side names match) and merged into
+    ``request._discovered_tools`` / ``request._namespace_map``. The FormatContext
+    namespace map is updated too so response-side name restoration sees them.
+    """
+    if not discovered_raw_tools:
+        return
+    declared = list(getattr(request, "tools", None) or [])
+    tools, discovered_namespace_map = _convert_discovered_tools(declared, discovered_raw_tools)
+    if not tools:
+        return
+    existing = list(getattr(request, "_discovered_tools", None) or [])
+    existing_names = {tool.name for tool in existing}
+    existing.extend(tool for tool in tools if tool.name not in existing_names)
+    request._discovered_tools = existing
+    if discovered_namespace_map:
+        merged = dict(getattr(request, "_namespace_map", None) or {})
+        merged.update(discovered_namespace_map)
+        request._namespace_map = merged
+        from llm_proxy.protocols.openresponses.handler import update_format_context
+
+        update_format_context(namespace_map=merged)
+
+
+@dataclass
+class DiscoveredToolsCollector:
+    """Collects the tools that ``tool_search_output`` items make callable.
+
+    Threaded through input-item dispatch by both the request-parse path and
+    stored-response replay, so the two paths collect and attach discoveries the
+    same way instead of each threading their own out-parameter (and repeating the
+    attach block).
+    """
+
+    tools: list[dict[str, Any]] = field(default_factory=list)
+
+    def collect(self, item_dict: dict[str, Any]) -> None:
+        """Add the definitions carried by one input item (a no-op for others)."""
+        if item_dict.get("type") == "tool_search_output":
+            self.tools.extend(_discovered_tools_from_item(item_dict))
+
+    def attach_to(self, request: Any) -> None:
+        """Merge the collected definitions into ``request``."""
+        attach_discovered_tools(request, self.tools)
+
+
 def _process_function_call_output_item(
     item_dict: dict[str, Any],
     messages: list[Message],
@@ -678,11 +819,19 @@ def _process_function_call_output_item(
 def _process_tool_output_like_item(
     item_dict: dict[str, Any],
     messages: list[Message],
+    discovered: DiscoveredToolsCollector | None = None,
 ) -> None:
-    """Process a custom_tool_call_output or tool_search_output input item."""
+    """Process a custom_tool_call_output or tool_search_output input item.
+
+    ``tool_search_output`` also carries the discovered tool definitions; they are
+    collected into ``discovered`` so the request pipeline can make them callable
+    for providers that bridge ``tool_search`` to a function tool.
+    """
     result_block = _tool_output_like_item_to_result_block(item_dict)
     if result_block is not None:
         messages.append(Message(role="tool", content=[result_block]))
+    if discovered is not None:
+        discovered.collect(item_dict)
 
 
 def _process_reasoning_item(
@@ -747,6 +896,46 @@ def _process_web_search_call_item(
     pending_web_search_calls.append((ws_call_id, ws_query))
 
 
+def _tool_entry_name(tool: Any) -> str | None:
+    """Return a tool entry's ``name``, accepting dicts, pydantic models, and
+    internal ``ToolDefinition`` dataclasses.
+
+    ``ResponsesRequest.tools`` validates into pydantic models while
+    ``additional_tools`` input items carry raw dicts; both are merged into
+    ``request.tools``, so duplicate detection must handle both shapes. Shared with
+    the FormatContext tool collection in ``handler._collect_raw_tools``.
+    """
+    if hasattr(tool, "model_dump"):
+        tool = tool.model_dump()
+    name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return None
+
+
+def _unique_raw_tools(
+    candidates: Iterable[Any],
+    seen: set[str],
+) -> list[dict[str, Any]]:
+    """Filter ``candidates`` to named dicts whose name is not already in ``seen``.
+
+    ``seen`` is updated with the accepted names, so one call dedupes within the
+    candidate list and against everything the caller has seen. Callers pass
+    pydantic models or raw dicts (``_tool_entry_name`` accepts both) but only raw
+    dicts are returned.
+    """
+    unique: list[dict[str, Any]] = []
+    for tool in candidates:
+        if not isinstance(tool, dict):
+            continue
+        name = _tool_entry_name(tool)
+        if name is None or name in seen:
+            continue
+        seen.add(name)
+        unique.append(tool)
+    return unique
+
+
 def _process_additional_tools_item(
     item_dict: dict[str, Any],
     request: Any,
@@ -757,12 +946,8 @@ def _process_additional_tools_item(
         return
     if request.tools is None:
         request.tools = []
-    existing_names = {t.get("name") for t in request.tools if isinstance(t, dict) and t.get("name")}
-    new_tools: list[dict[str, Any]] = []
-    for tool in additional:
-        if isinstance(tool, dict) and tool.get("name") not in existing_names:
-            new_tools.append(tool)
-            existing_names.add(tool["name"])
+    existing_names = {name for tool in request.tools if (name := _tool_entry_name(tool))}
+    new_tools = _unique_raw_tools(additional, existing_names)
     if new_tools:
         request.tools = [*request.tools, *new_tools]
 
@@ -777,6 +962,7 @@ def _dispatch_input_item(
     request: Any,
     seen_items: dict[str, dict[str, Any]],
     unresolved_refs: list[tuple[int, str]] | None = None,
+    discovered: DiscoveredToolsCollector | None = None,
 ) -> None:
     """Dispatch a single input item dict to its processor.
 
@@ -788,6 +974,9 @@ def _dispatch_input_item(
     where the reference appeared) instead of being dropped, so the pipeline's
     previous-response resolution can splice the referenced items in after the
     stored previous response is materialized.
+
+    ``discovered``: when provided, ``tool_search_output`` items add their
+    definitions to it.
     """
     item_type = item_dict.get("type")
 
@@ -839,7 +1028,7 @@ def _dispatch_input_item(
         _flush_pending_turn(
             pending_assistant_blocks, pending_web_search_calls, messages, pending_phase
         )
-        _process_tool_output_like_item(item_dict, messages)
+        _process_tool_output_like_item(item_dict, messages, discovered)
     elif item_type == "reasoning":
         _process_reasoning_item(item_dict, pending_assistant_blocks)
     elif item_type in ("compaction", "compaction_summary", "context_compaction"):
@@ -861,6 +1050,7 @@ def _dispatch_input_item(
                     request,
                     seen_items,
                     unresolved_refs,
+                    discovered,
                 )
         else:
             _process_compaction_item(item_dict, pending_assistant_blocks)
@@ -901,6 +1091,9 @@ def _convert_request_to_unified(
     # recorded as (message_index, ref_id) so the pipeline can resolve them
     # against a stored previous response.
     unresolved_item_refs: list[tuple[int, str]] = []
+    # Tool definitions discovered by ``tool_search_output`` items, collected from
+    # the input items below.
+    discovered = DiscoveredToolsCollector()
 
     if request.instructions:
         system_messages.append(SystemMessage.from_text(role="system", text=request.instructions))
@@ -937,6 +1130,7 @@ def _convert_request_to_unified(
                 request,
                 seen_items,
                 unresolved_item_refs,
+                discovered,
             )
 
         _flush_pending_assistant(
@@ -946,6 +1140,7 @@ def _convert_request_to_unified(
     tools: list[ToolDefinition] | None = None
     namespace_mapping = None
     preserved_tools: list[dict[str, Any]] = []
+    raw_tools: list[dict[str, Any]] = []
     if request.tools:
         from llm_proxy.protocols.openresponses.tool_converter import (
             convert_responses_tools,
@@ -955,6 +1150,20 @@ def _convert_request_to_unified(
         tools, namespace_mapping, preserved_tools = convert_responses_tools(raw_tools)
         if not tools:
             tools = None
+
+    # Tools discovered by a hosted ``tool_search`` call are kept OUT of ``tools``:
+    # a native Responses provider (OpenAI) handles ``tool_search`` server-side and
+    # must not receive the discovered definitions as regular top-level tools (and
+    # namespace-typed specs are rejected at the top level). ToolSearchStage
+    # appends them for every other provider, which only sees the bridged
+    # ``tool_search`` function tool.
+    discovered_tools, discovered_namespace_map = _convert_discovered_tools(
+        raw_tools, discovered.tools
+    )
+    namespace_map: dict[str, list[str]] = {}
+    if namespace_mapping is not None:
+        namespace_map.update(namespace_mapping.to_dict())
+    namespace_map.update(discovered_namespace_map)
 
     tool_choice = _parse_tool_choice(request.tool_choice)
 
@@ -1094,10 +1303,12 @@ def _convert_request_to_unified(
 
     # Propagate namespace_map to FormatContext for response formatting
     # (stored here, not in extra_fields — FormatContext is the canonical place).
-    if namespace_mapping is not None:
+    # Includes namespaces introduced by tools discovered via ``tool_search``, so
+    # response-side name restoration sees them.
+    if namespace_map:
         from llm_proxy.protocols.openresponses.handler import update_format_context
 
-        update_format_context(namespace_map=namespace_mapping.to_dict())
+        update_format_context(namespace_map=namespace_map)
 
     req = InternalRequest(
         model=request.model,
@@ -1108,10 +1319,12 @@ def _convert_request_to_unified(
         stream=request.stream,
         extra=extra_fields,
     )
-    if namespace_mapping is not None:
+    if namespace_map:
         # Provider serializers flatten history tool-call names with this map so
         # they match the flattened tool definitions sent upstream.
-        req._namespace_map = namespace_mapping.to_dict()
+        req._namespace_map = namespace_map
+    if discovered_tools:
+        req._discovered_tools = discovered_tools
     if unresolved_item_refs:
         # Consumed by PreviousResponseResolutionStage once the referenced
         # previous response has been materialized into the conversation.

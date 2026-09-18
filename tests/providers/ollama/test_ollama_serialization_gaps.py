@@ -12,6 +12,7 @@ from llm_proxy.models import (
     ServerToolUseBlock,
     TextBlock,
 )
+from llm_proxy.models.tools import CustomTool, FunctionTool
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.ollama.serializer import OllamaProviderSerializer
 
@@ -166,3 +167,62 @@ class TestOllamaParseSideImageBlock:
         assert len(image_blocks) == 2
         assert image_blocks[0].source.data == "img1"
         assert image_blocks[1].source.data == "img2"
+
+
+class TestOllamaCustomToolGrammar:
+    """CustomTool grammar is embedded so freeform tools stay usable.
+
+    Codex declares freeform tools (``apply_patch``, ``exec``) as Responses
+    ``type: custom`` with a ``format`` grammar. Ollama has no native grammar
+    support, so the tool is bridged to a function tool; the grammar must be
+    surfaced in the description (mirroring the OpenAI Chat Completions bridge)
+    or the model has no way to know the expected freeform format.
+    """
+
+    def _build_tools(self, tools):
+        from llm_proxy.models import InternalRequest
+        from llm_proxy.serialization.context import BuildContext
+
+        serializer = OllamaProviderSerializer()
+        request = InternalRequest(
+            model="qwen3-coder",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            tools=tools,
+        )
+        body = serializer.build_provider_request(
+            request, BuildContext(provider_name="ollama", model="qwen3-coder")
+        )
+        return body.get("tools", [])
+
+    def test_custom_tool_grammar_embedded_in_description(self):
+        tool = CustomTool(
+            name="apply_patch",
+            description="Use apply_patch.",
+            format_type="grammar",
+            grammar_definition="start: begin_patch hunk+ end_patch",
+            grammar_syntax="lark",
+        )
+        tools = self._build_tools([tool])
+        functions = [t["function"] for t in tools]
+        assert functions[0]["name"] == "apply_patch"
+        assert functions[0]["parameters"]["required"] == ["content"]
+        description = functions[0]["description"]
+        assert "Use apply_patch." in description
+        assert "start: begin_patch hunk+ end_patch" in description
+        assert "```lark" in description
+
+    def test_custom_tool_without_grammar_keeps_description(self):
+        tool = CustomTool(name="exec", description="Run JS.")
+        tools = self._build_tools([tool])
+        assert tools[0]["function"]["description"] == "Run JS."
+
+    def test_function_tool_description_unchanged(self):
+        tool = FunctionTool(
+            name="shell",
+            description="Run a shell command",
+            parameters={"type": "object", "properties": {}},
+        )
+        tools = self._build_tools([tool])
+        assert tools[0]["function"]["description"] == "Run a shell command"

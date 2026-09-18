@@ -114,6 +114,16 @@ class InternalRequest:
     # serializers use it to flatten history tool-call names so they match the
     # flattened tool definitions sent upstream (models echo the history name).
     _namespace_map: dict[str, list[str]] | None = field(default=None, repr=False)
+    # Tool definitions discovered by an OpenResponses ``tool_search_output``
+    # item, converted by the protocol serializer. They are deliberately NOT in
+    # ``tools``: a native Responses provider (OpenAI) handles ``tool_search``
+    # server-side and must not receive them as regular top-level tools.
+    # ToolSearchStage appends them for every other provider, which only sees the
+    # bridged ``tool_search`` function tool.
+    _discovered_tools: list[ToolDefinition] | None = field(default=None, repr=False)
+    # Set by ToolSearchStage once ``_discovered_tools`` has been appended to
+    # ``tools`` (or deliberately skipped), so re-running the stage is a no-op.
+    _discovered_tools_materialized: bool = field(default=False, repr=False)
 
     # The model name the client actually requested (pre-override / pre-routing
     # alias, e.g. "fast"). Written by ProviderSelectionStage; read via the

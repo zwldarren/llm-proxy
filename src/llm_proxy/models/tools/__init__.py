@@ -21,6 +21,7 @@ from llm_proxy.models.tools.core import (
     ToolChoiceNamed,
     ToolChoiceSpec,
     ToolDefinition,
+    custom_tool_bridge_description,
     is_web_search_tool_name,
 )
 from llm_proxy.models.tools.openai_builtin import (
@@ -46,6 +47,7 @@ __all__ = [
     "ToolChoiceNamed",
     "ToolChoiceSpec",
     "ToolDefinition",
+    "custom_tool_bridge_description",
     "is_web_search_tool_name",
     # anthropic_builtin
     "BashTool",

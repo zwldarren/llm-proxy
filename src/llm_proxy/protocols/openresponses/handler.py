@@ -10,7 +10,11 @@ from typing import Any
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.base import ProtocolEndpoint
 from llm_proxy.protocols.openresponses.schemas import ResponsesRequest
-from llm_proxy.protocols.openresponses.serializer import conversation_to_input_items
+from llm_proxy.protocols.openresponses.serializer import (
+    _tool_entry_name,
+    _unique_raw_tools,
+    conversation_to_input_items,
+)
 from llm_proxy.serialization.format_context import FormatContext
 
 logger = get_logger(__name__)
@@ -47,22 +51,22 @@ _FORMAT_CONTEXT_FIELDS: tuple[str, ...] = (
 def _collect_raw_tools(data: dict) -> list[dict]:
     """Collect raw tool dicts from the request for the FormatContext.
 
-    Tools may arrive both in the top-level ``tools`` array and inside
-    ``additional_tools`` input items (Codex sends all tools this way).
-    Both sources are needed so downstream consumers (e.g. custom tool
+    Tools may arrive in the top-level ``tools`` array, inside ``additional_tools``
+    input items (Codex sends all tools this way), or inside ``tool_search_output``
+    items (tools discovered by a hosted ``tool_search`` call become callable in
+    that turn). All sources are needed so downstream consumers (e.g. custom tool
     detection for ``custom_tool_call`` emission) see the complete set.
     """
     tools: list[dict] = [t for t in data.get("tools") or [] if isinstance(t, dict)]
     input_items = data.get("input")
     if isinstance(input_items, list):
-        seen = {t.get("name") for t in tools}
+        seen = {name for tool in tools if (name := _tool_entry_name(tool))}
         for item in input_items:
-            if not isinstance(item, dict) or item.get("type") != "additional_tools":
+            if not isinstance(item, dict):
                 continue
-            for tool in item.get("tools") or []:
-                if isinstance(tool, dict) and tool.get("name") not in seen:
-                    tools.append(tool)
-                    seen.add(tool.get("name"))
+            if item.get("type") not in ("additional_tools", "tool_search_output"):
+                continue
+            tools.extend(_unique_raw_tools(item.get("tools") or [], seen))
     return tools
 
 

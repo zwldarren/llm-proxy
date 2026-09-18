@@ -19,6 +19,7 @@ from llm_proxy.core.processing.stages import (
     ProviderSelectionStage,
     RequestExecutionStage,
     RetryExecutor,
+    ToolSearchStage,
     WebSearchStage,
     normalize_developer_roles,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "RetryExecutor",
     "ServiceDependencies",
     "StreamingResponseMarker",
+    "ToolSearchStage",
     "UnifiedProcessor",
     "WebSearchStage",
     "WebSearchStreamProcessor",

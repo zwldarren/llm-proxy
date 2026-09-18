@@ -717,6 +717,18 @@ class BaseHttpProvider(BaseAdapter, ABC):
         """
         return "chat_completions"
 
+    @property
+    def is_native_responses_upstream(self) -> bool:
+        """Whether this adapter talks to the upstream's native Responses API.
+
+        Derived from ``_target_endpoint`` so the endpoint stays the single source
+        of truth. Pipeline stages that must branch on native-Responses semantics
+        (e.g. whether a hosted ``tool_search`` is executed upstream or bridged)
+        read this public predicate instead of probing ``_target_endpoint``
+        themselves.
+        """
+        return self._target_endpoint() == "responses"
+
     # ------------------------------------------------------------------
     # Body merge & policy helpers
     # ------------------------------------------------------------------
