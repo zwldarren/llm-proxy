@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.6](https://github.com/zwldarren/llm-proxy/compare/v0.2.5...v0.2.6) (2026-09-18)
+
+
+### Features
+
+* **logging:** prune usage records on the log retention window ([35fde51](https://github.com/zwldarren/llm-proxy/commit/35fde511b44648c0d6ce6cd5a0d54336aad5c5dd))
+* **logging:** reassemble streamed response bodies for request logs ([eaaf47f](https://github.com/zwldarren/llm-proxy/commit/eaaf47f5fa194e9fa635e231e23ff69388989abf))
+* **openresponses:** make tool_search-discovered tools callable ([d27b010](https://github.com/zwldarren/llm-proxy/commit/d27b010591e1f9e96d94b698c3b22b42233e6549))
+
+
+### Bug Fixes
+
+* **logging:** classify /v1/models as an endpoint, not an audit event ([9d86f4f](https://github.com/zwldarren/llm-proxy/commit/9d86f4f95015db90acb136c432ce2aa63b89ec41))
+* **openai-compatible:** force include_usage on every conversion tier ([0183e4b](https://github.com/zwldarren/llm-proxy/commit/0183e4b05a5f0cd014b29bb481e5ad7317c83a55))
+
 ## [0.2.5](https://github.com/zwldarren/llm-proxy/compare/v0.2.4...v0.2.5) (2026-09-17)
 
 
