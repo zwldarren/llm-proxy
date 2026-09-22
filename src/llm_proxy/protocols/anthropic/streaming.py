@@ -173,6 +173,8 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             info["container"] = self._pending_container
         if self._has_log_diagnostics:
             info["diagnostics"] = self._log_diagnostics
+        if self._pending_safeguard_results is not None:
+            info["safeguard_results"] = self._pending_safeguard_results
         return info or None
 
     def _provider_extras(self) -> dict[str, Any]:
@@ -621,6 +623,10 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 self.capture_stop_sequence(choice.get("stop_sequence"))
                 self.capture_stop_details(choice.get("stop_details"))
                 self.capture_container(choice.get("container"))
+                # Server-side auto mode: classifier results arrive on the
+                # canonical terminal chunk (from the provider converter) and
+                # are replayed inside the terminal message_delta delta.
+                self.capture_safeguard_results(choice.get("safeguard_results"))
 
         return "".join(result_chunks) if result_chunks else None
 
@@ -736,6 +742,11 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         if self._pending_container is not None:
             delta["container"] = self._pending_container
             self._pending_container = None
+        if self._pending_safeguard_results is not None:
+            # Server-side auto mode: Claude Code reads the classifier results
+            # from the terminal message_delta's delta.
+            delta["safeguard_results"] = self._pending_safeguard_results
+            self._pending_safeguard_results = None
         return self._sse_event(
             "message_delta",
             {
@@ -753,6 +764,24 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 "type": "message_delta",
                 "delta": {},
                 "usage": usage,
+            },
+        )
+
+    def _message_delta_with_safeguard_results(self) -> str:
+        """Generate a message_delta carrying only auto-mode classifier results.
+
+        Degenerate fallback: the upstream sent ``safeguard_results`` with no
+        stop_reason and no usage to fold, so the terminal delta would otherwise
+        be dropped and the session would fall back to its own classifier.
+        """
+        delta: dict[str, Any] = {"safeguard_results": self._pending_safeguard_results}
+        self._pending_safeguard_results = None
+        return self._sse_event(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": delta,
+                "usage": {"output_tokens": 0},
             },
         )
 
@@ -895,6 +924,8 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 )
             )
             self._has_pending_usage = False
+        elif self._pending_safeguard_results is not None:
+            result_chunks.append(self._message_delta_with_safeguard_results())
 
         result_chunks.append(self._message_stop())
         return "".join(result_chunks)

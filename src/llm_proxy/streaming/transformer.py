@@ -59,6 +59,7 @@ class PendingTerminalState:
     _pending_stop_sequence: str | None = None
     _pending_stop_details: dict[str, Any] | None = None
     _pending_container: dict[str, Any] | None = None
+    _pending_safeguard_results: list[dict[str, Any]] | None = None
     _pending_usage: dict[str, Any] | None = None
     _has_pending_usage: bool = False
 
@@ -89,6 +90,23 @@ class PendingTerminalState:
         """Record pending container info (code execution)."""
         if container is not None:
             self._pending_container = container
+
+    def capture_safeguard_results(self, safeguard_results: Any) -> None:
+        """Record auto-mode classifier results from the terminal event.
+
+        Claude Code's server-side auto mode pairs the request's ``safeguards``
+        field with a ``safeguard_results`` response field: the upstream names
+        each evaluated tool use, keyed by the tool-use id, so the session can
+        skip its own (billed) classifier call. The field arrives on the
+        non-streaming message and, when streamed, inside the final
+        ``message_delta``; the terminal flush replays it so a converted stream
+        keeps the same contract as a native passthrough stream.
+
+        Presence-keyed (``None`` means "not sent"); the payload is forwarded
+        verbatim, including the tool-use ids the results refer to.
+        """
+        if safeguard_results is not None:
+            self._pending_safeguard_results = safeguard_results
 
     def capture_usage(self, usage: dict[str, Any]) -> None:
         """Record a terminal usage payload, replacing any earlier one."""

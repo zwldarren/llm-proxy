@@ -729,6 +729,14 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
         if "diagnostics" in response:
             provider_info["diagnostics"] = response["diagnostics"]
 
+        # Server-side auto mode: ``safeguard_results`` closes the loop on the
+        # request's ``safeguards`` field. Claude Code reads it to skip its own
+        # (billed) classifier call, keyed by the tool-use ids it evaluated, so
+        # it rides ``provider_info`` onto the converted response instead of
+        # being dropped with the rest of the unmodelled top-level keys.
+        if "safeguard_results" in response:
+            provider_info["safeguard_results"] = response["safeguard_results"]
+
         return InternalResponse(
             id=response.get("id") or generate_response_id(),
             model=model or "unknown",

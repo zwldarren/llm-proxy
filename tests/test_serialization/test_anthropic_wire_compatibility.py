@@ -791,3 +791,121 @@ def test_stream_beta_usage_and_diagnostics_pass_chain():
     assert '"speed":"fast"' in sse
     assert '"iterations":[{"type":"message"' in sse
     assert '"stop_reason":"end_turn"' in sse
+
+
+def _message_delta_payloads(sse: str) -> list[dict]:
+    """Parse the ``message_delta`` events out of a converted SSE stream."""
+    import orjson
+
+    payloads = []
+    for frame in sse.split("\n\n"):
+        if "event: message_delta" not in frame:
+            continue
+        for line in frame.split("\n"):
+            if line.startswith("data: "):
+                payloads.append(orjson.loads(line[len("data: ") :]))
+    return payloads
+
+
+def test_non_streaming_safeguard_results_roundtrip(provider, protocol):
+    """Server-side auto mode: ``safeguard_results`` must survive the converted
+    (non-passthrough) response path, with the tool-use ids it keys on intact."""
+    results = [
+        {
+            "type": "dangerous_tool_use",
+            "status": {
+                "type": "available",
+                "tool_uses": {
+                    "toolu_01V9Z5KXn3SU71Fzr5cquHLi": {
+                        "type": "evaluated",
+                        "outcome": "not_flagged",
+                    }
+                },
+            },
+        }
+    ]
+    raw = {
+        "id": "1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_01V9Z5KXn3SU71Fzr5cquHLi",
+                "name": "Bash",
+                "input": {"command": "echo hello"},
+            }
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 7, "output_tokens": 3},
+        "safeguard_results": results,
+    }
+    out = protocol.format_response(provider.parse_provider_response(raw, model="claude-opus-5"))
+    assert out["safeguard_results"] == results
+    # The results refer to tool uses by id — those ids must not be rewritten.
+    assert out["content"][0]["id"] == "toolu_01V9Z5KXn3SU71Fzr5cquHLi"
+
+
+def test_non_streaming_safeguard_results_absent_stays_absent(provider, protocol):
+    """Absence is not synthesized: a response without the field must not gain it."""
+    raw = {
+        "id": "1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5",
+        "content": [{"type": "text", "text": "hi"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    out = protocol.format_response(provider.parse_provider_response(raw, model="claude-opus-5"))
+    assert "safeguard_results" not in out
+
+
+def test_stream_safeguard_results_reaches_terminal_message_delta():
+    """The streamed field rides the converter → transformer chain and lands
+    inside the terminal ``message_delta`` delta, where Claude Code reads it."""
+    results = [
+        {
+            "type": "dangerous_tool_use",
+            "status": {
+                "type": "available",
+                "tool_uses": {
+                    "toolu_01V9Z5KXn3SU71Fzr5cquHLi": {
+                        "type": "evaluated",
+                        "outcome": "not_flagged",
+                    }
+                },
+            },
+        }
+    ]
+    sse = _run_stream(
+        [
+            {"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1}}},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use", "safeguard_results": results},
+                "usage": {"output_tokens": 3},
+            },
+            {"type": "message_stop"},
+        ]
+    )
+    deltas = _message_delta_payloads(sse)
+    assert deltas, "expected a terminal message_delta"
+    assert deltas[-1]["delta"]["safeguard_results"] == results
+    assert "toolu_01V9Z5KXn3SU71Fzr5cquHLi" in sse
+
+
+def test_stream_safeguard_results_survives_without_stop_reason_or_usage():
+    """Degenerate upstream: results with no stop_reason and no usage still get
+    a terminal delta rather than being dropped."""
+    results = [{"type": "dangerous_tool_use", "status": {"type": "available"}}]
+    sse = _run_stream(
+        [
+            {"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1}}},
+            {"type": "message_delta", "delta": {"safeguard_results": results}, "usage": {}},
+            {"type": "message_stop"},
+        ]
+    )
+    deltas = _message_delta_payloads(sse)
+    assert deltas[-1]["delta"]["safeguard_results"] == results

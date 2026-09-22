@@ -137,6 +137,23 @@ class TestRequestSidePassthrough:
         # The stashed raw body is untouched.
         assert "stop_sequences" in raw
 
+    def test_safeguards_field_forwarded_verbatim(self):
+        # Claude Code's server-side auto mode pairs the ``safeguards`` request
+        # field with the ``safeguard_results`` response field; the native tier
+        # must not strip it (a stripped field silently degrades the session to
+        # the client-side classifier).
+        safeguards = [
+            {
+                "type": "dangerous_tool_use",
+                "classifier_context": {"v": 1, "permission_mode": "auto"},
+            }
+        ]
+        raw = _raw(safeguards=safeguards)
+        req = _request(raw)
+        outbound = adapter._build_outbound_body(req, request_type="chat")
+        assert outbound.json_body["safeguards"] == safeguards
+        assert raw["safeguards"] == safeguards
+
     def test_web_search_interception_rebuilds(self):
         raw = _raw(future_field={"nested": True})
         req = _request(raw)

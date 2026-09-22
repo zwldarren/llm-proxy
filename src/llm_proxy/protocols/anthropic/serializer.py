@@ -227,6 +227,14 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
         if "diagnostics" in response.provider_info:
             result["diagnostics"] = response.provider_info["diagnostics"]
 
+        # Server-side auto mode: the classifier results (and the tool-use ids
+        # they key on) must survive the converted path exactly as the native
+        # passthrough tier forwards them, or Claude Code falls back to its own
+        # classifier. Presence-keyed: an explicit empty list is a real result
+        # set, not absence.
+        if "safeguard_results" in response.provider_info:
+            result["safeguard_results"] = response.provider_info["safeguard_results"]
+
         return result
 
     def _parse_params(self, data: dict[str, Any]) -> GenerationParams:

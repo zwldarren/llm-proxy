@@ -84,6 +84,13 @@ class TestEnsureClaudeCodeBeta:
             "claude-code-20250219,oauth-2025-04-20"
         )
 
+    def test_auto_mode_beta_value_is_preserved(self):
+        # Claude Code's server-side auto mode sets this beta alongside the
+        # ``safeguards`` body field; the marker must be prepended, never
+        # substituted for the client's own list.
+        value = "dangerous-tool-use-2026-09-03,oauth-2025-04-20"
+        assert ensure_claude_code_beta(value) == f"{CLAUDE_CODE_BETA},{value}"
+
 
 class TestAdapterHeaderMerge:
     def test_build_headers_merges_client_headers(self):
@@ -104,6 +111,18 @@ class TestAdapterHeaderMerge:
         assert headers["anthropic-beta"] == "claude-code-20250219,oauth-2025-04-20"
         # Provider auth wins over anything captured.
         assert headers["x-api-key"] == "sk-upstream"
+
+    def test_build_headers_preserves_auto_mode_beta(self):
+        adapter = AnthropicAdapter(api_key="sk-upstream")
+        capture_client_headers(
+            {
+                "anthropic-beta": "dangerous-tool-use-2026-09-03,oauth-2025-04-20",
+                "x-app": "claude-code",
+            }
+        )
+        beta = adapter._build_headers()["anthropic-beta"]
+        assert "dangerous-tool-use-2026-09-03" in beta
+        assert "oauth-2025-04-20" in beta
 
     def test_build_headers_injects_marker_when_client_sent_no_beta(self):
         adapter = AnthropicAdapter(api_key="sk-upstream")

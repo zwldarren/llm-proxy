@@ -382,6 +382,14 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
         # Container info (code execution) rides the canonical channel the
         # same way as stop_details, for the protocol transformer to replay.
         self.capture_container(delta.get("container"))
+        # Server-side auto mode: the upstream returns ``safeguard_results`` in
+        # the final ``message_delta``, inside the delta (some servers mirror it
+        # at the event top level). Capture both so the protocol transformer can
+        # replay it on the client's terminal delta.
+        safeguard_results = delta.get("safeguard_results")
+        if safeguard_results is None:
+            safeguard_results = event.get("safeguard_results")
+        self.capture_safeguard_results(safeguard_results)
 
         usage = event.get("usage", {})
         if usage:
@@ -466,12 +474,19 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
             # without stop_reason/usage so it is never silently dropped.
             choice["container"] = self._pending_container
             self._pending_container = None
+        if self._pending_safeguard_results is not None:
+            # Auto-mode classifier results ride the same canonical channel as
+            # container/stop_details; the protocol transformer replays them
+            # inside its terminal message_delta delta.
+            choice["safeguard_results"] = self._pending_safeguard_results
+            self._pending_safeguard_results = None
         chunk_data: dict[str, Any] = {"choices": [choice]}
         if self._pending_usage:
             chunk_data["usage"] = self._pending_usage
         if (
             not choice.get("finish_reason")
             and "container" not in choice
+            and "safeguard_results" not in choice
             and not chunk_data.get("usage")
         ):
             return None

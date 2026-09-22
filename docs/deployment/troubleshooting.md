@@ -52,6 +52,32 @@ container/console logs:
 | MCP changes don't take effect | A running server is not restarted by an update | Disable, then re-enable the server |
 | `web_search` tool calls return `web_search_tool_result_error` | Search backend unreachable / rate-limited / bad key | The model still answers; check the Web Search log tab and the backend config |
 | Smart routing picks unexpected models | Classifier signals or mode weights | Review Settings → Advanced → Smart Routing; use routing diagnostics (`verbose_routing_logs`) and per-request feedback |
+| Claude Code warns the session "isn't eligible" for no-charge auto mode | The upstream cannot run server-side auto-mode checks | See [Claude Code auto mode](#claude-code-auto-mode) below |
+
+## Claude Code auto mode
+
+Claude Code (v2.1.278+) with auto mode asks the upstream to run its safety checks by
+adding a `safeguards` request field and the `dangerous-tool-use-2026-09-03`
+`anthropic-beta` value; the upstream must answer with a `safeguard_results` response
+field (streamed: inside the terminal `message_delta` delta), keyed by tool-use id.
+When neither half comes back, Claude Code falls back to its own classifier — billed
+as token usage — and shows a notice the first time it would have checked an action.
+
+Nothing breaks when this happens; auto mode keeps working.
+
+- **Non-Anthropic upstreams cannot serve this at all** — Ollama, vLLM, SGLang, and the
+  third-party Claude-compatible providers (z.ai, Kimi, MiniMax, Moonshot, DeepSeek,
+  Qwen) have no server-side check. The notice is expected on those routes.
+- **An Anthropic-format upstream** works when the fields survive end to end. This proxy's
+  native Anthropic passthrough forwards `safeguards`, the full `anthropic-beta` value,
+  and every response key verbatim; the converted path keeps `safeguard_results` too.
+- **Silence the notice** by setting `CLAUDE_CODE_AUTO_MODE_SERVER=0` in the environment
+  Claude Code starts from. It then never asks for server-side checks and the notice
+  disappears.
+
+To confirm which state a session is in, run `/status` in Claude Code and check the
+**Auto mode server** row: `Enabled` means the server is performing the checks,
+`Disabled` means the session has fallen back.
 
 ## Getting more detail
 
