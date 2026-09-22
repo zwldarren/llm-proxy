@@ -206,7 +206,7 @@ const hasAnyPricing = computed(
           <Tooltip v-if="activeDims.length">
             <TooltipTrigger as-child>
               <div
-                class="mt-0.5 text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/60"
+                class="mt-0.5 text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground"
               >
                 +{{ activeDims.length }} {{ t("models.moreDims") }}
               </div>

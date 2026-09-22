@@ -54,6 +54,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useAuditLabels } from "@/composables/useAuditLabels";
+import { CONSOLE_DESKTOP_QUERY } from "@/composables/useViewMode";
 import { useDebounceFn, useEventListener, useMediaQuery } from "@vueuse/core";
 import { logsApi } from "@/services/api/logs";
 import { meApi, type FeedbackSignal } from "@/services/api/me";
@@ -93,7 +94,7 @@ const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 
-const isDesktop = useMediaQuery("(min-width: 1024px)");
+const isDesktop = useMediaQuery(CONSOLE_DESKTOP_QUERY);
 
 // Log tab type
 type LogTab = "proxy" | "audit" | "mcp" | "websearch";
@@ -852,7 +853,7 @@ const auditListAction = (log: LogListItemType): string => {
       <!-- Collapsible Advanced Filters panel -->
       <div
         v-if="showFilters"
-        class="flex-none border-b border-border/60 bg-muted/15 backdrop-blur-sm px-4 sm:px-6 py-4 animate-in slide-in-from-top-2 duration-200"
+        class="flex-none border-b border-border/60 bg-muted/15 px-4 sm:px-6 py-4 animate-in slide-in-from-top-2 duration-200"
       >
         <LogsFilters
           ref="logsFiltersRef"
@@ -1046,7 +1047,7 @@ const auditListAction = (log: LogListItemType): string => {
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                class="h-8 w-8 text-muted-foreground/60 hover:text-foreground"
+                                class="h-8 w-8 text-muted-foreground hover:text-foreground"
                                 :aria-label="t(FEEDBACK_LABEL_KEYS[signal])"
                                 :disabled="feedbackSubmittingIds.has(log.request_id)"
                                 @click.stop="submitFeedback(log, signal)"
@@ -1289,7 +1290,7 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableCell class="text-xs hidden sm:table-cell">
                     <div class="flex items-center gap-1.5">
                       <div
-                        class="w-4 h-4 rounded flex items-center justify-center overflow-hidden bg-white/90 border border-border/50 shrink-0"
+                        class="w-4 h-4 rounded flex items-center justify-center overflow-hidden bg-background border border-border/50 shrink-0"
                       >
                         <img
                           v-if="getProviderIconUrl(log.provider || '')"

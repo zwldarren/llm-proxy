@@ -212,7 +212,7 @@ const handleCopy = async (text: string) => {
           <!-- Loading state for the whole content -->
           <div
             v-if="isLoading"
-            class="h-[360px] flex flex-col items-center justify-center text-muted-foreground gap-3 bg-card/50 backdrop-blur-[0.5px] rounded-md"
+            class="h-[360px] flex flex-col items-center justify-center text-muted-foreground gap-3 bg-card/50 rounded-md"
           >
             <Loader2 class="w-8 h-8 animate-spin text-primary" />
             <span class="text-xs font-medium">{{ t("mcpServers.loadingCapabilities") }}</span>
@@ -221,7 +221,7 @@ const handleCopy = async (text: string) => {
           <!-- Error state -->
           <div
             v-else-if="capabilitiesFailed"
-            class="h-[360px] flex flex-col items-center justify-center text-muted-foreground gap-3 bg-card/50 backdrop-blur-[0.5px] rounded-md"
+            class="h-[360px] flex flex-col items-center justify-center text-muted-foreground gap-3 bg-card/50 rounded-md"
           >
             <AlertCircle class="w-8 h-8 text-destructive" />
             <span class="text-xs font-medium text-destructive">{{
@@ -250,7 +250,7 @@ const handleCopy = async (text: string) => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
+                            class="h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 active:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity shrink-0"
                             :aria-label="t('mcpServers.copyName')"
                             @click.stop="handleCopy(tool.name)"
                           >

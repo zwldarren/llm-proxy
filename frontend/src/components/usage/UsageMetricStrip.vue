@@ -130,9 +130,7 @@ const tier = computed(() => tierStyles[successTier.value]);
           <Package class="w-3.5 h-3.5 text-action-blue" />
           {{ t("home.totalRequests") }}
         </div>
-        <div
-          class="text-base font-mono font-semibold text-foreground mt-1 leading-none tabular-nums"
-        >
+        <div class="text-metric text-foreground mt-1">
           <ValueSwap :value="formatNumberWithSuffix(summary.total_requests)" />
         </div>
         <div class="text-[11px] text-muted-foreground mt-1">
@@ -147,9 +145,7 @@ const tier = computed(() => tierStyles[successTier.value]);
           <DollarSign class="w-3.5 h-3.5 text-action-amber" />
           {{ t("home.totalCost") }}
         </div>
-        <div
-          class="text-base font-mono font-semibold text-foreground mt-1 leading-none tabular-nums"
-        >
+        <div class="text-metric text-foreground mt-1">
           <ValueSwap :value="formatCostWithPrecision(summary.total_cost, 2)" />
         </div>
         <div class="text-[11px] text-muted-foreground mt-1">
@@ -163,9 +159,7 @@ const tier = computed(() => tierStyles[successTier.value]);
           <Activity class="w-3.5 h-3.5 text-action-rose" />
           {{ t("home.totalTokens") }}
         </div>
-        <div
-          class="text-base font-mono font-semibold text-foreground mt-1 leading-none tabular-nums"
-        >
+        <div class="text-metric text-foreground mt-1">
           <ValueSwap :value="formatNumberWithSuffix(totalTokens)" />
         </div>
         <div class="text-[11px] text-muted-foreground mt-1 truncate">
@@ -188,7 +182,7 @@ const tier = computed(() => tierStyles[successTier.value]);
           {{ t("home.successRate") }}
         </div>
         <div class="flex items-center gap-1.5 mt-1">
-          <span class="text-base font-mono font-semibold tabular-nums" :class="tier.text">
+          <span class="text-metric" :class="tier.text">
             <ValueSwap :value="formatPercentage(summary.success_rate)" />
           </span>
           <span class="text-[11px] px-1.5 py-0.5 rounded-full border" :class="tier.badge">
@@ -197,9 +191,9 @@ const tier = computed(() => tierStyles[successTier.value]);
         </div>
         <div class="relative h-1 w-full bg-muted rounded-full overflow-hidden mt-1.5">
           <div
-            class="h-full rounded-full transition-all duration-500"
+            class="h-full w-full origin-left rounded-full transition-transform duration-500"
             :class="tier.meter"
-            :style="{ width: `${summary.success_rate}%` }"
+            :style="{ transform: `scaleX(${summary.success_rate / 100})` }"
           />
         </div>
         <div class="flex items-center gap-1 mt-1">
@@ -220,9 +214,7 @@ const tier = computed(() => tierStyles[successTier.value]);
           <Clock class="w-3.5 h-3.5 text-action-blue" />
           {{ t("logs.latency") }}
         </div>
-        <div
-          class="text-base font-mono font-semibold text-foreground mt-1 leading-none tabular-nums"
-        >
+        <div class="text-metric text-foreground mt-1">
           <ValueSwap :value="formatDuration(summary.avg_response_time_ms)" />
         </div>
         <div class="text-[11px] text-muted-foreground mt-1">
@@ -236,9 +228,7 @@ const tier = computed(() => tierStyles[successTier.value]);
           <Cpu class="w-3.5 h-3.5 text-action-amber" />
           {{ t("home.avgThroughput") }}
         </div>
-        <div
-          class="text-base font-mono font-semibold text-foreground mt-1 leading-none tabular-nums"
-        >
+        <div class="text-metric text-foreground mt-1">
           <ValueSwap :value="summary.avg_tokens_per_second.toFixed(1)" />
           <span class="text-xs font-normal text-muted-foreground">tps</span>
         </div>

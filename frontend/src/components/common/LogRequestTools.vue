@@ -125,7 +125,7 @@ function collapseAll() {
           </span>
           <span
             v-if="!expanded.has(i) && (tool.description || tool.summary)"
-            class="text-[11px] text-muted-foreground/60 truncate min-w-0 flex-1 hidden sm:block"
+            class="text-[11px] text-muted-foreground truncate min-w-0 flex-1 hidden sm:block"
           >
             {{ tool.description || tool.summary }}
           </span>

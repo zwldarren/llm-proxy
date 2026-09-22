@@ -174,8 +174,8 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
 
       <!-- Timestamps + spend: fixed-width, right-aligned stat columns so
            values line up across rows and never wrap. -->
-      <div class="hidden md:flex items-center gap-6 shrink-0 text-right">
-        <div v-if="spendLabel" class="flex flex-col w-36" :title="spendTitle">
+      <div class="hidden md:flex items-center gap-4 xl:gap-6 shrink-0 text-right">
+        <div v-if="spendLabel" class="flex flex-col w-28 xl:w-36" :title="spendTitle">
           <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
             {{ t("apiKeys.spend") }}
           </span>
@@ -201,7 +201,7 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
             />
           </div>
         </div>
-        <div class="flex flex-col w-40">
+        <div class="flex flex-col w-32 xl:w-40">
           <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
             {{ t("apiKeys.expires") }}
           </span>
@@ -212,7 +212,7 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
             {{ apiKey.expires_at ? formatDate(apiKey.expires_at) : t("apiKeys.never") }}
           </span>
         </div>
-        <div class="flex flex-col w-40">
+        <div class="flex flex-col w-32 xl:w-40">
           <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
             {{ t("apiKeys.lastUsed") }}
           </span>

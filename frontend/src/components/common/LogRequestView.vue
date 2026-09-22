@@ -242,7 +242,7 @@ const oversizeRequestBodyText = computed((): string | null =>
           <span class="text-[11px] text-action-amber font-bold uppercase tracking-wider">
             {{ t("logs.systemInstructions") }}
           </span>
-          <span class="ml-auto text-[11px] font-mono text-muted-foreground/60 tabular-nums">
+          <span class="ml-auto text-[11px] font-mono text-muted-foreground tabular-nums">
             {{ systemCharLabel }} {{ t("logs.charsUnit") }}
           </span>
         </template>
@@ -258,7 +258,7 @@ const oversizeRequestBodyText = computed((): string | null =>
           <h4 class="text-xs font-bold text-muted-foreground uppercase tracking-wider">
             {{ t("logs.conversationMessages") }}
           </h4>
-          <span class="text-[11px] font-mono text-muted-foreground/60 tabular-nums">
+          <span class="text-[11px] font-mono text-muted-foreground tabular-nums">
             ({{ parsed.messages.length }} · {{ totalCharsLabel }} {{ t("logs.charsUnit") }})
           </span>
           <LogExpandControls @expand="expandAllMessages" @collapse="collapseAllMessages" />

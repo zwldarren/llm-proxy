@@ -113,8 +113,9 @@ describe("createCategoricalColorScale", () => {
     }
   });
 
-  it("returns the neutral-slate fallback for names outside the set", () => {
+  it("returns the --status-unknown fallback for names outside the set", () => {
     const scale = createCategoricalColorScale(MODELS);
-    expect(scale("unknown-model", true)).toBe("hsl(220 5% 50%)");
+    expect(scale("unknown-model", true)).toBe("hsl(220 5% 58%)");
+    expect(scale("unknown-model", false)).toBe("hsl(220 3% 45%)");
   });
 });

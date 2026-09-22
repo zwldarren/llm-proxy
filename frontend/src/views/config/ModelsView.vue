@@ -651,9 +651,9 @@ const confirmDelete = async () => {
               <!-- Feature-bound capabilities: these gate proxy behavior -->
               <div class="space-y-4">
                 <div>
-                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                  <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                     {{ t("models.capBoundHeader") }}
-                  </h4>
+                  </h2>
                   <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
                     {{ t("models.capBoundHint") }}
                   </p>
@@ -674,9 +674,9 @@ const confirmDelete = async () => {
               <!-- Informational models.dev attributes: display-only -->
               <div class="space-y-4">
                 <div>
-                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                  <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                     {{ t("models.capInfoHeader") }}
-                  </h4>
+                  </h2>
                   <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
                     {{ t("models.capInfoHint") }}
                   </p>
@@ -993,9 +993,9 @@ const confirmDelete = async () => {
                 {{ t("models.routingTabHelp") }}
               </p>
 
-              <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+              <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                 {{ t("models.routingEligibilityHeader") }}
-              </h4>
+              </h2>
 
               <!-- Auto-Eligible -->
               <div class="flex items-start justify-between gap-4">
@@ -1008,12 +1008,12 @@ const confirmDelete = async () => {
                 <Switch v-model="newModel.auto_eligible" class="mt-0.5" />
               </div>
 
-              <h4
+              <h2
                 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2 pt-1"
                 :class="{ 'opacity-50': !newModel.auto_eligible }"
               >
                 {{ t("models.routingProfileHeader") }}
-              </h4>
+              </h2>
 
               <!-- Quality Tier -->
               <div class="grid gap-2" :class="{ 'opacity-50': !newModel.auto_eligible }">
@@ -1024,7 +1024,7 @@ const confirmDelete = async () => {
                   {{ t("models.qualityTier") }}
                 </Label>
                 <Select v-model="newModel.quality_tier" :disabled="!newModel.auto_eligible">
-                  <SelectTrigger class="h-9">
+                  <SelectTrigger id="qualityTier" class="h-9">
                     <SelectValue :placeholder="t('models.qualityTierSelect')" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1083,9 +1083,9 @@ const confirmDelete = async () => {
             <TabsContent value="advanced" class="space-y-6 mt-0">
               <!-- Section 1: Model Profile (description, links) -->
               <div class="space-y-4">
-                <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                   {{ t("models.tabProfileHeader") }}
-                </h4>
+                </h2>
 
                 <!-- Description -->
                 <div class="grid gap-2">
@@ -1124,9 +1124,9 @@ const confirmDelete = async () => {
               <!-- Section 2: Limits (models.dev limit.*) -->
               <div class="space-y-4">
                 <div>
-                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                  <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                     {{ t("models.limitsHeader") }}
-                  </h4>
+                  </h2>
                   <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
                     {{ t("models.limitsHint") }}
                   </p>
@@ -1168,9 +1168,9 @@ const confirmDelete = async () => {
               <!-- Section 3: Classification (models.dev metadata) -->
               <div class="space-y-4">
                 <div>
-                  <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                  <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                     {{ t("models.classificationHeader") }}
-                  </h4>
+                  </h2>
                   <p class="text-[11px] text-muted-foreground leading-normal mt-1.5">
                     {{ t("models.classificationHint") }}
                   </p>
@@ -1236,9 +1236,9 @@ const confirmDelete = async () => {
 
               <!-- Section 3: Visual Settings -->
               <div class="space-y-4">
-                <h4 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
+                <h2 class="text-sm font-semibold text-foreground border-b border-border/60 pb-2">
                   {{ t("models.tabVisualsHeader") }}
-                </h4>
+                </h2>
 
                 <div class="flex items-start gap-4">
                   <!-- Icon Preview -->

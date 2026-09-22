@@ -18,7 +18,7 @@ defineEmits<{
     :model-value="modelValue"
     type="single"
     :spacing="1"
-    class="shrink-0 rounded-lg border border-border/60 bg-background/70 p-0.5 shadow-[inset_0_1px_0_hsl(var(--background)/0.7)]"
+    class="max-lg:hidden shrink-0 rounded-lg border border-border/60 bg-background/70 p-0.5 shadow-[inset_0_1px_0_hsl(var(--background)/0.7)]"
     @update:model-value="$emit('update:modelValue', $event as ViewMode)"
   >
     <ToggleGroupItem

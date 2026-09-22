@@ -21,11 +21,8 @@ withDefaults(defineProps<Props>(), {
   <div class="flex flex-col gap-2">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex items-center gap-2.5">
-        <div
-          v-if="icon"
-          class="flex items-center justify-center h-8 w-8 rounded-md bg-muted text-foreground border border-border/50 shrink-0"
-        >
-          <component :is="icon" class="w-4 h-4 text-foreground/80" :class="iconClass" />
+        <div v-if="icon" class="icon-container icon-container-sm shrink-0 text-primary">
+          <component :is="icon" class="w-4 h-4" :class="iconClass" />
         </div>
         <div class="space-y-0.5">
           <h1

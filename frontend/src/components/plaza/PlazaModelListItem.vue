@@ -107,7 +107,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
           <p
             :class="[
               'max-w-3xl text-xs leading-relaxed',
-              model.description ? 'text-muted-foreground' : 'text-muted-foreground/50 italic',
+              model.description ? 'text-muted-foreground' : 'text-muted-foreground italic',
             ]"
           >
             {{ model.description || t("plaza.noDescription") }}

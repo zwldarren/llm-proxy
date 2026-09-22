@@ -48,7 +48,7 @@ const hasMetadata = computed((): boolean => {
         <p class="text-sm text-muted-foreground font-medium">
           {{ t("logs.noMetadata") }}
         </p>
-        <p class="text-xs text-muted-foreground/60 max-w-sm">
+        <p class="text-xs text-muted-foreground max-w-sm">
           {{ t("logs.noMetadataDescription") }}
         </p>
       </div>

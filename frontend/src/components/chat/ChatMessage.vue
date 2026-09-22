@@ -12,7 +12,7 @@ import {
   RotateCcw,
 } from "@lucide/vue";
 import MarkdownIt from "markdown-it";
-import { computed, ref, onUnmounted } from "vue";
+import { computed, ref, onUnmounted, watch } from "vue";
 import { highlightCode } from "@/utils/highlighter";
 import { useI18n } from "vue-i18n";
 
@@ -85,6 +85,25 @@ md.renderer.rules.code_block = (tokens, idx) => {
   return renderCodeBlock(token.content, "");
 };
 
+const escapeAttr = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Markdown images are zoomable. Wrap the rendered image element in a real
+// button so the lightbox stays reachable by keyboard (the same pattern
+// LogImagePreview uses). The name comes from the image's alt text; a decorative
+// image falls back to the localized "image" label rather than shipping a
+// nameless button.
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const alt = self.renderInlineAsText(token.children ?? [], options, env);
+  const altIndex = token.attrIndex("alt");
+  if (altIndex >= 0) {
+    token.attrs![altIndex][1] = alt;
+  }
+  const label = alt.trim() || t("images.image");
+  return `<button type="button" class="zoomable-image focus-visible-ring" aria-label="${escapeAttr(label)}">${self.renderToken(tokens, idx, options)}</button>`;
+};
+
 const handleCodeCopy = async (btn: Element) => {
   const wrapper = btn.closest(".code-block-wrapper");
   const codeEl = wrapper?.querySelector("code");
@@ -113,11 +132,16 @@ const handleCodeCopy = async (btn: Element) => {
 const handleContentClick = (e: MouseEvent) => {
   const target = e.target as HTMLElement;
 
-  if (target.tagName === "IMG") {
-    const img = target as HTMLImageElement;
-    if (img.src) {
-      openImageModal(img.src);
-    }
+  // Keyboard activation of a zoomable image reports the wrapper button, so
+  // resolve the image through it instead of matching the image tag alone.
+  const zoomWrapper = target.closest(".zoomable-image");
+  const zoomedImg = zoomWrapper
+    ? zoomWrapper.querySelector("img")
+    : target instanceof HTMLImageElement
+      ? target
+      : null;
+  if (zoomedImg?.src) {
+    openImageModal(zoomedImg.src);
     return;
   }
 
@@ -164,20 +188,75 @@ const imageParts = computed(() => {
 
 const hasImageParts = computed(() => imageParts.value.length > 0);
 
-const renderedContent = computed(() => {
-  const content = props.message.content;
-  let rawHtml = "";
-  if (typeof content === "string") {
-    rawHtml = md.render(content);
-  } else if (Array.isArray(content)) {
-    const textContent = content
+const extractText = (content: ChatMessage["content"]): string => {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
       .join("\n");
-    rawHtml = md.render(textContent);
   }
-  return sanitizeMarkdownHtml(rawHtml);
-});
+  return "";
+};
+
+const markdownToHtml = (text: string) => sanitizeMarkdownHtml(md.render(text));
+
+// A streaming response appends to `content` on every flush. Re-parsing the whole
+// message each time (markdown + DOMPurify + syntax highlighting) is O(n²), so the
+// settled prefix is rendered once, frozen at a blank-line boundary, and only the
+// growing tail is re-rendered. `renderFull` runs when the stream ends: a full
+// pass corrects anything a boundary split could not see (reference-style links,
+// HTML blocks spanning blank lines).
+const renderedContent = ref("");
+let frozenHtml = "";
+let frozenLength = 0;
+let renderedSource = "";
+
+const hasBalancedFences = (text: string): boolean => {
+  const fences = text.match(/^[ \t]*```/gm);
+  return !fences || fences.length % 2 === 0;
+};
+
+/** First blank-line boundary after `from` that is safe to freeze at (-1 if none). */
+const findFreezePoint = (source: string, from: number): number => {
+  let index = source.indexOf("\n\n", from);
+  while (index !== -1) {
+    const candidate = index + 2;
+    if (hasBalancedFences(source.slice(0, candidate))) return candidate;
+    index = source.indexOf("\n\n", candidate);
+  }
+  return -1;
+};
+
+const renderIncremental = () => {
+  const source = extractText(props.message.content);
+  if (!source.startsWith(renderedSource)) {
+    // Content was replaced or edited rather than appended to: start over.
+    frozenHtml = "";
+    frozenLength = 0;
+  }
+  renderedSource = source;
+
+  const freezePoint = findFreezePoint(source, frozenLength);
+  if (freezePoint > frozenLength) {
+    frozenHtml += markdownToHtml(source.slice(frozenLength, freezePoint));
+    frozenLength = freezePoint;
+  }
+  renderedContent.value = frozenHtml + markdownToHtml(source.slice(frozenLength));
+};
+
+const renderFull = () => {
+  renderedSource = extractText(props.message.content);
+  frozenHtml = "";
+  frozenLength = 0;
+  renderedContent.value = markdownToHtml(renderedSource);
+};
+
+watch(
+  () => props.message.content,
+  () => renderIncremental(),
+  { immediate: true, deep: true }
+);
 
 const formatToolArguments = (args: string): string => {
   try {
@@ -190,6 +269,16 @@ const formatToolArguments = (args: string): string => {
 
 const chatStore = useChatStore();
 const modelStore = useModelStore();
+
+// The stream settled: re-render this message in one full pass so an incremental
+// freeze boundary can never leave a stale interpretation behind.
+watch(
+  () => chatStore.isLoading,
+  (loading) => {
+    if (!loading) renderFull();
+  }
+);
+
 const isTtsLoading = ref(false);
 const isCopied = ref(false);
 const ttsAbortController = ref<AbortController | null>(null);
@@ -377,6 +466,8 @@ const handleReadAloud = async () => {
 
     if (storeMsg) {
       storeMsg.audioUrl = audioUrl;
+      // The store persists on an explicit dirty flag, not a deep watcher.
+      chatStore.touchChat();
     }
 
     chatStore.playAudio(msgId, audioUrl);
@@ -635,18 +726,21 @@ const handleReadAloud = async () => {
               v-if="message.content.some((p) => p.type === 'image_url')"
               class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4"
             >
-              <div
+              <button
                 v-for="(part, idx) in message.content.filter((p) => p.type === 'image_url')"
                 :key="'img-' + idx"
-                class="relative overflow-hidden border border-border/40 bg-muted/20 aspect-video flex items-center justify-center"
+                type="button"
+                class="focus-visible-ring relative overflow-hidden border border-border/40 bg-muted/20 aspect-video flex items-center justify-center cursor-zoom-in"
+                :aria-label="t('chat.openImage', { n: idx + 1 })"
+                @click="openImageModal(part.image_url.url)"
               >
                 <img
                   :src="part.image_url.url"
-                  alt="Uploaded image"
-                  class="w-full h-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
-                  @click="openImageModal(part.image_url.url)"
+                  :alt="t('chat.uploadedImageAlt', { n: idx + 1 })"
+                  class="w-full h-full object-cover hover:opacity-90 transition-opacity"
+                  loading="lazy"
                 />
-              </div>
+              </button>
             </div>
 
             <div
@@ -680,18 +774,21 @@ const handleReadAloud = async () => {
           v-if="message.role === 'assistant' && hasImageParts"
           class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4"
         >
-          <div
+          <button
             v-for="(part, idx) in imageParts"
             :key="'img-' + idx"
-            class="relative overflow-hidden border border-border/40 bg-muted/20 aspect-video flex items-center justify-center"
+            type="button"
+            class="focus-visible-ring relative overflow-hidden border border-border/40 bg-muted/20 aspect-video flex items-center justify-center cursor-zoom-in"
+            :aria-label="t('chat.openImage', { n: idx + 1 })"
+            @click="openImageModal(part.image_url.url)"
           >
             <img
               :src="part.image_url.url"
-              alt="Generated image"
-              class="w-full h-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
-              @click="openImageModal(part.image_url.url)"
+              :alt="t('chat.generatedImageAlt', { n: idx + 1 })"
+              class="w-full h-full object-cover hover:opacity-90 transition-opacity"
+              loading="lazy"
             />
-          </div>
+          </button>
         </div>
 
         <!-- Generated Audio Player -->
@@ -699,10 +796,8 @@ const handleReadAloud = async () => {
           v-if="message.audioUrl && message.explicitAudio"
           class="mt-4 pt-4 border-t border-border/40"
         >
-          <div
-            class="text-[11px] uppercase font-mono tracking-widest text-muted-foreground/60 mb-2"
-          >
-            Generated Audio
+          <div class="text-[11px] uppercase font-mono tracking-widest text-muted-foreground mb-2">
+            {{ t("chat.generatedAudio") }}
           </div>
           <audio
             controls
@@ -729,8 +824,8 @@ const handleReadAloud = async () => {
         </button>
         <img
           :src="previewImageUrl"
-          alt="Image preview"
-          class="max-w-full max-h-[90vh] object-contain shadow-2xl border border-border/20 animate-in zoom-in-95 duration-200"
+          :alt="t('chat.imagePreviewAlt')"
+          class="max-w-full max-h-[90vh] object-contain shadow-lg animate-in zoom-in-95 duration-200"
           @click.stop
         />
       </div>
@@ -777,5 +872,15 @@ const handleReadAloud = async () => {
 
 :deep(img:hover) {
   opacity: 0.9;
+}
+
+/* Markdown images are wrapped in a button for keyboard access, so the wrapper
+   must not paint button chrome. */
+:deep(.zoomable-image) {
+  display: inline-block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
 }
 </style>

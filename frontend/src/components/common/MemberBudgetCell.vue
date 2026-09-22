@@ -44,9 +44,9 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
         aria-valuemax="100"
       >
         <div
-          class="h-full rounded-full transition-all"
+          class="h-full w-full origin-left rounded-full transition-transform"
           :class="barClass"
-          :style="{ width: `${(budgetRatio ?? 0) * 100}%` }"
+          :style="{ transform: `scaleX(${budgetRatio ?? 0})` }"
         />
       </div>
       <span class="text-[10px] text-muted-foreground/80">

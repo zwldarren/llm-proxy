@@ -346,7 +346,7 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
         <h4 class="text-xs uppercase font-bold text-muted-foreground flex items-center gap-2">
           <Database class="size-3.5" />
           {{ t("logs.embeddings") }}
-          <span class="text-muted-foreground/60 font-mono normal-case tracking-normal">
+          <span class="text-muted-foreground font-mono normal-case tracking-normal">
             ({{ parsedResponse.embeddings.length }})
           </span>
         </h4>
@@ -409,7 +409,7 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
           <h4 class="text-xs font-bold text-muted-foreground uppercase tracking-wider">
             {{ t("logs.outputItems") }}
           </h4>
-          <span class="text-[11px] font-mono text-muted-foreground/60 tabular-nums">
+          <span class="text-[11px] font-mono text-muted-foreground tabular-nums">
             ({{ parsedResponse.items.length }})
           </span>
           <LogExpandControls @expand="setAllTextItems(true)" @collapse="setAllTextItems(false)" />
@@ -433,12 +433,12 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
                 </span>
                 <span
                   v-if="!isItemExpanded(i) && item.text"
-                  class="text-[11px] font-mono text-muted-foreground/60 truncate min-w-0 flex-1"
+                  class="text-[11px] font-mono text-muted-foreground truncate min-w-0 flex-1"
                 >
                   {{ firstLinePreview(item.text) }}
                 </span>
                 <span v-else class="flex-1" />
-                <span class="text-[11px] font-mono text-muted-foreground/60 shrink-0 tabular-nums">
+                <span class="text-[11px] font-mono text-muted-foreground shrink-0 tabular-nums">
                   {{ formatCharCount(item.text.length) }}
                 </span>
               </template>
@@ -467,12 +467,12 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
                 </span>
                 <span
                   v-if="!isItemExpanded(i)"
-                  class="text-[11px] font-mono text-muted-foreground/60 truncate min-w-0 flex-1"
+                  class="text-[11px] font-mono text-muted-foreground truncate min-w-0 flex-1"
                 >
                   {{ firstLinePreview(item.text) }}
                 </span>
                 <span v-else class="flex-1" />
-                <span class="text-[11px] font-mono text-muted-foreground/60 shrink-0 tabular-nums">
+                <span class="text-[11px] font-mono text-muted-foreground shrink-0 tabular-nums">
                   {{ formatCharCount(item.text.length) }}
                 </span>
               </template>
@@ -499,7 +499,7 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
                 >
                   {{ t("logs.toolResult") }}
                 </span>
-                <span class="text-[11px] font-mono text-muted-foreground/60 truncate min-w-0">
+                <span class="text-[11px] font-mono text-muted-foreground truncate min-w-0">
                   {{ item.result.toolUseId || item.result.callId || "#" + (i + 1) }}
                 </span>
               </div>
@@ -546,7 +546,7 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
         <div v-if="toolCallsWithResults.length > 0" class="space-y-2.5">
           <h4 class="text-xs uppercase font-bold text-action-amber flex items-center gap-2">
             {{ t("chat.toolCalls") }}
-            <span class="text-muted-foreground/60 font-mono normal-case tracking-normal">
+            <span class="text-muted-foreground font-mono normal-case tracking-normal">
               ({{ toolCallsWithResults.length }})
             </span>
           </h4>

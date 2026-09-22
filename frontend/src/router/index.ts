@@ -104,14 +104,13 @@ const router = createRouter({
 
 export default router;
 
-router.beforeEach((to, _from) => {
+router.beforeEach(async (to, _from) => {
   const authStore = useAuthStore();
 
-  // If setup status is still loading (null), allow navigation to proceed
-  // without redirecting - avoids race conditions while setup status resolves
-  if (authStore.needsSetup === null) {
-    return;
-  }
+  // Resolve the first-run setup status before deciding anything: the check is
+  // memoized, so the initial navigation waits for the API round-trip while
+  // later navigations resolve immediately.
+  await authStore.ensureSetupStatus();
 
   // Force the first-run admin setup screen when no admin account exists yet.
   if (authStore.needsSetup === true && to.name !== "setup") {
@@ -214,7 +213,19 @@ router.afterEach((to) => {
   viewsToPrefetch.forEach((v, index) => {
     const importer = VIEW_IMPORTS[v.view];
     if (importer) {
-      requestIdleCallback(() => importer(), { timeout: 2000 + index * 1000 });
+      schedulePrefetch(importer, 2000 + index * 1000);
     }
   });
 });
+
+/**
+ * Run a prefetch when the browser is idle, falling back to a plain timer where
+ * `requestIdleCallback` is unavailable (Safari < 17, non-browser test envs).
+ */
+function schedulePrefetch(importer: () => Promise<unknown>, timeoutMs: number): void {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(() => void importer(), { timeout: timeoutMs });
+    return;
+  }
+  setTimeout(() => void importer(), timeoutMs);
+}

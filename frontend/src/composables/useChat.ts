@@ -11,6 +11,47 @@ import type { GenerationSettings } from "@/adapters/endpointProfiles";
 import { planChatRequest } from "@/adapters/endpointProfiles";
 import { makeRunId } from "@/utils/runs";
 
+/**
+ * Coalesce streamed deltas into one reactive write per animation frame.
+ *
+ * At token rate, each delta re-renders the whole message and re-runs the chat
+ * store's deep watchers; batching bounds that work by frame instead of by
+ * chunk. The buffer is flushed whenever the stream settles, so the finished
+ * message is never missing text, and a backgrounded tab simply defers the
+ * (invisible) render until it is visible again.
+ */
+function createDeltaBuffer(apply: (delta: string) => void) {
+  let pending = "";
+  let frame: number | null = null;
+
+  const flush = () => {
+    if (frame !== null) {
+      cancelAnimationFrame(frame);
+      frame = null;
+    }
+    if (!pending) return;
+    const delta = pending;
+    pending = "";
+    apply(delta);
+  };
+
+  const push = (delta: string) => {
+    if (!delta) return;
+    pending += delta;
+    if (frame !== null) return;
+    if (typeof requestAnimationFrame !== "function") {
+      flush();
+      return;
+    }
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      flush();
+    });
+  };
+
+  return { push, flush };
+}
+
 export type WebSearchContextSize = "low" | "medium" | "high";
 
 export interface WebSearchConfig {
@@ -169,6 +210,16 @@ export function useChat() {
     };
     let runError: string | undefined;
     let runStopped = false;
+
+    // Every in-place mutation of the transcript must be paired with a dirty
+    // mark so the debounced writer persists it (see stores/chat.ts). This
+    // helper keeps the pairing atomic at each call site instead of relying on
+    // every mutation remembering to call touchChat() itself.
+    const mutateChat = (mutate: () => void) => {
+      mutate();
+      store.touchChat();
+    };
+
     const settleRun = (
       status: ChatRunStatus,
       overrides?: Partial<Pick<ChatRun, "payload" | "responseChars">>
@@ -236,16 +287,20 @@ export function useChat() {
         }
 
         const audioUrl = URL.createObjectURL(blob);
-        assistantMessage.content = `${t("chat.audioGeneratedSuccess")}\n\n*Voice: ${voice}, Speed: ${speed}x*`;
-        assistantMessage.audioUrl = audioUrl;
-        assistantMessage.explicitAudio = true;
+        mutateChat(() => {
+          assistantMessage.content = `${t("chat.audioGeneratedSuccess")}\n\n*Voice: ${voice}, Speed: ${speed}x*`;
+          assistantMessage.audioUrl = audioUrl;
+          assistantMessage.explicitAudio = true;
+        });
         settleRun("ok", { payload: audioPayload });
       } catch (e: unknown) {
         console.error(e);
         const errorObj = e as Error;
         const errMsg = errorObj.message || t("dialogs.errorGenerating");
         store.setError(errMsg);
-        assistantMessage.content = `**Error:** ${errMsg}`;
+        mutateChat(() => {
+          assistantMessage.content = `**Error:** ${errMsg}`;
+        });
         runError = errMsg;
         settleRun("error", { payload: audioPayload });
       } finally {
@@ -269,54 +324,70 @@ export function useChat() {
     });
     store.pushMessage(assistantMessage);
 
+    const contentBuffer = createDeltaBuffer((delta) => {
+      mutateChat(() => {
+        assistantMessage.content += delta;
+      });
+    });
+    const reasoningBuffer = createDeltaBuffer((delta) => {
+      mutateChat(() => {
+        assistantMessage.reasoning_content = (assistantMessage.reasoning_content || "") + delta;
+      });
+    });
+
     try {
       await chatApi.streamChatCompletion(
         endpoint,
         requestPayload,
         apiKey,
         (chunk) => {
-          assistantMessage.content += chunk;
+          contentBuffer.push(chunk);
           if (onChunk) onChunk(chunk);
         },
         (streamError) => {
           const errorMsg = `Stream error: ${streamError}`;
           store.setError(errorMsg);
-          assistantMessage.content += `**Error:** ${errorMsg}`;
+          contentBuffer.push(`**Error:** ${errorMsg}`);
           runError = errorMsg;
         },
         (reasoningChunk) => {
-          assistantMessage.reasoning_content =
-            (assistantMessage.reasoning_content || "") + reasoningChunk;
+          reasoningBuffer.push(reasoningChunk);
           if (onChunk) onChunk("");
         },
         (index, id, name, args) => {
-          if (!assistantMessage.tool_calls) {
-            assistantMessage.tool_calls = [];
-          }
-          if (!assistantMessage.tool_calls[index]) {
-            assistantMessage.tool_calls[index] = {
-              id: "",
-              type: "function",
-              function: { name: "", arguments: "" },
-            };
-          }
-          const tc = assistantMessage.tool_calls[index];
-          if (id) tc.id = id;
-          if (name) tc.function.name = name;
-          if (args) tc.function.arguments += args;
+          mutateChat(() => {
+            if (!assistantMessage.tool_calls) {
+              assistantMessage.tool_calls = [];
+            }
+            if (!assistantMessage.tool_calls[index]) {
+              assistantMessage.tool_calls[index] = {
+                id: "",
+                type: "function",
+                function: { name: "", arguments: "" },
+              };
+            }
+            const tc = assistantMessage.tool_calls[index];
+            if (id) tc.id = id;
+            if (name) tc.function.name = name;
+            if (args) tc.function.arguments += args;
+          });
           if (onChunk) onChunk("");
         },
         (_index, id, query, status) => {
-          if (!assistantMessage.web_search_calls) {
-            assistantMessage.web_search_calls = [];
-          }
-          // Use id as the key to avoid duplicates from mismatched output_index values
-          const existingIdx = assistantMessage.web_search_calls.findIndex((c) => c && c.id === id);
-          if (existingIdx >= 0) {
-            assistantMessage.web_search_calls[existingIdx] = { id, query, status };
-          } else {
-            assistantMessage.web_search_calls.push({ id, query, status });
-          }
+          mutateChat(() => {
+            if (!assistantMessage.web_search_calls) {
+              assistantMessage.web_search_calls = [];
+            }
+            // Use id as the key to avoid duplicates from mismatched output_index values
+            const existingIdx = assistantMessage.web_search_calls.findIndex(
+              (c) => c && c.id === id
+            );
+            if (existingIdx >= 0) {
+              assistantMessage.web_search_calls[existingIdx] = { id, query, status };
+            } else {
+              assistantMessage.web_search_calls.push({ id, query, status });
+            }
+          });
           if (onChunk) onChunk("");
         },
         signal
@@ -324,16 +395,18 @@ export function useChat() {
     } catch (e) {
       // Check if this was an abort error
       if (e instanceof Error && e.name === "AbortError") {
-        assistantMessage.content += "\n\n*[Generation stopped]*";
+        contentBuffer.push("\n\n*[Generation stopped]*");
         runStopped = true;
       } else {
         console.error(e);
         const errorMsg = t("dialogs.errorGenerating");
         store.setError(errorMsg);
-        assistantMessage.content += `\n\n**Error:** ${errorMsg}`;
+        contentBuffer.push(`\n\n**Error:** ${errorMsg}`);
         runError = e instanceof Error ? e.message : errorMsg;
       }
     } finally {
+      contentBuffer.flush();
+      reasoningBuffer.flush();
       abortController.value = null;
       store.setLoading(false);
       settleRun(runStopped ? "stopped" : runError ? "error" : "ok", {

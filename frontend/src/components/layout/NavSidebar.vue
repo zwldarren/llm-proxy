@@ -404,7 +404,7 @@ const prefetchRoute = (href: string) => {
       <button
         v-if="!isMobile"
         type="button"
-        class="absolute top-5 right-0 z-50 hidden md:flex h-6 w-6 translate-x-1/2 items-center justify-center rounded-full border border-sidebar-border bg-background text-sidebar-foreground shadow-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring transition-transform duration-200 cursor-pointer"
+        class="absolute top-5 right-0 z-50 hidden md:flex h-6 w-6 translate-x-1/2 items-center justify-center rounded-full border border-sidebar-border bg-background text-sidebar-foreground shadow-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring transition-transform duration-200 cursor-pointer [@media(hover:none)]:h-11 [@media(hover:none)]:w-11"
         :aria-label="toggleLabel"
         :title="toggleLabel"
         @click="toggleSidebar"
@@ -416,59 +416,69 @@ const prefetchRoute = (href: string) => {
     <!-- Navigation -->
     <SidebarContent class="py-4">
       <!-- Navigation sections -->
-      <SidebarGroup v-for="section in visibleSections" :key="section.title">
-        <SidebarGroupLabel
-          class="text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/50"
-        >
-          {{ t(section.title) }}
-        </SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu class="gap-0.5">
-            <SidebarMenuItem v-for="item in section.items" :key="item.name">
-              <template v-if="!item.subItems">
-                <SidebarMenuButton as-child :is-active="isCurrent(item.href!)">
-                  <RouterLink
-                    :to="item.href!"
-                    :aria-current="isCurrent(item.href!) ? 'page' : undefined"
-                    @mouseenter="prefetchRoute(item.href!)"
+      <nav :aria-label="t('nav.mainNavigation')" class="flex flex-col gap-2">
+        <SidebarGroup v-for="section in visibleSections" :key="section.title">
+          <SidebarGroupLabel
+            class="text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/50"
+          >
+            {{ t(section.title) }}
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu class="gap-0.5">
+              <SidebarMenuItem v-for="item in section.items" :key="item.name">
+                <template v-if="!item.subItems">
+                  <SidebarMenuButton
+                    as-child
+                    :is-active="isCurrent(item.href!)"
+                    class="max-md:h-11"
                   >
-                    <component :is="item.icon" />
-                    <span>{{ t(item.name) }}</span>
-                  </RouterLink>
-                </SidebarMenuButton>
-              </template>
-              <template v-else>
-                <Collapsible v-model:open="expandedGroups[item.name]" class="group/collapsible">
-                  <CollapsibleTrigger as-child>
-                    <SidebarMenuButton>
-                      <component :is="item.icon" v-if="item.icon" />
+                    <RouterLink
+                      :to="item.href!"
+                      :aria-current="isCurrent(item.href!) ? 'page' : undefined"
+                      @mouseenter="prefetchRoute(item.href!)"
+                    >
+                      <component :is="item.icon" />
                       <span>{{ t(item.name) }}</span>
-                      <ChevronRight
-                        class="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90"
-                      />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub>
-                      <SidebarMenuSubItem v-for="sub in item.subItems" :key="sub.name">
-                        <SidebarMenuSubButton as-child :is-active="isCurrent(sub.href)">
-                          <RouterLink
-                            :to="sub.href"
-                            :aria-current="isCurrent(sub.href) ? 'page' : undefined"
-                            @mouseenter="prefetchRoute(sub.href)"
+                    </RouterLink>
+                  </SidebarMenuButton>
+                </template>
+                <template v-else>
+                  <Collapsible v-model:open="expandedGroups[item.name]" class="group/collapsible">
+                    <CollapsibleTrigger as-child>
+                      <SidebarMenuButton class="max-md:h-11">
+                        <component :is="item.icon" v-if="item.icon" />
+                        <span>{{ t(item.name) }}</span>
+                        <ChevronRight
+                          class="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90"
+                        />
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub>
+                        <SidebarMenuSubItem v-for="sub in item.subItems" :key="sub.name">
+                          <SidebarMenuSubButton
+                            as-child
+                            :is-active="isCurrent(sub.href)"
+                            class="max-md:h-11"
                           >
-                            <span>{{ t(sub.name) }}</span>
-                          </RouterLink>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </Collapsible>
-              </template>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
+                            <RouterLink
+                              :to="sub.href"
+                              :aria-current="isCurrent(sub.href) ? 'page' : undefined"
+                              @mouseenter="prefetchRoute(sub.href)"
+                            >
+                              <span>{{ t(sub.name) }}</span>
+                            </RouterLink>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </template>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </nav>
     </SidebarContent>
 
     <!-- Footer: user info + profile + logout merged -->

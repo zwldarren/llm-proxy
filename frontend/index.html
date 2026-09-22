@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LLM Proxy</title>
+    <script>
+      // Apply the persisted theme before the first paint. The app bundle is a
+      // deferred module, so the browser can paint the light default first and
+      // dark-mode users see a deterministic white flash. Mirrors useTheme's key
+      // (vueuse-color-scheme) and its `initialValue: "dark"`.
+      (function () {
+        try {
+          var stored = localStorage.getItem("vueuse-color-scheme");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = stored === "light" ? false : stored === "auto" ? prefersDark : true;
+          document.documentElement.classList.toggle("dark", dark);
+        } catch {
+          // Storage unavailable (private mode): fall back to the dark default.
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
 
   <body class="antialiased">

@@ -61,7 +61,7 @@ watch(
       <div v-if="count > 0" class="flex items-center gap-1.5 min-w-0">
         <slot />
       </div>
-      <span v-else class="text-code-xs text-muted-foreground/60 truncate select-none">
+      <span v-else class="text-code-xs text-muted-foreground truncate select-none">
         {{ t("playground.runsEmpty") }}
       </span>
 

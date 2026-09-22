@@ -809,6 +809,7 @@ const handleRetryMessage = async (msg: ChatMessageType) => {
 
   // Remove the user message as well because sendMessage will push a new one
   messages.value.splice(userMsgIdx, 1);
+  chatStore.touchChat();
 
   isSubmitting.value = true;
   isAutoScroll.value = true;
@@ -972,6 +973,7 @@ watch(
       <header
         class="config-header-bar flex items-center justify-between px-4 sm:px-6 h-14 z-20 shrink-0"
       >
+        <h1 class="sr-only">{{ t("nav.chat") }}</h1>
         <div class="flex items-center gap-2">
           <!-- Model Selector -->
           <Select v-if="models.length > 0" v-model="selectedModel">
@@ -1184,7 +1186,7 @@ watch(
             >
               <div class="flex items-center gap-2 text-action-amber">
                 <Wrench class="w-5 h-5" />
-                <h4 class="font-semibold text-sm">{{ t("chat.requiredToolOutputs") }}</h4>
+                <h2 class="font-semibold text-sm">{{ t("chat.requiredToolOutputs") }}</h2>
               </div>
               <p class="text-xs text-muted-foreground">
                 {{ t("chat.toolOutputsDescription") }}
@@ -1333,7 +1335,7 @@ watch(
                   <button
                     type="button"
                     @click="removeAttachedFile(file.id)"
-                    class="p-0.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    class="p-0.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer relative after:absolute after:-inset-3.5 after:content-['']"
                   >
                     <X class="w-3.5 h-3.5" />
                   </button>
@@ -1347,7 +1349,7 @@ watch(
                 rows="1"
                 :placeholder="t('chat.typeMessage')"
                 :aria-label="t('chat.typeMessage')"
-                class="w-full bg-transparent border-0 outline-none ring-0 focus:outline-none focus:ring-0 py-2 px-2.5 min-h-[38px] max-h-48 resize-none text-[14.5px] leading-relaxed placeholder:text-muted-foreground/50 field-sizing-content text-foreground font-sans"
+                class="w-full bg-transparent border-0 outline-none ring-0 focus:outline-none focus:ring-0 py-2 px-2.5 min-h-[38px] max-h-48 resize-none text-[14.5px] leading-relaxed placeholder:text-muted-foreground field-sizing-content text-foreground font-sans"
                 @focus="handleFocus"
                 @blur="handleBlur"
                 @paste="handlePaste"
@@ -1434,7 +1436,7 @@ watch(
                         ? 'bg-muted text-foreground'
                         : canSend
                           ? 'bg-foreground text-background hover:bg-foreground/90'
-                          : 'bg-muted/30 text-muted-foreground/40 cursor-not-allowed border border-border/20'
+                          : 'bg-muted/30 text-muted-foreground cursor-not-allowed border border-border/20'
                     "
                     :aria-label="isSubmitting ? t('chat.sending') : t('chat.sendMessage')"
                   >

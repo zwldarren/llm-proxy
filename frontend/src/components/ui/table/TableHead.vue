@@ -2,13 +2,19 @@
 import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"];
-}>();
+const props = withDefaults(
+  defineProps<{
+    class?: HTMLAttributes["class"];
+    /** Header scope; "row" for row headers, "col" for the common case. */
+    scope?: "col" | "row";
+  }>(),
+  { scope: "col" }
+);
 </script>
 
 <template>
   <th
+    :scope="scope"
     data-slot="table-head"
     :class="
       cn(

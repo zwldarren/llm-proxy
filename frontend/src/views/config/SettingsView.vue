@@ -484,7 +484,7 @@ onUnmounted(() => {
   <AppLayout layoutMode="full">
     <template #header>
       <div
-        class="flex-none px-4 sm:px-6 py-3 border-b border-border/40 bg-background/95 backdrop-blur-sm z-10 flex items-center gap-3.5"
+        class="flex-none px-4 sm:px-6 py-3 border-b border-border/40 bg-background z-10 flex items-center gap-3.5"
       >
         <h1 class="text-base font-semibold text-foreground tracking-tight">
           {{ t("nav.settings") }}

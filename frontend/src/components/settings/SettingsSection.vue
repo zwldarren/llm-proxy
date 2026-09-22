@@ -43,7 +43,7 @@ withDefaults(defineProps<Props>(), {
 
     <!-- Section Body (Card Container) -->
     <div
-      class="border border-border/50 rounded-xl overflow-hidden bg-card/35 backdrop-blur-xs divide-y divide-border/45"
+      class="border border-border/50 rounded-xl overflow-hidden bg-card/35 divide-y divide-border/45"
     >
       <slot />
     </div>

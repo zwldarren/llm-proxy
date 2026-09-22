@@ -114,13 +114,13 @@ function toggle() {
 
       <!-- Collapsed: one-line preview -->
       <template v-if="!expanded">
-        <span class="text-[11px] font-mono text-muted-foreground/60 truncate min-w-0 flex-1">
+        <span class="text-[11px] font-mono text-muted-foreground truncate min-w-0 flex-1">
           {{ preview }}
         </span>
       </template>
       <span v-else class="flex-1" />
 
-      <span class="text-[11px] font-mono text-muted-foreground/50 shrink-0 tabular-nums">
+      <span class="text-[11px] font-mono text-muted-foreground shrink-0 tabular-nums">
         {{ charCountLabel }} · #{{ index + 1 }}
       </span>
     </template>
@@ -232,10 +232,10 @@ function toggle() {
             <span class="truncate" :title="block.url">{{ block.url }}</span>
           </span>
           <span v-else>{{ block.mediaType || t("logs.mediaImage") }}</span>
-          <span v-if="block.bytes" class="text-muted-foreground/60"
+          <span v-if="block.bytes" class="text-muted-foreground"
             >~{{ formatBytes(block.bytes) }}</span
           >
-          <span v-if="block.detail" class="text-muted-foreground/60">· {{ block.detail }}</span>
+          <span v-if="block.detail" class="text-muted-foreground">· {{ block.detail }}</span>
         </div>
 
         <!-- Audio chip -->
@@ -245,7 +245,7 @@ function toggle() {
         >
           <Volume2 class="size-3.5 shrink-0 text-muted-foreground/70" />
           <span>{{ block.format || t("logs.mediaAudio") }}</span>
-          <span v-if="block.bytes" class="text-muted-foreground/60"
+          <span v-if="block.bytes" class="text-muted-foreground"
             >~{{ formatBytes(block.bytes) }}</span
           >
         </div>
@@ -257,7 +257,7 @@ function toggle() {
         >
           <File class="size-3.5 shrink-0 text-muted-foreground/70" />
           <span class="truncate" :title="block.name">{{ block.name || t("logs.mediaFile") }}</span>
-          <span v-if="block.bytes" class="text-muted-foreground/60"
+          <span v-if="block.bytes" class="text-muted-foreground"
             >~{{ formatBytes(block.bytes) }}</span
           >
         </div>

@@ -146,6 +146,15 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  // One-shot, memoized form of the check. The router guard awaits this before
+  // deciding anything, so the first navigation waits for the API while every
+  // later navigation resolves from the same promise without another round-trip.
+  let setupStatusPromise: Promise<void> | null = null;
+  function ensureSetupStatus(): Promise<void> {
+    setupStatusPromise ??= checkSetupStatus();
+    return setupStatusPromise;
+  }
+
   async function login(credentials: LoginRequest) {
     const response = await authApi.login(credentials);
     setToken(response.access_token);
@@ -181,5 +190,6 @@ export const useAuthStore = defineStore("auth", () => {
     setToken,
     setup,
     checkSetupStatus,
+    ensureSetupStatus,
   };
 });

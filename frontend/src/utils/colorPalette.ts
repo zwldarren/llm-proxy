@@ -41,8 +41,12 @@ const SATURATION_RAMP = [28, 38] as const;
 const LIGHTNESS_RAMP_DARK = [60, 70] as const;
 const LIGHTNESS_RAMP_LIGHT = [48, 38] as const;
 
-/** Fallback for names outside the scale's set — Neutral Slate token. */
-const FALLBACK = "hsl(220 5% 50%)";
+/**
+ * Fallback for names outside the scale's set — the `--status-unknown` Neutral
+ * Slate token, resolved per theme so unknown series match the rest of the UI.
+ */
+const FALLBACK_DARK = "hsl(220 5% 58%)";
+const FALLBACK_LIGHT = "hsl(220 3% 45%)";
 
 type CategoricalColorScale = (name: string, isDark: boolean) => string;
 
@@ -61,7 +65,7 @@ export function createCategoricalColorScale(names: readonly string[]): Categoric
 
   return (name, isDark) => {
     const rank = indexByName.get(name);
-    if (rank === undefined) return FALLBACK;
+    if (rank === undefined) return isDark ? FALLBACK_DARK : FALLBACK_LIGHT;
 
     const cycle = Math.floor(rank / SLOT_COUNT);
     const slot = (((rank * SLOT_STRIDE) % SLOT_COUNT) + SLOT_COUNT) % SLOT_COUNT;

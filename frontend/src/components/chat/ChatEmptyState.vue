@@ -82,7 +82,7 @@ const templates = [
           {{ t(`chat.${tpl.descKey}`) }}
         </span>
         <span
-          class="mt-3 self-end text-[11px] font-medium text-muted-foreground/50 group-hover/tpl:text-foreground transition-colors"
+          class="mt-3 self-end text-[11px] font-medium text-muted-foreground group-hover/tpl:text-foreground transition-colors"
         >
           {{ t("chat.runTemplate") }} &rarr;
         </span>

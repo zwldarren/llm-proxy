@@ -446,7 +446,7 @@ onMounted(() => fetchServers());
               >{{ t("mcpServers.type") }} <span class="text-destructive">*</span></Label
             >
             <Select v-model="newServer.type">
-              <SelectTrigger>
+              <SelectTrigger id="type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

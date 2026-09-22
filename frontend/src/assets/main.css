@@ -197,6 +197,9 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
+  /* Black scrim used by image/modal overlays (see --overlay) */
+  --color-overlay: hsl(var(--overlay));
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -238,23 +241,11 @@
   --color-http-put: hsl(var(--http-put));
   --color-http-delete: hsl(var(--http-delete));
 
-  /* Error colors */
-  --color-error-light: hsl(var(--error-light));
-  --color-error-dark: hsl(var(--error-dark));
-
-  /* Success colors */
-  --color-success-light: hsl(var(--success-light));
-  --color-success-dark: hsl(var(--success-dark));
-
   /* Status colors */
   --color-status-success: hsl(var(--status-success));
   --color-status-warning: hsl(var(--status-warning));
   --color-status-error: hsl(var(--status-error));
   --color-status-unknown: hsl(var(--status-unknown));
-
-  /* Cache colors - grayscale */
-  --color-cache-creation: 0 0% 35%;
-  --color-cache-read: 0 0% 50%;
 }
 
 :root {
@@ -290,7 +281,7 @@
   --destructive-foreground: 0 0% 98.5%;
 
   --border: 220 4% 88%;
-  --input: 220 4% 85%;
+  --input: 220 4% 88%;
   --ring: 220 8% 5%;
 
   --radius: 0.75rem;
@@ -587,18 +578,6 @@
   .dark body {
     line-height: 1.55;
   }
-
-  .dark .text-body {
-    line-height: 1.6;
-  }
-
-  .dark .text-secondary {
-    line-height: 1.55;
-  }
-
-  .dark .text-caption {
-    line-height: 1.35;
-  }
 }
 
 /* Group utility for parent-child hover/focus states */
@@ -697,16 +676,6 @@
 
 /* Reusable Component Utilities */
 @layer components {
-  /* Card container - simplified hover with containment for performance */
-  .card-container {
-    @apply rounded-xl border border-border bg-card shadow-xs;
-    transition: border-color 0.15s ease;
-    contain: layout style;
-  }
-  .card-container:hover {
-    @apply border-border/80;
-  }
-
   /* Form group layout */
   .form-group {
     @apply flex flex-col gap-2;
@@ -826,11 +795,6 @@
     }
   }
 
-  /* Base card styling - used by all card-based layouts */
-  .card-base {
-    @apply overflow-hidden rounded-xl border border-border bg-card shadow-xs;
-  }
-
   /* ========================================
 	 * Design System Gradient Utilities
 	 * ======================================== */
@@ -874,11 +838,6 @@
     @apply flex flex-col sm:flex-row gap-3 p-4 border-b bg-muted/30;
   }
 
-  /* Page content section wrapper */
-  .page-section {
-    @apply space-y-4 md:space-y-6;
-  }
-
   .brand-main-shell {
     @apply bg-background;
   }
@@ -899,45 +858,47 @@
 
   /* Error banner styling */
   .error-banner {
-    @apply p-4 rounded-lg shadow-sm bg-error-light/10 dark:bg-error-dark/10 border border-error-light/20 dark:border-error-dark/30;
+    @apply p-4 rounded-lg shadow-sm bg-status-error/10 border border-status-error/20;
   }
 
   .error-title {
-    @apply text-sm font-bold mb-2 flex items-center gap-2 text-error-light/80 dark:text-error-dark/90;
+    @apply text-sm font-bold mb-2 flex items-center gap-2 text-status-error;
   }
 
   .error-message {
-    @apply text-sm font-mono whitespace-pre-wrap text-error-light/70 dark:text-error-dark/80;
+    @apply text-sm font-mono whitespace-pre-wrap text-status-error/80;
   }
 
   .error-detail-label {
-    @apply text-xs font-medium text-error-light/70 dark:text-error-dark/80;
+    @apply text-xs font-medium text-status-error/80;
   }
 
   .error-detail-value {
-    @apply text-xs font-mono text-error-light/60 dark:text-error-dark/70;
+    @apply text-xs font-mono text-status-error/70;
   }
 
   .error-border-top {
-    @apply mt-4 pt-4 border-t border-error-light/20 dark:border-error-dark/30;
+    @apply mt-4 pt-4 border-t border-status-error/20;
   }
 
   .error-code-block {
-    @apply mt-1 overflow-x-auto p-2 rounded-md border bg-white dark:bg-black/20 border-error-light/15 dark:border-error-dark/20;
+    @apply mt-1 overflow-x-auto p-2 rounded-md border bg-white dark:bg-black/20 border-status-error/15;
   }
 
   .pagination-bar {
     @apply flex items-center justify-end space-x-2 py-4 pr-2;
   }
 
-  .card-flat {
-    @apply bg-card border border-border rounded-xl overflow-hidden;
-  }
-
   /* Shared select style for TTS model/voice dropdowns */
 
   .icon-container {
     @apply p-2.5 rounded-xl bg-linear-to-br from-primary/20 via-primary/10 to-action-blue/12 ring-1 ring-primary/30 min-h-11 min-w-11 flex items-center justify-center shadow-[inset_0_1px_0_hsl(var(--primary)/0.26)];
+  }
+
+  /* Page-header size of the icon-container signature, the 8x8 tile that
+     sits beside a page title. */
+  .icon-container-sm {
+    @apply p-0 h-8 w-8 min-h-8 min-w-8 rounded-md;
   }
 
   .table-row-hover {
@@ -974,10 +935,6 @@
 
   .table-scrollable-inner {
     @apply overflow-auto max-h-[50vh];
-  }
-
-  .table-header-sticky {
-    @apply sticky top-0 bg-muted/95 backdrop-blur-sm;
   }
 
   /* Modern table styling */
@@ -1186,15 +1143,6 @@
     @apply whitespace-nowrap;
   }
 
-  /* Hide less important columns on small screens */
-  .hide-on-mobile {
-    @apply hidden lg:table-cell;
-  }
-
-  .hide-on-tablet {
-    @apply hidden md:table-cell;
-  }
-
   /* Touch-friendly table cells - 44px minimum for accessibility */
   .table-cell-touch {
     @apply min-h-11 min-w-11;
@@ -1202,18 +1150,6 @@
 
   .number-display {
     @apply text-2xl font-bold;
-  }
-
-  .card-grid-3 {
-    @apply grid grid-cols-1 md:grid-cols-3 gap-4;
-  }
-
-  .card-grid-2 {
-    @apply grid gap-4 md:gap-6 grid-cols-1 lg:grid-cols-2;
-  }
-
-  .card-grid-4 {
-    @apply grid gap-4 grid-cols-2 lg:grid-cols-4;
   }
 
   .empty-container {
@@ -1227,12 +1163,6 @@
   /* Code/JSON content container - consistent styling for code blocks */
   .code-container {
     @apply bg-muted/50 rounded-lg border border-border overflow-x-auto;
-  }
-
-  /* Hover card with smooth transition and containment */
-  .hover-card {
-    @apply rounded-xl border border-border bg-card transition-all duration-200 hover:border-primary/40;
-    contain: layout style;
   }
 
   /* Navigation item base style - note: add 'group' class directly in HTML, not via @apply */
@@ -1275,11 +1205,6 @@
   /* Keyboard navigation focus ring utility */
   .focus-visible-ring {
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
-  }
-
-  /* Dark mode: use lighter ring offset for visibility on dark backgrounds */
-  .dark .focus-visible-ring {
-    --tw-ring-offset-color: 0 0% 20%;
   }
 
   /* Text overflow prevention */
@@ -1427,45 +1352,41 @@
     @apply p-5 sm:p-6 md:p-8;
   }
 
-  /* Animation utilities using tw-animate-css with GPU acceleration */
+  /* Animation utilities using tw-animate-css with GPU acceleration.
+   * One-shot entrance animations carry no `will-change`: these classes stay on
+   * the element after the animation ends, so a permanent hint would pin a
+   * composited layer (transform/opacity are promoted by the browser while the
+   * animation actually runs). Only the infinite animations below keep a hint. */
   .animate-fade-in {
     animation: fade-in 0.25s ease-out;
-    will-change: opacity;
   }
 
   .animate-fade-out {
     animation: fade-out 0.15s ease-in;
-    will-change: opacity;
   }
 
   .animate-slide-in-up {
     animation: slide-in-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    will-change: transform, opacity;
   }
 
   .animate-slide-in-down {
     animation: slide-in-down 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    will-change: transform, opacity;
   }
 
   .animate-slide-in-left {
     animation: slide-in-left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    will-change: transform, opacity;
   }
 
   .animate-slide-in-right {
     animation: slide-in-right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    will-change: transform, opacity;
   }
 
   .animate-zoom-in {
     animation: zoom-in 0.15s ease-out;
-    will-change: transform, opacity;
   }
 
   .animate-zoom-out {
     animation: zoom-out 0.15s ease-in;
-    will-change: transform, opacity;
   }
 
   .animate-spin-slow {
@@ -1478,52 +1399,9 @@
     will-change: opacity;
   }
 
-  /* ========================================
-	 * Staggered Animation Utilities
-	 * Apply to parent container for cascade effect
-	 * ======================================== */
-  .stagger-children {
-    contain: layout style;
-  }
-  .stagger-children > * {
-    animation: stagger-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-    will-change: transform, opacity;
-  }
-  .stagger-children > *:nth-child(1) {
-    animation-delay: 0ms;
-  }
-  .stagger-children > *:nth-child(2) {
-    animation-delay: 50ms;
-  }
-  .stagger-children > *:nth-child(3) {
-    animation-delay: 100ms;
-  }
-  .stagger-children > *:nth-child(4) {
-    animation-delay: 150ms;
-  }
-  .stagger-children > *:nth-child(5) {
-    animation-delay: 200ms;
-  }
-  .stagger-children > *:nth-child(6) {
-    animation-delay: 250ms;
-  }
-  .stagger-children > *:nth-child(7) {
-    animation-delay: 300ms;
-  }
-  .stagger-children > *:nth-child(8) {
-    animation-delay: 350ms;
-  }
-  .stagger-children > *:nth-child(9) {
-    animation-delay: 400ms;
-  }
-  .stagger-children > *:nth-child(10) {
-    animation-delay: 450ms;
-  }
-
   /* Faster stagger for smaller elements */
   .stagger-fast > * {
     animation: stagger-fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-    will-change: transform, opacity;
   }
   .stagger-fast > *:nth-child(1) {
     animation-delay: 0ms;
@@ -1556,87 +1434,8 @@
   }
 
   /* ========================================
-	 * Display Typography - Elegant headlines
-	 * ======================================== */
-  .text-display {
-    font-family: var(--font-display);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-  }
-
-  .text-display-lg {
-    font-family: var(--font-display);
-    font-size: 3rem;
-    line-height: 1.1;
-    font-weight: 400;
-    letter-spacing: -0.02em;
-  }
-
-  .text-display-xl {
-    font-family: var(--font-display);
-    font-size: 4rem;
-    line-height: 1;
-    font-weight: 400;
-    letter-spacing: -0.02em;
-  }
-
-  /* Italic variant for visual interest */
-  .text-display-italic {
-    font-family: var(--font-display);
-    font-style: italic;
-  }
-
-  /* ========================================
 	 * Typography Utilities - Semantic Patterns
 	 * ======================================== */
-  /* Page/section headings - H1 */
-  .text-heading {
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    letter-spacing: var(--tracking-tight);
-    line-height: var(--leading-tight);
-  }
-
-  /* Subheadings - H2 */
-  .text-subheading {
-    font-size: var(--text-xl);
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-normal);
-    line-height: var(--leading-snug);
-  }
-
-  /* Card titles, form sections - H3 */
-  .text-title {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-normal);
-    line-height: var(--leading-snug);
-  }
-
-  /* Body text - primary reading */
-  .text-body {
-    font-size: var(--text-base);
-    font-weight: var(--font-normal);
-    letter-spacing: var(--tracking-normal);
-    line-height: var(--leading-normal);
-  }
-
-  /* Secondary text, descriptions */
-  .text-secondary {
-    font-size: var(--text-sm);
-    font-weight: var(--font-normal);
-    letter-spacing: var(--tracking-normal);
-    line-height: var(--leading-normal);
-  }
-
-  /* Captions, metadata, badges */
-  .text-caption {
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    letter-spacing: var(--tracking-wide);
-    line-height: var(--leading-tight);
-  }
-
   /* Code and technical values */
   .text-code {
     font-family: var(--font-mono);
@@ -1680,25 +1479,6 @@
     font-weight: var(--font-bold);
     letter-spacing: -0.01em;
     line-height: 1;
-  }
-
-  /* Label styling for form elements */
-  .text-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    letter-spacing: var(--tracking-normal);
-    line-height: var(--leading-tight);
-  }
-
-  /* Text measure constraint - optimal line length for readability */
-  .text-measure {
-    max-width: 65ch;
-  }
-
-  /* Prose container for long-form content */
-  .text-prose {
-    max-width: 70ch;
-    line-height: var(--leading-relaxed);
   }
 
   /* ========================================
@@ -1809,94 +1589,6 @@
       transform: translateY(-4px);
       opacity: 0.7;
     }
-  }
-
-  /* Sidebar accent line */
-  .sidebar-accent::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 2px;
-    background: linear-gradient(
-      to bottom,
-      transparent,
-      hsl(var(--sidebar-primary) / 0.42) 20%,
-      hsl(var(--sidebar-primary) / 0.72) 50%,
-      hsl(var(--sidebar-primary) / 0.42) 80%,
-      transparent
-    );
-  }
-
-  /* ========================================
-	 * Color-Enhanced Section Cards
-	 * ======================================== */
-  /* Primary/Cyan section - Overview, Usage, Logs */
-  .section-card-primary {
-    @apply rounded-xl border border-primary/20 bg-linear-to-br from-primary/8 via-card/95 to-card;
-    box-shadow: 0 8px 24px -16px hsl(var(--primary) / 0.25);
-  }
-
-  /* Action Blue section - Tools, Chat, Images */
-  .section-card-blue {
-    @apply rounded-xl border border-action-blue/20 bg-linear-to-br from-action-blue/8 via-card/95 to-card;
-    box-shadow: 0 8px 24px -16px hsl(var(--action-blue) / 0.25);
-  }
-
-  /* Action Amber section - Config, Settings */
-  .section-card-amber {
-    @apply rounded-xl border border-action-amber/20 bg-linear-to-br from-action-amber/8 via-card/95 to-card;
-    box-shadow: 0 8px 24px -16px hsl(var(--action-amber) / 0.2);
-  }
-
-  /* Success/Health section */
-  .section-card-success {
-    @apply rounded-xl border border-status-success/20 bg-linear-to-br from-status-success/8 via-card/95 to-card;
-    box-shadow: 0 8px 24px -16px hsl(var(--status-success) / 0.2);
-  }
-
-  /* ========================================
-	 * Color-Tinted Icon Containers
-	 * ======================================== */
-  .icon-container-primary {
-    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
-    background: linear-gradient(135deg, hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.05));
-    box-shadow: inset 0 1px 0 hsl(var(--primary) / 0.2);
-    ring-color: hsl(var(--primary) / 0.25);
-  }
-
-  .icon-container-blue {
-    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
-    background: linear-gradient(
-      135deg,
-      hsl(var(--action-blue) / 0.15),
-      hsl(var(--action-blue) / 0.05)
-    );
-    box-shadow: inset 0 1px 0 hsl(var(--action-blue) / 0.2);
-    ring-color: hsl(var(--action-blue) / 0.25);
-  }
-
-  .icon-container-amber {
-    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
-    background: linear-gradient(
-      135deg,
-      hsl(var(--action-amber) / 0.15),
-      hsl(var(--action-amber) / 0.05)
-    );
-    box-shadow: inset 0 1px 0 hsl(var(--action-amber) / 0.2);
-    ring-color: hsl(var(--action-amber) / 0.25);
-  }
-
-  .icon-container-success {
-    @apply p-2.5 rounded-xl ring-1 min-h-11 min-w-11 flex items-center justify-center;
-    background: linear-gradient(
-      135deg,
-      hsl(var(--status-success) / 0.15),
-      hsl(var(--status-success) / 0.05)
-    );
-    box-shadow: inset 0 1px 0 hsl(var(--status-success) / 0.2);
-    ring-color: hsl(var(--status-success) / 0.25);
   }
 
   /* ========================================

@@ -168,7 +168,7 @@ const searchQuery = computed(() => {
       </Badge>
       <span
         v-if="index !== undefined"
-        class="ml-auto text-[11px] font-mono text-muted-foreground/60 shrink-0"
+        class="ml-auto text-[11px] font-mono text-muted-foreground shrink-0"
       >
         #{{ index + 1 }}
       </span>
@@ -178,7 +178,7 @@ const searchQuery = computed(() => {
     <div v-if="expanded" class="px-3 pb-3 pt-1 space-y-2.5 border-t border-border/25">
       <!-- Inline search query for web_search -->
       <div v-if="searchQuery" class="text-xs font-mono text-muted-foreground/90 pt-2">
-        <span class="text-muted-foreground/60">query: </span>
+        <span class="text-muted-foreground">query: </span>
         <span class="text-foreground/90">"{{ searchQuery }}"</span>
       </div>
 

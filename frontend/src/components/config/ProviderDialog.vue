@@ -308,8 +308,15 @@ const onSubmit = handleSubmit(async (values) => {
                   :disabled="isEditing"
                   maxlength="255"
                   class="min-w-0"
+                  :aria-invalid="!!errors.name"
+                  :aria-describedby="errors.name ? 'provider-name-error' : undefined"
                 />
-                <p v-if="errors.name" class="text-sm text-destructive mt-1 wrap-break-word">
+                <p
+                  v-if="errors.name"
+                  id="provider-name-error"
+                  role="alert"
+                  class="text-sm text-destructive mt-1 wrap-break-word"
+                >
                   {{ errors.name }}
                 </p>
               </div>
@@ -318,7 +325,11 @@ const onSubmit = handleSubmit(async (values) => {
                   >{{ t("providers.type") }} <span class="text-destructive">*</span></Label
                 >
                 <Select v-model="type">
-                  <SelectTrigger>
+                  <SelectTrigger
+                    id="type"
+                    :aria-invalid="!!errors.type"
+                    :aria-describedby="errors.type ? 'provider-type-error' : undefined"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -331,7 +342,12 @@ const onSubmit = handleSubmit(async (values) => {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <p v-if="errors.type" class="text-sm text-destructive mt-1 wrap-break-word">
+                <p
+                  v-if="errors.type"
+                  id="provider-type-error"
+                  role="alert"
+                  class="text-sm text-destructive mt-1 wrap-break-word"
+                >
                   {{ errors.type }}
                 </p>
               </div>
@@ -357,8 +373,15 @@ const onSubmit = handleSubmit(async (values) => {
                   :placeholder="isEditing ? t('placeholders.apiKeyOptional') : ''"
                   :disabled="isEditing && !apiKeyEditing"
                   class="w-full"
+                  :aria-invalid="!!errors.api_key"
+                  :aria-describedby="errors.api_key ? 'provider-api-key-error' : undefined"
                 />
-                <p v-if="errors.api_key" class="text-sm text-destructive mt-1">
+                <p
+                  v-if="errors.api_key"
+                  id="provider-api-key-error"
+                  role="alert"
+                  class="text-sm text-destructive mt-1"
+                >
                   {{ errors.api_key }}
                 </p>
                 <p v-else-if="isEditing" class="text-[11px] text-muted-foreground">
@@ -375,8 +398,15 @@ const onSubmit = handleSubmit(async (values) => {
                   maxlength="2048"
                   class="min-w-0"
                   type="url"
+                  :aria-invalid="!!errors.base_url"
+                  :aria-describedby="errors.base_url ? 'provider-base-url-error' : undefined"
                 />
-                <p v-if="errors.base_url" class="text-sm text-destructive mt-1 wrap-break-word">
+                <p
+                  v-if="errors.base_url"
+                  id="provider-base-url-error"
+                  role="alert"
+                  class="text-sm text-destructive mt-1 wrap-break-word"
+                >
                   {{ errors.base_url }}
                 </p>
                 <p v-else class="text-[11px] text-muted-foreground wrap-break-word">
@@ -393,8 +423,15 @@ const onSubmit = handleSubmit(async (values) => {
                   maxlength="2048"
                   class="min-w-0"
                   type="url"
+                  :aria-invalid="!!errors.icon_url"
+                  :aria-describedby="errors.icon_url ? 'provider-icon-url-error' : undefined"
                 />
-                <p v-if="errors.icon_url" class="text-sm text-destructive mt-1 wrap-break-word">
+                <p
+                  v-if="errors.icon_url"
+                  id="provider-icon-url-error"
+                  role="alert"
+                  class="text-sm text-destructive mt-1 wrap-break-word"
+                >
                   {{ errors.icon_url }}
                 </p>
                 <p v-else class="text-[11px] text-muted-foreground wrap-break-word">

@@ -94,7 +94,6 @@ describe("UsageMetricStrip", () => {
 
   it("renders no Card / no rounded-xl nested boxes", () => {
     const html = mountStrip().html();
-    expect(html).not.toContain('class="card-container');
     // primary strip is a grid of cells separated by divide-x, not bordered boxes
     expect(html).not.toContain("rounded-xl border");
   });

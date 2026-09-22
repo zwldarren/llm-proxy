@@ -8,12 +8,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { loadLocaleMessages } from "@/i18n";
+import { STORAGE_KEYS } from "@/constants/storageKeys";
 
 const { locale, t } = useI18n();
 
-const changeLanguage = (langCode: string) => {
+const changeLanguage = async (langCode: string) => {
+  // Message bundles for non-default locales are loaded on demand.
+  await loadLocaleMessages(langCode);
   locale.value = langCode;
-  localStorage.setItem("locale", langCode);
+  localStorage.setItem(STORAGE_KEYS.LOCALE, langCode);
 };
 </script>
 

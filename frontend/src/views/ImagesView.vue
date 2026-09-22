@@ -575,7 +575,7 @@ watch(
                 <Textarea
                   v-model="prompt"
                   :placeholder="t('images.enterPrompt')"
-                  class="min-h-32 resize-none border-0 bg-transparent shadow-none text-base leading-relaxed placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  class="min-h-32 resize-none border-0 bg-transparent shadow-none text-base leading-relaxed placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
                   :disabled="isGenerating"
                 />
               </div>
@@ -717,7 +717,7 @@ watch(
             <!-- Drag hint -->
             <p
               v-if="!uploadedImages.length && !isDragOverMain"
-              class="text-center text-xs text-muted-foreground/50 mt-2"
+              class="text-center text-xs text-muted-foreground mt-2"
             >
               {{ t("images.dragHint") }}
             </p>
@@ -821,7 +821,7 @@ watch(
                     class="w-full aspect-square object-cover"
                   />
                   <div
-                    class="hidden sm:flex absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity items-center justify-center gap-2"
+                    class="hidden sm:flex absolute inset-0 bg-overlay/50 opacity-0 group-hover:opacity-100 transition-opacity items-center justify-center gap-2"
                   >
                     <Button
                       v-if="image.url || image.b64_json"

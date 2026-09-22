@@ -54,14 +54,33 @@ onMounted(() => {
   onUnmounted(() => observer.disconnect());
 });
 
-const themeColors = computed(() => ({
-  tooltipBg: isDarkMode.value ? "hsl(220 12% 7% / 0.95)" : "hsl(0 0% 100% / 0.95)",
-  tooltipTitle: isDarkMode.value ? "hsl(0 0% 96%)" : "hsl(220 8% 5%)",
-  tooltipBody: isDarkMode.value ? "hsl(220 5% 62%)" : "hsl(220 4% 38%)",
-  tooltipBorder: isDarkMode.value ? "hsl(220 10% 22%)" : "hsl(220 4% 88%)",
-  gridColor: isDarkMode.value ? "hsl(220 10% 22% / 0.3)" : "hsl(220 4% 88% / 0.8)",
-  tickColor: isDarkMode.value ? "hsl(220 5% 62%)" : "hsl(220 4% 38%)",
-}));
+/**
+ * Resolve a `main.css` color token into a chart-ready color value. Tokens are
+ * stored as bare HSL channels, so `cssColor("--border")` → `hsl(220 10% 22%)`.
+ * Canvas can't read CSS variables, but resolving them here keeps the chart on
+ * the same single source of truth as the rest of the UI instead of re-encoding
+ * the palette as literals.
+ */
+const cssColor = (token: string, alpha?: number): string => {
+  const channels = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  return alpha === undefined ? `hsl(${channels})` : `hsl(${channels} / ${alpha})`;
+};
+
+const themeColors = computed(() => {
+  // `isDarkMode` is the reactive dependency: the MutationObserver has already
+  // applied the new theme class by the time it flips, so the tokens resolve to
+  // the new palette on recompute.
+  const isDark = isDarkMode.value;
+  return {
+    tooltipBg: cssColor("--popover", 0.95),
+    tooltipTitle: cssColor("--popover-foreground"),
+    tooltipBody: cssColor("--muted-foreground"),
+    tooltipBorder: cssColor("--border"),
+    // The grid is a whisper on dark surfaces and more present on light ones.
+    gridColor: cssColor("--border", isDark ? 0.3 : 0.8),
+    tickColor: cssColor("--muted-foreground"),
+  };
+});
 
 // Chart type state (Requests, Cost, Tokens)
 const chartType = ref<"requests" | "cost" | "tokens">("requests");

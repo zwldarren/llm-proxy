@@ -17,7 +17,7 @@ import type { McpServerRead, McpServerStatus } from "@/types/schemas";
  * visuals and the proxy-URL copy affordance stay consistent.
  */
 
-interface McpStatusConfig {
+export interface McpStatusConfig {
   label: string;
   /** text color class for the status label */
   color: string;
@@ -29,7 +29,7 @@ interface McpStatusConfig {
   pulse: boolean;
 }
 
-interface McpTypeConfig {
+export interface McpTypeConfig {
   icon: Component;
   label: string;
   /** icon container background */
@@ -44,73 +44,86 @@ interface McpTypeConfig {
 
 type TFn = (key: string, ...args: unknown[]) => string;
 
+/**
+ * Presentation for a server status dot/label. Exported separately so
+ * components that only render the status (without the server model) can reuse
+ * the same mapping.
+ */
+export function mcpStatusConfig(status: McpServerStatus | undefined, t: TFn): McpStatusConfig {
+  switch (status?.status || "stopped") {
+    case "running":
+      return {
+        label: t("mcpServers.statusRunning"),
+        color: "text-status-success",
+        bg: "bg-status-success",
+        ring: "ring-status-success/20",
+        pulse: true,
+      };
+    case "error":
+      return {
+        label: t("mcpServers.statusError"),
+        color: "text-destructive",
+        bg: "bg-destructive",
+        ring: "ring-destructive/20",
+        pulse: false,
+      };
+    default:
+      return {
+        label: t("mcpServers.statusStopped"),
+        color: "text-muted-foreground",
+        bg: "bg-muted-foreground",
+        ring: "ring-muted-foreground/20",
+        pulse: false,
+      };
+  }
+}
+
+/**
+ * Presentation for a server type (transport) mark. Exported separately so the
+ * tile and the badge can resolve it without the copy affordance state.
+ */
+export function mcpTypeConfig(server: McpServerRead, t: TFn): McpTypeConfig {
+  switch (server.type) {
+    case "stdio":
+      return {
+        icon: Terminal,
+        label: t("mcpServers.stdio"),
+        bg: "bg-primary/10",
+        text: "text-primary",
+        border: "border-primary/25",
+        iconColor: "text-primary",
+      };
+    case "streamableHttp":
+      return {
+        icon: Webhook,
+        label: t("mcpServers.streamableHttp"),
+        bg: "bg-action-violet/10",
+        text: "text-action-violet",
+        border: "border-action-violet/25",
+        iconColor: "text-action-violet",
+      };
+    default:
+      return {
+        icon: Terminal,
+        label: t("mcpServers.unknownType", { type: server.type }),
+        bg: "bg-muted",
+        text: "text-muted-foreground",
+        border: "border-border",
+        iconColor: "text-muted-foreground",
+      };
+  }
+}
+
 export function useMcpServerMeta(
   server: MaybeRefOrGetter<McpServerRead>,
   status: MaybeRefOrGetter<McpServerStatus | undefined>,
   t: TFn
 ) {
-  const statusConfig: ComputedRef<McpStatusConfig> = computed(() => {
-    const current = toValue(status)?.status || "stopped";
-    switch (current) {
-      case "running":
-        return {
-          label: t("mcpServers.statusRunning"),
-          color: "text-status-success",
-          bg: "bg-status-success",
-          ring: "ring-status-success/20",
-          pulse: true,
-        };
-      case "error":
-        return {
-          label: t("mcpServers.statusError"),
-          color: "text-destructive",
-          bg: "bg-destructive",
-          ring: "ring-destructive/20",
-          pulse: false,
-        };
-      default:
-        return {
-          label: t("mcpServers.statusStopped"),
-          color: "text-muted-foreground",
-          bg: "bg-muted-foreground",
-          ring: "ring-muted-foreground/20",
-          pulse: false,
-        };
-    }
-  });
+  const statusConfig: ComputedRef<McpStatusConfig> = computed(() =>
+    mcpStatusConfig(toValue(status), t)
+  );
 
-  const typeConfig: ComputedRef<McpTypeConfig> = computed(() => {
-    const srv = toValue(server);
-    switch (srv.type) {
-      case "stdio":
-        return {
-          icon: Terminal,
-          label: t("mcpServers.stdio"),
-          bg: "bg-primary/10",
-          text: "text-primary",
-          border: "border-primary/25",
-          iconColor: "text-primary",
-        };
-      case "streamableHttp":
-        return {
-          icon: Webhook,
-          label: t("mcpServers.streamableHttp"),
-          bg: "bg-action-violet/10",
-          text: "text-action-violet",
-          border: "border-action-violet/25",
-          iconColor: "text-action-violet",
-        };
-      default:
-        return {
-          icon: Terminal,
-          label: t("mcpServers.unknownType", { type: srv.type }),
-          bg: "bg-muted",
-          text: "text-muted-foreground",
-          border: "border-border",
-          iconColor: "text-muted-foreground",
-        };
-    }
-  });
+  const typeConfig: ComputedRef<McpTypeConfig> = computed(() => mcpTypeConfig(toValue(server), t));
 
   const isEnabled = computed(() => toValue(server).enabled !== false);
 

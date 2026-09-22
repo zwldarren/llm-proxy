@@ -1,10 +1,19 @@
 """Tests for the frontend SPA fallback route (serve_frontend)."""
 
+import asyncio
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from starlette.types import Scope
 
-from llm_proxy.api import resolve_frontend_file, serve_frontend_response
+from llm_proxy.api import (
+    ImmutableStaticFiles,
+    app,
+    resolve_frontend_file,
+    serve_frontend_response,
+)
 from llm_proxy.core.exceptions import NotFoundError
 
 
@@ -117,3 +126,64 @@ def test_serve_frontend_response_blocks_api_prefix(tmp_path: Path) -> None:
 
     with pytest.raises(NotFoundError):
         serve_frontend_response(static_root, "api/nonexistent")
+
+
+def test_serve_frontend_response_index_is_never_cached(tmp_path: Path) -> None:
+    """The SPA shell is not cacheable: it names the hashed asset URLs."""
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("<html>SPA</html>")
+
+    response = serve_frontend_response(static_root, "some/spa/route")
+
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_serve_frontend_response_direct_index_is_never_cached(tmp_path: Path) -> None:
+    """A direct /index.html request gets the same no-cache header as the fallback."""
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("<html>SPA</html>")
+
+    response = serve_frontend_response(static_root, "index.html")
+
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_immutable_static_files_set_year_long_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Content-hashed assets are immutable, so they get a one-year cache."""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "index-abc123.js").write_text("console.log('hi')")
+
+    # StaticFiles stats the file through anyio's worker thread. Run that inline
+    # so the assertion covers the header override itself instead of depending on
+    # an event loop's thread pool.
+    async def run_inline(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("starlette.staticfiles.anyio.to_thread.run_sync", run_inline)
+
+    static = ImmutableStaticFiles(directory=assets)
+    # Only the keys get_response actually reads; Scope is a TypedDict whose
+    # full ASGI shape is irrelevant here.
+    scope = cast(Scope, {"type": "http", "method": "GET", "headers": []})
+
+    response = asyncio.run(static.get_response("index-abc123.js", scope))
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_gzip_middleware_is_installed() -> None:
+    """Responses are compressed on the delivery path.
+
+    Asserted structurally because installing the app's full middleware stack
+    means starting its lifespan (database, MCP servers), which a header check
+    does not need.
+    """
+    names = [middleware.cls.__name__ for middleware in app.user_middleware]
+
+    assert "GZipMiddleware" in names

@@ -52,7 +52,7 @@ onBeforeUnmount(() => {
   <div class="min-w-0">
     <div v-bind="$attrs" class="whitespace-pre-wrap break-all leading-relaxed">{{ shown }}</div>
     <div v-if="isTruncated" class="mt-1.5 flex items-center gap-2 flex-wrap">
-      <span class="text-[11px] font-mono text-muted-foreground/60">
+      <span class="text-[11px] font-mono text-muted-foreground">
         {{
           t("logs.textTruncated", {
             shown: formatCharCount(props.maxChars),

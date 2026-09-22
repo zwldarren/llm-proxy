@@ -60,7 +60,18 @@ export const useChatStore = defineStore("chat", () => {
     }
   }, 800);
 
-  watch(messages, saveMessages, { deep: true });
+  /**
+   * Persistence is driven by an explicit dirty counter rather than a deep
+   * watcher: streaming mutates the last message in place on every chunk, and a
+   * deep watcher re-traverses the whole transcript for each one (the debounced
+   * write never fixed the traversal). Every mutation of the message list or the
+   * run tray must call touchChat().
+   */
+  const revision = ref(0);
+
+  function touchChat() {
+    revision.value += 1;
+  }
 
   const currentlyPlayingId = ref<string | null>(null);
   let activeAudio: HTMLAudioElement | null = null;
@@ -134,6 +145,7 @@ export const useChatStore = defineStore("chat", () => {
       msg.id = generateMessageId();
     }
     messages.value.push(msg);
+    touchChat();
   }
 
   // Run specimens for the playground tray — one record per API request.
@@ -151,7 +163,10 @@ export const useChatStore = defineStore("chat", () => {
     }
   }, 800);
 
-  watch(runs, saveRuns, { deep: true });
+  watch(revision, () => {
+    saveMessages();
+    saveRuns();
+  });
 
   function upsertRun(run: ChatRun) {
     const idx = runs.value.findIndex((r) => r.id === run.id);
@@ -160,6 +175,7 @@ export const useChatStore = defineStore("chat", () => {
     } else {
       runs.value = appendRun(runs.value, run, MAX_RUNS);
     }
+    touchChat();
   }
 
   function clearMessages() {
@@ -167,6 +183,7 @@ export const useChatStore = defineStore("chat", () => {
     runs.value = [];
     error.value = null;
     stopAudio();
+    touchChat();
   }
 
   /** Session teardown: drop the transcript from memory AND localStorage so
@@ -201,6 +218,7 @@ export const useChatStore = defineStore("chat", () => {
     playAudio,
     stopAudio,
     pushMessage,
+    touchChat,
     clearMessages,
     reset,
     setLoading,

@@ -15,6 +15,7 @@ import {
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import StatusBadge from "@/components/common/StatusBadge.vue";
+import MetricCell from "@/components/common/MetricCell.vue";
 import { useAuditLabels } from "@/composables/useAuditLabels";
 import { Badge } from "@/components/ui/badge";
 import type { LogRead } from "@/types/schemas";
@@ -145,13 +146,8 @@ const statusColorClass = computed(() => {
       <!-- 1. PROXY LOG METRICS -->
       <template v-if="!isAuditLog && !isToolLog">
         <!-- Cell: Model & Provider -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.model") }}</span>
-            <Cpu class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.model')">
+          <template #icon><Cpu class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 sm:gap-1.5 mt-1 min-w-0">
             <span
               class="text-xs sm:text-sm font-semibold truncate text-foreground"
@@ -185,21 +181,14 @@ const statusColorClass = computed(() => {
               }}</span>
             </div>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Status & Request -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.status") }}</span>
-            <Activity class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.status')">
+          <template #icon><Activity class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1 min-w-0">
             <div class="flex items-center gap-2">
-              <span
-                :class="['font-mono text-base sm:text-lg font-bold tabular-nums', statusColorClass]"
-              >
+              <span :class="['text-metric', statusColorClass]">
                 {{ log.status_code || "—" }}
               </span>
               <Badge variant="outline" class="font-mono text-[11px] uppercase font-bold py-0">
@@ -213,18 +202,13 @@ const statusColorClass = computed(() => {
               {{ log.endpoint }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Duration & Performance -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.duration") }}</span>
-            <Clock class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.duration')">
+          <template #icon><Clock class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1">
-            <span class="text-base sm:text-lg font-bold text-foreground font-mono tabular-nums">
+            <span class="text-metric text-foreground">
               {{ formatDuration(log.response_time_ms) }}
             </span>
             <div class="flex items-center gap-1.5 flex-wrap">
@@ -237,7 +221,7 @@ const statusColorClass = computed(() => {
               </span>
               <span
                 v-if="ttftMs(log) !== null && tps !== null"
-                class="text-[11px] text-muted-foreground/40"
+                class="text-[11px] text-muted-foreground"
                 >·</span
               >
               <span
@@ -255,18 +239,13 @@ const statusColorClass = computed(() => {
               </span>
             </div>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Tokens & Cost -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.cost") }}</span>
-            <Coins class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.cost')">
+          <template #icon><Coins class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1">
-            <span class="text-base sm:text-lg font-bold text-foreground font-mono tabular-nums">
+            <span class="text-metric text-foreground">
               {{ formatCost(costUsd(log)) }}
             </span>
             <div class="flex items-center gap-1.5 flex-wrap">
@@ -292,19 +271,14 @@ const statusColorClass = computed(() => {
               </span>
             </div>
           </div>
-        </div>
+        </MetricCell>
       </template>
 
       <!-- 2. AUDIT LOG METRICS -->
       <template v-else-if="isAuditLog">
         <!-- Cell: Action -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.action") }}</span>
-            <Shield class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.action')">
+          <template #icon><Shield class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <span
               class="text-xs sm:text-sm font-semibold font-mono truncate text-foreground"
@@ -321,16 +295,11 @@ const statusColorClass = computed(() => {
               </Badge>
             </div>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Actor -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.actor") }}</span>
-            <User class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.actor')">
+          <template #icon><User class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1 min-w-0">
             <span
               class="text-xs sm:text-sm font-bold text-foreground truncate"
@@ -346,20 +315,13 @@ const statusColorClass = computed(() => {
               {{ log.client_ip }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Status -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.status") }}</span>
-            <Activity class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.status')">
+          <template #icon><Activity class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1 min-w-0">
-            <span
-              :class="['font-mono text-base sm:text-lg font-bold tabular-nums', statusColorClass]"
-            >
+            <span :class="['text-metric', statusColorClass]">
               {{ log.status_code || "—" }}
             </span>
             <StatusBadge
@@ -377,37 +339,27 @@ const statusColorClass = computed(() => {
               {{ log.endpoint }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Latency -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.latency") }}</span>
-            <Clock class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.latency')">
+          <template #icon><Clock class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1">
-            <span class="text-base sm:text-lg font-bold text-foreground font-mono tabular-nums">
+            <span class="text-metric text-foreground">
               {{ formatDuration(log.response_time_ms) }}
             </span>
             <span class="text-[11px] text-muted-foreground font-mono">{{
               t("logs.duration")
             }}</span>
           </div>
-        </div>
+        </MetricCell>
       </template>
 
       <!-- 3. MCP LOG METRICS -->
       <template v-else-if="isMcpLog && mcpMetadata">
         <!-- Cell: Server -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.mcpServer") }}</span>
-            <Server class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.mcpServer')">
+          <template #icon><Server class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <span
               class="text-xs sm:text-sm font-semibold font-mono truncate text-foreground"
@@ -419,16 +371,11 @@ const statusColorClass = computed(() => {
               {{ t("logs.type") }}: {{ mcpMetadata.resourceType || "—" }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Operation -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.mcpOperation") }}</span>
-            <Wrench class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.mcpOperation')">
+          <template #icon><Wrench class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <span class="text-xs sm:text-sm font-bold text-foreground truncate">
               {{ formatMcpOperation(mcpMetadata.operation) }}
@@ -440,57 +387,40 @@ const statusColorClass = computed(() => {
               {{ mcpMetadata.resourceName || "—" }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Status -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.status") }}</span>
-            <Activity class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.status')">
+          <template #icon><Activity class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1">
-            <span
-              :class="['font-mono text-base sm:text-lg font-bold tabular-nums', statusColorClass]"
-            >
+            <span :class="['text-metric', statusColorClass]">
               {{ log.status_code || "—" }}
             </span>
             <span class="text-[11px] text-muted-foreground font-mono mt-0.5">
               {{ t("logs.httpCode") }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Latency -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.latency") }}</span>
-            <Clock class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.latency')">
+          <template #icon><Clock class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1">
-            <span class="text-base sm:text-lg font-bold text-foreground font-mono tabular-nums">
+            <span class="text-metric text-foreground">
               {{ formatDuration(log.response_time_ms) }}
             </span>
             <span class="text-[11px] text-muted-foreground font-mono">{{
               t("logs.duration")
             }}</span>
           </div>
-        </div>
+        </MetricCell>
       </template>
 
       <!-- 4. WEB SEARCH LOG METRICS -->
       <template v-else-if="isWebSearchLog && webSearchMetadata">
         <!-- Cell: Search Query -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.searchQuery") }}</span>
-            <Search class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.searchQuery')">
+          <template #icon><Search class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <span
               class="text-xs sm:text-sm font-semibold font-mono truncate text-foreground"
@@ -502,16 +432,11 @@ const statusColorClass = computed(() => {
               {{ t("logs.queryString") }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Provider -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.webSearchProvider") }}</span>
-            <Globe class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.webSearchProvider')">
+          <template #icon><Globe class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <div class="flex items-center gap-1.5">
               <div
@@ -534,16 +459,11 @@ const statusColorClass = computed(() => {
               {{ t("logs.webSearchCount") }}: {{ webSearchMetadata.resultCount }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Status -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.webSearchStatus") }}</span>
-            <Activity class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.webSearchStatus')">
+          <template #icon><Activity class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <span
               :class="[
@@ -559,25 +479,20 @@ const statusColorClass = computed(() => {
               {{ t("logs.httpCode") }}: {{ log.status_code || "—" }}
             </span>
           </div>
-        </div>
+        </MetricCell>
 
         <!-- Cell: Latency -->
-        <div class="bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0">
-          <div
-            class="flex items-center justify-between text-[11px] text-muted-foreground font-semibold uppercase tracking-wider"
-          >
-            <span>{{ t("logs.latency") }}</span>
-            <Clock class="size-3 text-muted-foreground/50" />
-          </div>
+        <MetricCell :label="t('logs.latency')">
+          <template #icon><Clock class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1 mt-1">
-            <span class="text-base sm:text-lg font-bold text-foreground font-mono tabular-nums">
+            <span class="text-metric text-foreground">
               {{ formatDuration(log.response_time_ms) }}
             </span>
             <span class="text-[11px] text-muted-foreground font-mono">{{
               t("logs.duration")
             }}</span>
           </div>
-        </div>
+        </MetricCell>
       </template>
     </div>
   </div>

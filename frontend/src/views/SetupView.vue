@@ -107,7 +107,7 @@ const handleSetup = async () => {
       <!-- Brand mark -->
       <div class="mb-8 flex flex-col items-center text-center">
         <div
-          class="auth-mark ring-1 ring-primary/25 flex h-14 w-14 items-center justify-center rounded-2xl text-foreground"
+          class="auth-mark ring-1 ring-primary/25 flex h-14 w-14 items-center justify-center rounded-xl text-foreground"
         >
           <LogoIcon class="h-8 w-8" />
         </div>

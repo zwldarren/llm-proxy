@@ -2,7 +2,7 @@
 /**
  * Dedicated image preview for image_generation / image_edit log responses.
  *
- * Renders generated images as real <img> elements (data URLs for base64, or
+ * Renders generated images as real image elements (data URLs for base64, or
  * direct URLs) — never feeds megabyte-sized base64 strings into a JSON tree
  * viewer, which is what froze the Logs details page on image requests.
  *
@@ -107,7 +107,7 @@ function openInNewTab(url: string) {
       <h4 class="text-xs uppercase font-bold text-muted-foreground flex items-center gap-2 pl-1">
         <Maximize2 class="size-3.5" />
         {{ t("logs.generatedImages") }}
-        <span class="text-muted-foreground/60 font-mono normal-case tracking-normal">
+        <span class="text-muted-foreground font-mono normal-case tracking-normal">
           ({{ resolved.length }})
         </span>
       </h4>
@@ -141,7 +141,7 @@ function openInNewTab(url: string) {
           </div>
           <!-- Hover zoom hint -->
           <div
-            class="absolute top-2 right-2 p-1.5 rounded-md bg-background/70 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity"
+            class="absolute top-2 right-2 p-1.5 rounded-md bg-background/70 backdrop-blur-sm opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
           >
             <Maximize2 class="size-3.5 text-foreground/80" />
           </div>
@@ -190,7 +190,7 @@ function openInNewTab(url: string) {
             v-if="img.revisedPrompt"
             class="text-[11px] text-muted-foreground/90 leading-relaxed"
           >
-            <span class="text-muted-foreground/60 font-medium">{{ t("logs.revisedPrompt") }}:</span>
+            <span class="text-muted-foreground font-medium">{{ t("logs.revisedPrompt") }}:</span>
             <span class="font-mono">{{ img.revisedPrompt }}</span>
           </div>
 
@@ -253,7 +253,7 @@ function openInNewTab(url: string) {
           v-if="lightbox"
           :src="lightbox.url"
           :alt="lightbox.image.revisedPrompt || t('logs.imageAltN', { n: lightbox.index + 1 })"
-          class="max-w-full max-h-[90vh] object-contain shadow-2xl border border-border/20 animate-in zoom-in-95 duration-200"
+          class="max-w-full max-h-[90vh] object-contain shadow-lg animate-in zoom-in-95 duration-200"
           @click.stop
         />
       </DialogContent>

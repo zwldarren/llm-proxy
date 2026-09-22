@@ -199,7 +199,7 @@ A two-theme monochrome system with a cool-neutral (hue 220°) undertone. Dark mo
 
 ### Neutral
 - **Deep Cool-Neutral Void** (`--background`): the page surface. Dark `hsl(220 12% 4%)` `#090A0B` / Light `hsl(220 3% 98.5%)` `#FBFBFB`. The main content sits on a faint `--muted/5` tint above this to separate the page from the chrome.
-- **Crisp White / Near-Black** (`--foreground`, `--ink`): body text and icon ink. Dark `hsl(0 0% 96%)` `#F5F5F5` / Light `hsl(220 8% 5%)` `#0C0C0E`.
+- **Crisp White / Near-Black** (`--foreground`): body text and icon ink. Dark `hsl(0 0% 96%)` `#F5F5F5` / Light `hsl(220 8% 5%)` `#0C0C0E`.
 - **Raised Slate** (`--card`, `--popover`): cards, popovers, dialogs. Dark `hsl(220 10% 9%)` `#151619` / Light `hsl(0 0% 100%)` `#FFFFFF`. One step lighter than the void in dark mode; pure white in light mode.
 - **Deeper Slate** (`--sidebar`): the navigation rail. Dark `hsl(220 14% 7%)` `#0F1114` / Light `hsl(220 5% 97.5%)` `#F8F9F9`. Slightly cooler and darker than the card to read as a recessed column.
 - **Muted Slate** (`--muted`): secondary fills, table hover, filter bars. Dark `hsl(220 9% 15%)` `#23252A` / Light `hsl(220 4% 94%)` `#EFEFF0`.
@@ -215,7 +215,7 @@ Muted but perceptible hues used to disambiguate HTTP methods, action types, and 
 - **Muted Teal** (`--action-teal`, embedding): the fifth capability tint in the model plaza — vision→azure, image generation→iris, TTS→amber, STT→coral, embedding→teal. Dark `hsl(180 26% 62%)` `#85B7B7` / Light `hsl(180 24% 30%)` `#3A5F5F`.
 
 ### Status Tints (Tertiary — semantic only)
-Desaturated but recognizable; always rendered as a tinted badge (`bg/15 text border/30`) with a text label and `role="status"`. Success and error pair across themes via light/dark aliases — `--status-success` resolves to `--success-light` in light mode and `--success-dark` in dark mode; `--status-error` resolves to `--error-light` / `--error-dark`. The pairs are first-class tokens, used directly by error panels.
+Desaturated but recognizable; always rendered as a tinted badge (`bg/15 text border/30`) with a text label and `role="status"`. Success and error pair across themes via light/dark aliases — `--status-success` resolves to `--success-light` in light mode and `--success-dark` in dark mode; `--status-error` resolves to `--error-light` / `--error-dark`. Surface code consumes the resolved `--status-*` token only: the light/dark halves exist to define it, never as a second encoding alongside it.
 - **Sage Mint** (`--status-success`): Dark `hsl(150 42% 58%)` `#67C194` / Light `hsl(150 42% 34%)` `#327B57`.
 - **Muted Gold** (`--status-warning`): Dark `hsl(32 42% 58%)` `#C19767` / Light `hsl(32 42% 42%)` `#986E3E`.
 - **Salmon Rose** (`--status-error`): Dark `hsl(4 52% 72%)` `#DD9792` / Light `hsl(4 45% 45%)` `#A6463F`.
@@ -255,16 +255,16 @@ To minimize layout shift during font loading, metric-adjusted fallbacks are defi
 The scale is a 1.25 (Major Third) modular scale on a 16px base, expressed in fixed `rem` so app UI stays spatially predictable.
 
 - **Display** (Space Grotesk, 600, `text-xl`/`text-2xl` 1.25–1.5rem, line-height 1.25, tracking −0.02em): page titles via `.brand-heading`. In-app weight is 600 (not 400); display weight 400 is reserved for rare marketing headlines only. Floor tracking is −0.04em.
-- **Headline** (Space Grotesk, 400, 2rem, line-height 1.1, tracking −0.02em): large display headlines, rarely used in-app (`.text-display-lg`/`.text-display-xl`).
-- **Title** (Manrope, 600, 1.125rem, line-height 1.375): card titles and form-section headings (`.text-title`).
-- **Body** (Manrope, 400, 1rem, line-height 1.5): primary reading text (`.text-body`). Max line length ~65–75ch (`.text-measure`).
-- **Secondary** (Manrope, 400, 0.875rem, line-height 1.5): descriptions, secondary text (`.text-secondary`).
-- **Label** (Manrope, 500, 0.75rem, tracking 0.02em, uppercase when eyebrow): captions, metadata, badges, form labels (`.text-caption`, `.text-label`).
+- **Headline** (Space Grotesk, 400, 2rem, line-height 1.1, tracking −0.02em): large display headlines, rarely used in-app.
+- **Title** (Manrope, 600, 1.125rem, line-height 1.375): card titles and form-section headings (`text-lg font-semibold`).
+- **Body** (Manrope, 400, 1rem, line-height 1.5): primary reading text (`text-base`). Max line length ~65–75ch (`max-w-[65ch]`).
+- **Secondary** (Manrope, 400, 0.875rem, line-height 1.5): descriptions, secondary text (`text-sm`, usually `text-muted-foreground`).
+- **Label** (Manrope, 500, 0.75rem, tracking 0.02em, uppercase when eyebrow): captions, metadata, badges, form labels (`text-xs font-medium`, `text-[11px]` for eyebrows).
 - **Mono** (IBM Plex Mono, 400, 0.875rem, `tabular-nums`): code, JSON, technical values (`.text-code`, `.text-data`).
 - **Metric** (IBM Plex Mono, 700, 1.5rem, `tabular-nums slashed-zero`, line-height 1): large stats (`.text-metric`).
 
 ### Dark-Mode Readability Adjustments
-Dark mode adds 0.05–0.1 to body line-height for light-on-dark readability: `.dark body` → 1.55, `.text-body` → 1.6, `.text-secondary` → 1.55, `.text-caption` → 1.35.
+Dark mode adds 0.05 to body line-height for light-on-dark readability: `.dark body` → 1.55.
 
 ### Named Rules
 **The Three Voices Rule.** Space Grotesk + Manrope + IBM Plex Mono is the whole system. Never introduce a fourth family. A number or code value set in Manrope is a defect, not a stylistic choice.
@@ -278,13 +278,13 @@ Dark mode adds 0.05–0.1 to body line-height for light-on-dark readability: `.d
 A fixed left-rail / fluid-`main` app shell built for scan-first density, not marketing space.
 
 - **App shell:** `flex h-screen overflow-hidden`. Fixed `NavSidebar` (desktop `hidden md:flex`, mobile `Sheet` drawer) + `main` on a faint `bg-muted/5` page tint with responsive padding `px-4 sm:px-6 lg:px-10 xl:px-16 py-5 sm:py-6`. A `full` layout mode (no padding, child-managed) drives the console pages.
-- **Sidebar:** `w-64` expanded / `w-16` collapsed, `border-r border-sidebar-border`, a `brand-sidebar-shell` (180° sidebar→sidebar/96 gradient), and a 2px `.sidebar-accent` gradient rail line. Collapsible with 100ms-delay tooltip labels in collapsed state.
-- **Page header:** one per page, the consistent anchor — `flex` row with an 8×8 `.icon-container` (tinted tile, top sheen), a `.brand-heading` title (`text-xl sm:text-2xl`, `#page-title`), a `text-muted-foreground text-xs max-w-2xl` description, and an `actions` slot (`animate-in fade-in duration-300`, optionally in a `rounded-xl border-border/55 bg-card/76` toolbar).
-- **Grids:** `.card-grid-2` (`grid-cols-1 lg:grid-cols-2`, gap 4/6), `.card-grid-3` (`md:grid-cols-3`, gap 4), `.card-grid-4` (`grid-cols-2 lg:grid-cols-4`, gap 4).
-- **Spacing rhythm:** Tailwind scale — 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64px. Page sections use `space-y-4 md:space-y-6`; `.page-section` is the canonical wrapper.
+- **Sidebar:** `w-64` expanded / `w-16` collapsed, `bg-sidebar` on a `border-r border-sidebar-border` rail. Collapsible with 100ms-delay tooltip labels in collapsed state.
+- **Page header:** one per page, the consistent anchor — `flex` row with an `.icon-container` at its `.icon-container-sm` page-header size (tinted tile, top sheen), a `.brand-heading` title (`text-xl sm:text-2xl`, `#page-title`), a `text-muted-foreground text-xs max-w-2xl` description, and an `actions` slot (`animate-in fade-in duration-300`, optionally in a `rounded-xl border-border/55 bg-card/76` toolbar).
+- **Grids:** Tailwind grid utilities, composed per surface — `grid-cols-1 lg:grid-cols-2` (gap 4/6), `md:grid-cols-3` (gap 4), `grid-cols-2 lg:grid-cols-4` (gap 4).
+- **Spacing rhythm:** Tailwind scale — 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64px. Page sections are `space-y-4 md:space-y-6`.
 - **Console layout (signature — management pages):** the "card wrapping card" anti-pattern is explicitly rejected. Providers, API Keys, Models, MCP Servers use a flush console: `config-header-bar` (sticky `bg-background` + `border-b/60`) + `config-toolbar` (flush `bg-background` + `border-b/60`) + `config-content` (scrollable) with a pinned `config-thead` (`bg-background`, header cells `bg-muted/50 border-b-2 border-border/70`). One seamless surface separated only by hairlines; table rows sit on the faint page tint.
-- **Tables:** dense, hairline-separated, `whitespace-nowrap` by default; `.hide-on-mobile` / `.hide-on-tablet` drop less-important columns at `lg`/`md`; touch cells are `min-h-11 min-w-11` (44px).
-- **Measure:** long-form body capped at 65ch (`.text-measure`), prose at 70ch (`.text-prose`).
+- **Tables:** dense, hairline-separated, `whitespace-nowrap` by default; touch cells are `min-h-11 min-w-11` (44px).
+- **Measure:** long-form body capped at 65ch (`max-w-[65ch]`), prose at 70ch (`max-w-[70ch]`).
 - **Responsive:** mobile-first; `sm:640 md:768 lg:1024 xl:1280`. Container queries (`@sm/@md/@lg`) exist for component-level responsiveness.
 - **Atmosphere layers:** two fixed `body::before`/`::after` layers behind every screen — a trio of soft radial foreground-glints (opacity 0.05–0.12) and a 42px grid masked toward viewport center (opacity 0.45–0.6), dimmer in dark mode. They never sit above content (`z-index: -2/-1`, `pointer-events: none`).
 
@@ -298,15 +298,14 @@ A fixed left-rail / fluid-`main` app shell built for scan-first density, not mar
 Flat-by-default. Depth is conveyed by **tonal background steps** (`--card` over `--background`, the `--muted/5` page tint, `--muted/50` table hover) and **1px hairline borders**, not by structural drop shadows. Shadows, when they appear, are ambient and state-driven, never decorative.
 
 ### Shadow Vocabulary
-- **Rest card shadow** (`shadow-xs`): the default on `.card-container` / `.card-base` / primary buttons — a barely-there lift that confirms the card sits above the page. `.card-flat` omits it entirely.
-- **Section-card wash** (`0 8px 24px -16px hsl(<color> / 0.2–0.25)`): a soft, colored, downward-diffused glow under the tinted section cards (`.section-card-primary/-blue/-amber/-success`). Reserved for semantically-grouped regions; never a default card style.
+- **Rest card shadow** (`shadow-xs`): the default on `rounded-xl border border-border bg-card` cards and primary buttons — a barely-there lift that confirms the card sits above the page.
 - **Sidebar edge shadow** (`16px 0 36px -32px sidebar/0.95`): the soft right-edge shadow on the nav rail.
 - **Hover glow** (`0 0 20px -6px hsl(<color> / 0.35–0.4)`): `.hover-glow-primary/-blue/-amber/-success` — a constrained ambient halo on interactive elements in the matching semantic color.
 - **Inset top highlight** (`inset 0 1px 0 hsl(var(--foreground) / 0.06)` on cards; `inset 0 1px 0 hsl(var(--background) / 0.9)` on inputs): the single-pixel top sheen that reads as a lit edge on raised surfaces.
 - **Auth-mark shadow** (`0 18px 36px -20px hsl(var(--primary) / 0.55)` + inset): the floating login mark.
 
 ### Named Rules
-**The Flat-By-Default Rule.** Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained section-card / auth-mark exceptions. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.
+**The Flat-By-Default Rule.** Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained auth-mark exception. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.
 
 **The Tonal-Step Rule.** When you need to separate two surfaces, step the background token (`--background` → `--card` → `--muted`) before reaching for a shadow. A 1px `--border` hairline plus a tonal step is the default depth recipe.
 
@@ -353,9 +352,8 @@ A labeled chip, not a swatch. Color is redundant; the text label and `role="stat
 Flat raised slates, hairline-edged, tonally stepped above the void.
 - **Corner:** `rounded-xl` (16px).
 - **Background:** `bg-card` (`--card`), one step lighter than `--background`.
-- **Shadow:** `shadow-xs` at rest (`.card-container`, `.card-base`); `.card-flat` omits the shadow entirely.
-- **Hover:** border tightens — `.card-container:hover` → `border-border/80`; `.hover-card:hover` → `border-primary/40`. Never a shadow lift.
-- **Tinted section cards** (`.section-card-primary/-blue/-amber/-success`): `rounded-xl` + `border-<color>/20` + `bg-linear-to-br from-<color>/8 via-card/95 to-card` + the section-card wash shadow. Reserved for semantically-grouped regions; not a default card style.
+- **Shadow:** `shadow-xs` at rest; hover never adds one.
+- **Hover:** the border tightens (`hover:border-border/80`). Never a shadow lift.
 
 ### Inputs / Fields
 A lit-edge control with the strongest focus signal in the system.
@@ -367,7 +365,7 @@ A lit-edge control with the strongest focus signal in the system.
 
 ### Navigation (`NavSidebar`)
 A recessed column with a gradient rail; items are quiet until active, then marked by a 2px gradient indicator.
-- **Shell:** `w-64`/`w-16`, `border-r border-sidebar-border`, `brand-sidebar-shell` gradient, 2px `.sidebar-accent` rail line, soft right shadow.
+- **Shell:** `w-64`/`w-16`, `bg-sidebar`, `border-r border-sidebar-border`, soft right shadow.
 - **Items:** `rounded-lg px-3 py-2.5 text-sm font-medium transition-all 200ms`, `min-h-11 min-w-11`. Active: `bg-sidebar-accent/95` + the 2px gradient indicator line (`from-sidebar-primary to-sidebar-primary/60`, `rounded-r-full`, active glow) + icon `scale-110`. Hover: `bg-sidebar-accent/70` + a horizontal reflection sweep (`via-sidebar-primary/12`, opacity 0→100). Logout hover tints `destructive/16`.
 - **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/50` — a tracked eyebrow used **only** for the three nav section groups (Overview / Tools / Config), never as a page-section eyebrow.
 
@@ -378,7 +376,7 @@ One route may render different views by role when both roles work on the same da
 - Keep this pattern rare — admin tools otherwise live under `/config/*` with an `adminOnly` route guard.
 
 ### Color-Tinted Icon Container (signature)
-`.icon-container` and its `-primary/-blue/-amber/-success` variants: `p-2.5 rounded-xl min-h-11 min-w-11`, `bg-linear-to-br from-<color>/15–20 via-<color>/10 to-<color>/5–12`, `ring-1 ring-<color>/25–30`, `inset 0 1px 0 <color>/0.2–0.26`. The signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen.
+`.icon-container` (and its `.icon-container-sm` page-header size, `h-8 w-8 rounded-md`): `p-2.5 rounded-xl min-h-11 min-w-11`, `bg-linear-to-br from-primary/20 via-primary/10 to-action-blue/12`, `ring-1 ring-primary/30`, `inset 0 1px 0 primary/0.26`. The signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen.
 
 ### Range Slider (signature control)
 Used by Smart Routing mode-weight sliders. `appearance-none` + `.range-thumb`; track `0.5rem rounded-full bg-muted`, thumb `1rem rounded-full border-2 bg-background bg-primary` with a `primary/40` glow; hover `scale(1.12)`, active `scale(0.96)`, focus `0 0 0 4px ring`. Reduced-motion removes the thumb transform.
@@ -400,7 +398,7 @@ Concrete visual guardrails grounded in the implemented system.
 - **Do** set every numeric value — tokens, cost, latency, counts, timestamps, status codes — in IBM Plex Mono with `tabular-nums` (`.text-data` inline, `.text-metric` for large stats).
 - **Do** convey depth with tonal background steps (`--card` over `--background`, `--muted/5` page tint) and 1px `--border` hairlines; reserve shadow for `shadow-xs` at rest and ambient glow on hover.
 - **Do** render status and HTTP semantics as labeled `StatusBadge` chips at `/15` tint + `/25–30` border, with `role="status"` and a text label as the primary signal.
-- **Do** use the `config-page-reveal` entrance on every page and the `stagger-children` / `row-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.
+- **Do** use the `config-page-reveal` entrance on every page and the `stagger-fast` / `row-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.
 - **Do** keep display tracking at −0.02em (floor −0.04em), display weight 600 in-app, and page titles at `text-xl sm:text-2xl`.
 - **Do** hit WCAG AA on both themes: tune `--muted-foreground` for readability, never lighten muted text "for elegance," and bump dark-mode body line-height to 1.55–1.6.
 - **Do** keep touch targets ≥44px (`min-h-11 min-w-11`) on nav and mobile controls.

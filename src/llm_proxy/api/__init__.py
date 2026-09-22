@@ -8,6 +8,9 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.responses import Response
+from starlette.types import Scope
 
 from llm_proxy import providers  # noqa: F401
 from llm_proxy.api.fast_path import FastPathEntry, install_protocol_fast_path
@@ -72,6 +75,21 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.version import get_display_version
 
 logger = get_logger(__name__)
+
+
+class ImmutableStaticFiles(StaticFiles):
+    """Static mount for content-hashed build assets.
+
+    Vite emits `name-<hash>.<ext>` filenames, so a one-year immutable cache
+    is safe: any content change produces a new URL. Without it every cold load
+    re-downloads the whole bundle.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
 
 @asynccontextmanager
@@ -213,7 +231,7 @@ def create_app() -> FastAPI:
 
     static_dir = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
     if static_dir.exists():
-        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+        app.mount("/assets", ImmutableStaticFiles(directory=static_dir / "assets"), name="assets")
 
         # Resolve the canonical static root once. This is the security boundary
         # that the requested path must not escape.
@@ -229,6 +247,12 @@ def create_app() -> FastAPI:
     # re-pump). Registered before MCPProxyMiddleware so it sits just inside it
     # and covers the whole function-middleware stack.
     app.add_middleware(OverheadHeaderMiddleware)
+
+    # Compression sits just inside the MCP proxy short-circuit, so /servers/*
+    # keeps its own transport untouched, and outside the rest of the stack so
+    # every API and static response benefits. Text/event-stream, fonts and
+    # images are excluded by GZipMiddleware's own defaults.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     # The MCP proxy must be handled before the main FastAPI middleware stack.
     # StreamableHTTPSessionManager creates its own anyio task groups; wrapping
@@ -282,10 +306,16 @@ def serve_frontend_response(static_root: Path, full_path: str) -> FileResponse:
 
     file_path = resolve_frontend_file(static_root, full_path)
     if file_path.exists() and file_path.is_file():
+        # index.html names the hashed asset URLs, so it must never be cached —
+        # including when requested directly rather than via the SPA fallback.
+        if file_path.name == "index.html":
+            return FileResponse(file_path, headers={"Cache-Control": "no-cache"})
         return FileResponse(file_path)
 
+    # The shell must never be cached: it names the hashed asset URLs, so a stale
+    # copy would pin a client to an old bundle.
     index_path = resolve_frontend_file(static_root, "index.html")
-    return FileResponse(index_path)
+    return FileResponse(index_path, headers={"Cache-Control": "no-cache"})
 
 
 app = create_app()
@@ -293,6 +323,7 @@ app = create_app()
 __all__ = [
     "app",
     "create_app",
+    "ImmutableStaticFiles",
     "resolve_frontend_file",
     "serve_frontend_response",
 ]
