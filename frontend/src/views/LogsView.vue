@@ -741,10 +741,8 @@ const auditListAction = (log: LogListItemType): string => {
       <header class="config-header-bar flex flex-col pt-4 px-4 sm:px-6">
         <div class="flex items-center justify-between w-full pb-3">
           <div class="flex items-center gap-3 min-w-0">
-            <div
-              class="flex items-center justify-center h-8 w-8 rounded-md bg-muted text-foreground border border-border/50 shrink-0"
-            >
-              <ScrollText class="w-4 h-4 text-foreground/80" />
+            <div class="icon-container icon-container-sm shrink-0 text-primary">
+              <ScrollText class="w-4 h-4" />
             </div>
             <div class="space-y-0.5">
               <h1

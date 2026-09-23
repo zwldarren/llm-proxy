@@ -89,15 +89,15 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
     class="flex w-full flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-2.5"
   >
     <div
-      class="flex w-full min-w-0 flex-col items-start gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-2.5"
+      class="flex w-full min-w-0 flex-col items-start gap-3 sm:w-auto sm:flex-1 sm:flex-row sm:items-center sm:gap-2.5"
     >
       <!-- Search input. The wrapper is a stacking context (isolate) so the icon's
            z-10 is scoped here — needed because the Input's backdrop-blur-sm
            establishes its own stacking context and would otherwise paint above
-           (and blur) the icon. Width is capped at sm+: a filter field that
-           stretches to the full band width reads as the page's main control
-           instead of a refinement control. -->
-      <div class="relative isolate group w-full min-w-0 sm:w-80 lg:w-96">
+           (and blur) the icon. The field stretches to fill the band so no dead
+           space opens up between it and the trailing controls; the right-hand
+           cluster (results count, view toggle) stays anchored to the end. -->
+      <div class="relative isolate group w-full min-w-0 sm:flex-1">
         <Search
           class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-foreground pointer-events-none z-10"
         />

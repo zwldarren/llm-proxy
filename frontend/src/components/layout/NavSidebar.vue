@@ -344,6 +344,14 @@ const PREFETCH_ROUTES: Record<string, () => void> = {
 const prefetchRoute = (href: string) => {
   PREFETCH_ROUTES[href]?.();
 };
+
+/** The badge is a RouterLink to the About card, but a click that does not change
+ * the URL (already on Settings, same hash) never fires the view's hash watcher.
+ * Scroll directly in that case so the jump always happens. */
+const handleVersionBadgeClick = () => {
+  if (route.name !== "settings") return;
+  document.getElementById("about")?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
 </script>
 
 <template>
@@ -365,8 +373,9 @@ const prefetchRoute = (href: string) => {
                Renders nothing while the info is loading or when the fetch failed. -->
           <RouterLink
             v-if="!isCollapsed && systemStore.info"
-            to="/config/settings"
+            to="/config/settings#about"
             :title="t('about.title')"
+            @click="handleVersionBadgeClick"
             class="flex min-w-0 max-w-36 shrink items-center gap-1 overflow-hidden rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/70 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
           >
             <span class="truncate" :title="`v${systemStore.info.version}`">

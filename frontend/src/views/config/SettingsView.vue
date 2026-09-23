@@ -126,26 +126,47 @@ const onContentRevealEnd = (event: AnimationEvent) => {
   el.classList.remove("config-page-reveal");
 };
 
+/* Deep links into a specific settings card — e.g. the sidebar version badge
+ * pointing at /config/settings#about. The target is not guaranteed to be in the
+ * DOM when the route changes (admin configs load behind a spinner on a cold
+ * visit, and the v-show tab sections are only revealed once the tab resolves),
+ * so retry briefly instead of scrolling once into an empty tree. */
+let hashScrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scrollToHash(attempt = 0) {
+  if (hashScrollTimer) {
+    clearTimeout(hashScrollTimer);
+    hashScrollTimer = null;
+  }
+  const id = route.hash.replace("#", "");
+  if (!id) return;
+
+  const el = document.getElementById(id);
+  if (el) {
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  // ~2s budget covers the DOM settling after data arrives.
+  if (attempt < 20) {
+    hashScrollTimer = setTimeout(() => scrollToHash(attempt + 1), 100);
+  }
+}
+
 watch(
   () => route.fullPath,
-  () => {
-    if (route.hash) {
-      // Use setTimeout to ensure any Vue transitions or DOM updates (v-if) are fully complete
-      setTimeout(() => {
-        const id = route.hash.replace("#", "");
-        const el = document.getElementById(id);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-      }, 100);
-    }
-  },
+  () => scrollToHash(),
   { immediate: true }
 );
 
 // Show loading spinner only when we have no cached data at all
 // Non-admin users don't fetch configs, so skip the spinner
 const showLoadingSpinner = computed(() => authStore.isAdmin && !settingsStore.hasCache());
+
+// First visit renders the settings cards only after fetchAll() resolves; honour a
+// hash that was set before the spinner cleared once the content column mounts.
+watch(showLoadingSpinner, (loading) => {
+  if (!loading) nextTick(() => scrollToHash());
+});
 
 // ── Auto-save instances ─────────────────────────────────────────────
 // Initialize with defaults - will be updated after data loads
@@ -477,6 +498,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (pollInterval) {
     clearInterval(pollInterval);
+  }
+  if (hashScrollTimer) {
+    clearTimeout(hashScrollTimer);
+    hashScrollTimer = null;
   }
 });
 </script>
