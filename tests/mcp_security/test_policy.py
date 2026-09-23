@@ -77,6 +77,15 @@ class TestAllowedCommands:
         assert policy.is_allowed_command("npx") is True
         assert policy.is_allowed_command("uvx") is False
 
+    def test_is_blocked_command_helper(self) -> None:
+        """is_blocked_command distinguishes hard-blocked commands from unlisted ones."""
+        policy = McpSecurityPolicy(allowed_commands=["bash", "uvx"])
+        assert policy.is_blocked_command("bash") is True
+        assert policy.is_blocked_command("/bin/bash") is True
+        assert policy.is_blocked_command("BASH") is True
+        assert policy.is_blocked_command("uvx") is False
+        assert policy.is_blocked_command("npx") is False
+
     def test_exact_invocation_allows_specific_package(self) -> None:
         """Exact entries like 'npx mcp-searxng' only permit that invocation."""
         policy = McpSecurityPolicy(allowed_commands=["npx mcp-searxng"])

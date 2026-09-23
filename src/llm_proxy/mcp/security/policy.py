@@ -80,6 +80,11 @@ class McpSecurityPolicy(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    def is_blocked_command(self, command: str) -> bool:
+        """Return True if the command is explicitly blocked regardless of the allowlist."""
+        name = command.strip().lower().split("/")[-1]
+        return name in {c.strip().lower() for c in self.blocked_commands}
+
     def is_allowed_command(self, command: str, args: list[str] | None = None) -> bool:
         """Return True if the command is permitted by the policy.
 
@@ -92,7 +97,7 @@ class McpSecurityPolicy(BaseModel):
         """
         base = command.strip().lower()
         name = base.split("/")[-1]
-        if name in {c.strip().lower() for c in self.blocked_commands}:
+        if self.is_blocked_command(name):
             return False
         if not self.allowed_commands:
             return False

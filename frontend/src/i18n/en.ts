@@ -1606,9 +1606,11 @@ export default {
     statusError: "Error",
     commandRequired: "Command is required for stdio type",
     baseUrlRequired: "Base URL is required for streamableHttp type",
-    commandHelp: "Command to execute.",
+    commandHelp:
+      "Command to execute. It must be allowlisted in MCP Security before the server can start.",
     baseUrlHelp: "HTTP endpoint URL",
-    envHelp: "Environment variables for the server process",
+    envHelp:
+      "Environment variables for the server process. Keys must be allowlisted in MCP Security or they are ignored.",
     invalidJsonError: "Invalid JSON",
     invalidJsonDescription: "Please check your JSON syntax for Environment Variables",
     loadingCapabilities: "Loading capabilities...",
@@ -1631,6 +1633,23 @@ export default {
     proxyUrl: "Proxy URL",
     capabilities: "Capabilities",
     copyProxyUrl: "Copy proxy URL",
+    policy: {
+      noCommandsAllowedTitle: "No stdio commands are allowed yet",
+      noCommandsAllowedDescription:
+        "The MCP security policy currently permits no stdio commands, so this server cannot be created. Add your command to the Allowed Commands list first, then come back.",
+      allowedCommandsLabel: "Allowlisted commands:",
+      commandBlockedTitle: "'{command}' is blocked",
+      commandBlockedDescription:
+        "This command is always blocked by the MCP security policy and cannot be used for stdio MCP servers.",
+      commandNotAllowedTitle: "'{command}' is not allowlisted",
+      commandNotAllowedDescription:
+        "This server will be rejected on save. Add '{command}' to the Allowed Commands list in MCP Security settings to permit it.",
+      commandAllowed: "Command is allowlisted.",
+      envKeysDroppedTitle: "Some environment variables will be ignored",
+      envKeysDroppedDescription:
+        "these keys are not in the Allowed Environment Keys list, so they will not be passed to the server. Add them in MCP Security settings to use them.",
+      openSettings: "Open MCP Security",
+    },
   },
   // MCP Security
   security: {
@@ -1722,7 +1741,7 @@ export default {
     blockedCommandsDescription: "Commands always blocked even if in the allowed list.",
     allowedEnvKeys: "Allowed Environment Keys",
     allowedEnvKeysDescription:
-      "Environment variable keys permitted for MCP servers. Defaults to none; only blocked keys are rejected until explicitly allowed.",
+      "Environment variable keys permitted for MCP servers. Defaults to empty (deny-by-default): no environment variable is passed to a server unless its key is listed here.",
     blockedEnvKeys: "Blocked Environment Keys",
     blockedEnvKeysDescription: "Environment variable keys always blocked.",
     blockedUrlHosts: "Blocked URL Hosts",

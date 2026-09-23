@@ -1556,9 +1556,9 @@ export default {
     statusError: "错误",
     commandRequired: "stdio 类型需要填写命令",
     baseUrlRequired: "streamableHttp 类型需要填写基础 URL",
-    commandHelp: "要执行的命令",
+    commandHelp: "要执行的命令。必须先在「MCP 安全」中将其加入允许列表，服务器才能启动。",
     baseUrlHelp: "HTTP 端点 URL",
-    envHelp: "服务器进程的环境变量",
+    envHelp: "服务器进程的环境变量。键必须先在「MCP 安全」中允许，否则会被忽略。",
     invalidJsonError: "JSON 格式错误",
     invalidJsonDescription: "请检查环境变量的 JSON 语法",
     loadingCapabilities: "加载能力中...",
@@ -1581,6 +1581,22 @@ export default {
     proxyUrl: "代理 URL",
     capabilities: "能力",
     copyProxyUrl: "复制代理 URL",
+    policy: {
+      noCommandsAllowedTitle: "尚未允许任何 stdio 命令",
+      noCommandsAllowedDescription:
+        "当前 MCP 安全策略不允许任何 stdio 命令，因此无法创建该服务器。请先将命令添加到「允许的命令」列表，然后返回此处。",
+      allowedCommandsLabel: "已允许的命令：",
+      commandBlockedTitle: "「{command}」已被阻止",
+      commandBlockedDescription: "该命令被 MCP 安全策略永久阻止，无法用于 stdio MCP 服务器。",
+      commandNotAllowedTitle: "「{command}」不在允许列表中",
+      commandNotAllowedDescription:
+        "保存时该服务器将被拒绝。请在「MCP 安全」设置的「允许的命令」中添加「{command}」。",
+      commandAllowed: "该命令已在允许列表中。",
+      envKeysDroppedTitle: "部分环境变量将被忽略",
+      envKeysDroppedDescription:
+        "这些键不在「允许的环境变量键」列表中，因此不会传递给服务器。请在「MCP 安全」设置中添加它们。",
+      openSettings: "打开 MCP 安全",
+    },
   },
   // MCP Security
   security: {
@@ -1660,7 +1676,8 @@ export default {
     blockedCommands: "阻止的命令",
     blockedCommandsDescription: "即使在允许列表中也始终阻止的命令。",
     allowedEnvKeys: "允许的环境变量键",
-    allowedEnvKeysDescription: "MCP 服务器允许使用的环境变量键。默认为空，仅阻止黑名单中的键。",
+    allowedEnvKeysDescription:
+      "MCP 服务器允许使用的环境变量键。默认为空（默认拒绝）：未在此列出的环境变量键不会传递给服务器。",
     blockedEnvKeys: "阻止的环境变量键",
     blockedEnvKeysDescription: "始终阻止的环境变量键。",
     blockedUrlHosts: "阻止的 URL 主机",

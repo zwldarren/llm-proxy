@@ -14,12 +14,31 @@ class McpSecurityValidator:
         """Validate the command for a stdio MCP server.
 
         The allowlist is always enforced. An empty ``allowed_commands`` list
-        means no stdio commands are permitted.
+        means no stdio commands are permitted. Error messages include the
+        allowlist location so operators know how to unblock themselves.
         """
         if not command:
             raise MCPSecurityError("stdio command cannot be empty")
         if not self._policy.is_allowed_command(command, args):
-            raise MCPSecurityError(f"command '{command}' is not allowed by the MCP security policy")
+            if self._policy.is_blocked_command(command):
+                raise MCPSecurityError(
+                    f"command '{command}' is blocked by the MCP security policy and is "
+                    "not allowed for stdio MCP servers"
+                )
+            allowed = ", ".join(c for c in self._policy.allowed_commands if c.strip())
+            if allowed:
+                hint = (
+                    f"Allowed commands: {allowed}. Add '{command}' to the Allowed "
+                    f"Commands list in MCP Security settings to permit it."
+                )
+            else:
+                hint = (
+                    f"No stdio commands are allowed yet. Add '{command}' to the Allowed "
+                    "Commands list in MCP Security settings before creating this server."
+                )
+            raise MCPSecurityError(
+                f"command '{command}' is not allowed by the MCP security policy. {hint}"
+            )
         # Reject obvious shell escapes in args (belt-and-suspenders).
         combined = " ".join(args).lower()
         dangerous = [";", "&&", "||", "|", "$(", "`", ">", "<"]

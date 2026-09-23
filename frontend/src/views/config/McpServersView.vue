@@ -11,6 +11,7 @@ import PageHeader from "@/components/common/PageHeader.vue";
 import ViewToggle from "@/components/common/ViewToggle.vue";
 import McpServerList from "@/components/mcp/McpServerList.vue";
 import McpServerTable from "@/components/mcp/McpServerTable.vue";
+import McpPolicyNotice from "@/components/mcp/McpPolicyNotice.vue";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
@@ -30,6 +31,7 @@ import { useJsonField } from "@/composables/useJsonField";
 import { useTableFilter } from "@/composables/useTableFilter";
 import { useViewMode } from "@/composables/useViewMode";
 import { useMcpServerStore } from "@/stores/mcpServers";
+import { useSettingsStore } from "@/stores/settings";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import type {
   McpServerCreate,
@@ -42,6 +44,11 @@ const { t } = useI18n();
 const { handleSaveError, handleDeleteError } = useErrorHandler();
 const { parseJsonField, initJsonField } = useJsonField();
 const mcpStore = useMcpServerStore();
+const settingsStore = useSettingsStore();
+
+// The security policy drives the inline guidance in the stdio form. It is
+// loaded best-effort: the backend still enforces it on save if this fails.
+const mcpSecurityPolicy = computed(() => settingsStore.mcpSecurityConfig);
 
 const serverStatuses = ref<Record<string, McpServerStatus>>({});
 const showCreateDialog = ref(false);
@@ -133,6 +140,20 @@ const newServer = ref<McpServerCreate>({
 
 const argsList = ref<string[]>([]);
 const envJson = ref("{}");
+
+// Env keys currently typed by the operator, used to warn about keys that the
+// security policy would silently drop. Invalid JSON is reported on save.
+const envKeys = computed<string[]>(() => {
+  try {
+    const parsed = JSON.parse(envJson.value || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.keys(parsed);
+    }
+  } catch {
+    // Ignore — the save handler surfaces the JSON syntax error.
+  }
+  return [];
+});
 
 async function fetchServerCapabilities(serverName: string) {
   try {
@@ -314,7 +335,10 @@ const toggleServerEnabled = async (server: McpServerRead, nextEnabled: boolean) 
   }
 };
 
-onMounted(() => fetchServers());
+onMounted(() => {
+  settingsStore.fetchMcpSecurity().catch(() => {});
+  fetchServers();
+});
 </script>
 
 <template>
@@ -473,6 +497,13 @@ onMounted(() => fetchServers());
                 :placeholder="t('placeholders.command')"
               />
               <p class="text-[11px] text-muted-foreground">{{ t("mcpServers.commandHelp") }}</p>
+              <McpPolicyNotice
+                v-if="mcpSecurityPolicy"
+                :policy="mcpSecurityPolicy"
+                :command="newServer.command || ''"
+                :args="argsList"
+                :show-env="false"
+              />
             </div>
 
             <div class="grid gap-2">
@@ -506,6 +537,12 @@ onMounted(() => fetchServers());
                 class="code-textarea min-h-24"
               />
               <p class="text-[11px] text-muted-foreground">{{ t("mcpServers.envHelp") }}</p>
+              <McpPolicyNotice
+                v-if="mcpSecurityPolicy"
+                :policy="mcpSecurityPolicy"
+                :env-keys="envKeys"
+                :show-command="false"
+              />
             </div>
           </div>
 

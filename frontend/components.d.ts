@@ -115,6 +115,7 @@ declare module 'vue' {
     McpCapabilityChips: typeof import('./src/components/mcp/McpCapabilityChips.vue')['default']
     McpEndpoint: typeof import('./src/components/mcp/McpEndpoint.vue')['default']
     McpIcon: typeof import('./src/components/common/McpIcon.vue')['default']
+    McpPolicyNotice: typeof import('./src/components/mcp/McpPolicyNotice.vue')['default']
     McpRowActions: typeof import('./src/components/mcp/McpRowActions.vue')['default']
     McpSecuritySection: typeof import('./src/components/settings/sections/McpSecuritySection.vue')['default']
     McpServerList: typeof import('./src/components/mcp/McpServerList.vue')['default']

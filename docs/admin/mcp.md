@@ -112,6 +112,12 @@ Enforcement happens when a server is created or updated (HTTP 422) and again whe
 backend starts. Environment keys that are not allowed are dropped rather than
 rejected — the stored config shows only what survived.
 
+Because the default allowlist is empty, a fresh install rejects every stdio server
+until a command is allowlisted. The console surfaces this directly: the server form
+checks the command, args, and env keys against the current policy as you type and
+links to **MCP Security** when something is not allowlisted, and API errors name the
+rejected command and point at the same setting.
+
 ::: tip Typical allowlist entry
 For a Node-based server: allow command `npx` (or the exact `npx @scope/server`
 form) and add only the env vars the server needs. The container includes `bunx`
