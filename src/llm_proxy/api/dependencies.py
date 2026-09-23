@@ -191,6 +191,10 @@ def _create_adapter(
             # "interactions") — forwarded opaquely through AdapterConfig.extra;
             # only the Gemini adapter reads it.
             api_variant=provider_config.metadata.get("api_variant", "generate_content"),
+            # App-attribution identity (OpenRouter's HTTP-Referer /
+            # X-OpenRouter-Title). Forwarded opaquely; only adapters for
+            # upstreams that track client apps read it.
+            app_attribution=provider_config.app_attribution.model_dump(),
             unknown_fields_policy=unknown_fields_policy,
             unsupported_block_policy=unsupported_block_policy,
             http_client=http_client,

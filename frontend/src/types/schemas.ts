@@ -422,6 +422,17 @@ export interface ApplyMetadataResponse {
   results: ApplyMetadataResult[];
 }
 
+export interface AppAttribution {
+  /** Application URL, sent as OpenRouter's ``HTTP-Referer`` header. */
+  url?: string | null;
+  /** Application display name, sent as ``X-OpenRouter-Title``. */
+  title?: string | null;
+  /** OpenRouter marketplace categories (sent comma-separated). */
+  categories?: string[] | null;
+  /** Whether a newly created OpenRouter app is listed publicly. */
+  visibility?: "public" | "hidden" | null;
+}
+
 interface ProviderBase {
   name: string;
   type: string;
@@ -438,6 +449,7 @@ interface ProviderBase {
   parameter_overrides?: Record<string, unknown> | null;
   endpoint_base_urls?: Record<string, string> | null;
   native_web_search?: boolean;
+  app_attribution?: AppAttribution | null;
   icon_url?: string | null;
 }
 
@@ -461,6 +473,7 @@ export interface ProviderUpdate {
   parameter_overrides?: Record<string, unknown> | null;
   endpoint_base_urls?: Record<string, string> | null;
   native_web_search?: boolean | null;
+  app_attribution?: AppAttribution | null;
   icon_url?: string | null;
 }
 

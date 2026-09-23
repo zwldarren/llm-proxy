@@ -7,6 +7,7 @@ from llm_proxy.providers.openai.client_headers import (
     capture_client_headers,
     clear_client_headers,
     get_client_headers,
+    get_openrouter_client_headers,
 )
 
 
@@ -77,6 +78,32 @@ class TestCaptureClientHeaders:
         capture_client_headers({"originator": "first"})
         capture_client_headers({"session_id": "second"})
         assert get_client_headers() == {"session_id": "second"}
+
+    def test_openrouter_headers_are_isolated_from_the_generic_set(self):
+        """OpenRouter control headers must not ride the generic passthrough.
+
+        The generic accessor is merged by every native-passthrough adapter
+        (DeepSeek, Qwen, xAI, ...); an ``X-OpenRouter-Metadata`` sent by a
+        client targeted at OpenRouter must never reach those upstreams.
+        """
+        capture_client_headers(
+            {
+                "originator": "codex_cli_rs",
+                "X-OpenRouter-Metadata": "enabled",
+                "X-OpenRouter-Cache": "true",
+            }
+        )
+        assert get_client_headers() == {"originator": "codex_cli_rs"}
+        assert get_openrouter_client_headers() == {
+            "X-OpenRouter-Metadata": "enabled",
+            "X-OpenRouter-Cache": "true",
+        }
+
+    def test_clear_drops_both_contextvars(self):
+        capture_client_headers({"originator": "codex", "X-OpenRouter-Cache": "true"})
+        clear_client_headers()
+        assert get_client_headers() == {}
+        assert get_openrouter_client_headers() == {}
 
 
 class TestAdapterHeaderMerge:

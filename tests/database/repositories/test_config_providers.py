@@ -49,6 +49,19 @@ class TestProviderRepository:
         data = repo._prepare_provider_data(name="test", type="openai")
         assert "provider_metadata" in data
 
+    def test_prepare_provider_data_folds_app_attribution(self, repo):
+        """Typed app_attribution is persisted inside provider_metadata."""
+        data = repo._prepare_provider_data(
+            name="or",
+            type="openrouter",
+            app_attribution={"url": "https://my.app", "title": "My App"},
+        )
+        assert "app_attribution" not in data
+        assert data["provider_metadata"]["app_attribution"] == {
+            "url": "https://my.app",
+            "title": "My App",
+        }
+
     @pytest.mark.asyncio
     async def test_create_provider(self, repo, mock_session, mock_provider):
         """Test creating a provider."""
@@ -235,6 +248,32 @@ class TestProviderRepository:
             # No api_key change: the stored key is left untouched and must
             # not be decrypted in place.
             mock_decrypt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_provider_folds_app_attribution_into_metadata(
+        self, repo, mock_session, mock_provider
+    ):
+        """Updating app_attribution writes into provider_metadata, not a column."""
+        mock_provider.provider_metadata = {"other": "kept"}
+
+        with (
+            patch.object(repo, "get_provider", return_value=mock_provider),
+            patch(
+                "llm_proxy.database.repositories.config_providers.decrypt_api_key"
+            ) as mock_decrypt,
+        ):
+            mock_decrypt.return_value = "decrypted-key"
+            mock_session.refresh = AsyncMock()
+
+            result = await repo.update_provider(
+                "test-provider", app_attribution={"url": "https://my.app"}
+            )
+
+            assert result is not None
+            assert mock_provider.provider_metadata == {
+                "other": "kept",
+                "app_attribution": {"url": "https://my.app"},
+            }
 
     @pytest.mark.asyncio
     async def test_update_provider_not_found(self, repo, mock_session):

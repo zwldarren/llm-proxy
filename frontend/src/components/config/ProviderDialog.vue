@@ -21,7 +21,7 @@ import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
 import { useProviderTypes } from "@/composables/useProviderTypes";
 import { configApi } from "@/services/api/config";
 import { providerFormSchema, type ProviderFormValues } from "@/schemas/providerForm";
-import type { ProviderCreate, ProviderRead, ProviderUpdate } from "@/types/schemas";
+import type { AppAttribution, ProviderCreate, ProviderRead, ProviderUpdate } from "@/types/schemas";
 
 const props = defineProps<{
   open: boolean;
@@ -109,6 +109,86 @@ const endpointTypes: { label: string; value: EndpointType }[] = [
 ];
 const endpointBaseUrls = ref<{ type: EndpointType; url: string }[]>([]);
 
+/**
+ * App-attribution identity (OpenRouter's HTTP-Referer / X-OpenRouter-Title).
+ *
+ * Held as plain refs rather than vee-validate fields, mirroring
+ * ``customHeaders``: the values map onto a nested request object, and the
+ * backend applies its own defaults when a field is left empty. Categories are
+ * edited as a comma-separated string because OpenRouter accepts at most two
+ * per request and the header form is itself comma-separated.
+ */
+type AppAttributionVisibility = NonNullable<AppAttribution["visibility"]>;
+type AppAttributionField = "url" | "title" | "categories";
+
+const appAttributionUrl = ref("");
+const appAttributionTitle = ref("");
+const appAttributionCategories = ref("");
+const appAttributionVisibility = ref<AppAttributionVisibility | null>(null);
+const appAttributionErrors = ref<Partial<Record<AppAttributionField, string>>>({});
+
+/**
+ * HTTP header values accept printable ASCII only; a non-ASCII or control
+ * character would make httpx reject every request through the provider.
+ */
+const HEADER_VALUE_UNSAFE = /[^\x20-\x7e]/;
+
+function parseAppAttributionCategories(): string[] {
+  return appAttributionCategories.value
+    .split(",")
+    .map((category) => category.trim())
+    .filter(Boolean);
+}
+
+function buildAppAttribution(): AppAttribution {
+  return {
+    url: appAttributionUrl.value.trim() || null,
+    title: appAttributionTitle.value.trim() || null,
+    // OpenRouter accepts at most two categories; extras are surfaced as a
+    // validation error before submit and never sent.
+    categories: parseAppAttributionCategories().slice(0, 2),
+    visibility: appAttributionVisibility.value,
+  };
+}
+
+/**
+ * Validate the attribution fields before submit. The values are sent verbatim
+ * as HTTP headers, so malformed URLs and non-ASCII/control characters must be
+ * caught here rather than failing the upstream request at runtime.
+ */
+function validateAppAttribution(): boolean {
+  const nextErrors: Partial<Record<AppAttributionField, string>> = {};
+  const url = appAttributionUrl.value.trim();
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        nextErrors.url = t("providers.appAttributionUrlInvalid");
+      }
+    } catch {
+      nextErrors.url = t("providers.appAttributionUrlInvalid");
+    }
+  }
+  if (HEADER_VALUE_UNSAFE.test(url)) {
+    nextErrors.url = t("providers.appAttributionHeaderInvalid");
+  }
+  if (HEADER_VALUE_UNSAFE.test(appAttributionTitle.value.trim())) {
+    nextErrors.title = t("providers.appAttributionHeaderInvalid");
+  }
+  const categories = parseAppAttributionCategories();
+  if (categories.length > 2) {
+    nextErrors.categories = t("providers.appAttributionCategoriesMax");
+  } else if (categories.some((category) => HEADER_VALUE_UNSAFE.test(category))) {
+    nextErrors.categories = t("providers.appAttributionHeaderInvalid");
+  }
+  appAttributionErrors.value = nextErrors;
+  return Object.keys(nextErrors).length === 0;
+}
+
+function setAppAttributionVisibility(value: unknown): void {
+  appAttributionVisibility.value = value === "public" || value === "hidden" ? value : null;
+}
+
 const canAddEndpointUrl = computed(() => endpointBaseUrls.value.length < endpointTypes.length);
 
 function populateForm(provider: ProviderRead | null) {
@@ -129,6 +209,11 @@ function populateForm(provider: ProviderRead | null) {
     endpointBaseUrls.value = Object.entries(provider.endpoint_base_urls || {}).map(
       ([type, url]) => ({ type: type as EndpointType, url })
     );
+    appAttributionUrl.value = provider.app_attribution?.url ?? "";
+    appAttributionTitle.value = provider.app_attribution?.title ?? "";
+    appAttributionCategories.value = (provider.app_attribution?.categories ?? []).join(", ");
+    appAttributionVisibility.value = provider.app_attribution?.visibility ?? null;
+    appAttributionErrors.value = {};
   } else {
     setFieldValue("name", "");
     setFieldValue("type", "openai");
@@ -141,6 +226,11 @@ function populateForm(provider: ProviderRead | null) {
     apiKeyEditing.value = false;
     customHeaders.value = [];
     endpointBaseUrls.value = [];
+    appAttributionUrl.value = "";
+    appAttributionTitle.value = "";
+    appAttributionCategories.value = "";
+    appAttributionVisibility.value = null;
+    appAttributionErrors.value = {};
   }
 }
 
@@ -207,6 +297,12 @@ function buildProviderMetadata(values: ProviderFormValues): Record<string, unkno
 }
 
 const onSubmit = handleSubmit(async (values) => {
+  if (!validateAppAttribution()) {
+    toast.error(t("common.error"), {
+      description: t("providers.appAttributionInvalid"),
+    });
+    return;
+  }
   isLoading.value = true;
   try {
     const providerData: ProviderCreate = {
@@ -230,6 +326,9 @@ const onSubmit = handleSubmit(async (values) => {
     // Process endpoint base URLs
     providerData.endpoint_base_urls = buildEndpointBaseUrls();
 
+    // App-attribution identity; unset fields fall back to the adapter defaults.
+    providerData.app_attribution = buildAppAttribution();
+
     // Gemini API dialect switch; other provider types leave metadata untouched.
     if (values.type === "gemini") {
       providerData.provider_metadata = buildProviderMetadata(values);
@@ -241,6 +340,7 @@ const onSubmit = handleSubmit(async (values) => {
         base_url: providerData.base_url,
         custom_headers: providerData.custom_headers,
         endpoint_base_urls: providerData.endpoint_base_urls,
+        app_attribution: providerData.app_attribution,
         icon_url: providerData.icon_url,
         native_web_search: providerData.native_web_search,
       };
@@ -450,6 +550,108 @@ const onSubmit = handleSubmit(async (values) => {
                     </p>
                   </div>
                   <Switch v-model="geminiInteractions" />
+                </div>
+              </div>
+              <div
+                v-if="type === 'openrouter'"
+                class="grid gap-3 rounded-lg border border-border/60 p-3"
+              >
+                <div>
+                  <Label>{{ t("providers.appAttribution") }}</Label>
+                  <p class="text-[11px] text-muted-foreground">
+                    {{ t("providers.appAttributionHelp") }}
+                  </p>
+                </div>
+                <div class="grid gap-2">
+                  <Label class="text-xs">{{ t("providers.appAttributionUrl") }}</Label>
+                  <Input
+                    v-model="appAttributionUrl"
+                    type="url"
+                    maxlength="2048"
+                    placeholder="https://github.com/zwldarren/llm-proxy"
+                    class="h-8 text-xs font-mono"
+                    :aria-invalid="!!appAttributionErrors.url"
+                    :aria-describedby="
+                      appAttributionErrors.url ? 'app-attribution-url-error' : undefined
+                    "
+                  />
+                  <p
+                    v-if="appAttributionErrors.url"
+                    id="app-attribution-url-error"
+                    role="alert"
+                    class="text-sm text-destructive"
+                  >
+                    {{ appAttributionErrors.url }}
+                  </p>
+                  <p v-else class="text-[11px] text-muted-foreground">
+                    {{ t("providers.appAttributionUrlHelp") }}
+                  </p>
+                </div>
+                <div class="grid gap-2">
+                  <Label class="text-xs">{{ t("providers.appAttributionTitle") }}</Label>
+                  <Input
+                    v-model="appAttributionTitle"
+                    maxlength="128"
+                    placeholder="LLM Proxy"
+                    class="h-8 text-xs"
+                    :aria-invalid="!!appAttributionErrors.title"
+                    :aria-describedby="
+                      appAttributionErrors.title ? 'app-attribution-title-error' : undefined
+                    "
+                  />
+                  <p
+                    v-if="appAttributionErrors.title"
+                    id="app-attribution-title-error"
+                    role="alert"
+                    class="text-sm text-destructive"
+                  >
+                    {{ appAttributionErrors.title }}
+                  </p>
+                </div>
+                <div class="grid gap-2">
+                  <Label class="text-xs">{{ t("providers.appAttributionCategories") }}</Label>
+                  <Input
+                    v-model="appAttributionCategories"
+                    maxlength="256"
+                    placeholder="cli-agent, cloud-agent"
+                    class="h-8 text-xs font-mono"
+                    :aria-invalid="!!appAttributionErrors.categories"
+                    :aria-describedby="
+                      appAttributionErrors.categories
+                        ? 'app-attribution-categories-error'
+                        : undefined
+                    "
+                  />
+                  <p
+                    v-if="appAttributionErrors.categories"
+                    id="app-attribution-categories-error"
+                    role="alert"
+                    class="text-sm text-destructive"
+                  >
+                    {{ appAttributionErrors.categories }}
+                  </p>
+                </div>
+                <div class="grid gap-2">
+                  <Label class="text-xs">{{ t("providers.appAttributionVisibility") }}</Label>
+                  <Select
+                    :model-value="appAttributionVisibility ?? 'default'"
+                    @update:model-value="setAppAttributionVisibility"
+                  >
+                    <SelectTrigger class="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        {{ t("providers.appAttributionVisibilityDefault") }}
+                      </SelectItem>
+                      <SelectItem value="public">
+                        {{ t("providers.appAttributionVisibilityPublic") }}
+                      </SelectItem>
+                      <SelectItem value="hidden">
+                        {{ t("providers.appAttributionVisibilityHidden") }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div class="grid gap-2">

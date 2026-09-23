@@ -126,6 +126,50 @@ def test_map_provider_record_splits_metadata():
     assert config.metadata == {"extra": "kept"}
 
 
+def test_map_provider_record_splits_app_attribution():
+    record = _provider_record(
+        provider_metadata={
+            "app_attribution": {
+                "url": "https://my.app",
+                "title": "My App",
+                "categories": ["cli-agent"],
+                "visibility": "hidden",
+            },
+            "extra": "kept",
+        }
+    )
+    config = map_provider_record(record)
+
+    assert config.app_attribution.url == "https://my.app"
+    assert config.app_attribution.title == "My App"
+    assert config.app_attribution.categories == ["cli-agent"]
+    assert config.app_attribution.visibility == "hidden"
+    # The typed field is never left behind in the generic metadata bag.
+    assert config.metadata == {"extra": "kept"}
+
+
+def test_map_provider_record_app_attribution_rejects_unknown_visibility():
+    record = _provider_record(
+        provider_metadata={"app_attribution": {"url": "https://my.app", "visibility": "secret"}}
+    )
+    with pytest.raises(ValidationError):
+        map_provider_record(record)
+
+
+def test_map_provider_record_rejects_too_many_categories():
+    record = _provider_record(
+        provider_metadata={"app_attribution": {"categories": ["a", "b", "c"]}}
+    )
+    with pytest.raises(ValidationError):
+        map_provider_record(record)
+
+
+def test_map_provider_record_rejects_non_ascii_header_values():
+    record = _provider_record(provider_metadata={"app_attribution": {"title": "中文应用"}})
+    with pytest.raises(ValidationError):
+        map_provider_record(record)
+
+
 def test_map_provider_record_empty_metadata_defaults():
     record = _provider_record(provider_metadata=None)
     config = map_provider_record(record)
@@ -134,6 +178,8 @@ def test_map_provider_record_empty_metadata_defaults():
     assert config.parameter_overrides == {}
     assert config.endpoint_base_urls == {}
     assert config.native_web_search is False
+    assert config.app_attribution.url is None
+    assert config.app_attribution.categories == []
 
 
 def test_map_provider_record_empty_api_key():

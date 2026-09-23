@@ -42,6 +42,12 @@ class BuildContext:
         response_passthrough: Provider-metadata kill switch
             (``response_passthrough: false``) for the response-side
             WIRE_REUSE tier; when False the response is always fully parsed.
+        reasoning_object: Whether the provider accepts the unified
+            ``reasoning`` object (effort/mode/context/summary/max_tokens/
+            exclude/enabled) on its Chat Completions wire. Set by adapters
+            that declare ``REASONING_OBJECT`` so the OpenAI request builder
+            emits the object instead of a bare ``reasoning_effort`` and stops
+            dropping it as a Responses-only field.
         namespace_map: OpenResponses namespace mapping (flat name ->
             [namespace, original_name]) carried over from the request so
             provider serializers can flatten history tool-call names to match
@@ -60,6 +66,7 @@ class BuildContext:
     supported_content_blocks: frozenset[type[ContentBlock]] = field(default_factory=frozenset)
     compatible_protocols: frozenset[str] = frozenset()
     response_passthrough: bool = True
+    reasoning_object: bool = False
     namespace_map: dict[str, list[str]] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -83,6 +90,7 @@ class BuildContext:
         supported_content_blocks = kwargs.pop("supported_content_blocks", frozenset())
         compatible_protocols = kwargs.pop("compatible_protocols", frozenset())
         response_passthrough = kwargs.pop("response_passthrough", True)
+        reasoning_object = kwargs.pop("reasoning_object", False)
         return cls(
             stream=request.stream,
             model=request.model,
@@ -95,6 +103,7 @@ class BuildContext:
             supported_content_blocks=supported_content_blocks,
             compatible_protocols=compatible_protocols,
             response_passthrough=response_passthrough,
+            reasoning_object=reasoning_object,
             namespace_map=request._namespace_map,
             extra=kwargs,
         )

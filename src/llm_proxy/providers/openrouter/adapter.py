@@ -15,20 +15,32 @@ import base64
 from typing import Any
 
 from llm_proxy.core.adapter import register_adapter
-from llm_proxy.models import InternalResponse
+from llm_proxy.models import InternalRequest, InternalResponse
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
+from llm_proxy.providers.headers import merge_passthrough_headers
+from llm_proxy.providers.openai.client_headers import get_openrouter_client_headers
+from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
 from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 logger = get_logger(__name__)
 
+#: Default app-attribution values, applied when the operator has not configured
+#: their own: requests made through the proxy are credited to the LLM Proxy
+#: project on OpenRouter's rankings and analytics. Overridden per provider by
+#: the ``app_attribution`` config field or by ``HTTP-Referer`` /
+#: ``X-OpenRouter-Title`` entries in ``custom_headers``.
+DEFAULT_ATTRIBUTION_URL = "https://github.com/zwldarren/llm-proxy"
+DEFAULT_ATTRIBUTION_TITLE = "LLM Proxy"
+
 
 @register_adapter("openrouter")
-class OpenRouterAdapter(OpenAICompatibleBase):
+class OpenRouterAdapter(NativePassthroughChatBase):
     """OpenRouter provider using direct HTTP calls to OpenAI-compatible API.
 
-    OpenRouter provides unified access to multiple LLM providers through a single API.
-    This adapter extends OpenAICompatibleBase with OpenRouter-specific features.
+    OpenRouter provides unified access to multiple LLM providers through a
+    single API. Extends ``NativePassthroughChatBase`` with OpenRouter-specific
+    features: a native Responses endpoint, the unified ``reasoning`` request
+    object, per-request control-header forwarding, and app attribution.
     """
 
     _DEFAULT_PROVIDER_NAME = "openrouter"
@@ -43,6 +55,144 @@ class OpenRouterAdapter(OpenAICompatibleBase):
     _REASONING_FIELD = "reasoning"
     # OpenRouter's dedicated Image API is at /images (not /images/generations).
     IMAGES_ENDPOINT = "/images"
+
+    # OpenRouter exposes a native OpenAI Responses API alongside Chat
+    # Completions, so ``/v1/responses`` clients are forwarded verbatim:
+    # reasoning mode/context, provider routing, plugins, transforms and usage
+    # accounting all survive instead of being dropped by the Chat Completions
+    # translation (ADR-0002).
+    native_protocols = frozenset({"openresponses"})
+    RESPONSES_PATH = "/responses"
+
+    # The Chat Completions wire accepts the unified ``reasoning`` object
+    # (``effort`` plus the Responses-only ``mode``/``context``/``summary``),
+    # so the request builder emits that instead of a bare ``reasoning_effort``.
+    REASONING_OBJECT = True
+
+    # A router fans out to many upstreams: the client's Codex/Claude Code
+    # fingerprint headers describe its original target, not the routed
+    # upstream, so only OpenRouter's own control headers are forwarded.
+    FORWARD_CLIENT_HEADERS = False
+
+    #: App-attribution title headers, in precedence order. ``X-OpenRouter-Title``
+    #: is the current name; ``X-Title`` is kept for backwards compatibility.
+    _ATTRIBUTION_TITLE_HEADERS = ("X-OpenRouter-Title", "X-Title")
+
+    #: Attribution headers a client must never control (``X-Title`` mirrors
+    #: ``_ATTRIBUTION_TITLE_HEADERS``; the rest complete the app identity).
+    #: They come from the operator's ``app_attribution``/``custom_headers``
+    #: only, so a client cannot spoof the app credited on OpenRouter.
+    _ATTRIBUTION_CONTROL_HEADERS = frozenset(
+        {
+            "x-openrouter-title",
+            "x-title",
+            "x-openrouter-categories",
+            "x-openrouter-app-visibility",
+        }
+    )
+
+    #: OpenRouter request fields documented as supported on the Chat
+    #: Completions wire. They arrive through ``InternalRequest.extra`` because
+    #: they are not part of the OpenAI Chat Completions schema, so the default
+    #: ``unknown_fields_policy="ignore"`` would strip them as if the upstream
+    #: did not understand them. Declaring them here keeps a client's routing,
+    #: fallback, plugin and accounting options intact without forcing operators
+    #: to switch the whole provider to ``passthrough``.
+    CHAT_EXEMPT_EXTRA_KEYS = frozenset(
+        {
+            # Provider routing and model fallbacks.
+            "provider",
+            "models",
+            "route",
+            # Request/response extensions.
+            "plugins",
+            "transforms",
+            "usage",
+            "session_id",
+            "trace",
+            "preset",
+            "include_reasoning",
+            "structured_outputs",
+            # Prompt caching: top level applies a breakpoint to the last
+            # cacheable block (per-block markers ride inside message content).
+            "cache_control",
+            # Sampling parameters OpenRouter documents but OpenAI's schema does
+            # not have.
+            "min_p",
+            "top_k",
+            "top_a",
+            "repetition_penalty",
+        }
+    )
+
+    def _build_headers(
+        self,
+        auth_header: str | None = None,
+        auth_prefix: str | None = None,
+    ) -> dict[str, str]:
+        """Build upstream headers: provider headers + attribution + client opt-ins.
+
+        Order matters. ``super()`` applies ``EXTRA_HEADERS`` and the operator's
+        ``custom_headers`` first; the client's forwarded OpenRouter control
+        headers (router metadata, response caching) come next; the attribution
+        defaults fill in last. Both merges are non-destructive, so an operator
+        who sets ``HTTP-Referer``/``X-OpenRouter-Title`` in ``custom_headers``
+        (or through the typed attribution fields) always wins over the default
+        project link. Attribution headers are filtered out of the client set
+        first, so a client cannot spoof the app identity.
+        """
+        headers = super()._build_headers(auth_header, auth_prefix)
+        client_headers = {
+            key: value
+            for key, value in get_openrouter_client_headers().items()
+            if key.lower() not in self._ATTRIBUTION_CONTROL_HEADERS
+        }
+        merge_passthrough_headers(headers, client_headers)
+        self._apply_attribution_headers(headers)
+        return headers
+
+    def _apply_attribution_headers(self, headers: dict[str, str]) -> None:
+        """Fill in app-attribution headers for any the operator has not set."""
+        attribution = self._extra_config.get("app_attribution") or {}
+        if not isinstance(attribution, dict):
+            attribution = {}
+
+        existing = {key.lower() for key in headers}
+
+        referer = attribution.get("url") or DEFAULT_ATTRIBUTION_URL
+        if referer and "http-referer" not in existing:
+            headers["HTTP-Referer"] = referer
+
+        title = attribution.get("title") or DEFAULT_ATTRIBUTION_TITLE
+        if title and not any(h.lower() in existing for h in self._ATTRIBUTION_TITLE_HEADERS):
+            headers["X-OpenRouter-Title"] = title
+
+        categories = attribution.get("categories")
+        if categories and "x-openrouter-categories" not in existing:
+            if isinstance(categories, list):
+                categories = ",".join(str(c) for c in categories)
+            headers["X-OpenRouter-Categories"] = str(categories)
+
+        visibility = attribution.get("visibility")
+        if visibility == "hidden" and "x-openrouter-app-visibility" not in existing:
+            # Only meaningful alongside HTTP-Referer — and that header is always
+            # present by the time we get here (default or operator-supplied).
+            headers["X-OpenRouter-App-Visibility"] = "hidden"
+
+    async def _native_completion(self, request: InternalRequest) -> InternalResponse:
+        """Native Responses completion with OpenRouter cost extraction.
+
+        The base implementation carries the upstream body verbatim and parses
+        only usage; OpenRouter also reports the actual billed cost in
+        ``usage.cost``, which the billing pipeline reads from
+        ``provider_info["openrouter_cost"]``. Reusing the chat path's
+        post-processing keeps the two tiers' metadata identical.
+        """
+        result = await super()._native_completion(request)
+        body = result.provider_info.get("_raw_response_body")
+        if isinstance(body, dict):
+            result = self._post_process_chat_response(body, result)
+        return result
 
     def _stream_filter_line(self, line_str: str) -> str | None:
         if line_str.startswith(":"):

@@ -68,6 +68,10 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
     #: RESPONSES_URL is None (see above).
     RESPONSES_PATH = "/responses"
 
+    #: Whether captured client fingerprint headers are merged into upstream
+    #: requests. Adapters fronting a multi-provider router opt out.
+    FORWARD_CLIENT_HEADERS: bool = True
+
     # ------------------------------------------------------------------
     # Passthrough gate & veto
     # ------------------------------------------------------------------
@@ -155,10 +159,14 @@ class NativePassthroughChatBase(OpenAICompatibleBase):
 
         Adapters with their own ``_build_headers`` (e.g. KimiCodeAdapter,
         GLMBase's ``x-api-key``) call ``super()`` and inherit this merge.
+        Adapters fronting a multi-provider router set
+        ``FORWARD_CLIENT_HEADERS = False``: the fingerprint identifies the
+        client's original target, not the routed upstream.
         """
         headers = super()._build_headers(auth_header, auth_prefix)
-        merge_anthropic_client_headers(headers, get_anthropic_client_headers())
-        merge_passthrough_headers(headers, get_openai_client_headers())
+        if self.FORWARD_CLIENT_HEADERS:
+            merge_anthropic_client_headers(headers, get_anthropic_client_headers())
+            merge_passthrough_headers(headers, get_openai_client_headers())
         return headers
 
     # ------------------------------------------------------------------

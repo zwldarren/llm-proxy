@@ -45,7 +45,7 @@ def provider_record_to_read(provider) -> ProviderRead:
     """Convert a ProviderRecord to ProviderRead schema."""
     remaining, extracted = _extract_metadata_fields(
         provider.provider_metadata,
-        ["parameter_overrides", "endpoint_base_urls", "native_web_search"],
+        ["parameter_overrides", "endpoint_base_urls", "native_web_search", "app_attribution"],
     )
 
     endpoint_base_urls = extracted.get("endpoint_base_urls")
@@ -72,6 +72,7 @@ def provider_record_to_read(provider) -> ProviderRead:
         parameter_overrides=extracted.get("parameter_overrides", {}),
         endpoint_base_urls=endpoint_base_urls_typed,
         native_web_search=extracted.get("native_web_search", False),
+        app_attribution=extracted.get("app_attribution") or {},
         icon_url=provider.icon_url,
     )
 

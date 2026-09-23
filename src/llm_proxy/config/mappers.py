@@ -27,13 +27,14 @@ def map_provider_record(record: ProviderRecord) -> ProviderConfig:
     """Map a :class:`ProviderRecord` to a :class:`ProviderConfig`.
 
     Splits ``provider_metadata`` into the typed ``parameter_overrides``,
-    ``endpoint_base_urls``, and ``native_web_search`` fields, leaving the
-    remainder as ``metadata``.
+    ``endpoint_base_urls``, ``native_web_search`` and ``app_attribution``
+    fields, leaving the remainder as ``metadata``.
     """
     metadata = record.provider_metadata.copy() if record.provider_metadata else {}
     parameter_overrides = metadata.pop("parameter_overrides", {})
     endpoint_base_urls = metadata.pop("endpoint_base_urls", {})
     native_web_search = metadata.pop("native_web_search", False)
+    app_attribution = metadata.pop("app_attribution", {})
 
     return ProviderConfig(
         type=record.type,
@@ -49,6 +50,7 @@ def map_provider_record(record: ProviderRecord) -> ProviderConfig:
         parameter_overrides=parameter_overrides,
         endpoint_base_urls=endpoint_base_urls,
         native_web_search=native_web_search,
+        app_attribution=app_attribution if isinstance(app_attribution, dict) else {},
         metadata=metadata,
         definition_path=record.definition_path,
     )

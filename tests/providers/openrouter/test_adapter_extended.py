@@ -84,7 +84,12 @@ class TestOpenRouterRequestBody:
     """OpenRouter request body includes provider routing & reasoning params."""
 
     def test_reasoning_effort_passthrough(self, adapter):
-        """``reasoning_effort`` is included when set in OpenAISpecificParams."""
+        """``reasoning_effort`` reaches OpenRouter inside the unified object.
+
+        OpenRouter accepts ``reasoning: {effort, ...}`` on its Chat Completions
+        wire; emitting a bare top-level ``reasoning_effort`` instead would drop
+        the Responses-only fields (``mode``, ``context``, ``summary``).
+        """
         request = InternalRequest(
             model="openai/gpt-4o",
             conversation=ConversationContext(
@@ -93,7 +98,25 @@ class TestOpenRouterRequestBody:
             params=GenerationParams(openai=OpenAISpecificParams(reasoning_effort="high")),
         )
         body = adapter._build_request_body(request)
-        assert body["reasoning_effort"] == "high"
+        assert body["reasoning"] == {"effort": "high"}
+        assert "reasoning_effort" not in body
+
+    def test_reasoning_mode_passthrough(self, adapter):
+        """``reasoning.mode: pro`` survives the request builder."""
+        request = InternalRequest(
+            model="openai/gpt-5.6",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="Hello")])]
+            ),
+            params=GenerationParams(thinking=ThinkingConfig(type="enabled", effort="high")),
+            extra={"reasoning": {"mode": "pro", "context": "all_turns"}},
+        )
+        body = adapter._build_request_body(request)
+        assert body["reasoning"] == {
+            "effort": "high",
+            "mode": "pro",
+            "context": "all_turns",
+        }
 
     def test_provider_routing_via_extra_passthrough(self, adapter):
         """OpenRouter provider routing preferences passed via extra.
@@ -144,8 +167,8 @@ class TestOpenRouterRequestBody:
         assert assistant_msg["reasoning"] == "Previous reasoning"
         assert "reasoning_content" not in assistant_msg
 
-    def test_thinking_config_emits_reasoning_effort(self, adapter):
-        """ThinkingConfig is converted to reasoning_effort for OpenRouter."""
+    def test_thinking_config_emits_reasoning_object(self, adapter):
+        """ThinkingConfig is converted to the unified reasoning object."""
         request = InternalRequest(
             model="openai/gpt-4o",
             conversation=ConversationContext(
@@ -154,7 +177,7 @@ class TestOpenRouterRequestBody:
             params=GenerationParams(thinking=ThinkingConfig(type="enabled", effort="high")),
         )
         body = adapter._build_request_body(request)
-        assert body["reasoning_effort"] == "high"
+        assert body["reasoning"] == {"effort": "high"}
 
     def test_max_completion_tokens(self, adapter):
         """OpenRouter supports max_completion_tokens."""

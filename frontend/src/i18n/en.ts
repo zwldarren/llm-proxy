@@ -457,6 +457,23 @@ export default {
     geminiInteractionsHelp:
       "Route requests through Google's GA Interactions API (steps-based dialect) instead of the legacy generateContent API.",
     interactionsBadge: "Interactions",
+    appAttribution: "App Attribution",
+    appAttributionHelp:
+      "Identify this proxy as an application on OpenRouter's rankings and analytics. Leave blank to credit the LLM Proxy project.",
+    appAttributionUrl: "Application URL",
+    appAttributionUrlHelp:
+      "Sent as HTTP-Referer. OpenRouter requires it to create an app page and appear in rankings.",
+    appAttributionTitle: "Application name",
+    appAttributionCategories: "Marketplace categories (comma-separated, max 2)",
+    appAttributionVisibility: "Ranking visibility",
+    appAttributionVisibilityDefault: "Default (public)",
+    appAttributionVisibilityPublic: "Public",
+    appAttributionVisibilityHidden: "Hidden",
+    appAttributionUrlInvalid: "Enter an absolute http(s) URL.",
+    appAttributionHeaderInvalid:
+      "Use printable ASCII only — these values are sent as HTTP headers.",
+    appAttributionCategoriesMax: "OpenRouter accepts at most 2 categories.",
+    appAttributionInvalid: "Fix the app attribution fields before saving.",
     apiKeyEditHelp: "Leave blank to keep existing API key.",
     iconUrlHelp: "Optional URL to an icon image for this provider",
     createSuccess: "Provider created successfully.",

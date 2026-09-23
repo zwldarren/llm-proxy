@@ -47,6 +47,21 @@ _RESPONSES_ONLY_EXTRA_KEYS = frozenset(
     }
 )
 
+# The unified ``reasoning`` object (OpenRouter's cross-provider interface) is
+# accepted by some Chat Completions upstreams even though it is Responses-API-
+# shaped. Adapters that declare ``REASONING_OBJECT`` set
+# ``BuildContext.reasoning_object``, and these keys are then forwarded instead
+# of dropped with the rest of ``_RESPONSES_ONLY_EXTRA_KEYS``.
+_REASONING_OBJECT_KEYS = (
+    "effort",
+    "mode",
+    "context",
+    "summary",
+    "max_tokens",
+    "exclude",
+    "enabled",
+)
+
 
 class OpenAIRequestBuilder:
     """Builds OpenAI Chat Completions request bodies from InternalRequest.
@@ -78,9 +93,9 @@ class OpenAIRequestBuilder:
         body = self._build_params(body, request)
         body = self._build_response_format(body, request)
         body = self._build_tools(body, request, context)
-        body = self._build_thinking(body, request)
+        body = self._build_thinking(body, request, context)
         body = self._build_openai_params(body, request, context)
-        body = self._build_extra(body, request)
+        body = self._build_extra(body, request, context)
         body = self.normalize_reasoning_for_request(body, context.base_url, model=body.get("model"))
 
         return body
@@ -200,8 +215,17 @@ class OpenAIRequestBuilder:
         return body
 
     @staticmethod
-    def _build_thinking(body: dict[str, Any], request: InternalRequest) -> dict[str, Any]:
+    def _build_thinking(
+        body: dict[str, Any], request: InternalRequest, context: BuildContext
+    ) -> dict[str, Any]:
         from llm_proxy.core.thinking import convert_to_openai, resolve_thinking
+
+        if context.reasoning_object:
+            # Upstreams that accept the unified ``reasoning`` object get the
+            # effort folded into it by ``_build_reasoning_object`` instead of
+            # as a bare top-level ``reasoning_effort``: the two would
+            # otherwise both be sent and could disagree.
+            return body
 
         thinking = resolve_thinking(request)
         if thinking is not None:
@@ -274,8 +298,9 @@ class OpenAIRequestBuilder:
             body["prompt_cache_key"] = cache_key
         return body
 
-    @staticmethod
-    def _build_extra(body: dict[str, Any], request: InternalRequest) -> dict[str, Any]:
+    def _build_extra(
+        self, body: dict[str, Any], request: InternalRequest, context: BuildContext
+    ) -> dict[str, Any]:
         if request.n is not None:
             body["n"] = request.n
         if request.user is not None:
@@ -298,14 +323,53 @@ class OpenAIRequestBuilder:
                     "Dropping Responses-API-only extra keys %r from Chat Completions request body",
                     dropped,
                 )
+            reasoning_object = context.reasoning_object
             body.update(
                 {
                     k: v
                     for k, v in request.extra.items()
-                    if v is not None and k not in _RESPONSES_ONLY_EXTRA_KEYS
+                    if v is not None
+                    and k not in _RESPONSES_ONLY_EXTRA_KEYS
+                    # ``reasoning`` is rebuilt from scratch by
+                    # ``_build_reasoning_object`` so the derived effort and the
+                    # client-supplied fields are merged into one object.
+                    and not (k == "reasoning" and reasoning_object)
                 }
             )
+        if context.reasoning_object:
+            reasoning = self._build_reasoning_object(request)
+            if reasoning:
+                body["reasoning"] = reasoning
         return body
+
+    @staticmethod
+    def _build_reasoning_object(request: InternalRequest) -> dict[str, Any] | None:
+        """Build the unified ``reasoning`` object for Chat Completions upstreams.
+
+        Merges whatever the client sent (``mode``/``context``/``summary`` and
+        any explicit ``effort``) with the effort derived from the unified
+        thinking config, so a request that only carries
+        ``reasoning_effort``/``thinking`` still reaches the upstream as a
+        complete reasoning object.
+        """
+        from llm_proxy.core.thinking import resolve_thinking, thinking_config_to_reasoning_effort
+
+        reasoning: dict[str, Any] = {}
+        extra_reasoning = request.extra.get("reasoning")
+        if isinstance(extra_reasoning, dict):
+            for key in _REASONING_OBJECT_KEYS:
+                val = extra_reasoning.get(key)
+                if val is not None:
+                    reasoning[key] = val
+
+        if "effort" not in reasoning:
+            thinking = resolve_thinking(request)
+            if thinking is not None:
+                effort = thinking_config_to_reasoning_effort(thinking)
+                if effort is not None:
+                    reasoning["effort"] = effort
+
+        return reasoning or None
 
     # ------------------------------------------------------------------
     # Reasoning field handling

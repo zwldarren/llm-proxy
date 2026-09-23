@@ -62,6 +62,13 @@ class BaseAdapter(ABC):
     #: ``TestTierFieldParity`` fails if the tiers' field sets diverge.
     native_protocols: ClassVar[frozenset[str]] = frozenset()
 
+    #: Whether the upstream accepts the unified ``reasoning`` object
+    #: (``effort`` plus the Responses-only ``mode``/``context``/``summary``)
+    #: on its Chat Completions wire. Read by ``BaseHttpProvider._build_chat_context``
+    #: into ``BuildContext.reasoning_object``; adapters for multi-provider
+    #: routers (OpenRouter) declare True.
+    REASONING_OBJECT: ClassVar[bool] = False
+
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the adapter.
 

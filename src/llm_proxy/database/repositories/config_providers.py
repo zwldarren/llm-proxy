@@ -16,11 +16,13 @@ class ProviderRepository(BaseRepository):
     def _prepare_provider_data(self, **kwargs: Any) -> dict[str, Any]:
         """Prepare provider data for database storage.
 
-        Moves parameter_overrides, endpoint_base_urls, native_web_search into provider_metadata.
+        Moves parameter_overrides, endpoint_base_urls, native_web_search,
+        app_attribution into provider_metadata.
         """
         data = kwargs.copy()
         endpoint_base_urls = data.pop("endpoint_base_urls", {})
         native_web_search = data.pop("native_web_search", None)
+        app_attribution = data.pop("app_attribution", None)
 
         data = self._prepare_metadata_data(
             data,
@@ -34,6 +36,9 @@ class ProviderRepository(BaseRepository):
 
         if native_web_search is not None:
             data["provider_metadata"]["native_web_search"] = bool(native_web_search)
+
+        if app_attribution is not None:
+            data["provider_metadata"]["app_attribution"] = app_attribution
 
         return data
 
@@ -169,6 +174,8 @@ class ProviderRepository(BaseRepository):
             metadata_updates["endpoint_base_urls"] = kwargs.pop("endpoint_base_urls")
         if "native_web_search" in kwargs:
             metadata_updates["native_web_search"] = kwargs.pop("native_web_search")
+        if "app_attribution" in kwargs:
+            metadata_updates["app_attribution"] = kwargs.pop("app_attribution")
 
         if metadata_updates:
             metadata = provider.provider_metadata.copy() if provider.provider_metadata else {}

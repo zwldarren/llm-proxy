@@ -20,7 +20,8 @@ and let fallback and priority decide who answers.
 | **Gemini Interactions** | `gemini` type only: use Google's newer Interactions API instead of `generateContent` (`metadata.api_variant`). The provider list shows an **Interactions** badge |
 | **API version** | Not in the console dialog; set via API/DB only. Not applied by any adapter in v0.2.3 |
 | **Timeout** | Not in the console dialog; set via API/DB only. Not applied in v0.2.3 — upstream calls use a fixed 600 s read timeout (10 s connect) |
-| **Custom headers** | Extra headers sent upstream (e.g. tenant or organization headers) |
+| **Custom headers** | Extra headers sent upstream (e.g. tenant or organization headers). These win over any other source for the same header name |
+| **App Attribution** | `openrouter` type only: application URL (`HTTP-Referer`), name, marketplace categories and ranking visibility. Unset values fall back to crediting the LLM Proxy project |
 | **Endpoint base URLs** | Per-endpoint overrides; the URL is used as-is, without appending the endpoint path |
 | **Native web search** | Set when the upstream provides its own web-search tool; the proxy then passes `web_search` tools through instead of intercepting them |
 | **Priority** | Not shown in the console; provider-level `priority` exists only via API/DB and is ignored by selection — fallback order comes from each **model mapping's** priority (see [Models & Pricing](models.md#provider-priority-and-fallback)) |
@@ -53,7 +54,7 @@ variable makes stored keys undecryptable.
 | `minimax` | Chat Completions + native Anthropic/Responses | `https://api.minimax.io/v1` |
 | `qwen` | Chat Completions + native Anthropic/Responses | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | `qwen-intl` | Same as `qwen` (international keys are region-bound) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
-| `openrouter` | Chat Completions | `https://openrouter.ai/api/v1` |
+| `openrouter` | Chat Completions + native Responses | `https://openrouter.ai/api/v1` |
 | `chutes` | Chat Completions | `https://llm.chutes.ai/v1` |
 | `mistral` | Chat Completions | `https://api.mistral.ai/v1` |
 | `nanogpt` | Chat Completions | `https://nano-gpt.com/api/v1` |
@@ -66,6 +67,40 @@ provider metadata `native_passthrough: true`.
 
 Cost reporting: `openrouter` and `nanogpt` return their own cost figures, which the
 proxy records instead of computing them from token prices.
+
+### OpenRouter specifics
+
+OpenRouter is a router rather than a single upstream, so the adapter keeps a few
+of its request shapes intact:
+
+- **Responses passthrough.** `/v1/responses` clients are forwarded verbatim,
+  so `reasoning.mode` / `reasoning.context`, `provider` routing preferences,
+  `plugins`, `models` fallbacks and `usage` accounting all reach OpenRouter.
+  Chat Completions clients get the same fields through the request builder.
+  Set provider metadata `native_passthrough: false` to fall back to the
+  Chat Completions translation (e.g. if the routed model rejects a
+  Responses-only item type).
+- **Unified `reasoning` object.** The proxy sends `reasoning: {effort, mode,
+  context, summary, max_tokens, exclude, enabled}` instead of a bare
+  `reasoning_effort`, because `mode: "pro"` (and the other Responses-only
+  fields) have no top-level equivalent. OpenRouter only honours `mode: "pro"`
+  when it can route to OpenAI or Azure, and only for GPT-5.6 and newer.
+- **App attribution.** The **App Attribution** fields in the provider dialog
+  identify your deployment on OpenRouter's rankings: the application URL
+  (`HTTP-Referer`), display name (`X-OpenRouter-Title`), marketplace
+  categories and whether a newly created app is listed publicly. Unset fields
+  fall back to crediting the LLM Proxy project; headers set explicitly under
+  **Custom Headers** win over both. Values are validated as printable ASCII
+  (they become raw HTTP headers), the URL must be an absolute http(s) URL, and
+  at most two categories are accepted.
+- **Forwarded client headers.** Per-request OpenRouter control headers
+  (`X-OpenRouter-Metadata`, `X-OpenRouter-Cache`, `X-OpenRouter-Cache-TTL`,
+  `X-OpenRouter-Cache-Clear`) are forwarded from the client. Client Codex /
+  Claude Code fingerprint headers are *not* forwarded to a router.
+- **Model variants.** `:free`, `:nitro`, `:floor`, `:online`, `:thinking` and
+  the `*-pro` variants are passed through as plain model strings, but model
+  lookup is an exact name match — register each variant you want to expose as
+  its own model, or route to it with a model alias.
 
 ## Verifying a provider
 

@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from llm_proxy.config.types.model import ProviderSelectionStrategy, normalize_pricing_tiers
+from llm_proxy.config.types.provider import AppAttributionValidators
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.provider import ProviderModelInfo
 from llm_proxy.security.passwords import validate_password_strength
@@ -775,6 +776,28 @@ class ModelCatalogEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AppAttributionSchema(BaseModel, AppAttributionValidators):
+    """App-attribution identity for upstreams that track client applications.
+
+    OpenRouter reads these to credit usage to an application on its public
+    rankings; other upstreams ignore them. Unset values fall back to the
+    adapter defaults. Values become raw HTTP header values, so they are
+    validated as printable ASCII with an absolute http(s) URL and at most two
+    categories (see :class:`AppAttributionValidators`).
+    """
+
+    url: str | None = Field(None, description="Application URL (OpenRouter's HTTP-Referer header)")
+    title: str | None = Field(
+        None, description="Application display name (OpenRouter's X-OpenRouter-Title header)"
+    )
+    categories: list[str] = Field(
+        default_factory=list, description="Marketplace categories (OpenRouter only)"
+    )
+    visibility: Literal["public", "hidden"] | None = Field(
+        None, description="Public listing for a newly created app (OpenRouter only)"
+    )
+
+
 class ProviderBase(BaseModel, ValidatorMixin):
     """Base schema for Provider configuration."""
 
@@ -814,6 +837,10 @@ class ProviderBase(BaseModel, ValidatorMixin):
         description="When True, web_search tools pass through to the upstream provider "
         "for native handling instead of being intercepted by the proxy.",
     )
+    app_attribution: AppAttributionSchema = Field(
+        default_factory=AppAttributionSchema,
+        description="App-attribution identity for upstreams that track client applications",
+    )
 
 
 class ProviderCreate(ProviderBase):
@@ -850,6 +877,7 @@ class ProviderUpdate(BaseModel):
     endpoint_base_urls: dict[str, str] | None = None
     icon_url: str | None = None
     native_web_search: bool | None = None
+    app_attribution: AppAttributionSchema | None = None
 
 
 def mask_api_key(value: str | None) -> str:

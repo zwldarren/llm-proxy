@@ -928,6 +928,7 @@ class TestDeclarationPartition:
             "moonshot",
             "kimi-code",
             "xai",
+            "openrouter",
             "zai-coding",
             "zhipu",
             "zhipu-coding",

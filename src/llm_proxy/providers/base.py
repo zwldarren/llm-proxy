@@ -134,6 +134,15 @@ class BaseHttpProvider(BaseAdapter, ABC):
     #: embedding params override this; empty by default.
     _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset()
 
+    #: Chat request fields this upstream documents as supported even though
+    #: they arrive through ``InternalRequest.extra``. ``unknown_fields_policy``
+    #: (default ``ignore``) drops *every* key present in ``extra`` from the
+    #: built body, which is right for genuinely unknown fields but wrong for an
+    #: upstream that officially accepts them — a multi-provider router like
+    #: OpenRouter takes ``provider``/``models``/``plugins``/``usage`` and would
+    #: otherwise lose them silently. Declared per adapter; empty by default.
+    CHAT_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset()
+
     def __init__(self, config: AdapterConfig | None = None, **kwargs: Any):
         """Initialize shared transport, error translation, and retry policy.
 
@@ -510,6 +519,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
             # Provider-metadata kill switch for the response-side WIRE_REUSE
             # tier (same pattern as the native_passthrough kill switch).
             response_passthrough=bool(self._extra_config.get("response_passthrough", True)),
+            reasoning_object=self.REASONING_OBJECT,
         )
 
     # ------------------------------------------------------------------
@@ -599,6 +609,21 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
         if rt == RequestType.CHAT:
             ctx = self._build_chat_context(request)
+            # Fields this upstream documents as supported must not be stripped
+            # by the unknown-fields policy just because the client supplied
+            # them through ``extra`` (see CHAT_EXEMPT_EXTRA_KEYS).
+            chat_exempt = (exempt_keys or set()) | set(self.CHAT_EXEMPT_EXTRA_KEYS)
+            if self.REASONING_OBJECT:
+                # The unified reasoning object is emitted deliberately by the
+                # builder; the client's original ``reasoning`` dict rides
+                # ``extra`` and would otherwise be removed as "unknown".
+                chat_exempt.add("reasoning")
+
+            def _finalize_chat(body: dict[str, Any], merge_extra: bool = False) -> dict[str, Any]:
+                return self._finalize_body(
+                    body, request, exempt_keys=chat_exempt, merge_extra=merge_extra
+                )
+
             # The conversion seam decides the tier. Native passthrough
             # forwards the stashed raw body verbatim: it already carries
             # parameter overrides (ParameterOverrideStage re-parses and
@@ -611,12 +636,8 @@ class BaseHttpProvider(BaseAdapter, ABC):
             if plan.request_tier == ConversionTier.NATIVE_PASSTHROUGH:
                 return OutboundBody(json_body=prepare_native_body(self, request))
             if plan.request_tier == ConversionTier.WIRE_REUSE:
-                return OutboundBody(
-                    json_body=_finalize(prepare_wire_reuse_body(request, ctx), merge_extra=False)
-                )
-            return OutboundBody(
-                json_body=_finalize(self._build_chat_raw(request, ctx), merge_extra=False)
-            )
+                return OutboundBody(json_body=_finalize_chat(prepare_wire_reuse_body(request, ctx)))
+            return OutboundBody(json_body=_finalize_chat(self._build_chat_raw(request, ctx)))
 
         if rt == RequestType.EMBEDDING:
             # Adapters may declare native embedding parameters (e.g. Ollama's
