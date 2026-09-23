@@ -316,7 +316,7 @@ const modelRows = computed(() => {
             >
               <Inbox class="w-6 h-6 text-muted-foreground/60" aria-hidden="true" />
               <p class="text-sm text-muted-foreground">{{ t("apiKeys.noUsageData") }}</p>
-              <p class="text-xs text-muted-foreground/70">{{ t("apiKeys.noUsageDataHint") }}</p>
+              <p class="text-xs text-muted-foreground">{{ t("apiKeys.noUsageDataHint") }}</p>
             </div>
 
             <template v-else>

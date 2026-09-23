@@ -89,13 +89,15 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
     class="flex w-full flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-2.5"
   >
     <div
-      class="flex w-full min-w-0 flex-col items-start gap-3 sm:flex-1 sm:flex-row sm:items-center sm:gap-2.5"
+      class="flex w-full min-w-0 flex-col items-start gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-2.5"
     >
       <!-- Search input. The wrapper is a stacking context (isolate) so the icon's
            z-10 is scoped here — needed because the Input's backdrop-blur-sm
            establishes its own stacking context and would otherwise paint above
-           (and blur) the icon. -->
-      <div class="relative flex-1 min-w-0 w-full sm:w-auto group isolate">
+           (and blur) the icon. Width is capped at sm+: a filter field that
+           stretches to the full band width reads as the page's main control
+           instead of a refinement control. -->
+      <div class="relative isolate group w-full min-w-0 sm:w-80 lg:w-96">
         <Search
           class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-foreground pointer-events-none z-10"
         />
@@ -110,6 +112,7 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
       <Select v-if="typeFilterOptions && typeFilterOptions.length > 0" v-model="typeFilter">
         <SelectTrigger
           class="min-h-11 w-full shrink-0 border-border/40 bg-muted/15 hover:bg-muted/25 transition-colors duration-200 sm:w-40 focus:bg-background"
+          :aria-label="typeFilterLabel || t('common.filter')"
         >
           <SelectValue :placeholder="typeFilterLabel || t('common.filter')" />
         </SelectTrigger>
@@ -134,10 +137,11 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
       </Button>
     </div>
 
-    <!-- Results count indicator -->
+    <!-- Results count indicator — anchored to the band's trailing edge so the
+         control cluster stays compact on the left. -->
     <div
       v-if="resultCount !== undefined && totalCount !== undefined && resultCount !== totalCount"
-      class="hidden sm:block text-xs text-muted-foreground shrink-0 tabular-nums"
+      class="hidden sm:block sm:ml-auto text-xs text-muted-foreground shrink-0 tabular-nums"
       role="status"
       aria-live="polite"
     >
@@ -145,7 +149,10 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
     </div>
 
     <!-- Slot for additional controls (e.g., view toggle) -->
-    <div v-if="$slots.default" class="flex w-full justify-end sm:w-auto sm:shrink-0 sm:pl-1">
+    <div
+      v-if="$slots.default"
+      class="flex w-full justify-end sm:ml-auto sm:w-auto sm:shrink-0 sm:pl-1"
+    >
       <slot />
     </div>
   </div>

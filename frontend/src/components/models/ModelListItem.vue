@@ -70,7 +70,7 @@ const capabilities = computed(() => props.model.capabilities ?? []);
             <span class="text-border" aria-hidden="true">·</span>
             <span class="tabular-nums shrink-0">
               {{ formatContextLength(model.context_length) }}
-              <span class="font-sans lowercase tracking-wide text-muted-foreground/70">{{
+              <span class="font-sans lowercase tracking-wide text-muted-foreground">{{
                 t("models.contextShort")
               }}</span>
             </span>
@@ -79,7 +79,7 @@ const capabilities = computed(() => props.model.capabilities ?? []);
             <span class="text-border" aria-hidden="true">·</span>
             <span class="tabular-nums shrink-0">
               {{ formatContextLength(model.max_output_tokens) }}
-              <span class="font-sans lowercase tracking-wide text-muted-foreground/70">{{
+              <span class="font-sans lowercase tracking-wide text-muted-foreground">{{
                 t("models.outputShort")
               }}</span>
             </span>
@@ -103,7 +103,7 @@ const capabilities = computed(() => props.model.capabilities ?? []);
             </Tooltip>
             <span
               v-if="model.routing_assignments?.length"
-              class="font-mono text-[11px] text-muted-foreground/80"
+              class="font-mono text-[11px] text-muted-foreground"
             >
               {{ model.routing_assignments.join(", ") }}
             </span>

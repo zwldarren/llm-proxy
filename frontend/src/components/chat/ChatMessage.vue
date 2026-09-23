@@ -576,7 +576,7 @@ const handleReadAloud = async () => {
           <span>{{ message.name || message.tool_call_id }}()</span>
         </div>
         <pre
-          class="text-xs font-mono text-muted-foreground/80 whitespace-pre-wrap overflow-x-auto bg-muted/10 rounded-md p-3 border border-border/40"
+          class="text-xs font-mono text-muted-foreground whitespace-pre-wrap overflow-x-auto bg-muted/10 rounded-md p-3 border border-border/40"
           >{{
             typeof message.content === "string"
               ? formatToolArguments(message.content)
@@ -604,7 +604,7 @@ const handleReadAloud = async () => {
           </button>
           <div
             v-if="isThinkingExpanded"
-            class="mt-3 pt-3 border-t border-border/40 text-[12px] font-mono text-muted-foreground/80 whitespace-pre-wrap max-h-96 overflow-y-auto"
+            class="mt-3 pt-3 border-t border-border/40 text-[12px] font-mono text-muted-foreground whitespace-pre-wrap max-h-96 overflow-y-auto"
           >
             {{ message.reasoning_content }}
           </div>
@@ -627,7 +627,7 @@ const handleReadAloud = async () => {
                 › {{ toolCall.function.name }}()
               </div>
               <pre
-                class="text-xs font-mono rounded-md text-muted-foreground/80 whitespace-pre-wrap p-3 bg-background border border-border/40"
+                class="text-xs font-mono rounded-md text-muted-foreground whitespace-pre-wrap p-3 bg-background border border-border/40"
                 >{{ formatToolArguments(toolCall.function.arguments) }}</pre>
             </div>
           </div>
@@ -677,7 +677,7 @@ const handleReadAloud = async () => {
                 >
                 <span v-else class="text-[11px] font-mono text-status-success">COMPLETED</span>
               </div>
-              <div class="text-xs font-mono text-muted-foreground/80 pl-2">"{{ call.query }}"</div>
+              <div class="text-xs font-mono text-muted-foreground pl-2">"{{ call.query }}"</div>
             </div>
           </div>
         </div>
@@ -700,7 +700,7 @@ const handleReadAloud = async () => {
             <div v-for="(toolUse, index) in toolUseCalls" :key="toolUse.id ?? `tooluse-${index}`">
               <div class="text-[11px] font-mono text-action-blue mb-1">› {{ toolUse.name }}()</div>
               <pre
-                class="text-xs font-mono rounded-md text-muted-foreground/80 whitespace-pre-wrap p-3 bg-background border border-border/40"
+                class="text-xs font-mono rounded-md text-muted-foreground whitespace-pre-wrap p-3 bg-background border border-border/40"
                 >{{ JSON.stringify(toolUse.input, null, 2) }}</pre>
             </div>
           </div>

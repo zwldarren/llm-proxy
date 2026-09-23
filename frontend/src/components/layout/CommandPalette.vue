@@ -261,7 +261,7 @@ whenever(keys["meta_k"], () => {
                 {{ cmd.hint }}
               </span>
             </span>
-            <span class="text-[11px] text-muted-foreground/70 shrink-0">{{ cmd.group }}</span>
+            <span class="text-[11px] text-muted-foreground shrink-0">{{ cmd.group }}</span>
           </button>
         </template>
         <div v-if="loadingLogs" class="px-4 py-2 text-[11px] text-muted-foreground">

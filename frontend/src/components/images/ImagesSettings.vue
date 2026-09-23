@@ -80,7 +80,7 @@ const sizeOptions = [
               <div class="icon-container p-1.5">
                 <Sliders class="w-4 h-4 text-primary" />
               </div>
-              <h3 class="font-semibold text-sm">{{ t("images.settings") }}</h3>
+              <h2 class="font-semibold text-sm">{{ t("images.settings") }}</h2>
             </div>
             <div class="flex items-center gap-1">
               <Button
@@ -92,7 +92,13 @@ const sizeOptions = [
                 <Paintbrush class="w-3 h-3 mr-1" />
                 {{ t("chat.resetSettings") }}
               </Button>
-              <Button variant="ghost" size="icon" class="h-10 w-10" @click="close">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-10 w-10"
+                :aria-label="t('common.close')"
+                @click="close"
+              >
                 <X class="w-4 h-4" />
               </Button>
             </div>
@@ -106,7 +112,7 @@ const sizeOptions = [
               t("images.numberOfImages")
             }}</Label>
             <Select v-model="numberOfImages">
-              <SelectTrigger class="h-9">
+              <SelectTrigger class="h-9" :aria-label="t('images.numberOfImages')">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -118,7 +124,7 @@ const sizeOptions = [
           <div class="space-y-2">
             <Label class="text-xs font-medium text-muted-foreground">{{ t("images.size") }}</Label>
             <Select v-model="size">
-              <SelectTrigger class="h-9">
+              <SelectTrigger class="h-9" :aria-label="t('images.size')">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -134,7 +140,7 @@ const sizeOptions = [
               t("images.quality")
             }}</Label>
             <Select v-model="quality">
-              <SelectTrigger class="h-9">
+              <SelectTrigger class="h-9" :aria-label="t('images.quality')">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -153,7 +159,7 @@ const sizeOptions = [
               t("images.background")
             }}</Label>
             <Select v-model="background">
-              <SelectTrigger class="h-9">
+              <SelectTrigger class="h-9" :aria-label="t('images.background')">
                 <SelectValue :placeholder="t('images.backgroundAuto')" />
               </SelectTrigger>
               <SelectContent>
@@ -169,7 +175,7 @@ const sizeOptions = [
               t("images.moderation")
             }}</Label>
             <Select v-model="moderation">
-              <SelectTrigger class="h-9">
+              <SelectTrigger class="h-9" :aria-label="t('images.moderation')">
                 <SelectValue :placeholder="t('images.moderationAuto')" />
               </SelectTrigger>
               <SelectContent>
@@ -184,7 +190,7 @@ const sizeOptions = [
               t("images.outputFormat")
             }}</Label>
             <Select v-model="outputFormat">
-              <SelectTrigger class="h-9">
+              <SelectTrigger class="h-9" :aria-label="t('images.outputFormat')">
                 <SelectValue :placeholder="t('common.select')" />
               </SelectTrigger>
               <SelectContent>
@@ -201,6 +207,7 @@ const sizeOptions = [
             }}</Label>
             <NumberInput
               v-model.number="outputCompression"
+              :aria-label="t('images.outputCompression')"
               class="h-9"
               :placeholder="t('common.optional')"
             />
@@ -212,6 +219,7 @@ const sizeOptions = [
             }}</Label>
             <NumberInput
               v-model.number="partialImages"
+              :aria-label="t('images.partialImages')"
               class="h-9"
               :placeholder="t('common.optional')"
               min="0"

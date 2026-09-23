@@ -46,7 +46,7 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
           </span>
           / {{ formatCost(budget.budget_usd) }}
         </span>
-        <span class="text-[10px] text-muted-foreground/80">{{ budgetPeriodLabel }}</span>
+        <span class="text-[10px] text-muted-foreground">{{ budgetPeriodLabel }}</span>
       </div>
       <div
         class="mt-1.5 h-1.5 w-full max-w-48 rounded-full bg-muted overflow-hidden"

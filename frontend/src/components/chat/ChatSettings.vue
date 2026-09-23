@@ -432,7 +432,7 @@ const close = () => emit("update:open", false);
               <div class="icon-container p-1.5">
                 <Sliders class="w-4 h-4 text-primary" />
               </div>
-              <h3 class="font-semibold text-sm">{{ t("chat.advancedSettings") }}</h3>
+              <h2 class="font-semibold text-sm">{{ t("chat.advancedSettings") }}</h2>
             </div>
             <div class="flex items-center gap-1">
               <Button
@@ -444,7 +444,13 @@ const close = () => emit("update:open", false);
                 <Paintbrush class="w-3 h-3 mr-1" />
                 {{ t("chat.resetSettings") }}
               </Button>
-              <Button variant="ghost" size="icon" class="h-10 w-10" @click="close">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-10 w-10"
+                :aria-label="t('common.close')"
+                @click="close"
+              >
                 <X class="w-4 h-4" />
               </Button>
             </div>
@@ -487,11 +493,16 @@ const close = () => emit("update:open", false);
                 <Wand2 class="w-3.5 h-3.5 text-action-violet" />
                 {{ t("chat.systemPrompt") }}
               </Label>
-              <Switch v-model="localSystemPromptEnabled" class="scale-75" />
+              <Switch
+                v-model="localSystemPromptEnabled"
+                :aria-label="t('chat.systemPrompt')"
+                class="scale-75"
+              />
             </div>
             <div :class="{ 'opacity-50 pointer-events-none': !localSystemPromptEnabled }">
               <Textarea
                 v-model="localSystemPrompt"
+                :aria-label="t('chat.systemPrompt')"
                 placeholder="You are a helpful assistant..."
                 :disabled="!localSystemPromptEnabled"
                 class="min-h-20 text-sm bg-muted/30 border-border/50 resize-none"
@@ -519,7 +530,11 @@ const close = () => emit("update:open", false);
                 >
                   {{ localTemperature.toFixed(2) }}
                 </Badge>
-                <Switch v-model="localTemperatureEnabled" class="scale-75" />
+                <Switch
+                  v-model="localTemperatureEnabled"
+                  :aria-label="t('chat.temperature')"
+                  class="scale-75"
+                />
               </div>
             </div>
             <div
@@ -527,6 +542,7 @@ const close = () => emit("update:open", false);
               class="space-y-1.5"
             >
               <Slider
+                :aria-label="t('chat.temperature')"
                 :model-value="[localTemperature]"
                 @update:model-value="localTemperature = ($event as number[])[0] ?? 0"
                 :min="0"
@@ -571,12 +587,17 @@ const close = () => emit("update:open", false);
                 >
                   {{ t("chat.unlimited") }}
                 </Badge>
-                <Switch v-model="localMaxTokensEnabled" class="scale-75" />
+                <Switch
+                  v-model="localMaxTokensEnabled"
+                  :aria-label="t('chat.maxTokens')"
+                  class="scale-75"
+                />
               </div>
             </div>
             <div :class="{ 'opacity-50 pointer-events-none': !localMaxTokensEnabled }">
               <NumberInput
                 v-model.number="localMaxTokens"
+                :aria-label="t('chat.maxTokens')"
                 :placeholder="t('chat.maxTokensPlaceholder')"
                 :disabled="!localMaxTokensEnabled"
                 class="h-9 text-sm bg-muted/30 border-border/50 font-mono"
@@ -604,7 +625,7 @@ const close = () => emit("update:open", false);
                 >
                   {{ localTopP.toFixed(2) }}
                 </Badge>
-                <Switch v-model="localTopPEnabled" class="scale-75" />
+                <Switch v-model="localTopPEnabled" :aria-label="t('chat.topP')" class="scale-75" />
               </div>
             </div>
             <div
@@ -612,6 +633,7 @@ const close = () => emit("update:open", false);
               class="space-y-1.5"
             >
               <Slider
+                :aria-label="t('chat.topP')"
                 :model-value="[localTopP]"
                 @update:model-value="localTopP = ($event as number[])[0] ?? 0"
                 :min="0"
@@ -641,6 +663,7 @@ const close = () => emit("update:open", false);
                 </Badge>
                 <Switch
                   v-model="localFrequencyPenaltyEnabled"
+                  :aria-label="t('chat.frequencyPenalty')"
                   class="scale-75"
                   :disabled="!supportsFrequencyPenalty"
                 />
@@ -654,6 +677,7 @@ const close = () => emit("update:open", false);
               class="space-y-1.5"
             >
               <Slider
+                :aria-label="t('chat.frequencyPenalty')"
                 :model-value="[localFrequencyPenalty]"
                 @update:model-value="localFrequencyPenalty = ($event as number[])[0] ?? 0"
                 :min="-2"
@@ -688,6 +712,7 @@ const close = () => emit("update:open", false);
                 </Badge>
                 <Switch
                   v-model="localPresencePenaltyEnabled"
+                  :aria-label="t('chat.presencePenalty')"
                   class="scale-75"
                   :disabled="!supportsPresencePenalty"
                 />
@@ -701,6 +726,7 @@ const close = () => emit("update:open", false);
               class="space-y-1.5"
             >
               <Slider
+                :aria-label="t('chat.presencePenalty')"
                 :model-value="[localPresencePenalty]"
                 @update:model-value="localPresencePenalty = ($event as number[])[0] ?? 0"
                 :min="-2"
@@ -725,7 +751,11 @@ const close = () => emit("update:open", false);
                 <Brain class="w-3.5 h-3.5 text-action-rose" />
                 {{ t("chat.reasoningEffort") }}
               </Label>
-              <Switch v-model="localReasoningEffortEnabled" class="scale-75" />
+              <Switch
+                v-model="localReasoningEffortEnabled"
+                :aria-label="t('chat.reasoningEffort')"
+                class="scale-75"
+              />
             </div>
             <div :class="{ 'opacity-50 pointer-events-none': !localReasoningEffortEnabled }">
               <Select
@@ -733,7 +763,7 @@ const close = () => emit("update:open", false);
                 @update:model-value="localReasoningEffort = $event as ReasoningEffortValue"
                 :disabled="!localReasoningEffortEnabled"
               >
-                <SelectTrigger class="h-9 text-sm">
+                <SelectTrigger class="h-9 text-sm" :aria-label="t('chat.reasoningEffort')">
                   <SelectValue :placeholder="t('chat.reasoningEffortDefault')" />
                 </SelectTrigger>
                 <SelectContent>
@@ -758,13 +788,13 @@ const close = () => emit("update:open", false);
               <Volume2 class="w-3.5 h-3.5 text-muted-foreground" />
               {{ t("chat.ttsSettings") }}
             </Label>
-            <p class="text-[11px] text-muted-foreground/80">{{ t("chat.ttsPlaybackOnly") }}</p>
+            <p class="text-[11px] text-muted-foreground">{{ t("chat.ttsPlaybackOnly") }}</p>
 
             <!-- TTS Model Selection -->
             <div class="space-y-1">
               <Label class="text-[11px] text-muted-foreground">{{ t("chat.ttsModel") }}</Label>
               <Select v-model="localSpeechModel">
-                <SelectTrigger class="h-9 text-sm">
+                <SelectTrigger class="h-9 text-sm" :aria-label="t('chat.ttsModel')">
                   <SelectValue :placeholder="t('chat.selectModel')" />
                 </SelectTrigger>
                 <SelectContent>
@@ -785,7 +815,7 @@ const close = () => emit("update:open", false);
             <div class="space-y-1">
               <Label class="text-[11px] text-muted-foreground">{{ t("chat.speechVoice") }}</Label>
               <Select v-if="isBrowserTts" v-model="localSpeechVoice">
-                <SelectTrigger class="h-9 text-sm">
+                <SelectTrigger class="h-9 text-sm" :aria-label="t('chat.speechVoice')">
                   <SelectValue :placeholder="t('chat.selectVoice')" />
                 </SelectTrigger>
                 <SelectContent>
@@ -795,7 +825,7 @@ const close = () => emit("update:open", false);
                 </SelectContent>
               </Select>
               <Select v-else-if="isGptTts" v-model="localSpeechVoice">
-                <SelectTrigger class="h-9 text-sm">
+                <SelectTrigger class="h-9 text-sm" :aria-label="t('chat.speechVoice')">
                   <SelectValue :placeholder="t('chat.selectVoice')" />
                 </SelectTrigger>
                 <SelectContent>
@@ -808,6 +838,7 @@ const close = () => emit("update:open", false);
                 v-else
                 type="text"
                 v-model="localSpeechVoice"
+                :aria-label="t('chat.speechVoice')"
                 placeholder="e.g. alloy"
                 class="h-9 bg-background text-sm px-3 shadow-none"
               />
@@ -820,6 +851,7 @@ const close = () => emit("update:open", false);
                 <Input
                   type="number"
                   v-model.number="localSpeechSpeed"
+                  :aria-label="t('chat.speechSpeed')"
                   min="0.25"
                   max="4.0"
                   step="0.05"
@@ -881,6 +913,7 @@ const close = () => emit("update:open", false);
                     variant="ghost"
                     size="icon"
                     class="h-6 w-6 text-muted-foreground hover:text-destructive"
+                    :aria-label="t('common.delete')"
                     @click="removeCustomVariable(index)"
                   >
                     <Trash2 class="w-3.5 h-3.5" />
@@ -894,6 +927,7 @@ const close = () => emit("update:open", false);
                     }}</Label>
                     <Input
                       :model-value="v.key"
+                      :aria-label="t('chat.variableKey')"
                       @update:model-value="updateCustomVariable(index, 'key', $event as string)"
                       placeholder="e.g. seed"
                       class="h-7 text-xs bg-background"
@@ -909,7 +943,7 @@ const close = () => emit("update:open", false);
                         updateCustomVariableType(index, $event as CustomVariable['type'])
                       "
                     >
-                      <SelectTrigger class="h-7 text-xs">
+                      <SelectTrigger class="h-7 text-xs" :aria-label="t('chat.variableType')">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -928,6 +962,7 @@ const close = () => emit("update:open", false);
                   <Input
                     v-if="v.type !== 'boolean'"
                     :model-value="v.value"
+                    :aria-label="t('chat.variableValue')"
                     @update:model-value="updateCustomVariable(index, 'value', $event as string)"
                     :placeholder="v.type === 'number' ? 'e.g. 42' : 'e.g. high'"
                     class="h-7 text-xs bg-background"
@@ -937,7 +972,7 @@ const close = () => emit("update:open", false);
                     :model-value="v.value"
                     @update:model-value="updateCustomVariable(index, 'value', $event as string)"
                   >
-                    <SelectTrigger class="h-7 text-xs">
+                    <SelectTrigger class="h-7 text-xs" :aria-label="t('chat.variableValue')">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -960,6 +995,7 @@ const close = () => emit("update:open", false);
               </Label>
               <Switch
                 :model-value="localWebSearch.enabled"
+                :aria-label="t('chat.webSearch')"
                 @update:model-value="updateWebSearch('enabled', $event)"
                 class="scale-75"
               />
@@ -981,6 +1017,7 @@ const close = () => emit("update:open", false);
                   }}</Label>
                   <Switch
                     :model-value="localWebSearch.maxUses !== null"
+                    :aria-label="t('chat.webSearchMaxUses')"
                     @update:model-value="updateWebSearch('maxUses', $event ? 5 : null)"
                     class="scale-75"
                     :disabled="!supportsWebSearchMaxUses"
@@ -990,6 +1027,7 @@ const close = () => emit("update:open", false);
                   v-if="localWebSearch.maxUses !== null && supportsWebSearchMaxUses"
                   :model-value="localWebSearch.maxUses"
                   @update:model-value="updateWebSearch('maxUses', $event)"
+                  :aria-label="t('chat.webSearchMaxUses')"
                   min="1"
                   max="100"
                   step="1"
@@ -1015,7 +1053,7 @@ const close = () => emit("update:open", false);
                   "
                   :disabled="!supportsWebSearchContextSize"
                 >
-                  <SelectTrigger class="h-8 text-xs">
+                  <SelectTrigger class="h-8 text-xs" :aria-label="t('chat.webSearchContextSize')">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1040,6 +1078,7 @@ const close = () => emit("update:open", false);
                   }}</Label>
                   <Switch
                     :model-value="localWebSearch.includeSources"
+                    :aria-label="t('chat.webSearchIncludeSources')"
                     @update:model-value="updateWebSearch('includeSources', $event)"
                     class="scale-75"
                     :disabled="!supportsWebSearchSources"
@@ -1116,6 +1155,7 @@ const close = () => emit("update:open", false);
                     variant="ghost"
                     size="icon"
                     class="h-6 w-6 text-muted-foreground hover:text-destructive"
+                    :aria-label="t('common.delete')"
                     @click="removeTool(index)"
                   >
                     <Trash2 class="w-3.5 h-3.5" />
@@ -1187,7 +1227,7 @@ const close = () => emit("update:open", false);
               class="inline-flex items-center gap-1"
             >
               <span class="text-muted-foreground">{{ effectLabel(effect) }}</span>
-              <span class="text-muted-foreground/70" aria-hidden="true">→</span>
+              <span class="text-muted-foreground" aria-hidden="true">→</span>
               <span class="text-foreground/75">{{ effect.fields.join(", ") }}</span>
             </span>
           </div>

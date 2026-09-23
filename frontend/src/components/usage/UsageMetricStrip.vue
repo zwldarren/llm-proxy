@@ -120,9 +120,13 @@ const tier = computed(() => tierStyles[successTier.value]);
 
 <template>
   <section class="flex flex-col">
-    <!-- Primary metric strip: 6 flush cells, hairline-separated. No cards. -->
+    <!-- Primary metric strip: 6 flush cells, hairline-separated. No cards.
+         The page gutter lives on the cells, not the strip: padding the strip
+         and the cells would inset the first metric 16px past every section
+         title below it. `px-1 sm:px-2` + cell `px-3 sm:px-4` = the page's
+         16/24px gutter, so the strip shares a left edge with the bands under it. -->
     <div
-      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-y sm:divide-y-0 lg:divide-y-0 divide-border/60 border-b border-border/60 px-4 sm:px-6"
+      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-y sm:divide-y-0 lg:divide-y-0 divide-border/60 border-b border-border/60 px-1 sm:px-2"
     >
       <!-- Requests -->
       <div class="px-3 sm:px-4 py-3">
@@ -238,7 +242,7 @@ const tier = computed(() => tierStyles[successTier.value]);
 
     <!-- Secondary strip: 2 bar-metrics, flush. No nested boxes. -->
     <div
-      class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60 border-b border-border/60 px-4 sm:px-6"
+      class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60 border-b border-border/60 px-1 sm:px-2"
     >
       <!-- Token distribution -->
       <div class="px-3 sm:px-4 py-3">

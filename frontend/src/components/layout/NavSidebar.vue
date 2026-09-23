@@ -352,12 +352,12 @@ const prefetchRoute = (href: string) => {
     <SidebarHeader class="h-16 border-b border-sidebar-border justify-center relative">
       <div
         class="flex h-full items-center w-full transition-opacity duration-200"
-        :class="isCollapsed ? 'justify-center px-0' : 'justify-between px-4'"
+        :class="isCollapsed ? 'justify-center px-0' : 'justify-between px-2.5'"
       >
         <div class="flex items-center gap-2 min-w-0">
           <span
             v-if="!isCollapsed"
-            class="brand-heading text-lg font-semibold tracking-tight truncate animate-in fade-in duration-200"
+            class="brand-heading text-lg font-semibold tracking-tight shrink-0 animate-in fade-in duration-200"
           >
             {{ t("home.title") }}
           </span>
@@ -367,7 +367,7 @@ const prefetchRoute = (href: string) => {
             v-if="!isCollapsed && systemStore.info"
             to="/config/settings"
             :title="t('about.title')"
-            class="flex min-w-0 max-w-36 shrink items-center gap-1 rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/50 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
+            class="flex min-w-0 max-w-36 shrink items-center gap-1 overflow-hidden rounded-md border border-sidebar-border/60 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/70 transition-colors duration-200 hover:border-sidebar-border hover:text-sidebar-foreground animate-in fade-in duration-200"
           >
             <span class="truncate" :title="`v${systemStore.info.version}`">
               v{{ systemStore.info.version }}
@@ -419,7 +419,7 @@ const prefetchRoute = (href: string) => {
       <nav :aria-label="t('nav.mainNavigation')" class="flex flex-col gap-2">
         <SidebarGroup v-for="section in visibleSections" :key="section.title">
           <SidebarGroupLabel
-            class="text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/50"
+            class="text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70"
           >
             {{ t(section.title) }}
           </SidebarGroupLabel>
@@ -504,7 +504,7 @@ const prefetchRoute = (href: string) => {
                   <span class="truncate text-xs font-semibold text-sidebar-foreground">{{
                     authStore.username
                   }}</span>
-                  <span class="truncate text-[11px] text-sidebar-foreground/50 font-medium">
+                  <span class="truncate text-[11px] text-sidebar-foreground/70 font-medium">
                     {{ authStore.isAdmin ? t("team.admin") : t("team.viewer") }}
                   </span>
                 </div>

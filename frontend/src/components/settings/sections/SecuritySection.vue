@@ -32,7 +32,10 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.login_lockout_enabled" />
+        <Switch
+          v-model="state.login_lockout_enabled"
+          :aria-label="t('security.loginLockoutEnabled')"
+        />
       </template>
     </SettingsItem>
 
@@ -47,6 +50,7 @@ const { t } = useI18n();
         <NumberStepper
           :model-value="state.max_failed_login_attempts"
           :min="1"
+          :aria-label="t('security.maxFailedLoginAttempts')"
           @update:model-value="
             state.max_failed_login_attempts = $event ?? DEFAULT_SECURITY.max_failed_login_attempts
           "
@@ -66,6 +70,7 @@ const { t } = useI18n();
           :model-value="state.lockout_duration_seconds"
           :min="1"
           :suffix="t('security.seconds')"
+          :aria-label="t('security.lockoutDurationSeconds')"
           @update:model-value="
             state.lockout_duration_seconds = $event ?? DEFAULT_SECURITY.lockout_duration_seconds
           "
@@ -83,6 +88,7 @@ const { t } = useI18n();
         <NumberStepper
           :model-value="state.max_failed_api_key_attempts"
           :min="1"
+          :aria-label="t('security.maxFailedApiKeyAttempts')"
           @update:model-value="
             state.max_failed_api_key_attempts =
               $event ?? DEFAULT_SECURITY.max_failed_api_key_attempts
@@ -102,6 +108,7 @@ const { t } = useI18n();
           :model-value="state.api_key_lockout_duration_seconds"
           :min="1"
           :suffix="t('security.seconds')"
+          :aria-label="t('security.apiKeyLockoutDurationSeconds')"
           @update:model-value="
             state.api_key_lockout_duration_seconds =
               $event ?? DEFAULT_SECURITY.api_key_lockout_duration_seconds
@@ -122,6 +129,7 @@ const { t } = useI18n();
           :min="0"
           :step="50"
           :suffix="t('security.ms')"
+          :aria-label="t('security.authFailureDelayMs')"
           @update:model-value="
             state.auth_failure_delay_ms = $event ?? DEFAULT_SECURITY.auth_failure_delay_ms
           "
@@ -136,7 +144,7 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.rate_limit_disabled" />
+        <Switch v-model="state.rate_limit_disabled" :aria-label="t('security.rateLimitDisabled')" />
       </template>
     </SettingsItem>
 
@@ -153,7 +161,10 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.redis_rate_limit_fail_closed" />
+        <Switch
+          v-model="state.redis_rate_limit_fail_closed"
+          :aria-label="t('security.redisRateLimitFailClosed')"
+        />
       </template>
     </SettingsItem>
 
@@ -164,7 +175,7 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.hsts_enabled" />
+        <Switch v-model="state.hsts_enabled" :aria-label="t('security.hstsEnabled')" />
       </template>
     </SettingsItem>
 
@@ -181,6 +192,7 @@ const { t } = useI18n();
           :min="0"
           :step="86400"
           :suffix="t('security.seconds')"
+          :aria-label="t('security.hstsMaxAge')"
           @update:model-value="state.hsts_max_age = $event ?? DEFAULT_SECURITY.hsts_max_age"
         />
       </template>
@@ -197,6 +209,7 @@ const { t } = useI18n();
           :model-value="Math.floor(state.max_request_body_size_bytes / (1024 * 1024))"
           :min="0"
           suffix="MB"
+          :aria-label="t('security.maxRequestBodySize')"
           @update:model-value="
             state.max_request_body_size_bytes =
               ($event ?? DEFAULT_SECURITY.max_request_body_size_bytes / (1024 * 1024)) * 1024 * 1024

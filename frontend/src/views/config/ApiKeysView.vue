@@ -864,7 +864,7 @@ onMounted(() => {
                 />
               </div>
               <Select v-model="newKeyBudgetPeriod" :disabled="newKeyBudget === null">
-                <SelectTrigger class="w-32">
+                <SelectTrigger class="w-32" :aria-label="t('apiKeys.budget')">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -882,7 +882,7 @@ onMounted(() => {
             >
               <span>{{ t("apiKeys.resetDayPrefix") }}</span>
               <Select v-model="newKeyBudgetResetDay">
-                <SelectTrigger class="w-18 h-8 text-xs">
+                <SelectTrigger class="w-18 h-8 text-xs" :aria-label="t('apiKeys.resetDayPrefix')">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent class="max-h-56">
@@ -1021,7 +1021,7 @@ onMounted(() => {
                 />
               </div>
               <Select v-model="editBudgetPeriod" :disabled="editBudget === null">
-                <SelectTrigger class="w-32">
+                <SelectTrigger class="w-32" :aria-label="t('apiKeys.budget')">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1039,7 +1039,7 @@ onMounted(() => {
             >
               <span>{{ t("apiKeys.resetDayPrefix") }}</span>
               <Select v-model="editBudgetResetDay">
-                <SelectTrigger class="w-18 h-8 text-xs">
+                <SelectTrigger class="w-18 h-8 text-xs" :aria-label="t('apiKeys.resetDayPrefix')">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent class="max-h-56">

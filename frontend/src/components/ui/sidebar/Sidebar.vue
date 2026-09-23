@@ -93,8 +93,12 @@ const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
     >
       <div
         data-sidebar="sidebar"
+        role="complementary"
         class="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm relative"
       >
+        <!-- The rail is a landmark so the brand header and the account footer
+             (which sit outside the inner <nav>) are reachable when navigating
+             by landmark; the <nav> inside remains the navigation landmark. -->
         <slot />
       </div>
     </div>

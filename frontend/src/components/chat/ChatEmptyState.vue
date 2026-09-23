@@ -46,11 +46,11 @@ const templates = [
   <div class="flex-1 flex flex-col justify-center max-w-2xl mx-auto w-full py-16 px-4">
     <!-- Header — operational, no exclamation headline, no tracked mono eyebrow -->
     <div class="mb-8">
-      <h3
+      <h2
         class="text-2xl sm:text-3xl font-medium tracking-tight text-foreground brand-heading mb-2"
       >
         {{ t("chat.apiConsoleTitle") }}
-      </h3>
+      </h2>
       <p class="text-sm text-muted-foreground leading-relaxed max-w-md">
         {{ t("chat.apiConsoleSubtitle") }}
       </p>

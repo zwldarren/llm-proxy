@@ -414,10 +414,12 @@ watch(
       <header
         class="config-header-bar flex items-center justify-between px-4 sm:px-6 h-14 z-20 shrink-0"
       >
+        <h1 class="sr-only">{{ t("images.title") }}</h1>
         <div class="flex items-center gap-2">
           <!-- Model Selector -->
           <Select v-if="models.length > 0" v-model="selectedModel">
             <SelectTrigger
+              :aria-label="t('images.selectModel')"
               class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-3 transition-colors text-foreground flex items-center min-w-0 font-mono text-[11px]"
             >
               <div class="flex items-center gap-2 min-w-0">
@@ -428,7 +430,8 @@ watch(
                   <img
                     v-if="getModelIcon(selectedModel)"
                     :src="getModelIcon(selectedModel)!"
-                    :alt="selectedModel"
+                    alt=""
+                    aria-hidden="true"
                     :class="[
                       isMonoIcon(selectedModel) ? 'icon-mono' : null,
                       'w-3.5 h-3.5 object-contain',
@@ -457,7 +460,8 @@ watch(
                     <img
                       v-if="getModelIcon(modelOption.id)"
                       :src="getModelIcon(modelOption.id)!"
-                      :alt="modelOption.id"
+                      alt=""
+                      aria-hidden="true"
                       :class="[
                         isMonoIcon(modelOption.id) ? 'icon-mono' : null,
                         'w-3.5 h-3.5 object-contain',
@@ -486,7 +490,7 @@ watch(
                 v-if="isLoadingModels"
                 class="w-3 h-3 animate-spin shrink-0 text-muted-foreground/70"
               />
-              <span class="font-medium text-muted-foreground/70 truncate min-w-0 max-w-[200px]">
+              <span class="font-medium text-muted-foreground truncate min-w-0 max-w-[200px]">
                 {{ isLoadingModels ? `${t("common.loading")}…` : t("images.selectModel") }}
               </span>
             </div>
@@ -501,6 +505,7 @@ watch(
             disabled
           >
             <SelectTrigger
+              :aria-label="t('chat.protocolEndpoint')"
               class="border border-border/60 bg-transparent opacity-80 cursor-default shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground hidden sm:flex items-center font-mono text-[11px]"
             >
               <div class="flex items-center gap-2">
@@ -892,7 +897,7 @@ watch(
             />
             <span class="text-foreground/80">#{{ String(i + 1).padStart(2, "0") }}</span>
             <span>{{ endpointName(runEndpoint(run)) }}</span>
-            <span class="text-muted-foreground/70">{{ formatLatency(run.latencyMs) }}</span>
+            <span class="text-muted-foreground">{{ formatLatency(run.latencyMs) }}</span>
           </RunSpecimen>
         </SpecimenTray>
       </div>

@@ -86,7 +86,9 @@ const getShare = (requests: number): string => {
         </div>
       </div>
 
-      <ScrollArea class="h-85 w-full">
+      <!-- Height matches UsageByModel's scroll box so the two side-by-side
+           panels end on the same line at lg. -->
+      <ScrollArea class="h-90 w-full">
         <div v-if="sortedProviders.length > 0" class="px-4 sm:px-6 py-1 space-y-0.5">
           <div
             v-for="(item, index) in sortedProviders"

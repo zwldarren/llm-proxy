@@ -19,6 +19,8 @@ const props = withDefaults(
     step?: number;
     suffix?: string;
     id?: string;
+    /** Accessible name for the inner input (the visible row title is a plain div). */
+    ariaLabel?: string;
     placeholder?: string;
     class?: HTMLAttributes["class"];
   }>(),
@@ -28,6 +30,7 @@ const props = withDefaults(
     step: 1,
     suffix: "",
     id: undefined,
+    ariaLabel: undefined,
     placeholder: undefined,
     class: "",
   }
@@ -72,6 +75,7 @@ function onInput(value: string | number | null) {
   <InputGroup :class="cn('w-32', props.class)">
     <InputGroupInput
       :id="props.id"
+      :aria-label="props.ariaLabel"
       type="number"
       :min="props.min"
       :max="props.max"

@@ -131,6 +131,7 @@ const { t } = useI18n();
                 (editor.getProviderFieldValue(provider, 'timeout') as number | null) || null
               "
               :min="1"
+              :aria-label="t('tracing.timeout')"
               :placeholder="t('tracing.timeoutPlaceholder')"
               class="font-mono text-sm w-full bg-background"
               @update:model-value="

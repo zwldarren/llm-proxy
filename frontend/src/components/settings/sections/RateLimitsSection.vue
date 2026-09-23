@@ -82,6 +82,7 @@ const invalidBuckets = computed(() =>
       <template #action>
         <Input
           :model-value="drafts[bucket] ?? state.limits[bucket] ?? ''"
+          :aria-label="t(bucketLabels[bucket].title)"
           :placeholder="t('rateLimits.placeholder')"
           class="font-mono text-sm w-32 bg-background"
           @update:model-value="onLimitInput(bucket, $event)"

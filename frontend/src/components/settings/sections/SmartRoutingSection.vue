@@ -49,7 +49,7 @@ function setModeWeight(key: ModeKey, value: number) {
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.enabled" />
+        <Switch v-model="state.enabled" :aria-label="t('smartRouting.enable')" />
       </template>
     </SettingsItem>
 
@@ -90,7 +90,10 @@ function setModeWeight(key: ModeKey, value: number) {
         :error="loggingError"
       >
         <template #action>
-          <Switch v-model="loggingState.verbose_routing_logs" />
+          <Switch
+            v-model="loggingState.verbose_routing_logs"
+            :aria-label="t('smartRouting.routingDiagnostics')"
+          />
         </template>
       </SettingsItem>
 

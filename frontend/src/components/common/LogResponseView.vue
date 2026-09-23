@@ -360,11 +360,11 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
               <span class="text-[11px] font-mono text-muted-foreground uppercase tracking-wider">
                 #{{ emb.index }}
               </span>
-              <span class="text-[11px] font-mono text-muted-foreground/70">
+              <span class="text-[11px] font-mono text-muted-foreground">
                 {{ t("logs.dimensions") }}: {{ emb.fullLength }}
               </span>
             </div>
-            <div class="font-mono text-[11px] text-muted-foreground/80 break-all leading-relaxed">
+            <div class="font-mono text-[11px] text-muted-foreground break-all leading-relaxed">
               [{{ emb.vectorPreview.map((v) => v.toFixed(4)).join(", ")
               }}{{ emb.fullLength > emb.vectorPreview.length ? ", …" : "" }}]
             </div>
@@ -615,7 +615,7 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
         <!-- Image responses: never feed base64 into the JSON viewer (freeze) -->
         <div v-else-if="isImageResponse" class="text-xs text-muted-foreground p-3 space-y-1">
           <p>{{ t("logs.imageRawOmitted", { count: parsedResponse.images.length }) }}</p>
-          <p class="font-mono text-[11px] text-muted-foreground/70">
+          <p class="font-mono text-[11px] text-muted-foreground">
             {{ t("logs.viewImagesAbove") }}
           </p>
         </div>

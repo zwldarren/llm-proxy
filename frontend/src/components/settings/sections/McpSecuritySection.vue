@@ -82,7 +82,10 @@ const envKeyOverlap = computed(() => {
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.require_key_mcp_permissions" />
+        <Switch
+          v-model="state.require_key_mcp_permissions"
+          :aria-label="t('mcpSecurity.requireKeyMcpPermissions')"
+        />
       </template>
     </SettingsItem>
 

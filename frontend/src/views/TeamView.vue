@@ -672,7 +672,9 @@ onMounted(loadMembers);
                 :active-dir="sortDir"
                 @sort="onSort"
               />
-              <TableHead class="w-24 text-right"></TableHead>
+              <TableHead class="w-24 text-right">
+                <span class="sr-only">{{ t("common.actions") }}</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody class="row-stagger">
@@ -1129,7 +1131,7 @@ onMounted(loadMembers);
                 />
               </div>
               <Select v-model="budgetPeriod" :disabled="normalizedBudgetUsd === null">
-                <SelectTrigger class="w-32">
+                <SelectTrigger class="w-32" :aria-label="t('team.budget')">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1147,7 +1149,7 @@ onMounted(loadMembers);
             >
               <span>{{ t("apiKeys.resetDayPrefix") }}</span>
               <Select v-model="budgetResetDay">
-                <SelectTrigger class="w-18 h-8 text-xs">
+                <SelectTrigger class="w-18 h-8 text-xs" :aria-label="t('apiKeys.resetDayPrefix')">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent class="max-h-56">

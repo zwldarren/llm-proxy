@@ -157,7 +157,7 @@ const statusColorClass = computed(() => {
             </span>
             <div
               v-if="providerModelName && providerModelName !== log.model"
-              class="flex items-center gap-1 text-[11px] text-muted-foreground/80 font-mono"
+              class="flex items-center gap-1 text-[11px] text-muted-foreground font-mono"
               :title="t('logs.providerModel')"
             >
               <CornerDownRight class="size-3 text-muted-foreground/50 shrink-0" />
@@ -174,6 +174,8 @@ const statusColorClass = computed(() => {
                     isMonoProvider(log.provider) ? 'icon-mono' : null,
                     'size-2.5 object-contain',
                   ]"
+                  alt=""
+                  aria-hidden="true"
                 />
               </div>
               <span class="text-[11px] text-muted-foreground font-medium capitalize">{{
@@ -449,6 +451,8 @@ const statusColorClass = computed(() => {
                     isMonoProvider(log.provider || 'searxng') ? 'icon-mono' : null,
                     'size-2.5 object-contain',
                   ]"
+                  alt=""
+                  aria-hidden="true"
                 />
               </div>
               <span class="text-xs sm:text-sm font-bold text-foreground capitalize truncate">{{

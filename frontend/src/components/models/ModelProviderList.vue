@@ -39,7 +39,7 @@ const visibleProviders = computed(() => props.providers.slice(0, 3));
           </TooltipContent>
         </Tooltip>
       </template>
-      <span v-if="providers.length > 3" class="text-muted-foreground/70">
+      <span v-if="providers.length > 3" class="text-muted-foreground">
         +{{ providers.length - 3 }}
       </span>
     </template>

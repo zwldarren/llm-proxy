@@ -40,7 +40,7 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.log_input_output" />
+        <Switch v-model="state.log_input_output" :aria-label="t('settings.logInputOutput')" />
       </template>
     </SettingsItem>
 
@@ -52,7 +52,7 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.log_raw_stream" />
+        <Switch v-model="state.log_raw_stream" :aria-label="t('settings.logRawStream')" />
       </template>
     </SettingsItem>
 
@@ -68,6 +68,7 @@ const { t } = useI18n();
           :model-value="state.log_retention_days"
           :min="0"
           :suffix="t('settings.days')"
+          :aria-label="t('settings.logRetentionDays')"
           @update:model-value="state.log_retention_days = $event ?? 0"
         />
       </template>
@@ -81,7 +82,7 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.mask_sensitive_data" />
+        <Switch v-model="state.mask_sensitive_data" :aria-label="t('settings.maskSensitiveData')" />
       </template>
     </SettingsItem>
 
@@ -98,6 +99,7 @@ const { t } = useI18n();
           min="0"
           max="1"
           step="0.1"
+          :aria-label="t('settings.samplingRate')"
           class="font-mono text-sm w-28 bg-background"
           @update:model-value="state.sampling_rate = $event ?? 1"
         />
@@ -117,6 +119,7 @@ const { t } = useI18n();
           min="0"
           max="1"
           step="0.1"
+          :aria-label="t('settings.auditSamplingRate')"
           :placeholder="t('settings.inheritPlaceholder')"
           class="font-mono text-sm w-28 bg-background"
         />
@@ -134,6 +137,7 @@ const { t } = useI18n();
         <NumberInput
           v-model="state.audit_retention_days"
           min="0"
+          :aria-label="t('settings.auditRetentionDays')"
           :placeholder="t('settings.inheritPlaceholder')"
           class="font-mono text-sm w-28 bg-background"
         />
@@ -150,6 +154,7 @@ const { t } = useI18n();
       <template #action>
         <Input
           v-model="state.sensitive_keys"
+          :aria-label="t('settings.sensitiveKeys')"
           :placeholder="t('settings.sensitiveKeysPlaceholder')"
           class="font-mono text-sm w-64 bg-background"
         />

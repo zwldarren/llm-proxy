@@ -39,7 +39,7 @@ defineEmits<{ "update:modelValue": [value: boolean] }>();
       <div class="space-y-1 min-w-0">
         <Label class="text-sm font-medium text-foreground">
           {{ label }}
-          <code v-if="field" class="text-data text-[10px] text-muted-foreground/70 font-normal">
+          <code v-if="field" class="text-data text-[10px] text-muted-foreground font-normal">
             {{ field }}
           </code>
         </Label>

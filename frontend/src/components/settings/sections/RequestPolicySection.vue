@@ -36,7 +36,7 @@ const { t } = useI18n();
     >
       <template #action>
         <Select v-model="state.unknown_fields_policy">
-          <SelectTrigger class="w-44">
+          <SelectTrigger class="w-44" :aria-label="t('requestPolicy.unknownFieldsPolicy')">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -62,7 +62,7 @@ const { t } = useI18n();
     >
       <template #action>
         <Select v-model="state.unsupported_block_policy">
-          <SelectTrigger class="w-44">
+          <SelectTrigger class="w-44" :aria-label="t('requestPolicy.unsupportedBlockPolicy')">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

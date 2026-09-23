@@ -185,7 +185,7 @@ const statusLabel = computed(() => {
               {{ t("playground.requestPayload") }}
             </span>
             <JsonViewer v-if="payload" :data="payload" :deep="4" max-height="none" />
-            <p v-else class="text-code-xs text-muted-foreground/70">
+            <p v-else class="text-code-xs text-muted-foreground">
               {{ t("playground.payloadNotRetained") }}
             </p>
           </div>

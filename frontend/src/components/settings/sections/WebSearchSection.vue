@@ -64,7 +64,7 @@ watch(
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.enabled" />
+        <Switch v-model="state.enabled" :aria-label="t('settings.enableWebSearch')" />
       </template>
     </SettingsItem>
 
@@ -79,7 +79,7 @@ watch(
               }
             "
           >
-            <SelectTrigger class="w-[180px] h-9">
+            <SelectTrigger class="w-[180px] h-9" :aria-label="t('settings.searchProvider')">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -152,6 +152,7 @@ watch(
             </Label>
             <NumberInput
               v-model.number="state.searxng.timeout"
+              :aria-label="t('settings.searxng.timeout')"
               class="font-mono text-sm w-full bg-background"
             />
           </div>
@@ -165,6 +166,7 @@ watch(
               v-model.number="state.searxng.max_results"
               min="1"
               max="20"
+              :aria-label="t('settings.searxng.maxResults')"
               class="font-mono text-sm w-full bg-background"
             />
           </div>
@@ -208,6 +210,7 @@ watch(
             </Label>
             <NumberInput
               v-model.number="state.ollama.timeout"
+              :aria-label="t('settings.ollama.timeout')"
               class="font-mono text-sm w-full bg-background"
             />
           </div>
@@ -221,6 +224,7 @@ watch(
               v-model.number="state.ollama.max_results"
               min="1"
               max="10"
+              :aria-label="t('settings.ollama.maxResults')"
               class="font-mono text-sm w-full bg-background"
             />
           </div>

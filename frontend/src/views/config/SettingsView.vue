@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2 } from "@lucide/vue";
+import { Settings2, Trash2 } from "@lucide/vue";
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -7,6 +7,7 @@ import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import LoadingState from "@/components/common/LoadingState.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
 import NumberStepper from "@/components/settings/NumberStepper.vue";
 import PreferenceSection from "@/components/settings/sections/PreferenceSection.vue";
 import ServerLogsSection from "@/components/settings/sections/ServerLogsSection.vue";
@@ -483,40 +484,51 @@ onUnmounted(() => {
 <template>
   <AppLayout layoutMode="full">
     <template #header>
-      <div
-        class="flex-none px-4 sm:px-6 py-3 border-b border-border/40 bg-background z-10 flex items-center gap-3.5"
-      >
-        <h1 class="text-base font-semibold text-foreground tracking-tight">
-          {{ t("nav.settings") }}
-        </h1>
-        <div class="h-4 w-px bg-border/60"></div>
-        <div class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40">
-          <button
-            type="button"
-            class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-            :class="
-              activeSection === 'general'
-                ? 'bg-background text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            @click="switchTab('general')"
+      <header class="config-header-bar px-4 sm:px-6 py-4">
+        <!-- Capped to the same measure as the content column below so the band
+             and the section cards share both a left and a right edge. -->
+        <div class="w-full max-w-5xl">
+          <PageHeader
+            :title="t('settings.title')"
+            :description="t('settings.description')"
+            :icon="Settings2"
           >
-            {{ t("nav.general") }}
-          </button>
-          <button
-            type="button"
-            class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-            :class="
-              activeSection === 'advanced'
-                ? 'bg-background text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            @click="switchTab('advanced')"
-          >
-            {{ t("nav.advanced") }}
-          </button>
+            <template #actions>
+              <div
+                class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40"
+                :aria-label="t('settings.title')"
+              >
+                <button
+                  type="button"
+                  :aria-pressed="activeSection === 'general'"
+                  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                  :class="
+                    activeSection === 'general'
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="switchTab('general')"
+                >
+                  {{ t("nav.general") }}
+                </button>
+                <button
+                  type="button"
+                  :aria-pressed="activeSection === 'advanced'"
+                  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                  :class="
+                    activeSection === 'advanced'
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="switchTab('advanced')"
+                >
+                  {{ t("nav.advanced") }}
+                </button>
+              </div>
+            </template>
+          </PageHeader>
         </div>
-      </div>
+      </header>
     </template>
 
     <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 relative">
@@ -531,11 +543,7 @@ onUnmounted(() => {
         <!-- Content Area -->
         <div class="flex-1 min-w-0 space-y-8">
           <!-- General tab -->
-          <div
-            v-show="activeSection === 'general'"
-            id="interface"
-            class="space-y-6 mt-0 scroll-mt-20"
-          >
+          <div v-show="activeSection === 'general'" id="interface" class="space-y-6 mt-0">
             <PreferenceSection />
           </div>
 
@@ -543,7 +551,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="server"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <ServerLogsSection
               :auto-save="loggingAutoSave"
@@ -556,16 +564,12 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="webSearch"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <WebSearchSection :auto-save="webSearchAutoSave" />
           </div>
 
-          <div
-            v-show="activeSection === 'general'"
-            id="tracing"
-            class="space-y-6 mt-0 scroll-mt-20"
-          >
+          <div v-show="activeSection === 'general'" id="tracing" class="space-y-6 mt-0">
             <TracingSection
               :auto-save="tracingAutoSave"
               :editor="tracing"
@@ -577,7 +581,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="about"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <AboutSection />
           </div>
@@ -587,7 +591,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="requestPolicy"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <RequestPolicySection :auto-save="requestPolicyAutoSave" />
           </div>
@@ -596,7 +600,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="smartRouting"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <SmartRoutingSection
               :auto-save="smartRoutingAutoSave"
@@ -608,7 +612,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="providerSelection"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <ProviderSelectionSection :auto-save="providerSelectionAutoSave" />
           </div>
@@ -617,7 +621,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="retryFallback"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <ResilienceSection :auto-save="resilienceAutoSave" />
           </div>
@@ -626,7 +630,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="circuitBreaker"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <CircuitBreakerSection
               :auto-save="resilienceAutoSave"
@@ -643,7 +647,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="security"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <SecuritySection :auto-save="securityAutoSave" />
           </div>
@@ -652,7 +656,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="keepalive"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <KeepaliveSection :auto-save="keepaliveAutoSave" />
           </div>
@@ -661,7 +665,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="rateLimits"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <RateLimitsSection :auto-save="rateLimitsAutoSave" />
           </div>
@@ -670,7 +674,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="cors"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <CorsSection :auto-save="corsAutoSave" />
           </div>
@@ -679,7 +683,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="mcpSecurity"
-            class="space-y-6 mt-0 scroll-mt-20"
+            class="space-y-6 mt-0"
           >
             <McpSecuritySection
               :auto-save="mcpSecurityAutoSave"

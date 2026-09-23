@@ -26,7 +26,7 @@ withDefaults(
     class="text-data-xs inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted/50 px-2.5 py-0.5"
     :title="title ?? `${label}: ${value}`"
   >
-    <span class="shrink-0 lowercase text-muted-foreground/70">{{ label }}</span>
+    <span class="shrink-0 lowercase text-muted-foreground">{{ label }}</span>
     <span class="min-w-0 truncate font-semibold tabular-nums text-foreground/80">
       {{ value }}
     </span>

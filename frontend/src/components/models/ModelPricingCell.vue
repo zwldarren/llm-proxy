@@ -172,7 +172,7 @@ const hasAnyPricing = computed(
           <span class="text-data text-xs font-medium text-foreground">{{ fieldText ?? "—" }}</span>
           <Tooltip v-if="activeDims.length">
             <TooltipTrigger as-child>
-              <span class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground/70"
+              <span class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground"
                 >+{{ activeDims.length }}</span
               >
             </TooltipTrigger>
@@ -184,21 +184,21 @@ const hasAnyPricing = computed(
         <div v-else class="text-data text-xs leading-snug">
           <div class="flex items-baseline justify-end gap-1.5">
             <span
-              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/70"
+              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground"
               >{{ t("models.inputShort") }}</span
             >
             <span class="font-medium text-foreground">{{ inputText ?? "—" }}</span>
           </div>
           <div class="flex items-baseline justify-end gap-1.5">
             <span
-              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/70"
+              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground"
               >{{ t("models.outputShort") }}</span
             >
             <span class="font-medium text-foreground">{{ outputText ?? "—" }}</span>
           </div>
           <div class="flex items-baseline justify-end gap-1.5">
             <span
-              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground/70"
+              class="text-[10px] font-sans font-medium uppercase tracking-wider text-muted-foreground"
               >{{ t("models.cachedShort") }}</span
             >
             <span class="font-medium text-foreground">{{ cachedText ?? "—" }}</span>

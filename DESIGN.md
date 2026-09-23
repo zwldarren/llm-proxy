@@ -216,8 +216,9 @@ Muted but perceptible hues used to disambiguate HTTP methods, action types, and 
 
 ### Status Tints (Tertiary — semantic only)
 Desaturated but recognizable; always rendered as a tinted badge (`bg/15 text border/30`) with a text label and `role="status"`. Success and error pair across themes via light/dark aliases — `--status-success` resolves to `--success-light` in light mode and `--success-dark` in dark mode; `--status-error` resolves to `--error-light` / `--error-dark`. Surface code consumes the resolved `--status-*` token only: the light/dark halves exist to define it, never as a second encoding alongside it.
-- **Sage Mint** (`--status-success`): Dark `hsl(150 42% 58%)` `#67C194` / Light `hsl(150 42% 34%)` `#327B57`.
-- **Muted Gold** (`--status-warning`): Dark `hsl(32 42% 58%)` `#C19767` / Light `hsl(32 42% 42%)` `#986E3E`.
+- **Sage Mint** (`--status-success`): Dark `hsl(150 42% 58%)` `#67C194` / Light `hsl(150 42% 30%)` `#2C6D4D`.
+- **Muted Gold** (`--status-warning`): Dark `hsl(32 42% 58%)` `#C19767` / Light `hsl(32 42% 34%)` `#7B5932`.
+  (Light-mode status lightness is set by the AA requirement against the badge's own `/15` tint, not against the page alone — see §Colors.)
 - **Salmon Rose** (`--status-error`): Dark `hsl(4 52% 72%)` `#DD9792` / Light `hsl(4 45% 45%)` `#A6463F`.
 - **Neutral Slate** (`--status-unknown`): Dark `hsl(220 5% 58%)` `#8F9299` / Light `hsl(220 3% 45%)` `#6F7276`.
 - **Desaturated Rose** (`--destructive`): destructive actions and the logout hover. Dark `hsl(4 52% 52%)` `#C44D45` / Light `hsl(4 48% 46%)` `#AE453D`.

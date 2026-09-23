@@ -31,7 +31,7 @@ const { t } = useI18n();
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.enabled" />
+        <Switch v-model="state.enabled" :aria-label="t('keepalive.enabled')" />
       </template>
     </SettingsItem>
 
@@ -47,6 +47,7 @@ const { t } = useI18n();
           :model-value="state.grace_seconds"
           :min="1"
           :suffix="t('keepalive.seconds')"
+          :aria-label="t('keepalive.graceSeconds')"
           @update:model-value="state.grace_seconds = $event ?? DEFAULT_KEEPALIVE.grace_seconds"
         />
       </template>
@@ -64,6 +65,7 @@ const { t } = useI18n();
           :model-value="state.interval_seconds"
           :min="1"
           :suffix="t('keepalive.seconds')"
+          :aria-label="t('keepalive.intervalSeconds')"
           @update:model-value="
             state.interval_seconds = $event ?? DEFAULT_KEEPALIVE.interval_seconds
           "

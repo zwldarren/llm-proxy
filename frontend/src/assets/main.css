@@ -315,13 +315,16 @@
   --error-light: 4 45% 45%;
   --error-dark: 4 48% 32%;
 
-  /* Success colors - desaturated but recognizable forest green */
-  --success-light: 150 42% 34%;
+  /* Success colors - desaturated but recognizable forest green.
+   * Lightness is tuned for WCAG AA on the /15 status-badge tint, not just on
+   * the page: at 34% the badge text measured 4.06:1 against its own tint. */
+  --success-light: 150 42% 30%;
   --success-dark: 150 45% 27%;
 
   /* Status colors - muted but distinguishable */
   --status-success: var(--success-light);
-  --status-warning: 32 42% 42%;
+  /* 42% failed AA both on the page (4.38:1) and on the badge tint (3.65:1). */
+  --status-warning: 32 42% 34%;
   --status-error: var(--error-light);
   --status-unknown: 220 3% 45%;
 

@@ -476,13 +476,8 @@ const chartOptions = computed(() => ({
 
     <!-- Chart panel (flush, no Card) -->
     <div class="px-4 sm:px-6 pb-4 pt-3">
-      <div
-        v-if="dailyUsage.length > 0"
-        class="relative w-full h-72 md:h-85"
-        role="img"
-        :aria-label="chartAriaLabel"
-      >
-        <Bar :data="chartData" :options="chartOptions" />
+      <div v-if="dailyUsage.length > 0" class="relative w-full h-72 md:h-85">
+        <Bar :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
       </div>
       <div v-else class="py-12 text-center text-muted-foreground text-sm">
         {{ t("logs.noLogs") }}

@@ -303,6 +303,7 @@ const totalRetryCount = computed(() => {
           :variant="tab === 'audit' ? 'http' : 'status'"
           :status="getStatusType(log.status_code)"
           :http-method="tab === 'audit' ? log.method : undefined"
+          :mono="tab === 'proxy'"
           class="shrink-0"
         >
           <template v-if="tab === 'websearch'">{{ getWebSearchStatus(log) }}</template>
@@ -345,7 +346,7 @@ const totalRetryCount = computed(() => {
         ></span>
         <div
           v-if="primaryContent.subValue && primaryContent.subValue !== primaryContent.value"
-          class="flex items-center gap-1 text-xs text-muted-foreground/80 font-mono pl-1 mt-1"
+          class="flex items-center gap-1 text-xs text-muted-foreground font-mono pl-1 mt-1"
         >
           <CornerDownRight class="size-3 text-muted-foreground/50 shrink-0" />
           <span class="truncate">{{ primaryContent.subValue }}</span>
@@ -366,6 +367,8 @@ const totalRetryCount = computed(() => {
                 isMonoProvider(metric.provider) ? 'icon-mono' : null,
                 'size-3 object-contain',
               ]"
+              alt=""
+              aria-hidden="true"
               loading="lazy"
             />
           </div>

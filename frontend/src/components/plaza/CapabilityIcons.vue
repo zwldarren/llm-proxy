@@ -18,6 +18,7 @@ const { t } = useI18n();
     <Tooltip v-for="cap in capabilities" :key="cap">
       <TooltipTrigger as-child>
         <span
+          role="img"
           class="inline-flex items-center justify-center"
           tabindex="0"
           :aria-label="t(CAPABILITY_META[cap].labelKey)"

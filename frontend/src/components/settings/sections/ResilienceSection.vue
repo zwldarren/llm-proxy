@@ -33,6 +33,7 @@ const { t } = useI18n();
           :model-value="state.max_retries"
           :min="0"
           :max="10"
+          :aria-label="t('resilience.maxRetries')"
           @update:model-value="state.max_retries = $event ?? 0"
         />
       </template>
@@ -49,6 +50,7 @@ const { t } = useI18n();
           :model-value="state.max_fallback_attempts"
           :min="1"
           :max="20"
+          :aria-label="t('resilience.maxFallbackAttempts')"
           @update:model-value="state.max_fallback_attempts = $event ?? 1"
         />
       </template>

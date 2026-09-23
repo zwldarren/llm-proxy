@@ -214,7 +214,10 @@ const confirmDelete = async () => {
       </header>
     </template>
 
-    <!-- Toolbar band (flush) -->
+    <!-- Toolbar band (flush). One band holds the filter row and the provider
+         quick-filter chips: a second stacked band costs another hairline plus
+         its own padding for a single row of controls and splits one filter
+         reading order into two. -->
     <div v-if="models.length > 0 || isLoading" class="config-toolbar px-4 sm:px-6 py-3">
       <FilterBar
         v-model:search-query="searchQuery"
@@ -225,14 +228,12 @@ const confirmDelete = async () => {
       >
         <ViewToggle v-model="viewMode" />
       </FilterBar>
-    </div>
 
-    <!-- Provider quick-filter chips (flush sub-row) -->
-    <div
-      v-if="(models.length > 0 || isLoading) && availableProviders.length > 0"
-      class="flex-none bg-background border-b border-border/60 px-4 sm:px-6 py-2.5"
-    >
-      <div class="flex flex-wrap items-center gap-2 overflow-x-auto scrollbar-none">
+      <!-- Provider quick-filter chips -->
+      <div
+        v-if="availableProviders.length > 0"
+        class="mt-3 flex flex-wrap items-center gap-2 overflow-x-auto scrollbar-none"
+      >
         <span class="mr-1 text-[11px] text-muted-foreground shrink-0"
           >{{ t("models.filterByProvider") }}:</span
         >
@@ -560,7 +561,10 @@ const confirmDelete = async () => {
                           v-model="p.provider_name"
                           @update:model-value="p.provider_model_name = ''"
                         >
-                          <SelectTrigger class="h-8 text-xs bg-background">
+                          <SelectTrigger
+                            class="h-8 text-xs bg-background"
+                            :aria-label="`${t('models.provider')} ${index + 1}`"
+                          >
                             <SelectValue :placeholder="t('placeholders.selectProvider')" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1328,7 +1332,7 @@ const confirmDelete = async () => {
             <div class="grid gap-2">
               <Label>{{ t("models.provider") }} <span class="text-destructive">*</span></Label>
               <Select v-model="editingProviderData.provider_name">
-                <SelectTrigger class="h-9">
+                <SelectTrigger class="h-9" :aria-label="t('models.provider')">
                   <SelectValue :placeholder="t('placeholders.selectProvider')" />
                 </SelectTrigger>
                 <SelectContent>

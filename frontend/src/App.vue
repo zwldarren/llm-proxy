@@ -36,7 +36,9 @@ const handleRetry = () => {
 
 <template>
   <TooltipProvider>
-    <main role="main">
+    <!-- App-shell wrapper, not a landmark: the single <main> landmark lives in
+         SidebarInset (#main-content); auth views render their own <main>. -->
+    <div>
       <!-- Error Boundary -->
       <div
         v-if="error"
@@ -64,7 +66,7 @@ const handleRetry = () => {
           <component :is="Component" />
         </KeepAlive>
       </RouterView>
-    </main>
+    </div>
     <Toaster position="top-right" :expand="false" />
   </TooltipProvider>
 </template>

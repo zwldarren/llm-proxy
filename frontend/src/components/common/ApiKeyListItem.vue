@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { ApiKeyRead, ApiKeySpendSummary } from "@/services/api/apiKeys";
 import { getApiKeyStatus, isApiKeyExpired } from "@/utils/apiKeys";
-import { formatCost, formatDate } from "@/utils/format";
+import { formatCostWithPrecision, formatDate } from "@/utils/format";
 
 interface Props {
   apiKey: ApiKeyRead;
@@ -27,7 +27,7 @@ const emit = defineEmits<{
   viewUsage: [];
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const allowedModels = computed(() => props.apiKey.allowed_models ?? []);
 // Keys are three-state: null = allow all, [] = deny-all, non-empty = allowlist.
@@ -48,9 +48,9 @@ const spendLabel = computed(() => {
   const spend = props.spend;
   if (!spend) return null;
   if (spend.budget_usd !== null && spend.period_spend_usd !== null) {
-    return `${formatCost(spend.period_spend_usd)} / ${formatCost(spend.budget_usd)}`;
+    return `${formatCostWithPrecision(spend.period_spend_usd, 2, locale.value)} / ${formatCostWithPrecision(spend.budget_usd, 2, locale.value)}`;
   }
-  return formatCost(spend.total_spend_usd);
+  return formatCostWithPrecision(spend.total_spend_usd, 2, locale.value);
 });
 
 const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay(

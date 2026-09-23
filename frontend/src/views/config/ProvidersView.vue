@@ -201,7 +201,7 @@ onMounted(() => {
         >
           <TableHeader class="config-thead">
             <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
-              <TableHead class="w-12"></TableHead>
+              <TableHead class="w-12" aria-hidden="true"></TableHead>
               <SortableHead
                 :label="t('providers.name')"
                 sort-key="name"

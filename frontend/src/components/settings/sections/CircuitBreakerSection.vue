@@ -87,7 +87,7 @@ function formatCooldown(key: string): string {
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.circuit_breaker.enabled" />
+        <Switch v-model="state.circuit_breaker.enabled" :aria-label="t('circuitBreaker.enabled')" />
       </template>
     </SettingsItem>
 
@@ -99,12 +99,13 @@ function formatCooldown(key: string): string {
         :description="t('circuitBreaker.failureThresholdDescription')"
         :loading="pending"
         :error="error"
-        class="border-t border-border/40 bg-muted/5"
+        class="border-t border-border/45 bg-muted/5"
       >
         <template #action>
           <NumberStepper
             :model-value="state.circuit_breaker.failure_threshold"
             :min="1"
+            :aria-label="t('circuitBreaker.failureThreshold')"
             @update:model-value="state.circuit_breaker.failure_threshold = $event ?? 1"
           />
         </template>
@@ -116,7 +117,7 @@ function formatCooldown(key: string): string {
         :description="t('circuitBreaker.cooldownDescription')"
         :loading="pending"
         :error="error"
-        class="border-t border-border/40 bg-muted/5"
+        class="border-t border-border/45 bg-muted/5"
       >
         <template #action>
           <NumberStepper
@@ -124,13 +125,14 @@ function formatCooldown(key: string): string {
             :min="1"
             :step="5"
             suffix="s"
+            :aria-label="t('circuitBreaker.cooldown')"
             @update:model-value="state.circuit_breaker.cooldown_seconds = $event ?? 1"
           />
         </template>
       </SettingsItem>
 
       <!-- Circuit states list -->
-      <div class="border-t border-border/40 bg-muted/5">
+      <div class="border-t border-border/45 bg-muted/5">
         <div
           class="px-5.5 py-4 border-b border-border/40 bg-muted/10 flex items-center justify-between gap-4"
         >

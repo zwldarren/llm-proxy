@@ -74,9 +74,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
           <TooltipContent>{{ model.description }}</TooltipContent>
         </Tooltip>
         <!-- Meta line: providers · context -->
-        <span
-          class="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground/80"
-        >
+        <span class="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
           <span class="truncate">{{ model.provider_names.join(" · ") }}</span>
           <template v-if="model.context_length != null">
             <span class="text-border" aria-hidden="true">·</span>
@@ -116,7 +114,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
           <!-- Structured detail rows -->
           <dl class="grid gap-x-8 gap-y-2 sm:grid-cols-2 max-w-2xl">
             <div class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.capabilitiesLabel") }}
               </dt>
               <dd class="flex flex-wrap items-center gap-1.5">
@@ -137,13 +135,13 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
               </dd>
             </div>
             <div v-if="model.context_length != null" class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.context") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground">{{ exactContext }}</dd>
             </div>
             <div v-if="model.max_output_tokens != null" class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.maxOutput") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground">
@@ -151,7 +149,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
               </dd>
             </div>
             <div v-if="model.status" class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.status") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground lowercase">
@@ -159,19 +157,19 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
               </dd>
             </div>
             <div v-if="model.family" class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.family") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground">{{ model.family }}</dd>
             </div>
             <div v-if="model.knowledge" class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.knowledge") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground">{{ model.knowledge }}</dd>
             </div>
             <div v-if="model.release_date" class="flex items-baseline gap-2 text-xs">
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.releaseDate") }}
               </dt>
               <dd class="font-mono tabular-nums text-muted-foreground">{{ model.release_date }}</dd>
@@ -180,7 +178,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
               v-if="model.provider_names.length"
               class="flex items-baseline gap-2 text-xs sm:col-span-2"
             >
-              <dt class="shrink-0 text-[11px] text-muted-foreground/80 w-20">
+              <dt class="shrink-0 text-[11px] text-muted-foreground w-20">
                 {{ t("plaza.providers") }}
               </dt>
               <dd class="flex flex-wrap items-center gap-1.5">

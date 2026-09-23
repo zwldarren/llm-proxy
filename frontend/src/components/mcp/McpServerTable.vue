@@ -58,7 +58,7 @@ const onClear = () => emit("clearFilters");
   <Table class="table-modern" container-class="h-full border-0 bg-transparent rounded-none">
     <TableHeader class="config-thead">
       <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
-        <TableHead class="w-12"></TableHead>
+        <TableHead class="w-12" aria-hidden="true"></TableHead>
         <SortableHead
           :label="t('mcpServers.name')"
           sort-key="name"

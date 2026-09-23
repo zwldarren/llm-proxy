@@ -30,7 +30,7 @@ const changeLanguage = async (langCode: string) => {
       }
     "
   >
-    <SelectTrigger class="w-[140px] h-9">
+    <SelectTrigger class="w-[140px] h-9" :aria-label="t('settings.language')">
       <div class="flex items-center gap-2">
         <Languages class="size-4 text-muted-foreground" />
         <SelectValue :placeholder="t('settings.language')" />

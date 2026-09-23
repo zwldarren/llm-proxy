@@ -73,7 +73,7 @@ function collapseAll() {
       <span class="text-xs font-bold text-muted-foreground uppercase tracking-wider">
         {{ t("logs.toolsOffered") }}
       </span>
-      <span class="text-[11px] font-mono text-muted-foreground/70">({{ tools.length }})</span>
+      <span class="text-[11px] font-mono text-muted-foreground">({{ tools.length }})</span>
 
       <Badge
         v-if="toolChoice"

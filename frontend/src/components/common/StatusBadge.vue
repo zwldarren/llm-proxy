@@ -7,12 +7,15 @@ interface Props {
   variant?: "status" | "http" | "default";
   status?: "success" | "warning" | "error" | "unknown";
   httpMethod?: string;
+  /** Set the slot in the mono voice (IBM Plex Mono, tabular-nums) for numeric/technical tokens. */
+  mono?: boolean;
   class?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   variant: "default",
   status: "unknown",
+  mono: false,
   class: "",
 });
 
@@ -48,12 +51,19 @@ const statusClasses = computed(() => {
 
   return "";
 });
+
+// DESIGN.md Mono-Data Rule: numeric/technical tokens (status codes, HTTP
+// methods) render in the mono voice; word labels keep the sans voice.
+// `variant="http"` is mono by definition since its content is an HTTP method.
+const monoClasses = computed(() =>
+  props.mono || props.variant === "http" ? "font-mono tabular-nums" : "font-medium"
+);
 </script>
 
 <template>
   <Badge
     variant="outline"
-    :class="cn(statusClasses, 'px-2 py-0.5 text-xs font-medium max-w-full', props.class)"
+    :class="cn(statusClasses, 'px-2 py-0.5 text-xs max-w-full', monoClasses, props.class)"
     role="status"
   >
     <span class="truncate"><slot /></span>

@@ -898,17 +898,18 @@ const auditListAction = (log: LogListItemType): string => {
           aria-live="polite"
         />
 
-        <!-- Scrollable data display -->
-        <div v-else class="flex-1 overflow-auto">
+        <!-- Scrollable data display: the table owns the scroll axis so its
+             header can pin; the mobile card list keeps its own scroller. -->
+        <div v-else class="flex-1 overflow-hidden">
           <!-- Desktop view -->
           <template v-if="isDesktop">
             <!-- Proxy Logs Table -->
             <Table
               v-if="activeTab === 'proxy'"
               class="table-modern"
-              container-class="border-0 bg-transparent rounded-none"
+              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
-              <TableHeader>
+              <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs hidden md:table-cell">{{ t("logs.apiKey") }}</TableHead>
@@ -927,7 +928,9 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableHead class="table-cell-mono text-right hidden md:table-cell">{{
                     t("logs.cost")
                   }}</TableHead>
-                  <TableHead class="w-36"></TableHead>
+                  <TableHead class="w-36">
+                    <span class="sr-only">{{ t("common.actions") }}</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -969,7 +972,7 @@ const auditListAction = (log: LogListItemType): string => {
                       </Badge>
                       <div
                         v-if="getProviderModelName(log) && getProviderModelName(log) !== log.model"
-                        class="flex items-center gap-1 text-[11px] text-muted-foreground/80 font-mono pl-1"
+                        class="flex items-center gap-1 text-[11px] text-muted-foreground font-mono pl-1"
                         :title="t('logs.providerModel')"
                       >
                         <CornerDownRight class="w-3 h-3 text-muted-foreground/50 shrink-0" />
@@ -989,6 +992,8 @@ const auditListAction = (log: LogListItemType): string => {
                             isMonoProvider(log.provider || '') ? 'icon-mono' : null,
                             'w-3 h-3 object-contain',
                           ]"
+                          alt=""
+                          aria-hidden="true"
                           loading="lazy"
                         />
                       </div>
@@ -1000,7 +1005,7 @@ const auditListAction = (log: LogListItemType): string => {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <StatusBadge variant="status" :status="getStatusType(log.status_code)">
+                    <StatusBadge variant="status" :status="getStatusType(log.status_code)" mono>
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
@@ -1060,16 +1065,15 @@ const auditListAction = (log: LogListItemType): string => {
                           </Tooltip>
                         </template>
                       </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        class="h-11 w-11 min-h-11 min-w-11"
-                        :aria-label="`${t('logs.viewDetails')} - ${log.model || log.request_id}`"
-                        :disabled="isLoadingDetail"
-                        @click.stop="handleViewDetails(log)"
+                      <!-- Visual/mouse affordance of the row control: the row
+                           itself is the interactive element, so this is a
+                           non-interactive span and clicks bubble to it. -->
+                      <span
+                        class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
+                        :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
                       >
                         <Eye class="size-5 text-muted-foreground" />
-                      </Button>
+                      </span>
                     </div>
                   </TableCellActions>
                 </TableRow>
@@ -1080,9 +1084,9 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-else-if="activeTab === 'audit'"
               class="table-modern"
-              container-class="border-0 bg-transparent rounded-none"
+              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
-              <TableHeader>
+              <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.action") }}</TableHead>
@@ -1097,7 +1101,9 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableHead class="table-cell-mono hidden lg:table-cell">{{
                     t("logs.latency")
                   }}</TableHead>
-                  <TableHead class="w-16"></TableHead>
+                  <TableHead class="w-16">
+                    <span class="sr-only">{{ t("common.actions") }}</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1143,7 +1149,7 @@ const auditListAction = (log: LogListItemType): string => {
                     <span :title="log.endpoint" class="break-all">{{ log.endpoint }}</span>
                   </TableCellCode>
                   <TableCell>
-                    <StatusBadge variant="status" :status="getStatusType(log.status_code)">
+                    <StatusBadge variant="status" :status="getStatusType(log.status_code)" mono>
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
@@ -1151,16 +1157,15 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      class="h-11 w-11 min-h-11 min-w-11"
-                      :aria-label="`${t('logs.viewDetails')} - ${log.endpoint || log.request_id}`"
-                      :disabled="isLoadingDetail"
-                      @click.stop="handleViewDetails(log)"
+                    <!-- Visual/mouse affordance of the row control: the row
+                         itself is the interactive element, so this is a
+                         non-interactive span and clicks bubble to it. -->
+                    <span
+                      class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
+                      :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
                     >
                       <Eye class="size-5 text-muted-foreground" />
-                    </Button>
+                    </span>
                   </TableCellActions>
                 </TableRow>
               </TableBody>
@@ -1170,9 +1175,9 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-else-if="activeTab === 'mcp'"
               class="table-modern"
-              container-class="border-0 bg-transparent rounded-none"
+              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
-              <TableHeader>
+              <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.mcpServer") }}</TableHead>
@@ -1186,7 +1191,9 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableHead class="table-cell-mono hidden lg:table-cell">{{
                     t("logs.duration")
                   }}</TableHead>
-                  <TableHead class="w-16"></TableHead>
+                  <TableHead class="w-16">
+                    <span class="sr-only">{{ t("common.actions") }}</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1220,7 +1227,7 @@ const auditListAction = (log: LogListItemType): string => {
                     }}</span>
                   </TableCellCode>
                   <TableCell>
-                    <StatusBadge variant="status" :status="getStatusType(log.status_code)">
+                    <StatusBadge variant="status" :status="getStatusType(log.status_code)" mono>
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
@@ -1228,16 +1235,15 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      class="h-11 w-11 min-h-11 min-w-11"
-                      :aria-label="`${t('logs.viewDetails')} - ${getMcpServer(log) || log.request_id}`"
-                      :disabled="isLoadingDetail"
-                      @click.stop="handleViewDetails(log)"
+                    <!-- Visual/mouse affordance of the row control: the row
+                         itself is the interactive element, so this is a
+                         non-interactive span and clicks bubble to it. -->
+                    <span
+                      class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
+                      :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
                     >
                       <Eye class="size-5 text-muted-foreground" />
-                    </Button>
+                    </span>
                   </TableCellActions>
                 </TableRow>
               </TableBody>
@@ -1247,9 +1253,9 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-else-if="activeTab === 'websearch'"
               class="table-modern"
-              container-class="border-0 bg-transparent rounded-none"
+              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
-              <TableHeader>
+              <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.webSearchQuery") }}</TableHead>
@@ -1263,7 +1269,9 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableHead class="table-cell-mono hidden lg:table-cell">{{
                     t("logs.duration")
                   }}</TableHead>
-                  <TableHead class="w-16"></TableHead>
+                  <TableHead class="w-16">
+                    <span class="sr-only">{{ t("common.actions") }}</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1299,6 +1307,8 @@ const auditListAction = (log: LogListItemType): string => {
                             isMonoProvider(log.provider || '') ? 'icon-mono' : null,
                             'w-3 h-3 object-contain',
                           ]"
+                          alt=""
+                          aria-hidden="true"
                           loading="lazy"
                         />
                         <Globe v-else class="w-2.5 h-2.5 text-muted-foreground" />
@@ -1320,16 +1330,15 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      class="h-11 w-11 min-h-11 min-w-11"
-                      :aria-label="`${t('logs.viewDetails')} - ${getWebSearchQuery(log) || log.request_id}`"
-                      :disabled="isLoadingDetail"
-                      @click.stop="handleViewDetails(log)"
+                    <!-- Visual/mouse affordance of the row control: the row
+                         itself is the interactive element, so this is a
+                         non-interactive span and clicks bubble to it. -->
+                    <span
+                      class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
+                      :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
                     >
                       <Eye class="size-5 text-muted-foreground" />
-                    </Button>
+                    </span>
                   </TableCellActions>
                 </TableRow>
               </TableBody>
@@ -1338,7 +1347,7 @@ const auditListAction = (log: LogListItemType): string => {
 
           <!-- Mobile view -->
           <template v-else>
-            <div class="flex flex-col gap-2 p-3">
+            <div class="flex h-full flex-col gap-2 overflow-y-auto p-3">
               <LogListItem
                 v-for="log in logs"
                 :key="log.request_id"

@@ -75,6 +75,16 @@ onActivated(triggerReveal);
   <SidebarProvider
     class="group/sidebar-wrapper flex h-screen overflow-hidden bg-background font-sans text-foreground"
   >
+    <!-- Skip to main content link for keyboard users. First in the DOM so it is
+         the first tab stop from the top of the page; visually hidden until
+         focused (fixed overlay, so position in the flex layout is irrelevant). -->
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-100 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+    >
+      {{ t("a11y.skipToContent") }}
+    </a>
+
     <NavSidebar />
 
     <!-- Global Cmd/Ctrl+K command palette (routes + recent logs) -->
@@ -85,14 +95,6 @@ onActivated(triggerReveal);
       tabindex="-1"
       class="bg-muted/5 relative flex flex-1 flex-col overflow-hidden"
     >
-      <!-- Skip to main content link for keyboard users -->
-      <a
-        href="#main-content"
-        class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-100 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        {{ t("a11y.skipToContent") }}
-      </a>
-
       <!-- Mobile header -->
       <div
         class="md:hidden flex-none border-b border-border bg-background z-10 h-16 flex items-center px-4 gap-3"

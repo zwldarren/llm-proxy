@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { TeamMember } from "@/services/api/team";
-import { formatCost } from "@/utils/format";
+import { formatCostWithPrecision } from "@/utils/format";
 
 interface Props {
   member: TeamMember;
@@ -11,7 +11,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // Mirrors ApiKeySpendCell, but for the member's account-level budget envelope:
 // spend aggregates all of the member's keys within the current window.
@@ -30,9 +30,9 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
   <div v-if="member.budget_usd !== null" class="min-w-28" :title="spendTitle">
     <div class="flex items-center gap-1.5 text-data text-muted-foreground">
       <span :class="{ 'text-destructive font-medium': isBudgetExceeded }">
-        {{ formatCost(member.budget_spend_usd) }}
+        {{ formatCostWithPrecision(member.budget_spend_usd ?? 0, 2, locale) }}
       </span>
-      <span>/ {{ formatCost(member.budget_usd) }}</span>
+      <span>/ {{ formatCostWithPrecision(member.budget_usd, 2, locale) }}</span>
     </div>
     <div class="mt-1 flex items-center gap-2">
       <div
@@ -49,7 +49,7 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
           :style="{ transform: `scaleX(${budgetRatio ?? 0})` }"
         />
       </div>
-      <span class="text-[10px] text-muted-foreground/80">
+      <span class="text-[10px] text-muted-foreground">
         {{ budgetPeriodLabel }}
       </span>
     </div>

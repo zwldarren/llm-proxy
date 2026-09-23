@@ -23,9 +23,9 @@ withDefaults(defineProps<Props>(), {
     class="group transition-colors duration-200"
     :class="[
       variant === 'row'
-        ? 'flex flex-row items-center justify-between gap-6 py-4.5 px-5.5'
+        ? 'flex flex-col items-stretch gap-3 py-4.5 px-5.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6'
         : variant === 'nested'
-          ? 'flex flex-row items-center justify-between gap-6 py-3.5 px-5.5 pl-6 sm:pl-11'
+          ? 'flex flex-col items-stretch gap-3 py-3.5 px-5.5 pl-6 sm:pl-11 sm:flex-row sm:items-center sm:justify-between sm:gap-6'
           : 'flex flex-col gap-3.5 py-4.5 px-5.5',
       'hover:bg-muted/12 first:rounded-t-xl last:rounded-b-xl',
     ]"
@@ -56,7 +56,9 @@ withDefaults(defineProps<Props>(), {
     <div
       class="shrink-0 flex items-center gap-2"
       :class="[
-        variant === 'full-width' ? 'w-full justify-end' : '',
+        variant === 'full-width'
+          ? 'w-full justify-end'
+          : 'w-full justify-start sm:w-auto sm:justify-end',
         loading ? 'opacity-70 pointer-events-none' : '',
       ]"
     >

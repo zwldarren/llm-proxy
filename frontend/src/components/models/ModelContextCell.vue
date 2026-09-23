@@ -25,7 +25,7 @@ const { t } = useI18n();
         </template>
         <template v-if="maxOutputTokens != null">
           {{ formatContextLength(maxOutputTokens) }}
-          <span class="lowercase tracking-wide text-muted-foreground/70">{{ t("plaza.out") }}</span>
+          <span class="lowercase tracking-wide text-muted-foreground">{{ t("plaza.out") }}</span>
         </template>
       </span>
     </TooltipTrigger>

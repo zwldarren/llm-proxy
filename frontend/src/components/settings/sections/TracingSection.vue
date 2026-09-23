@@ -55,7 +55,7 @@ const hasProviders = computed(() => state.value.providers.length > 0);
       :error="error"
     >
       <template #action>
-        <Switch v-model="state.enabled" />
+        <Switch v-model="state.enabled" :aria-label="t('tracing.enableTracing')" />
       </template>
     </SettingsItem>
 
@@ -72,9 +72,9 @@ const hasProviders = computed(() => state.value.providers.length > 0);
               <Radio class="size-4 text-muted-foreground/70" />
             </div>
             <div class="space-y-1">
-              <h4 class="text-sm font-medium text-foreground">
+              <h3 class="text-sm font-medium text-foreground">
                 {{ t("tracing.emptyState.title") }}
-              </h4>
+              </h3>
               <p class="text-xs text-muted-foreground max-w-sm leading-relaxed">
                 {{ t("tracing.emptyState.description") }}
               </p>
@@ -103,6 +103,7 @@ const hasProviders = computed(() => state.value.providers.length > 0);
           <div class="flex items-center gap-1 shrink-0">
             <Switch
               :model-value="provider.enabled"
+              :aria-label="editor.providerTypeLabel(provider.provider)"
               @update:model-value="
                 provider.id && editor.updateProviderEnabled(provider.id!, Boolean($event))
               "
