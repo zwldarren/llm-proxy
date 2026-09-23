@@ -49,6 +49,15 @@ _PASSTHROUGH_PREFIXES = (
 #: ``OpenRouterAdapter`` reads them (see ``get_openrouter_client_headers``).
 OPENROUTER_HEADER_PREFIX = "x-openrouter-"
 
+#: OpenRouter headers that do not carry the prefix. ``x-session-id`` drives
+#: sticky routing and prompt-cache affinity on chat, and is the only way to
+#: attach a session on the multimodal endpoints (used there for usage
+#: grouping); ``x-anthropic-beta`` opts a Claude
+#: request into Anthropic beta features (interleaved thinking, and the
+#: ``structured-outputs-*`` flag without which OpenRouter strips ``strict``
+#: from tool definitions).
+OPENROUTER_HEADER_NAMES = frozenset({"x-session-id", "x-anthropic-beta"})
+
 # Headers that must never be taken from the client request.
 _NEVER_FORWARD = frozenset(
     {
@@ -88,7 +97,7 @@ def capture_client_headers(headers: Mapping[str, str]) -> None:
             continue
         if lowered in _PASSTHROUGH_EXACT or lowered.startswith(_PASSTHROUGH_PREFIXES):
             selected[key] = value
-        elif lowered.startswith(OPENROUTER_HEADER_PREFIX):
+        elif lowered.startswith(OPENROUTER_HEADER_PREFIX) or lowered in OPENROUTER_HEADER_NAMES:
             # Kept apart so the generic merge never forwards them to
             # non-OpenRouter upstreams.
             openrouter_selected[key] = value
@@ -113,6 +122,7 @@ def clear_client_headers() -> None:
 
 
 __all__ = [
+    "OPENROUTER_HEADER_NAMES",
     "OPENROUTER_HEADER_PREFIX",
     "capture_client_headers",
     "clear_client_headers",

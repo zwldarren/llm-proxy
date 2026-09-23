@@ -573,6 +573,7 @@ export default {
     dimSearch: "搜索",
     noModels: "暂无配置的模型",
     perMillionTokens: "每 1M Token",
+    perMillionSuffix: "/1M Token",
     parameterOverridesHelp: "使用此模型时强制设置特定参数 (例如 temperature, max_tokens)。",
     createSuccess: "模型创建成功。",
     updateSuccess: "模型更新成功。",

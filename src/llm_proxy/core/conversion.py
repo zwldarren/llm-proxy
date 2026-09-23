@@ -506,6 +506,13 @@ class NativePassthroughHandler:
         so the terminal frame carries a ``usage`` object with an empty
         ``choices`` array. Only frames containing a ``"usage"`` substring are
         parsed, keeping regular delta frames on the verbatim fast path.
+
+        Native frames bypass the streaming transformer, whose
+        ``OpenAIStreamingTransformer.get_usage`` is the only other place the
+        provider-reported ``usage.cost`` (OpenRouter) and
+        ``usage.server_tool_use.web_search_requests`` are read. Without them
+        here, a streamed request is billed from the local price table instead
+        of the provider-reported cost the router actually charged.
         """
         if event_context is None:
             return
@@ -535,6 +542,17 @@ class NativePassthroughHandler:
                 and completion_details.get("reasoning_tokens") is not None
             ):
                 event_context.reasoning_tokens = completion_details["reasoning_tokens"]
+            # Provider-reported cost (OpenRouter's ``usage.cost``) takes
+            # precedence over local price estimation in
+            # ``observability.cost.calculate_event_cost``.
+            cost = usage.get("cost")
+            if isinstance(cost, int | float) and cost > 0:
+                event_context.provider_reported_cost = cost
+            server_tool_use = usage.get("server_tool_use")
+            if isinstance(server_tool_use, dict):
+                ws_count = server_tool_use.get("web_search_requests")
+                if isinstance(ws_count, int) and ws_count > 0:
+                    event_context.web_search_requests = ws_count
 
     @staticmethod
     def maybe_capture_native_streaming_usage(

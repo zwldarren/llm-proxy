@@ -455,3 +455,222 @@ class TestOpenRouterChatPostProcess:
             "completion": 0.003,
         }
         assert result.provider_info["openrouter_is_byok"] is True
+
+
+class TestOpenRouterImageBody:
+    """OpenRouter's Image API takes output_format, not OpenAI's response_format."""
+
+    def test_documented_fields_emitted_and_openai_fields_dropped(self):
+        from llm_proxy.models.image import InternalImageRequest
+
+        provider = OpenRouterAdapter(api_key="test-key")
+        request = InternalImageRequest(
+            model="openai/gpt-image-1",
+            prompt="a product photo",
+            quality="high",
+            style="vivid",
+            background="transparent",
+            output_format="webp",
+            output_compression=80,
+            extra={"resolution": "2K", "seed": 7},
+        )
+
+        body = provider._build_outbound_body(request, request_type="image_generation").json_body
+
+        assert body["output_format"] == "webp"
+        assert body["background"] == "transparent"
+        assert body["output_compression"] == 80
+        # Documented and shared with OpenAI: kept as-is.
+        assert body["quality"] == "high"
+        # OpenRouter-documented extras survive the default ignore policy.
+        assert body["resolution"] == "2K"
+        assert body["seed"] == 7
+        # OpenAI-only: never documented by /api/v1/images.
+        assert "response_format" not in body
+        assert "style" not in body
+
+
+class TestOpenRouterSpeechFormat:
+    """OpenRouter TTS accepts mp3/pcm; other OpenAI formats are rejected locally."""
+
+    @pytest.mark.parametrize("fmt", ["mp3", "pcm"])
+    def test_supported_formats_pass_through(self, fmt):
+        from llm_proxy.models import InternalSpeechRequest
+
+        provider = OpenRouterAdapter(api_key="test-key")
+        request = InternalSpeechRequest(
+            model="openai/gpt-4o-mini-tts",
+            input="hello",
+            voice="alloy",
+            response_format=fmt,
+        )
+
+        body = provider._build_outbound_body(request, request_type="speech").json_body
+
+        assert body["response_format"] == fmt
+
+    @pytest.mark.parametrize("fmt", ["opus", "aac", "flac", "wav"])
+    def test_openai_only_formats_fail_at_the_proxy_boundary(self, fmt):
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.models import InternalSpeechRequest
+
+        provider = OpenRouterAdapter(api_key="test-key")
+        request = InternalSpeechRequest(
+            model="openai/gpt-4o-mini-tts",
+            input="hello",
+            voice="alloy",
+            response_format=fmt,
+        )
+
+        with pytest.raises(ValidationError) as excinfo:
+            provider._build_outbound_body(request, request_type="speech")
+
+        assert excinfo.value.status_code == 400
+        assert "response_format" in excinfo.value.message
+
+
+class TestOpenRouterSTTUsageAndFormats:
+    """STT usage is per second with a reported cost; only json/verbose_json exist."""
+
+    def test_bare_seconds_usage_is_duration_based(self):
+        provider = OpenRouterAdapter(api_key="test-key")
+
+        usage = provider._parse_usage({"seconds": 6.4, "cost": 0.000178})
+
+        assert usage.audio_duration_seconds == 6.4
+        assert usage.input_tokens == 0
+
+    def test_whisper_duration_usage_still_parsed(self):
+        provider = OpenRouterAdapter(api_key="test-key")
+
+        usage = provider._parse_usage({"type": "duration", "seconds": 12.5})
+
+        assert usage.audio_duration_seconds == 12.5
+
+    def test_token_usage_still_parsed(self):
+        provider = OpenRouterAdapter(api_key="test-key")
+
+        usage = provider._parse_usage({"input_tokens": 11, "output_tokens": 4})
+
+        assert usage.input_tokens == 11
+        assert usage.total_tokens == 15
+        assert usage.audio_duration_seconds is None
+
+    def test_unsupported_response_format_fails_at_the_proxy_boundary(self):
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.models import InternalTranscriptionRequest
+
+        provider = OpenRouterAdapter(api_key="test-key")
+
+        for fmt in ("text", "srt", "vtt"):
+            request = InternalTranscriptionRequest(
+                model="openai/whisper-1",
+                file=b"audio",
+                filename="audio.wav",
+                response_format=fmt,
+            )
+            with pytest.raises(ValidationError) as excinfo:
+                provider._build_transcription_request(request)
+            assert excinfo.value.status_code == 400
+
+    async def test_transcription_reports_cost_duration_and_headers(self, monkeypatch):
+        """A per-second upstream charge must reach billing, not an estimate."""
+        from llm_proxy.models import InternalTranscriptionRequest
+
+        provider = OpenRouterAdapter(api_key="test-key")
+
+        async def mock_post(url, headers=None, json=None, **kwargs):
+            class MockResponse:
+                status_code = 200
+                headers = {"content-type": "application/json", "x-generation-id": "gen-1"}
+
+                def json(self):
+                    return {"text": "hello", "usage": {"seconds": 6.4, "cost": 0.000178}}
+
+            return MockResponse()
+
+        client = await provider._get_client()
+        monkeypatch.setattr(client, "post", mock_post)
+
+        result = await provider.transcription(
+            InternalTranscriptionRequest(
+                model="openai/whisper-large-v3",
+                file=b"audio",
+                filename="audio.wav",
+                timestamp_granularities=["word"],
+            )
+        )
+
+        assert result.usage.audio_duration_seconds == 6.4
+        assert result.provider_info["openrouter_cost"] == 0.000178
+        assert result.provider_info["_rate_limit_headers"]["x-generation-id"] == "gen-1"
+
+
+class TestOpenRouterModelListing:
+    """The listing keeps the catalog metadata and asks for every modality."""
+
+    @pytest.mark.asyncio
+    async def test_listing_requests_all_modalities_and_keeps_metadata(self, monkeypatch):
+        provider = OpenRouterAdapter(api_key="test-key")
+        captured: dict = {}
+
+        async def fake_fetch_json(client, url, headers=None, params=None):
+            captured["url"] = url
+            captured["params"] = params
+            return {
+                "data": [
+                    {
+                        "id": "google/gemini-2.5-flash-image",
+                        "name": "Gemini 2.5 Flash Image",
+                        "description": "Image generation and editing",
+                        "context_length": 32768,
+                        "architecture": {
+                            "input_modalities": ["text", "image"],
+                            "output_modalities": ["text", "image"],
+                        },
+                        "supported_parameters": ["max_tokens", "seed"],
+                        "pricing": {
+                            "prompt": "0.0000003",
+                            "completion": "0.0000025",
+                            "request": "0",
+                        },
+                    }
+                ]
+            }
+
+        monkeypatch.setattr("llm_proxy.http.client.fetch_json", fake_fetch_json)
+
+        models = await provider.list_models()
+
+        # `output_modalities` defaults to `text` upstream, which would hide the
+        # image/audio/video models this adapter also serves.
+        assert captured["url"] == "https://openrouter.ai/api/v1/models"
+        assert captured["params"] == {"output_modalities": "all"}
+
+        model = models[0]
+        assert model.name == "Gemini 2.5 Flash Image"
+        assert model.context_length == 32768
+        assert model.architecture is not None
+        assert model.architecture.output_modalities == ["text", "image"]
+        assert model.supported_parameters == ["max_tokens", "seed"]
+        assert model.pricing is not None
+        assert model.pricing.prompt == pytest.approx(0.0000003)
+        assert model.pricing.request == 0.0
+
+
+class TestOpenRouterTranslationEndpoint:
+    """OpenRouter documents speech and transcriptions, not translations."""
+
+    @pytest.mark.asyncio
+    async def test_translation_fails_before_the_upstream_call(self):
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.models.audio import InternalTranslationRequest
+
+        provider = OpenRouterAdapter(api_key="test-key")
+        request = InternalTranslationRequest(model="openai/whisper-1", file=b"a", filename="a.wav")
+
+        with pytest.raises(ValidationError) as excinfo:
+            await provider.translation(request)
+
+        assert excinfo.value.status_code == 400
+        assert "translation" in excinfo.value.message

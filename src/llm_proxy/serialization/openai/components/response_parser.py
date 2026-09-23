@@ -239,7 +239,16 @@ class OpenAIResponseParser:
         reasoning_content = message.get("reasoning_content")
         if reasoning_content is None:
             reasoning_content = message.get("reasoning")
-        if reasoning_content:
+        reasoning_details = message.get("reasoning_details")
+        if isinstance(reasoning_details, list) and reasoning_details:
+            # Structured array alongside (or instead of) the plaintext field.
+            output.append(
+                ThinkingBlock(
+                    thinking=reasoning_content or "",
+                    extra={"reasoning_details": reasoning_details},
+                )
+            )
+        elif reasoning_content:
             output.append(ThinkingBlock(thinking=reasoning_content))
 
         # Audio output

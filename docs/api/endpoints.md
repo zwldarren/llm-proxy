@@ -47,6 +47,7 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Embeddings | `openai`, the `openai-compatible` family (including DeepSeek, Kimi, MiniMax, Moonshot, Qwen, xAI, vLLM, SGLang, Chutes, Mistral, NanoGPT, OpenRouter), `gemini`, `ollama` |
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
 | Audio (speech, STT) | `openai`, the `openai-compatible` family, `gemini` (native TTS/STT), `openrouter` (STT) |
+| Audio (translation) | `openai`, the `openai-compatible` family, `gemini`. `openrouter` has no upstream endpoint and rejects the request |
 
 The dedicated `anthropic` provider type is chat-only.
 

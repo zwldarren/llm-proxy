@@ -1088,3 +1088,84 @@ class TestOpenAIStreamingTransformerMultimodal:
         # Audio data should be concatenated
         assert audio_blocks[0].source.data == "AAAABBBB"
         assert audio_blocks[0].source.transcript == "Hello world"
+
+
+class TestReasoningDetailsRoundTrip:
+    """OpenRouter's structured ``reasoning_details`` must survive a rebuild.
+
+    Clients echo the array back on the next turn, and models that emit
+    encrypted or summarized reasoning entries reject a history without it. The
+    verbatim tiers (wire reuse, native passthrough) already carry it; these
+    tests pin the rebuilt path: protocol parse -> internal block -> wire emit.
+    """
+
+    DETAILS = [
+        {"type": "reasoning.text", "text": "step 1", "format": "unknown", "index": 0},
+        {"type": "reasoning.encrypted", "data": "opaque", "format": "google-gemini-v1", "index": 1},
+    ]
+
+    def test_rebuilt_request_echoes_the_array(self):
+        raw = {
+            "model": "gpt-4",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": "answer",
+                    "reasoning_content": "step 1",
+                    "reasoning_details": self.DETAILS,
+                },
+            ],
+        }
+        unified = _openai_serializer.parse_request(raw)
+
+        body = format_conversation(unified.conversation)
+
+        assert body[1]["reasoning_details"] == self.DETAILS
+        assert body[1]["reasoning_content"] == "step 1"
+
+    def test_rebuilt_request_keeps_a_details_only_turn(self):
+        """Encrypted-only reasoning arrives with no plaintext at all."""
+        raw = {
+            "model": "gpt-4",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": None, "reasoning_details": self.DETAILS},
+            ],
+        }
+        unified = _openai_serializer.parse_request(raw)
+
+        body = format_conversation(unified.conversation)
+
+        assert len(body) == 2
+        assert body[1]["role"] == "assistant"
+        assert body[1]["reasoning_details"] == self.DETAILS
+        assert "reasoning_content" not in body[1]
+
+    def test_response_parse_and_format_keep_the_array(self):
+        from llm_proxy.serialization.openai.components.response_parser import OpenAIResponseParser
+
+        upstream = {
+            "id": "gen-1",
+            "object": "chat.completion",
+            "model": "google/gemini-3-pro",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "answer",
+                        "reasoning": "step 1",
+                        "reasoning_details": self.DETAILS,
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        internal = OpenAIResponseParser().parse(upstream)
+
+        formatted = _openai_serializer.format_response(internal)
+
+        message = formatted["choices"][0]["message"]
+        assert message["reasoning_details"] == self.DETAILS
+        assert message["reasoning_content"] == "step 1"

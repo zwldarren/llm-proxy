@@ -147,6 +147,11 @@ class AudioCapabilityMixin:
 
         Handles token-based usage (chat, gpt-4o-transcribe) and duration-based
         usage (whisper transcription/translation: {"type": "duration", "seconds": N}).
+
+        A bare ``seconds`` key is duration-based too: OpenRouter's
+        ``/audio/transcriptions`` reports ``{"seconds": N, "cost": ...}`` with no
+        ``type`` discriminator, and reading it as a token usage would bill a
+        per-second endpoint from token estimation.
         """
         from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
 
@@ -166,11 +171,10 @@ class AudioCapabilityMixin:
             return None
 
         # Duration-based usage (whisper transcription/translation)
-        if raw_usage.get("type") == "duration":
-            seconds = raw_usage.get("seconds")
-            usage = Usage(
-                audio_duration_seconds=seconds if isinstance(seconds, int | float) else None
-            )
+        seconds = raw_usage.get("seconds")
+        duration_seconds = seconds if isinstance(seconds, int | float) else None
+        if raw_usage.get("type") == "duration" or duration_seconds is not None:
+            usage = Usage(audio_duration_seconds=duration_seconds)
             # Duration-based responses may still carry input token details
             # (e.g. gpt-4o-transcribe with audio/text token breakdown).
             input_details = raw_usage.get("input_token_details") or raw_usage.get(

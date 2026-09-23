@@ -228,3 +228,31 @@ async def test_anthropic_chat_completion_captures_rate_limit_headers():
     assert headers["request-id"] == "req_01ABC"
     assert headers["anthropic-ratelimit-requests-remaining"] == "49"
     assert headers["anthropic-ratelimit-tokens-remaining"] == "39000"
+
+
+def test_openrouter_generation_and_cache_headers_are_captured():
+    """X-Generation-Id and the cache family reach the client (OpenRouter OR-9).
+
+    ``X-Generation-Id`` is the only handle a client has on ``GET
+    /api/v1/generation?id=``; the ``X-OpenRouter-Cache-*`` family reports
+    whether the router answered from its cache.
+    """
+    from llm_proxy.providers.base import extract_rate_limit_headers
+
+    captured = extract_rate_limit_headers(
+        {
+            "content-type": "application/json",
+            "X-Generation-Id": "gen-abc",
+            "X-OpenRouter-Cache-Status": "HIT",
+            "X-OpenRouter-Cache-Age": "42",
+            "X-OpenRouter-Cache-TTL": "600",
+            "X-OpenRouter-Cache-Source-Id": "gen-src",
+        }
+    )
+
+    assert captured["X-Generation-Id"] == "gen-abc"
+    assert captured["X-OpenRouter-Cache-Status"] == "HIT"
+    assert captured["X-OpenRouter-Cache-Age"] == "42"
+    assert captured["X-OpenRouter-Cache-TTL"] == "600"
+    assert captured["X-OpenRouter-Cache-Source-Id"] == "gen-src"
+    assert "content-type" not in captured

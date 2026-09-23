@@ -8,6 +8,7 @@ import orjson
 
 from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.core.request_type import RequestType
 from llm_proxy.http.client import AsyncSession
 from llm_proxy.models import (
     InternalEmbeddingRequest,
@@ -55,7 +56,9 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
 
     #: Extra keys that are native /api/embed parameters; exempt from the
     #: unknown-fields policy so they survive the merge into the body.
-    _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset({"keep_alive", "truncate", "options"})
+    EXEMPT_EXTRA_KEYS = {
+        RequestType.EMBEDDING: frozenset({"keep_alive", "truncate", "options"}),
+    }
 
     async def _download_images_in_conversation(
         self,

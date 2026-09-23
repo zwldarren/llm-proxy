@@ -141,6 +141,11 @@ def _is_empty_assistant_message(message: dict[str, Any]) -> bool:
         return False
     if message.get("content") or message.get("tool_calls"):
         return False
+    if message.get("reasoning_details"):
+        # A details-only turn: OpenRouter returns encrypted/summary reasoning
+        # with no plaintext, and a model that produced it requires the array
+        # back on the next turn.
+        return False
     reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
     if reasoning.strip() == "tool call":
         return False
@@ -336,6 +341,7 @@ def _assistant_message_to_openai(
     reasoning_parts: list[str] = []
     reasoning_signatures: list[str] = []
     reasoning_is_redacted = False
+    reasoning_details: list[dict[str, Any]] = []
     content_parts: list[dict[str, Any]] = []
     tool_calls: list[dict[str, Any]] = []
 
@@ -347,9 +353,15 @@ def _assistant_message_to_openai(
                 reasoning_parts.append(block.thinking)
             if block.signature:
                 reasoning_signatures.append(block.signature)
+            details = block.extra.get("reasoning_details")
+            if isinstance(details, list):
+                reasoning_details.extend(details)
         elif isinstance(block, RedactedThinkingBlock):
             reasoning_parts.append(block.data)
             reasoning_is_redacted = True
+            details = block.extra.get("reasoning_details")
+            if isinstance(details, list):
+                reasoning_details.extend(details)
         elif isinstance(block, (ToolUseBlock, ServerToolUseBlock)):
             # Flatten history call names for Chat Completions targets so they
             # match the flattened tool definitions sent upstream (models echo
@@ -456,6 +468,12 @@ def _assistant_message_to_openai(
         result["reasoning_signature"] = "".join(reasoning_signatures)
     if reasoning_is_redacted:
         result["reasoning_is_redacted"] = True
+    if reasoning_details and (context is None or context.target_endpoint != "responses"):
+        # OpenRouter's structured reasoning array, echoed back verbatim. Like
+        # ``reasoning_content`` it is replayed whatever the destination: the
+        # client sent it, and the Chat Completions message schema tolerates the
+        # extra field. Not for Responses targets, whose items have no such key.
+        result["reasoning_details"] = reasoning_details
 
     if msg.name is not None:
         result["name"] = msg.name

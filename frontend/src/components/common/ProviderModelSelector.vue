@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { configApi } from "@/services/api/config";
 import type { ProviderModelInfo } from "@/types/schemas";
 import { getErrorMessage } from "@/utils/error";
+import { formatContextLength } from "@/utils/format";
 
 const props = defineProps<{
   providerName: string;
@@ -44,9 +45,38 @@ const filteredModels = computed(() => {
     (model) =>
       model.id.toLowerCase().includes(query) ||
       model.name.toLowerCase().includes(query) ||
-      model.description?.toLowerCase().includes(query)
+      model.description?.toLowerCase().includes(query) ||
+      // Modalities and parameters are shown as badges, so they must be
+      // searchable: "image" has to find the image models.
+      model.architecture?.output_modalities.some((m) => m.toLowerCase().includes(query)) ||
+      model.architecture?.input_modalities.some((m) => m.toLowerCase().includes(query)) ||
+      model.supported_parameters?.some((p) => p.toLowerCase().includes(query))
   );
 });
+
+/** Compact per-1M price from the upstream's per-token figure. */
+const formatPerMillion = (perToken?: number | null): string | null =>
+  typeof perToken === "number" ? `$${(perToken * 1_000_000).toFixed(2)}` : null;
+
+const priceHint = (model: ProviderModelInfo): string | null => {
+  const input = formatPerMillion(model.pricing?.prompt);
+  const output = formatPerMillion(model.pricing?.completion);
+  const parts = [
+    input ? `${t("models.inputShort")} ${input}` : null,
+    output ? `${t("models.outputShort")} ${output}` : null,
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(" · ")} ${t("models.perMillionSuffix")}` : null;
+};
+
+/** ``text→image`` for models that are not plain text-to-text. */
+const modalityHint = (model: ProviderModelInfo): string | null => {
+  const input = model.architecture?.input_modalities ?? [];
+  const output = model.architecture?.output_modalities ?? [];
+  if (!input.length && !output.length) return null;
+  const isPlainText = output.every((m) => m === "text") && input.every((m) => m === "text");
+  if (isPlainText) return null;
+  return `${input.join("/") || "?"}→${output.join("/") || "?"}`;
+};
 
 // Fetch models when provider changes or popover opens
 const fetchModels = async () => {
@@ -282,6 +312,16 @@ const displayValue = computed(() => {
               :title="model.id"
               >{{ model.id }}</span
             >
+            <div class="flex items-center gap-1.5 mt-0.5 text-[11px] text-muted-foreground">
+              <span v-if="model.context_length" class="shrink-0 font-mono">
+                {{ formatContextLength(model.context_length) }}
+                {{ t("models.contextShort") }}
+              </span>
+              <span v-if="modalityHint(model)" class="shrink-0 font-mono">{{
+                modalityHint(model)
+              }}</span>
+              <span v-if="priceHint(model)" class="shrink-0 font-mono">{{ priceHint(model) }}</span>
+            </div>
             <span
               v-if="model.description"
               class="text-[11px] text-muted-foreground mt-0.5 line-clamp-2 wrap-break-word"

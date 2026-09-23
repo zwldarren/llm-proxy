@@ -247,3 +247,49 @@ class TestHandleNativeOpenAIChunk:
             chunk, self._request("glm-5", "glm-5"), None
         )
         assert out is chunk
+
+
+class TestNativeUsageFrameBilling:
+    """Provider-reported cost and web-search counts on the native stream tier.
+
+    Native frames bypass the streaming transformer, so this capture is the only
+    route by which OpenRouter's ``usage.cost`` reaches the billing pipeline.
+    """
+
+    def _request(self, model: str, echo_model: str | None) -> MagicMock:
+        req = MagicMock()
+        req.model = model
+        req.echo_model = echo_model or model
+        return req
+
+    def test_usage_frame_captures_cost_and_web_search(self) -> None:
+        from llm_proxy.observability.event_context import EventContext
+
+        ctx = EventContext(request_id="r", trace_id="t", model="anthropic/claude-sonnet-4.5")
+        frame = (
+            'data: {"id":"gen-1","choices":[],"usage":{"prompt_tokens":10,'
+            '"completion_tokens":20,"total_tokens":30,"cost":0.0123,'
+            '"is_byok":false,"server_tool_use":{"web_search_requests":2}}}\n\n'
+        )
+
+        out = NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("anthropic/claude-sonnet-4.5", "claude-sonnet-4.5"), ctx
+        )
+
+        assert out == frame
+        assert ctx.prompt_tokens == 10
+        assert ctx.provider_reported_cost == 0.0123
+        assert ctx.web_search_requests == 2
+
+    def test_zero_cost_is_not_treated_as_reported(self) -> None:
+        """A 0.0 cost must not replace local estimation with a fake zero."""
+        from llm_proxy.observability.event_context import EventContext
+
+        ctx = EventContext(request_id="r", trace_id="t", model="glm-5")
+        frame = 'data: {"id":"1","choices":[],"usage":{"prompt_tokens":5,"cost":0.0}}\n\n'
+
+        NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("glm-5", "glm-5"), ctx
+        )
+
+        assert ctx.provider_reported_cost is None

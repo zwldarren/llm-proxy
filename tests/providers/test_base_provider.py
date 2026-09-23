@@ -757,3 +757,34 @@ async def test_stream_generator_empty_error_body_handled():
     assert "Empty error response body" in error.message, (
         f"Error message should indicate empty body, got: {error.message}"
     )
+
+
+def test_parse_model_falls_back_to_the_id_and_tolerates_odd_metadata():
+    """A provider that names nothing still lists, and junk pricing stays null.
+
+    ``name`` is only human-readable sugar on top of ``id`` for the catalogs
+    that supply it; the non-numeric pricing sentinels some catalogs use
+    (``"-1"``) must not be reported as a real price.
+    """
+    provider = ConcreteProvider()
+
+    unnamed = provider._parse_model({"id": "Qwen/Qwen3-8B", "pricing": {"prompt": "-1"}})
+    assert unnamed.name == "Qwen/Qwen3-8B"
+    assert unnamed.context_length is None
+    assert unnamed.architecture is None
+    assert unnamed.supported_parameters == []
+    assert unnamed.pricing is not None
+    assert unnamed.pricing.prompt == -1.0
+
+    malformed = provider._parse_model(
+        {
+            "id": "m",
+            "context_length": "n/a",
+            "architecture": "text",
+            "supported_parameters": "tools",
+        }
+    )
+    assert malformed.context_length is None
+    assert malformed.architecture is None
+    assert malformed.supported_parameters == []
+    assert malformed.pricing is None

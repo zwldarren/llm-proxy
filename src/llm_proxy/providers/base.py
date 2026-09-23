@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from llm_proxy.models import (
         InternalRequest,
     )
-    from llm_proxy.models.provider import ProviderModelInfo
+    from llm_proxy.models.provider import ProviderModelInfo, ProviderModelPricing
 
 logger = get_logger(__name__)
 
@@ -56,28 +56,40 @@ _PASSTHROUGH_RESPONSE_HEADERS = frozenset(
         "request-id",
         "openai-version",
         "openai-processing-ms",
+        # OpenRouter returns the id of the generation it created for every
+        # endpoint; ``GET /api/v1/generation?id=`` reconciles it against the
+        # provider's own usage and cost record.
+        "x-generation-id",
     }
+)
+
+#: OpenRouter response-cache headers (status/age/ttl/source id), reported on
+#: responses served from its cache. Prefix-matched so a new cache header is
+#: forwarded without another edit here.
+_PASSTHROUGH_RESPONSE_HEADER_PREFIXES = (
+    "x-ratelimit-",
+    "ratelimit-",
+    "anthropic-ratelimit-",
+    "x-openrouter-cache-",
 )
 
 
 def extract_rate_limit_headers(headers) -> dict[str, str]:
     """Capture upstream rate-limit and informational headers for passthrough.
 
-    Preserves ``x-ratelimit-*``, ``RateLimit-*``, ``anthropic-ratelimit-*``,
-    ``Retry-After`` and a small set of end-to-end informational headers
-    (``x-request-id``, ``request-id``, ``openai-version``,
-    ``openai-processing-ms``) so the API layer can forward them to the caller.
+    Preserves the ``x-ratelimit-*``/``RateLimit-*``/``anthropic-ratelimit-*``
+    families, the ``x-openrouter-cache-*`` family, ``Retry-After`` and a small
+    set of end-to-end informational headers (``x-request-id``, ``request-id``,
+    ``x-generation-id``, ``openai-version``, ``openai-processing-ms``) so the
+    API layer can forward them to the caller.
     """
     if not headers:
         return {}
     captured: dict[str, str] = {}
     for key, value in headers.items():
         lower = key.lower()
-        if (
-            lower in _PASSTHROUGH_RESPONSE_HEADERS
-            or lower.startswith("x-ratelimit-")
-            or lower.startswith("ratelimit-")
-            or lower.startswith("anthropic-ratelimit-")
+        if lower in _PASSTHROUGH_RESPONSE_HEADERS or lower.startswith(
+            _PASSTHROUGH_RESPONSE_HEADER_PREFIXES
         ):
             captured[key] = value
     return captured
@@ -129,19 +141,17 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
     _api_key: str | None = None
 
-    #: Native embedding parameters that must survive the unknown-fields policy
-    #: (e.g. Ollama's keep_alive/truncate/options). Adapters with native
-    #: embedding params override this; empty by default.
-    _EMBEDDING_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset()
-
-    #: Chat request fields this upstream documents as supported even though
-    #: they arrive through ``InternalRequest.extra``. ``unknown_fields_policy``
-    #: (default ``ignore``) drops *every* key present in ``extra`` from the
-    #: built body, which is right for genuinely unknown fields but wrong for an
-    #: upstream that officially accepts them — a multi-provider router like
-    #: OpenRouter takes ``provider``/``models``/``plugins``/``usage`` and would
-    #: otherwise lose them silently. Declared per adapter; empty by default.
-    CHAT_EXEMPT_EXTRA_KEYS: frozenset[str] = frozenset()
+    #: Request fields this upstream documents as supported even though they
+    #: arrive through ``InternalRequest.extra``, keyed by ``RequestType``.
+    #: ``unknown_fields_policy`` (default ``ignore``) drops *every* key present
+    #: in ``extra`` from the built body, which is right for genuinely unknown
+    #: fields but wrong for an upstream that officially accepts them — a
+    #: multi-provider router like OpenRouter takes ``provider``/``models``/
+    #: ``plugins``/``usage`` on chat and ``output_format``/``provider`` on the
+    #: media endpoints, and would otherwise lose them silently. Declared per
+    #: adapter, empty by default; adapters that document nothing for a request
+    #: type simply omit the key.
+    EXEMPT_EXTRA_KEYS: dict[RequestType, frozenset[str]] = {}
 
     def __init__(self, config: AdapterConfig | None = None, **kwargs: Any):
         """Initialize shared transport, error translation, and retry policy.
@@ -600,19 +610,18 @@ class BaseHttpProvider(BaseAdapter, ABC):
         request.extra.  All other branches merge_extra=True.
         """
 
-        def _finalize(body: dict[str, Any], merge_extra: bool = True) -> dict[str, Any]:
-            return self._finalize_body(
-                body, request, exempt_keys=exempt_keys, merge_extra=merge_extra
-            )
-
         rt = RequestType(request_type)
+        # Fields this upstream documents as supported must not be stripped by
+        # the unknown-fields policy just because the client supplied them
+        # through ``extra`` (see EXEMPT_EXTRA_KEYS).
+        exempt = self._exempt_keys_for(rt, exempt_keys)
+
+        def _finalize(body: dict[str, Any], merge_extra: bool = True) -> dict[str, Any]:
+            return self._finalize_body(body, request, exempt_keys=exempt, merge_extra=merge_extra)
 
         if rt == RequestType.CHAT:
             ctx = self._build_chat_context(request)
-            # Fields this upstream documents as supported must not be stripped
-            # by the unknown-fields policy just because the client supplied
-            # them through ``extra`` (see CHAT_EXEMPT_EXTRA_KEYS).
-            chat_exempt = (exempt_keys or set()) | set(self.CHAT_EXEMPT_EXTRA_KEYS)
+            chat_exempt = set(exempt)
             if self.REASONING_OBJECT:
                 # The unified reasoning object is emitted deliberately by the
                 # builder; the client's original ``reasoning`` dict rides
@@ -640,12 +649,6 @@ class BaseHttpProvider(BaseAdapter, ABC):
             return OutboundBody(json_body=_finalize_chat(self._build_chat_raw(request, ctx)))
 
         if rt == RequestType.EMBEDDING:
-            # Adapters may declare native embedding parameters (e.g. Ollama's
-            # keep_alive/truncate/options) that must survive the
-            # unknown-fields policy after _merge_extra injects them into the
-            # body. Declared at the chokepoint so every call path honors it.
-            if self._EMBEDDING_EXEMPT_EXTRA_KEYS:
-                exempt_keys = (exempt_keys or set()) | set(self._EMBEDDING_EXEMPT_EXTRA_KEYS)
             return OutboundBody(json_body=_finalize(self._build_embedding_raw(request)))
         if rt == RequestType.SPEECH:
             return OutboundBody(json_body=_finalize(self._build_speech_raw(request)))
@@ -799,6 +802,17 @@ class BaseHttpProvider(BaseAdapter, ABC):
                 )
                 return body
 
+    def _exempt_keys_for(
+        self, request_type: RequestType, extra_keys: set[str] | None = None
+    ) -> set[str]:
+        """Return the keys exempt from the unknown-fields policy for *request_type*.
+
+        The outbound chokepoint applies this automatically; adapters that build
+        their own body and call ``_finalize_body`` directly must go through the
+        same lookup or their endpoint exemptions silently stop applying.
+        """
+        return set(extra_keys or ()) | set(self.EXEMPT_EXTRA_KEYS.get(request_type, ()))
+
     def _finalize_body(
         self,
         body: dict[str, Any],
@@ -877,14 +891,38 @@ class BaseHttpProvider(BaseAdapter, ABC):
     def _models_headers(self) -> dict[str, str]:
         return self._build_headers()
 
-    def _parse_model(self, raw: dict[str, Any]) -> ProviderModelInfo:
-        from llm_proxy.models.provider import ProviderModelInfo
+    def _models_params(self) -> dict[str, Any]:
+        """Extra query parameters for the model-list request.
 
+        Empty for the providers whose ``/models`` returns its whole catalog;
+        overridden where upstream filters by default (OpenRouter's
+        ``output_modalities`` defaults to ``text``).
+        """
+        return {}
+
+    def _parse_model(self, raw: dict[str, Any]) -> ProviderModelInfo:
+        from llm_proxy.models.provider import ProviderModelArchitecture, ProviderModelInfo
+
+        model_id = raw.get("id", "")
+        architecture = raw.get("architecture")
         return ProviderModelInfo(
-            id=raw.get("id", ""),
-            name=raw.get("id", ""),
+            id=model_id,
+            # Providers that do not name their models (vLLM, SGLang) fall back
+            # to the ID; those that do (OpenRouter) get a readable label.
+            name=raw.get("name") or model_id,
             description=raw.get("description"),
             owned_by=raw.get("owned_by"),
+            context_length=_as_int(raw.get("context_length")),
+            architecture=(
+                ProviderModelArchitecture(
+                    input_modalities=_as_str_list(architecture.get("input_modalities")),
+                    output_modalities=_as_str_list(architecture.get("output_modalities")),
+                )
+                if isinstance(architecture, dict)
+                else None
+            ),
+            supported_parameters=_as_str_list(raw.get("supported_parameters")),
+            pricing=_parse_model_pricing(raw.get("pricing")),
         )
 
     async def list_models(self, client: AsyncSession | None = None) -> list[ProviderModelInfo]:
@@ -897,7 +935,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
         models: list[dict[str, Any]] = []
         page_token: str | None = None
         while True:
-            params: dict[str, Any] = {}
+            params: dict[str, Any] = self._models_params()
             if self._models_page_size is not None:
                 params["pageSize"] = self._models_page_size
             if page_token:
@@ -925,6 +963,47 @@ class BaseHttpProvider(BaseAdapter, ABC):
         if model and "{model}" in url:
             url = url.replace("{model}", model)
         return url
+
+
+def _as_int(value: Any) -> int | None:
+    """Coerce an upstream numeric field, tolerating strings and nulls."""
+    try:
+        return int(value)
+    except TypeError, ValueError:
+        return None
+
+
+def _as_str_list(value: Any) -> list[str]:
+    """Coerce an upstream string-array field, dropping anything else."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _parse_model_pricing(raw: Any) -> ProviderModelPricing | None:
+    """Build a ``ProviderModelPricing`` from an upstream pricing block.
+
+    Upstream sends USD amounts as strings (``"0.000003"``). A value that is not
+    a number at all is left null; sentinels such as ``"-1"`` (dynamic pricing
+    on some catalogs) are passed through, since only the catalog knows how to
+    read them.
+    """
+    from llm_proxy.models.provider import ProviderModelPricing
+
+    if not isinstance(raw, dict):
+        return None
+
+    def _amount(key: str) -> float | None:
+        try:
+            return float(raw[key])
+        except KeyError, TypeError, ValueError:
+            return None
+
+    return ProviderModelPricing(
+        prompt=_amount("prompt"),
+        completion=_amount("completion"),
+        request=_amount("request"),
+    )
 
 
 __all__ = [

@@ -73,10 +73,13 @@ proxy records instead of computing them from token prices.
 OpenRouter is a router rather than a single upstream, so the adapter keeps a few
 of its request shapes intact:
 
-- **Responses passthrough.** `/v1/responses` clients are forwarded verbatim,
-  so `reasoning.mode` / `reasoning.context`, `provider` routing preferences,
+- **Responses and Messages passthrough.** `/v1/responses` and `/v1/messages`
+  clients are forwarded verbatim, so `reasoning.mode` / `reasoning.context`,
+  `thinking` budgets, `context_management`, `provider` routing preferences,
   `plugins`, `models` fallbacks and `usage` accounting all reach OpenRouter.
-  Chat Completions clients get the same fields through the request builder.
+  An Anthropic-protocol client avoids the double translation
+  (Messages → Chat Completions → Messages) that used to drop them. Chat
+  Completions clients get the equivalent fields through the request builder.
   Set provider metadata `native_passthrough: false` to fall back to the
   Chat Completions translation (e.g. if the routed model rejects a
   Responses-only item type).
@@ -95,8 +98,42 @@ of its request shapes intact:
   at most two categories are accepted.
 - **Forwarded client headers.** Per-request OpenRouter control headers
   (`X-OpenRouter-Metadata`, `X-OpenRouter-Cache`, `X-OpenRouter-Cache-TTL`,
-  `X-OpenRouter-Cache-Clear`) are forwarded from the client. Client Codex /
-  Claude Code fingerprint headers are *not* forwarded to a router.
+  `X-OpenRouter-Cache-Clear`) are forwarded from the client, as are
+  `x-session-id` (sticky routing and prompt-cache affinity on chat; on the
+  embeddings/image/audio endpoints it is the only way to attach a session,
+  used there for usage grouping) and `x-anthropic-beta`
+  (Claude beta opt-ins such as `structured-outputs-2025-11-13`, without which
+  OpenRouter strips `strict` from tool definitions). Client Codex / Claude Code
+  fingerprint headers are *not* forwarded to a router.
+- **Per-endpoint passthrough fields.** Each endpoint keeps the fields OpenRouter
+  documents beyond the OpenAI schema: chat (`provider`, `models`, `plugins`,
+  `session_id`, `trace`, `preset`, `structured_outputs`, `cache_control`,
+  `min_p`, `top_k`, `top_a`, `repetition_penalty`), embeddings (`input_type`,
+  `session_id`, `trace`, `provider`, `user`), image generation (`resolution`,
+  `aspect_ratio`, `seed`, `input_references`, `provider`), TTS
+  (`input_references`, `provider`) and STT (`provider`). Chat also forwards
+  the legacy `route`, `transforms`, `usage` and `include_reasoning` fields for
+  clients that still send them — upstream deprecates them in favour of
+  `providers.sort.partition`, the `context-compression` plugin,
+  `stream_options.include_usage` and `reasoning.exclude` respectively. Image
+  requests are normalized to the Image API's own
+  schema (`output_format`, `background`, `output_compression`; `response_format`
+  and `style` are dropped), and TTS/STT `response_format` is validated against
+  the formats OpenRouter accepts (`mp3`/`pcm` and `json`/`verbose_json`) instead
+  of surfacing an upstream 400.
+- **Response metadata.** `X-Generation-Id` (usable with
+  `GET /api/v1/generation?id=`) and the `X-OpenRouter-Cache-*` headers are
+  forwarded to the client; `cost`, `cost_details` and `is_byok` from `usage`
+  feed the cost record.
+- **Model picker.** The provider's catalog is fetched with
+  `output_modalities=all` — upstream defaults to `text`, which would hide the
+  image, video, audio and embedding models this adapter also serves — and keeps
+  the catalog's `context_length`, modalities, `supported_parameters` and
+  pricing, so the picker can show which models are non-text and what they cost.
+- **Audio.** Speech (`mp3`/`pcm`) and transcription (`json`/`verbose_json`)
+  formats are checked at the proxy boundary rather than surfaced as an upstream
+  400. OpenRouter has no audio *translation* endpoint, so
+  `/v1/audio/translations` is rejected locally instead of 404-ing upstream.
 - **Model variants.** `:free`, `:nitro`, `:floor`, `:online`, `:thinking` and
   the `*-pro` variants are passed through as plain model strings, but model
   lookup is an exact name match — register each variant you want to expose as

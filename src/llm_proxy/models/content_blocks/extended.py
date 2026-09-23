@@ -18,6 +18,12 @@ class ThinkingBlock(ContentBlock):
     provider produced the signature so target serializers can decide whether
     replaying it is valid (e.g. only Gemini-issued thoughtSignatures may be
     sent back to Gemini).
+
+    ``extra`` carries opaque provider payloads that must round-trip unchanged.
+    OpenRouter's ``reasoning_details`` array (``reasoning.text``,
+    ``reasoning.encrypted``, ``reasoning.summary`` entries) lives here: models
+    that emit encrypted or summarized reasoning require it to be echoed back
+    verbatim, and its entries cannot be represented by ``thinking`` alone.
     """
 
     thinking: str
@@ -25,14 +31,20 @@ class ThinkingBlock(ContentBlock):
     signature_origin: SignatureOrigin | None = None
     encrypted_content: str | None = None
     cache_control: Any | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RedactedThinkingBlock(ContentBlock):
-    """Redacted thinking content block."""
+    """Redacted thinking content block.
+
+    ``extra`` mirrors ``ThinkingBlock.extra`` so an opaque provider payload that
+    arrives alongside redacted reasoning is not dropped on the round trip.
+    """
 
     data: str
     cache_control: Any | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

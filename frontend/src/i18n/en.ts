@@ -589,6 +589,7 @@ export default {
     dimSearch: "search",
     noModels: "No models configured",
     perMillionTokens: "Per 1M tokens",
+    perMillionSuffix: "/1M tokens",
     parameterOverridesHelp:
       "Force specific parameters when this model is used (e.g. temperature, max_tokens).",
     createSuccess: "Model created successfully.",

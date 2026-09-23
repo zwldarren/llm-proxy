@@ -256,6 +256,7 @@ class OpenAIFormattingMixin:
         text_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         collected_annotations: list[dict[str, Any]] = []
+        collected_reasoning_details: list[dict[str, Any]] = []
 
         for block in output:
             match block:
@@ -293,12 +294,19 @@ class OpenAIFormattingMixin:
                         }
                     )
                 case ThinkingBlock():
-                    message["reasoning_content"] = block.thinking
+                    if block.thinking:
+                        message["reasoning_content"] = block.thinking
                     if block.signature:
                         message["reasoning_signature"] = block.signature
+                    details = block.extra.get("reasoning_details")
+                    if isinstance(details, list):
+                        collected_reasoning_details.extend(details)
                 case RedactedThinkingBlock():
                     message["reasoning_content"] = "[redacted]"
                     message["reasoning_is_redacted"] = True
+                    details = block.extra.get("reasoning_details")
+                    if isinstance(details, list):
+                        collected_reasoning_details.extend(details)
                 case RefusalBlock():
                     message["refusal"] = block.refusal
                 case AudioBlock():
@@ -425,6 +433,9 @@ class OpenAIFormattingMixin:
 
         if collected_annotations:
             message["annotations"] = collected_annotations
+
+        if collected_reasoning_details:
+            message["reasoning_details"] = collected_reasoning_details
 
         return message
 

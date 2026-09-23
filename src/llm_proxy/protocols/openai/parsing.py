@@ -27,6 +27,7 @@ from llm_proxy.models import (
     StreamOptions,
     SystemMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -254,6 +255,18 @@ class OpenAIParsingMixin:
                 # rejects ("Model turns with thought summaries must start with
                 # a thought block in thinking models").
                 reasoning_block = parse_reasoning_content(msg)
+                reasoning_details = msg.get("reasoning_details")
+                if isinstance(reasoning_details, list) and reasoning_details:
+                    # OpenRouter's structured reasoning array. Clients echo it
+                    # back on the next turn; models that emit encrypted or
+                    # summarized entries reject a history without it, and it
+                    # can arrive with no plaintext reasoning at all.
+                    if reasoning_block is not None:
+                        reasoning_block.extra["reasoning_details"] = reasoning_details
+                    else:
+                        reasoning_block = ThinkingBlock(
+                            thinking="", extra={"reasoning_details": reasoning_details}
+                        )
                 if reasoning_block is not None:
                     content_blocks.insert(0, reasoning_block)
 

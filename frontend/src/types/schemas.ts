@@ -746,11 +746,29 @@ export interface AuditIntegrityResult {
 }
 
 // Provider Models Types
+export interface ProviderModelArchitecture {
+  input_modalities: string[];
+  output_modalities: string[];
+}
+
+/** Upstream-reported price per unit, verbatim: USD per token for the text
+ * dimensions (multiply by 1e6 for a per-1M display), per image/audio unit for
+ * the rest. */
+export interface ProviderModelPricing {
+  prompt?: number | null;
+  completion?: number | null;
+  request?: number | null;
+}
+
 export interface ProviderModelInfo {
   id: string;
   name: string;
   description?: string | null;
   owned_by?: string | null;
+  context_length?: number | null;
+  architecture?: ProviderModelArchitecture | null;
+  supported_parameters?: string[];
+  pricing?: ProviderModelPricing | null;
 }
 
 export interface ProviderModelsResponse {
