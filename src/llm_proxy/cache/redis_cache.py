@@ -29,6 +29,11 @@ _CONNECTION_ERRORS = (
     OSError,
 )
 
+#: TTL for the shared configuration generation token. The token is a change
+#: signal, not data, so it only needs to outlive the slowest worker refresh;
+#: a week is far beyond that and keeps a stale worker from missing changes.
+_CONFIG_GENERATION_TTL = 7 * 24 * 3600
+
 
 def _is_connection_error(exc: Exception) -> bool:
     if isinstance(exc, _CONNECTION_ERRORS):
@@ -328,6 +333,54 @@ class RedisCache:
             if _is_connection_error(e):
                 await self._invalidate_cached_client()
             return 0
+
+    async def get_config_generation(self) -> str | None:
+        """Read the shared configuration generation token.
+
+        The token changes whenever any worker process mutates configuration
+        (see :meth:`set_config_generation`). A worker compares it against the
+        generation of its own in-memory snapshot to decide whether that
+        snapshot is stale. Returns ``None`` when the token is unset or the
+        cache is unavailable.
+        """
+        try:
+            redis_client = await self._get_client()
+            token = await redis_client.get(self._get_key("config", "generation"))
+            if not isinstance(token, str):
+                self._stats["misses"] += 1
+                return None
+            self._stats["hits"] += 1
+            return token
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Failed to read config generation from cache: {e}")
+            if _is_connection_error(e):
+                await self._invalidate_cached_client()
+            return None
+
+    async def set_config_generation(self, token: str) -> bool:
+        """Publish a new configuration generation token for peer workers.
+
+        The token is a change signal, not data, so it is kept well beyond any
+        worker's refresh latency. A token (rather than a counter) is used so
+        that ``invalidate_all`` expiring the key cannot make two consecutive
+        changes collide on the same value.
+        """
+        try:
+            redis_client = await self._get_client()
+            key = self._get_key("config", "generation")
+            await redis_client.setex(key, _CONFIG_GENERATION_TTL, token)
+
+            self._stats["sets"] += 1
+            return True
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Failed to publish config generation to cache: {e}")
+            if _is_connection_error(e):
+                await self._invalidate_cached_client()
+            return False
 
 
 # Global Redis cache instance

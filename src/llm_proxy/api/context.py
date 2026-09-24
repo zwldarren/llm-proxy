@@ -124,6 +124,11 @@ async def _build_request_context(
     if model_config is None:
         raise ModelNotFoundError(model_name)
 
+    # ``get_model_config`` may have refreshed the snapshot when a peer worker
+    # added the model (multi-worker deployments). Re-read it so the provider
+    # configs and selection/retry settings below match the resolved model.
+    config = await config_manager.get_config()
+
     circuit_breaker = getattr(req.app.state, "circuit_breaker", None)
 
     # Resolve per-request inputs for the provider-selection strategy. The

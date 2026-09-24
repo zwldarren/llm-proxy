@@ -169,6 +169,10 @@ async def startup_redis(app: FastAPI, config_manager: DatabaseConfigManager) -> 
 
             redis_cache = RedisCache(redis_client=redis_client, config=config.redis.cache)
             config_manager.enable_cache(redis_cache)
+            # Adopt the shared generation the snapshot was loaded from so a
+            # peer worker's earlier mutation does not force a redundant reload
+            # on this process's first request.
+            await config_manager.sync_generation()
     else:
         app.state.redis_client = None
 

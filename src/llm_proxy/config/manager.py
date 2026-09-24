@@ -1,6 +1,8 @@
 """Database-backed configuration manager with optional Redis caching."""
 
 import asyncio
+import time
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.core.constants import DEFAULT_MAX_FALLBACK_ATTEMPTS, DEFAULT_MAX_RETRIES
@@ -30,6 +32,12 @@ from .types import (
 )
 
 logger = get_logger(__name__)
+
+#: Upper bound on how long a worker may serve its in-memory snapshot before a
+#: normal lookup re-checks the shared configuration generation. Additions land
+#: immediately through the miss path (``get_model_config``); this interval
+#: bounds how long edits and deletions can stay invisible on a peer worker.
+_CONFIG_GENERATION_CHECK_INTERVAL = 1.0
 
 # Async lock to protect concurrent DB read-modify-write sequences
 _config_lock_obj: asyncio.Lock | None = None
@@ -251,6 +259,13 @@ class DatabaseConfigManager:
         self._config: ProxyConfig | None = None
         self._redis_cache: RedisCache | None = None
         self._cache_enabled: bool = False
+        # Cross-process config freshness. ``_generation`` identifies the
+        # snapshot this process holds; peers publish a new token on every
+        # mutation so a stale worker reloads instead of serving an outdated
+        # provider/model set. See ``_refresh_if_generation_changed``.
+        self._generation: str | None = None
+        self._generation_checked_at: float = 0.0
+        self._refresh_lock = asyncio.Lock()
 
     async def load(self) -> ProxyConfig:
         """Load configuration from database."""
@@ -455,9 +470,16 @@ class DatabaseConfigManager:
         return self._config
 
     async def get_config(self) -> ProxyConfig:
-        """Get the current configuration."""
+        """Get the current configuration.
+
+        When Redis caching is enabled, this also re-checks the shared
+        configuration generation (at most once per
+        ``_CONFIG_GENERATION_CHECK_INTERVAL``) so a peer worker's changes are
+        picked up without a restart.
+        """
         if not self._config:
             return await self.load()
+        await self._refresh_if_generation_changed()
         return self._config
 
     async def get_provider_config(self, provider: str) -> ProviderConfig:
@@ -490,6 +512,14 @@ class DatabaseConfigManager:
             except Exception as e:
                 logger.warning(f"Cache lookup failed for provider {provider}: {e}")
 
+        # A peer worker may have added the provider after this process loaded
+        # its snapshot. Bypass the refresh interval so the first request for a
+        # newly added provider succeeds on every worker, then retry once.
+        if await self._refresh_if_generation_changed(force=True):
+            refreshed = (await self.get_config()).provider_configs
+            if provider in refreshed:
+                return refreshed[provider]
+
         raise ProviderNotConfiguredError(provider)
 
     async def get_model_config(self, model: str) -> ModelConfig | None:
@@ -518,6 +548,12 @@ class DatabaseConfigManager:
             except Exception as e:
                 logger.warning(f"Cache lookup failed for model {model}: {e}")
 
+        # A peer worker may have added the model after this process loaded its
+        # snapshot. Bypass the refresh interval so the very first request for a
+        # newly added model succeeds on every worker, then retry once.
+        if await self._refresh_if_generation_changed(force=True):
+            return (await self.get_config()).models.get(model)
+
         return None
 
     async def get_all_models(self) -> dict[str, ModelConfig]:
@@ -535,10 +571,79 @@ class DatabaseConfigManager:
         return (await self.get_config()).smart_routing
 
     async def reload(self) -> None:
-        """Reload configuration from database and invalidate cache."""
+        """Reload configuration from database and invalidate cache.
+
+        Publishes a fresh configuration generation so peer worker processes
+        (multi-worker deployments share Redis) drop their stale in-memory
+        snapshots on their next lookup.
+        """
         self._config = None
         await self.load()
         await self.invalidate_all_cache()
+        await self._publish_generation()
+
+    async def sync_generation(self) -> None:
+        """Adopt the shared generation token without reloading.
+
+        Called once at startup, after Redis caching is enabled, so the first
+        request does not trigger a redundant reload for a generation this
+        process already loaded from the database.
+        """
+        if not (self._cache_enabled and self._redis_cache):
+            return
+        try:
+            self._generation = await self._redis_cache.get_config_generation()
+        except Exception as e:
+            logger.warning(f"Failed to sync config generation: {e}")
+
+    async def _publish_generation(self) -> None:
+        """Publish a new configuration generation token for peer workers."""
+        if not (self._cache_enabled and self._redis_cache):
+            return
+        token = uuid.uuid4().hex
+        try:
+            published = await self._redis_cache.set_config_generation(token)
+        except Exception as e:
+            logger.warning(f"Failed to publish config generation: {e}")
+            return
+        if published:
+            self._generation = token
+
+    async def _refresh_if_generation_changed(self, *, force: bool = False) -> bool:
+        """Reload the snapshot when a peer worker published a new generation.
+
+        Returns ``True`` when the config was reloaded. Checks are throttled to
+        ``_CONFIG_GENERATION_CHECK_INTERVAL`` seconds unless ``force`` is set,
+        so the hot path pays at most one shared-cache read per interval. A
+        no-op when Redis caching is disabled: a single process already reloads
+        on every mutation.
+        """
+        if not (self._cache_enabled and self._redis_cache):
+            return False
+
+        now = time.monotonic()
+        if not force and now - self._generation_checked_at < _CONFIG_GENERATION_CHECK_INTERVAL:
+            return False
+
+        async with self._refresh_lock:
+            now = time.monotonic()
+            if not force and now - self._generation_checked_at < _CONFIG_GENERATION_CHECK_INTERVAL:
+                return False
+            self._generation_checked_at = now
+
+            try:
+                generation = await self._redis_cache.get_config_generation()
+            except Exception as e:
+                logger.warning(f"Config generation check failed: {e}")
+                return False
+
+            if generation is None or generation == self._generation:
+                return False
+
+            await self.load()
+            self._generation = generation
+            logger.debug("Config refreshed after a peer worker changed it")
+            return True
 
     async def invalidate_all_cache(self) -> None:
         """Invalidate all cached configurations."""

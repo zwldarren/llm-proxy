@@ -7,6 +7,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from llm_proxy.cache.redis_cache import (
+    _CONFIG_GENERATION_TTL,
     RedisCache,
     _empty_cache_stats,
     _is_connection_error,
@@ -394,6 +395,67 @@ class TestRedisCache:
             await cache.get_provider_config("openai")
 
         assert cache._cached_async_client is None
+
+    @pytest.mark.asyncio
+    async def test_get_config_generation_hit(self, cache, mock_redis_client):
+        mock_redis_client.get = AsyncMock(return_value="gen-token")
+
+        with patch(
+            "llm_proxy.cache.redis_cache.get_redis_client_async",
+            AsyncMock(return_value=mock_redis_client),
+        ):
+            result = await cache.get_config_generation()
+
+        assert result == "gen-token"
+        mock_redis_client.get.assert_awaited_once_with("cache:config:generation")
+
+    @pytest.mark.asyncio
+    async def test_get_config_generation_unset_returns_none(self, cache, mock_redis_client):
+        mock_redis_client.get = AsyncMock(return_value=None)
+
+        with patch(
+            "llm_proxy.cache.redis_cache.get_redis_client_async",
+            AsyncMock(return_value=mock_redis_client),
+        ):
+            assert await cache.get_config_generation() is None
+
+    @pytest.mark.asyncio
+    async def test_get_config_generation_error_returns_none(self, cache, mock_redis_client):
+        mock_redis_client.get = AsyncMock(side_effect=ConnectionError("test"))
+
+        with patch(
+            "llm_proxy.cache.redis_cache.get_redis_client_async",
+            AsyncMock(return_value=mock_redis_client),
+        ):
+            assert await cache.get_config_generation() is None
+
+        assert cache._stats["errors"] == 1
+
+    @pytest.mark.asyncio
+    async def test_set_config_generation(self, cache, mock_redis_client):
+        with patch(
+            "llm_proxy.cache.redis_cache.get_redis_client_async",
+            AsyncMock(return_value=mock_redis_client),
+        ):
+            assert await cache.set_config_generation("gen-token") is True
+
+        mock_redis_client.setex.assert_awaited_once()
+        key, ttl, value = mock_redis_client.setex.await_args.args
+        assert key == "cache:config:generation"
+        assert ttl == _CONFIG_GENERATION_TTL
+        assert value == "gen-token"
+
+    @pytest.mark.asyncio
+    async def test_set_config_generation_error_returns_false(self, cache, mock_redis_client):
+        mock_redis_client.setex = AsyncMock(side_effect=ConnectionError("test"))
+
+        with patch(
+            "llm_proxy.cache.redis_cache.get_redis_client_async",
+            AsyncMock(return_value=mock_redis_client),
+        ):
+            assert await cache.set_config_generation("gen-token") is False
+
+        assert cache._stats["errors"] == 1
 
 
 class TestGetRedisCache:

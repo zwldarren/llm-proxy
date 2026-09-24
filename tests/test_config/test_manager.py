@@ -436,3 +436,181 @@ class TestInMemoryConfigPrecedesRedis:
 
         assert model_config is cached
         manager._redis_cache.get_model_config.assert_awaited_once_with("not-in-memory")
+
+
+class TestCrossProcessConfigRefresh:
+    """A worker must pick up configuration a peer process changed.
+
+    Multi-worker deployments (the shipped compose uses PostgreSQL + Redis and
+    auto-selects several workers) reload their own in-memory snapshot on every
+    mutation, so without a shared signal a request routed to a peer worker
+    still fails with ``ModelNotFoundError`` for a freshly added model.
+    """
+
+    @staticmethod
+    def _config(models=None, providers=None):
+        from llm_proxy.config.types import ProxyAuthConfig, ProxyConfig, ServerParams
+
+        return ProxyConfig(
+            server_params=ServerParams(auth=ProxyAuthConfig(jwt_secret="a" * 32)),
+            provider_configs=providers or {},
+            models=models or {},
+        )
+
+    def _manager(self, generation: str | None = "gen-1", generation_after: str | None = None):
+        manager = DatabaseConfigManager()
+        cache = MagicMock()
+        cache.get_model_config = AsyncMock(return_value=None)
+        cache.get_provider_config = AsyncMock(return_value=None)
+        cache.get_config_generation = AsyncMock(return_value=generation_after or generation)
+        cache.set_config_generation = AsyncMock(return_value=True)
+        cache.invalidate_all = AsyncMock(return_value=0)
+        manager.enable_cache(cache)
+        manager._config = self._config()
+        manager._generation = generation
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_model_lookup_reloads_when_a_peer_added_the_model(self):
+        from llm_proxy.config.types import (
+            ModelConfig,
+            ModelProviderConfig,
+            ProviderConfig,
+        )
+
+        manager = self._manager(generation="gen-1", generation_after="gen-2")
+        refreshed = self._config(
+            providers={"openai": ProviderConfig(type="openai")},
+            models={"new-model": ModelConfig(providers=[ModelProviderConfig(provider="openai")])},
+        )
+
+        async def _load():
+            manager._config = refreshed
+            return refreshed
+
+        manager.load = AsyncMock(side_effect=_load)
+
+        model_config = await manager.get_model_config("new-model")
+
+        assert model_config is not None
+        assert model_config.providers[0].provider == "openai"
+        assert manager._generation == "gen-2"
+        manager.load.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_model_lookup_does_not_reload_when_generation_is_unchanged(self):
+        manager = self._manager()
+        manager.load = AsyncMock()
+
+        assert await manager.get_model_config("missing") is None
+        manager.load.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_provider_lookup_reloads_when_a_peer_added_the_provider(self):
+        from llm_proxy.config.types import ProviderConfig
+
+        manager = self._manager(generation="gen-1", generation_after="gen-2")
+        refreshed = self._config(providers={"new-provider": ProviderConfig(type="openai")})
+
+        async def _load():
+            manager._config = refreshed
+            return refreshed
+
+        manager.load = AsyncMock(side_effect=_load)
+
+        provider_config = await manager.get_provider_config("new-provider")
+
+        assert provider_config.type == "openai"
+        manager.load.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reload_publishes_a_generation_for_peers(self):
+        manager = self._manager()
+        manager.load = AsyncMock(return_value=self._config())
+
+        await manager.reload()
+
+        manager._redis_cache.set_config_generation.assert_awaited_once()
+        token = manager._redis_cache.set_config_generation.await_args.args[0]
+        assert token and token == manager._generation
+
+    @pytest.mark.asyncio
+    async def test_sync_generation_adopts_the_token_without_reloading(self):
+        manager = self._manager(generation_after="gen-9")
+        manager.load = AsyncMock()
+
+        await manager.sync_generation()
+
+        assert manager._generation == "gen-9"
+        manager.load.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_refresh_is_a_noop_without_redis_caching(self):
+        manager = DatabaseConfigManager()
+        manager._config = self._config()
+        manager.load = AsyncMock()
+
+        assert await manager._refresh_if_generation_changed(force=True) is False
+        manager.load.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_peer_worker_picks_up_a_new_model_end_to_end(self):
+        """Two managers sharing one generation store mirror two worker processes."""
+        from llm_proxy.config.types import (
+            ModelConfig,
+            ModelProviderConfig,
+            ProviderConfig,
+        )
+
+        store: dict[str, str | None] = {"generation": None}
+
+        def _cache():
+            cache = MagicMock()
+            cache.get_model_config = AsyncMock(return_value=None)
+            cache.get_provider_config = AsyncMock(return_value=None)
+            cache.get_config_generation = AsyncMock(side_effect=lambda: store["generation"])
+            cache.invalidate_all = AsyncMock(
+                side_effect=lambda: (store.update(generation=None), 0)[1]
+            )
+
+            async def _set(token):
+                store["generation"] = token
+                return True
+
+            cache.set_config_generation = AsyncMock(side_effect=_set)
+            return cache
+
+        worker_a = DatabaseConfigManager()
+        worker_a.enable_cache(_cache())
+        worker_a._config = self._config()
+
+        worker_b = DatabaseConfigManager()
+        worker_b.enable_cache(_cache())
+        worker_b._config = self._config()
+
+        refreshed = self._config(
+            providers={"openai": ProviderConfig(type="openai")},
+            models={"new-model": ModelConfig(providers=[ModelProviderConfig(provider="openai")])},
+        )
+
+        async def _load_a():
+            worker_a._config = refreshed
+            return refreshed
+
+        async def _load_b():
+            worker_b._config = refreshed
+            return refreshed
+
+        worker_a.load = AsyncMock(side_effect=_load_a)
+        worker_b.load = AsyncMock(side_effect=_load_b)
+
+        # Worker A handles the admin mutation and reloads its own snapshot.
+        await worker_a.reload()
+        assert store["generation"] is not None
+
+        # A request for the new model lands on worker B, which has not reloaded.
+        model_config = await worker_b.get_model_config("new-model")
+
+        assert model_config is not None
+        assert worker_b._generation == store["generation"]
+        worker_b.load.assert_awaited()
