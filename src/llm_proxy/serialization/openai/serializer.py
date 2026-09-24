@@ -3,6 +3,7 @@
 Registered here (ADR-0003); targets the Responses API dialect.
 """
 
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -47,6 +48,7 @@ from llm_proxy.serialization.openai.converter import (
     _assistant_message_to_openai,
     _effective_role_for_provider,
     _message_to_openai,
+    content_to_openai_parts,
 )
 from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.providers.registry import register_provider_serializer
@@ -210,13 +212,30 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
         for msg in request.conversation.messages:
             if msg.role == "assistant":
                 items.extend(self._assistant_message_to_items(msg, context))
-            else:
-                converted = _message_to_openai(msg, context)
-                if isinstance(converted, list):
-                    for cm in converted:
+                continue
+
+            # Responses ``function_call_output.output`` accepts an array of
+            # content parts, so tool results are emitted from the blocks
+            # directly: routing them through the Chat Completions converter
+            # would flatten images/files to a text placeholder (the string-only
+            # shape that wire requires).
+            tool_results = [b for b in msg.content if isinstance(b, ToolResultBlock)]
+            if tool_results:
+                remaining = [b for b in msg.content if not isinstance(b, ToolResultBlock)]
+                if remaining:
+                    converted = _message_to_openai(replace(msg, content=remaining), context)
+                    for cm in converted if isinstance(converted, list) else [converted]:
                         items.append(self._chat_message_to_item(cm))
-                else:
-                    items.append(self._chat_message_to_item(converted))
+                for block in tool_results:
+                    items.append(self._tool_result_to_function_call_output(block, context))
+                continue
+
+            converted = _message_to_openai(msg, context)
+            if isinstance(converted, list):
+                for cm in converted:
+                    items.append(self._chat_message_to_item(cm))
+            else:
+                items.append(self._chat_message_to_item(converted))
 
         body: dict[str, Any] = {
             "model": context.model or request.model,
@@ -415,6 +434,41 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             "type": "message",
             "role": role,
             "content": self._normalize_responses_content(cm.get("content", ""), role),
+        }
+
+    def _tool_result_to_function_call_output(
+        self, block: Any, context: BuildContext
+    ) -> dict[str, Any]:
+        """Build a ``function_call_output`` item from a tool-result block.
+
+        The Responses API accepts a string or an array of ``input_text`` /
+        ``input_image`` / ``input_file`` content parts, so multimodal tool
+        results survive instead of being flattened to a text placeholder by the
+        string-only Chat Completions path.
+        """
+        content = getattr(block, "content", "")
+        if isinstance(content, list):
+            parts = content_to_openai_parts(content, context)
+            output: Any = (
+                self._normalize_responses_content(parts, "user")
+                if isinstance(parts, list)
+                else parts
+            )
+        elif content is None:
+            output = ""
+        else:
+            output = str(content)
+
+        if getattr(block, "is_error", False):
+            if isinstance(output, str):
+                output = f"Error: {output}"
+            elif isinstance(output, list):
+                output = [{"type": "input_text", "text": "Error: "}, *output]
+
+        return {
+            "type": "function_call_output",
+            "call_id": getattr(block, "tool_use_id", ""),
+            "output": output,
         }
 
     def _normalize_responses_content(self, content: Any, role: str) -> Any:
@@ -641,19 +695,17 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                     tool_def["strict"] = tool.strict
                 result.append(tool_def)
             elif isinstance(tool, OpenAIWebSearchTool):
-                ws_def: dict[str, Any] = {
-                    "type": "web_search",
-                }
+                # Preserve the client's requested tool type. Newer controls
+                # (filters, external_web_access, return_token_budget,
+                # image_settings) are only valid on ``web_search``;
+                # ``web_search_preview`` is the legacy type and does not
+                # support them, so they are dropped rather than sent as
+                # unknown fields.
+                ws_def: dict[str, Any] = {"type": tool.type}
                 if tool.search_context_size is not None:
                     ws_def["search_context_size"] = tool.search_context_size
-                if tool.external_web_access is not None:
-                    ws_def["external_web_access"] = tool.external_web_access
-                if tool.return_token_budget is not None:
-                    ws_def["return_token_budget"] = tool.return_token_budget
                 if tool.search_content_types is not None:
                     ws_def["search_content_types"] = tool.search_content_types
-                if tool.image_settings is not None:
-                    ws_def["image_settings"] = tool.image_settings
                 if tool.user_location is not None:
                     ws_def["user_location"] = {
                         k: v
@@ -666,14 +718,35 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                         }.items()
                         if v is not None
                     }
-                # Serialize filters (allowed/blocked domains) under OpenAI's filters wrapper
-                filters: dict[str, Any] = {}
-                if tool.allowed_domains:
-                    filters["allowed_domains"] = tool.allowed_domains
-                if tool.blocked_domains:
-                    filters["blocked_domains"] = tool.blocked_domains
-                if filters:
-                    ws_def["filters"] = filters
+                if tool.type == "web_search":
+                    if tool.external_web_access is not None:
+                        ws_def["external_web_access"] = tool.external_web_access
+                    if tool.return_token_budget is not None:
+                        ws_def["return_token_budget"] = tool.return_token_budget
+                    if tool.image_settings is not None:
+                        ws_def["image_settings"] = tool.image_settings
+                    # Serialize filters under OpenAI's filters wrapper.
+                    filters: dict[str, Any] = {}
+                    if tool.allowed_domains:
+                        filters["allowed_domains"] = tool.allowed_domains
+                    if tool.blocked_domains:
+                        filters["blocked_domains"] = tool.blocked_domains
+                    if filters:
+                        ws_def["filters"] = filters
+                elif any(
+                    value is not None
+                    for value in (
+                        tool.external_web_access,
+                        tool.return_token_budget,
+                        tool.image_settings,
+                        tool.allowed_domains,
+                        tool.blocked_domains,
+                    )
+                ):
+                    logger.debug(
+                        "Dropping web_search controls unsupported by the legacy "
+                        "web_search_preview tool type"
+                    )
                 result.append(ws_def)
             elif isinstance(tool, OpenAIToolSearchTool):
                 result.append({"type": "tool_search"})

@@ -559,7 +559,8 @@ class TestImageInput:
         msg = result.conversation.messages[0]
         file_blocks = [b for b in msg.content if isinstance(b, FileBlock)]
         assert len(file_blocks) == 1
-        assert file_blocks[0].file_data == "https://example.com/letter.pdf"
+        assert file_blocks[0].file_url == "https://example.com/letter.pdf"
+        assert file_blocks[0].file_data is None
         assert file_blocks[0].filename == "letter.pdf"
 
     def test_file_input_with_base64(self):

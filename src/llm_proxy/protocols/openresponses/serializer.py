@@ -158,16 +158,13 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
         elif part_type == "input_file":
             from llm_proxy.models.content_blocks import FileBlock
 
-            file_data = part_dict.get("file_data")
-            file_id = part_dict.get("file_id")
-            file_url = part_dict.get("file_url")
-            if file_url and not file_data and not file_id:
-                file_data = file_url
             result.append(
                 FileBlock(
-                    file_data=file_data,
-                    file_id=file_id,
+                    file_data=part_dict.get("file_data"),
+                    file_id=part_dict.get("file_id"),
+                    file_url=part_dict.get("file_url"),
                     filename=part_dict.get("filename"),
+                    detail=part_dict.get("detail"),
                 )
             )
         elif part_type == "input_video":

@@ -22,10 +22,13 @@ from llm_proxy.models import (
     Message,
     RefusalBlock,
     TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
     VideoBlock,
 )
 from llm_proxy.models.conversation import SystemMessage
 from llm_proxy.models.params import OpenAISpecificParams
+from llm_proxy.models.tools import OpenAIWebSearchTool
 from llm_proxy.models.types import AudioSource, ImageSource, ResponseFormat, VideoSource
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
@@ -294,3 +297,192 @@ class TestUnsupportedTopLevelParams:
         system_item = body["input"][0]
         assert system_item["role"] == "system"
         assert "name" not in system_item
+
+
+class TestFileUrlAndDetail:
+    def test_file_url_is_preserved_as_file_url(self):
+        # Responses ``input_file`` distinguishes file_url from base64
+        # file_data; the URL must not be rewritten into file_data.
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        FileBlock(
+                            file_url="https://example.com/doc.pdf",
+                            filename="doc.pdf",
+                            detail="low",
+                        )
+                    ],
+                )
+            ]
+        )
+        assert parts == [
+            {
+                "type": "input_file",
+                "file_url": "https://example.com/doc.pdf",
+                "filename": "doc.pdf",
+                "detail": "low",
+            }
+        ]
+
+    def test_file_id_detail_is_preserved(self):
+        parts = _parts([Message(role="user", content=[FileBlock(file_id="file_1", detail="high")])])
+        assert parts == [{"type": "input_file", "file_id": "file_1", "detail": "high"}]
+
+
+class TestDocumentUrl:
+    def test_document_url_source_becomes_file_url(self):
+        from llm_proxy.models import DocumentBlock
+        from llm_proxy.models.types import DocumentSource
+
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        DocumentBlock(
+                            source=DocumentSource(
+                                type="url", data="https://example.com/a.pdf", media_type=None
+                            ),
+                            title="a.pdf",
+                        )
+                    ],
+                )
+            ]
+        )
+        assert parts == [
+            {"type": "input_file", "file_url": "https://example.com/a.pdf", "filename": "a.pdf"}
+        ]
+
+
+class TestFunctionCallOutputArrays:
+    def test_multimodal_tool_result_stays_structured(self):
+        body = _body(
+            [
+                Message(role="assistant", content=[ToolUseBlock(id="c1", name="shot", input={})]),
+                Message(
+                    role="tool",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="c1",
+                            content=[
+                                TextBlock(text="screenshot attached"),
+                                ImageBlock(
+                                    source=ImageSource(
+                                        type="base64", data="AAAA", media_type="image/png"
+                                    )
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+            ]
+        )
+        outputs = [i for i in body["input"] if i["type"] == "function_call_output"]
+        assert outputs == [
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": [
+                    {"type": "input_text", "text": "screenshot attached"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                ],
+            }
+        ]
+
+    def test_text_only_tool_result_stays_a_string(self):
+        body = _body(
+            [
+                Message(role="assistant", content=[ToolUseBlock(id="c1", name="f", input={})]),
+                Message(
+                    role="tool",
+                    content=[ToolResultBlock(tool_use_id="c1", content="plain result")],
+                ),
+            ]
+        )
+        outputs = [i for i in body["input"] if i["type"] == "function_call_output"]
+        assert outputs == [
+            {"type": "function_call_output", "call_id": "c1", "output": "plain result"}
+        ]
+
+    def test_error_tool_result_keeps_error_prefix(self):
+        body = _body(
+            [
+                Message(role="assistant", content=[ToolUseBlock(id="c1", name="f", input={})]),
+                Message(
+                    role="tool",
+                    content=[ToolResultBlock(tool_use_id="c1", content="boom", is_error=True)],
+                ),
+            ]
+        )
+        outputs = [i for i in body["input"] if i["type"] == "function_call_output"]
+        assert outputs[0]["output"] == "Error: boom"
+
+
+class TestWebSearchToolType:
+    def _tools(self, tool: OpenAIWebSearchTool) -> list[dict]:
+        request = InternalRequest(
+            model="gpt-6-luna",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            params=GenerationParams(),
+            tools=[tool],
+        )
+        body = serializer._build_provider_request(request, _ctx())
+        return body["tools"]
+
+    def test_web_search_type_is_preserved(self):
+        assert self._tools(OpenAIWebSearchTool(type="web_search_preview")) == [
+            {"type": "web_search_preview"}
+        ]
+
+    def test_modern_controls_kept_on_web_search(self):
+        tools = self._tools(
+            OpenAIWebSearchTool(
+                type="web_search",
+                external_web_access=False,
+                return_token_budget="unlimited",
+                image_settings={"max_results": 2},
+                blocked_domains=["x.com"],
+            )
+        )
+        assert tools == [
+            {
+                "type": "web_search",
+                "external_web_access": False,
+                "return_token_budget": "unlimited",
+                "image_settings": {"max_results": 2},
+                "filters": {"blocked_domains": ["x.com"]},
+            }
+        ]
+
+    def test_modern_controls_dropped_for_legacy_preview(self):
+        tools = self._tools(
+            OpenAIWebSearchTool(
+                type="web_search_preview",
+                external_web_access=False,
+                return_token_budget="unlimited",
+                allowed_domains=["x.com"],
+            )
+        )
+        assert tools == [{"type": "web_search_preview"}]
+
+
+class TestAssistantMedia:
+    def test_assistant_image_is_degraded_not_dropped(self):
+        content = _content(
+            [
+                Message(
+                    role="assistant",
+                    content=[
+                        TextBlock(text="here"),
+                        ImageBlock(
+                            source=ImageSource(type="base64", data="AAAA", media_type="image/png")
+                        ),
+                    ],
+                )
+            ]
+        )[0]["content"]
+        assert content == "here [Image: image/png]"

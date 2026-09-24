@@ -44,6 +44,9 @@ class InputFileContent(BaseModel):
     file_data: str | None = Field(None, description="Base64 encoded file data")
     file_id: str | None = Field(None, description="File ID from Files API")
     filename: str | None = Field(None, description="Name of the file")
+    detail: Literal["auto", "low", "high"] | None = Field(
+        None, description="Rendering detail level for the file"
+    )
 
 
 class InputVideoContent(BaseModel):

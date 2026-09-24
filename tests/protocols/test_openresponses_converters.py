@@ -141,9 +141,21 @@ class TestConvertInputContent:
         )
         assert len(result) == 1
         assert isinstance(result[0], FileBlock)
-        assert result[0].file_data == "https://example.com/document.pdf"
+        assert result[0].file_url == "https://example.com/document.pdf"
+        assert result[0].file_data is None
         assert result[0].filename == "document.pdf"
         assert result[0].file_id is None
+
+    def test_input_file_with_detail(self):
+        from llm_proxy.models.content_blocks import FileBlock
+
+        result = _convert_input_content(
+            [{"type": "input_file", "file_id": "file_1", "detail": "low"}]
+        )
+        assert len(result) == 1
+        assert isinstance(result[0], FileBlock)
+        assert result[0].file_id == "file_1"
+        assert result[0].detail == "low"
 
     def test_input_file_with_base64_data(self):
         from llm_proxy.models.content_blocks import FileBlock
@@ -254,7 +266,8 @@ class TestConvertInputContent:
         blocks = result.conversation.messages[0].content
         files = [b for b in blocks if isinstance(b, FileBlock)]
         assert len(files) == 1
-        assert files[0].file_data == "https://example.com/doc.pdf"
+        assert files[0].file_url == "https://example.com/doc.pdf"
+        assert files[0].file_data is None
         assert files[0].filename == "doc.pdf"
 
     def test_base64_image_through_full_request(self):

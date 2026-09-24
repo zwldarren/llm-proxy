@@ -57,11 +57,19 @@ class RefusalBlock(ContentBlock):
 
 @dataclass
 class FileBlock(ContentBlock):
-    """File content block with file data or file_id."""
+    """File content block with file data, a URL, or a file_id.
+
+    ``file_data`` is base64/data-URI content, ``file_url`` a remote URL and
+    ``file_id`` a Files-API reference: OpenAI's Responses ``input_file``
+    distinguishes all three. ``detail`` (``auto``/``low``/``high``) controls
+    the rendering detail for file inputs.
+    """
 
     file_data: str | None = None
     file_id: str | None = None
+    file_url: str | None = None
     filename: str | None = None
+    detail: str | None = None
     cache_control: Any | None = None
 
 

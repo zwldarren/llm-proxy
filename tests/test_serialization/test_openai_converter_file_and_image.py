@@ -44,12 +44,22 @@ class TestImageBlockToOpenAI:
         assert parts[0]["image_url"]["detail"] == "high"
 
     def test_file_id_image(self):
+        # Chat Completions has no file_id image source, so the block degrades to
+        # text rather than sending the raw id as an ``image_url``.
         block = ImageBlock(
             source=ImageSource(type="file_id", data="file_abc", media_type="image/png"),
         )
-        parts = content_to_openai_parts([block])
-        assert parts[0]["type"] == "image_url"
-        assert parts[0]["image_url"]["url"] == "file_abc"
+        result = content_to_openai_parts([block])
+        assert isinstance(result, str)
+        assert "[Image: image/png]" in result
+
+    def test_file_id_image_for_responses_uses_file_id(self):
+        block = ImageBlock(
+            source=ImageSource(type="file_id", data="file_abc", media_type="image/png"),
+        )
+        ctx = BuildContext(provider_name="openai", target_endpoint="responses")
+        parts = content_to_openai_parts([block], ctx)
+        assert parts == [{"type": "input_image", "file_id": "file_abc"}]
 
 
 class TestFileBlockToDeepSeek:

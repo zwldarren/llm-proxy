@@ -348,6 +348,14 @@ def _assistant_message_to_openai(
     for block in msg.content:
         if isinstance(block, TextBlock):
             content_parts.append({"type": "text", "text": block.text})
+        elif isinstance(block, ImageBlock):
+            # An assistant turn carrying an image has no faithful wire shape on
+            # either target (Chat Completions assistant content is text-only;
+            # Responses assistant input content is ``output_text``/``refusal``).
+            # Keep a placeholder instead of dropping the block silently.
+            degraded = degrade_block_to_text(block)
+            if degraded:
+                content_parts.append({"type": "text", "text": degraded})
         elif isinstance(block, ThinkingBlock):
             if block.thinking:
                 reasoning_parts.append(block.thinking)
@@ -677,6 +685,51 @@ def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | No
     return None
 
 
+def _block_to_responses_part(block: Any) -> dict[str, Any] | None:
+    """Build an OpenAI Responses content part for a block whose Chat
+    Completions shape cannot carry the information faithfully.
+
+    Chat Completions has no ``file_id`` image source, no ``file_url`` field and
+    no per-file ``detail``; the generic converter flattens those into a single
+    ``image_url``/``file_data`` string. Returns ``None`` for every block the
+    Chat Completions shape represents faithfully (the provider serializer
+    rewrites those part types afterwards).
+    """
+    if isinstance(block, ImageBlock) and block.source.type == "file_id":
+        part: dict[str, Any] = {"type": "input_image", "file_id": block.source.data}
+        if block.detail is not None:
+            part["detail"] = block.detail
+        return part
+
+    if isinstance(block, FileBlock):
+        part = {"type": "input_file"}
+        for key, value in (
+            ("file_url", block.file_url),
+            ("file_data", block.file_data),
+            ("file_id", block.file_id),
+            ("filename", block.filename),
+            ("detail", block.detail),
+        ):
+            if value is not None:
+                part[key] = value
+        return part
+
+    if isinstance(block, DocumentBlock) and block.source.type in ("base64", "url", "file_id"):
+        part = {"type": "input_file"}
+        if block.source.type == "base64":
+            media_type = block.source.media_type or "application/pdf"
+            part["file_data"] = f"data:{media_type};base64,{block.source.data}"
+        elif block.source.type == "url":
+            part["file_url"] = block.source.data
+        else:
+            part["file_id"] = block.source.data
+        if block.title:
+            part["filename"] = block.title
+        return part
+
+    return None
+
+
 def content_to_openai_parts(
     content: list[Any], context: BuildContext | None = None
 ) -> list[dict[str, Any]] | str:
@@ -689,27 +742,26 @@ def content_to_openai_parts(
     policy = context.unsupported_block_policy if context else "drop"
     provider_name = context.provider_name if context else "openai"
     supported_blocks = context.supported_content_blocks if context else frozenset()
+    responses_target = context is not None and context.target_endpoint == "responses"
 
     for block in content:
-        # Responses ``input_image`` accepts a ``file_id`` source directly. Chat
-        # Completions has no equivalent, so the generic converter would emit the
-        # raw id as an ``image_url`` ("Invalid value: 'image_url'" / bad URL on
-        # the Responses API). Build the Responses-shaped part from the block
-        # while the source type is still known.
-        if (
-            context is not None
-            and context.target_endpoint == "responses"
-            and isinstance(block, ImageBlock)
-            and block.source.type == "file_id"
-        ):
-            file_id_part: dict[str, Any] = {
-                "type": "input_image",
-                "file_id": block.source.data,
-            }
-            if block.detail is not None:
-                file_id_part["detail"] = block.detail
-            parts.append(file_id_part)
+        if responses_target:
+            # Blocks whose Chat Completions shape loses information (file_id
+            # images, file URLs, file detail) are built directly in Responses
+            # form while the block is still available.
+            responses_part = _block_to_responses_part(block)
+            if responses_part is not None:
+                parts.append(responses_part)
+                continue
+
+        if isinstance(block, ImageBlock) and block.source.type == "file_id":
+            # Chat Completions has no file_id image source. Degrade instead of
+            # emitting the raw id as an ``image_url`` (a bad URL upstream).
+            degraded = degrade_block_to_text(block)
+            if degraded:
+                parts.append({"type": "text", "text": degraded})
             continue
+
         part = _block_to_openai_part(block, provider_name)
         if part is not None:
             parts.append(part)

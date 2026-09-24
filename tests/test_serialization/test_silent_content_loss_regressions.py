@@ -157,8 +157,12 @@ class TestOpenAIToolResultImageRegression:
         assert function_call_outputs[0]["call_id"] == "t1"
         output = function_call_outputs[0]["output"]
         assert output, "function_call_output.output must not be empty"
-        assert "result" in output
-        assert "[Image: image/png]" in output
+        # For the Responses target the tool result keeps its structure: the
+        # image becomes an ``input_image`` part instead of a text placeholder.
+        assert output == [
+            {"type": "input_text", "text": "result"},
+            {"type": "input_image", "image_url": "data:image/png;base64,iVBOR="},
+        ]
 
 
 class TestContextManagementDroppedForChatCompletions:
