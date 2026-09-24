@@ -124,22 +124,35 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
             from llm_proxy.models.content_blocks import ImageBlock
             from llm_proxy.models.types import ImageSource
 
-            image_url = part_dict.get("image_url", "")
-            if image_url.startswith("data:"):
+            image_url = part_dict.get("image_url") or ""
+            file_id = part_dict.get("file_id") or ""
+            detail = part_dict.get("detail")
+            if not image_url and file_id:
+                # Responses ``input_image`` may reference an uploaded file by
+                # ``file_id`` instead of ``image_url``. Keep it as a file_id
+                # source so the rebuild for a Responses upstream re-emits
+                # ``file_id`` rather than an empty ``image_url``.
+                result.append(
+                    ImageBlock(
+                        source=ImageSource(type="file_id", data=file_id, media_type=None),
+                        detail=detail,
+                    )
+                )
+            elif image_url.startswith("data:"):
                 data_part = image_url.split(";base64,", 1)
                 media_type = data_part[0].replace("data:", "") if len(data_part) == 2 else None
                 data = data_part[1] if len(data_part) == 2 else image_url
                 result.append(
                     ImageBlock(
                         source=ImageSource(type="base64", data=data, media_type=media_type),
-                        detail=part_dict.get("detail"),
+                        detail=detail,
                     )
                 )
-            else:
+            elif image_url:
                 result.append(
                     ImageBlock(
                         source=ImageSource(type="url", data=image_url, media_type=None),
-                        detail=part_dict.get("detail"),
+                        detail=detail,
                     )
                 )
         elif part_type == "input_file":

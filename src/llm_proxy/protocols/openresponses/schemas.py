@@ -21,10 +21,16 @@ class InputTextContent(BaseModel):
 
 
 class InputImageContent(BaseModel):
-    """Image input content."""
+    """Image input content.
+
+    Per the Responses spec one of ``image_url`` or ``file_id`` is required:
+    the image may be sent inline/as a URL, or referenced by the ID of an
+    uploaded file.
+    """
 
     type: Literal["input_image"] = "input_image"
-    image_url: str = Field(..., description="URL or base64 data URL of the image")
+    image_url: str | None = Field(None, description="URL or base64 data URL of the image")
+    file_id: str | None = Field(None, description="ID of an uploaded file containing the image")
     detail: Literal["low", "high", "auto", "original"] = Field(
         "auto", description="Image detail level"
     )

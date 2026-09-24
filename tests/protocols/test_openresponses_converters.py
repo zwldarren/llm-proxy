@@ -86,6 +86,18 @@ class TestConvertInputContent:
         assert len(result) == 1
         assert isinstance(result[0], ImageBlock)
 
+    def test_input_image_with_file_id(self):
+        from llm_proxy.models.content_blocks import ImageBlock
+
+        result = _convert_input_content(
+            [{"type": "input_image", "file_id": "file_abc", "detail": "low"}]
+        )
+        assert len(result) == 1
+        assert isinstance(result[0], ImageBlock)
+        assert result[0].source.type == "file_id"
+        assert result[0].source.data == "file_abc"
+        assert result[0].detail == "low"
+
     def test_input_image_with_base64_data_uri(self):
         from llm_proxy.models.content_blocks import ImageBlock
 
