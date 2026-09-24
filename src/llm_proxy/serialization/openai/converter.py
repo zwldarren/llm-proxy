@@ -691,6 +691,25 @@ def content_to_openai_parts(
     supported_blocks = context.supported_content_blocks if context else frozenset()
 
     for block in content:
+        # Responses ``input_image`` accepts a ``file_id`` source directly. Chat
+        # Completions has no equivalent, so the generic converter would emit the
+        # raw id as an ``image_url`` ("Invalid value: 'image_url'" / bad URL on
+        # the Responses API). Build the Responses-shaped part from the block
+        # while the source type is still known.
+        if (
+            context is not None
+            and context.target_endpoint == "responses"
+            and isinstance(block, ImageBlock)
+            and block.source.type == "file_id"
+        ):
+            file_id_part: dict[str, Any] = {
+                "type": "input_image",
+                "file_id": block.source.data,
+            }
+            if block.detail is not None:
+                file_id_part["detail"] = block.detail
+            parts.append(file_id_part)
+            continue
         part = _block_to_openai_part(block, provider_name)
         if part is not None:
             parts.append(part)

@@ -41,6 +41,7 @@ from llm_proxy.models.tools import (
     ToolChoiceNamed,
 )
 from llm_proxy.models.types import Usage
+from llm_proxy.observability.logger import get_logger
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.converter import (
     _assistant_message_to_openai,
@@ -53,6 +54,8 @@ from llm_proxy.serialization.responses_toolkit import (
     _extract_reasoning_text,
     _extract_summary_text,
 )
+
+logger = get_logger(__name__)
 
 
 def parse_usage_from_response(
@@ -106,6 +109,31 @@ def parse_usage_from_response(
         completion_tokens_details=completion_details,
         web_search_requests=web_search_call_count or None,
     )
+
+
+#: Responses ``input_audio.format`` values, keyed by the audio media subtype.
+#: The wire only accepts the short extensions (see the OpenResponses spec).
+_AUDIO_MEDIA_SUBTYPE_TO_FORMAT = {
+    "mpeg": "mp3",
+    "mpga": "mp3",
+    "x-wav": "wav",
+    "wave": "wav",
+}
+
+
+def _audio_format_from_media_url(url: str) -> str | None:
+    """Derive a Responses ``input_audio.format`` from a data/remote media URL.
+
+    Returns ``None`` when the URL carries no recognisable audio subtype, so
+    callers omit the field rather than guessing.
+    """
+    if not url.startswith("data:"):
+        return None
+    header = url[5:].split(";", 1)[0]
+    if "/" not in header:
+        return None
+    subtype = header.split("/", 1)[1].lower()
+    return _AUDIO_MEDIA_SUBTYPE_TO_FORMAT.get(subtype, subtype or None)
 
 
 @register_provider_serializer("openai")
@@ -173,8 +201,9 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 "role": _effective_role_for_provider(sys_msg.role, context),
                 "content": sys_msg.text_content,
             }
-            if sys_msg.name is not None:
-                item["name"] = sys_msg.name
+            # ``name`` is a legacy Chat Completions field with no Responses-API
+            # equivalent (message items accept content/role/phase only), so it
+            # is dropped rather than forwarded as an unknown field.
             items.append(item)
 
         # Conversation messages.
@@ -208,8 +237,11 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             body["max_output_tokens"] = request.params.max_tokens
         elif request.params.openai and request.params.openai.max_completion_tokens is not None:
             body["max_output_tokens"] = request.params.openai.max_completion_tokens
+        # ``stop`` does not exist on the Responses API (the parameter list has
+        # no stop/stop_sequences field) and the API rejects unknown top-level
+        # fields, so it is dropped. Chat Completions clients are its only source.
         if request.params.stop is not None:
-            body["stop"] = request.params.stop
+            logger.debug("Dropping 'stop' for a Responses-API request: not supported upstream")
 
         # response_format -> Responses API ``text.format`` (Structured Outputs).
         self._apply_response_format(body, request.params.response_format)
@@ -313,6 +345,16 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 body["safety_identifier"] = oai.safety_identifier
             if oai.parallel_tool_calls is not None:
                 body["parallel_tool_calls"] = oai.parallel_tool_calls
+            # verbosity lives under ``text.verbosity`` on the Responses API.
+            # Merge rather than overwrite: ``text`` may already carry the
+            # ``format`` from response_format or a client-supplied ``text``
+            # (native Responses clients pass it through ``extra``).
+            if oai.verbosity is not None:
+                text_config = body.get("text")
+                if text_config is None:
+                    body["text"] = {"verbosity": oai.verbosity}
+                elif isinstance(text_config, dict) and "verbosity" not in text_config:
+                    text_config["verbosity"] = oai.verbosity
             # logprobs: Responses API exposes ``top_logprobs`` (0-20) plus an
             # ``include`` entry requesting the logprobs payload.
             if oai.top_logprobs is not None:
@@ -375,24 +417,87 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             "content": self._normalize_responses_content(cm.get("content", ""), role),
         }
 
-    @staticmethod
-    def _normalize_responses_content(content: Any, role: str) -> Any:
+    def _normalize_responses_content(self, content: Any, role: str) -> Any:
         """Translate Chat Completions content parts to Responses API part types.
 
-        The Chat Completions converter emits ``{"type": "text"}`` parts, which
-        the Responses API rejects ("Invalid value: 'text'"). Responses expects
-        ``input_text`` on user/developer messages and ``output_text`` on
-        assistant messages. String content is already valid and returned as-is.
+        The Chat Completions converter emits part types the Responses API
+        rejects with a 400 ("Invalid value: 'text'" / "Invalid value:
+        'image_url'" / ...), and nests media payloads under the type name while
+        Responses expects scalar/sibling fields. Responses spells the part types
+        ``input_text`` (``output_text`` on assistant messages), ``input_image``,
+        ``input_file``, and ``input_audio``. String content and parts already in
+        Responses form (``refusal``, ``encrypted_content``, ...) pass through.
         """
         if not isinstance(content, list):
             return content
-        target = "output_text" if role == "assistant" else "input_text"
+        text_target = "output_text" if role == "assistant" else "input_text"
         return [
-            {**part, "type": target}
-            if isinstance(part, dict) and part.get("type") == "text"
-            else part
+            self._normalize_responses_part(part, text_target) if isinstance(part, dict) else part
             for part in content
         ]
+
+    @staticmethod
+    def _normalize_responses_part(part: dict[str, Any], text_target: str) -> dict[str, Any]:
+        """Translate one Chat Completions content part to its Responses shape."""
+        part_type = part.get("type")
+
+        if part_type == "text":
+            return {**part, "type": text_target}
+
+        if part_type == "image_url":
+            # Chat Completions: {"image_url": {"url": ..., "detail": ...}}
+            # Responses:        {"image_url": <url string>, "detail": ...}
+            payload = part.get("image_url")
+            url = payload.get("url") if isinstance(payload, dict) else payload
+            detail = payload.get("detail") if isinstance(payload, dict) else part.get("detail")
+            image: dict[str, Any] = {"type": "input_image", "image_url": url}
+            if detail is not None:
+                image["detail"] = detail
+            return image
+
+        if part_type == "file":
+            # Chat Completions nests the descriptor under ``file``; Responses
+            # expects file_data / file_id / filename at the part's top level.
+            payload = part.get("file")
+            if not isinstance(payload, dict):
+                return {**{k: v for k, v in part.items() if k != "file"}, "type": "input_file"}
+            return {"type": "input_file", **{k: v for k, v in payload.items() if v is not None}}
+
+        if part_type == "video_url":
+            # OpenAI's Responses API has no video input content type, so a video
+            # part would be rejected ("Invalid value: 'video_url'"). Degrade it
+            # to text, keeping the URL visible, instead of sending a 400.
+            payload = part.get("video_url")
+            url = payload.get("url") if isinstance(payload, dict) else payload
+            return {"type": text_target, "text": f"[Video: {url}]" if url else "[Video]"}
+
+        if part_type == "audio_url":
+            # Chat Completions (OpenRouter dialect): {"audio_url": {"url": ...}}
+            # Responses:                                {"audio_url": <url string>}
+            payload = part.get("audio_url")
+            url = payload.get("url") if isinstance(payload, dict) else payload
+            audio: dict[str, Any] = {"type": "input_audio"}
+            if url is not None:
+                audio["audio_url"] = url
+                audio_format = _audio_format_from_media_url(url)
+                if audio_format is not None:
+                    audio["format"] = audio_format
+            return audio
+
+        if part_type == "input_audio":
+            # OpenAI Chat Completions: {"input_audio": {"data": ..., "format": ...}}
+            # Responses:               {"audio_data": ..., "format": ...}
+            payload = part.get("input_audio")
+            if not isinstance(payload, dict):
+                return part  # already Responses-shaped (audio_data / audio_url)
+            audio = {"type": "input_audio"}
+            if payload.get("data") is not None:
+                audio["audio_data"] = payload["data"]
+            if payload.get("format") is not None:
+                audio["format"] = payload["format"]
+            return audio
+
+        return part
 
     def _assistant_message_to_items(self, msg: Any, context: BuildContext) -> list[dict[str, Any]]:
         """Convert an assistant Message into Responses API items.
