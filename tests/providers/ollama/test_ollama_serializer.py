@@ -337,11 +337,12 @@ class TestFileAndDocumentBlocks:
 
     Document blocks are surfaced as text: plain-text sources are extracted and
     binary documents (e.g. PDFs) are degraded to placeholders so they are not
-    silently lost. Audio and file blocks are still dropped, since Ollama cannot
-    interpret them and text degradation adds no value there.
+    silently lost. Audio and file blocks follow the ``unsupported_block_policy``:
+    dropped under the default ``drop`` policy, degraded to a placeholder under
+    ``degrade`` (Ollama cannot interpret them either way).
     """
 
-    def test_file_block_is_dropped(self, serializer, degrade_ctx):
+    def test_file_block_degrades_under_degrade_policy(self, serializer, degrade_ctx):
         text_content = "Hello from file"
         file_base64 = base64.b64encode(text_content.encode()).decode()
         conv = ConversationContext(
@@ -359,7 +360,23 @@ class TestFileAndDocumentBlocks:
             ]
         )
         result = serializer._convert_conversation_to_ollama(conv, degrade_ctx)
-        # FileBlock is silently dropped, only TextBlock content remains
+        # Under the degrade policy the block surfaces as a placeholder instead
+        # of being silently dropped.
+        assert result[0]["content"] == "hello [File: test.txt]"
+
+    def test_file_block_is_dropped_under_drop_policy(self, serializer):
+        conv = ConversationContext(
+            messages=[
+                Message(
+                    role="user",
+                    content=[
+                        TextBlock(text="hello"),
+                        FileBlock(filename="test.txt", file_data="QUJD"),
+                    ],
+                )
+            ]
+        )
+        result = serializer._convert_conversation_to_ollama(conv, BuildContext())
         assert result[0]["content"] == "hello"
 
     def test_document_block_base64_text_is_extracted(self, serializer, degrade_ctx):
@@ -429,7 +446,7 @@ class TestFileAndDocumentBlocks:
         # binary PDF document degrades to a placeholder instead of being dropped
         assert result[0]["content"] == "hello [Document: report.pdf]"
 
-    def test_audio_block_is_dropped(self, serializer, degrade_ctx):
+    def test_audio_block_degrades_under_degrade_policy(self, serializer, degrade_ctx):
         from llm_proxy.models import AudioBlock, AudioSource
 
         conv = ConversationContext(
@@ -450,8 +467,7 @@ class TestFileAndDocumentBlocks:
             ]
         )
         result = serializer._convert_conversation_to_ollama(conv, degrade_ctx)
-        # AudioBlock is silently dropped, only TextBlock content remains
-        assert result[0]["content"] == "hello"
+        assert result[0]["content"] == "hello [Audio: audio/mp3]"
 
 
 class TestThinkingBlocks:
@@ -834,3 +850,36 @@ class TestComplexConversations:
         assert "<system-prompt>" in sys_msg["content"]
         assert "Speak only French." in sys_msg["content"]
         assert "</system-prompt>" in sys_msg["content"]
+
+
+class TestToolResultMedia:
+    """Ollama tool messages are plain strings; media must not vanish silently."""
+
+    def test_tool_result_image_degrades_to_placeholder(self, serializer):
+        conv = ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="c1", name="shot", input={})],
+                ),
+                Message(
+                    role="tool",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="c1",
+                            content=[
+                                TextBlock(text="screenshot"),
+                                ImageBlock(
+                                    source=ImageSource(
+                                        type="base64", data="AAAA", media_type="image/png"
+                                    )
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+            ]
+        )
+        result = serializer._convert_conversation_to_ollama(conv, BuildContext())
+        tool_msgs = [m for m in result if m["role"] == "tool"]
+        assert tool_msgs[0]["content"] == "screenshot [Image: image/png]"

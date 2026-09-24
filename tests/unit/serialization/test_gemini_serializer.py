@@ -1158,3 +1158,102 @@ def test_search_grounding_excludes_tool_use_tokens_from_input():
     assert result.usage is not None
     assert result.usage.input_tokens == 10
     assert result.usage.web_search_requests == 1
+
+
+def test_build_provider_request_file_block_uses_file_url(serializer):
+    """A FileBlock carrying only ``file_url`` (Responses ``input_file.file_url``)
+    must be emitted as ``file_data.file_uri``, not dropped."""
+    request = InternalRequest(
+        model="gemini-2.0-flash",
+        conversation=ConversationContext(
+            messages=[
+                Message(
+                    role="user",
+                    content=[FileBlock(file_url="https://example.com/doc.pdf", filename="doc.pdf")],
+                )
+            ]
+        ),
+        params=GenerationParams(),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    assert body["contents"][0]["parts"] == [
+        {"file_data": {"file_uri": "https://example.com/doc.pdf"}}
+    ]
+
+
+def test_build_provider_request_tool_result_keeps_inline_image(serializer):
+    """Images inside a tool result survive as ``functionResponse.parts``."""
+    request = InternalRequest(
+        model="gemini-3-pro",
+        conversation=ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="c1", name="shot", input={})],
+                ),
+                Message(
+                    role="tool",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="c1",
+                            content=[
+                                TextBlock(text="screenshot"),
+                                ImageBlock(
+                                    source=ImageSource(
+                                        type="base64", data="AAAA", media_type="image/png"
+                                    )
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+            ]
+        ),
+        params=GenerationParams(),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+    assert func_resp["parts"] == [{"inline_data": {"mime_type": "image/png", "data": "AAAA"}}]
+    assert func_resp["response"]["content"] == "screenshot\n[Image: image/png]"
+
+
+def test_build_provider_request_tool_result_url_image_degrades(serializer):
+    """URL-sourced tool-result media cannot be inlined here; keep a placeholder."""
+    request = InternalRequest(
+        model="gemini-3-pro",
+        conversation=ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="c1", name="shot", input={})],
+                ),
+                Message(
+                    role="tool",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="c1",
+                            content=[
+                                TextBlock(text="screenshot"),
+                                ImageBlock(
+                                    source=ImageSource(
+                                        type="url", data="https://x/cat.png", media_type=None
+                                    )
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+            ]
+        ),
+        params=GenerationParams(),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+    assert "parts" not in func_resp
+    assert func_resp["response"]["content"] == "screenshot\n[Image: image]"

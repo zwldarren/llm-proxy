@@ -188,15 +188,26 @@ class OpenAIParsingMixin:
             if role == "tool":
                 tool_call_id = msg.get("tool_call_id", "")
                 content_blocks = self.parse_content_blocks(content)
-                content_str = " ".join(b.text for b in content_blocks if isinstance(b, TextBlock))
                 func_name = tool_call_id_to_name.get(tool_call_id, name)
+                # Keep multimodal tool results structured so they can reach
+                # upstreams that accept content arrays (Responses
+                # ``function_call_output.output``, Gemini
+                # ``functionResponse.parts``). Plain-text results stay a string
+                # so existing string-shaped payloads are unchanged.
+                tool_content: str | list[ContentBlock]
+                if any(not isinstance(b, TextBlock) for b in content_blocks):
+                    tool_content = content_blocks
+                else:
+                    tool_content = " ".join(
+                        b.text for b in content_blocks if isinstance(b, TextBlock)
+                    )
                 conv_messages.append(
                     Message(
                         role="tool",
                         content=[
                             ToolResultBlock(
                                 tool_use_id=tool_call_id,
-                                content=content_str,
+                                content=tool_content,
                                 name=func_name,
                             ),
                         ],

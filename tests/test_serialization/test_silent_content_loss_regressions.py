@@ -225,3 +225,130 @@ class TestContextManagementDroppedForChatCompletions:
             },
         )
         assert "context_management" not in body
+
+
+class TestFileUrlNotDropped:
+    """Regression: ``FileBlock.file_url`` (added so the OpenAI Responses
+    ``input_file.file_url`` field survives) was ignored by every other provider
+    serializer, silently dropping the file — and, for a file-only message, the
+    entire user turn.
+    """
+
+    @staticmethod
+    def _body(provider: str) -> dict:
+        return _chat_convert(
+            "openresponses",
+            provider,
+            {
+                "model": "m",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "summarize"},
+                            {
+                                "type": "input_file",
+                                "file_url": "https://example.com/doc.pdf",
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def test_gemini_emits_file_uri(self):
+        body = self._body("gemini")
+        parts = body["contents"][0]["parts"]
+        assert {"file_data": {"file_uri": "https://example.com/doc.pdf"}} in parts
+
+    def test_gemini_interactions_emits_document_uri(self):
+        body = self._body("gemini-interactions")
+        items = body["input"][0]["content"]
+        assert {"type": "document", "uri": "https://example.com/doc.pdf"} in items
+
+    def test_anthropic_keeps_file_url(self):
+        body = self._body("anthropic")
+        blocks = body["messages"][0]["content"]
+        assert {"type": "file", "file_url": "https://example.com/doc.pdf"} in blocks
+
+    def test_responses_target_keeps_file_url(self):
+        body = self._body("openai")
+        parts = body["input"][0]["content"]
+        assert {"type": "input_file", "file_url": "https://example.com/doc.pdf"} in parts
+
+    def test_chat_completions_target_carries_url_in_file_data(self):
+        body = self._body("openrouter")
+        parts = body["messages"][0]["content"]
+        assert {"type": "file", "file": {"file_data": "https://example.com/doc.pdf"}} in parts
+
+
+class TestChatCompletionsToolResultMediaRegression:
+    """Regression: the Chat Completions parser flattened multimodal tool
+    results to a text string, so images inside ``role: "tool"`` messages never
+    reached any provider.
+    """
+
+    @staticmethod
+    def _raw(image_url: str) -> dict:
+        return {
+            "model": "m",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "shot", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "c1",
+                    "content": [
+                        {"type": "text", "text": "screenshot"},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                },
+            ],
+        }
+
+    def test_gemini_emits_function_response_parts(self):
+        body = _chat_convert("openai", "gemini", self._raw("data:image/png;base64,AAAA"))
+        func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+        assert func_resp["parts"] == [{"inline_data": {"mime_type": "image/png", "data": "AAAA"}}]
+        # A text placeholder is kept alongside for models that ignore ``parts``.
+        assert func_resp["response"]["content"] == "screenshot\n[Image: image/png]"
+
+    def test_gemini_url_media_degrades_to_placeholder(self):
+        body = _chat_convert("openai", "gemini", self._raw("https://x/cat.png"))
+        func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+        assert "parts" not in func_resp
+        assert func_resp["response"]["content"] == "screenshot\n[Image: image]"
+
+    def test_responses_function_call_output_is_an_array(self):
+        body = _chat_convert("openai", "openai", self._raw("data:image/png;base64,AAAA"))
+        outputs = [i for i in body["input"] if i.get("type") == "function_call_output"]
+        assert outputs == [
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": [
+                    {"type": "input_text", "text": "screenshot"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                ],
+            }
+        ]
+
+    def test_plain_text_tool_result_stays_a_string(self):
+        raw = {
+            "model": "m",
+            "messages": [
+                {"role": "tool", "tool_call_id": "c1", "content": "plain result"},
+            ],
+        }
+        body = _chat_convert("openai", "gemini", raw)
+        func_resp = body["contents"][0]["parts"][0]["functionResponse"]
+        assert func_resp["response"] == {"content": "plain result"}

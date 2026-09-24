@@ -230,7 +230,7 @@ def _degrade_document(block: DocumentBlock) -> str | None:
 
 @register_block_degrader(FileBlock)
 def _degrade_file(block: FileBlock) -> str | None:
-    filename = block.filename or block.file_id or ""
+    filename = block.filename or block.file_url or block.file_id or ""
     return f"[File: {filename}]" if filename else "[File]"
 
 

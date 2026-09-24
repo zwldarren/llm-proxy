@@ -1181,3 +1181,89 @@ class TestResponseParser:
         assert result.usage is not None
         assert result.usage.input_tokens == 10
         assert result.usage.web_search_requests == 2
+
+
+def test_tool_result_with_image_keeps_multimodal_result(serializer):
+    """``function_result.result`` accepts Content items, so images inside a tool
+    result must survive instead of being flattened to text."""
+    request = InternalRequest(
+        model="gemini-3.7-flash",
+        conversation=ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[
+                        ThinkingBlock(thinking="take a screenshot", signature="sig_1"),
+                        ToolUseBlock(id="call_1", name="shot", input={}),
+                    ],
+                ),
+                Message(
+                    role="tool",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="call_1",
+                            name="shot",
+                            content=[
+                                TextBlock(text="screenshot"),
+                                ImageBlock(
+                                    source=ImageSource(
+                                        type="base64", data="AAAA", media_type="image/png"
+                                    )
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+                Message(role="user", content=[TextBlock(text="thanks")]),
+            ]
+        ),
+        params=GenerationParams(),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    function_result = next(s for s in body["input"] if s["type"] == "function_result")
+    assert function_result["result"] == [
+        {"type": "text", "text": "screenshot"},
+        {"type": "image", "data": "AAAA", "mime_type": "image/png"},
+    ]
+
+
+def test_tool_result_with_url_image_keeps_uri(serializer):
+    request = InternalRequest(
+        model="gemini-3.7-flash",
+        conversation=ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[
+                        ThinkingBlock(thinking="take a screenshot", signature="sig_1"),
+                        ToolUseBlock(id="call_1", name="shot", input={}),
+                    ],
+                ),
+                Message(
+                    role="tool",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="call_1",
+                            name="shot",
+                            content=[
+                                ImageBlock(
+                                    source=ImageSource(
+                                        type="url", data="https://x/cat.png", media_type=None
+                                    )
+                                ),
+                            ],
+                        )
+                    ],
+                ),
+                Message(role="user", content=[TextBlock(text="thanks")]),
+            ]
+        ),
+        params=GenerationParams(),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    function_result = next(s for s in body["input"] if s["type"] == "function_result")
+    assert function_result["result"] == [{"type": "image", "uri": "https://x/cat.png"}]

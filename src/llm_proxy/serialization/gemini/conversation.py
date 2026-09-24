@@ -13,6 +13,7 @@ from llm_proxy.models import (
     ConversationContext,
     CustomToolUseBlock,
     DocumentBlock,
+    FileBlock,
     ImageBlock,
     TextBlock,
     ThinkingBlock,
@@ -60,15 +61,21 @@ class GeminiConversationMixin:
     def _make_file_part(
         file_data: str | None,
         file_id: str | None,
+        file_url: str | None = None,
     ) -> dict[str, Any] | None:
         """Build a Gemini part from a FileBlock.
 
         ``file_data`` may be either a ``data:<mime>;base64,<payload>`` URI or a
         plain URL. The data URI is decoded into a Gemini ``inline_data`` part
         (with the data: prefix stripped and the real mime_type extracted); a
-        plain URL is emitted as a ``file_data`` part. ``file_id`` references a
-        previously uploaded Gemini File API resource and is emitted as
-        ``file_data`` as well.
+        plain URL is emitted as a ``file_data`` part. ``file_url`` (the
+        Responses ``input_file.file_url`` field) is a remote URL and is emitted
+        the same way. ``file_id`` references a previously uploaded Gemini File
+        API resource and is emitted as ``file_data`` as well.
+
+        HTTP(S) ``file_data.file_uri`` values are downloaded and inlined by the
+        adapter (``GeminiAdapter._download_images_in_gemini_contents``), so
+        ``file_url`` keeps working end to end.
         """
         if file_data:
             decoded = GeminiConversationMixin._decode_data_uri(file_data)
@@ -76,6 +83,8 @@ class GeminiConversationMixin:
                 mime_type, b64 = decoded
                 return {"inline_data": {"mime_type": mime_type, "data": b64}}
             return {"file_data": {"file_uri": file_data}}
+        if file_url:
+            return {"file_data": {"file_uri": file_url}}
         if file_id:
             return {"file_data": {"file_uri": file_id}}
         return None
@@ -96,6 +105,46 @@ class GeminiConversationMixin:
         if source_type in ("file_id", "url"):
             return {"file_data": {"mime_type": mime, "file_uri": data}}
         return None
+
+    @staticmethod
+    def _tool_result_media_part(block: Any) -> dict[str, Any] | None:
+        """Build a Gemini ``FunctionResponsePart`` for inline (base64) media.
+
+        ``FunctionResponse.parts`` only carries inline bytes (there is no
+        ``file_uri`` variant on the public generativelanguage API), so
+        URL-sourced media is left to the caller's text degradation: inlining it
+        would need a network fetch, and the adapter's download pass only walks
+        regular content parts, not function responses.
+        """
+        if isinstance(block, FileBlock):
+            if not block.file_data:
+                return None
+            decoded = GeminiConversationMixin._decode_data_uri(block.file_data)
+            if decoded is None:
+                return None
+            mime_type, data = decoded
+            return {"inline_data": {"mime_type": mime_type, "data": data}}
+
+        defaults = {
+            ImageBlock: "image/png",
+            AudioBlock: "audio/mp3",
+            VideoBlock: "video/mp4",
+            DocumentBlock: "application/pdf",
+        }
+        default_mime = next(
+            (mime for block_type, mime in defaults.items() if isinstance(block, block_type)), None
+        )
+        if default_mime is None:
+            return None
+        source = block.source
+        if source.type != "base64" or not source.data:
+            return None
+        return {
+            "inline_data": {
+                "mime_type": source.media_type or default_mime,
+                "data": source.data,
+            }
+        }
 
     def _convert_conversation_to_gemini(
         self, conversation: ConversationContext, context: BuildContext | None = None
@@ -298,7 +347,7 @@ class GeminiConversationMixin:
                     if part:
                         parts.append(part)
             elif isinstance(block, FileBlock):
-                part = self._make_file_part(block.file_data, block.file_id)
+                part = self._make_file_part(block.file_data, block.file_id, block.file_url)
                 if part:
                     parts.append(part)
             elif isinstance(block, CustomToolUseBlock):
@@ -351,34 +400,42 @@ class GeminiConversationMixin:
                 func_name = flatten_history_tool_name(
                     context.namespace_map if context else None, raw_name
                 )
-                response_content: dict[str, Any] | str
+                function_response: dict[str, Any] = {"name": func_name}
                 if isinstance(block.content, str):
                     try:
                         parsed = orjson.loads(block.content)
                         if isinstance(parsed, dict):
-                            response_content = parsed
+                            function_response["response"] = parsed
                         else:
-                            response_content = {"content": block.content}
+                            function_response["response"] = {"content": block.content}
                     except orjson.JSONDecodeError, TypeError:
-                        response_content = {"content": block.content}
+                        function_response["response"] = {"content": block.content}
                 elif isinstance(block.content, list):
+                    # ``FunctionResponse.parts`` accepts ordered multimodal parts
+                    # (Gemini 3 series): base64 media is inlined so the model can
+                    # actually see it. Chat Completions tool results used to lose
+                    # images/audio silently because only TextBlocks were kept.
+                    # A text placeholder is kept alongside so the media is still
+                    # signalled on models that ignore ``parts``.
                     text_parts: list[str] = []
+                    media_parts: list[dict[str, Any]] = []
                     for sub in block.content:
-                        if isinstance(sub, TextBlock) and sub.text:
-                            text_parts.append(sub.text)
-                    response_content = (
-                        {"content": "\n".join(text_parts)} if text_parts else {"content": ""}
-                    )
+                        if isinstance(sub, TextBlock):
+                            if sub.text:
+                                text_parts.append(sub.text)
+                            continue
+                        media = self._tool_result_media_part(sub)
+                        if media is not None:
+                            media_parts.append(media)
+                        degraded = degrade_block_to_text(sub)
+                        if degraded:
+                            text_parts.append(degraded)
+                    function_response["response"] = {"content": "\n".join(text_parts)}
+                    if media_parts:
+                        function_response["parts"] = media_parts
                 else:
-                    response_content = {"content": str(block.content)}
-                parts.append(
-                    {
-                        "functionResponse": {
-                            "name": func_name,
-                            "response": response_content,
-                        }
-                    }
-                )
+                    function_response["response"] = {"content": str(block.content)}
+                parts.append({"functionResponse": function_response})
             else:
                 # Handle unsupported block types via shared degradation logic.
                 # If a block is declared as supported but fell through unhandled,

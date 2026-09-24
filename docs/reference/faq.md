@@ -44,6 +44,27 @@ between protocols. Capability flags on the model record drive routing and the ca
 they do not block non-chat endpoints. See
 [Create chat completion](../api/chat/create-completion.md) and [Tools & Reasoning](../api/tools.md).
 
+## How are files and media mapped when I route to another provider?
+
+The proxy renders each part in whatever form the upstream accepts, so the same
+`input_image` / `input_file` / `input_audio` part may arrive as inline bytes, a remote
+URI, or an uploaded-file reference. Worth knowing:
+
+- **`file_id` is passed through as-is.** There is no `/v1/files` store, so an id must
+  have been issued by the upstream it is sent to. An OpenAI Files-API id sent to Gemini
+  (or the reverse) fails upstream.
+- **HTTP(S) image, audio and document URIs are downloaded and inlined** before the
+  request is forwarded, so any publicly reachable URL works. SSRF protection applies.
+- **Video URIs are not downloaded.** Gemini fetches video itself and reliably accepts
+  only YouTube URLs (or File API / `gs://` URIs); an arbitrary `https://…/v.mp4` is
+  rejected upstream.
+- **Multimodal tool results** stay structured where the upstream supports it (Responses
+  `function_call_output.output`, Gemini 3 `functionResponse.parts`); elsewhere the media
+  is degraded to a text placeholder rather than dropped.
+- A block the target provider cannot represent follows the
+  `unsupported_block_policy` — `drop` by default, `degrade` to keep a text placeholder
+  (`[Image: …]`, `[File: …]`).
+
 ## Can I export logs to my own system?
 
 There is no export endpoint in v0.2.3; use `GET /api/logs` with cursor pagination

@@ -63,11 +63,6 @@ class OllamaConversationMixin:
     def _convert_conversation_to_ollama(
         self, conversation: ConversationContext, context: BuildContext | None = None
     ) -> list[dict[str, Any]]:
-        from llm_proxy.models import (
-            AudioBlock,
-            FileBlock,
-        )
-
         prepared: list[dict[str, Any]] = []
         tool_id_to_name: dict[str, str] = {}
         policy = context.unsupported_block_policy if context else "drop"
@@ -147,8 +142,6 @@ class OllamaConversationMixin:
                         degraded = degrade_block_to_text(block)
                         if degraded:
                             texts.append(degraded)
-                elif isinstance(block, (AudioBlock, FileBlock)):
-                    pass
                 elif isinstance(block, ThinkingBlock):
                     if block.thinking:
                         out["thinking"] = block.thinking
@@ -230,9 +223,18 @@ class OllamaConversationMixin:
         if isinstance(content_raw, str):
             content_str = content_raw
         elif isinstance(content_raw, list):
-            content_str = " ".join(
-                b.text for b in content_raw if isinstance(b, TextBlock) and b.text
-            )
+            # Ollama tool messages carry a plain string, so multimodal tool
+            # result blocks are degraded to placeholders instead of dropped.
+            parts: list[str] = []
+            for b in content_raw:
+                if isinstance(b, TextBlock):
+                    if b.text:
+                        parts.append(b.text)
+                    continue
+                degraded = degrade_block_to_text(b)
+                if degraded:
+                    parts.append(degraded)
+            content_str = " ".join(parts)
         else:
             content_str = str(content_raw) if content_raw is not None else ""
 

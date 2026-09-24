@@ -618,6 +618,11 @@ class AnthropicContentMixin:
         file_block: dict[str, Any] = {"type": "file"}
         if block.file_data:
             file_block["file_data"] = block.file_data
+        if block.file_url:
+            # Responses ``input_file.file_url``: the Anthropic wire has no
+            # ``file_url`` field, but the proxy's lossless ``file`` passthrough
+            # keeps it so the URL is not silently dropped.
+            file_block["file_url"] = block.file_url
         if block.file_id:
             file_block["file_id"] = block.file_id
         if block.filename:

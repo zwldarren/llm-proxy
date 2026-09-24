@@ -76,6 +76,11 @@ Content parts: `input_text`, `input_image` (`image_url`, `detail`), `input_file`
 (`file_url` / `file_data` / `file_id`, `filename`), `input_video`, `input_audio`
 (`audio_data` / `audio_url`, `format`), `encrypted_content`.
 
+`input_file.file_url` is kept as a URL on the Responses wire. When the request is
+routed to a provider whose wire has no URL file input, the URL is carried in that
+provider's file field (and HTTP(S) URIs are downloaded and inlined before forwarding);
+see [FAQ](../../reference/faq.md#how-are-files-and-media-mapped-when-i-route-to-another-provider).
+
 Key parameters:
 
 | Parameter | Notes |

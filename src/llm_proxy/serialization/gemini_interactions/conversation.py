@@ -185,6 +185,10 @@ class GeminiInteractionsConversationMixin:
                     mime_type, b64 = decoded
                     return [{"type": "document", "mime_type": mime_type, "data": b64}]
                 return [{"type": "document", "uri": block.file_data}]
+            if block.file_url:
+                # Responses ``input_file.file_url``: a remote URL. The adapter
+                # downloads HTTP(S) URIs before the request is sent.
+                return [{"type": "document", "uri": block.file_url}]
             if block.file_id:
                 return [{"type": "document", "uri": block.file_id}]
             return []
@@ -215,13 +219,14 @@ class GeminiInteractionsConversationMixin:
 
     # ── Tool call / result step helpers ───────────────────────────────
 
-    @staticmethod
-    def _tool_result_content(content: Any) -> Any:
+    def _tool_result_content(self, content: Any, context: BuildContext | None = None) -> Any:
         """Normalize ToolResultBlock.content into an Interactions result.
 
         Accepted forms per the API reference: array of Content, object, or
         string. JSON strings that parse to an object are kept as objects;
-        plain text becomes a Content array.
+        plain text becomes a Content array. Multimodal blocks (``function_result``
+        accepts image/audio/video/document Content items) are preserved instead
+        of being flattened away.
         """
         if isinstance(content, str):
             try:
@@ -232,10 +237,22 @@ class GeminiInteractionsConversationMixin:
                 return parsed
             return [{"type": "text", "text": content}]
         if isinstance(content, list):
-            text_parts = [sub.text for sub in content if isinstance(sub, TextBlock) and sub.text]
-            if text_parts:
-                return [{"type": "text", "text": "\n".join(text_parts)}]
-            return [{"type": "text", "text": ""}]
+            items: list[dict[str, Any]] = []
+            for sub in content:
+                if isinstance(sub, TextBlock):
+                    if sub.text:
+                        items.append({"type": "text", "text": sub.text})
+                    continue
+                converted = self._block_to_content_item(sub, context)
+                if converted:
+                    items.extend(converted)
+                    continue
+                # A block the Interactions dialect cannot carry is kept as a
+                # text placeholder rather than silently dropped.
+                degraded = degrade_block_to_text(sub)
+                if degraded:
+                    items.append({"type": "text", "text": degraded})
+            return items or [{"type": "text", "text": ""}]
         return [{"type": "text", "text": str(content)}]
 
     # ── Conversation → input ──────────────────────────────────────────
@@ -374,7 +391,7 @@ class GeminiInteractionsConversationMixin:
                             "name": flatten_history_tool_name(
                                 context.namespace_map if context else None, raw_name
                             ),
-                            "result": self._tool_result_content(block.content),
+                            "result": self._tool_result_content(block.content, context),
                         }
                     )
 

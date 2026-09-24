@@ -592,6 +592,12 @@ def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | No
         file_dict: dict[str, Any] = {}
         if block.file_data:
             file_dict["file_data"] = block.file_data
+        elif block.file_url:
+            # Chat Completions has no ``file_url`` field. The previous
+            # behaviour (before the Responses file_url/file_data split) carried
+            # the URL in ``file_data``, which OpenAI-compatible providers
+            # accept; keep that so the file is not silently dropped.
+            file_dict["file_data"] = block.file_url
         if block.file_id:
             file_dict["file_id"] = block.file_id
         if block.filename:
