@@ -1135,7 +1135,7 @@ wheels = [
 
 [[package]]
 name = "llm-proxy"
-version = "0.2.6"
+version = "0.2.7"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

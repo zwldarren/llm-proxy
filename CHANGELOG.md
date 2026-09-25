@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.7](https://github.com/zwldarren/llm-proxy/compare/v0.2.6...v0.2.7) (2026-09-25)
+
+
+### Features
+
+* **serialization:** map files and media across provider wires ([43b4542](https://github.com/zwldarren/llm-proxy/commit/43b454278aed6ff29a34ac7d896e63c101b64384))
+
+
+### Bug Fixes
+
+* **config:** add "default" sentinel so per-adapter policy defaults apply ([81ec72d](https://github.com/zwldarren/llm-proxy/commit/81ec72d69818ca4b00c0e67b9bee4b8141b21bbe))
+* **config:** refresh worker config when a peer process changes it ([28c5cda](https://github.com/zwldarren/llm-proxy/commit/28c5cdae0b575647443db22c8f150797590e2bcd))
+* **openai:** align rebuilt Responses requests with the API reference ([4141b51](https://github.com/zwldarren/llm-proxy/commit/4141b51893babfd1681f1403bc5cecc2f722598d))
+* **openai:** degrade audio to text and expand document content chunks ([ca1690b](https://github.com/zwldarren/llm-proxy/commit/ca1690b56e3e4977d2e9f0b617b50cdd39b962e4))
+* **openai:** rebuild Responses content parts from Chat Completions shapes ([f967f18](https://github.com/zwldarren/llm-proxy/commit/f967f188b1f2f3a2a90ac2ac9dd23e279de8275e))
+* **openresponses:** preserve input_image file_id on requests ([9fd6beb](https://github.com/zwldarren/llm-proxy/commit/9fd6beba0d7f5619ab529e1d981d86db59be1568))
+* **serialization:** accept loose image payloads and reject unrepresentable ones ([beea060](https://github.com/zwldarren/llm-proxy/commit/beea060269d9a6651041a02a23bcbe647c01aa3d))
+* **serialization:** map files and media onto blocks providers accept ([4a4902e](https://github.com/zwldarren/llm-proxy/commit/4a4902e8651a6fa7d34053c25104f21d2f8850eb))
+* **serialization:** stop dropping files and media when routing across providers ([dff9d0a](https://github.com/zwldarren/llm-proxy/commit/dff9d0ac670e91efb3d4839f802b62638b6089ec))
+
+
+### Documentation
+
+* an FAQ section on how files/media map across providers (file_id is ([dff9d0a](https://github.com/zwldarren/llm-proxy/commit/dff9d0ac670e91efb3d4839f802b62638b6089ec))
+
 ## [0.2.6](https://github.com/zwldarren/llm-proxy/compare/v0.2.5...v0.2.6) (2026-09-23)
 
 
