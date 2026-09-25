@@ -58,6 +58,12 @@ URI, or an uploaded-file reference. Worth knowing:
 - **Video URIs are not downloaded.** Gemini fetches video itself and reliably accepts
   only YouTube URLs (or File API / `gs://` URIs); an arbitrary `https://…/v.mp4` is
   rejected upstream.
+- **Audio has no OpenAI Responses content type.** The Responses API accepts message
+  content of `input_text` / `input_image` / `input_file` only, so audio routed to the
+  built-in `openai` provider (which targets `/responses`) degrades to an
+  `[Audio: …]` text placeholder instead of being sent as an `input_audio` part the API
+  rejects. Audio passes through verbatim on the native Responses passthrough path, and
+  Chat Completions upstreams keep their `input_audio` support.
 - **Multimodal tool results** stay structured where the upstream supports it (Responses
   `function_call_output.output`, Gemini 3 `functionResponse.parts`); elsewhere the media
   is degraded to a text placeholder rather than dropped.

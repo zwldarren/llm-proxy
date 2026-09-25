@@ -5,11 +5,12 @@ Chat Completions converter, which emits Chat-Completions-only part types and
 nesting. OpenAI's Responses API rejects those with a 400, e.g.::
 
     Invalid value: 'image_url'. Supported values are: 'input_text',
-    'input_image', 'input_audio', 'output_text', 'refusal', 'input_file', ...
+    'input_image', 'output_text', 'refusal', 'input_file', ...
 
 These tests pin the translation back to the Responses wire shapes
 (``input_image`` with a scalar ``image_url`` sibling ``detail``, flattened
-``input_file`` fields, ``input_audio`` with ``audio_url``/``audio_data``).
+``input_file`` fields) and to text degradation for media the Responses API
+cannot accept (video and audio).
 """
 
 from llm_proxy.models import (
@@ -35,13 +36,12 @@ from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSer
 
 serializer = OpenAIResponsesProviderSerializer()
 
-#: Part types the Responses API accepts (from its own validation error). A
-#: rebuilt body must never contain anything outside this set.
+#: Part types the Responses API accepts for message content. A rebuilt body
+#: must never contain anything outside this set.
 _RESPONSES_PART_TYPES = frozenset(
     {
         "input_text",
         "input_image",
-        "input_audio",
         "output_text",
         "refusal",
         "input_file",
@@ -173,8 +173,16 @@ class TestFileTranslation:
         assert parts == [{"type": "input_file", "file_id": "file_abc"}]
 
 
-class TestAudioTranslation:
-    def test_audio_url_is_flattened_and_format_derived(self):
+class TestAudioDegradation:
+    """The Responses API has no audio input content type.
+
+    Message content accepts ``input_text``/``input_image``/``input_file`` only
+    and ``ResponseInputAudio`` is Evals-only (never a member of
+    ``ResponseInputItem``); api.openai.com rejects an ``input_audio`` part with
+    "Invalid value: 'input_audio'". Audio must degrade to text instead.
+    """
+
+    def test_base64_audio_degrades_to_text_without_dumping_payload(self):
         parts = _parts(
             [
                 Message(
@@ -187,13 +195,38 @@ class TestAudioTranslation:
                 )
             ]
         )
-        assert parts == [
-            {
-                "type": "input_audio",
-                "audio_url": "data:audio/mpeg;base64,AAAA",
-                "format": "mp3",
-            }
-        ]
+        # The inline data URL is not echoed: it would inject a base64 blob
+        # into the prompt as text.
+        assert parts == [{"type": "input_text", "text": "[Audio]"}]
+
+    def test_remote_audio_url_keeps_the_url_visible(self):
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        AudioBlock(
+                            source=AudioSource(
+                                type="url", data="https://example.com/a.mp3", media_type=None
+                            )
+                        )
+                    ],
+                )
+            ]
+        )
+        assert parts == [{"type": "input_text", "text": "[Audio: https://example.com/a.mp3]"}]
+
+    def test_chat_completions_audio_part_degrades(self):
+        # A raw Chat Completions / OpenResponses-shaped audio part reaching the
+        # normalizer must also degrade rather than pass through.
+        assert serializer._normalize_responses_content(
+            [{"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}}],
+            "user",
+        ) == [{"type": "input_text", "text": "[Audio: wav]"}]
+        assert serializer._normalize_responses_content(
+            [{"type": "input_audio", "audio_url": "data:audio/wav;base64,AAAA"}],
+            "user",
+        ) == [{"type": "input_text", "text": "[Audio]"}]
 
 
 class TestPassthroughParts:
@@ -354,6 +387,64 @@ class TestDocumentUrl:
         assert parts == [
             {"type": "input_file", "file_url": "https://example.com/a.pdf", "filename": "a.pdf"}
         ]
+
+
+class TestDocumentContentSource:
+    """Anthropic ``document`` with ``source.type == "content"`` nested chunks.
+
+    The nested ``content`` payload is a list of ``text``/``image`` chunks. The
+    generic converter used to ``str()`` the list, emitting a Python repr as
+    text and dropping nested images.
+    """
+
+    @staticmethod
+    def _doc(data):
+        from llm_proxy.models import DocumentBlock
+        from llm_proxy.models.types import DocumentSource
+
+        return DocumentBlock(source=DocumentSource(type="content", data=data))
+
+    def test_string_content_becomes_input_text(self):
+        # A lone text part collapses to a plain string, which is valid content.
+        content = _content([Message(role="user", content=[self._doc("plain text")])])[0]["content"]
+        assert content == "plain text"
+
+    def test_text_and_image_chunks_are_expanded(self):
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        self._doc(
+                            [
+                                {"type": "text", "text": "look"},
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": "AAAA",
+                                    },
+                                },
+                            ]
+                        )
+                    ],
+                )
+            ]
+        )
+        assert parts == [
+            {"type": "input_text", "text": "look"},
+            {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+        ]
+
+    def test_unknown_chunk_degrades_to_placeholder(self):
+        content = _content(
+            [Message(role="user", content=[self._doc([{"type": "future_thing", "x": 1}])])]
+        )[0]["content"]
+        assert content == "[future_thing]"
+
+    def test_empty_content_yields_no_part(self):
+        assert _content([Message(role="user", content=[self._doc([])])])[0]["content"] == []
 
 
 class TestFunctionCallOutputArrays:

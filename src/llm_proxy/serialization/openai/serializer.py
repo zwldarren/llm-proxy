@@ -113,29 +113,22 @@ def parse_usage_from_response(
     )
 
 
-#: Responses ``input_audio.format`` values, keyed by the audio media subtype.
-#: The wire only accepts the short extensions (see the OpenResponses spec).
-_AUDIO_MEDIA_SUBTYPE_TO_FORMAT = {
-    "mpeg": "mp3",
-    "mpga": "mp3",
-    "x-wav": "wav",
-    "wave": "wav",
-}
+def _audio_placeholder(part: dict[str, Any]) -> str:
+    """Build a concise text placeholder for an audio content part.
 
-
-def _audio_format_from_media_url(url: str) -> str | None:
-    """Derive a Responses ``input_audio.format`` from a data/remote media URL.
-
-    Returns ``None`` when the URL carries no recognisable audio subtype, so
-    callers omit the field rather than guessing.
+    The Responses API has no audio input content type, so audio parts are
+    degraded to text. Inline ``data:`` URLs are deliberately not echoed: a
+    base64 audio payload would otherwise be injected into the prompt as text.
     """
-    if not url.startswith("data:"):
-        return None
-    header = url[5:].split(";", 1)[0]
-    if "/" not in header:
-        return None
-    subtype = header.split("/", 1)[1].lower()
-    return _AUDIO_MEDIA_SUBTYPE_TO_FORMAT.get(subtype, subtype or None)
+    if part.get("type") == "audio_url":
+        payload = part.get("audio_url")
+        url = payload.get("url") if isinstance(payload, dict) else payload
+        if isinstance(url, str) and url and not url.startswith("data:"):
+            return f"[Audio: {url}]"
+        return "[Audio]"
+    payload = part.get("input_audio")
+    audio_format = payload.get("format") if isinstance(payload, dict) else None
+    return f"[Audio: {audio_format}]" if audio_format else "[Audio]"
 
 
 @register_provider_serializer("openai")
@@ -525,31 +518,16 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             url = payload.get("url") if isinstance(payload, dict) else payload
             return {"type": text_target, "text": f"[Video: {url}]" if url else "[Video]"}
 
-        if part_type == "audio_url":
-            # Chat Completions (OpenRouter dialect): {"audio_url": {"url": ...}}
-            # Responses:                                {"audio_url": <url string>}
-            payload = part.get("audio_url")
-            url = payload.get("url") if isinstance(payload, dict) else payload
-            audio: dict[str, Any] = {"type": "input_audio"}
-            if url is not None:
-                audio["audio_url"] = url
-                audio_format = _audio_format_from_media_url(url)
-                if audio_format is not None:
-                    audio["format"] = audio_format
-            return audio
-
-        if part_type == "input_audio":
-            # OpenAI Chat Completions: {"input_audio": {"data": ..., "format": ...}}
-            # Responses:               {"audio_data": ..., "format": ...}
-            payload = part.get("input_audio")
-            if not isinstance(payload, dict):
-                return part  # already Responses-shaped (audio_data / audio_url)
-            audio = {"type": "input_audio"}
-            if payload.get("data") is not None:
-                audio["audio_data"] = payload["data"]
-            if payload.get("format") is not None:
-                audio["format"] = payload["format"]
-            return audio
+        if part_type in ("audio_url", "input_audio"):
+            # The Responses API has no audio input content type: message content
+            # accepts ``input_text`` / ``input_image`` / ``input_file`` only, and
+            # the ``ResponseInputAudio`` schema is Evals-only (not a member of
+            # ``ResponseInputItem``). api.openai.com rejects an ``input_audio``
+            # part with "Invalid value: 'input_audio'", so a Chat Completions
+            # part (``audio_url``) or an OpenResponses-style part (``input_audio``
+            # with ``audio_data``/``audio_url``) is degraded to a text placeholder
+            # rather than sent as a 400.
+            return {"type": text_target, "text": _audio_placeholder(part)}
 
         return part
 

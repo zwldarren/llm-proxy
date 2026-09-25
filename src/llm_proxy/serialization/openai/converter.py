@@ -47,6 +47,10 @@ from llm_proxy.serialization._shared_degradation import (
     degrade_block_to_text,
     should_degrade_block,
 )
+from llm_proxy.serialization.content_parsers import (
+    parse_image_block_anthropic,
+    parse_text_block,
+)
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.responses_toolkit.namespace import (
     flatten_history_tool_name,
@@ -614,7 +618,7 @@ def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | No
         return {"type": "text", "text": degraded} if degraded else None
 
     if isinstance(block, DocumentBlock):
-        if block.source.type in ("text", "content"):
+        if block.source.type == "text":
             doc_data = block.source.data
             doc_text = doc_data if isinstance(doc_data, str) else str(doc_data)
             return {"type": "text", "text": doc_text}
@@ -736,6 +740,50 @@ def _block_to_responses_part(block: Any) -> dict[str, Any] | None:
     return None
 
 
+def _document_content_to_parts(
+    block: DocumentBlock, context: BuildContext | None
+) -> list[dict[str, Any]]:
+    """Convert an Anthropic ``document`` ``content`` source into OpenAI parts.
+
+    ``DocumentSource.data`` for a ``content`` source holds the raw Anthropic
+    payload: a plain string or a list of ``text``/``image`` chunks. The generic
+    ``_block_to_openai_part`` path applied ``str()`` to the list, emitting a
+    Python repr as text and silently dropping any nested image. Parse the
+    chunks into blocks and convert them through the normal path instead.
+    """
+    data = block.source.data
+    if isinstance(data, str):
+        return [{"type": "text", "text": data}] if data else []
+    if not isinstance(data, list):
+        return [{"type": "text", "text": str(data)}] if data else []
+
+    nested: list[Any] = []
+    for chunk in data:
+        if isinstance(chunk, str):
+            if chunk:
+                nested.append(TextBlock(text=chunk))
+            continue
+        if not isinstance(chunk, dict):
+            continue
+        text_block = parse_text_block(chunk)
+        if text_block is not None:
+            nested.append(text_block)
+            continue
+        image_block = parse_image_block_anthropic(chunk)
+        if image_block is not None:
+            nested.append(image_block)
+            continue
+        # Unknown chunk type: keep a placeholder so nothing is lost silently.
+        nested.append(TextBlock(text=f"[{chunk.get('type', 'content')}]"))
+
+    if not nested:
+        return []
+    converted = content_to_openai_parts(nested, context)
+    if isinstance(converted, str):
+        return [{"type": "text", "text": converted}] if converted else []
+    return converted
+
+
 def content_to_openai_parts(
     content: list[Any], context: BuildContext | None = None
 ) -> list[dict[str, Any]] | str:
@@ -759,6 +807,12 @@ def content_to_openai_parts(
             if responses_part is not None:
                 parts.append(responses_part)
                 continue
+
+        if isinstance(block, DocumentBlock) and block.source.type == "content":
+            # ``content`` sources may carry a list of nested text/image chunks;
+            # expand them into parts instead of str()-ing the list.
+            parts.extend(_document_content_to_parts(block, context))
+            continue
 
         if isinstance(block, ImageBlock) and block.source.type == "file_id":
             # Chat Completions has no file_id image source. Degrade instead of
