@@ -47,8 +47,8 @@ export const DEFAULT_PROVIDER_SELECTION: ProviderSelectionConfig = {
 };
 
 export const DEFAULT_REQUEST_POLICY: RequestPolicyConfig = {
-  unknown_fields_policy: "ignore",
-  unsupported_block_policy: "drop",
+  unknown_fields_policy: "default",
+  unsupported_block_policy: "default",
 };
 
 export const DEFAULT_MCP_SECURITY: McpSecurityPolicyConfig = {

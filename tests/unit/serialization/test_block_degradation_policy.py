@@ -7,8 +7,11 @@ values: 'drop' (skip), 'degrade' (to text), 'error' (raise).
 import pytest
 
 from llm_proxy.core.exceptions import ProviderError
-from llm_proxy.models import RedactedThinkingBlock
-from llm_proxy.serialization._shared_degradation import should_degrade_block
+from llm_proxy.models import ContentBlock, RedactedThinkingBlock
+from llm_proxy.serialization._shared_degradation import (
+    degrade_block_to_text,
+    should_degrade_block,
+)
 
 _RTB = RedactedThinkingBlock(data="redacted")
 _EMPTY = frozenset()
@@ -51,3 +54,18 @@ class TestBackwardCompatibility:
 
     def test_ignore_skips_block(self):
         assert should_degrade_block("ignore", _RTB, "p", supported_blocks=_EMPTY) is False
+
+
+class TestDegradeNeverDrops:
+    """The 'degrade' policy must never silently fall back to dropping content."""
+
+    def test_unregistered_block_gets_generic_placeholder(self):
+        class _MysteryBlock(ContentBlock):
+            pass
+
+        # No degrader is registered for this type; before, degrade_block_to_text
+        # returned None and callers silently dropped the block.
+        assert degrade_block_to_text(_MysteryBlock()) == "[_MysteryBlock block]"
+
+    def test_registered_block_uses_specific_degrader(self):
+        assert degrade_block_to_text(RedactedThinkingBlock(data="x")) == "[Redacted thinking]"

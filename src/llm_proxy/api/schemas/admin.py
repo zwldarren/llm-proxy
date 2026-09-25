@@ -21,6 +21,14 @@ from llm_proxy.serialization.context import UnknownFieldsPolicy, UnsupportedBloc
 
 from .logs import DailyUsage, UsageByModel, UsageSummary
 
+#: Global request-policy selection values. ``"default"`` means "not configured":
+#: the per-adapter default applies (e.g. vLLM/SGLang pass unknown fields
+#: through). Any other value is an explicit operator choice. The concrete values
+#: come from the serialization-layer policy Literals so the two layers cannot
+#: drift apart.
+UnknownFieldsPolicySelection = Literal["default", UnknownFieldsPolicy]
+UnsupportedBlockPolicySelection = Literal["default", UnsupportedBlockPolicy]
+
 
 class ValidatorMixin:
     """Shared field validators for Pydantic models.
@@ -1040,21 +1048,28 @@ class WebSearchConfigUpdate(BaseModel):
 
 
 class RequestPolicyConfig(BaseModel):
-    """Schema for global request policy configuration."""
+    """Schema for global request policy configuration.
 
-    unknown_fields_policy: UnknownFieldsPolicy = Field(
-        default="ignore",
+    ``"default"`` is stored verbatim and resolves to "not configured" at
+    runtime, letting each provider apply its own default. Concrete values
+    override every provider.
+    """
+
+    unknown_fields_policy: UnknownFieldsPolicySelection = Field(
+        default="default",
         description=(
             "How to handle unknown request fields globally: "
+            "'default' (per-provider default), "
             "'ignore' (strip fields silently), "
             "'passthrough' (keep unknown fields in body), "
             "'error' (reject request with validation error)"
         ),
     )
-    unsupported_block_policy: UnsupportedBlockPolicy = Field(
-        default="drop",
+    unsupported_block_policy: UnsupportedBlockPolicySelection = Field(
+        default="default",
         description=(
             "How to handle content blocks the provider cannot serialize: "
+            "'default' (per-provider default), "
             "'drop' (remove unsupported blocks silently), "
             "'degrade' (convert to a supported fallback representation), "
             "'error' (reject request with validation error)"

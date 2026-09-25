@@ -38,7 +38,9 @@ def register_block_degrader[T: ContentBlock](
     """Decorator to register a text degradation function for a content block type.
 
     The decorated function receives a block instance and returns a human-readable
-    text representation, or None if it cannot be degraded.
+    text representation. Returning None or an empty string does NOT drop the
+    block: ``degrade_block_to_text`` falls back to a generic ``[<TypeName> block]``
+    placeholder so the ``degrade`` policy never silently loses content.
     """
 
     def decorator(
@@ -50,19 +52,26 @@ def register_block_degrader[T: ContentBlock](
     return decorator
 
 
-def degrade_block_to_text(block: ContentBlock) -> str | None:
+def degrade_block_to_text(block: ContentBlock) -> str:
     """Convert an unsupported block type to a text placeholder via the registry.
+
+    Always returns a non-empty placeholder. A block type with no registered
+    degrader (or whose degrader yields nothing) falls back to a generic
+    ``[<TypeName> block]`` marker: the ``degrade`` policy promises that nothing
+    is lost silently, so returning ``None`` here would degrade into ``drop``.
 
     Args:
         block: The content block to degrade.
 
     Returns:
-        A human-readable text representation, or None if not degradable.
+        A human-readable text representation (never empty).
     """
     func = _BLOCK_DEGRADERS.get(type(block))
     if func is not None:
-        return func(block)
-    return None
+        degraded = func(block)
+        if degraded:
+            return degraded
+    return f"[{type(block).__name__} block]"
 
 
 def should_degrade_block(

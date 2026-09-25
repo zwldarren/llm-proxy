@@ -1063,8 +1063,8 @@ export interface ProviderSelectionConfig {
 }
 
 export interface RequestPolicyConfig {
-  unknown_fields_policy: "ignore" | "passthrough" | "error";
-  unsupported_block_policy: "drop" | "degrade" | "error";
+  unknown_fields_policy: "default" | "ignore" | "passthrough" | "error";
+  unsupported_block_policy: "default" | "drop" | "degrade" | "error";
 }
 
 export interface McpSecurityPolicyConfig {

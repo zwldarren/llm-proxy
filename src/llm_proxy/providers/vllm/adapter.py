@@ -31,8 +31,9 @@ Engine-specific request parameters (``top_k``, ``min_p``,
 ``repetition_penalty``, ``structured_outputs``, ``min_tokens``, ``ignore_eos``,
 ``chat_template_kwargs``, ``include_reasoning``, ``vllm_xargs``, ...) arrive in
 ``InternalRequest.extra``; this adapter defaults ``unknown_fields_policy`` to
-``passthrough`` so they reach the engine unchanged (still overridable per
-provider via provider metadata). vLLM accepts-and-ignores unknown fields, so a
+``passthrough`` so they reach the engine unchanged — unless the operator sets a
+global request policy (Settings → Request Policy), which always wins. vLLM
+accepts-and-ignores unknown fields, so a
 build that predates ``reasoning_effort`` silently ignores it — a client that
 needs deterministic thinking control should pass ``chat_template_kwargs``.
 
@@ -93,9 +94,11 @@ class VLLMAdapter(NativePassthroughChatBase):
     #: stateless Responses API).
     NATIVE_PASSTHROUGH_DEFAULT = False
 
-    def _resolve_field_policy(self) -> str:
-        """Default to passthrough so vLLM sampling extensions survive the trip."""
-        return self._extra_config.get("unknown_fields_policy", "passthrough")
+    #: vLLM accepts-and-ignores unknown fields, so engine-specific sampling
+    #: extensions (``top_k``/``min_p``/``guided_json``/``chat_template_kwargs``/…)
+    #: must reach it unchanged. Applies only while the operator has not set a
+    #: global ``unknown_fields_policy`` — an explicit global value always wins.
+    DEFAULT_UNKNOWN_FIELDS_POLICY = "passthrough"
 
 
 __all__ = ["VLLMAdapter"]

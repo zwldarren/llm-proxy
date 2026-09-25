@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from llm_proxy.api.dependencies import _create_adapter
+from llm_proxy.config.types.provider import ProviderConfig
 from llm_proxy.core.adapter import get_adapter, list_providers
 from llm_proxy.core.conversion import plan_conversion
 from llm_proxy.models import ConversionTier, GenerationParams, ThinkingConfig
@@ -123,6 +125,39 @@ class TestFieldPolicy:
     def test_explicit_ignore_still_strips(self, engine: Engine):
         adapter = engine.adapter_cls(api_key="k", unknown_fields_policy="ignore")
         body = adapter._build_request_body(chat_request(extra={"top_k": 40}))
+        assert "top_k" not in body
+
+    def test_global_unset_uses_adapter_default(self, engine: Engine):
+        """Production plumbing passes None when no global policy is configured.
+
+        Regression guard: the global default used to be passed as a concrete
+        "ignore", which silently defeated the engine adapters' passthrough
+        default on the request path (the direct-construction tests above did
+        not catch it).
+        """
+        created = _create_adapter(
+            engine.name,
+            ProviderConfig(type=engine.name, api_key="k"),
+            http_client=AsyncMock(),
+            unknown_fields_policy=None,
+            unsupported_block_policy=None,
+        )
+        assert created._resolve_field_policy() == "passthrough"
+        body = created._build_request_body(chat_request(extra=engine.engine_extras))
+        for key, value in engine.engine_extras.items():
+            assert body[key] == value
+
+    def test_global_ignore_overrides_adapter_default(self, engine: Engine):
+        """An explicit global policy always wins over the adapter default."""
+        created = _create_adapter(
+            engine.name,
+            ProviderConfig(type=engine.name, api_key="k"),
+            http_client=AsyncMock(),
+            unknown_fields_policy="ignore",
+            unsupported_block_policy="drop",
+        )
+        assert created._resolve_field_policy() == "ignore"
+        body = created._build_request_body(chat_request(extra={"top_k": 40}))
         assert "top_k" not in body
 
 

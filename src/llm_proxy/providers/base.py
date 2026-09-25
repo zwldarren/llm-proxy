@@ -4,7 +4,7 @@ from abc import ABC
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 
 import orjson
 from orjson import JSONDecodeError
@@ -152,6 +152,16 @@ class BaseHttpProvider(BaseAdapter, ABC):
     #: adapter, empty by default; adapters that document nothing for a request
     #: type simply omit the key.
     EXEMPT_EXTRA_KEYS: dict[RequestType, frozenset[str]] = {}
+
+    #: Value used when the operator configured no global policy. The global
+    #: value (``server_params.unknown_fields_policy``) is an explicit choice and
+    #: always wins; ``None``/absent means "not configured", so this default
+    #: applies. Adapters for upstreams that accept-and-ignore unknown fields
+    #: (vLLM, SGLang) override it to ``passthrough`` so their engine-specific
+    #: sampling extensions survive the trip.
+    DEFAULT_UNKNOWN_FIELDS_POLICY: ClassVar[str] = "ignore"
+    #: Block-policy counterpart of :attr:`DEFAULT_UNKNOWN_FIELDS_POLICY`.
+    DEFAULT_UNSUPPORTED_BLOCK_POLICY: ClassVar[str] = "drop"
 
     def __init__(self, config: AdapterConfig | None = None, **kwargs: Any):
         """Initialize shared transport, error translation, and retry policy.
@@ -727,10 +737,23 @@ class BaseHttpProvider(BaseAdapter, ABC):
     # ------------------------------------------------------------------
 
     def _resolve_field_policy(self) -> str:
-        return self._extra_config.get("unknown_fields_policy", "ignore")
+        """Resolve the effective unknown-fields policy for this adapter.
+
+        An explicitly configured global policy always wins; otherwise the
+        adapter's own default applies. Values outside the valid set (e.g. a
+        typo, or a sentinel that slipped through) fall back to the default.
+        """
+        value = self._extra_config.get("unknown_fields_policy")
+        if value in ("ignore", "passthrough", "error"):
+            return value
+        return self.DEFAULT_UNKNOWN_FIELDS_POLICY
 
     def _resolve_block_policy(self) -> str:
-        return self._extra_config.get("unsupported_block_policy", "drop")
+        """Resolve the effective unsupported-block policy for this adapter."""
+        value = self._extra_config.get("unsupported_block_policy")
+        if value in ("drop", "degrade", "error"):
+            return value
+        return self.DEFAULT_UNSUPPORTED_BLOCK_POLICY
 
     def _target_endpoint(self) -> str:
         """Return the target upstream endpoint type for chat requests.

@@ -142,24 +142,30 @@ class ServerParams(BaseModel):
         default=None,
         description="Web search tool configuration for non-Anthropic providers",
     )
-    unknown_fields_policy: Literal["ignore", "passthrough", "error"] = Field(
-        default="ignore",
+    # ``None`` means "not configured": the per-adapter default applies (see
+    # ``BaseHttpProvider.DEFAULT_UNKNOWN_FIELDS_POLICY``). A concrete value is an
+    # explicit operator choice and overrides every adapter's default.
+    unknown_fields_policy: Literal["ignore", "passthrough", "error"] | None = Field(
+        default=None,
         description=(
             "How to handle unknown request fields globally: "
             "'ignore' (strip fields silently), "
             "'passthrough' (keep unknown fields in body), "
             "'error' (reject request with validation error). "
+            "When unset, each provider's own default applies (e.g. vLLM/SGLang "
+            "default to 'passthrough'). "
             "Note: native passthrough requests (client protocol identical to the "
             "upstream's wire format) are forwarded verbatim and bypass this policy."
         ),
     )
-    unsupported_block_policy: Literal["drop", "degrade", "error"] = Field(
-        default="drop",
+    unsupported_block_policy: Literal["drop", "degrade", "error"] | None = Field(
+        default=None,
         description=(
             "How to handle content blocks the provider cannot serialize: "
             "'drop' (remove unsupported blocks silently), "
             "'degrade' (convert to a supported fallback representation), "
-            "'error' (reject request with validation error)"
+            "'error' (reject request with validation error). "
+            "When unset, each provider's own default applies."
         ),
     )
     circuit_breaker: CircuitBreakerParams = Field(

@@ -156,8 +156,8 @@ def _create_adapter(
     provider_name: str,
     provider_config: ProviderConfig,
     http_client: AsyncSession,
-    unknown_fields_policy: str,
-    unsupported_block_policy: str,
+    unknown_fields_policy: str | None,
+    unsupported_block_policy: str | None,
     http_client_manager: ProviderHTTPClientManager | None = None,
     max_retries: int = 3,
 ) -> BaseAdapter:
@@ -223,7 +223,10 @@ async def create_adapter_for_provider(
 
     manager_instance = manager if isinstance(manager, ProviderHTTPClientManager) else None
 
-    # Read global policy values from server config
+    # Read global policy values from server config. ``None`` means the operator
+    # never configured a global policy, so the adapter's own default applies
+    # (e.g. vLLM/SGLang default to ``passthrough``); ``_resolve_field_policy``
+    # treats a missing/None value accordingly.
     config = await get_config_manager(request).get_config()
     ufp = config.server_params.unknown_fields_policy
     ubp = config.server_params.unsupported_block_policy

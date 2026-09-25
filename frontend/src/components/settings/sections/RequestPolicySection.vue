@@ -40,6 +40,9 @@ const { t } = useI18n();
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="default">
+              {{ t("requestPolicy.unknownFieldsPolicyDefault") }}
+            </SelectItem>
             <SelectItem value="passthrough">
               {{ t("requestPolicy.unknownFieldsPolicyPassthrough") }}
             </SelectItem>
@@ -66,6 +69,9 @@ const { t } = useI18n();
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="default">
+              {{ t("requestPolicy.unsupportedBlockPolicyDefault") }}
+            </SelectItem>
             <SelectItem value="drop">
               {{ t("requestPolicy.unsupportedBlockPolicyDrop") }}
             </SelectItem>

@@ -34,8 +34,9 @@ Engine-specific request parameters (``top_k``, ``min_p``,
 ``chat_template_kwargs``, ``separate_reasoning``, ``stream_reasoning``,
 ``return_hidden_states``, ``lora_path``, ...) arrive in
 ``InternalRequest.extra``; this adapter defaults ``unknown_fields_policy`` to
-``passthrough`` so they reach the engine unchanged (still overridable per
-provider via provider metadata). The native ``/generate``-only logprob
+``passthrough`` so they reach the engine unchanged — unless the operator sets a
+global request policy (Settings → Request Policy), which always wins. The
+native ``/generate``-only logprob
 parameters (``return_logprob``, ``logprob_start_len``, ...) are silently
 ignored by the chat endpoint — pass them only for native-API workflows.
 
@@ -97,9 +98,12 @@ class SGLangAdapter(NativePassthroughChatBase):
     #: cache_control, narrower Responses tool coverage).
     NATIVE_PASSTHROUGH_DEFAULT = False
 
-    def _resolve_field_policy(self) -> str:
-        """Default to passthrough so SGLang sampling extensions survive the trip."""
-        return self._extra_config.get("unknown_fields_policy", "passthrough")
+    #: SGLang accepts-and-ignores unknown fields, so engine-specific sampling
+    #: extensions (``top_k``/``min_p``/``separate_reasoning``/
+    #: ``chat_template_kwargs``/…) must reach it unchanged. Applies only while
+    #: the operator has not set a global ``unknown_fields_policy`` — an explicit
+    #: global value always wins.
+    DEFAULT_UNKNOWN_FIELDS_POLICY = "passthrough"
 
 
 __all__ = ["SGLangAdapter"]

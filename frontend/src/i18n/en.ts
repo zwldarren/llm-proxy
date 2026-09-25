@@ -940,13 +940,15 @@ export default {
     description: "Configure how the proxy handles unknown fields and unsupported content blocks.",
     unknownFieldsPolicy: "Unknown Fields Policy",
     unknownFieldsPolicyDescription:
-      "Controls what happens when a request contains extra parameters (e.g. custom fields in the JSON body) that the target provider does not recognize. 'Ignore' silently strips them, 'Passthrough' forwards them as-is, and 'Error' rejects the request. This applies to top-level request fields like metadata, custom parameters, or vendor-specific options — not to content blocks inside messages.",
+      "Controls what happens when a request contains extra parameters (e.g. custom fields in the JSON body) that the target provider does not recognize. 'Provider default' leaves the choice to each provider (most ignore unknown fields; vLLM/SGLang pass them through so engine-specific options survive), 'Ignore' silently strips them, 'Passthrough' forwards them as-is, and 'Error' rejects the request. This applies to top-level request fields like metadata, custom parameters, or vendor-specific options — not to content blocks inside messages.",
+    unknownFieldsPolicyDefault: "Provider default",
     unknownFieldsPolicyPassthrough: "Passthrough (keep fields)",
     unknownFieldsPolicyIgnore: "Ignore (strip fields)",
     unknownFieldsPolicyError: "Error (reject request)",
     unsupportedBlockPolicy: "Unsupported Block Policy",
     unsupportedBlockPolicyDescription:
-      "Controls what happens when a message contains content blocks (e.g. images, tool results, thinking blocks) that the target provider cannot natively serialize. 'Drop' silently removes unsupported blocks, 'Degrade' converts them to text placeholders, and 'Error' rejects the request. This applies to content within messages — not to top-level request fields.",
+      "Controls what happens when a message contains content blocks (e.g. images, tool results, thinking blocks) that the target provider cannot natively serialize. 'Provider default' leaves the choice to each provider, 'Drop' silently removes unsupported blocks, 'Degrade' converts them to text placeholders, and 'Error' rejects the request. This applies to content within messages — not to top-level request fields.",
+    unsupportedBlockPolicyDefault: "Provider default",
     unsupportedBlockPolicyDrop: "Drop (skip blocks)",
     unsupportedBlockPolicyDegrade: "Degrade (convert to text)",
     unsupportedBlockPolicyError: "Error (reject request)",

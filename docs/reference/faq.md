@@ -61,9 +61,11 @@ URI, or an uploaded-file reference. Worth knowing:
 - **Multimodal tool results** stay structured where the upstream supports it (Responses
   `function_call_output.output`, Gemini 3 `functionResponse.parts`); elsewhere the media
   is degraded to a text placeholder rather than dropped.
-- A block the target provider cannot represent follows the
-  `unsupported_block_policy` — `drop` by default, `degrade` to keep a text placeholder
-  (`[Image: …]`, `[File: …]`).
+- A block the target provider cannot represent at all follows the
+  `unsupported_block_policy`; the default **Provider default** resolves to `drop` for
+  every provider today, while `degrade` keeps a text placeholder (`[Image: …]`,
+  `[File: …]`) and never silently drops — a block with no specific placeholder gets a
+  generic `[<TypeName> block]` marker.
 
 ## Can I export logs to my own system?
 

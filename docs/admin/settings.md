@@ -67,16 +67,27 @@ outbound check with `UPDATE_CHECK__ENABLED=false`.
 
 ### Request Policy
 
-How the proxy treats fields it does not understand:
+How the proxy treats fields and content blocks it does not understand. The setting is
+global, but **Provider default** leaves the decision to each provider's adapter (most
+drop unknown fields; vLLM/SGLang pass them through so engine-specific options such as
+`top_k`/`guided_json`/`chat_template_kwargs` survive). A concrete value overrides every
+provider's own default.
 
 | Field | Options | Default |
 | --- | --- | --- |
-| **Unknown fields policy** | `ignore` · `passthrough` · `error` | `ignore` — unknown top-level request fields are dropped |
-| **Unsupported block policy** | `drop` · `degrade` · `error` | `drop` — unsupported content blocks are dropped |
+| **Unknown fields policy** | `provider default` · `ignore` · `passthrough` · `error` | **Provider default** — per adapter (usually `ignore`) |
+| **Unsupported block policy** | `provider default` · `drop` · `degrade` · `error` | **Provider default** — per adapter (currently `drop`) |
 
+Unknown-fields policy applies to **top-level** request fields the internal model does
+not recognize; unknown fields nested inside messages are handled by each serializer.
 Requests that take the native-passthrough tier (Anthropic and Responses clients on
-supporting providers) bypass the unknown-fields policy — their bodies are forwarded
-verbatim.
+supporting providers) bypass it — their bodies are forwarded verbatim.
+
+For content blocks, lossless conversion runs first: a block the provider can represent
+(after conversion) is never affected by the policy. The policy governs the residual
+blocks with no representation — `drop` removes them, `degrade` keeps a text placeholder
+(`[Image: …]`), and `error` rejects the request. `degrade` never silently falls back to
+dropping: a block with no specific placeholder gets a generic `[<TypeName> block]`.
 
 ### Smart Routing
 

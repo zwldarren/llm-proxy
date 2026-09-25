@@ -311,27 +311,35 @@ class DatabaseConfigManager:
                 except Exception as e:
                     logger.warning(f"Failed to parse web_search_config: {e}")
 
-            # Read global request policies from the request_policy config key
+            # Read global request policies from the request_policy config key.
+            # "default"/absent means "not configured": the per-adapter default
+            # applies (see BaseHttpProvider.DEFAULT_UNKNOWN_FIELDS_POLICY). An invalid
+            # value is treated the same way after a warning, so a typo never
+            # silently overrides a provider's own default.
             request_policy = server_config_dict.get("request_policy", {})
             if not isinstance(request_policy, dict):
                 request_policy = {}
 
-            unknown_fields_policy = request_policy.get("unknown_fields_policy", "ignore")
-            if unknown_fields_policy not in {"ignore", "passthrough", "error"}:
+            unknown_fields_policy = request_policy.get("unknown_fields_policy", "default")
+            if unknown_fields_policy == "default":
+                unknown_fields_policy = None
+            elif unknown_fields_policy not in {"ignore", "passthrough", "error"}:
                 logger.warning(
                     f"Invalid unknown_fields_policy '{unknown_fields_policy}' in server config; "
-                    "falling back to 'ignore'"
+                    "treating it as unset (per-provider default applies)"
                 )
-                unknown_fields_policy = "ignore"
+                unknown_fields_policy = None
 
-            unsupported_block_policy = request_policy.get("unsupported_block_policy", "drop")
-            if unsupported_block_policy not in {"drop", "degrade", "error"}:
+            unsupported_block_policy = request_policy.get("unsupported_block_policy", "default")
+            if unsupported_block_policy == "default":
+                unsupported_block_policy = None
+            elif unsupported_block_policy not in {"drop", "degrade", "error"}:
                 logger.warning(
                     f"Invalid unsupported_block_policy "
                     f"'{unsupported_block_policy}' in server config; "
-                    "falling back to 'drop'"
+                    "treating it as unset (per-provider default applies)"
                 )
-                unsupported_block_policy = "drop"
+                unsupported_block_policy = None
 
             # Read global resilience policies from the resilience config key
             resilience = server_config_dict.get("resilience", {})

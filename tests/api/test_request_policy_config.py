@@ -54,8 +54,8 @@ class TestGetRequestPolicyConfig:
         ):
             result = await get_request_policy_config(request, session)
 
-        assert result["unknown_fields_policy"] == "ignore"
-        assert result["unsupported_block_policy"] == "drop"
+        assert result["unknown_fields_policy"] == "default"
+        assert result["unsupported_block_policy"] == "default"
 
     @pytest.mark.asyncio
     async def test_stored_values_returned(self):
@@ -109,8 +109,8 @@ class TestRequestPolicyConfigAPI:
 
         assert res.status_code == 200
         data = res.json()
-        assert data["unknown_fields_policy"] == "ignore"
-        assert data["unsupported_block_policy"] == "drop"
+        assert data["unknown_fields_policy"] == "default"
+        assert data["unsupported_block_policy"] == "default"
 
         del app.dependency_overrides[get_async_session_dep]
 

@@ -905,13 +905,15 @@ export default {
     description: "配置代理如何处理未知字段和不支持的内容块。",
     unknownFieldsPolicy: "未知字段处理策略",
     unknownFieldsPolicyDescription:
-      "控制当请求中包含目标提供商无法识别的额外参数（如 JSON 体中的自定义字段）时的处理方式。「忽略」静默移除这些字段，「透传」原样转发，「报错」拒绝请求。适用于请求顶层的字段（如元数据、自定义参数、供应商特定选项），不适用于消息内部的内容块。",
+      "控制当请求中包含目标提供商无法识别的额外参数（如 JSON 体中的自定义字段）时的处理方式。「提供商默认」由各提供商自行决定（多数会忽略未知字段；vLLM/SGLang 会透传以保留引擎专有参数），「忽略」静默移除这些字段，「透传」原样转发，「报错」拒绝请求。适用于请求顶层的字段（如元数据、自定义参数、供应商特定选项），不适用于消息内部的内容块。",
+    unknownFieldsPolicyDefault: "提供商默认",
     unknownFieldsPolicyPassthrough: "透传（保留字段）",
     unknownFieldsPolicyIgnore: "忽略（移除字段）",
     unknownFieldsPolicyError: "报错（拒绝请求）",
     unsupportedBlockPolicy: "不支持块策略",
     unsupportedBlockPolicyDescription:
-      "控制当消息中包含目标提供商无法原生序列化的内容块（如图片、工具结果、思考块等）时的处理方式。「丢弃」静默移除不支持的内容块，「降级」将其转为文本占位符，「报错」拒绝请求。适用于消息内部的内容块，不适用于请求顶层的字段。",
+      "控制当消息中包含目标提供商无法原生序列化的内容块（如图片、工具结果、思考块等）时的处理方式。「提供商默认」由各提供商自行决定，「丢弃」静默移除不支持的内容块，「降级」将其转为文本占位符，「报错」拒绝请求。适用于消息内部的内容块，不适用于请求顶层的字段。",
+    unsupportedBlockPolicyDefault: "提供商默认",
     unsupportedBlockPolicyDrop: "丢弃（跳过块）",
     unsupportedBlockPolicyDegrade: "降级（转为文本）",
     unsupportedBlockPolicyError: "报错（拒绝请求）",
