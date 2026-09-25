@@ -1063,8 +1063,8 @@ def test_build_provider_request_degrades_audio_file_id_to_text(serializer):
     assert any(c.get("type") == "text" and "file_abc123" in c.get("text", "") for c in content)
 
 
-def test_build_provider_request_audio_base64_and_url_still_works(serializer):
-    """AudioBlock with base64 and url should still produce native audio blocks."""
+def test_build_provider_request_degrades_audio_base64_and_url_to_text(serializer):
+    """Audio is degraded to text: Anthropic has no audio content block."""
     from llm_proxy.models.content_blocks import AudioBlock
     from llm_proxy.models.types import AudioSource
 
@@ -1075,6 +1075,7 @@ def test_build_provider_request_audio_base64_and_url_still_works(serializer):
                 Message(
                     role="user",
                     content=[
+                        TextBlock(text="Listen to these"),
                         AudioBlock(
                             source=AudioSource(
                                 type="base64", data="base64data", media_type="audio/wav"
@@ -1096,9 +1097,11 @@ def test_build_provider_request_audio_base64_and_url_still_works(serializer):
     body = serializer.build_provider_request(request)
     content = body["messages"][0]["content"]
     types = [c.get("type") for c in content]
-    assert types.count("audio") == 2
-    assert any(c["source"]["type"] == "base64" for c in content if c["type"] == "audio")
-    assert any(c["source"]["type"] == "url" for c in content if c["type"] == "audio")
+    # ``audio`` is not a valid Anthropic Messages content block.
+    assert "audio" not in types
+    assert types == ["text", "text", "text"]
+    assert content[0] == {"type": "text", "text": "Listen to these"}
+    assert all("[Audio:" in c["text"] for c in content[1:])
 
 
 # ---------------------------------------------------------------------------

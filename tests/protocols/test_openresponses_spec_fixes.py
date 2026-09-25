@@ -1189,3 +1189,107 @@ class TestResponseEchoFields:
             assert snapshot["parallel_tool_calls"] is False
             assert snapshot["prompt_cache_key"] == "pck"
             assert snapshot["safety_identifier"] == "sid"
+
+
+class TestConversationToInputItemsMedia:
+    """Multimodal content must survive the stored-input round trip.
+
+    Regression: ``conversation_to_input_items`` skipped image ``file_id``
+    sources and every file/audio/document block, so a ``previous_response_id``
+    continuation resent the conversation without the attachment.
+    """
+
+    @staticmethod
+    def _round_trip(blocks):
+        from llm_proxy.models import ConversationContext, Message
+        from llm_proxy.protocols.openresponses.serializer import conversation_to_input_items
+
+        conversation = ConversationContext(messages=[Message(role="user", content=blocks)])
+        return conversation_to_input_items(conversation)
+
+    def test_image_file_id_is_preserved(self):
+        from llm_proxy.models.content_blocks import ImageBlock
+        from llm_proxy.models.types import ImageSource
+
+        items = self._round_trip(
+            [ImageBlock(source=ImageSource(type="file_id", data="img_1"), detail="high")]
+        )
+        assert items[0]["content"] == [
+            {"type": "input_image", "file_id": "img_1", "detail": "high"}
+        ]
+
+    def test_file_block_sources_are_preserved(self):
+        from llm_proxy.models.content_blocks import FileBlock
+
+        items = self._round_trip(
+            [
+                FileBlock(file_data="data:application/pdf;base64,JVBERi0xLg==", filename="r.pdf"),
+                FileBlock(file_url="https://x/d.pdf"),
+                FileBlock(file_id="file_1", filename="d2.pdf"),
+            ]
+        )
+        assert items[0]["content"] == [
+            {
+                "type": "input_file",
+                "file_data": "data:application/pdf;base64,JVBERi0xLg==",
+                "filename": "r.pdf",
+            },
+            {"type": "input_file", "file_url": "https://x/d.pdf"},
+            {"type": "input_file", "file_id": "file_1", "filename": "d2.pdf"},
+        ]
+
+    def test_audio_block_is_preserved(self):
+        from llm_proxy.models.content_blocks import AudioBlock
+        from llm_proxy.models.types import AudioSource
+
+        items = self._round_trip(
+            [
+                AudioBlock(source=AudioSource(type="base64", data="QUJD", media_type="audio/mpeg")),
+                AudioBlock(source=AudioSource(type="url", data="https://x/a.wav", media_type=None)),
+            ]
+        )
+        assert items[0]["content"] == [
+            {"type": "input_audio", "audio_data": "QUJD", "format": "mp3"},
+            {"type": "input_audio", "audio_url": "https://x/a.wav", "format": "wav"},
+        ]
+
+    def test_document_block_is_preserved_as_input_file(self):
+        from llm_proxy.models.content_blocks import DocumentBlock
+        from llm_proxy.models.types import DocumentSource
+
+        items = self._round_trip(
+            [
+                DocumentBlock(
+                    source=DocumentSource(
+                        type="base64", media_type="application/pdf", data="JVBERi0xLg=="
+                    ),
+                    title="t.pdf",
+                )
+            ]
+        )
+        assert items[0]["content"] == [
+            {
+                "type": "input_file",
+                "file_data": "data:application/pdf;base64,JVBERi0xLg==",
+                "filename": "t.pdf",
+            }
+        ]
+
+    def test_items_reparse_into_blocks(self):
+        """The stored items must parse back into the same internal blocks."""
+        from llm_proxy.models.content_blocks import FileBlock, ImageBlock
+        from llm_proxy.models.types import ImageSource
+
+        serializer = OpenResponsesProtocolSerializer()
+        blocks = [
+            ImageBlock(source=ImageSource(type="file_id", data="img_1")),
+            FileBlock(file_id="file_1", filename="d.pdf"),
+        ]
+        reparsed = serializer.parse_request({"model": "gpt-5.2", "input": self._round_trip(blocks)})
+        reparsed_blocks = reparsed.conversation.messages[0].content
+        assert isinstance(reparsed_blocks[0], ImageBlock)
+        assert reparsed_blocks[0].source.type == "file_id"
+        assert reparsed_blocks[0].source.data == "img_1"
+        assert isinstance(reparsed_blocks[1], FileBlock)
+        assert reparsed_blocks[1].file_id == "file_1"
+        assert reparsed_blocks[1].filename == "d.pdf"

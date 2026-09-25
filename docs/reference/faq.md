@@ -53,11 +53,22 @@ URI, or an uploaded-file reference. Worth knowing:
 - **`file_id` is passed through as-is.** There is no `/v1/files` store, so an id must
   have been issued by the upstream it is sent to. An OpenAI Files-API id sent to Gemini
   (or the reverse) fails upstream.
-- **HTTP(S) image, audio and document URIs are downloaded and inlined** before the
-  request is forwarded, so any publicly reachable URL works. SSRF protection applies.
+- **HTTP(S) image and document URIs are sent as native URL sources** where the
+  upstream has one (Anthropic `image` / `document` URL sources, Gemini
+  `file_data.file_uri`); where it does not, the URL is downloaded and inlined
+  before forwarding, so any publicly reachable URL works. SSRF protection applies
+  to the download path.
 - **Video URIs are not downloaded.** Gemini fetches video itself and reliably accepts
   only YouTube URLs (or File API / `gs://` URIs); an arbitrary `https://…/v.mp4` is
   rejected upstream.
+- **Anthropic has no `file` content block.** A Responses `input_file` is mapped onto
+  the block Anthropic actually accepts: `application/pdf` (base64 or URL) and plain
+  text (`.txt` / `.md` / `.csv` / … decoded into a `text` source) become `document`
+  blocks, image payloads become `image` blocks, and `file_id` becomes a
+  `document`/`image` `file` source. Media types Anthropic cannot represent (`.docx`,
+  `.xlsx`, …) follow the `unsupported_block_policy`.
+- **Anthropic has no audio content block.** Audio routed there degrades to an
+  `[Audio: …]` text placeholder (never an `audio` block the API rejects).
 - **Audio has no OpenAI Responses content type.** The Responses API accepts message
   content of `input_text` / `input_image` / `input_file` only, so audio routed to the
   built-in `openai` provider (which targets `/responses`) degrades to an

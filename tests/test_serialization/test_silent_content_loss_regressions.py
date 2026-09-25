@@ -266,10 +266,15 @@ class TestFileUrlNotDropped:
         items = body["input"][0]["content"]
         assert {"type": "document", "uri": "https://example.com/doc.pdf"} in items
 
-    def test_anthropic_keeps_file_url(self):
+    def test_anthropic_emits_document_url(self):
         body = self._body("anthropic")
         blocks = body["messages"][0]["content"]
-        assert {"type": "file", "file_url": "https://example.com/doc.pdf"} in blocks
+        # Anthropic has no ``file`` content block: the URL must arrive as a
+        # ``document`` source (a ``file`` block is rejected upstream).
+        assert {
+            "type": "document",
+            "source": {"type": "url", "url": "https://example.com/doc.pdf"},
+        } in blocks
 
     def test_responses_target_keeps_file_url(self):
         body = self._body("openai")

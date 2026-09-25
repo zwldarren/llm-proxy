@@ -4,10 +4,12 @@ Used by both AnthropicProtocolSerializer and AnthropicProviderSerializer
 to avoid duplicating content block conversion logic.
 """
 
+import base64
 from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from llm_proxy.core.utils import parse_data_uri
 from llm_proxy.models import (
     AudioBlock,
     AudioSource,
@@ -71,6 +73,44 @@ _SERVER_TOOL_RESULT_BLOCK_TYPES: dict[str, type] = {
     "bash_code_execution_tool_result": BashCodeExecutionToolResultBlock,
     "text_editor_code_execution_tool_result": TextEditorCodeExecutionToolResultBlock,
     "tool_search_tool_result": ToolSearchToolResultBlock,
+}
+
+#: Media types Anthropic accepts in an ``image`` block. Anything else (e.g. SVG)
+#: has to degrade rather than be forwarded.
+_ANTHROPIC_IMAGE_MEDIA_TYPES: frozenset[str] = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp"}
+)
+
+#: Filename extension -> media type. Anthropic Messages has no ``file`` block,
+#: so a Responses ``input_file`` that carries only a URL/file_id + filename is
+#: classified here to pick between ``image`` and ``document`` and, for inline
+#: data, between base64-PDF and plain text.
+_FILE_EXTENSION_MEDIA_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    # Plain-text documents (Anthropic documents ``.txt``/``.csv``/``.md`` as
+    # ``text/plain``; other text formats are decoded the same way).
+    ".txt": "text/plain",
+    ".text": "text/plain",
+    ".md": "text/plain",
+    ".markdown": "text/plain",
+    ".csv": "text/plain",
+    ".tsv": "text/plain",
+    ".json": "text/plain",
+    ".jsonl": "text/plain",
+    ".log": "text/plain",
+    ".yaml": "text/plain",
+    ".yml": "text/plain",
+    ".xml": "text/plain",
+    ".toml": "text/plain",
+    ".ini": "text/plain",
+    ".cfg": "text/plain",
+    ".rst": "text/plain",
+    ".tex": "text/plain",
 }
 
 
@@ -398,7 +438,7 @@ class AnthropicContentMixin:
         if isinstance(block, AudioBlock):
             return self._format_audio_block(block)
         if isinstance(block, FileBlock):
-            return self._format_file_block(block)
+            return self._format_file_block(block, context=context)
         if isinstance(block, SearchResultBlock):
             return self._format_search_result_block(block, context=context)
         if isinstance(block, ContainerUploadBlock):
@@ -561,6 +601,8 @@ class AnthropicContentMixin:
         image_block: dict[str, Any] = {"type": "image", "source": source}
         if block.transformations:
             image_block["transformations"] = block.transformations
+        if block.cache_control:
+            image_block["cache_control"] = self._format_cache_control(block.cache_control)
         return image_block
 
     def _format_document_block(self, block: DocumentBlock) -> dict[str, Any] | None:
@@ -596,38 +638,139 @@ class AnthropicContentMixin:
             doc_block["citations"] = block.citations
         if block.context:
             doc_block["context"] = block.context
+        if block.cache_control:
+            doc_block["cache_control"] = self._format_cache_control(block.cache_control)
         return doc_block
 
-    def _format_audio_block(self, block: AudioBlock) -> dict[str, Any] | None:
-        """Format an AudioBlock, or None for unsupported source types."""
+    def _format_audio_block(self, block: AudioBlock) -> dict[str, Any]:
+        """Degrade an AudioBlock to a text placeholder.
+
+        Anthropic Messages has no audio content block, so ``{"type": "audio"}``
+        is rejected upstream with ``invalid_request_error``. Audio is therefore
+        never forwarded as-is: the ``file_id`` source names the id the model
+        cannot receive, and base64/URL sources degrade to a media-type
+        placeholder so the block is not silently lost.
+        """
         if block.source.type == "file_id":
-            # Anthropic API does not support audio content blocks via file_id.
-            # Degrade to text placeholder to avoid crashing when routing from
-            # other protocols that support audio file_id (e.g. OpenAI).
             return {
                 "type": "text",
                 "text": f"[Audio: file_id={block.source.data}]",
             }
-        source = self._format_file_source(block.source)
-        if source is None:
-            return None
-        return {"type": "audio", "source": source}
+        return {"type": "text", "text": degrade_block_to_text(block)}
 
-    def _format_file_block(self, block: FileBlock) -> dict[str, Any]:
-        """Format a FileBlock to Anthropic wire format."""
-        file_block: dict[str, Any] = {"type": "file"}
+    @staticmethod
+    def _media_type_from_filename(filename: str | None) -> str | None:
+        """Best-effort media type for a file, inferred from its extension."""
+        if not filename or "." not in filename:
+            return None
+        extension = filename.rsplit(".", 1)[-1].split("?", 1)[0].lower()
+        return _FILE_EXTENSION_MEDIA_TYPES.get(f".{extension}")
+
+    @staticmethod
+    def _document_title(filename: str | None) -> dict[str, Any]:
+        """Carry a filename as the document ``title`` (Anthropic caps it at 500 chars)."""
+        if filename and len(filename) <= 500:
+            return {"title": filename}
+        return {}
+
+    @staticmethod
+    def _decode_text_payload(payload: str) -> str | None:
+        """Decode a base64 text payload; None when it is not valid base64."""
+        try:
+            raw = base64.b64decode(payload + "=" * (-len(payload) % 4), validate=True)
+        except ValueError:
+            return None
+        return raw.decode("utf-8", errors="replace")
+
+    def _file_uri_block(self, uri: str, filename: str | None) -> dict[str, Any]:
+        """Build a URL-sourced ``image`` or ``document`` block for a file URI."""
+        if self._media_type_from_filename(filename) in _ANTHROPIC_IMAGE_MEDIA_TYPES:
+            return {"type": "image", "source": {"type": "url", "url": uri}}
+        return {
+            "type": "document",
+            "source": {"type": "url", "url": uri},
+            **self._document_title(filename),
+        }
+
+    def _file_block_to_media_block(self, block: FileBlock) -> dict[str, Any] | None:
+        """Map a Responses ``input_file`` onto a valid Anthropic block.
+
+        Anthropic carries files as ``document`` blocks (base64 PDF, plain text,
+        URL or ``file_id``) or, when the payload is an image, as ``image``
+        blocks. Returns None for payloads Anthropic cannot represent (media
+        types other than PDF/text/images, e.g. ``.docx``/``.xlsx``), so the
+        caller can apply ``unsupported_block_policy``.
+        """
+        filename = block.filename
         if block.file_data:
-            file_block["file_data"] = block.file_data
+            # Chat Completions callers may carry a URL in ``file_data`` (the
+            # field predates ``file_url``); treat it as one.
+            if block.file_data.startswith(("http://", "https://")):
+                return self._file_uri_block(block.file_data, filename)
+            parsed = parse_data_uri(block.file_data)
+            if parsed is None and block.file_data.startswith("data:"):
+                # Malformed data URI (no base64 payload): let the block policy
+                # handle it rather than forwarding the URI as base64 bytes.
+                return None
+            payload = parsed[1] if parsed else block.file_data
+            media_type = (parsed[0] if parsed else None) or self._media_type_from_filename(filename)
+            if not media_type:
+                return None
+            media_type = media_type.split(";", 1)[0].strip().lower()
+            if media_type in _ANTHROPIC_IMAGE_MEDIA_TYPES:
+                return {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": payload},
+                }
+            if media_type == "application/pdf":
+                return {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": payload,
+                    },
+                    **self._document_title(filename),
+                }
+            if media_type.startswith("text/"):
+                # Anthropic's ``text`` source carries the raw text, not base64.
+                text = self._decode_text_payload(payload)
+                if text is None:
+                    return None
+                return {
+                    "type": "document",
+                    "source": {"type": "text", "media_type": "text/plain", "data": text},
+                    **self._document_title(filename),
+                }
+            return None
         if block.file_url:
-            # Responses ``input_file.file_url``: the Anthropic wire has no
-            # ``file_url`` field, but the proxy's lossless ``file`` passthrough
-            # keeps it so the URL is not silently dropped.
-            file_block["file_url"] = block.file_url
+            return self._file_uri_block(block.file_url, filename)
         if block.file_id:
-            file_block["file_id"] = block.file_id
-        if block.filename:
-            file_block["filename"] = block.filename
-        return file_block
+            if self._media_type_from_filename(filename) in _ANTHROPIC_IMAGE_MEDIA_TYPES:
+                return {"type": "image", "source": {"type": "file", "file_id": block.file_id}}
+            return {
+                "type": "document",
+                "source": {"type": "file", "file_id": block.file_id},
+                **self._document_title(filename),
+            }
+        return None
+
+    def _format_file_block(
+        self, block: FileBlock, context: BuildContext | None = None
+    ) -> dict[str, Any] | None:
+        """Format a FileBlock to Anthropic wire format.
+
+        Anthropic Messages has no ``file`` content block, so the file is mapped
+        onto the ``document``/``image`` block that carries it. Files that cannot
+        be represented follow ``unsupported_block_policy`` (drop/degrade/error)
+        rather than being sent as a block the API rejects.
+        """
+        formatted = self._file_block_to_media_block(block)
+        if formatted is None:
+            return self._format_unsupported_block(block, context)
+        if block.cache_control:
+            formatted["cache_control"] = self._format_cache_control(block.cache_control)
+        return formatted
 
     def _format_search_result_block(
         self, block: SearchResultBlock, context: BuildContext | None

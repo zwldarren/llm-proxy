@@ -85,6 +85,23 @@ _AUDIO_FORMAT_TO_MEDIA_TYPE: dict[str, str] = {
     "mp4": "audio/mp4",
 }
 
+# Inverse of ``_AUDIO_FORMAT_TO_MEDIA_TYPE``: an internal AudioSource media type
+# mapped back to the Responses ``input_audio.format`` value when a materialized
+# conversation is rebuilt into stored input items.
+_MEDIA_TYPE_TO_AUDIO_FORMAT: dict[str, str] = {
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+    "audio/webm": "webm",
+    "audio/mp4": "mp4",
+    "audio/m4a": "mp4",
+}
+
 
 def _convert_input_content(content: Any) -> list[ContentBlock]:
     if content is None:
@@ -251,9 +268,9 @@ def conversation_to_input_items(
     then reasoning blocks become ``reasoning`` items, tool calls become
     ``function_call`` / ``custom_tool_call`` / ``tool_search_call`` items, tool
     results become ``function_call_output`` / ``tool_search_output`` items, and
-    text/image/refusal content becomes a ``message`` item (keeping the assistant
-    ``phase``). Content that has no round-trippable item shape (audio/video/file)
-    is skipped.
+    text/image/file/audio/refusal content becomes a ``message`` item (keeping
+    the assistant ``phase``); document blocks are re-emitted as ``input_file``
+    items so a PDF/image survives a ``previous_response_id`` continuation.
 
     ``exclude_system_text``: skip the first system message whose text matches
     this value. Used by storage call sites to avoid serializing the
@@ -262,7 +279,7 @@ def conversation_to_input_items(
     continuation, so emitting them as an input item too would duplicate them.
     """
     from llm_proxy.models import RefusalBlock
-    from llm_proxy.models.content_blocks import ImageBlock, RedactedThinkingBlock
+    from llm_proxy.models.content_blocks import AudioBlock, ImageBlock, RedactedThinkingBlock
 
     items: list[dict[str, Any]] = []
 
@@ -412,14 +429,76 @@ def conversation_to_input_items(
                 source = block.source
                 if source.type == "base64":
                     media = source.media_type or "image/png"
+                    image_part: dict[str, Any] = {
+                        "type": "input_image",
+                        "image_url": f"data:{media};base64,{source.data}",
+                    }
+                elif source.type == "file_id":
+                    image_part = {"type": "input_image", "file_id": source.data}
+                else:
+                    image_part = {"type": "input_image", "image_url": source.data}
+                if block.detail is not None:
+                    image_part["detail"] = block.detail
+                content_parts.append(image_part)
+            elif isinstance(block, FileBlock):
+                file_part: dict[str, Any] = {"type": "input_file"}
+                for key, value in (
+                    ("file_data", block.file_data),
+                    ("file_url", block.file_url),
+                    ("file_id", block.file_id),
+                    ("filename", block.filename),
+                    ("detail", block.detail),
+                ):
+                    if value is not None:
+                        file_part[key] = value
+                if len(file_part) > 1:
+                    content_parts.append(file_part)
+            elif isinstance(block, AudioBlock):
+                if block.source.type == "file_id":
+                    # Responses ``input_audio`` has no file_id field; keep the
+                    # reference as text rather than dropping the block.
+                    content_parts.append(
+                        {"type": "input_text", "text": f"[Audio: file_id={block.source.data}]"}
+                    )
+                else:
+                    audio_part: dict[str, Any] = {
+                        "type": "input_audio",
+                        "format": _MEDIA_TYPE_TO_AUDIO_FORMAT.get(
+                            (block.source.media_type or "").lower(), "wav"
+                        ),
+                    }
+                    if block.source.type == "url":
+                        audio_part["audio_url"] = block.source.data
+                    else:
+                        audio_part["audio_data"] = block.source.data
+                    content_parts.append(audio_part)
+            elif isinstance(block, DocumentBlock):
+                # The Responses wire has no ``document`` content type: re-emit
+                # the payload as ``input_file`` (or ``input_text`` for a plain
+                # text source) so a routed PDF/text document survives storage.
+                if block.source.type == "base64":
+                    media_type = block.source.media_type or "application/pdf"
+                    document_part: dict[str, Any] = {
+                        "type": "input_file",
+                        "file_data": f"data:{media_type};base64,{block.source.data}",
+                    }
+                elif block.source.type == "url":
+                    document_part = {"type": "input_file", "file_url": block.source.data}
+                elif block.source.type == "file_id":
+                    document_part = {"type": "input_file", "file_id": block.source.data}
+                elif block.source.type == "text":
                     content_parts.append(
                         {
-                            "type": "input_image",
-                            "image_url": f"data:{media};base64,{source.data}",
+                            "type": "input_text",
+                            "text": str(block.source.data) if block.source.data else "",
                         }
                     )
-                elif source.type == "url":
-                    content_parts.append({"type": "input_image", "image_url": source.data})
+                    continue
+                else:
+                    continue
+                if block.title:
+                    document_part["filename"] = block.title
+                content_parts.append(document_part)
             elif isinstance(block, RefusalBlock):
                 content_parts.append({"type": "refusal", "refusal": block.refusal})
 
