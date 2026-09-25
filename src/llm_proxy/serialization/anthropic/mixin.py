@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import orjson
 
+from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.utils import parse_data_uri
 from llm_proxy.models import (
     AudioBlock,
@@ -80,6 +81,25 @@ _SERVER_TOOL_RESULT_BLOCK_TYPES: dict[str, type] = {
 _ANTHROPIC_IMAGE_MEDIA_TYPES: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/gif", "image/webp"}
 )
+
+#: Common non-canonical spellings of the media types Anthropic accepts.
+#: OpenAI-compatible clients occasionally emit ``image/jpg`` (or the old
+#: ``image/pjpeg``) instead of ``image/jpeg``; resolving the alias here keeps an
+#: otherwise-valid image from being rejected upstream.
+_ANTHROPIC_IMAGE_MEDIA_TYPE_ALIASES: dict[str, str] = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-png": "image/png",
+}
+
+
+def _normalize_image_media_type(media_type: str | None) -> str | None:
+    """Lowercase/strip media-type parameters and resolve known aliases."""
+    if not media_type:
+        return None
+    normalized = media_type.split(";", 1)[0].strip().lower()
+    return _ANTHROPIC_IMAGE_MEDIA_TYPE_ALIASES.get(normalized, normalized)
+
 
 #: Filename extension -> media type. Anthropic Messages has no ``file`` block,
 #: so a Responses ``input_file`` that carries only a URL/file_id + filename is
@@ -432,7 +452,7 @@ class AnthropicContentMixin:
         if isinstance(block, RefusalBlock):
             return self._format_refusal_block(block)
         if isinstance(block, ImageBlock):
-            return self._format_image_block(block)
+            return self._format_image_block(block, context=context)
         if isinstance(block, DocumentBlock):
             return self._format_document_block(block)
         if isinstance(block, AudioBlock):
@@ -593,17 +613,67 @@ class AnthropicContentMixin:
             return {"type": "file", "file_id": source.data}
         return None
 
-    def _format_image_block(self, block: ImageBlock) -> dict[str, Any] | None:
-        """Format an ImageBlock, or None for unsupported source types."""
-        source = self._format_file_source(block.source)
-        if source is None:
-            return None
-        image_block: dict[str, Any] = {"type": "image", "source": source}
+    def _format_image_block(
+        self, block: ImageBlock, context: BuildContext | None = None
+    ) -> dict[str, Any] | None:
+        """Format an ImageBlock onto an Anthropic ``image`` block.
+
+        Returns None (or a text placeholder, per ``unsupported_block_policy``)
+        when the payload cannot be represented: an unsupported base64 media
+        type (Anthropic accepts only jpeg/png/gif/webp), an empty URL/file_id,
+        or an unknown source type. Forwarding those as-is makes the upstream
+        reject the whole request with ``invalid_request_error``.
+        """
+        source = block.source
+        source_dict: dict[str, Any]
+        if source.type == "base64":
+            media_type = _normalize_image_media_type(source.media_type)
+            if media_type not in _ANTHROPIC_IMAGE_MEDIA_TYPES:
+                return self._unsupported_media_fallback(block, context)
+            source_dict = {
+                "type": "base64",
+                "media_type": media_type,
+                "data": source.data,
+            }
+        elif source.type in ("url", "file_id") and source.data:
+            formatted_source = self._format_file_source(source)
+            if formatted_source is None:
+                return self._unsupported_media_fallback(block, context)
+            source_dict = formatted_source
+        else:
+            return self._unsupported_media_fallback(block, context)
+        image_block: dict[str, Any] = {"type": "image", "source": source_dict}
         if block.transformations:
             image_block["transformations"] = block.transformations
         if block.cache_control:
             image_block["cache_control"] = self._format_cache_control(block.cache_control)
         return image_block
+
+    def _unsupported_media_fallback(
+        self, block: ContentBlock, context: BuildContext | None
+    ) -> dict[str, Any] | None:
+        """Apply ``unsupported_block_policy`` to an unrepresentable payload.
+
+        Distinct from ``_format_unsupported_block``: that one keys off the
+        block *type* via ``supported_content_blocks``, but an ``ImageBlock`` is
+        a supported type whose payload may still be unrepresentable (e.g. an
+        SVG or an empty URL). This applies the policy to that payload case.
+        """
+        policy = getattr(context, "unsupported_block_policy", "drop") if context else "drop"
+        if policy == "error":
+            raise ProviderError(
+                message=(
+                    f"Provider '{self.provider_name}' cannot represent this "
+                    f"{type(block).__name__} payload (unsupported media or source "
+                    "type). Remove or replace the block, or set "
+                    "unsupported_block_policy to 'drop' or 'degrade'."
+                ),
+                error_type="invalid_request_error",
+                provider_name=self.provider_name,
+            )
+        if policy == "degrade":
+            return {"type": "text", "text": degrade_block_to_text(block)}
+        return None
 
     def _format_document_block(self, block: DocumentBlock) -> dict[str, Any] | None:
         """Format a DocumentBlock, or None for unsupported source types."""
@@ -714,9 +784,9 @@ class AnthropicContentMixin:
                 return None
             payload = parsed[1] if parsed else block.file_data
             media_type = (parsed[0] if parsed else None) or self._media_type_from_filename(filename)
+            media_type = _normalize_image_media_type(media_type)
             if not media_type:
                 return None
-            media_type = media_type.split(";", 1)[0].strip().lower()
             if media_type in _ANTHROPIC_IMAGE_MEDIA_TYPES:
                 return {
                     "type": "image",

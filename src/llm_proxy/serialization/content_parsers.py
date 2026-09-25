@@ -61,12 +61,44 @@ def _parse_text_block_cache_control(part: dict) -> CacheControl | None:
     return None
 
 
+def unparseable_image_placeholder(part_type: str) -> TextBlock:
+    """Text placeholder for an image part whose source cannot be parsed.
+
+    Chosen over silently dropping the part so the client's intent (an image was
+    sent, and of what kind) stays visible to the model downstream, matching the
+    no-silent-loss behavior applied to other unrepresentable content.
+    """
+    return TextBlock(text=f"[{part_type}: unparseable image source]")
+
+
+def extract_image_reference(part: dict) -> tuple[str, str | None]:
+    """Extract ``(url, detail)`` from an OpenAI image content part.
+
+    Accepts the documented object shape
+    (``{"image_url": {"url": ..., "detail": ...}}``) and the bare-string
+    shape some OpenAI-compatible clients emit (``{"image_url": "https://..."}``).
+    Chat Completions carries ``detail`` inside the object; the Responses API
+    carries it at the part level, so both locations are checked. A missing or
+    non-string ``image_url`` yields an empty URL, which callers treat as
+    unparseable.
+    """
+    raw = part.get("image_url")
+    if isinstance(raw, dict):
+        url = raw.get("url")
+        detail = raw.get("detail") or part.get("detail")
+    elif isinstance(raw, str):
+        url = raw
+        detail = part.get("detail")
+    else:
+        url = ""
+        detail = part.get("detail")
+    return (url if isinstance(url, str) else ""), detail
+
+
 def parse_image_block_openai(part: dict) -> ImageBlock | None:
     if part.get("type") != "image_url":
         return None
-    image_url = part.get("image_url") or {}
-    url = image_url.get("url", "")
-    detail = image_url.get("detail")
+    url, detail = extract_image_reference(part)
     source = create_image_source_from_url(url)
     if source:
         return ImageBlock(source=source, detail=detail)

@@ -16,7 +16,7 @@ import orjson
 
 from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_output
 from llm_proxy.core.thinking import thinking_config_from_reasoning_effort
-from llm_proxy.core.utils import generate_response_id
+from llm_proxy.core.utils import create_image_source_from_url, generate_response_id
 from llm_proxy.models import (
     ContentBlock,
     ConversationContext,
@@ -58,6 +58,10 @@ from llm_proxy.protocols.openresponses.schemas import ResponsesRequest
 from llm_proxy.protocols.registry import register_protocol_serializer
 from llm_proxy.protocols.serializer_base import ProtocolSerializer
 from llm_proxy.routing.message_extract import function_call_output_to_text
+from llm_proxy.serialization.content_parsers import (
+    extract_image_reference,
+    unparseable_image_placeholder,
+)
 from llm_proxy.serialization.format_context import FormatContext
 from llm_proxy.serialization.responses_toolkit import (
     NamespaceMapping,
@@ -141,9 +145,8 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
             from llm_proxy.models.content_blocks import ImageBlock
             from llm_proxy.models.types import ImageSource
 
-            image_url = part_dict.get("image_url") or ""
+            image_url, detail = extract_image_reference(part_dict)
             file_id = part_dict.get("file_id") or ""
-            detail = part_dict.get("detail")
             if not image_url and file_id:
                 # Responses ``input_image`` may reference an uploaded file by
                 # ``file_id`` instead of ``image_url``. Keep it as a file_id
@@ -155,23 +158,18 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
                         detail=detail,
                     )
                 )
-            elif image_url.startswith("data:"):
-                data_part = image_url.split(";base64,", 1)
-                media_type = data_part[0].replace("data:", "") if len(data_part) == 2 else None
-                data = data_part[1] if len(data_part) == 2 else image_url
-                result.append(
-                    ImageBlock(
-                        source=ImageSource(type="base64", data=data, media_type=media_type),
-                        detail=detail,
-                    )
-                )
-            elif image_url:
-                result.append(
-                    ImageBlock(
-                        source=ImageSource(type="url", data=image_url, media_type=None),
-                        detail=detail,
-                    )
-                )
+            elif not image_url:
+                # Neither an image reference nor a file id: keep a placeholder
+                # rather than dropping the part silently.
+                result.append(unparseable_image_placeholder("input_image"))
+            else:
+                source = create_image_source_from_url(image_url)
+                if source is None:
+                    # Malformed data URIs (no base64 payload) cannot be
+                    # represented as a source; keep a placeholder.
+                    result.append(unparseable_image_placeholder("input_image"))
+                else:
+                    result.append(ImageBlock(source=source, detail=detail))
         elif part_type == "input_file":
             from llm_proxy.models.content_blocks import FileBlock
 

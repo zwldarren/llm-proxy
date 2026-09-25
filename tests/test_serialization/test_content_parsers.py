@@ -5,6 +5,8 @@ valid OpenAI and Anthropic content block types for image, file,
 and audio inputs.
 """
 
+import pytest
+
 from llm_proxy.models import AudioBlock, FileBlock, ImageBlock, TextBlock
 from llm_proxy.serialization.content_parsers import (
     parse_audio_block_openai,
@@ -74,6 +76,41 @@ class TestParseImageBlockOpenAI:
         block = parse_image_block_openai({"type": "image_url"})
         assert isinstance(block, ImageBlock)
         assert block.source.data == ""
+
+    def test_string_image_url(self):
+        """Some OpenAI-compatible clients send the bare-string image_url shape."""
+        block = parse_image_block_openai(
+            {"type": "image_url", "image_url": "https://example.com/img.png", "detail": "low"}
+        )
+        assert isinstance(block, ImageBlock)
+        assert block.source.type == "url"
+        assert block.source.data == "https://example.com/img.png"
+        assert block.detail == "low"
+
+    def test_string_image_url_data_uri(self):
+        block = parse_image_block_openai(
+            {"type": "image_url", "image_url": "data:image/png;base64,AAAA"}
+        )
+        assert isinstance(block, ImageBlock)
+        assert block.source.type == "base64"
+        assert block.source.media_type == "image/png"
+        assert block.source.data == "AAAA"
+
+    def test_non_string_image_url_does_not_raise(self):
+        block = parse_image_block_openai({"type": "image_url", "image_url": 12345})
+        assert isinstance(block, ImageBlock)
+        assert block.source.data == ""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "data:;base64,AAAA",  # data URI without a media type
+            "data:image/svg+xml,%3Csvg%2F%3E",  # URL-encoded, not base64
+            "data:image/png;base64,",  # empty base64 payload
+        ],
+    )
+    def test_unparseable_data_uri_returns_none(self, url):
+        assert parse_image_block_openai({"type": "image_url", "image_url": {"url": url}}) is None
 
 
 class TestParseFileBlockOpenAI:

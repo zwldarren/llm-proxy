@@ -1,5 +1,7 @@
 """Tests for OpenResponses format converters."""
 
+import pytest
+
 from llm_proxy.models import (
     FunctionTool,
     InternalRequest,
@@ -207,6 +209,33 @@ class TestConvertInputContent:
         )
         assert isinstance(result[0], ImageBlock)
         assert result[0].detail == "low"
+
+    def test_input_image_with_dict_image_url(self):
+        """Compatibility: chat-completions-style nested image_url object."""
+        from llm_proxy.models.content_blocks import ImageBlock
+
+        result = _convert_input_content(
+            [{"type": "input_image", "image_url": {"url": "https://x/a.png", "detail": "high"}}]
+        )
+        assert len(result) == 1
+        assert isinstance(result[0], ImageBlock)
+        assert result[0].source.type == "url"
+        assert result[0].source.data == "https://x/a.png"
+        assert result[0].detail == "high"
+
+    @pytest.mark.parametrize(
+        "part",
+        [
+            {"type": "input_image", "image_url": "data:image/svg+xml,%3Csvg%2F%3E"},
+            {"type": "input_image", "image_url": "data:;base64,AAAA"},
+            {"type": "input_image"},
+        ],
+    )
+    def test_unparseable_input_image_degrades_to_placeholder(self, part):
+        result = _convert_input_content([part])
+        assert len(result) == 1
+        assert isinstance(result[0], TextBlock)
+        assert result[0].text == "[input_image: unparseable image source]"
 
     def test_input_video_degraded_to_text(self):
         result = _convert_input_content(

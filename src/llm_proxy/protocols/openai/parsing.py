@@ -46,6 +46,7 @@ from llm_proxy.serialization.content_parsers import (
     parse_reasoning_content,
     parse_text_block,
     parse_video_block_openai,
+    unparseable_image_placeholder,
 )
 
 
@@ -346,9 +347,14 @@ class OpenAIParsingMixin:
                     if block:
                         blocks.append(block)
                         continue
-                    block = parse_image_block_openai(part)
-                    if block:
-                        blocks.append(block)
+                    if part.get("type") == "image_url":
+                        # A malformed/URL-encoded image source cannot be
+                        # represented upstream, so it degrades to a text
+                        # placeholder rather than being dropped silently.
+                        block = parse_image_block_openai(part)
+                        blocks.append(
+                            block if block else unparseable_image_placeholder("image_url")
+                        )
                         continue
                     block = parse_audio_block_openai(part)
                     if block:

@@ -257,3 +257,75 @@ class TestMediaCacheControl:
             ]
         )
         assert content[0]["cache_control"] == {"type": "ephemeral"}
+
+
+class TestImageMediaTypeValidation:
+    """Anthropic accepts only jpeg/png/gif/webp in base64 image blocks.
+
+    Forwarding any other media type (or a missing one) makes the upstream
+    reject the whole request, so an unrepresentable payload follows the
+    block policy instead of being sent as-is.
+    """
+
+    @staticmethod
+    def _image(media_type: str | None, data: str = "AAAA") -> ImageBlock:
+        return ImageBlock(source=ImageSource(type="base64", data=data, media_type=media_type))
+
+    def test_jpg_alias_is_normalized_to_jpeg(self):
+        content = _content([self._image("image/jpg")])
+        assert content == [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": "AAAA"},
+            }
+        ]
+
+    def test_media_type_case_and_parameters_are_normalized(self):
+        content = _content([self._image("IMAGE/PNG;charset=utf-8")])
+        assert content[0]["source"]["media_type"] == "image/png"
+
+    @pytest.mark.parametrize(
+        "media_type", ["image/svg+xml", "image/tiff", "image/bmp", "image/avif"]
+    )
+    def test_unsupported_media_type_degrades(self, media_type):
+        content = _content([self._image(media_type)], policy="degrade")
+        assert content == [{"type": "text", "text": f"[Image: {media_type}]"}]
+
+    def test_missing_media_type_degrades(self):
+        content = _content([self._image(None)], policy="degrade")
+        assert content == [{"type": "text", "text": "[Image: image]"}]
+
+    def test_unsupported_media_type_is_dropped_under_drop_policy(self):
+        content = _content([self._image("image/tiff")])
+        assert content == [{"type": "text", "text": ""}]
+
+    def test_unsupported_media_type_raises_under_error_policy(self):
+        with pytest.raises(ProviderError):
+            _content([self._image("image/tiff")], policy="error")
+
+    @pytest.mark.parametrize("media_type", ["image/jpeg", "image/png", "image/gif", "image/webp"])
+    def test_supported_media_types_pass_through(self, media_type):
+        content = _content([self._image(media_type)])
+        assert content[0]["source"]["media_type"] == media_type
+
+    def test_empty_url_image_degrades_instead_of_forwarding(self):
+        content = _content(
+            [ImageBlock(source=ImageSource(type="url", data="", media_type=None))],
+            policy="degrade",
+        )
+        assert content == [{"type": "text", "text": "[Image: image]"}]
+
+    def test_file_id_image_without_media_type_still_passes(self):
+        content = _content(
+            [ImageBlock(source=ImageSource(type="file_id", data="file_x", media_type=None))]
+        )
+        assert content == [{"type": "image", "source": {"type": "file", "file_id": "file_x"}}]
+
+    def test_file_block_jpg_data_uri_is_normalized(self):
+        content = _content([FileBlock(file_data="data:image/jpg;base64,AAAA")])
+        assert content == [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": "AAAA"},
+            }
+        ]

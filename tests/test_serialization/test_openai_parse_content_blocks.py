@@ -202,3 +202,25 @@ class TestParseToolSearchResultBlock:
         assert len(blocks) >= 1
         assert any(isinstance(b, TextBlock) for b in blocks)
         assert any("search" in b.text.lower() for b in blocks if isinstance(b, TextBlock))
+
+
+class TestParseImageBlocks:
+    """Image parts must never crash, and unparseable ones must not vanish."""
+
+    def test_string_image_url(self, serializer):
+        from llm_proxy.models import ImageBlock
+
+        blocks = serializer.parse_content_blocks(
+            [{"type": "image_url", "image_url": "https://example.com/a.png"}]
+        )
+        assert len(blocks) == 1
+        assert isinstance(blocks[0], ImageBlock)
+        assert blocks[0].source.data == "https://example.com/a.png"
+
+    def test_unparseable_image_url_degrades_to_placeholder(self, serializer):
+        blocks = serializer.parse_content_blocks(
+            [{"type": "image_url", "image_url": {"url": "data:image/svg+xml,%3Csvg%2F%3E"}}]
+        )
+        assert len(blocks) == 1
+        assert isinstance(blocks[0], TextBlock)
+        assert blocks[0].text == "[image_url: unparseable image source]"
