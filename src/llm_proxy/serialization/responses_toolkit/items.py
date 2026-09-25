@@ -13,7 +13,7 @@ def generate_item_id() -> str:
     return f"item_{secrets.token_hex(12)}"
 
 
-def _extract_reasoning_text(content: Any) -> str:
+def extract_reasoning_text(content: Any) -> str:
     """Extract reasoning text from a reasoning item's ``content`` list."""
     if not isinstance(content, list):
         return ""
@@ -28,7 +28,7 @@ def _extract_reasoning_text(content: Any) -> str:
     return "".join(parts)
 
 
-def _extract_summary_text(summary: Any) -> str:
+def extract_summary_text(summary: Any) -> str:
     """Extract reasoning summary text from a reasoning item's ``summary`` list.
 
     The OpenResponses/OpenAI reasoning item can carry its visible reasoning as
@@ -51,6 +51,6 @@ def _extract_summary_text(summary: Any) -> str:
 
 __all__ = [
     "generate_item_id",
-    "_extract_reasoning_text",
-    "_extract_summary_text",
+    "extract_reasoning_text",
+    "extract_summary_text",
 ]

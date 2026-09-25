@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 
 from llm_proxy.core.exceptions import ProviderError
-from llm_proxy.core.utils import parse_data_uri
+from llm_proxy.core.utils import as_http_url, normalize_media_type, parse_data_uri
 from llm_proxy.models import (
     AudioBlock,
     AudioSource,
@@ -97,7 +97,7 @@ def _normalize_image_media_type(media_type: str | None) -> str | None:
     """Lowercase/strip media-type parameters and resolve known aliases."""
     if not media_type:
         return None
-    normalized = media_type.split(";", 1)[0].strip().lower()
+    normalized = normalize_media_type(media_type)
     return _ANTHROPIC_IMAGE_MEDIA_TYPE_ALIASES.get(normalized, normalized)
 
 
@@ -659,7 +659,7 @@ class AnthropicContentMixin:
         a supported type whose payload may still be unrepresentable (e.g. an
         SVG or an empty URL). This applies the policy to that payload case.
         """
-        policy = getattr(context, "unsupported_block_policy", "drop") if context else "drop"
+        policy = context.unsupported_block_policy if context else "drop"
         if policy == "error":
             raise ProviderError(
                 message=(
@@ -775,7 +775,7 @@ class AnthropicContentMixin:
         if block.file_data:
             # Chat Completions callers may carry a URL in ``file_data`` (the
             # field predates ``file_url``); treat it as one.
-            if block.file_data.startswith(("http://", "https://")):
+            if as_http_url(block.file_data):
                 return self._file_uri_block(block.file_data, filename)
             parsed = parse_data_uri(block.file_data)
             if parsed is None and block.file_data.startswith("data:"):
@@ -947,10 +947,8 @@ class AnthropicContentMixin:
         self, block: ContentBlock, context: BuildContext | None
     ) -> dict[str, Any] | None:
         """Apply the unsupported-block policy, or None to drop the block."""
-        policy = getattr(context, "unsupported_block_policy", "drop") if context else "drop"
-        supported = (
-            getattr(context, "supported_content_blocks", frozenset()) if context else frozenset()
-        )
+        policy = context.unsupported_block_policy if context else "drop"
+        supported = context.supported_content_blocks if context else frozenset()
         if not should_degrade_block(policy, block, self.provider_name, supported_blocks=supported):
             return None
         degraded = degrade_block_to_text(block)

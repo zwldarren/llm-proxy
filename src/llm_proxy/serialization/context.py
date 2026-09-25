@@ -62,6 +62,12 @@ class BuildContext:
     unsupported_block_policy: UnsupportedBlockPolicy = "drop"
     base_url: str | None = None
     provider_name: str = "openai"
+    #: Registered adapter/serializer type (e.g. ``openrouter``). Distinct from
+    #: ``provider_name``, which is the operator-chosen provider label and may be
+    #: an arbitrary display name. Provider-specific wire decisions key on this;
+    #: it defaults to empty so direct callers that only set ``provider_name``
+    #: fall back to it.
+    provider_type: str = ""
     target_endpoint: TargetEndpoint = "chat_completions"
     supported_content_blocks: frozenset[type[ContentBlock]] = field(default_factory=frozenset)
     compatible_protocols: frozenset[str] = frozenset()
@@ -86,6 +92,7 @@ class BuildContext:
         unknown_fields_policy = kwargs.pop("unknown_fields_policy", "ignore")
         unsupported_block_policy = kwargs.pop("unsupported_block_policy", "drop")
         provider_name = kwargs.pop("provider_name", "openai")
+        provider_type = kwargs.pop("provider_type", "")
         target_endpoint = kwargs.pop("target_endpoint", "chat_completions")
         supported_content_blocks = kwargs.pop("supported_content_blocks", frozenset())
         compatible_protocols = kwargs.pop("compatible_protocols", frozenset())
@@ -99,6 +106,7 @@ class BuildContext:
             unsupported_block_policy=unsupported_block_policy,
             base_url=base_url,
             provider_name=provider_name,
+            provider_type=provider_type,
             target_endpoint=target_endpoint,
             supported_content_blocks=supported_content_blocks,
             compatible_protocols=compatible_protocols,

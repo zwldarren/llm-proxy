@@ -558,5 +558,79 @@ class TestResponsesRoundTrip:
         assert fn_outputs[0]["output"] == "ok"
 
 
+class TestStreamingReasoningSummaryEvents:
+    """Official OpenAI reasoning streams ``response.reasoning_summary_text.*``.
+
+    The converter must surface those as ``reasoning_content`` deltas (matching
+    the non-streaming parser, which reads the item's ``summary``), and fall back
+    to ``response.output_item.done`` when an upstream sends no per-token deltas.
+    """
+
+    @staticmethod
+    def _converter():
+        from llm_proxy.serialization.openai.streaming_converter import (
+            OpenAIResponsesChunkConverter,
+        )
+
+        converter = OpenAIResponsesChunkConverter(model="gpt-5")
+        converter.convert_chunk(
+            {"event_type": "response.created", "response": {"id": "r", "model": "gpt-5"}}
+        )
+        return converter
+
+    def test_summary_text_delta_emits_reasoning_content(self):
+        chunk = self._converter().convert_chunk(
+            {"event_type": "response.reasoning_summary_text.delta", "delta": "step one"}
+        )
+        assert chunk is not None
+        assert chunk["choices"][0]["delta"]["reasoning_content"] == "step one"
+
+    def test_output_item_done_falls_back_to_summary(self):
+        chunk = self._converter().convert_chunk(
+            {
+                "event_type": "response.output_item.done",
+                "item": {
+                    "id": "rs_1",
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "the plan"}],
+                },
+            }
+        )
+        assert chunk is not None
+        assert chunk["choices"][0]["delta"]["reasoning_content"] == "the plan"
+
+    def test_output_item_done_does_not_duplicate_streamed_summary(self):
+        converter = self._converter()
+        converter.convert_chunk(
+            {"event_type": "response.reasoning_summary_text.delta", "delta": "the plan"}
+        )
+        chunk = converter.convert_chunk(
+            {
+                "event_type": "response.output_item.done",
+                "item": {
+                    "id": "rs_1",
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "the plan"}],
+                },
+            }
+        )
+        assert chunk is None
+
+    def test_output_item_done_carries_encrypted_content(self):
+        chunk = self._converter().convert_chunk(
+            {
+                "event_type": "response.output_item.done",
+                "item": {
+                    "id": "rs_1",
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "plan"}],
+                    "encrypted_content": "ENC",
+                },
+            }
+        )
+        assert chunk is not None
+        assert chunk["choices"][0]["delta"]["encrypted_content"] == "ENC"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -164,6 +164,33 @@ def parse_data_uri(url: str) -> tuple[str | None, str] | None:
     return None
 
 
+#: URL schemes treated as external, fetchable sources.
+_HTTP_URL_PREFIXES = ("http://", "https://")
+
+
+def normalize_media_type(media_type: str) -> str:
+    """Lowercase a media type and drop any parameters (``; charset=utf-8``).
+
+    Args:
+        media_type: A raw media type, possibly carrying parameters.
+
+    Returns:
+        The bare, lowercased media type (``image/png`` from ``Image/PNG; q=1``).
+    """
+    return media_type.split(";", 1)[0].strip().lower()
+
+
+def as_http_url(value: Any) -> str | None:
+    """Return *value* when it is an HTTP(S) URL string, else None.
+
+    Used to recognise a URL that a caller parked in a field otherwise reserved
+    for base64 payloads, and to filter block sources down to fetchable URLs.
+    """
+    if isinstance(value, str) and value.startswith(_HTTP_URL_PREFIXES):
+        return value
+    return None
+
+
 def create_image_source_from_url(url: str, _detail: str | None = None) -> Any:
     """Create an ImageSource from a URL string.
 

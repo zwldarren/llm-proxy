@@ -65,8 +65,8 @@ from llm_proxy.serialization.content_parsers import (
 from llm_proxy.serialization.format_context import FormatContext
 from llm_proxy.serialization.responses_toolkit import (
     NamespaceMapping,
-    _extract_reasoning_text,
-    _extract_summary_text,
+    extract_reasoning_text,
+    extract_summary_text,
     generate_item_id,
     restore_tool_name,
 )
@@ -926,9 +926,9 @@ def _process_reasoning_item(
     pending_assistant_blocks: list[ContentBlock],
 ) -> None:
     """Process a ``reasoning`` input item."""
-    thinking_text = _extract_reasoning_text(item_dict.get("content", []))
+    thinking_text = extract_reasoning_text(item_dict.get("content", []))
     if not thinking_text:
-        thinking_text = _extract_summary_text(item_dict.get("summary", []))
+        thinking_text = extract_summary_text(item_dict.get("summary", []))
     encrypted = item_dict.get("encrypted_content")
     if thinking_text == REDACTED_THINKING_TEXT and encrypted:
         # Round-trip of a formatted redacted_thinking block: the opaque data

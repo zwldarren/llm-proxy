@@ -5,8 +5,10 @@ Pure functions for converting between Unified models and OpenAI message format.
 These functions have no dependency on a serializer class.
 """
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
+from llm_proxy.core.utils import as_http_url, normalize_media_type
 from llm_proxy.models import (
     AudioBlock,
     ConversationContext,
@@ -122,7 +124,82 @@ def format_conversation(
             if not _is_empty_assistant_message(m):
                 result.append(m)
 
+    if _chat_target_forbids_file_with_media(_context_provider_type(context)):
+        result = _split_mixed_file_and_media_messages(result)
+
     return result
+
+
+def _context_provider_type(context: BuildContext | None) -> str:
+    """Resolve the provider *type* (e.g. ``openrouter``) from a build context.
+
+    ``BuildContext.provider_name`` is the operator-chosen provider label and may
+    differ from the adapter type; ``provider_type`` carries the registered
+    adapter/serializer type that provider-specific wire decisions key on. Direct
+    callers and tests that set only ``provider_name`` still resolve correctly.
+    """
+    if context is None:
+        return "openai"
+    return context.provider_type or context.provider_name
+
+
+_CHAT_FILE_PART_TYPES = frozenset({"file"})
+_CHAT_VISUAL_PART_TYPES = frozenset({"image_url", "video_url"})
+
+
+def _chat_part_media_class(part: Any) -> str | None:
+    """Classify a content part for the file/media co-occurrence rule."""
+    if not isinstance(part, dict):
+        return None
+    part_type = part.get("type")
+    if part_type in _CHAT_FILE_PART_TYPES:
+        return "file"
+    if part_type in _CHAT_VISUAL_PART_TYPES:
+        return "visual"
+    return None
+
+
+def _split_mixed_file_and_media_messages(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Split a message that mixes a ``file`` part with image/video parts.
+
+    Zhipu / Z.AI GLM reject a ``content`` array carrying a ``file`` part together
+    with ``image_url`` / ``video_url`` ("Not support passing both the ``file``
+    and ``image_url`` or ``video_url`` parameters at the same time"). Text parts
+    are neutral, so they stay with whichever neighbour they were next to and the
+    message is split only at a file↔media boundary, preserving order.
+    """
+    split: list[dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if message.get("role") != "user" or not isinstance(content, list):
+            split.append(message)
+            continue
+        present = {part.get("type") for part in content if isinstance(part, dict)}
+        if not (present & _CHAT_FILE_PART_TYPES and present & _CHAT_VISUAL_PART_TYPES):
+            split.append(message)
+            continue
+
+        current: list[Any] = []
+        current_class: str | None = None
+        for part in content:
+            media_class = _chat_part_media_class(part)
+            if (
+                current
+                and current_class is not None
+                and media_class is not None
+                and media_class != current_class
+            ):
+                split.append({**message, "content": current})
+                current = []
+                current_class = None
+            current.append(part)
+            if media_class is not None:
+                current_class = media_class
+        if current:
+            split.append({**message, "content": current})
+    return split
 
 
 def _is_empty_assistant_message(message: dict[str, Any]) -> bool:
@@ -547,6 +624,238 @@ def _make_media_url(source: Any, default_media_type: str) -> str:
     return source.data
 
 
+# ---------------------------------------------------------------------------
+# Per-provider document/file mapping on the Chat Completions wire
+# ---------------------------------------------------------------------------
+# Chat Completions has no single ``file`` shape: OpenAI, OpenRouter and Zhipu
+# (Z.AI) nest it under a ``file`` object, DeepSeek uses top-level keys, Mistral
+# spells documents ``document_url``, and only some providers accept an external
+# URL at all. ``_CHAT_FILE_TARGETS`` is the single source of truth for that
+# matrix. A provider absent from the table has no document content part on its
+# Chat Completions endpoint, so documents degrade per
+# ``unsupported_block_policy``.
+#
+# Evidence (official docs):
+# - OpenAI: ``file`` = {file_data (base64), file_id, filename}, PDF only, no URL
+#   (https://developers.openai.com/api/docs/guides/file-inputs).
+# - OpenRouter: ``file.file_data`` is documented as "base64 data URL or URL"
+#   (https://openrouter.ai/docs/guides/overview/multimodal/pdfs).
+# - Zhipu / Z.AI GLM: ``file`` accepts file_url / file_data / file_id
+#   (https://docs.z.ai/api-reference/llm/chat-completion).
+# - Mistral: ``{"type": "document_url", "document_url": <url-or-data-uri>}``
+#   (https://docs.mistral.ai/studio/document-processing/document_qna).
+# - DeepSeek: top-level ``file`` part for images and Files-API ids, no URL
+#   (https://api-docs.deepseek.com/guides/vision).
+# - xAI / Qwen / Moonshot / MiniMax: no document content part on
+#   /chat/completions (documents only via Responses / file-extract APIs), so
+#   they stay out of the table and degrade.
+#
+# GLM additionally forbids a ``file`` part in the same message as an image or
+# video part; see ``no_file_with_media`` and
+# ``_split_mixed_file_and_media_messages``.
+
+
+@dataclass(frozen=True)
+class _ChatFileTarget:
+    """How one provider carries a document/file on the Chat Completions wire."""
+
+    style: Literal["nested_file", "top_level_file", "document_url"]
+    #: Field that may hold an external URL (``file_data`` / ``file_url`` /
+    #: ``document_url``), or ``None`` when the provider rejects URL sources.
+    url_field: str | None
+    #: Whether a Files-API ``file_id`` reference is accepted.
+    file_id: bool
+    accepts_pdf: bool
+    #: Non-PDF documents (docx, xlsx, text, …).
+    accepts_other_documents: bool
+    #: Images carried through the ``file`` part (normally ``image_url``).
+    accepts_images: bool
+    #: Whether a ``file`` part may not share a message with ``image_url`` /
+    #: ``video_url`` (Zhipu / Z.AI GLM), requiring the message to be split.
+    no_file_with_media: bool = False
+
+
+_CHAT_FILE_TARGETS: dict[str, _ChatFileTarget] = {
+    # OpenAI Chat Completions: PDF only, base64 or Files-API id, never a URL.
+    "openai": _ChatFileTarget(
+        style="nested_file",
+        url_field=None,
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=False,
+        accepts_images=False,
+    ),
+    # The generic OpenAI-compatible adapter speaks the same wire shape as OpenAI
+    # (its base URL is operator-supplied), so it inherits OpenAI's file rules.
+    "openai-compatible": _ChatFileTarget(
+        style="nested_file",
+        url_field=None,
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=False,
+        accepts_images=False,
+    ),
+    # OpenRouter's file parser accepts URLs in ``file_data`` and converts a
+    # broad set of document types server-side.
+    "openrouter": _ChatFileTarget(
+        style="nested_file",
+        url_field="file_data",
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=True,
+        accepts_images=True,
+    ),
+    # Zhipu / Z.AI GLM: nested ``file`` object with a dedicated ``file_url``, and
+    # a ``file`` part may not be mixed with an image/video part in one message.
+    "zai": _ChatFileTarget(
+        style="nested_file",
+        url_field="file_url",
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=True,
+        accepts_images=False,
+        no_file_with_media=True,
+    ),
+    "zai-coding": _ChatFileTarget(
+        style="nested_file",
+        url_field="file_url",
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=True,
+        accepts_images=False,
+        no_file_with_media=True,
+    ),
+    "zhipu": _ChatFileTarget(
+        style="nested_file",
+        url_field="file_url",
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=True,
+        accepts_images=False,
+        no_file_with_media=True,
+    ),
+    "zhipu-coding": _ChatFileTarget(
+        style="nested_file",
+        url_field="file_url",
+        file_id=True,
+        accepts_pdf=True,
+        accepts_other_documents=True,
+        accepts_images=False,
+        no_file_with_media=True,
+    ),
+    # Mistral: a flat ``document_url`` string (URL or base64 data URI).
+    "mistral": _ChatFileTarget(
+        style="document_url",
+        url_field="document_url",
+        file_id=False,
+        accepts_pdf=True,
+        accepts_other_documents=True,
+        accepts_images=False,
+    ),
+    # DeepSeek: top-level file part, images and Files-API ids only.
+    "deepseek": _ChatFileTarget(
+        style="top_level_file",
+        url_field=None,
+        file_id=True,
+        accepts_pdf=False,
+        accepts_other_documents=False,
+        accepts_images=True,
+    ),
+}
+
+
+def _chat_target_forbids_file_with_media(provider_name: str) -> bool:
+    """Whether the provider rejects ``file`` alongside image/video parts."""
+    target = _CHAT_FILE_TARGETS.get(provider_name)
+    return target is not None and target.no_file_with_media
+
+
+def chat_document_url_needs_download(provider_name: str) -> bool:
+    """Whether URL document sources must be downloaded and inlined.
+
+    True when the provider has no URL field on its ``file`` part but does accept
+    the inlined form — i.e. Chat Completions OpenAI / the generic
+    ``openai-compatible`` adapter, whose ``file`` part carries base64 data only.
+    Providers that take a URL directly keep it; providers with no document part
+    at all cannot be helped by inlining.
+    """
+    target = _CHAT_FILE_TARGETS.get(provider_name)
+    if target is None or target.url_field is not None:
+        return False
+    return target.accepts_pdf or target.accepts_other_documents
+
+
+def chat_file_media_type_accepted(provider_name: str, media_type: str) -> bool:
+    """Whether *media_type* may be sent inlined to *provider_name*'s file part."""
+    target = _CHAT_FILE_TARGETS.get(provider_name)
+    return target is not None and _accepts_chat_file_media_type(target, media_type)
+
+
+def _accepts_chat_file_media_type(target: _ChatFileTarget, media_type: str) -> bool:
+    """Whether *target* accepts a file of *media_type* through its file part."""
+    normalized = normalize_media_type(media_type)
+    if normalized.startswith("image/"):
+        return target.accepts_images
+    if normalized == "application/pdf":
+        return target.accepts_pdf
+    return target.accepts_other_documents
+
+
+def _data_uri_media_type(value: str) -> str | None:
+    """Return the media type of a ``data:`` URI, or None when it is not one."""
+    if not value.startswith("data:"):
+        return None
+    header = value[5:].split(",", 1)[0]
+    media_type = normalize_media_type(header)
+    return media_type or None
+
+
+def _render_chat_file_part(
+    target: _ChatFileTarget,
+    *,
+    data_uri: str | None = None,
+    url: str | None = None,
+    file_id: str | None = None,
+    filename: str | None = None,
+) -> dict[str, Any] | None:
+    """Render a document/file part for *target*, or None when unrepresentable.
+
+    A URL source is refused when the provider has no URL field, and a
+    ``file_id`` when the provider has no Files API — the caller then degrades
+    the block instead of forwarding a field the upstream rejects.
+    """
+    if target.style == "document_url":
+        value = url or data_uri
+        if value is None:
+            return None
+        return {"type": "document_url", "document_url": value}
+
+    file_dict: dict[str, Any] = {}
+    has_content = False
+    if url is not None:
+        if target.url_field is None:
+            return None
+        file_dict[target.url_field] = url
+        has_content = True
+    elif data_uri is not None:
+        file_dict["file_data"] = data_uri
+        has_content = True
+    if file_id is not None:
+        if not target.file_id:
+            return None
+        file_dict["file_id"] = file_id
+        has_content = True
+    if not has_content:
+        # ``filename`` alone is not a file input; degrade instead of emitting a
+        # ``file`` part the upstream cannot resolve.
+        return None
+    if filename:
+        file_dict["filename"] = filename
+    if target.style == "top_level_file":
+        return {"type": "file", **file_dict}
+    return {"type": "file", "file": file_dict}
+
+
 def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | None:
     """Convert a single content block to an OpenAI part dict.
 
@@ -562,10 +871,12 @@ def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | No
 
     if isinstance(block, ImageBlock):
         url = _make_media_url(block.source, "image/png")
-        return {
-            "type": "image_url",
-            "image_url": {"url": url, "detail": block.detail},
-        }
+        image_url: dict[str, Any] = {"url": url}
+        # ``detail`` is an optional enum (auto/low/high); an explicit null is
+        # off-schema for strict OpenAI-compatible providers, so omit it.
+        if block.detail is not None:
+            image_url["detail"] = block.detail
+        return {"type": "image_url", "image_url": image_url}
 
     if isinstance(block, AudioBlock):
         if provider_name == "openrouter":
@@ -593,27 +904,29 @@ def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | No
         return None
 
     if isinstance(block, FileBlock):
-        file_dict: dict[str, Any] = {}
-        if block.file_data:
-            file_dict["file_data"] = block.file_data
-        elif block.file_url:
-            # Chat Completions has no ``file_url`` field. The previous
-            # behaviour (before the Responses file_url/file_data split) carried
-            # the URL in ``file_data``, which OpenAI-compatible providers
-            # accept; keep that so the file is not silently dropped.
-            file_dict["file_data"] = block.file_url
-        if block.file_id:
-            file_dict["file_id"] = block.file_id
-        if block.filename:
-            file_dict["filename"] = block.filename
-        if provider_name == "deepseek":
-            # DeepSeek's Chat Completions endpoint carries file blocks with
-            # top-level keys (file_id / file_data / filename) instead of the
-            # OpenAI nested ``file`` object (see DeepSeek vision docs).
-            if file_dict:
-                return {"type": "file", **file_dict}
-        elif provider_name in ("openai", "openrouter"):
-            return {"type": "file", "file": file_dict}
+        target = _CHAT_FILE_TARGETS.get(provider_name)
+        if target is not None:
+            file_data = block.file_data
+            file_url = block.file_url
+            # Chat Completions callers (and the pre-split Responses mapping)
+            # put an external URL in ``file_data``; treat it as a URL source so
+            # each provider gets it in the field it actually accepts.
+            if as_http_url(file_data):
+                file_url = file_url or file_data
+                file_data = None
+            if file_data is not None:
+                media_type = _data_uri_media_type(file_data)
+                if media_type is not None and not _accepts_chat_file_media_type(target, media_type):
+                    file_data = None
+            part = _render_chat_file_part(
+                target,
+                data_uri=file_data,
+                url=file_url,
+                file_id=block.file_id,
+                filename=block.filename,
+            )
+            if part is not None:
+                return part
         degraded = degrade_block_to_text(block)
         return {"type": "text", "text": degraded} if degraded else None
 
@@ -622,21 +935,32 @@ def _block_to_openai_part(block: Any, provider_name: str) -> dict[str, Any] | No
             doc_data = block.source.data
             doc_text = doc_data if isinstance(doc_data, str) else str(doc_data)
             return {"type": "text", "text": doc_text}
-        if provider_name in ("openai", "openrouter"):
+        target = _CHAT_FILE_TARGETS.get(provider_name)
+        # A provider whose file part carries no documents at all (DeepSeek is
+        # images-only) must degrade a document block whatever its source type.
+        if target is not None and (target.accepts_pdf or target.accepts_other_documents):
             if block.source.type == "base64":
                 media_type = block.source.media_type or "application/pdf"
-                file_data = f"data:{media_type};base64,{block.source.data}"
-                file_dict = {"file_data": file_data}
+                if _accepts_chat_file_media_type(target, media_type):
+                    part = _render_chat_file_part(
+                        target,
+                        data_uri=f"data:{media_type};base64,{block.source.data}",
+                        filename=block.title,
+                    )
+                    if part is not None:
+                        return part
             elif block.source.type == "url":
-                file_dict = {"file_data": block.source.data}
+                # Anthropic URL document sources are PDFs. Providers without a
+                # URL field refuse rather than mislabel the URL as base64.
+                part = _render_chat_file_part(target, url=block.source.data, filename=block.title)
+                if part is not None:
+                    return part
             elif block.source.type == "file_id":
-                file_dict = {"file_id": block.source.data}
-            else:
-                file_dict = None
-            if file_dict:
-                if block.title:
-                    file_dict["filename"] = block.title
-                return {"type": "file", "file": file_dict}
+                part = _render_chat_file_part(
+                    target, file_id=block.source.data, filename=block.title
+                )
+                if part is not None:
+                    return part
         degraded = degrade_block_to_text(block)
         return {"type": "text", "text": degraded} if degraded else None
 
@@ -794,7 +1118,7 @@ def content_to_openai_parts(
     """
     parts: list[dict[str, Any]] = []
     policy = context.unsupported_block_policy if context else "drop"
-    provider_name = context.provider_name if context else "openai"
+    provider_name = _context_provider_type(context)
     supported_blocks = context.supported_content_blocks if context else frozenset()
     responses_target = context is not None and context.target_endpoint == "responses"
 

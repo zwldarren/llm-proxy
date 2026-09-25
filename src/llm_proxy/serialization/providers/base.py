@@ -145,6 +145,7 @@ class ProviderSerializer(ABC):
             context = BuildContext.from_request(
                 request,
                 provider_name=self.provider_name,
+                provider_type=self.provider_name,
                 supported_content_blocks=self.supported_content_blocks,
             )
 

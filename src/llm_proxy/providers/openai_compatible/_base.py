@@ -197,6 +197,24 @@ class OpenAICompatibleBase(
     def _stream_body(self, request: InternalRequest) -> dict[str, Any]:
         return self._build_request_body(request)
 
+    async def _prepare_chat_request(self, request: InternalRequest) -> None:
+        """Async preprocessing shared by every chat-body build path.
+
+        Inlines URL document/file sources for Chat Completions targets whose
+        ``file`` part accepts only base64 (OpenAI / ``openai-compatible``). The
+        body builder itself is synchronous, so the download happens here, before
+        the body is built; providers with a native URL field are unaffected.
+        """
+        from llm_proxy.serialization.openai.converter import chat_document_url_needs_download
+
+        if not chat_document_url_needs_download(self._adapter_type):
+            return
+
+        from llm_proxy.serialization.openai.url_inline import inline_chat_document_urls
+
+        client = await self._get_client()
+        await inline_chat_document_urls(request, provider_type=self._adapter_type, client=client)
+
     def _record_reasoning_field_preference(
         self,
         detected: str | None,
@@ -231,6 +249,7 @@ class OpenAICompatibleBase(
     async def chat_completion(self, request: InternalRequest, **kwargs: Any) -> InternalResponse:
         url = self._resolve_endpoint_url("chat_completion", self.CHAT_ENDPOINT, model=request.model)
         headers = self._build_headers()
+        await self._prepare_chat_request(request)
         body = self._build_request_body(request)
 
         response = await self._post_json_response_with_retry(url, headers, body)
@@ -322,6 +341,7 @@ class OpenAICompatibleBase(
             context = {"model": request.model}
         else:
             context["model"] = request.model
+        await self._prepare_chat_request(request)
         return await ChatCapabilityMixin.stream_chat_completion(
             self, request, cancel_token=cancel_token, context=context, **kwargs
         )
@@ -372,6 +392,7 @@ class OpenAICompatibleBase(
         convergence point every tier shares (ADR-0017).
         """
         url = self._stream_url(request)
+        await self._prepare_chat_request(request)
         body = self._stream_body(request)
         return self._with_retry_generator(
             lambda: self._stream_raw_sse(url, body, cancel_token),

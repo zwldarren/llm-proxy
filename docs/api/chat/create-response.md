@@ -79,7 +79,11 @@ Content parts: `input_text`, `input_image` (`image_url`, `detail`), `input_file`
 `input_file.file_url` is kept as a URL on the Responses wire. When the request is
 routed to a provider whose wire has no URL file input, the URL is carried in that
 provider's native URL field where one exists (an Anthropic `document` / `image` URL
-source, Gemini `file_data.file_uri`) and downloaded and inlined where it does not;
+source, Gemini `file_data.file_uri`, OpenRouter `file.file_data`, Zhipu / Z.AI
+`file.file_url`, Mistral `document_url`); where the wire has no URL file input but
+accepts inline bytes, the URL is downloaded and inlined (Gemini, and OpenAI / the
+generic `openai-compatible` Chat Completions `file` part); otherwise it degrades to a
+text placeholder;
 see [FAQ](../../reference/faq.md#how-are-files-and-media-mapped-when-i-route-to-another-provider).
 
 Key parameters:

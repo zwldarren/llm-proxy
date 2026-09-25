@@ -53,11 +53,25 @@ URI, or an uploaded-file reference. Worth knowing:
 - **`file_id` is passed through as-is.** There is no `/v1/files` store, so an id must
   have been issued by the upstream it is sent to. An OpenAI Files-API id sent to Gemini
   (or the reverse) fails upstream.
-- **HTTP(S) image and document URIs are sent as native URL sources** where the
-  upstream has one (Anthropic `image` / `document` URL sources, Gemini
-  `file_data.file_uri`); where it does not, the URL is downloaded and inlined
-  before forwarding, so any publicly reachable URL works. SSRF protection applies
-  to the download path.
+- **HTTP(S) image URIs are sent as native URL sources** where the upstream has one
+  (Anthropic `image` URL sources, Gemini `file_data.file_uri`, OpenAI / OpenRouter
+  `image_url`); where it does not, the URL is downloaded and inlined before
+  forwarding, so any publicly reachable URL works. SSRF protection applies to the
+  download path.
+- **Document URLs on Chat Completions are provider-specific.** Chat Completions has no
+  single `file` shape and not every upstream accepts a URL: OpenRouter carries the URL
+  in `file.file_data`, Zhipu / Z.AI (GLM) in `file.file_url`, and Mistral in a flat
+  `document_url`. OpenAI and the generic `openai-compatible` adapter accept no file
+  URL, so a URL document routed there is **downloaded and inlined as base64** (subject
+  to the same SSRF protection) when the upstream accepts the media type; a PDF becomes
+  a `file` part, while a non-PDF still degrades because OpenAI's `file` part is
+  PDF-only. DeepSeek's `file` part carries images and Files-API ids only, so a document
+  routed there degrades. OpenRouter, Zhipu and Mistral accept the document types they
+  document.
+- **Zhipu / Z.AI (GLM) cannot mix a `file` part with an image or video part.** A
+  message carrying both is split into separate messages (`file` on one, `image_url` /
+  `video_url` on the other) so the upstream does not reject the request; text parts stay
+  with the neighbouring part and ordering is preserved.
 - **Video URIs are not downloaded.** Gemini fetches video itself and reliably accepts
   only YouTube URLs (or File API / `gs://` URIs); an arbitrary `https://…/v.mp4` is
   rejected upstream.

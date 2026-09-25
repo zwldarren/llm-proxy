@@ -531,6 +531,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
             request,
             base_url=self._base_url,
             provider_name=self.provider_name,
+            provider_type=self._adapter_type,
             target_endpoint=self._target_endpoint(),
             unknown_fields_policy=self._resolve_field_policy(),
             unsupported_block_policy=self._resolve_block_policy(),

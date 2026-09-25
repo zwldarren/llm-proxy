@@ -53,8 +53,8 @@ from llm_proxy.serialization.openai.converter import (
 from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.providers.registry import register_provider_serializer
 from llm_proxy.serialization.responses_toolkit import (
-    _extract_reasoning_text,
-    _extract_summary_text,
+    extract_reasoning_text,
+    extract_summary_text,
 )
 
 logger = get_logger(__name__)
@@ -809,9 +809,9 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 # context). Prefer ``content`` reasoning_text/output_text, fall
                 # back to ``summary`` summary_text; carry ``encrypted_content``
                 # through unchanged so stateless reasoning state survives.
-                thinking = _extract_reasoning_text(item.get("content", []))
+                thinking = extract_reasoning_text(item.get("content", []))
                 if not thinking:
-                    thinking = _extract_summary_text(item.get("summary", []))
+                    thinking = extract_summary_text(item.get("summary", []))
                 encrypted = item.get("encrypted_content")
                 if thinking or encrypted:
                     output.append(

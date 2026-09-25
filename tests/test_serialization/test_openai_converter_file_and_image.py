@@ -244,15 +244,19 @@ class TestDocumentBlockToOpenAI:
         assert "pdf" in parts[0]["file"]["file_data"]
         assert parts[0]["file"]["filename"] == "doc.pdf"
 
-    def test_document_as_file_with_url(self):
+    def test_document_as_file_with_url_degrades(self):
+        # OpenAI Chat Completions does not support file URLs
+        # (https://developers.openai.com/api/docs/guides/file-inputs), so the
+        # block degrades instead of carrying the URL in ``file_data``.
         block = DocumentBlock(
             source=DocumentSource(
                 type="url", data="https://example.com/doc.pdf", media_type="application/pdf"
             ),
+            title="doc.pdf",
         )
-        parts = content_to_openai_parts([block])
-        assert parts[0]["type"] == "file"
-        assert parts[0]["file"]["file_data"] == "https://example.com/doc.pdf"
+        result = content_to_openai_parts([block])
+        assert isinstance(result, str)
+        assert "doc.pdf" in result
 
     def test_document_as_text(self):
         block = DocumentBlock(
@@ -424,3 +428,126 @@ class TestMixedContentToOpenAI:
         result = content_to_openai_parts([TextBlock(text="Just text")])
         assert isinstance(result, str)
         assert result == "Just text"
+
+
+class TestPerProviderDocumentFileMapping:
+    """Documents/files map per provider; only some accept URLs or non-PDF types.
+
+    The provider shapes are verified against official docs; the source URLs are
+    recorded on ``converter._CHAT_FILE_TARGETS``.
+    """
+
+    @staticmethod
+    def _doc(source_type, *, media_type=None, data="AAAA", title=None):
+        return DocumentBlock(
+            source=DocumentSource(type=source_type, data=data, media_type=media_type),
+            title=title,
+        )
+
+    @staticmethod
+    def _parts(block, provider):
+        return content_to_openai_parts([block], BuildContext(provider_name=provider))
+
+    # -- OpenAI: PDF only, never a URL --------------------------------------
+    def test_openai_pdf_base64_is_a_file(self):
+        parts = self._parts(
+            self._doc("base64", media_type="application/pdf", title="d.pdf"), "openai"
+        )
+        assert parts[0]["type"] == "file"
+        assert parts[0]["file"]["file_data"].startswith("data:application/pdf;base64,")
+
+    def test_openai_non_pdf_degrades(self):
+        result = self._parts(
+            self._doc(
+                "base64",
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                title="d.docx",
+            ),
+            "openai",
+        )
+        assert isinstance(result, str)
+        assert "d.docx" in result
+
+    def test_openai_url_degrades(self):
+        result = self._parts(self._doc("url", data="https://x/d.pdf", title="d.pdf"), "openai")
+        assert isinstance(result, str)
+
+    def test_openai_file_id_kept(self):
+        parts = self._parts(self._doc("file_id", data="file_1", title="d.pdf"), "openai")
+        assert parts[0]["file"]["file_id"] == "file_1"
+
+    # -- OpenRouter: URL in file_data, broad document types -----------------
+    def test_openrouter_url_uses_file_data(self):
+        parts = self._parts(self._doc("url", data="https://x/d.pdf"), "openrouter")
+        assert parts[0]["file"]["file_data"] == "https://x/d.pdf"
+
+    def test_openrouter_non_pdf_allowed(self):
+        parts = self._parts(self._doc("base64", media_type="text/csv", title="d.csv"), "openrouter")
+        assert parts[0]["type"] == "file"
+
+    # -- Zhipu / Z.AI: dedicated file_url -----------------------------------
+    def test_zai_url_uses_file_url(self):
+        parts = self._parts(self._doc("url", data="https://x/d.pdf"), "zai")
+        assert parts[0]["file"]["file_url"] == "https://x/d.pdf"
+        assert "file_data" not in parts[0]["file"]
+
+    def test_zhipu_url_uses_file_url(self):
+        parts = self._parts(self._doc("url", data="https://x/d.pdf"), "zhipu")
+        assert parts[0]["file"]["file_url"] == "https://x/d.pdf"
+
+    # -- Mistral: flat document_url -----------------------------------------
+    def test_mistral_url_uses_document_url(self):
+        parts = self._parts(self._doc("url", data="https://x/d.pdf"), "mistral")
+        assert parts[0] == {"type": "document_url", "document_url": "https://x/d.pdf"}
+
+    def test_mistral_base64_uses_document_url_data_uri(self):
+        parts = self._parts(self._doc("base64", media_type="application/pdf"), "mistral")
+        assert parts[0]["type"] == "document_url"
+        assert parts[0]["document_url"].startswith("data:application/pdf;base64,")
+
+    # -- DeepSeek: images only, no URL --------------------------------------
+    def test_deepseek_document_degrades(self):
+        result = self._parts(
+            self._doc("base64", media_type="application/pdf", title="d.pdf"), "deepseek"
+        )
+        assert isinstance(result, str)
+
+    def test_deepseek_image_file_is_top_level(self):
+        parts = self._parts(
+            FileBlock(file_data="data:image/png;base64,AAAA", filename="i.png"), "deepseek"
+        )
+        assert parts[0]["type"] == "file"
+        assert parts[0]["file_data"] == "data:image/png;base64,AAAA"
+        assert "file" not in parts[0]  # top-level keys, not nested under ``file``
+
+    def test_deepseek_pdf_file_degrades(self):
+        result = self._parts(
+            FileBlock(file_data="data:application/pdf;base64,AAAA", filename="d.pdf"), "deepseek"
+        )
+        assert isinstance(result, str)
+
+    def test_deepseek_file_url_degrades(self):
+        result = self._parts(FileBlock(file_url="https://x/d.png", filename="d.png"), "deepseek")
+        assert isinstance(result, str)
+
+    # -- Unknown providers stay conservative ---------------------------------
+    def test_unknown_provider_degrades(self):
+        result = self._parts(
+            self._doc("base64", media_type="application/pdf", title="d.pdf"), "qwen"
+        )
+        assert isinstance(result, str)
+
+
+class TestImageDetailOmittedWhenAbsent:
+    def test_no_detail_key(self):
+        block = ImageBlock(source=ImageSource(type="url", data="https://x/i.png", media_type=None))
+        parts = content_to_openai_parts([block])
+        assert "detail" not in parts[0]["image_url"]
+
+    def test_detail_preserved(self):
+        block = ImageBlock(
+            source=ImageSource(type="url", data="https://x/i.png", media_type=None),
+            detail="low",
+        )
+        parts = content_to_openai_parts([block])
+        assert parts[0]["image_url"]["detail"] == "low"

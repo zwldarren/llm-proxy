@@ -13,7 +13,10 @@ import time
 from typing import Any
 
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.serialization.responses_toolkit import generate_item_id
+from llm_proxy.serialization.responses_toolkit import (
+    extract_summary_text,
+    generate_item_id,
+)
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
 logger = get_logger(__name__)
@@ -67,6 +70,11 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         # Native server-side web search call count (billed per request)
         self._web_search_call_count: int = 0
         self._pending_reasoning_encrypted: str | None = None
+        # Whether a reasoning delta chunk has been emitted; guards the
+        # ``response.output_item.done`` fallback so summary text is not sent
+        # twice when the upstream streamed it incrementally.
+        self._reasoning_text_emitted: bool = False
+        self._reasoning_encrypted_emitted: bool = False
         # Final chunks to flush after stream ends.
         self._final_chunks: list[dict[str, Any]] = []
 
@@ -238,16 +246,14 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         """response.output_text.done: no client-visible chunk."""
         return None
 
-    def _handle_reasoning_delta(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """response.reasoning.delta / response.reasoning_text.delta."""
-        delta_text = data.get("delta", "")
-        if not delta_text:
-            return None
-
-        reasoning_delta: dict[str, Any] = {"reasoning_content": delta_text}
+    def _reasoning_chunk(self, text: str) -> dict[str, Any]:
+        """Build a canonical chunk carrying a reasoning delta."""
+        self._reasoning_text_emitted = True
+        reasoning_delta: dict[str, Any] = {"reasoning_content": text}
         if self._pending_reasoning_encrypted:
             reasoning_delta["encrypted_content"] = self._pending_reasoning_encrypted
             self._pending_reasoning_encrypted = None
+            self._reasoning_encrypted_emitted = True
 
         return {
             "id": self._response_id or "chatcmpl-proxy",
@@ -263,9 +269,39 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
             ],
         }
 
+    def _handle_reasoning_delta(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """response.reasoning_summary_text.delta / response.reasoning_text.delta."""
+        delta_text = data.get("delta", "")
+        if not delta_text:
+            return None
+        return self._reasoning_chunk(delta_text)
+
     def _handle_reasoning_done(self, _data: dict[str, Any]) -> dict[str, Any] | None:
-        """response.reasoning.done / response.reasoning_text.done."""
+        """response.reasoning[_summary]_text.done / reasoning_summary_part.*."""
         return None
+
+    def _handle_output_item_done(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """response.output_item.done: reasoning-summary fallback.
+
+        Some upstreams emit only the completed reasoning item, without
+        per-token summary deltas. Surface its ``summary`` text so the streaming
+        path matches the non-streaming parser, and capture ``encrypted_content``
+        if it was not already attached to a delta.
+        """
+        item = data.get("item", {})
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            return None
+
+        encrypted = item.get("encrypted_content")
+        if isinstance(encrypted, str) and encrypted and not self._reasoning_encrypted_emitted:
+            self._pending_reasoning_encrypted = self._pending_reasoning_encrypted or encrypted
+
+        if self._reasoning_text_emitted:
+            return None
+        text = extract_summary_text(item.get("summary", []))
+        if not text:
+            return None
+        return self._reasoning_chunk(text)
 
     def _handle_refusal_delta(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """response.refusal.delta: emit refusal delta chunk."""
@@ -440,8 +476,15 @@ _RESPONSES_EVENT_HANDLERS: dict[str, Any] = {
     "response.output_text.done": OpenAIResponsesChunkConverter._handle_text_done,
     "response.reasoning.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
     "response.reasoning_text.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
+    "response.reasoning_summary_text.delta": (
+        OpenAIResponsesChunkConverter._handle_reasoning_delta
+    ),
     "response.reasoning.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
     "response.reasoning_text.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
+    "response.reasoning_summary_text.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
+    "response.reasoning_summary_part.added": (OpenAIResponsesChunkConverter._handle_reasoning_done),
+    "response.reasoning_summary_part.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
+    "response.output_item.done": OpenAIResponsesChunkConverter._handle_output_item_done,
     "response.refusal.delta": (OpenAIResponsesChunkConverter._handle_refusal_delta),
     "response.refusal.done": OpenAIResponsesChunkConverter._handle_refusal_done,
     "response.function_call_arguments.delta": (
