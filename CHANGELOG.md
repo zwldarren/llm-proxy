@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8](https://github.com/zwldarren/llm-proxy/compare/v0.2.7...v0.2.8) (2026-09-26)
+
+
+### Bug Fixes
+
+* **reasoning:** keep thinking and encrypted reasoning faithful end to end ([5b84b42](https://github.com/zwldarren/llm-proxy/commit/5b84b4263ba194c25f71cf8180644cfb40a37f4e))
+
 ## [0.2.7](https://github.com/zwldarren/llm-proxy/compare/v0.2.6...v0.2.7) (2026-09-25)
 
 
