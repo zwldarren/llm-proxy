@@ -43,6 +43,7 @@ from llm_proxy.models.tools import (
 )
 from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.converter import (
     _assistant_message_to_openai,
@@ -557,10 +558,15 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 if ri["summary"] or ri.get("encrypted_content"):
                     items.append(ri)
             elif isinstance(block, RedactedThinkingBlock) and block.data:
+                # Mirror the client-facing OpenResponses formatter: the opaque
+                # payload rides ``encrypted_content`` and the summary carries
+                # the redacted marker, so the parse side reconstructs the block
+                # instead of surfacing the blob as visible summary text.
                 items.append(
                     {
                         "type": "reasoning",
-                        "summary": [{"type": "summary_text", "text": block.data}],
+                        "summary": [{"type": "summary_text", "text": REDACTED_THINKING_TEXT}],
+                        "encrypted_content": block.data,
                     }
                 )
 
@@ -813,11 +819,18 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 if not thinking:
                     thinking = extract_summary_text(item.get("summary", []))
                 encrypted = item.get("encrypted_content")
-                if thinking or encrypted:
+                if thinking == REDACTED_THINKING_TEXT and encrypted:
+                    output.append(RedactedThinkingBlock(data=encrypted))
+                elif thinking or encrypted:
                     output.append(
                         ThinkingBlock(
                             thinking=thinking,
                             encrypted_content=encrypted,
+                            # A genuine Responses encrypted blob is not an
+                            # Anthropic verification payload; mark its origin so
+                            # the Anthropic serializer never replays it as a
+                            # ``thinking.signature`` (Anthropic would reject it).
+                            signature_origin="openai" if encrypted else None,
                         )
                     )
             elif item_type == "function_call":

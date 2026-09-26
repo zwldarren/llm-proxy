@@ -995,6 +995,38 @@ class TestListInputItems:
         assert bad.status_code == 400
         assert bad.json()["error"]["code"] == "invalid_include"
 
+    def test_reasoning_encrypted_content_is_include_gated(self, client, mock_redis):
+        """Stored reasoning encrypted_content must not leak without include.
+
+        The stored input can carry encrypted reasoning the client never
+        received (an Anthropic signature bridged in, or a blob stored from the
+        model output); the spec gates it behind ``reasoning.encrypted_content``.
+        """
+        _seed_stored_response(
+            mock_redis,
+            input=[
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "plan"}],
+                    "encrypted_content": "OPAQUE",
+                },
+                {"type": "message", "id": "item_a", "role": "user", "content": "hi"},
+            ],
+        )
+
+        without = client.get("/v1/responses/resp_x/input_items")
+        assert without.status_code == 200, without.text
+        reasoning = next(i for i in without.json()["data"] if i["type"] == "reasoning")
+        assert "encrypted_content" not in reasoning
+
+        with_include = client.get(
+            "/v1/responses/resp_x/input_items",
+            params={"include": "reasoning.encrypted_content"},
+        )
+        reasoning = next(i for i in with_include.json()["data"] if i["type"] == "reasoning")
+        assert reasoning["encrypted_content"] == "OPAQUE"
+
     def test_not_found(self, client, mock_redis):
         response = client.get("/v1/responses/resp_missing/input_items")
         assert response.status_code == 404

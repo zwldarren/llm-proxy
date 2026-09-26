@@ -137,3 +137,36 @@ class TestNativeStreamReasoningCache:
         assert reasoning_cache.get("call_9") == "chain"
         # Snapshot bookkeeping still happens alongside the cache write.
         assert transformer.state.final_response_payload["id"] == "resp_9"
+
+
+class TestEvictionPrunesCallIndex:
+    """LRU eviction must prune the call_id -> response_ids back-links.
+
+    Otherwise the index grows without bound and, worse, keeps pointing at
+    evicted response ids so ``get()`` treats a reused call_id as ambiguous
+    and returns None forever.
+    """
+
+    def test_evicted_response_is_removed_from_the_index(self, monkeypatch):
+        monkeypatch.setattr(reasoning_cache, "_MAX_ENTRIES", 2)
+        reasoning_cache.store("resp_1", "call_a", "one")
+        reasoning_cache.store("resp_2", "call_b", "two")
+        # Storing a third response evicts resp_1.
+        reasoning_cache.store("resp_3", "call_c", "three")
+
+        assert reasoning_cache.get("call_a") is None
+        assert "call_a" not in reasoning_cache._call_index
+        assert reasoning_cache.get("call_b") == "two"
+        assert reasoning_cache.get("call_c") == "three"
+
+    def test_reused_call_id_is_not_stale_ambiguous(self, monkeypatch):
+        monkeypatch.setattr(reasoning_cache, "_MAX_ENTRIES", 2)
+        reasoning_cache.store("resp_1", "call_x", "old")
+        reasoning_cache.store("resp_2", "call_y", "two")
+        # Evicts resp_1; call_x's back-link must go with it.
+        reasoning_cache.store("resp_3", "call_z", "three")
+        # Reuse the same call id in a live response: it must resolve, not be
+        # treated as ambiguous against the evicted response.
+        reasoning_cache.store("resp_3", "call_x", "new")
+
+        assert reasoning_cache.get("call_x") == "new"

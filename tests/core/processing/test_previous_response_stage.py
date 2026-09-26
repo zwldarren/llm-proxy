@@ -1049,3 +1049,37 @@ async def test_fallback_rerun_rematerializes_previous_response():
     assert store.retrieve_calls == [("test-key", "resp_prev")]
     assert new_request.previous_response_materialized is True
     assert "previous_response_id" not in (new_request.extra or {})
+
+
+def test_repair_encrypted_reasoning_handles_custom_tool_calls():
+    """Codex ``custom_tool_call`` blocks are paired with cached reasoning too.
+
+    ``_repair_encrypted_blocks`` historically only recognized ``ToolUseBlock``,
+    so a ``CustomToolUseBlock`` (Codex ``apply_patch``) could never have its
+    reasoning restored from the cache — even though the cache writer handles it.
+    """
+    from types import SimpleNamespace
+
+    from llm_proxy.core import reasoning_cache
+    from llm_proxy.core.processing.stages.previous_response import _repair_encrypted_blocks
+    from llm_proxy.models import ConversationContext, Message
+    from llm_proxy.models.content_blocks import CustomToolUseBlock, ThinkingBlock
+
+    reasoning_cache.clear()
+    reasoning_cache.store("resp_x", "call_custom", "codex reasoning")
+    try:
+        msg = Message(
+            role="assistant",
+            content=[
+                CustomToolUseBlock(id="call_custom", name="apply_patch", input="*** Begin Patch"),
+            ],
+        )
+        conv = ConversationContext(system_messages=[], messages=[msg])
+        state = SimpleNamespace(unified_request=SimpleNamespace(conversation=conv))
+
+        _repair_encrypted_blocks(state)
+
+        assert isinstance(msg.content[0], ThinkingBlock)
+        assert msg.content[0].thinking == "codex reasoning"
+    finally:
+        reasoning_cache.clear()

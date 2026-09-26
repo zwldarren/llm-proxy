@@ -63,6 +63,13 @@ if TYPE_CHECKING:
     from llm_proxy.serialization.context import BuildContext
 
 
+#: ``signature_origin`` values whose payload must not be sent to Anthropic as a
+#: ``thinking.signature`` — Anthropic rejects a value it did not issue. Unset
+#: origin means the payload is an Anthropic signature bridged by the proxy (or
+#: genuinely Anthropic).
+_FOREIGN_SIGNATURE_ORIGINS = ("gemini", "openai")
+
+
 # Server-side tool result blocks that share the {tool_use_id, content}
 # shape (plus ``caller`` on the web_search/web_fetch pair). Kept lossless
 # on parse so multi-turn histories with web_search / web_fetch / code
@@ -564,8 +571,33 @@ class AnthropicContentMixin:
         return custom_tool_block
 
     def _format_thinking_block(self, block: ThinkingBlock) -> dict[str, Any] | None:
-        """Format a ThinkingBlock, or None to skip empty thinking."""
-        if not block.thinking:
+        """Format a ThinkingBlock, or None when it carries nothing at all.
+
+        An empty ``thinking`` that still has a signature (or the
+        OpenResponses-bridged ``encrypted_content``) is kept: the signature is
+        the integrity payload Anthropic verifies on replay, so dropping the
+        block breaks interleaved-thinking continuations.
+
+        A signature known to come from another provider (``signature_origin``)
+        is not presented as an Anthropic signature — Anthropic would reject
+        the mismatched value.
+
+        Known ambiguity: ``encrypted_content`` is overloaded. It carries an
+        Anthropic signature when a Responses client echoes a reasoning item the
+        proxy bridged (``signature_origin`` unset, so it is replayed), but it
+        also carries a genuine OpenAI encrypted reasoning blob (marked
+        ``signature_origin="openai"`` when parsed from an upstream, so it is
+        not). A blob that reached a client and came back carries no origin and
+        is still replayed as a signature; the wire has no field to disambiguate
+        it (tracked in docs/api/tools.md).
+        """
+        signature = block.signature or block.encrypted_content
+        if block.signature_origin in _FOREIGN_SIGNATURE_ORIGINS:
+            # A Gemini thought signature or a genuine OpenAI encrypted-reasoning
+            # blob bridged through history must not be sent to Anthropic as
+            # ``thinking.signature`` — Anthropic rejects the mismatched value.
+            signature = None
+        if not block.thinking and not signature:
             return None
         thinking_block: dict[str, Any] = {
             "type": "thinking",
@@ -573,7 +605,6 @@ class AnthropicContentMixin:
         }
         # Responses clients carry the signature (or redacted payload) in the
         # reasoning item's ``encrypted_content``; restore it for verification.
-        signature = block.signature or block.encrypted_content
         if signature:
             thinking_block["signature"] = signature
         return thinking_block

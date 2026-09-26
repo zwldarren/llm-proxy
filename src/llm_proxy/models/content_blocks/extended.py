@@ -6,7 +6,9 @@ from typing import Any, Literal
 from llm_proxy.models.content_blocks.core import ContentBlock
 
 #: Providers whose thought signatures may be replayed to the same provider.
-SignatureOrigin = Literal["gemini"]
+#: ``openai`` marks a genuine Responses ``encrypted_content`` blob (which is
+#: not an Anthropic verification payload and must not be replayed as one).
+SignatureOrigin = Literal["gemini", "openai"]
 
 
 @dataclass

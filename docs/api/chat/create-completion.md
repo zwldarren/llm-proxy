@@ -100,10 +100,21 @@ json_schema` is remapped to `text.format`.
   (base64 + `format`), `file` (`file_data`/`file_id`/`filename`), `video_url`,
   `refusal`. Unrecognized parts degrade to text rather than failing.
 - Assistant turns may include `tool_calls` (function or custom; `thought_signature`
-  preserved), `reasoning_content` (+ `reasoning_signature`,
-  `reasoning_is_redacted`), `refusal`, and `audio`.
-- On input, reasoning is read from **`reasoning_content` only** — an assistant
-  `reasoning` field is not read back.
+  preserved), `reasoning_content` (with `reasoning_signature`,
+  `reasoning_is_redacted`, `encrypted_content`), `reasoning_segments`, `refusal`,
+  and `audio`.
+- On input, reasoning is read from `reasoning_content` or the
+  OpenRouter/NanoGPT `reasoning` spelling (`reasoning_content` wins when both
+  are present). Redacted reasoning is read from `reasoning_is_redacted` +
+  `encrypted_content`, which carries the real opaque payload — `reasoning_content`
+  is only the `[redacted]` display placeholder.
+- An interleaved assistant turn (`thinking → tool_call → thinking`) cannot be
+  expressed by the single `reasoning_content` field. The proxy then emits a
+  `reasoning_segments` array of `{type, text?, signature?, encrypted_content?,
+  after_tool_calls?}` entries (redacted: `{type: "redacted", data}`), where
+  `after_tool_calls` is the number of preceding tool calls. Echo it back verbatim
+  to preserve tool-call positions; clients that drop the unknown field fall back
+  to the concatenated `reasoning_content`.
 
 ## Response
 
@@ -116,8 +127,10 @@ json_schema` is remapped to `text.format`.
 - Message: `content` (text joined; `null` when empty or when only a refusal is
   present), `tool_calls` with JSON-string `arguments`, plus `reasoning_content` — the
   proxy emits **`reasoning_content`, never `reasoning`** — `reasoning_signature`,
-  `refusal`, `audio`, and `annotations` when applicable. Generated images appear as
-  markdown inside `content`.
+  `encrypted_content` (opaque payload for redacted reasoning or a bridged
+  provider signature), `reasoning_segments` (only for an interleaved turn; see
+  above), `refusal`, `audio`, and `annotations` when applicable. Generated images
+  appear as markdown inside `content`.
 - `usage`: `prompt_tokens`, `completion_tokens`, `total_tokens`, with details
   (`prompt_tokens_details.cached_tokens`/`audio_tokens`,
   `completion_tokens_details.reasoning_tokens`/`audio_tokens`/…). `n > 1` produces `n`

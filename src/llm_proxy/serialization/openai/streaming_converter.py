@@ -10,6 +10,7 @@ Migrated from ``providers/openai/streaming.py``.
 """
 
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from llm_proxy.observability.logger import get_logger
@@ -20,6 +21,20 @@ from llm_proxy.serialization.responses_toolkit import (
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _ReasoningItemState:
+    """Streaming state for one Responses reasoning output item.
+
+    Keyed by the item id in ``_reasoning_items`` so an interleaved stream
+    (reasoning -> tool call -> reasoning) keeps each item's payload — and the
+    flags guarding its emit-once chunks — separate.
+    """
+
+    encrypted: str | None = None
+    encrypted_emitted: bool = False
+    text_emitted: bool = False
 
 
 class OpenAIResponsesChunkConverter(StreamingTransformer):
@@ -69,12 +84,17 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         self._audio_output_tokens: int = 0
         # Native server-side web search call count (billed per request)
         self._web_search_call_count: int = 0
-        self._pending_reasoning_encrypted: str | None = None
-        # Whether a reasoning delta chunk has been emitted; guards the
-        # ``response.output_item.done`` fallback so summary text is not sent
-        # twice when the upstream streamed it incrementally.
-        self._reasoning_text_emitted: bool = False
-        self._reasoning_encrypted_emitted: bool = False
+        # Per-reasoning-item state keyed by item id: the item's
+        # ``encrypted_content`` and whether its summary text / encrypted
+        # payload have already been emitted. Interleaved multi-item streams
+        # (reasoning → tool call → reasoning) keep each blob attached to the
+        # item that produced it; a single pending slot would either overwrite
+        # an unconsumed blob or attach one item's blob to a later item.
+        self._reasoning_items: dict[str, _ReasoningItemState] = {}
+        # Every encrypted blob already put on the wire, deduped by value. An
+        # upstream can repeat one payload across items or after a state-key
+        # migration; the client only needs it once.
+        self._emitted_reasoning_encrypted: set[str] = set()
         # Final chunks to flush after stream ends.
         self._final_chunks: list[dict[str, Any]] = []
 
@@ -226,9 +246,10 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
                 "arguments": "",
             }
         elif self._current_item_type == "reasoning":
+            state = self._reasoning_item_state(self._current_item_id)
             encrypted = item.get("encrypted_content")
-            if encrypted:
-                self._pending_reasoning_encrypted = encrypted
+            if isinstance(encrypted, str) and encrypted:
+                state.encrypted = encrypted
         elif self._current_item_type == "web_search_call":
             # Web search call metadata is tracked only via _current_item_id;
             # no client-visible chunk is emitted for it.
@@ -246,14 +267,61 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         """response.output_text.done: no client-visible chunk."""
         return None
 
-    def _reasoning_chunk(self, text: str) -> dict[str, Any]:
-        """Build a canonical chunk carrying a reasoning delta."""
-        self._reasoning_text_emitted = True
+    def _reasoning_item_state(self, item_id: str | None) -> _ReasoningItemState:
+        """Return the per-reasoning-item state, creating it on first use."""
+        iid = item_id or self._current_item_id
+        state = self._reasoning_items.get(iid)
+        if state is None:
+            state = _ReasoningItemState()
+            self._reasoning_items[iid] = state
+        return state
+
+    def _resolve_reasoning_item_state(self, item_id: str) -> _ReasoningItemState:
+        """Return the item's state at completion time, migrating stale keys.
+
+        A reasoning delta may arrive without an ``item_id`` (or without a
+        preceding ``output_item.added``), leaving its state under a stale key.
+        Reasoning items are processed strictly in order, so the most recently
+        created state belongs to the item now completing.
+        """
+        state = self._reasoning_items.get(item_id)
+        if state is None and self._reasoning_items:
+            stale_id, state = self._reasoning_items.popitem()
+            self._reasoning_items[item_id] = state
+        if state is None:
+            state = _ReasoningItemState()
+            self._reasoning_items[item_id] = state
+        return state
+
+    def _take_unemitted_encrypted(self, state: _ReasoningItemState) -> str | None:
+        """Return the item's encrypted blob if it has not been emitted yet.
+
+        Deduped globally by value so a repeated payload — the same blob on two
+        items, or one re-seen after a state-key migration in
+        ``_resolve_reasoning_item_state`` — reaches the client only once.
+        """
+        encrypted = state.encrypted
+        if not encrypted or state.encrypted_emitted:
+            return None
+        if encrypted in self._emitted_reasoning_encrypted:
+            state.encrypted_emitted = True
+            return None
+        state.encrypted_emitted = True
+        self._emitted_reasoning_encrypted.add(encrypted)
+        return encrypted
+
+    def _reasoning_chunk(self, text: str, item_id: str | None = None) -> dict[str, Any]:
+        """Build a canonical chunk carrying a reasoning delta.
+
+        Attaches the item's ``encrypted_content`` to its first reasoning delta
+        when the payload is known but has not been emitted yet.
+        """
         reasoning_delta: dict[str, Any] = {"reasoning_content": text}
-        if self._pending_reasoning_encrypted:
-            reasoning_delta["encrypted_content"] = self._pending_reasoning_encrypted
-            self._pending_reasoning_encrypted = None
-            self._reasoning_encrypted_emitted = True
+        state = self._reasoning_item_state(item_id)
+        state.text_emitted = True
+        encrypted = self._take_unemitted_encrypted(state)
+        if encrypted:
+            reasoning_delta["encrypted_content"] = encrypted
 
         return {
             "id": self._response_id or "chatcmpl-proxy",
@@ -274,7 +342,7 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         delta_text = data.get("delta", "")
         if not delta_text:
             return None
-        return self._reasoning_chunk(delta_text)
+        return self._reasoning_chunk(delta_text, data.get("item_id"))
 
     def _handle_reasoning_done(self, _data: dict[str, Any]) -> dict[str, Any] | None:
         """response.reasoning[_summary]_text.done / reasoning_summary_part.*."""
@@ -285,23 +353,38 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
 
         Some upstreams emit only the completed reasoning item, without
         per-token summary deltas. Surface its ``summary`` text so the streaming
-        path matches the non-streaming parser, and capture ``encrypted_content``
-        if it was not already attached to a delta.
+        path matches the non-streaming parser, and emit ``encrypted_content``
+        if it was not already attached to a delta — including for items that
+        carry no summary text at all (encrypted-only reasoning), whose payload
+        would otherwise never reach the wire.
         """
         item = data.get("item", {})
         if not isinstance(item, dict) or item.get("type") != "reasoning":
             return None
 
+        item_id = item.get("id") or data.get("item_id") or self._current_item_id
+        state = self._resolve_reasoning_item_state(item_id)
         encrypted = item.get("encrypted_content")
-        if isinstance(encrypted, str) and encrypted and not self._reasoning_encrypted_emitted:
-            self._pending_reasoning_encrypted = self._pending_reasoning_encrypted or encrypted
+        if isinstance(encrypted, str) and encrypted and not state.encrypted:
+            state.encrypted = encrypted
 
-        if self._reasoning_text_emitted:
-            return None
-        text = extract_summary_text(item.get("summary", []))
-        if not text:
-            return None
-        return self._reasoning_chunk(text)
+        if not state.text_emitted:
+            text = extract_summary_text(item.get("summary", []))
+            if text:
+                # Emits the summary text and attaches any pending encrypted
+                # payload of this item.
+                return self._reasoning_chunk(text, item_id)
+
+        pending_encrypted = self._take_unemitted_encrypted(state)
+        if pending_encrypted:
+            return {
+                "id": self._response_id or "chatcmpl-proxy",
+                "object": "chat.completion.chunk",
+                "created": self._created_at or time.time_ns() // 1_000_000_000,
+                "model": self._model,
+                "encrypted_content": pending_encrypted,
+            }
+        return None
 
     def _handle_refusal_delta(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """response.refusal.delta: emit refusal delta chunk."""
@@ -406,21 +489,39 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         elif self._status == "failed":
             finish_reason = "error"
 
-        # Best-effort: encrypted_content from final reasoning items.
-        if self._status == "completed":
-            for item in response.get("output", []):
-                if isinstance(item, dict) and item.get("type") == "reasoning":
-                    encrypted = item.get("encrypted_content")
-                    if encrypted:
-                        enc_chunk = {
-                            "id": self._response_id or "chatcmpl-proxy",
-                            "object": "chat.completion.chunk",
-                            "created": self._created_at or time.time_ns() // 1_000_000_000,
-                            "model": self._model,
-                            "encrypted_content": encrypted,
-                        }
-                        self._final_chunks.append(enc_chunk)
-                    break
+        # Best-effort: encrypted_content from the final reasoning items — one
+        # chunk per item, skipping payloads already emitted on deltas or at
+        # item completion. Emitted regardless of terminal status so
+        # interrupted (incomplete/failed) streams still hand the client the
+        # reasoning state produced so far.
+        for item in response.get("output", []):
+            if not isinstance(item, dict) or item.get("type") != "reasoning":
+                continue
+            encrypted = item.get("encrypted_content")
+            if not isinstance(encrypted, str) or not encrypted:
+                continue
+            state = self._reasoning_items.get(item.get("id", ""))
+            if state is not None:
+                if not state.encrypted:
+                    state.encrypted = encrypted
+                blob = self._take_unemitted_encrypted(state)
+            elif encrypted in self._emitted_reasoning_encrypted:
+                # No state for this id (delta carried none): fall back to the
+                # global value set so a repeated blob is not re-emitted.
+                blob = None
+            else:
+                self._emitted_reasoning_encrypted.add(encrypted)
+                blob = encrypted
+            if blob is None:
+                continue
+            enc_chunk = {
+                "id": self._response_id or "chatcmpl-proxy",
+                "object": "chat.completion.chunk",
+                "created": self._created_at or time.time_ns() // 1_000_000_000,
+                "model": self._model,
+                "encrypted_content": blob,
+            }
+            self._final_chunks.append(enc_chunk)
 
         chunk: dict[str, Any] = {
             "id": self._response_id or "chatcmpl-proxy",

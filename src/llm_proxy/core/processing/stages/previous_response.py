@@ -8,7 +8,7 @@ from llm_proxy.core.processing.stages.base import (
     PipelineState,
     is_native_responses_upstream,
 )
-from llm_proxy.models.content_blocks import ThinkingBlock, ToolUseBlock
+from llm_proxy.models.content_blocks import TOOL_CALL_BLOCK_TYPES, ThinkingBlock
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -37,7 +37,7 @@ def _repair_encrypted_blocks(state: PipelineState) -> None:
     for msg in conversation.messages:
         if msg.role != "assistant":
             continue
-        tool_blocks = [b for b in msg.content if isinstance(b, ToolUseBlock)]
+        tool_blocks = [b for b in msg.content if isinstance(b, TOOL_CALL_BLOCK_TYPES)]
         if not tool_blocks:
             continue
 
@@ -45,7 +45,7 @@ def _repair_encrypted_blocks(state: PipelineState) -> None:
         for i, block in enumerate(msg.content):
             if isinstance(block, ThinkingBlock) and not block.thinking:
                 next_tool = next(
-                    (b for b in msg.content[i + 1 :] if isinstance(b, ToolUseBlock)),
+                    (b for b in msg.content[i + 1 :] if isinstance(b, TOOL_CALL_BLOCK_TYPES)),
                     None,
                 )
                 if next_tool:
@@ -70,7 +70,9 @@ def _repair_encrypted_blocks(state: PipelineState) -> None:
                 reasoning = reasoning_cache.get(tool.id)
                 if reasoning:
                     insert_idx = min(
-                        idx for idx, b in enumerate(msg.content) if isinstance(b, ToolUseBlock)
+                        idx
+                        for idx, b in enumerate(msg.content)
+                        if isinstance(b, TOOL_CALL_BLOCK_TYPES)
                     )
                     msg.content.insert(
                         insert_idx,

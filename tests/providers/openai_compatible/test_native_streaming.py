@@ -248,6 +248,71 @@ class TestHandleNativeOpenAIChunk:
         )
         assert out is chunk
 
+    def test_reasoning_field_renamed_and_preference_learned(self) -> None:
+        """The load-bearing rename runs here, and teaches the request side."""
+        adapter = _adapter()
+        base_url = "https://upstream.example/v1"
+        frame = (
+            'data: {"id":"c1","model":"glm-5","choices":'
+            '[{"index":0,"delta":{"reasoning":"plan"}}]}\n\n'
+        )
+        try:
+            out = NativePassthroughHandler.handle_native_openai_chunk(
+                frame, self._request("glm-5", "glm-5"), None, adapter
+            )
+
+            assert '"reasoning_content":"plan"' in out
+            assert '"reasoning":' not in out
+            builder = adapter._get_request_builder()
+            assert builder.get_reasoning_field_preference(base_url, "glm-5") == "reasoning"
+        finally:
+            adapter._get_request_builder().clear_reasoning_field_preference(base_url)
+
+    def test_reasoning_field_renamed_without_adapter(self) -> None:
+        """The adapter only supplies the preference; the rename does not need it."""
+        frame = 'data: {"choices":[{"delta":{"reasoning":"plan"}}]}\n\n'
+        out = NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("glm-5", "glm-5"), None
+        )
+        assert '"reasoning_content":"plan"' in out
+        assert '"reasoning":' not in out
+
+    def test_reasoning_event_prefix_preserved(self) -> None:
+        """A rewritten frame keeps its ``event:`` annotation."""
+        frame = 'event: chunk\ndata: {"choices":[{"delta":{"reasoning":"p"}}]}\n\n'
+        out = NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("glm-5", "glm-5"), None
+        )
+        assert out.startswith("event: chunk\ndata: ")
+        assert '"reasoning_content":"p"' in out
+
+    def test_reasoning_details_key_is_not_rewritten(self) -> None:
+        """The exact-key guard keeps ``reasoning_details`` frames verbatim."""
+        frame = 'data: {"choices":[{"delta":{"reasoning_details":[{"x":1}]}}]}\n\n'
+        out = NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("glm-5", "glm-5"), None, _adapter()
+        )
+        assert out == frame
+
+    def test_frame_without_reasoning_is_untouched(self) -> None:
+        """Ordinary frames stay on the verbatim fast path."""
+        frame = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        out = NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("glm-5", "glm-5"), None, _adapter()
+        )
+        assert out == frame
+
+    def test_non_data_sse_fields_are_preserved(self) -> None:
+        """Only the ``data:`` line is rewritten; ``id:``/comments survive."""
+        frame = 'id: 42\nevent: chunk\ndata: {"choices":[{"delta":{"reasoning":"p"}}]}\n\n'
+        out = NativePassthroughHandler.handle_native_openai_chunk(
+            frame, self._request("glm-5", "glm-5"), None
+        )
+        assert (
+            out
+            == 'id: 42\nevent: chunk\ndata: {"choices":[{"delta":{"reasoning_content":"p"}}]}\n\n'
+        )
+
 
 class TestNativeUsageFrameBilling:
     """Provider-reported cost and web-search counts on the native stream tier.

@@ -45,13 +45,25 @@ How reasoning comes back:
 
 | Protocol | Field |
 | --- | --- |
-| Chat Completions | `reasoning_content` (never `reasoning`), plus `reasoning_signature`; redacted blocks → `reasoning_content: "[redacted]"` + `reasoning_is_redacted: true` |
+| Chat Completions | `reasoning_content` (never `reasoning`), plus `reasoning_signature`; redacted blocks → `reasoning_content: "[redacted]"` + `reasoning_is_redacted: true` + `encrypted_content: <opaque data>`; interleaved turns also carry `reasoning_segments` |
 | Anthropic | `thinking` blocks with `signature`, and `redacted_thinking` blocks |
 | Responses | Reasoning output items plus `response.reasoning_summary_text.delta` events while streaming; token counts in `output_tokens_details.reasoning_tokens` |
 
 Round-tripping multi-turn reasoning: pass back what you received. On Chat Completions
-input the proxy reads `reasoning_content` (with its signature) — an assistant
-`reasoning` field is not read back.
+input the proxy reads `reasoning_content` or the OpenRouter/NanoGPT `reasoning`
+spelling (`reasoning_content` wins when both are present), plus
+`reasoning_signature`, `reasoning_is_redacted`, `encrypted_content`, and
+`reasoning_segments`.
+
+::: warning Mixed-provider reasoning payloads
+`encrypted_content` is overloaded: it carries an Anthropic thinking signature
+when the proxy bridged one for round-trip, and a genuine OpenAI
+encrypted-reasoning blob otherwise. A blob the proxy parsed straight from an
+OpenAI upstream is marked, so it is never replayed to Anthropic as a signature,
+but a blob that reached your client and came back carries no origin marker —
+replaying that history to Anthropic can be rejected. Keep provider-specific
+reasoning within one provider where possible.
+:::
 
 ## Web search
 

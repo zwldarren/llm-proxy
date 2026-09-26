@@ -32,6 +32,7 @@ from llm_proxy.models import (
     ToolDefinition,
 )
 from llm_proxy.models.content_blocks import (
+    TOOL_CALL_BLOCK_TYPES,
     CustomToolUseBlock,
     DocumentBlock,
     FileBlock,
@@ -59,6 +60,7 @@ from llm_proxy.protocols.registry import register_protocol_serializer
 from llm_proxy.protocols.serializer_base import ProtocolSerializer
 from llm_proxy.routing.message_extract import function_call_output_to_text
 from llm_proxy.serialization.content_parsers import (
+    REDACTED_THINKING_TEXT,
     extract_image_reference,
     unparseable_image_placeholder,
 )
@@ -72,12 +74,6 @@ from llm_proxy.serialization.responses_toolkit import (
 )
 
 logger = logging.getLogger(__name__)
-
-#: Placeholder text emitted for RedactedThinkingBlock summaries. The opaque
-#: payload rides ``encrypted_content`` (see conversation_to_input_items /
-#: _format_thinking_block); the parse side recognizes this marker to restore
-#: the block type on round-trip.
-REDACTED_THINKING_TEXT = "[redacted]"
 
 # Audio format to media type mapping for input_audio content blocks
 _AUDIO_FORMAT_TO_MEDIA_TYPE: dict[str, str] = {
@@ -311,7 +307,11 @@ def conversation_to_input_items(
                     reasoning_item["summary"] = [{"type": "summary_text", "text": block.thinking}]
                 # Bridge anthropic-native verification payloads (signature) into
                 # encrypted_content — the only Responses field that round-trips.
-                native_payload = block.encrypted_content or block.signature
+                # ``signature`` wins over a genuine ``encrypted_content`` when
+                # both are present; keep this order identical to
+                # ``_format_thinking_block`` so the response and the
+                # materialized input carry the same payload.
+                native_payload = block.signature or block.encrypted_content
                 if native_payload:
                     reasoning_item["encrypted_content"] = native_payload
                 if reasoning_item["summary"] or reasoning_item.get("encrypted_content"):
@@ -1696,7 +1696,10 @@ def _format_text_block(
 
 
 def _format_thinking_block(
-    block: ThinkingBlock | RedactedThinkingBlock, include: list[str] | None
+    block: ThinkingBlock | RedactedThinkingBlock,
+    include: list[str] | None,
+    *,
+    stateless: bool = False,
 ) -> dict[str, Any]:
     """Format a thinking block as a completed reasoning item.
 
@@ -1705,8 +1708,12 @@ def _format_thinking_block(
     verification payloads (``thinking.signature`` / ``redacted_thinking.data``)
     have no Responses-native field, so ``encrypted_content`` carries them —
     replaying this item keeps multi-turn extended thinking working since
-    Anthropic rejects unsigned thinking blocks. Genuine ``encrypted_content``
-    stays include-gated per the spec.
+    Anthropic rejects unsigned thinking blocks.
+
+    Genuine ``encrypted_content`` is include-gated while the response is stored,
+    but a stateless response (``store: false`` — or ZDR, which the proxy cannot
+    detect) returns it by default per the current OpenAI reasoning docs. The
+    legacy ``include`` value still requests it explicitly.
     """
     text = REDACTED_THINKING_TEXT if isinstance(block, RedactedThinkingBlock) else block.thinking
     reasoning_item: dict[str, Any] = {
@@ -1717,10 +1724,17 @@ def _format_thinking_block(
         "summary": [{"type": "summary_text", "text": text}],
     }
     native_payload = getattr(block, "signature", None) or getattr(block, "data", None)
-    requested = bool(include) and "reasoning.encrypted_content" in include
+    requested = stateless or (bool(include) and "reasoning.encrypted_content" in include)
     encrypted = getattr(block, "encrypted_content", None)
-    if (encrypted and requested) or native_payload:
-        reasoning_item["encrypted_content"] = encrypted or native_payload
+    if native_payload:
+        # Anthropic verification payload (signature / redacted data): there is
+        # no Responses-native field for it, so ``encrypted_content`` carries it
+        # ungated — dropping it would leave the next turn's thinking block
+        # unsigned. Takes precedence over a genuine encrypted_content, which
+        # stays include-gated per the spec.
+        reasoning_item["encrypted_content"] = native_payload
+    elif encrypted and requested:
+        reasoning_item["encrypted_content"] = encrypted
     return reasoning_item
 
 
@@ -1942,8 +1956,8 @@ def _format_output_item(
     if isinstance(block, TextBlock):
         return _format_text_block(block, include, response)
     if isinstance(block, (ThinkingBlock, RedactedThinkingBlock)):
-        return _format_thinking_block(block, include)
-    if isinstance(block, (ToolUseBlock, ServerToolUseBlock, CustomToolUseBlock)):
+        return _format_thinking_block(block, include, stateless=context.store is False)
+    if isinstance(block, TOOL_CALL_BLOCK_TYPES):
         return _format_tool_use_block(block, include, web_search_results, context)
     if isinstance(block, RefusalBlock):
         return _format_refusal_block(block, output)

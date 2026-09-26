@@ -1069,6 +1069,35 @@ class TestFormatResponse:
         reasoning = [o for o in result["output"] if o["type"] == "reasoning"]
         assert len(reasoning) > 0
 
+    def test_stateless_response_includes_encrypted_reasoning(self):
+        """``store: false`` returns genuine encrypted reasoning by default."""
+        from llm_proxy.protocols.openresponses.handler import (
+            clear_format_context,
+            set_format_context,
+        )
+
+        internal = InternalResponse(
+            id="test",
+            model="test",
+            output=[ThinkingBlock(thinking="plan", encrypted_content="ENC")],
+            finish_reason="stop",
+        )
+        set_format_context({"store": False, "include": None})
+        try:
+            stateless = self._serializer.format_response(internal)
+        finally:
+            clear_format_context()
+        reasoning = [o for o in stateless["output"] if o["type"] == "reasoning"]
+        assert reasoning[0]["encrypted_content"] == "ENC"
+
+        set_format_context({"store": True, "include": None})
+        try:
+            stored = self._serializer.format_response(internal)
+        finally:
+            clear_format_context()
+        reasoning = [o for o in stored["output"] if o["type"] == "reasoning"]
+        assert "encrypted_content" not in reasoning[0]
+
     def test_finish_reason_length(self):
         internal = InternalResponse(
             id="test",
@@ -1609,3 +1638,65 @@ class TestConversationToInputItemsServerTools:
             if isinstance(b, ToolUseBlock)
         ]
         assert any(b.name == "web_search" and b.input.get("query") == "docs" for b in tool_uses)
+
+
+class TestReasoningItemEncryptedGating:
+    """``_format_thinking_block`` must not let a genuine encrypted payload
+    bypass the ``include: ["reasoning.encrypted_content"]`` gate, while an
+    Anthropic verification payload (signature / redacted data) still rides
+    ``encrypted_content`` ungated so multi-turn thinking round-trips."""
+
+    def test_signature_bridges_ungated(self):
+        from llm_proxy.protocols.openresponses.serializer import _format_thinking_block
+
+        item = _format_thinking_block(ThinkingBlock(thinking="t", signature="SIG"), include=None)
+        assert item["encrypted_content"] == "SIG"
+
+    def test_genuine_encrypted_content_is_include_gated(self):
+        from llm_proxy.protocols.openresponses.serializer import _format_thinking_block
+
+        block = ThinkingBlock(thinking="t", encrypted_content="ENC")
+        assert "encrypted_content" not in _format_thinking_block(block, include=None)
+        with_include = _format_thinking_block(block, include=["reasoning.encrypted_content"])
+        assert with_include["encrypted_content"] == "ENC"
+
+    def test_signature_wins_over_encrypted_content_without_include(self):
+        """Both present: the verification payload wins, and the genuine
+        encrypted payload must not leak through the ``native_payload`` branch."""
+        from llm_proxy.protocols.openresponses.serializer import _format_thinking_block
+
+        block = ThinkingBlock(thinking="t", signature="SIG", encrypted_content="ENC")
+        item = _format_thinking_block(block, include=None)
+        assert item["encrypted_content"] == "SIG"
+
+    def test_stateless_response_returns_genuine_encrypted_content(self):
+        """``store: false`` returns encrypted reasoning by default.
+
+        Current OpenAI docs: a stateless response includes ``encrypted_content``
+        on reasoning items without ``include``; the legacy include value still
+        requests it explicitly on a stored response.
+        """
+        from llm_proxy.protocols.openresponses.serializer import _format_thinking_block
+
+        block = ThinkingBlock(thinking="t", encrypted_content="ENC")
+        stateless = _format_thinking_block(block, include=None, stateless=True)
+        assert stateless["encrypted_content"] == "ENC"
+
+    def test_materializer_prefers_signature_like_the_formatter(self):
+        """The input materializer must pick the same payload as the formatter
+        when a block carries both a signature and a genuine blob, so the stored
+        input echoes what the client saw."""
+        from llm_proxy.models import ConversationContext, Message
+        from llm_proxy.protocols.openresponses.serializer import conversation_to_input_items
+
+        conversation = ConversationContext(
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[ThinkingBlock(thinking="t", signature="SIG", encrypted_content="ENC")],
+                )
+            ]
+        )
+        items = conversation_to_input_items(conversation)
+        reasoning = [i for i in items if i.get("type") == "reasoning"]
+        assert reasoning[0]["encrypted_content"] == "SIG"

@@ -35,11 +35,28 @@ def store(response_id: str, call_id: str, reasoning_text: str) -> None:
     # Ensure response_id entry exists (LRU eviction at response level)
     if response_id not in _cache:
         if len(_cache) >= _MAX_ENTRIES:
-            _cache.popitem(last=False)
+            _evict_oldest_response()
         _cache[response_id] = {}
     _cache[response_id][call_id] = reasoning_text
     # Track call_id -> response_ids for ambiguity detection
     _call_index[call_id].add(response_id)
+
+
+def _evict_oldest_response() -> None:
+    """LRU-evict the oldest response, pruning its ``_call_index`` back-links.
+
+    Without this the per-call_id index would grow without bound and, worse,
+    keep pointing at evicted response ids, so ``get()`` would treat a call_id
+    as ambiguous (two response ids) and return None forever.
+    """
+    evicted_id, call_ids = _cache.popitem(last=False)
+    for call_id in call_ids:
+        response_ids = _call_index.get(call_id)
+        if response_ids is None:
+            continue
+        response_ids.discard(evicted_id)
+        if not response_ids:
+            del _call_index[call_id]
 
 
 def get(call_id: str) -> str | None:
@@ -78,11 +95,7 @@ def cache_reasoning_from_blocks(blocks: list[Any] | None, response_id: str) -> N
     # Imported lazily: core.reasoning_cache is imported from serialization code
     # (converter, streaming paths), and content blocks live in the models layer
     # which must not be imported at module scope here.
-    from llm_proxy.models.content_blocks import (
-        CustomToolUseBlock,
-        ThinkingBlock,
-        ToolUseBlock,
-    )
+    from llm_proxy.models.content_blocks import TOOL_CALL_BLOCK_TYPES, ThinkingBlock
 
     thinking_idx = [
         i
@@ -92,7 +105,7 @@ def cache_reasoning_from_blocks(blocks: list[Any] | None, response_id: str) -> N
     if not thinking_idx:
         return
     for i, block in enumerate(blocks):
-        if not isinstance(block, (ToolUseBlock, CustomToolUseBlock)):
+        if not isinstance(block, TOOL_CALL_BLOCK_TYPES):
             continue
         call_id = getattr(block, "id", None)
         if not call_id:

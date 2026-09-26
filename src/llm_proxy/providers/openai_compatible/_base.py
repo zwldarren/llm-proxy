@@ -215,7 +215,7 @@ class OpenAICompatibleBase(
         client = await self._get_client()
         await inline_chat_document_urls(request, provider_type=self._adapter_type, client=client)
 
-    def _record_reasoning_field_preference(
+    def record_reasoning_field_preference(
         self,
         detected: str | None,
         *,
@@ -263,7 +263,7 @@ class OpenAICompatibleBase(
             # reasoning-field rename (stream renames reasoning ->
             # reasoning_content in chunks), model aliasing and usage
             # extraction (inside _build_passthrough_response).
-            self._record_reasoning_field_preference(
+            self.record_reasoning_field_preference(
                 detect_reasoning_field_in_response_body(response_data),
                 model=request.model,
                 response_model=response_data.get("model"),
@@ -315,7 +315,7 @@ class OpenAICompatibleBase(
     def _stream_transform_chunk(
         self, chunk: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any] | None:
-        self._record_reasoning_field_preference(
+        self.record_reasoning_field_preference(
             detect_reasoning_field_in_stream_chunk(chunk),
             model=context.get("model"),
             response_model=chunk.get("model"),
@@ -365,8 +365,9 @@ class OpenAICompatibleBase(
             # The upstream speaks Chat Completions SSE natively by definition
             # of this adapter family, so the openai client protocol can be
             # served verbatim: frames are forwarded untouched except the
-            # top-level model echo and usage capture (see
-            # NativePassthroughHandler.handle_native_openai_chunk).
+            # bookkeeping in NativePassthroughHandler.handle_native_openai_chunk
+            # (model echo, usage capture, the load-bearing reasoning-field
+            # rename).
             return self._native_passthrough_enabled()
         return super().supports_native_streaming(protocol_name)
 

@@ -45,6 +45,12 @@ from llm_proxy.models.content_blocks.extended import (
     ThinkingBlock,
 )
 
+#: Block types that carry a tool-call id. Used wherever an "is this a tool
+#: call?" check must cover the custom-tool (``custom_tool_call``) and
+#: server-side web-search shapes, not just the plain ``tool_use`` block — for
+#: example pairing cached reasoning with the tool call it precedes.
+TOOL_CALL_BLOCK_TYPES = (ToolUseBlock, CustomToolUseBlock, ServerToolUseBlock)
+
 __all__ = [
     # core
     "AudioBlock",
@@ -63,6 +69,8 @@ __all__ = [
     "RefusalBlock",
     "ServerToolUseBlock",
     "ThinkingBlock",
+    # tool-call shapes
+    "TOOL_CALL_BLOCK_TYPES",
     # anthropic_builtin
     "BashCodeExecutionToolResultBlock",
     "CacheControl",

@@ -52,8 +52,8 @@ duplicated there.
 
 The :class:`NativePassthroughHandler` holds the bookkeeping that native
 streams still require (usage capture for billing, response snapshots for
-persistence, model-name injection) — passthrough-lifecycle knowledge, not
-wire-shape conversion.
+persistence, model-name injection, the load-bearing reasoning-field rename)
+— passthrough-lifecycle knowledge, not wire-shape conversion.
 """
 
 import copy
@@ -69,7 +69,7 @@ from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_ou
 from llm_proxy.models import ConversionTier, InternalRequest
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.streaming.sse_parse import iter_sse_data_events
+from llm_proxy.streaming.sse_parse import iter_sse_data_events, split_sse_field
 
 if TYPE_CHECKING:
     from llm_proxy.serialization.context import BuildContext
@@ -475,28 +475,100 @@ class NativePassthroughHandler:
         chunk: Any,
         stream_request: Any,
         event_context: EventContext | None,
+        adapter: BaseAdapter | None = None,
     ) -> Any:
         """Bookkeeping for native chat-completions (OpenAI protocol) frames.
 
-        The frame is forwarded verbatim except for the top-level ``model``
-        field, which is rewritten to the client-requested alias
-        (``InternalRequest.echo_model``) like the transformer path does.
+        The frame is forwarded verbatim except for the two load-bearing
+        rewrites every converted path also performs:
+
+        - the top-level ``model`` field is replaced with the client-requested
+          alias (``InternalRequest.echo_model``);
+        - the provider's reasoning field is renamed to the client-facing
+          ``reasoning_content``
+          (:meth:`_rename_openai_reasoning_fields`).
+
         Terminal usage frames are forwarded too (matching
         ``OpenAIStreamingTransformer.finalize``, which always emits the
         pending usage chunk) and their usage is captured into the
         EventContext so cost accounting keeps working without the
         transformer.
+
+        ``adapter`` supplies the response-side family knowledge: the reasoning
+        field observed in a frame is recorded on it, so the next request's
+        echo is written back in the provider's own spelling.
         """
         if not isinstance(chunk, str):
             return chunk
         if '"usage"' in chunk:
             NativePassthroughHandler._capture_openai_stream_usage(chunk, event_context)
+        if '"reasoning"' in chunk:
+            chunk = NativePassthroughHandler._rename_openai_reasoning_fields(
+                chunk, stream_request, adapter
+            )
         alias = getattr(stream_request, "echo_model", None)
         if alias and alias != getattr(stream_request, "model", None):
             chunk = _OPENAI_CHUNK_MODEL_RE.sub(
                 lambda m: m.group(1) + alias + m.group(2), chunk, count=1
             )
         return chunk
+
+    @staticmethod
+    def _rename_openai_reasoning_fields(
+        chunk: str,
+        stream_request: Any,
+        adapter: BaseAdapter | None,
+    ) -> str:
+        """Rename the provider's reasoning field on a native chat frame.
+
+        ``reasoning`` -> ``reasoning_content`` is load-bearing even on the
+        verbatim tier: the client-facing name must match the parsed and
+        converted-stream tiers, and the learned preference lets
+        ``normalize_reasoning_for_request`` convert the client's echo back to
+        the provider's field next turn. Callers guard on the exact
+        ``"reasoning"`` key, so ordinary frames stay on the verbatim fast path
+        (``"reasoning_details"`` / ``"reasoning_content"`` do not match).
+
+        Known limitations (all degrade gracefully — the frame is forwarded
+        unchanged): an SSE event whose JSON is split across several ``data:``
+        lines never parses here, and only the first choice is renamed (the
+        shared ``normalize_reasoning_in_stream_chunk`` rule). CRLF frames keep
+        their line endings on every line that is not rewritten.
+        """
+        # Imported lazily: llm_proxy.providers.__init__ imports every adapter
+        # module, and those adapters import this module, so a module-scope
+        # import would be circular.
+        from llm_proxy.providers.reasoning import (
+            detect_reasoning_field_in_stream_chunk,
+            normalize_reasoning_in_stream_chunk,
+        )
+
+        # Rewrite only the ``data:`` line(s), leaving every other SSE line
+        # (``event:``, ``id:``, comments, the blank separator) exactly as the
+        # upstream sent it — reserializing the whole frame would drop fields the
+        # proxy does not model.
+        rewritten: list[str] = []
+        changed = False
+        for line in chunk.split("\n"):
+            field, value = split_sse_field(line.strip())
+            if field == "data":
+                try:
+                    payload = orjson.loads(value)
+                except JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    if adapter is not None:
+                        adapter.record_reasoning_field_preference(
+                            detect_reasoning_field_in_stream_chunk(payload),
+                            model=getattr(stream_request, "model", None),
+                            response_model=payload.get("model"),
+                        )
+                    normalize_reasoning_in_stream_chunk(payload)
+                    rewritten.append(f"data: {orjson.dumps(payload).decode()}")
+                    changed = True
+                    continue
+            rewritten.append(line)
+        return "\n".join(rewritten) if changed else chunk
 
     @staticmethod
     def _capture_openai_stream_usage(chunk: str, event_context: EventContext | None) -> None:

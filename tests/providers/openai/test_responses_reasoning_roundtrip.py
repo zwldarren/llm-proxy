@@ -634,3 +634,87 @@ class TestStreamingReasoningSummaryEvents:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestRedactedReasoningRoundTrip:
+    """A redacted thinking block must ride ``encrypted_content`` (with the
+    ``[redacted]`` summary marker), not surface its opaque blob as summary text,
+    and must parse back into a ``RedactedThinkingBlock``."""
+
+    def test_redacted_block_builds_encrypted_reasoning_item(self):
+        from llm_proxy.models import RedactedThinkingBlock
+
+        body = _build(
+            [
+                Message(role="user", content=[TextBlock(text="act")]),
+                Message(
+                    role="assistant",
+                    content=[
+                        RedactedThinkingBlock(data="OPAQUE"),
+                        ToolUseBlock(id="c", name="exec", input={}),
+                    ],
+                ),
+            ]
+        )
+        reasoning = [it for it in body["input"] if it.get("type") == "reasoning"]
+        assert reasoning
+        assert reasoning[0]["encrypted_content"] == "OPAQUE"
+        assert reasoning[0]["summary"] == [{"type": "summary_text", "text": "[redacted]"}]
+
+    def test_redacted_reasoning_item_parses_back(self):
+        from llm_proxy.models import RedactedThinkingBlock
+
+        response = {
+            "id": "resp_1",
+            "model": "o3",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "[redacted]"}],
+                    "encrypted_content": "OPAQUE",
+                },
+            ],
+        }
+        result = serializer.parse_provider_response(response, model="o3")
+        redacted = [b for b in result.output if isinstance(b, RedactedThinkingBlock)]
+        assert len(redacted) == 1
+        assert redacted[0].data == "OPAQUE"
+
+
+class TestEncryptedReasoningOrigin:
+    """A genuine Responses encrypted blob is marked ``signature_origin="openai"``
+    so the Anthropic serializer never replays it as a ``thinking.signature``."""
+
+    def _parse(self, item: dict) -> ThinkingBlock:
+        response = {"id": "resp_1", "model": "o3", "status": "completed", "output": [item]}
+        result = serializer.parse_provider_response(response, model="o3")
+        thinking = [b for b in result.output if isinstance(b, ThinkingBlock)]
+        assert len(thinking) == 1
+        return thinking[0]
+
+    def test_encrypted_blob_is_marked_openai_origin(self):
+        block = self._parse(
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "plan"}],
+                "encrypted_content": "ENC_BLOB",
+            }
+        )
+        assert block.encrypted_content == "ENC_BLOB"
+        assert block.signature_origin == "openai"
+
+    def test_summary_only_item_has_no_origin(self):
+        """No encrypted payload means nothing to disambiguate — leave unmarked
+        so an Anthropic-signed block is still replayed."""
+        block = self._parse(
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": "plan"}],
+            }
+        )
+        assert block.encrypted_content is None
+        assert block.signature_origin is None

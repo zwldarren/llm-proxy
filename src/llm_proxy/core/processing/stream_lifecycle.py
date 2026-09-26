@@ -307,6 +307,11 @@ class StreamLifecycle:
             if not self.native_streaming and not self.client_disconnected:
                 async for frame in self._finalize_and_cache():
                     yield frame
+            elif self.native_streaming and not self.client_disconnected:
+                # Native tiers skip _finalize_and_cache, but the transformer
+                # still accumulated the forwarded frames for the request log;
+                # cache the real reasoning from them too.
+                self._cache_native_reasoning()
 
             # Persist store=true streamed responses so follow-up
             # previous_response_id continuations and GET /v1/responses/{id}
@@ -427,7 +432,7 @@ class StreamLifecycle:
             handler.maybe_capture_native_streaming_usage(chunk, self.event_context)
         elif self.protocol_name == "openai":
             chunk = handler.handle_native_openai_chunk(
-                chunk, self.stream_request, self.event_context
+                chunk, self.stream_request, self.event_context, self.current_adapter
             )
         elif self.protocol_name == "openresponses":
             # The snapshot's model is rewritten to the client-requested
@@ -444,17 +449,26 @@ class StreamLifecycle:
         return chunk
 
     def _accumulate_native_chunk(self, chunk: Any) -> None:
-        """Feed a native frame to the transformer's request-log accumulator.
+        """Feed a native frame to the transformer's accumulator.
 
-        Skipped when the body is not being captured, or when raw SSE capture was
-        requested (the raw text is stored instead, so reassembly would be
-        wasted work).
+        Runs for the request log (only when full-body capture is on and raw SSE
+        capture is off — reassembly would be wasted work otherwise) and always
+        for the reasoning cache on delta protocols, whose accumulation is the
+        only reasoning source at stream end (``_cache_native_reasoning``). The
+        cache must not depend on the log-sampling decision, or a lower
+        ``sampling_rate`` silently stops teaching it. Snapshot protocols
+        (``openresponses``) write the cache from their terminal snapshot, so
+        their accumulation stays gated on logging.
         """
         context = self.event_context
-        if (
-            context is None
-            or context.should_capture_raw_stream
-            or not context.should_capture_full_body
+        if context is None:
+            return
+        logging_needs_accumulation = (
+            context.should_capture_full_body and not context.should_capture_raw_stream
+        )
+        if not logging_needs_accumulation and self.protocol_name not in (
+            "openai",
+            "anthropic",
         ):
             return
         accumulate_native_frame(self.transformer, chunk)
@@ -526,14 +540,38 @@ class StreamLifecycle:
         # restore it (DeepSeek-style echo) even when the client strips
         # reasoning or another provider served an intermediate turn.
         # Web-search continuations keep the final output split across two
-        # transformers, so cache both. Never fatal.
-        cache_targets = [state.transformer]
-        if self.transformer is not state.transformer:
-            cache_targets.append(self.transformer)
-        for target in cache_targets:
+        # transformers, so cache both.
+        self._cache_accumulated_reasoning(state.transformer, self.transformer)
+
+    def _cache_native_reasoning(self) -> None:
+        """Cache reasoning accumulated from native-passthrough frames.
+
+        Native tiers skip ``_finalize_and_cache``, so streamed reasoning would
+        never reach the reasoning cache; but the transformer still accumulates
+        the forwarded frames for the request log. Finalize that accumulation
+        (idempotent) and cache the real reasoning paired with its tool calls, so
+        a later turn can restore it when the client strips reasoning or another
+        provider served the intermediate turn.
+        """
+        transformers = [self.state.transformer, self.transformer]
+        flush_pending_accumulation(transformers)
+        self._cache_accumulated_reasoning(*transformers)
+
+    def _cache_accumulated_reasoning(self, *transformers: Any) -> None:
+        """Cache reasoning from each transformer's accumulated output.
+
+        The final output can be split across two transformers (web-search
+        continuations), and the same transformer may be passed more than once;
+        cache each one exactly once. Never fatal.
+        """
+        seen: set[int] = set()
+        for target in transformers:
+            if id(target) in seen:
+                continue
+            seen.add(id(target))
             try_cache_reasoning_from_blocks(
                 target.get_accumulated_output(),
-                response_id=target.response_id,
+                response_id=getattr(target, "response_id", "") or "",
             )
 
     async def _persist_response(self) -> None:

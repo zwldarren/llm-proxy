@@ -372,6 +372,10 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             tool_delta["id"] = call["id"]
             tool_delta["type"] = "function"
             tool_delta["function"] = {"name": call["name"], "arguments": tail}
+            # Surface the thought signature so a stateless client can echo it
+            # back (the adapter cache only covers same-process continuations).
+            if call.get("signature"):
+                tool_delta["thought_signature"] = call["signature"]
         else:
             tool_delta["function"] = {"arguments": tail}
         return self._make_openai_chunk({"tool_calls": [tool_delta]})
@@ -389,18 +393,15 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         # No arguments deltas arrived; emit the (possibly empty) call once.
         call["emitted"] = True
         arguments = call["arguments"] or "{}"
-        return self._make_openai_chunk(
-            {
-                "tool_calls": [
-                    {
-                        "index": index,
-                        "id": call["id"],
-                        "type": "function",
-                        "function": {"name": call["name"], "arguments": arguments},
-                    }
-                ]
-            }
-        )
+        tool_call: dict[str, Any] = {
+            "index": index,
+            "id": call["id"],
+            "type": "function",
+            "function": {"name": call["name"], "arguments": arguments},
+        }
+        if call.get("signature"):
+            tool_call["thought_signature"] = call["signature"]
+        return self._make_openai_chunk({"tool_calls": [tool_call]})
 
     # ------------------------------------------------------------------
     # Finish / usage / accumulation

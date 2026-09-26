@@ -23,6 +23,7 @@ from llm_proxy.serialization.anthropic import (
     ANTHROPIC_USAGE_EXTENSION_KEYS,
     parse_usage_and_provider_extras,
 )
+from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
@@ -73,6 +74,11 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         self._thinking_buffer = ""
         self._thinking_signature = ""
         self._thinking_is_redacted = False
+        # Opaque redacted_thinking payload for the open thinking block. The
+        # provider converter keeps "[redacted]" as a display placeholder in
+        # ``reasoning_content`` and carries the real ``data`` in
+        # ``delta.encrypted_content``; clients must echo the real payload back.
+        self._thinking_redacted_data = ""
         self._text_output_started = False
         self._tool_id = ""
         self._tool_name = ""
@@ -405,14 +411,13 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 # Handle text content
                 content = delta.get("content")
                 if content is not None and content != "":
-                    if self._in_thinking_block:
-                        # Providers can emit reasoning first and then normal text.
-                        # Close thinking block before switching back to text.
-                        result_chunks.append(self._content_block_stop(self._current_block_index))
-                        self._current_block_index += 1
-                        self._in_thinking_block = False
-
                     if not self._in_text_block:
+                        # Close whatever block is open (thinking or tool) before
+                        # switching to text. _close_current_open_block accumulates
+                        # it and resets the per-block buffers, so each interleaved
+                        # segment is its own block instead of being merged into or
+                        # overwritten by the next one.
+                        self._close_current_open_block(result_chunks)
                         self._in_text_block = True
                         result_chunks.append(
                             self._content_block_start(
@@ -437,34 +442,38 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                         continue
 
                     is_redacted = delta.get("reasoning_is_redacted", False)
-                    if is_redacted and reasoning == "[redacted]":
-                        if self._in_text_block:
-                            result_chunks.append(
-                                self._content_block_stop(self._current_block_index)
-                            )
-                            self._current_block_index += 1
-                            self._in_text_block = False
+                    if is_redacted and reasoning == REDACTED_THINKING_TEXT:
+                        # A redacted_thinking block is a new content block: close
+                        # whichever block is open (text, thinking, or tool) first.
+                        self._close_current_open_block(result_chunks)
+                        # The provider converter carries the real opaque
+                        # payload in ``encrypted_content``; ``reasoning``
+                        # itself is only the "[redacted]" placeholder.
+                        redacted_data = delta.get("encrypted_content") or reasoning
                         result_chunks.append(
                             self._content_block_start(
                                 self._current_block_index,
-                                {"type": "redacted_thinking", "data": reasoning},
+                                {"type": "redacted_thinking", "data": redacted_data},
                             )
                         )
                         self._in_thinking_block = True
                         self._thinking_is_redacted = True
+                        self._thinking_redacted_data = redacted_data
                         self._thinking_buffer = reasoning
                         continue
 
                     if is_redacted:
                         self._thinking_is_redacted = True
+                        if delta.get("encrypted_content"):
+                            self._thinking_redacted_data = delta["encrypted_content"]
 
                     if not self._in_thinking_block:
-                        if self._in_text_block:
-                            result_chunks.append(
-                                self._content_block_stop(self._current_block_index)
-                            )
-                            self._current_block_index += 1
-                            self._in_text_block = False
+                        # Close whatever block is open first: the canonical stream
+                        # carries no boundary chunk on a tool block stop, so a
+                        # tool_use followed by thinking (interleaved thinking) would
+                        # otherwise open a second block at the same index with no
+                        # intervening content_block_stop.
+                        self._close_current_open_block(result_chunks)
                         self._in_thinking_block = True
                         result_chunks.append(
                             self._content_block_start(
@@ -481,14 +490,27 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
 
                 reasoning_sig = delta.get("reasoning_signature")
                 if reasoning_sig is not None and reasoning_sig != "":
-                    self._thinking_signature += reasoning_sig
-                    if self._in_thinking_block:
+                    if not self._in_thinking_block:
+                        # The canonical stream carries signature_delta inside the
+                        # thinking block, so a signature with no open block is an
+                        # interleaved/degenerate provider. Open a (possibly
+                        # empty-text) thinking block for it instead of leaking
+                        # the value onto the next unrelated block or dropping it.
+                        self._close_current_open_block(result_chunks)
+                        self._in_thinking_block = True
                         result_chunks.append(
-                            self._content_block_delta(
+                            self._content_block_start(
                                 self._current_block_index,
-                                {"type": "signature_delta", "signature": reasoning_sig},
+                                {"type": "thinking", "thinking": ""},
                             )
                         )
+                    self._thinking_signature += reasoning_sig
+                    result_chunks.append(
+                        self._content_block_delta(
+                            self._current_block_index,
+                            {"type": "signature_delta", "signature": reasoning_sig},
+                        )
+                    )
 
                 # Handle tool calls
                 tool_calls = delta.get("tool_calls")
@@ -496,53 +518,14 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                     for tc in tool_calls:
                         # Tool call start
                         if tc.get("id") and tc.get("function", {}).get("name"):
-                            if self._in_tool_block:
-                                # Close previous tool block before starting the next one.
-                                # Accumulate the previous tool before closing
-                                if self._tool_id:
-                                    try:
-                                        tool_input = (
-                                            orjson.loads(self._tool_args) if self._tool_args else {}
-                                        )
-                                    except orjson.JSONDecodeError:
-                                        tool_input = {}
-
-                                    normalized = (
-                                        self._tool_name.lower().replace("_", "").replace("-", "")
-                                    )
-                                    if normalized == "websearch" and self._intercept_web_search:
-                                        self._accumulated_output.append(
-                                            ServerToolUseBlock(
-                                                id=self._tool_id,
-                                                name=self._tool_name,
-                                                input=tool_input,
-                                            )
-                                        )
-                                    else:
-                                        self._accumulated_output.append(
-                                            ToolUseBlock(
-                                                id=self._tool_id,
-                                                name=self._tool_name,
-                                                input=tool_input,
-                                            )
-                                        )
-                                result_chunks.append(
-                                    self._content_block_stop(self._current_block_index)
-                                )
-                                self._current_block_index += 1
-                                self._in_tool_block = False
-                                self._tool_id = ""
-                                self._tool_name = ""
-                                self._tool_args = ""
-
-                            if self._in_text_block or self._in_thinking_block:
-                                # Close previous block
-                                result_chunks.append(
-                                    self._content_block_stop(self._current_block_index)
-                                )
-                                self._current_block_index += 1
-                                self._in_text_block = False
-                                self._in_thinking_block = False
+                            # Close whatever block is open (previous tool, text, or
+                            # thinking) before starting the next tool call.
+                            # _close_current_open_block accumulates it and resets the
+                            # per-block buffers, keeping interleaved segments and
+                            # multiple tool calls distinct. ``server_aware`` keeps the
+                            # tool-call branch's web_search-as-ServerToolUseBlock
+                            # behavior for the tool it is closing.
+                            self._close_current_open_block(result_chunks, server_aware=True)
 
                             self._in_tool_block = True
                             self._tool_id = tc["id"]
@@ -839,8 +822,19 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         events.append(self._content_block_stop(index))
         return "".join(events)
 
-    def _close_current_open_block(self, result_chunks: list[str]) -> None:
-        """Close the currently open content block if one exists."""
+    def _close_current_open_block(
+        self, result_chunks: list[str], *, server_aware: bool = False
+    ) -> None:
+        """Close the currently open content block if one exists.
+
+        ``server_aware`` mirrors the tool-call branch's historical behavior:
+        when a tool block is closed because the *next tool call* started, a
+        proxy-intercepted ``web_search`` becomes a ``ServerToolUseBlock``. Every
+        other boundary (finish_reason, a following text/thinking block) closes
+        it as a plain ``ToolUseBlock``; the web-search interceptor normalizes
+        that later. Keeping the distinction preserves the two documented
+        accumulation paths.
+        """
         if not (self._in_text_block or self._in_thinking_block or self._in_tool_block):
             return
 
@@ -848,12 +842,21 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         if self._in_text_block and self._text_buffer:
             self._accumulated_output.append(TextBlock(text=self._text_buffer))
 
-        # If closing a thinking block, accumulate the ThinkingBlock or RedactedThinkingBlock
-        if self._in_thinking_block and self._thinking_buffer:
+        # If closing a thinking block, accumulate the ThinkingBlock or
+        # RedactedThinkingBlock. A block with no text but a signature is kept:
+        # the signature is the integrity payload replayed on the next turn, so
+        # dropping it would break interleaved-thinking continuations.
+        if self._in_thinking_block and (
+            self._thinking_buffer or self._thinking_signature or self._thinking_redacted_data
+        ):
             if self._thinking_is_redacted:
                 from llm_proxy.models import RedactedThinkingBlock
 
-                self._accumulated_output.append(RedactedThinkingBlock(data=self._thinking_buffer))
+                self._accumulated_output.append(
+                    RedactedThinkingBlock(
+                        data=self._thinking_redacted_data or self._thinking_buffer
+                    )
+                )
             else:
                 self._accumulated_output.append(
                     ThinkingBlock(
@@ -861,23 +864,37 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                         signature=self._thinking_signature or None,
                     )
                 )
+        if self._in_thinking_block:
             self._thinking_signature = ""
             self._thinking_is_redacted = False
+            self._thinking_redacted_data = ""
 
-        # If closing a tool block, accumulate the ToolUseBlock
+        # If closing a tool block, accumulate the ToolUseBlock (or the
+        # ServerToolUseBlock the proxy intercepts web search with, when the
+        # caller is the tool-call branch).
         if self._in_tool_block and self._tool_id:
             try:
                 tool_input = orjson.loads(self._tool_args) if self._tool_args else {}
             except orjson.JSONDecodeError:
                 tool_input = {}
 
-            self._accumulated_output.append(
-                ToolUseBlock(
-                    id=self._tool_id,
-                    name=self._tool_name,
-                    input=tool_input,
+            normalized = self._tool_name.lower().replace("_", "").replace("-", "")
+            if server_aware and normalized == "websearch" and self._intercept_web_search:
+                self._accumulated_output.append(
+                    ServerToolUseBlock(
+                        id=self._tool_id,
+                        name=self._tool_name,
+                        input=tool_input,
+                    )
                 )
-            )
+            else:
+                self._accumulated_output.append(
+                    ToolUseBlock(
+                        id=self._tool_id,
+                        name=self._tool_name,
+                        input=tool_input,
+                    )
+                )
 
         result_chunks.append(self._content_block_stop(self._current_block_index))
         self._current_block_index += 1

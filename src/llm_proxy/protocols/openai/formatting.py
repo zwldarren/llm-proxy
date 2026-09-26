@@ -24,6 +24,7 @@ from llm_proxy.models import (
     ThinkingBlock,
 )
 from llm_proxy.models.types import ChoiceLogprobs
+from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +258,11 @@ class OpenAIFormattingMixin:
         tool_calls: list[dict[str, Any]] = []
         collected_annotations: list[dict[str, Any]] = []
         collected_reasoning_details: list[dict[str, Any]] = []
+        # Ordered ``(tool-call count, segment)`` pairs. Collected and applied
+        # after the loop so multiple interleaved segments can be represented —
+        # and positioned relative to tool calls — without each one overwriting
+        # the previous.
+        reasoning_segments: list[tuple[int, ThinkingBlock | RedactedThinkingBlock]] = []
 
         for block in output:
             match block:
@@ -294,16 +300,12 @@ class OpenAIFormattingMixin:
                         }
                     )
                 case ThinkingBlock():
-                    if block.thinking:
-                        message["reasoning_content"] = block.thinking
-                    if block.signature:
-                        message["reasoning_signature"] = block.signature
+                    reasoning_segments.append((len(tool_calls), block))
                     details = block.extra.get("reasoning_details")
                     if isinstance(details, list):
                         collected_reasoning_details.extend(details)
                 case RedactedThinkingBlock():
-                    message["reasoning_content"] = "[redacted]"
-                    message["reasoning_is_redacted"] = True
+                    reasoning_segments.append((len(tool_calls), block))
                     details = block.extra.get("reasoning_details")
                     if isinstance(details, list):
                         collected_reasoning_details.extend(details)
@@ -437,7 +439,72 @@ class OpenAIFormattingMixin:
         if collected_reasoning_details:
             message["reasoning_details"] = collected_reasoning_details
 
+        if reasoning_segments:
+            self._apply_reasoning_segments(message, reasoning_segments)
+
         return message
+
+    @staticmethod
+    def _apply_reasoning_segments(
+        message: dict[str, Any],
+        segments: list[tuple[int, ThinkingBlock | RedactedThinkingBlock]],
+    ) -> None:
+        """Write reasoning segments onto an OpenAI Chat message in place.
+
+        ``segments`` are ``(after_tool_calls, block)`` pairs in original order:
+        the position is the number of tool calls that preceded the segment, so
+        the parse side can re-interleave reasoning and tool calls. A single
+        segment uses the flat ``reasoning_content`` / ``reasoning_signature`` /
+        ``reasoning_is_redacted`` / ``encrypted_content`` fields clients already
+        understand. Two or more (an interleaved ``thinking -> tool_use ->
+        thinking`` turn the flat fields cannot represent) additionally carry a
+        ``reasoning_segments`` array — the proxy's multi-segment carrier, parsed
+        back by ``parse_reasoning_segments`` — while ``reasoning_content`` keeps
+        the concatenated text as a best-effort fallback for clients that drop
+        unknown fields.
+        """
+        if len(segments) == 1:
+            block = segments[0][1]
+            if isinstance(block, RedactedThinkingBlock):
+                message["reasoning_content"] = REDACTED_THINKING_TEXT
+                message["reasoning_is_redacted"] = True
+                if block.data:
+                    # The opaque payload is the only value the client can echo
+                    # back for a valid redacted block; the marker is just a
+                    # display placeholder.
+                    message["encrypted_content"] = block.data
+                return
+            if block.thinking:
+                message["reasoning_content"] = block.thinking
+            if block.signature:
+                message["reasoning_signature"] = block.signature
+            if block.encrypted_content:
+                message["encrypted_content"] = block.encrypted_content
+            return
+
+        serialized: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+        for position, block in segments:
+            if isinstance(block, RedactedThinkingBlock):
+                entry: dict[str, Any] = {"type": "redacted", "data": block.data}
+                text_parts.append(REDACTED_THINKING_TEXT)
+            else:
+                entry: dict[str, Any] = {"type": "thinking", "text": block.thinking}
+                if block.signature:
+                    entry["signature"] = block.signature
+                if block.encrypted_content:
+                    entry["encrypted_content"] = block.encrypted_content
+                if block.thinking:
+                    text_parts.append(block.thinking)
+            if position > 0:
+                # Number of tool calls that preceded this segment; the parse
+                # side re-interleaves on it. Omitted when zero to keep the
+                # common leading-reasoning shape unchanged.
+                entry["after_tool_calls"] = position
+            serialized.append(entry)
+        message["reasoning_segments"] = serialized
+        if text_parts:
+            message["reasoning_content"] = "\n".join(text_parts)
 
     @staticmethod
     def _format_anthropic_block_as_text(block_type: str, block) -> str:

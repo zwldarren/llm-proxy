@@ -40,6 +40,23 @@ def _reset_security_config_manager():
 
 
 @pytest.fixture(autouse=True)
+def _reset_reasoning_cache():
+    """Clear the process-wide reasoning cache around every test.
+
+    The cache keys reasoning by tool-call id in module-level globals. Several
+    streaming/formatting tests write to it implicitly; without resetting, a
+    later test that reuses a call id can observe another test's reasoning
+    (order-dependent failures that only show up for non-default test
+    selections).
+    """
+    from llm_proxy.core import reasoning_cache
+
+    reasoning_cache.clear()
+    yield
+    reasoning_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _mock_langfuse_client():
     """Prevent tests from creating real Langfuse clients.
 

@@ -35,19 +35,25 @@ def _create_summary_text_part(text: str) -> dict[str, Any]:
 
 
 def _reasoning_encrypted_content(state: Any, item_index: int) -> str | None:
-    """Encrypted content for a reasoning item (include-gated or signature fallback).
+    """Encrypted content for a reasoning item (captured payload or signature fallback).
 
-    The include-gated payload (``reasoning.encrypted_content`` requested) wins.
-    Otherwise an Anthropic-origin thinking signature is bridged into
-    ``encrypted_content`` — the only Responses field that round-trips it — so
-    replaying the item keeps multi-turn extended thinking working.
+    The per-item attribution wins. A blob captured after its item was opened
+    (an upstream that only reveals ``encrypted_content`` at item or response
+    completion) is attributed on first use, oldest first, so interleaved
+    multi-item streams keep each blob on the item that produced it. Capture
+    itself is include-gated (with a redacted-thinking bypass), so anything in
+    the queue may be emitted. Otherwise an Anthropic-origin thinking signature
+    is bridged into ``encrypted_content`` — the only Responses field that
+    round-trips it — so replaying the item keeps multi-turn extended thinking
+    working.
     """
-    if state.include_reasoning_encrypted:
-        encrypted = (
-            state.reasoning_encrypted_contents.get(item_index) or state.reasoning_encrypted_content
-        )
-        if encrypted:
-            return encrypted
+    encrypted = state.reasoning_encrypted_contents.get(item_index)
+    if encrypted:
+        return encrypted
+    if state.pending_reasoning_encrypted:
+        encrypted = state.pending_reasoning_encrypted.pop(0)
+        state.reasoning_encrypted_contents[item_index] = encrypted
+        return encrypted
     return state.reasoning_signatures.get(item_index)
 
 
@@ -355,9 +361,11 @@ class StreamingEventFactory:
             item["status"] = "in_progress"
             item["content"] = []
             item["summary"] = []
-            if self.state.include_reasoning_encrypted and self.state.reasoning_encrypted_content:
+            if self.state.pending_reasoning_encrypted:
+                # The blob arrived with (or just before) this item's first
+                # reasoning delta: attribute the oldest unattributed blob.
                 self.state.reasoning_encrypted_contents[self.state.current_item_index] = (
-                    self.state.reasoning_encrypted_content
+                    self.state.pending_reasoning_encrypted.pop(0)
                 )
         elif item_type == "web_search_call":
             item["status"] = "completed"

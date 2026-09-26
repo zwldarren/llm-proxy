@@ -266,6 +266,53 @@ class TestAnthropicProtocolRoundTrip(ReasoningRoundtripTestMixin):
         assert thinking_output[0]["thinking"] == thinking_text
         assert thinking_output[0]["signature"] == signature
 
+    def test_anthropic_keeps_signature_only_thinking_block(self):
+        """An empty thinking text with a signature must survive the round trip.
+
+        The signature is the integrity payload Anthropic verifies on replay;
+        dropping a signature-only block breaks interleaved-thinking continuations.
+        """
+        blocks = [ThinkingBlock(thinking="", signature="sig-only")]
+        formatted = self.mixin.format_content_blocks(blocks)
+        thinking_output = [b for b in formatted if b.get("type") == "thinking"]
+        assert len(thinking_output) == 1
+        assert thinking_output[0]["thinking"] == ""
+        assert thinking_output[0]["signature"] == "sig-only"
+
+    def test_anthropic_drops_gemini_origin_signature(self):
+        """A signature known to come from Gemini must not be presented as an
+        Anthropic thinking signature (Anthropic would reject the mismatch)."""
+        blocks = [
+            ThinkingBlock(thinking="gemini thought", signature="GEM", signature_origin="gemini")
+        ]
+        formatted = self.mixin.format_content_blocks(blocks)
+        thinking_output = [b for b in formatted if b.get("type") == "thinking"]
+        assert len(thinking_output) == 1
+        assert "signature" not in thinking_output[0]
+
+    def test_anthropic_drops_openai_origin_encrypted_content(self):
+        """A genuine OpenAI encrypted-reasoning blob must not be replayed to
+        Anthropic as a thinking signature (Anthropic would reject it)."""
+        blocks = [
+            ThinkingBlock(
+                thinking="openai thought",
+                encrypted_content="OPENAI_BLOB",
+                signature_origin="openai",
+            )
+        ]
+        formatted = self.mixin.format_content_blocks(blocks)
+        thinking_output = [b for b in formatted if b.get("type") == "thinking"]
+        assert len(thinking_output) == 1
+        assert "signature" not in thinking_output[0]
+
+    def test_anthropic_replays_unmarked_bridged_signature(self):
+        """An unmarked ``encrypted_content`` is the proxy's bridged Anthropic
+        signature and must still be replayed (the round-trip contract)."""
+        blocks = [ThinkingBlock(thinking="claude thought", encrypted_content="BridgedSig")]
+        formatted = self.mixin.format_content_blocks(blocks)
+        thinking_output = [b for b in formatted if b.get("type") == "thinking"]
+        assert thinking_output[0]["signature"] == "BridgedSig"
+
     def test_anthropic_roundtrip_redacted_thinking(self):
 
         content = [

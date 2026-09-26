@@ -171,6 +171,27 @@ class BaseAdapter(ABC):
         """
         return body
 
+    def record_reasoning_field_preference(
+        self,
+        detected: str | None,
+        *,
+        model: str | None = None,
+        response_model: Any = None,
+    ) -> None:
+        """Learn the upstream's assistant reasoning field from a response.
+
+        The response-side sibling of ``native_body_hook``: called by
+        ``core.conversion.NativePassthroughHandler`` while a native response
+        still shows the provider's original field name, before the
+        ``reasoning`` -> ``reasoning_content`` rename for the client. The
+        learned field lets ``normalize_reasoning_for_request`` write the
+        client's echo back in the provider's own spelling next turn.
+
+        Default: no recording. OpenAI-compatible adapters cache the
+        ``(base_url, model)`` preference on their request builder.
+        """
+        return
+
     def supports_native_streaming(self, protocol_name: str) -> bool:
         """Return True if this adapter can yield protocol-native SSE directly.
 

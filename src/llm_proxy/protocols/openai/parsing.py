@@ -43,11 +43,48 @@ from llm_proxy.serialization.content_parsers import (
     parse_audio_block_openai,
     parse_file_block_openai,
     parse_image_block_openai,
-    parse_reasoning_content,
+    parse_reasoning_segments,
     parse_text_block,
     parse_video_block_openai,
     unparseable_image_placeholder,
 )
+
+
+def _interleave_reasoning_blocks(
+    content_blocks: list[ContentBlock],
+    reasoning_segments: list[tuple[Any, int]],
+) -> list[ContentBlock]:
+    """Re-interleave reasoning blocks with tool calls in the emitted order.
+
+    ``after_tool_calls`` records how many tool calls preceded a segment, so
+    segment ``n`` is placed right after the n-th tool call instead of every
+    reasoning block being flattened to the front of the turn (which would
+    reorder an interleaved ``thinking -> tool -> thinking`` history). Segments
+    without a recorded position keep the historical leading-reasoning shape.
+
+    Only ``tool_use`` / ``custom_tool_use`` count: those are the blocks the
+    formatter emits as wire ``tool_calls`` and therefore the ones whose count
+    ``after_tool_calls`` records. Server-side tool blocks (``web_search``) are
+    carried as text, not ``tool_calls``, so counting them would misplace a
+    segment.
+    """
+    if not reasoning_segments:
+        return content_blocks
+    by_position: dict[int, list[ContentBlock]] = {}
+    for block, position in reasoning_segments:
+        by_position.setdefault(position, []).append(block)
+
+    result: list[ContentBlock] = list(by_position.get(0, []))
+    tool_seen = 0
+    for block in content_blocks:
+        result.append(block)
+        if isinstance(block, (ToolUseBlock, CustomToolUseBlock)):
+            tool_seen += 1
+            result.extend(by_position.get(tool_seen, []))
+    highest = max(by_position, default=0)
+    for position in range(tool_seen + 1, highest + 1):
+        result.extend(by_position[position])
+    return result
 
 
 class OpenAIParsingMixin:
@@ -266,21 +303,26 @@ class OpenAIParsingMixin:
                 # thought on the Gemini Interactions variant, which the API
                 # rejects ("Model turns with thought summaries must start with
                 # a thought block in thinking models").
-                reasoning_block = parse_reasoning_content(msg)
+                reasoning_segments = parse_reasoning_segments(msg)
                 reasoning_details = msg.get("reasoning_details")
                 if isinstance(reasoning_details, list) and reasoning_details:
                     # OpenRouter's structured reasoning array. Clients echo it
                     # back on the next turn; models that emit encrypted or
                     # summarized entries reject a history without it, and it
                     # can arrive with no plaintext reasoning at all.
-                    if reasoning_block is not None:
-                        reasoning_block.extra["reasoning_details"] = reasoning_details
+                    if reasoning_segments:
+                        reasoning_segments[0][0].extra["reasoning_details"] = reasoning_details
                     else:
-                        reasoning_block = ThinkingBlock(
-                            thinking="", extra={"reasoning_details": reasoning_details}
-                        )
-                if reasoning_block is not None:
-                    content_blocks.insert(0, reasoning_block)
+                        reasoning_segments = [
+                            (
+                                ThinkingBlock(
+                                    thinking="",
+                                    extra={"reasoning_details": reasoning_details},
+                                ),
+                                0,
+                            )
+                        ]
+                content_blocks = _interleave_reasoning_blocks(content_blocks, reasoning_segments)
 
                 # Parse refusal
                 refusal = msg.get("refusal")

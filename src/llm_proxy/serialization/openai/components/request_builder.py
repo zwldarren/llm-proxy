@@ -466,8 +466,11 @@ class OpenAIRequestBuilder:
 
         Uses the cached per-model preference (``reasoning`` or
         ``reasoning_content``) so the request body matches what the upstream
-        model expects. If no preference has been detected yet, defaults to
-        ``reasoning_content``.
+        model expects. The rename is bidirectional: a body carrying the other
+        spelling (e.g. an OpenRouter-style ``reasoning`` history routed to a
+        ``reasoning_content`` provider) is converted, not just the common
+        ``reasoning_content`` -> ``reasoning`` direction. If no preference has
+        been detected yet, defaults to ``reasoning_content``.
 
         Args:
             body: Request body containing ``messages``.
@@ -480,12 +483,14 @@ class OpenAIRequestBuilder:
         if base_url is None and preferred is None:
             return body
         field = preferred or self.get_reasoning_field_preference(base_url, model)
-        if field == "reasoning_content":
-            return body
+        source_field = "reasoning" if field == "reasoning_content" else "reasoning_content"
+        target_field = field
         messages = body.get("messages", [])
         for msg in messages:
-            if msg.get("role") == "assistant" and "reasoning_content" in msg:
-                msg["reasoning"] = msg.pop("reasoning_content")
+            if msg.get("role") != "assistant":
+                continue
+            if source_field in msg and target_field not in msg:
+                msg[target_field] = msg.pop(source_field)
         return body
 
 

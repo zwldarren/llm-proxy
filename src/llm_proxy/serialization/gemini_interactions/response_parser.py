@@ -107,6 +107,7 @@ class GeminiInteractionsResponseParserMixin:
                         ThinkingBlock(
                             thinking="\n".join(texts),
                             signature=signature,
+                            signature_origin="gemini" if signature else None,
                         )
                     )
             elif step_type == "function_call":

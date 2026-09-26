@@ -430,6 +430,8 @@ async def list_input_items(
             )
         items = items[position + 1 :]
     data = items[:limit]
+    if "reasoning.encrypted_content" not in include:
+        data = [_without_reasoning_encrypted_content(item) for item in data]
     return {
         "object": "list",
         "data": data,
@@ -457,6 +459,22 @@ def _as_input_items(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return []
+
+
+def _without_reasoning_encrypted_content(item: Any) -> Any:
+    """Return an input item with a reasoning item's ``encrypted_content`` removed.
+
+    Proxy-materialized input may carry encrypted reasoning the client never
+    received (an Anthropic signature bridged into ``encrypted_content``, or a
+    blob stored from the model output). The spec gates it behind the
+    ``reasoning.encrypted_content`` include value, so it must not leak by
+    default from ``GET /v1/responses/{id}/input_items``.
+    """
+    if not isinstance(item, dict) or item.get("type") != "reasoning":
+        return item
+    if "encrypted_content" not in item:
+        return item
+    return {key: value for key, value in item.items() if key != "encrypted_content"}
 
 
 # =============================================================================

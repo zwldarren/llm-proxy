@@ -67,9 +67,11 @@ for item in items.data:
 - `reasoning.encrypted_content`
 - `message.output_text.logprobs`
 
-Stored items already carry whatever the client sent, so supported values return the
-stored data verbatim. Unknown values → **400** `invalid_include`. An `after` id that
-is not an input item of the response → **400** `invalid_cursor`.
+Stored items are returned as stored. `reasoning.encrypted_content` is stripped
+from stored reasoning items unless it is requested via `include` — the spec gates
+encrypted reasoning behind that value, and proxy-materialized input may carry a
+blob the client never received. Unknown values → **400** `invalid_include`. An
+`after` id that is not an input item of the response → **400** `invalid_cursor`.
 
 ## Pagination
 

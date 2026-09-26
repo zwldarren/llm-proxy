@@ -94,6 +94,10 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         self._reasoning_signature: str = ""
         self._reasoning_is_redacted: bool = False
         self._reasoning_encrypted_content: str | None = None
+        # OpenRouter-style structured reasoning array (last non-empty snapshot).
+        # Carried on the accumulated block's ``extra`` so a streamed turn logs/
+        # persists the same structured reasoning a non-streamed one does.
+        self._reasoning_details: list[dict[str, Any]] = []
         self._tool_calls_buffer: dict[int, dict[str, Any]] = {}
         self._images_buffer: list[dict[str, Any]] = []
         self._audio_data_buffer: str = ""
@@ -320,86 +324,14 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             if not isinstance(delta, dict):
                 continue
 
-            if "content" in delta and delta["content"] is not None:
-                content = delta["content"]
-                if isinstance(content, str):
-                    self._text_buffer += content
-                elif isinstance(content, list):
-                    # Handle content array (e.g., text + images from image generation)
-                    text_parts = []
-                    image_parts = []
-                    for part in content:
-                        if isinstance(part, dict):
-                            if part.get("type") == "text":
-                                text = part.get("text", "")
-                                if text:
-                                    text_parts.append(text)
-                            elif part.get("type") == "image_url":
-                                url = part.get("image_url", {}).get("url", "")
-                                if url:
-                                    image_parts.append(f"![image]({url})")
-                    if text_parts:
-                        self._text_buffer += "".join(text_parts)
-                    if image_parts:
-                        if self._text_buffer:
-                            self._text_buffer += "\n" + "\n".join(image_parts)
-                        else:
-                            self._text_buffer += "\n".join(image_parts)
-
-            if "reasoning_content" in delta and delta["reasoning_content"] is not None:
-                self._reasoning_buffer += delta["reasoning_content"]
-            elif "reasoning" in delta and delta["reasoning"] is not None:
-                self._reasoning_buffer += delta["reasoning"]
-
-            if "reasoning_signature" in delta and delta["reasoning_signature"] is not None:
-                self._reasoning_signature += delta["reasoning_signature"]
-            if "reasoning_is_redacted" in delta and delta["reasoning_is_redacted"]:
-                self._reasoning_is_redacted = True
-
-            if "encrypted_content" in delta and delta["encrypted_content"] is not None:
-                self._reasoning_encrypted_content = delta["encrypted_content"]
-
-            if "tool_calls" in delta and isinstance(delta["tool_calls"], list):
-                for tc in delta["tool_calls"]:
-                    if not isinstance(tc, dict):
-                        continue
-                    idx = tc.get("index", 0)
-                    if idx not in self._tool_calls_buffer:
-                        tc_type = tc.get("type", "function")
-                        if tc_type == "custom":
-                            self._tool_calls_buffer[idx] = {
-                                "id": "",
-                                "type": "custom",
-                                "custom": {"name": "", "input": ""},
-                            }
-                        else:
-                            self._tool_calls_buffer[idx] = {
-                                "id": "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                                "thought_signature": None,
-                            }
-
-                    if "id" in tc and tc["id"]:
-                        self._tool_calls_buffer[idx]["id"] = tc["id"]
-                    if "type" in tc and tc["type"]:
-                        self._tool_calls_buffer[idx]["type"] = tc["type"]
-                    if "function" in tc and isinstance(tc["function"], dict):
-                        func = tc["function"]
-                        if "name" in func and func["name"]:
-                            self._tool_calls_buffer[idx]["function"]["name"] = func["name"]
-                        if "arguments" in func and func["arguments"]:
-                            self._tool_calls_buffer[idx]["function"]["arguments"] += func[
-                                "arguments"
-                            ]
-                    if "thought_signature" in tc and tc["thought_signature"]:
-                        self._tool_calls_buffer[idx]["thought_signature"] = tc["thought_signature"]
-                    if "custom" in tc and isinstance(tc["custom"], dict):
-                        custom = tc["custom"]
-                        if "name" in custom and custom["name"]:
-                            self._tool_calls_buffer[idx]["custom"]["name"] = custom["name"]
-                        if "input" in custom and custom["input"]:
-                            self._tool_calls_buffer[idx]["custom"]["input"] += custom["input"]
+            # Buffer the three content kinds in canonical order
+            # (reasoning precedes visible content, which precedes tool calls).
+            # Each helper flushes the opposite kinds at a boundary so an
+            # interleaved turn keeps every segment as its own block instead of
+            # merging text and concatenating signatures.
+            self._accumulate_reasoning_delta(delta)
+            self._accumulate_text_delta(delta)
+            self._accumulate_tool_calls_delta(delta)
 
             # Accumulate image output (OpenRouter image generation via chat completions)
             if "images" in delta and isinstance(delta["images"], list):
@@ -422,63 +354,214 @@ class OpenAIStreamingTransformer(StreamingTransformer):
                 self._finish_reason = finish_reason
                 self._finalize_accumulation()
 
-    def _finalize_accumulation(self) -> None:
-        """Finalize and add accumulated content to _accumulated_output."""
-        if self._reasoning_buffer:
-            if self._reasoning_is_redacted:
-                self._accumulated_output.append(RedactedThinkingBlock(data=self._reasoning_buffer))
-            else:
-                self._accumulated_output.append(
-                    ThinkingBlock(
-                        thinking=self._reasoning_buffer,
-                        signature=self._reasoning_signature or None,
-                        encrypted_content=self._reasoning_encrypted_content,
-                    )
-                )
-            self._reasoning_buffer = ""
-            self._reasoning_signature = ""
-            self._reasoning_is_redacted = False
-            self._reasoning_encrypted_content = None
+    def _accumulate_reasoning_delta(self, delta: dict[str, Any]) -> None:
+        """Buffer one delta's reasoning, closing any preceding text/tool block.
 
+        Reasoning segments interleave with tool calls (``thinking -> tool ->
+        thinking``); flushing the previously-open segment at the boundary keeps
+        each segment its own block instead of merging their text and
+        concatenating their signatures.
+        """
+        reasoning = delta.get("reasoning_content")
+        if not isinstance(reasoning, str) or not reasoning:
+            alternate = delta.get("reasoning")
+            reasoning = alternate if isinstance(alternate, str) and alternate else ""
+        signature = delta.get("reasoning_signature")
+        encrypted = delta.get("encrypted_content")
+        details = delta.get("reasoning_details")
+        has_signature = isinstance(signature, str) and bool(signature)
+        has_encrypted = isinstance(encrypted, str) and bool(encrypted)
+        has_details = isinstance(details, list) and bool(details)
+        if not (reasoning or has_signature or has_encrypted or has_details):
+            return
+
+        # A new reasoning segment starts: close the segment before it.
+        self._flush_text()
+        self._flush_tools()
+
+        if reasoning:
+            self._reasoning_buffer += reasoning
+        if has_signature:
+            self._reasoning_signature += signature
+        if delta.get("reasoning_is_redacted"):
+            self._reasoning_is_redacted = True
+        if has_encrypted:
+            self._reasoning_encrypted_content = encrypted
+        if has_details:
+            self._reasoning_details = [d for d in details if isinstance(d, dict)]
+
+    def _accumulate_text_delta(self, delta: dict[str, Any]) -> None:
+        """Buffer one delta's visible text/images, closing preceding blocks."""
+        if "content" not in delta or delta["content"] is None:
+            return
+        content = delta["content"]
+        text_parts: list[str] = []
+        image_parts: list[str] = []
+        if isinstance(content, str):
+            if content:
+                text_parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    text = part.get("text", "")
+                    if text:
+                        text_parts.append(text)
+                elif part.get("type") == "image_url":
+                    url = part.get("image_url", {}).get("url", "")
+                    if url:
+                        image_parts.append(f"![image]({url})")
+        if not text_parts and not image_parts:
+            return
+
+        # Visible content starts: close the preceding reasoning/tool segment.
+        self._flush_reasoning()
+        self._flush_tools()
+
+        if text_parts:
+            self._text_buffer += "".join(text_parts)
+        if image_parts:
+            joined = "\n".join(image_parts)
+            if self._text_buffer:
+                self._text_buffer += "\n" + joined
+            else:
+                self._text_buffer += joined
+
+    def _accumulate_tool_calls_delta(self, delta: dict[str, Any]) -> None:
+        """Buffer one delta's tool calls, closing preceding reasoning/text."""
+        tool_calls = delta.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            return
+
+        # A tool call starts: close the preceding reasoning/text segment.
+        self._flush_reasoning()
+        self._flush_text()
+
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            idx = tc.get("index", 0)
+            if idx not in self._tool_calls_buffer:
+                tc_type = tc.get("type", "function")
+                if tc_type == "custom":
+                    self._tool_calls_buffer[idx] = {
+                        "id": "",
+                        "type": "custom",
+                        "custom": {"name": "", "input": ""},
+                    }
+                else:
+                    self._tool_calls_buffer[idx] = {
+                        "id": "",
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                        "thought_signature": None,
+                    }
+
+            if "id" in tc and tc["id"]:
+                self._tool_calls_buffer[idx]["id"] = tc["id"]
+            if "type" in tc and tc["type"]:
+                self._tool_calls_buffer[idx]["type"] = tc["type"]
+            if "function" in tc and isinstance(tc["function"], dict):
+                func = tc["function"]
+                if "name" in func and func["name"]:
+                    self._tool_calls_buffer[idx]["function"]["name"] = func["name"]
+                if "arguments" in func and func["arguments"]:
+                    self._tool_calls_buffer[idx]["function"]["arguments"] += func["arguments"]
+            if "thought_signature" in tc and tc["thought_signature"]:
+                self._tool_calls_buffer[idx]["thought_signature"] = tc["thought_signature"]
+            if "custom" in tc and isinstance(tc["custom"], dict):
+                custom = tc["custom"]
+                if "name" in custom and custom["name"]:
+                    self._tool_calls_buffer[idx]["custom"]["name"] = custom["name"]
+                if "input" in custom and custom["input"]:
+                    self._tool_calls_buffer[idx]["custom"]["input"] += custom["input"]
+
+    def _flush_reasoning(self) -> None:
+        """Append the pending reasoning segment as its own block.
+
+        A segment with no text but a signature is kept: the signature is the
+        integrity payload replayed next turn, matching the non-streaming
+        formatter.
+        """
+        if not (self._reasoning_buffer or self._reasoning_details or self._reasoning_signature):
+            return
+        reasoning_details = self._reasoning_details or None
+        if self._reasoning_is_redacted:
+            # The opaque payload rides ``encrypted_content`` on the wire;
+            # ``_reasoning_buffer`` only holds the "[redacted]" display
+            # placeholder, which would fail upstream validation if echoed.
+            self._accumulated_output.append(
+                RedactedThinkingBlock(
+                    data=self._reasoning_encrypted_content or self._reasoning_buffer,
+                    extra={"reasoning_details": reasoning_details} if reasoning_details else {},
+                )
+            )
+        else:
+            self._accumulated_output.append(
+                ThinkingBlock(
+                    thinking=self._reasoning_buffer,
+                    signature=self._reasoning_signature or None,
+                    encrypted_content=self._reasoning_encrypted_content,
+                    extra={"reasoning_details": reasoning_details} if reasoning_details else {},
+                )
+            )
+        self._reasoning_buffer = ""
+        self._reasoning_signature = ""
+        self._reasoning_is_redacted = False
+        self._reasoning_encrypted_content = None
+        self._reasoning_details = []
+
+    def _flush_text(self) -> None:
+        """Append the pending visible text as its own block."""
         if self._text_buffer:
             self._accumulated_output.append(TextBlock(text=self._text_buffer))
             self._text_buffer = ""
 
-        if self._tool_calls_buffer:
-            for idx in sorted(self._tool_calls_buffer.keys()):
-                tc = self._tool_calls_buffer[idx]
-                tc_type = tc.get("type", "function")
-                if tc_type == "custom":
-                    if tc["id"] and tc["custom"]["name"]:
-                        self._accumulated_output.append(
-                            CustomToolUseBlock(
-                                id=tc["id"],
-                                name=tc["custom"]["name"],
-                                input=tc["custom"]["input"],
-                            )
+    def _flush_tools(self) -> None:
+        """Append buffered tool calls as blocks, in index order."""
+        if not self._tool_calls_buffer:
+            return
+        for idx in sorted(self._tool_calls_buffer.keys()):
+            tc = self._tool_calls_buffer[idx]
+            tc_type = tc.get("type", "function")
+            if tc_type == "custom":
+                if tc["id"] and tc["custom"]["name"]:
+                    self._accumulated_output.append(
+                        CustomToolUseBlock(
+                            id=tc["id"],
+                            name=tc["custom"]["name"],
+                            input=tc["custom"]["input"],
                         )
-                else:
-                    if tc["id"] and tc["function"]["name"]:
-                        try:
-                            tool_input = (
-                                orjson.loads(tc["function"]["arguments"])
-                                if tc["function"]["arguments"]
-                                else {}
-                            )
-                        except JSONDecodeError:
-                            tool_input = {}
+                    )
+            else:
+                if tc["id"] and tc["function"]["name"]:
+                    try:
+                        tool_input = (
+                            orjson.loads(tc["function"]["arguments"])
+                            if tc["function"]["arguments"]
+                            else {}
+                        )
+                    except JSONDecodeError:
+                        tool_input = {}
 
-                        self._accumulated_output.append(
-                            ToolUseBlock(
-                                id=tc["id"],
-                                name=tc["function"]["name"],
-                                input=tool_input,
-                                extra={"thought_signature": tc.get("thought_signature")}
-                                if tc.get("thought_signature")
-                                else {},
-                            )
+                    self._accumulated_output.append(
+                        ToolUseBlock(
+                            id=tc["id"],
+                            name=tc["function"]["name"],
+                            input=tool_input,
+                            extra={"thought_signature": tc.get("thought_signature")}
+                            if tc.get("thought_signature")
+                            else {},
                         )
-            self._tool_calls_buffer = {}
+                    )
+        self._tool_calls_buffer = {}
+
+    def _finalize_accumulation(self) -> None:
+        """Finalize and add accumulated content to _accumulated_output."""
+        self._flush_reasoning()
+        self._flush_text()
+        self._flush_tools()
 
         # Accumulate image output blocks
         if self._images_buffer:

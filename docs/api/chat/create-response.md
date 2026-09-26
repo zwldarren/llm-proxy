@@ -108,6 +108,23 @@ Key parameters:
 `conversation` and `prompt` are forwarded only to native Responses providers; on other
 providers they are dropped. Unknown `include` values are accepted and forwarded.
 
+Reasoning items carry `encrypted_content` when the client requests
+`include: ["reasoning.encrypted_content"]` **or** when the response is stateless
+(`store: false`) — the current OpenAI reasoning docs return encrypted reasoning by
+default in stateless mode, with `include` kept as the legacy explicit request.
+
+Anthropic-origin reasoning items additionally carry their verification payload
+(`thinking.signature` / `redacted_thinking.data`) in `encrypted_content`
+regardless of `include` or `store` — the Responses wire has no other field for it,
+and dropping it would break the next turn's extended thinking.
+
+::: tip Zero Data Retention (ZDR)
+ZDR organizations are stateless upstream, but when `store` is omitted the proxy
+cannot see that and treats the response as stored, so it gates genuine encrypted
+reasoning behind `include`. Pass `store: false` or
+`include: ["reasoning.encrypted_content"]` explicitly to receive it.
+:::
+
 ## Response
 
 The response object carries the full spec surface: `id`, `status` (`queued`,

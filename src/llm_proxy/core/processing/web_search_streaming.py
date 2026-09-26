@@ -418,6 +418,12 @@ class WebSearchStreamProcessor:
             cont_transformer = cont_cls.continuation(**cont_kwargs)
 
             if src_state is not None:
+                # Preserve the encrypted-reasoning decision across the
+                # continuation: it depends on include/store, which the
+                # continuation kwargs do not carry.
+                cont_transformer.state.include_reasoning_encrypted = getattr(
+                    src_state, "include_reasoning_encrypted", False
+                )
                 for idx, item in src_state.pending_items.items():
                     if item.get("type") == "web_search_call":
                         cont_transformer.state.pending_items[idx] = dict(item)

@@ -18,6 +18,7 @@ from typing import Any
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models.finish_reasons import ANTHROPIC_TO_OPENAI
 from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
+from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
@@ -207,6 +208,16 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
 
         if block_type == "redacted_thinking":
             self._thinking_signature_buffer = ""
+            delta: dict[str, Any] = {
+                "reasoning_content": REDACTED_THINKING_TEXT,
+                "reasoning_is_redacted": True,
+            }
+            # Preserve the opaque payload: "[redacted]" is only a display
+            # placeholder, and clients must echo the real ``data`` back
+            # verbatim on the next turn for the block to validate.
+            redacted_data = block.get("data")
+            if redacted_data:
+                delta["encrypted_content"] = redacted_data
             return _make_openai_chunk(
                 self._response_id,
                 self._model,
@@ -214,10 +225,7 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
                 choices=[
                     {
                         "index": 0,
-                        "delta": {
-                            "reasoning_content": "[redacted]",
-                            "reasoning_is_redacted": True,
-                        },
+                        "delta": delta,
                         "finish_reason": None,
                     }
                 ],

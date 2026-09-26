@@ -184,6 +184,53 @@ class TestThinkingStreaming:
 
 
 class TestToolCallStreaming:
+    def test_first_tool_delta_carries_thought_signature(self):
+        """The thought signature snapshotted on a function_call must reach the
+        client so a stateless caller can echo it back (the adapter cache only
+        covers same-process continuations)."""
+        conv = make_transformer()
+        conv.convert_chunk(
+            {
+                "type": "step.start",
+                "index": 0,
+                "step": {"type": "thought", "signature": "SIG_T"},
+            }
+        )
+        conv.convert_chunk(
+            {
+                "type": "step.start",
+                "index": 1,
+                "step": {"type": "function_call", "id": "fc_1", "name": "f"},
+            }
+        )
+        chunk = conv.convert_chunk(
+            {
+                "type": "step.delta",
+                "index": 1,
+                "delta": {"type": "arguments", "partial_arguments": "{}"},
+            }
+        )
+        assert chunk["choices"][0]["delta"]["tool_calls"][0]["thought_signature"] == "SIG_T"
+
+    def test_step_stop_without_deltas_carries_thought_signature(self):
+        conv = make_transformer()
+        conv.convert_chunk(
+            {
+                "type": "step.start",
+                "index": 0,
+                "step": {"type": "thought", "signature": "SIG_S"},
+            }
+        )
+        conv.convert_chunk(
+            {
+                "type": "step.start",
+                "index": 1,
+                "step": {"type": "function_call", "id": "fc_1", "name": "f"},
+            }
+        )
+        chunk = conv.convert_chunk({"type": "step.stop", "index": 1, "status": "waiting"})
+        assert chunk["choices"][0]["delta"]["tool_calls"][0]["thought_signature"] == "SIG_S"
+
     def test_partial_arguments_stream_incrementally(self):
         conv = make_transformer()
         conv.convert_chunk(

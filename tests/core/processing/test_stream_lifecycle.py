@@ -521,6 +521,33 @@ class TestStreamLifecycleNativePassthrough:
         assert '"model":"alias-m"' in payload
         assert '"model":"upstream-m"' not in payload
 
+    async def test_native_openai_reasoning_field_renamed_and_learned(self) -> None:
+        """The lifecycle hands the adapter to the handler, so it learns the field.
+
+        The rename itself lives in the handler (the conversion seam); this
+        covers the wiring that makes the adapter's response-side knowledge
+        reach it.
+        """
+        adapter = MagicMock()
+        lifecycle = _lifecycle(
+            stream=_stream(
+                'data: {"id":"1","model":"glm-5","choices":[{"delta":{"reasoning":"plan"}}]}\n\n'
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="glm-5"),
+            current_adapter=adapter,
+        )
+
+        frames = await _collect(lifecycle.events())
+
+        payload = "".join(frames)
+        assert '"reasoning_content":"plan"' in payload
+        assert '"reasoning":' not in payload
+        adapter.record_reasoning_field_preference.assert_called_once_with(
+            "reasoning", model="glm-5", response_model="glm-5"
+        )
+
     async def test_native_openai_usage_frame_captured_and_forwarded(self) -> None:
         usage_frame = (
             'data: {"id":"1","model":"glm-5","choices":[],"usage":'
@@ -989,7 +1016,13 @@ class TestStreamLifecycleLoggedBody:
         assert context.assembled_response_body is not None
         assert context.assembled_response_body["choices"][0]["message"]["content"] == "partial"
 
-    async def test_native_openai_stream_is_not_accumulated_when_sampled_out(self) -> None:
+    async def test_native_openai_stream_accumulates_for_cache_when_sampled_out(self) -> None:
+        """Frames still reach the accumulator when the log is sampled out.
+
+        Accumulation feeds the reasoning cache (``_cache_native_reasoning``),
+        which must not depend on the log-sampling decision; only the assembled
+        request-log body stays absent.
+        """
         context = _context()
         context.should_capture_full_body = False
         transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
@@ -1003,14 +1036,12 @@ class TestStreamLifecycleLoggedBody:
 
         await _collect(lifecycle.events())
 
-        # The frame never reached the accumulator: flushing what is left yields
-        # nothing (the buffers are where accumulation lands before a finalize).
-        transformer.flush_pending_accumulation()
-        assert transformer.get_accumulated_output() == []
+        assert any(isinstance(b, TextBlock) for b in transformer.get_accumulated_output())
         assert context.should_capture_raw_stream is False
         assert context.assembled_response_body is None
 
-    async def test_native_openai_explicit_raw_capture_skips_accumulation(self) -> None:
+    async def test_native_openai_raw_capture_still_accumulates_for_cache(self) -> None:
+        """Raw-SSE capture does not stop the reasoning-cache accumulation."""
         context = _context()
         context.should_capture_raw_stream = True
         transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
@@ -1024,9 +1055,47 @@ class TestStreamLifecycleLoggedBody:
 
         await _collect(lifecycle.events())
 
-        transformer.flush_pending_accumulation()
-        assert transformer.get_accumulated_output() == []
+        assert any(isinstance(b, TextBlock) for b in transformer.get_accumulated_output())
         assert context.assembled_response_body is None
+
+    async def test_native_openai_reasoning_cache_written_when_sampled_out(self) -> None:
+        """A sampled-out native stream still teaches the reasoning cache."""
+        from llm_proxy.core import reasoning_cache
+
+        reasoning_cache.clear()
+        try:
+            context = _context()
+            context.should_capture_full_body = False
+            transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-native")
+            lifecycle = _lifecycle(
+                stream=_stream(
+                    _native_frame({"reasoning_content": "plan"}),
+                    _native_frame(
+                        {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {"name": "lookup", "arguments": "{}"},
+                                }
+                            ]
+                        },
+                        "tool_calls",
+                    ),
+                ),
+                native_streaming=True,
+                protocol_name="openai",
+                transformer=transformer,
+                stream_request=_request(model="glm-5"),
+                event_context=context,
+            )
+
+            await _collect(lifecycle.events())
+
+            assert reasoning_cache.get("call_1") == "plan"
+        finally:
+            reasoning_cache.clear()
 
     async def test_native_anthropic_stream_is_reassembled_not_buffered(self) -> None:
         """Native Anthropic frames rebuild the message the client received."""

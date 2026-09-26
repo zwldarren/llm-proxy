@@ -1169,3 +1169,164 @@ class TestReasoningDetailsRoundTrip:
         message = formatted["choices"][0]["message"]
         assert message["reasoning_details"] == self.DETAILS
         assert message["reasoning_content"] == "step 1"
+
+
+class TestOpenAIReasoningSegmentsRoundTrip:
+    """Multiple thinking segments and redacted payloads must survive a rebuild.
+
+    An interleaved ``thinking -> tool_use -> thinking`` turn cannot be carried
+    by the single ``reasoning_content`` field, so the formatter emits a
+    ``reasoning_segments`` array; a redacted block must carry its opaque
+    ``data`` as ``encrypted_content`` (the streaming path already does).
+    """
+
+    def _format(self, output) -> dict:
+        response = _openai_serializer.format_response(
+            InternalResponse(id="chatcmpl-x", model="m", output=output)
+        )
+        return response["choices"][0]["message"]
+
+    def _reparse(self, message: dict):
+        raw = {
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}, {**message, "role": "assistant"}],
+        }
+        unified = _openai_serializer.parse_request(raw)
+        return unified.conversation.messages[-1].content
+
+    def test_redacted_block_carries_opaque_data(self):
+        from llm_proxy.models import RedactedThinkingBlock
+
+        message = self._format([RedactedThinkingBlock(data="OPAQUE-DATA")])
+        assert message["reasoning_content"] == "[redacted]"
+        assert message["reasoning_is_redacted"] is True
+        assert message["encrypted_content"] == "OPAQUE-DATA"
+
+        blocks = self._reparse(message)
+        redacted = [b for b in blocks if isinstance(b, RedactedThinkingBlock)]
+        assert len(redacted) == 1
+        assert redacted[0].data == "OPAQUE-DATA"
+
+    def test_signature_only_thinking_round_trips(self):
+        """An empty-text, signature-bearing segment must not be dropped."""
+        from llm_proxy.models import ThinkingBlock
+
+        message = self._format([ThinkingBlock(thinking="", signature="SIG")])
+        assert message["reasoning_signature"] == "SIG"
+        assert "reasoning_content" not in message
+
+        blocks = self._reparse(message)
+        thinking = [b for b in blocks if isinstance(b, ThinkingBlock)]
+        assert len(thinking) == 1
+        assert thinking[0].thinking == ""
+        assert thinking[0].signature == "SIG"
+
+    def test_multiple_thinking_segments_round_trip(self):
+        from llm_proxy.models import ThinkingBlock, ToolUseBlock
+
+        output = [
+            ThinkingBlock(thinking="first", signature="S1"),
+            ToolUseBlock(id="t1", name="search", input={"q": "x"}),
+            ThinkingBlock(thinking="second", signature="S2"),
+        ]
+        message = self._format(output)
+        # ``after_tool_calls`` positions each segment relative to the tool calls
+        # so the parse side can re-interleave instead of flattening reasoning.
+        assert message["reasoning_segments"] == [
+            {"type": "thinking", "text": "first", "signature": "S1"},
+            {"type": "thinking", "text": "second", "signature": "S2", "after_tool_calls": 1},
+        ]
+
+        blocks = self._reparse(message)
+        thinking = [b for b in blocks if isinstance(b, ThinkingBlock)]
+        assert [b.thinking for b in thinking] == ["first", "second"]
+        assert [b.signature for b in thinking] == ["S1", "S2"]
+        # The second segment stays after the tool call it followed.
+        kinds = [type(b).__name__ for b in blocks]
+        assert kinds.index("ToolUseBlock") < max(
+            i for i, kind in enumerate(kinds) if kind == "ThinkingBlock"
+        )
+
+    def test_interleaved_segments_keep_tool_positions(self):
+        """A multi-tool interleave round-trips in emitted order."""
+        from llm_proxy.models import ThinkingBlock, ToolUseBlock
+
+        output = [
+            ThinkingBlock(thinking="first", signature="S1"),
+            ToolUseBlock(id="t1", name="search", input={}),
+            ThinkingBlock(thinking="second", signature="S2"),
+            ToolUseBlock(id="t2", name="lookup", input={}),
+            ThinkingBlock(thinking="third", signature="S3"),
+        ]
+        blocks = self._reparse(self._format(output))
+        ordered = [
+            (type(b).__name__, getattr(b, "thinking", None) or getattr(b, "name", None))
+            for b in blocks
+            if isinstance(b, (ThinkingBlock, ToolUseBlock))
+        ]
+        assert ordered == [
+            ("ThinkingBlock", "first"),
+            ("ToolUseBlock", "search"),
+            ("ThinkingBlock", "second"),
+            ("ToolUseBlock", "lookup"),
+            ("ThinkingBlock", "third"),
+        ]
+
+
+class TestOpenAIStreamingInterleavedThinking:
+    """The accumulated output must keep interleaved reasoning segments apart.
+
+    An interleaved ``thinking -> tool -> thinking`` stream used to merge both
+    segments into one ``ThinkingBlock`` and concatenate their signatures, which
+    corrupted the request log, the stored response and the reasoning cache.
+    """
+
+    def _transform(self, *deltas):
+        transformer = OpenAIStreamingTransformer(model="m", request_id="r")
+        for delta, finish in deltas:
+            transformer.transform(
+                {"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+            )
+        return transformer.get_accumulated_output()
+
+    def test_segments_and_signatures_stay_with_their_own_block(self):
+        from llm_proxy.models import ToolUseBlock
+
+        output = self._transform(
+            ({"reasoning_content": "A", "reasoning_signature": "SA"}, None),
+            (
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "f", "arguments": "{}"},
+                        }
+                    ]
+                },
+                None,
+            ),
+            ({"reasoning_content": "B", "reasoning_signature": "SB"}, None),
+            ({"content": "done"}, "stop"),
+        )
+        assert [type(b).__name__ for b in output] == [
+            "ThinkingBlock",
+            "ToolUseBlock",
+            "ThinkingBlock",
+            "TextBlock",
+        ]
+        assert output[0].thinking == "A"
+        assert output[0].signature == "SA"
+        assert output[2].thinking == "B"
+        assert output[2].signature == "SB"
+        assert isinstance(output[1], ToolUseBlock)
+
+    def test_signature_only_segment_is_kept(self):
+        from llm_proxy.models import ThinkingBlock
+
+        output = self._transform(({"reasoning_signature": "SIG"}, "stop"))
+        thinking = [b for b in output if isinstance(b, ThinkingBlock)]
+        assert len(thinking) == 1
+        assert thinking[0].thinking == ""
+        assert thinking[0].signature == "SIG"

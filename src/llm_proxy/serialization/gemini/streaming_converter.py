@@ -43,6 +43,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
         self._tool_calls_buffer: list[dict[str, Any]] = []
         self._reasoning_buffer: str = ""
         self._reasoning_signature_buffer: str = ""
+        self._reasoning_signature_emitted: bool = False
         self._usage: StreamingUsage | None = None
         # Native Google Search grounding query count (billed per search)
         self._web_search_requests: int = 0
@@ -193,6 +194,21 @@ class GeminiStreamingTransformer(StreamingTransformer):
         if reasoning_parts:
             delta["reasoning_content"] = "".join(reasoning_parts)
             self._reasoning_buffer += "".join(reasoning_parts)
+
+        # A Gemini thought part's ``thoughtSignature`` is integrity data the
+        # client must be able to echo back; surface it as the canonical
+        # ``reasoning_signature`` delta (both the OpenAI and Anthropic protocol
+        # transformers replay it — the latter as a ``signature_delta``). Emitted
+        # once, in the same or a following chunk as the reasoning text. Known
+        # limitation: a response with several thought parts without an
+        # intervening tool call keeps only the first signature, because this
+        # converter accumulates the whole turn into one reasoning block and the
+        # downstream transformers concatenate ``reasoning_signature`` deltas
+        # (Anthropic's signature_delta semantics), so re-emitting a distinct
+        # whole signature per part would corrupt them.
+        if self._reasoning_signature_buffer and not self._reasoning_signature_emitted:
+            delta["reasoning_signature"] = self._reasoning_signature_buffer
+            self._reasoning_signature_emitted = True
 
         if tool_calls:
             delta["tool_calls"] = tool_calls

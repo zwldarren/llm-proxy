@@ -13,7 +13,7 @@ from llm_proxy.models import (
 from llm_proxy.protocols.registry import register_protocol_serializer
 from llm_proxy.protocols.serializer_base import ProtocolSerializer
 from llm_proxy.serialization.anthropic.mixin import AnthropicContentMixin
-from llm_proxy.serialization.content_parsers import parse_reasoning_content
+from llm_proxy.serialization.content_parsers import parse_reasoning_blocks
 
 if TYPE_CHECKING:
     from llm_proxy.serialization.format_context import FormatContext
@@ -119,8 +119,8 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
             # Reasoning precedes the answer text, so insert at the front of the
             # block list (see protocols/openai/parsing.py for the same fix).
             if role == "assistant":
-                reasoning_block = parse_reasoning_content(msg)
-                if reasoning_block is not None:
+                reasoning_blocks = parse_reasoning_blocks(msg)
+                for reasoning_block in reversed(reasoning_blocks):
                     content.insert(0, reasoning_block)
 
             if role == "user":

@@ -17,20 +17,112 @@ from llm_proxy.models import (
 from llm_proxy.models.content_blocks.anthropic_builtin import CacheControl
 from llm_proxy.models.types import AudioSource, ImageSource, VideoSource
 
+#: Placeholder text emitted for ``RedactedThinkingBlock`` summaries on the
+#: client wire. The opaque payload rides ``encrypted_content`` (written by the
+#: OpenResponses, OpenAI and Anthropic formatters/converter), while this marker
+#: is only a display placeholder the parse side recognizes to restore the block
+#: type on round-trip. Single source for every site that emits or recognizes it.
+REDACTED_THINKING_TEXT = "[redacted]"
+
 
 def parse_reasoning_content(msg: dict) -> ThinkingBlock | RedactedThinkingBlock | None:
     """Parse OpenAI-style reasoning_content into a ThinkingBlock.
 
     Reasoning precedes the answer text, so callers insert the result at the
-    front of the block list. Returns None when the message carries no
-    reasoning_content.
+    front of the block list. Returns None when the message carries no reasoning
+    at all. Accepts both OpenAI's ``reasoning_content`` and the
+    OpenRouter/NanoGPT ``reasoning`` spelling.
+
+    A segment with no text but a ``reasoning_signature`` or ``encrypted_content``
+    is kept: those are integrity payloads the upstream verifies on replay, so
+    dropping a "signature-only" thinking block breaks interleaved-thinking
+    continuations (the Anthropic formatter preserves the same shape).
     """
     reasoning_text = msg.get("reasoning_content")
-    if not reasoning_text or not isinstance(reasoning_text, str):
-        return None
+    if not isinstance(reasoning_text, str) or not reasoning_text:
+        alternate = msg.get("reasoning")
+        if isinstance(alternate, str) and alternate:
+            reasoning_text = alternate
+    if not isinstance(reasoning_text, str):
+        reasoning_text = ""
+    encrypted = msg.get("encrypted_content")
+    if not isinstance(encrypted, str):
+        encrypted = None
+    signature = msg.get("reasoning_signature")
+    if not isinstance(signature, str):
+        signature = None
     if msg.get("reasoning_is_redacted", False):
-        return RedactedThinkingBlock(data=reasoning_text)
-    return ThinkingBlock(thinking=reasoning_text, signature=msg.get("reasoning_signature"))
+        # The opaque payload rides ``encrypted_content`` (written by the
+        # streaming formatter); ``reasoning_content`` is only the
+        # "[redacted]" display placeholder, so prefer the real payload.
+        data = encrypted or reasoning_text
+        return RedactedThinkingBlock(data=data) if data else None
+    if not reasoning_text and not signature and not encrypted:
+        return None
+    return ThinkingBlock(
+        thinking=reasoning_text,
+        signature=signature,
+        encrypted_content=encrypted,
+    )
+
+
+def parse_reasoning_segments(
+    msg: dict,
+) -> list[tuple[ThinkingBlock | RedactedThinkingBlock, int]]:
+    """Parse reasoning segments plus their position relative to tool calls.
+
+    Returns ``(block, after_tool_calls)`` pairs in original order. The position
+    is the number of tool calls that preceded the segment in the assistant turn
+    (written by the OpenAI protocol formatter as ``after_tool_calls``); callers
+    use it to re-interleave reasoning and tool calls the way the model emitted
+    them instead of flattening every reasoning block to the front. The
+    single-segment fallback has no recorded position and reports ``0``, which
+    keeps the historical "reasoning precedes the answer" behavior.
+    """
+    segments = msg.get("reasoning_segments")
+    if isinstance(segments, list) and segments:
+        parsed: list[tuple[ThinkingBlock | RedactedThinkingBlock, int]] = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            position = segment.get("after_tool_calls")
+            position = position if isinstance(position, int) and position > 0 else 0
+            if segment.get("type") == "redacted":
+                data = segment.get("data")
+                if isinstance(data, str) and data:
+                    parsed.append((RedactedThinkingBlock(data=data), position))
+                continue
+            text = segment.get("text")
+            signature = segment.get("signature")
+            encrypted = segment.get("encrypted_content")
+            if text or signature or encrypted:
+                parsed.append(
+                    (
+                        ThinkingBlock(
+                            thinking=text if isinstance(text, str) else "",
+                            signature=signature if isinstance(signature, str) else None,
+                            encrypted_content=encrypted if isinstance(encrypted, str) else None,
+                        ),
+                        position,
+                    )
+                )
+        if parsed:
+            return parsed
+    single = parse_reasoning_content(msg)
+    return [(single, 0)] if single is not None else []
+
+
+def parse_reasoning_blocks(msg: dict) -> list[ThinkingBlock | RedactedThinkingBlock]:
+    """Parse every reasoning segment from an OpenAI-format assistant message.
+
+    Prefers the proxy's multi-segment carrier ``reasoning_segments`` — written
+    by the OpenAI protocol formatter when an assistant turn interleaved several
+    thinking / redacted segments, which the single ``reasoning_content`` field
+    cannot represent — and otherwise falls back to ``parse_reasoning_content``.
+    Returns blocks in their original order; callers that do not track tool-call
+    positions prepend them (reasoning precedes the answer text).
+    """
+    return [block for block, _ in parse_reasoning_segments(msg)]
 
 
 def parse_text_block(part: dict) -> TextBlock | None:

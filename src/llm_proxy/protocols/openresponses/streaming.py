@@ -97,11 +97,20 @@ class OpenResponsesStreamingState:
     created_at: int = field(default_factory=lambda: time.time_ns() // 1_000_000_000)
     # Reasoning config from the original request
     reasoning: dict[str, Any] | None = None
-    # Encrypted reasoning content (from include: reasoning.encrypted_content)
-    reasoning_encrypted_content: str | None = None
-    # Per-item encrypted content (captured when each reasoning item is created)
+    # Captured encrypted reasoning blobs not yet attributed to an output item,
+    # in arrival order. Consumed FIFO as reasoning items open (delta-carried
+    # blobs) or close (blobs an upstream reveals only at item/response
+    # completion), so interleaved multi-item streams keep each blob on the
+    # item that produced it.
+    pending_reasoning_encrypted: list[str] = field(default_factory=list)
+    # Every blob ever captured, for dedupe: an upstream may repeat the same
+    # payload on a reasoning delta and again in the terminal response.
+    seen_reasoning_encrypted: set[str] = field(default_factory=set)
+    # Per-item encrypted content (attributed when each reasoning item is
+    # created or closed).
     reasoning_encrypted_contents: dict[int, str] = field(default_factory=dict)
-    # Whether reasoning.encrypted_content was requested in include
+    # Whether encrypted reasoning should be emitted: requested in include, or
+    # implied by a stateless response (store=false).
     include_reasoning_encrypted: bool = False
     # Anthropic thinking signatures (bridged as reasoning-item
     # ``encrypted_content``), tracked per item so multi-block streams keep the
@@ -249,10 +258,13 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     setattr(self.state, echo_field, echo_val)
             if ctx.reasoning is not None:
                 self.state.reasoning = ctx.reasoning
-            if ctx.include is not None:
-                self.state.include_reasoning_encrypted = (
-                    "reasoning.encrypted_content" in ctx.include
-                )
+            # Genuine encrypted reasoning is emitted when the client asks via
+            # ``include`` or when the response is stateless (``store: false``),
+            # matching the current OpenAI reasoning docs; ``include`` remains
+            # accepted as the legacy explicit request.
+            self.state.include_reasoning_encrypted = self.state.store is False or (
+                bool(ctx.include) and "reasoning.encrypted_content" in ctx.include
+            )
             if ctx.tools:
                 from llm_proxy.protocols.openresponses.serializer import (
                     extract_custom_tool_names,
@@ -648,22 +660,32 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         return events
 
     def _maybe_capture_encrypted_content(self, data: dict[str, Any]) -> None:
-        """Capture encrypted reasoning content from the chunk if requested."""
-        if not self.state.include_reasoning_encrypted or self.state.reasoning_encrypted_content:
-            return
+        """Capture encrypted reasoning content from the chunk if requested.
 
-        encrypted = data.get("encrypted_content")
-        if encrypted:
-            self.state.reasoning_encrypted_content = encrypted
+        Genuine OpenAI encrypted reasoning is captured only when the client
+        requested ``reasoning.encrypted_content`` via ``include``.
+        Redacted-thinking payloads bypass that gate: like Anthropic thinking
+        signatures they are integrity data the client must be able to echo
+        back verbatim, not spec-gated encrypted reasoning (the non-streaming
+        formatter emits them ungated for the same reason).
+        """
+        blob = data.get("encrypted_content")
+        redacted = False
+        if not blob:
+            choices = data.get("choices", [])
+            if choices and isinstance(choices[0], dict):
+                delta = choices[0].get("delta", {})
+                if isinstance(delta, dict):
+                    blob = delta.get("encrypted_content")
+                    redacted = bool(delta.get("reasoning_is_redacted"))
+        if not blob or not isinstance(blob, str):
             return
-
-        choices = data.get("choices", [])
-        if choices and isinstance(choices[0], dict):
-            delta = choices[0].get("delta", {})
-            if isinstance(delta, dict):
-                encrypted = delta.get("encrypted_content")
-                if encrypted:
-                    self.state.reasoning_encrypted_content = encrypted
+        if not (self.state.include_reasoning_encrypted or redacted):
+            return
+        if blob in self.state.seen_reasoning_encrypted:
+            return
+        self.state.seen_reasoning_encrypted.add(blob)
+        self.state.pending_reasoning_encrypted.append(blob)
 
     def _update_usage(self, usage: Any) -> None:
         """Update streaming token counts from a usage dict."""

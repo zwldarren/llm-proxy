@@ -259,3 +259,43 @@ def test_transform_chunk_with_multiple_parts(transformer):
 
     assert result is not None
     assert '"content":"Hello world"' in result
+
+
+def test_thought_part_signature_is_emitted_to_the_client(transformer):
+    """A Gemini thought part's ``thoughtSignature`` must reach the client.
+
+    Streaming clients need the signature to echo it back for interleaved
+    thinking; the transformer exposes it as the canonical
+    ``reasoning_signature`` delta (mirroring the Anthropic converter).
+    """
+    gemini_chunk = """{
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "thought": true,
+                    "text": "let me think",
+                    "thoughtSignature": "THOUGHT_SIG"
+                }]
+            }
+        }]
+    }"""
+
+    result = transformer.transform(gemini_chunk)
+
+    assert result is not None
+    assert '"reasoning_content":"let me think"' in result
+    assert '"reasoning_signature":"THOUGHT_SIG"' in result
+
+
+def test_thought_part_signature_emitted_once(transformer):
+    """The signature delta is emitted once, not repeated on every chunk."""
+    first = transformer.transform(
+        '{"candidates": [{"content": {"parts": ['
+        '{"thought": true, "text": "a", "thoughtSignature": "SIG"}]}}]}'
+    )
+    second = transformer.transform(
+        '{"candidates": [{"content": {"parts": [{"thought": true, "text": "b"}]}}]}'
+    )
+
+    assert '"reasoning_signature":"SIG"' in first
+    assert "reasoning_signature" not in second

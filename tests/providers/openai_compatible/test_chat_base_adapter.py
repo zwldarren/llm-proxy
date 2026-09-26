@@ -389,6 +389,20 @@ class TestReasoningFieldAutoDetection:
         finally:
             builder.set_reasoning_field_preference(base_url, "reasoning_content")
 
+    def test_normalize_reasoning_for_request_reverse_rename(self, openai_adapter):
+        """A ``reasoning``-spelled history is converted to ``reasoning_content``.
+
+        The rename must be bidirectional: an OpenRouter-style ``reasoning``
+        field routed to a ``reasoning_content`` provider must not be dropped.
+        """
+        from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
+
+        builder = OpenAIRequestBuilder()
+        body = {"messages": [{"role": "assistant", "content": "x", "reasoning": "thought"}]}
+        result = builder.normalize_reasoning_for_request(body, "https://api.openai.com/v1")
+        assert result["messages"][0]["reasoning_content"] == "thought"
+        assert "reasoning" not in result["messages"][0]
+
     def test_adapter_detects_reasoning_field_from_response(self):
         """Generic OpenAI-compatible adapter switches to `reasoning` after
         the upstream provider returns it in a response."""
@@ -696,7 +710,7 @@ class TestReasoningFieldAutoDetection:
             ],
         }
         try:
-            adapter._record_reasoning_field_preference(
+            adapter.record_reasoning_field_preference(
                 detect_reasoning_field_in_response_body(body_a_response),
                 model="model-a",
                 response_model=body_a_response.get("model"),
