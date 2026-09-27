@@ -124,8 +124,10 @@ exhausted:
 
 - Retries within a provider for `408/429/500/502/503/504` and network/timeout errors
   (`max_retries`, default 3).
-- Fallback across providers up to `max_fallback_attempts` (default 10); `4xx` client
-  errors skip retries and move to the next provider immediately.
+- Fallback across providers up to `max_fallback_attempts` (default 10). Any error
+  is eligible for fallback while another provider remains — the upstream status
+  code / error type is never trusted to block it, because providers misreport
+  errors (a context-window overflow is often a plain `400`).
 
 If everything fails, the last upstream error (or the routing constraint error) is
 what the client receives. The log entry records all attempts

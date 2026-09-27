@@ -32,8 +32,11 @@ WebSocket; the remaining flags are catalog/display metadata.
   orders candidates (`random` by default, or sticky/cost-optimized/balanced).
 - Each mapping is attempted once per request. Failures retry within the provider
   (`max_retries`) and then fall back across providers (`max_fallback_attempts`).
-- Retries happen for `408/429/500/502/503/504` and network/timeout errors; `4xx`
-  client errors move straight to the next provider.
+- **Any** provider error falls back to the next mapping while one remains. The
+  upstream status/error type never blocks a fallback, since providers routinely
+  misreport errors (e.g. a context-window rejection arriving as a generic `400`).
+- Retries happen for `408/429/500/502/503/504` and network/timeout errors before
+  falling back; every other error moves straight to the next provider.
 
 ## Pricing
 

@@ -241,6 +241,14 @@ class ProviderSelector:
     ) -> bool:
         """Determine if we should retry with another provider.
 
+        Any error is eligible for fallback as long as another provider mapping
+        remains. Error classification is only used to detect the
+        developer->system role transform and to enrich the log message -- it
+        never blocks a fallback. Upstreams routinely return a generic status
+        (e.g. a context-window rejection as a plain 400, or an error type we do
+        not recognize), so trusting the classification would surface errors that
+        a lower-priority provider could have served.
+
         Args:
             error: The exception that occurred
             status_code: The HTTP status code
@@ -252,27 +260,41 @@ class ProviderSelector:
             return False
 
         error_category = classify_error(error, status_code)
-        if error_category == ErrorCategory.NON_RETRYABLE:
-            logger.info(f"Error is non-retryable (status={status_code}), not attempting fallback")
-            return False
 
-        if error_category == ErrorCategory.ROLE_ERROR:
-            if not self.state.role_transformed:
-                logger.info("Unsupported role detected, will retry with role transformation")
-                return True
-            logger.info("Role already transformed, not retrying")
-            return False
-
-        if error_category == ErrorCategory.CONTEXT_LENGTH_ERROR:
-            logger.info("Context length exceeded, will try fallback to other provider")
+        # A role rejection is the one case worth handling on the *same*
+        # provider first: normalize ``developer`` -> ``system`` and retry before
+        # spending a fallback. Once transformed, role errors fall through to
+        # normal fallback handling like any other error.
+        if error_category == ErrorCategory.ROLE_ERROR and not self.state.role_transformed:
+            logger.info("Unsupported role detected, will retry with role transformation")
             return True
 
-        priority_groups = self._get_providers_by_priority_with_keys()
-        for group in priority_groups:
-            available = [(p, k) for p, k in group if k not in self.state.used_provider_keys]
-            if available:
-                return True
+        if self._has_available_candidate():
+            logger.info(
+                f"Provider error ({error_category.value}, status={status_code}), "
+                "attempting fallback to next provider"
+            )
+            return True
 
+        logger.info(
+            f"Provider error ({error_category.value}, status={status_code}) and no "
+            "further provider available, not attempting fallback"
+        )
+        return False
+
+    def _has_available_candidate(self) -> bool:
+        """Whether another provider mapping can still be tried.
+
+        Mirrors the availability filter used by ``select_next_provider`` so the
+        retry decision agrees with the selection that follows it.
+        """
+        for group in self._get_providers_by_priority_with_keys():
+            for _provider, key in group:
+                if key in self.state.used_provider_keys:
+                    continue
+                if self.circuit_breaker is not None and not self.circuit_breaker.is_available(key):
+                    continue
+                return True
         return False
 
     def record_last_failure(self) -> None:

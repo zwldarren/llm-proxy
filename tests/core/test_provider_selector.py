@@ -263,12 +263,69 @@ class TestProviderSelectorShouldRetry:
         # Should retry because another provider is available
         assert selector.should_retry(error=ProviderError(message="Error", error_type="api_error"))
 
-    def test_should_not_retry_non_retryable_error(self):
-        """Test should_retry returns False for non-retryable errors."""
+    def test_should_not_retry_when_no_provider_remains(self):
+        """Test should_retry returns False when the only provider already failed."""
         selector = create_test_selector()
+
+        # Spend the sole provider mapping; nothing left to fall back to.
+        selector.select_next_provider()
 
         error = ProviderError(message="Bad request", error_type="api_error", status_code=400)
         assert selector.should_retry(error=error, status_code=400) is False
+
+    def test_should_retry_non_retryable_error_when_fallback_available(self):
+        """Even a nominally non-retryable error must fall back if a provider remains.
+
+        Upstreams can report a context-window rejection as a generic 400; the
+        classifier alone must never block a fallback to a larger-context provider.
+        """
+        selector = create_test_selector(
+            providers=[
+                {"provider": "first", "priority": 2},
+                {"provider": "second", "priority": 1},
+            ]
+        )
+        selector.select_next_provider()
+
+        error = ProviderError(message="Bad request", error_type="api_error", status_code=400)
+        assert selector.should_retry(error=error, status_code=400) is True
+
+    def test_any_error_falls_back_when_provider_remains(self):
+        """Every error shape is a fallback candidate while a provider remains.
+
+        A 256k-context primary followed by a 1m-context fallback is the driving
+        case: the upstream reports the overflow as a plain invalid_request_error,
+        which must still reach the larger-context provider.
+        """
+        error_shapes = [
+            ProviderError(
+                message="This model's maximum context length is 262144 tokens",
+                error_type="invalid_request_error",
+                status_code=400,
+            ),
+            ProviderError(
+                message="Unauthorized",
+                error_type="authentication_error",
+                status_code=401,
+            ),
+            ProviderError(
+                message="I'm a teapot",
+                error_type="invalid_request_error",
+                status_code=418,
+            ),
+            ProviderError(message="Upstream exploded", error_type="api_error", status_code=500),
+            ProviderError(message="Unknown failure", error_type="api_error"),
+        ]
+
+        for error in error_shapes:
+            selector = create_test_selector(
+                providers=[
+                    {"provider": "small-context", "priority": 2},
+                    {"provider": "large-context", "priority": 1},
+                ]
+            )
+            selector.select_next_provider()
+            assert selector.should_retry(error=error, status_code=error.status_code) is True, error
 
     def test_should_retry_retryable_error(self):
         """Test should_retry returns True for retryable errors."""
