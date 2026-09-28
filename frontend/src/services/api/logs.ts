@@ -1,5 +1,6 @@
 import type {
   AuditIntegrityResult,
+  HourlyUsageResponse,
   LogFilter,
   LogListResponse,
   LogRead,
@@ -77,6 +78,16 @@ export const logsApi = {
     if (filter.start_date) params.append("start_date", filter.start_date);
     if (filter.end_date) params.append("end_date", filter.end_date);
     if (filter.log_type) params.append("log_type", filter.log_type);
+    if (filter.model) params.append("model", filter.model);
     return http.get<UsageStatsResponse>(`${BASE_URL}/usage-stats?${params.toString()}`);
+  },
+
+  getHourlyUsage: (filter: UsageStatsFilter = {}) => {
+    const params = new URLSearchParams();
+    if (filter.start_date) params.append("start_date", filter.start_date);
+    if (filter.end_date) params.append("end_date", filter.end_date);
+    if (filter.log_type) params.append("log_type", filter.log_type);
+    if (filter.model) params.append("model", filter.model);
+    return http.get<HourlyUsageResponse>(`${BASE_URL}/usage-stats/hourly?${params.toString()}`);
   },
 };

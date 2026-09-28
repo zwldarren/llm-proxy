@@ -6,6 +6,7 @@ real declarative ORM models (with and without a ``ttft_ms`` column) so the
 SQLAlchemy expressions it builds are valid.
 """
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -83,6 +84,11 @@ def _usage_row(**overrides) -> SimpleNamespace:
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
+
+
+def _row(**columns) -> SimpleNamespace:
+    """Build a grouped-query result row, keyed the way SQLAlchemy labels them."""
+    return SimpleNamespace(_mapping=columns)
 
 
 class TestBuildTimeFilters:
@@ -192,14 +198,32 @@ class TestGetUsageStats:
 
 
 class TestGetUsageByProvider:
-    """Provider-grouped stats are mapped from row tuples."""
+    """Provider-grouped stats are mapped from labelled result rows."""
 
     async def test_maps_provider_rows(self):
         session = MagicMock(spec=AsyncSession)
         result = MagicMock()
         result.all.return_value = [
-            ("openai", 50, 5.0, 500, 1000, 1, 2, 3),
-            ("anthropic", 30, 7.5, 300, 600, 0, 1, 2),
+            _row(
+                provider="openai",
+                requests=50,
+                cost=5.0,
+                input_tokens=500,
+                output_tokens=1000,
+                cache_creation_tokens=1,
+                cache_read_tokens=2,
+                cached_prompt_tokens=3,
+            ),
+            _row(
+                provider="anthropic",
+                requests=30,
+                cost=7.5,
+                input_tokens=300,
+                output_tokens=600,
+                cache_creation_tokens=0,
+                cache_read_tokens=1,
+                cached_prompt_tokens=2,
+            ),
         ]
         session.execute = AsyncMock(return_value=result)
         repo = BaseUsageRepository(session, _make_model(with_ttft=False))
@@ -216,7 +240,19 @@ class TestGetUsageByProvider:
     async def test_includes_ttft_when_requested(self):
         session = MagicMock(spec=AsyncSession)
         result = MagicMock()
-        result.all.return_value = [("openai", 50, 5.0, 500, 1000, 1, 2, 3, 12.0)]
+        result.all.return_value = [
+            _row(
+                provider="openai",
+                requests=50,
+                cost=5.0,
+                input_tokens=500,
+                output_tokens=1000,
+                cache_creation_tokens=1,
+                cache_read_tokens=2,
+                cached_prompt_tokens=3,
+                avg_ttft_ms=12.0,
+            )
+        ]
         session.execute = AsyncMock(return_value=result)
         repo = BaseUsageRepository(session, _make_model(with_ttft=True))
 
@@ -226,14 +262,34 @@ class TestGetUsageByProvider:
 
 
 class TestGetUsageByModel:
-    """Model-grouped stats are mapped from row tuples."""
+    """Model-grouped stats are mapped from labelled result rows."""
 
     async def test_maps_model_rows(self):
         session = MagicMock(spec=AsyncSession)
         result = MagicMock()
         result.all.return_value = [
-            ("gpt-4o", "openai", 40, 4.0, 400, 800, 1, 2, 3),
-            ("claude-3", "anthropic", 20, 3.0, 200, 400, 0, 1, 2),
+            _row(
+                model="gpt-4o",
+                provider="openai",
+                requests=40,
+                cost=4.0,
+                input_tokens=400,
+                output_tokens=800,
+                cache_creation_tokens=1,
+                cache_read_tokens=2,
+                cached_prompt_tokens=3,
+            ),
+            _row(
+                model="claude-3",
+                provider="anthropic",
+                requests=20,
+                cost=3.0,
+                input_tokens=200,
+                output_tokens=400,
+                cache_creation_tokens=0,
+                cache_read_tokens=1,
+                cached_prompt_tokens=2,
+            ),
         ]
         session.execute = AsyncMock(return_value=result)
         repo = BaseUsageRepository(session, _make_model(with_ttft=False))
@@ -253,9 +309,32 @@ class TestGetDailyUsage:
     async def test_groups_by_date_and_model(self):
         session = MagicMock(spec=AsyncSession)
         date_result = MagicMock()
-        date_result.all.return_value = [("2024-01-01", 10, 1.0, 100, 200, 1, 2, 3)]
+        date_result.all.return_value = [
+            _row(
+                date="2024-01-01",
+                requests=10,
+                cost=1.0,
+                input_tokens=100,
+                output_tokens=200,
+                cache_creation_tokens=1,
+                cache_read_tokens=2,
+                cached_prompt_tokens=3,
+            )
+        ]
         model_result = MagicMock()
-        model_result.all.return_value = [("2024-01-01", "gpt-4o", 10, 1.0, 100, 200, 1, 2, 3)]
+        model_result.all.return_value = [
+            _row(
+                date="2024-01-01",
+                model="gpt-4o",
+                requests=10,
+                cost=1.0,
+                input_tokens=100,
+                output_tokens=200,
+                cache_creation_tokens=1,
+                cache_read_tokens=2,
+                cached_prompt_tokens=3,
+            )
+        ]
         session.execute = AsyncMock(side_effect=[date_result, model_result])
         repo = BaseUsageRepository(session, _make_model(with_ttft=False))
 
@@ -270,7 +349,18 @@ class TestGetDailyUsage:
         session = MagicMock(spec=AsyncSession)
         date_result = MagicMock()
         # Only the start date is returned by the DB; the end date is missing.
-        date_result.all.return_value = [("2024-01-01", 5, 0.5, 50, 100, 0, 0, 0)]
+        date_result.all.return_value = [
+            _row(
+                date="2024-01-01",
+                requests=5,
+                cost=0.5,
+                input_tokens=50,
+                output_tokens=100,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+                cached_prompt_tokens=0,
+            )
+        ]
         model_result = MagicMock()
         model_result.all.return_value = []
         session.execute = AsyncMock(side_effect=[date_result, model_result])
@@ -288,3 +378,101 @@ class TestGetDailyUsage:
         missing = next(e for e in daily if e["date"] == "2024-01-02")
         assert missing["requests"] == 0
         assert missing["by_model"] == []
+
+
+class TestBuildTimeFiltersModel:
+    """The optional model filter emits a model equality predicate."""
+
+    def setup_method(self):
+        self.repo = BaseUsageRepository(MagicMock(spec=AsyncSession), _make_model())
+
+    def test_model_filter_added(self):
+        filters = self.repo._build_time_filters(
+            start_ts=None, end_ts=None, log_type=None, model="gpt-4o"
+        )
+        assert len(filters) == 1
+
+    def test_model_filter_combined(self):
+        filters = self.repo._build_time_filters(
+            start_ts=1.0, end_ts=2.0, log_type="endpoint", model="gpt-4o"
+        )
+        assert len(filters) == 4
+
+
+class TestGetHourlyUsage:
+    """Hourly usage buckets with zero-filling across the requested range."""
+
+    def _repo_with_rows(self, rows):
+        session = MagicMock(spec=AsyncSession)
+        result = MagicMock()
+        result.all.return_value = rows
+        session.execute = AsyncMock(return_value=result)
+        return BaseUsageRepository(session, _make_model(with_ttft=False))
+
+    async def test_maps_hourly_rows(self):
+        repo = self._repo_with_rows(
+            [
+                _row(
+                    bucket="2024-01-01 20:00",
+                    requests=10,
+                    cost=1.5,
+                    input_tokens=1000,
+                    output_tokens=200,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=800,
+                    cached_prompt_tokens=0,
+                )
+            ]
+        )
+
+        buckets = await repo.get_hourly_usage()
+
+        assert len(buckets) == 1
+        bucket = buckets[0]
+        assert bucket["bucket"] == "2024-01-01 20:00"
+        assert bucket["requests"] == 10
+        assert bucket["cost"] == 1.5
+        assert bucket["input_tokens"] == 1000
+        assert bucket["output_tokens"] == 200
+        assert bucket["cache_read_tokens"] == 800
+        assert bucket["cached_prompt_tokens"] == 0
+
+    async def test_fills_missing_hours_in_range(self):
+        # Local time on purpose: the SQLite bucket expression uses 'localtime',
+        # so the zero-fill keys must be generated in local time too.
+        start = datetime(2024, 1, 1, 20, 30).timestamp()
+        end = datetime(2024, 1, 1, 22, 15).timestamp()
+        repo = self._repo_with_rows(
+            [
+                _row(
+                    bucket="2024-01-01 21:00",
+                    requests=5,
+                    cost=0.5,
+                    input_tokens=500,
+                    output_tokens=100,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=0,
+                    cached_prompt_tokens=0,
+                )
+            ]
+        )
+
+        buckets = await repo.get_hourly_usage(start_ts=start, end_ts=end)
+
+        keys = [b["bucket"] for b in buckets]
+        assert keys == [
+            "2024-01-01 20:00",
+            "2024-01-01 21:00",
+            "2024-01-01 22:00",
+        ]
+        by_key = {b["bucket"]: b for b in buckets}
+        assert by_key["2024-01-01 20:00"]["requests"] == 0
+        assert by_key["2024-01-01 21:00"]["requests"] == 5
+        assert by_key["2024-01-01 22:00"]["output_tokens"] == 0
+
+    async def test_model_filter_accepted(self):
+        repo = self._repo_with_rows([])
+
+        buckets = await repo.get_hourly_usage(model="gpt-4o")
+
+        assert buckets == []

@@ -846,11 +846,16 @@ export interface UsageByProvider {
   cached_prompt_tokens: number;
 }
 
-interface UsageByModel {
+export interface UsageByModel {
   model: string;
   provider: string;
   requests: number;
   cost: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  cached_prompt_tokens: number;
 }
 
 interface DailyModelUsage {
@@ -887,6 +892,22 @@ export interface UsageStatsFilter {
   start_date?: string;
   end_date?: string;
   log_type?: string;
+  model?: string;
+}
+
+export interface HourlyUsageBucket {
+  bucket: string; // "YYYY-MM-DD HH:00"
+  requests: number;
+  cost: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  cached_prompt_tokens: number;
+}
+
+export interface HourlyUsageResponse {
+  buckets: HourlyUsageBucket[];
 }
 
 export interface TracingProvider {

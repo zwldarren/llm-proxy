@@ -66,11 +66,26 @@ vi.mock("@/components/usage", () => ({
     props: ["summary", "byProvider"],
     template: "<div data-test='strip'/>",
   }),
+  TokenBreakdownChart: defineComponent({
+    name: "TokenBreakdownChart",
+    props: ["buckets", "granularity"],
+    template: "<div data-test='token-breakdown'/>",
+  }),
 }));
 
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
-  return { BarChart3: Stub, CalendarIcon: Stub, Loader2: Stub, Settings: Stub };
+  return {
+    BarChart3: Stub,
+    CalendarIcon: Stub,
+    Check: Stub,
+    ChevronDown: Stub,
+    ChevronUp: Stub,
+    Cpu: Stub,
+    Layers: Stub,
+    Loader2: Stub,
+    Settings: Stub,
+  };
 });
 
 import HomeView from "./HomeView.vue";

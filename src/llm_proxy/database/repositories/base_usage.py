@@ -1,6 +1,6 @@
 """Shared base class for usage statistics query building."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from sqlalchemy import Date, and_, func, select
@@ -24,6 +24,10 @@ class BaseUsageRepository:
     - ttft_ms (optional, for include_ttft=True)
     """
 
+    # Zero-filling only helps chart-scale windows. A wider range returns its
+    # sparse buckets instead of allocating thousands of synthetic rows.
+    _MAX_FILL_BUCKETS = 24 * 62
+
     def __init__(self, session: AsyncSession, model_class: Any):
         self.session = session
         self.model = model_class
@@ -36,8 +40,9 @@ class BaseUsageRepository:
         log_type: str | None,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[Any]:
-        """Build common time, log_type, user_id, and api_key_name filters."""
+        """Build common time, log_type, user_id, api_key_name, and model filters."""
         filters: list[Any] = []
         if start_ts is not None:
             filters.append(self.model.timestamp >= start_ts)
@@ -49,7 +54,110 @@ class BaseUsageRepository:
             filters.append(self.model.user_id == user_id)
         if api_key_name is not None:
             filters.append(self.model.api_key_name == api_key_name)
+        if model is not None:
+            filters.append(self.model.model == model)
         return filters
+
+    def _usage_aggregates(self) -> list[Any]:
+        """The per-group aggregates shared by every grouped usage query."""
+        aggregates = {
+            "requests": func.count(),
+            "cost": func.coalesce(func.sum(self.model.cost_usd), 0.0),
+            "input_tokens": func.coalesce(func.sum(self.model.prompt_tokens), 0),
+            "output_tokens": func.coalesce(func.sum(self.model.completion_tokens), 0),
+            "cache_creation_tokens": func.coalesce(
+                func.sum(self.model.cache_creation_input_tokens), 0
+            ),
+            "cache_read_tokens": func.coalesce(func.sum(self.model.cache_read_input_tokens), 0),
+            "cached_prompt_tokens": func.coalesce(func.sum(self.model.cached_prompt_tokens), 0),
+        }
+        return [aggregate.label(label) for label, aggregate in aggregates.items()]
+
+    @staticmethod
+    def _usage_row(row: Any, *, key_name: str) -> dict[str, Any]:
+        """Map one `_usage_aggregates` row onto a usage dict, by column label.
+
+        Every column the grouped queries select carries a label, so reading
+        them back by name keeps the mapper independent of the order those
+        columns happen to be selected in.
+        """
+        columns = row._mapping
+        return {
+            key_name: str(columns[key_name]),
+            "requests": columns["requests"],
+            "cost": float(columns["cost"] or 0.0),
+            "input_tokens": int(columns["input_tokens"] or 0),
+            "output_tokens": int(columns["output_tokens"] or 0),
+            "cache_creation_tokens": int(columns["cache_creation_tokens"] or 0),
+            "cache_read_tokens": int(columns["cache_read_tokens"] or 0),
+            "cached_prompt_tokens": int(columns["cached_prompt_tokens"] or 0),
+        }
+
+    @staticmethod
+    def _empty_usage_row(key_name: str, key: str) -> dict[str, Any]:
+        """A zeroed row for a bucket with no usage, so charts get a full axis."""
+        return {
+            key_name: key,
+            "requests": 0,
+            "cost": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "cached_prompt_tokens": 0,
+        }
+
+    async def _aggregate_by_bucket(
+        self,
+        bucket_expr: Any,
+        key_name: str,
+        filters: list[Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Group usage rows by `bucket_expr`, keyed by the rendered bucket."""
+        stmt = select(bucket_expr.label(key_name), *self._usage_aggregates())
+        if filters:
+            stmt = stmt.where(*filters)
+        stmt = stmt.group_by(key_name).order_by(key_name)
+
+        results = await self.session.execute(stmt)
+        data: dict[str, dict[str, Any]] = {}
+        for row in results.all():
+            item = self._usage_row(row, key_name=key_name)
+            data[item[key_name]] = item
+        return data
+
+    @staticmethod
+    def _bucket_timezone() -> tzinfo | None:
+        """The timezone the SQL bucketing renders in.
+
+        SQLite has no timezone support and buckets via `'localtime'`, while
+        PostgreSQL buckets the UTC timestamps. Gap filling has to use the same
+        zone, otherwise the filled keys never line up with the aggregated ones.
+        """
+        return None if is_sqlite() else UTC
+
+    @staticmethod
+    def _fill_gaps(
+        data: dict[str, dict[str, Any]],
+        *,
+        key_name: str,
+        start_ts: float,
+        end_ts: float,
+        step: timedelta,
+        key_format: str,
+        tz: tzinfo | None,
+    ) -> None:
+        """Zero-fill every empty `step` between start_ts and end_ts."""
+        current = datetime.fromtimestamp(start_ts, tz=tz).replace(minute=0, second=0, microsecond=0)
+        last = datetime.fromtimestamp(end_ts, tz=tz).replace(minute=0, second=0, microsecond=0)
+        if (last - current) / step >= BaseUsageRepository._MAX_FILL_BUCKETS:
+            return
+
+        while current <= last:
+            key = current.strftime(key_format)
+            if key not in data:
+                data[key] = BaseUsageRepository._empty_usage_row(key_name, key)
+            current += step
 
     async def get_usage_stats(
         self,
@@ -60,6 +168,7 @@ class BaseUsageRepository:
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> dict[str, float | int]:
         """Get aggregated usage statistics.
 
@@ -70,6 +179,7 @@ class BaseUsageRepository:
             include_ttft: Include TTFT (time to first token) metrics
             user_id: Optional user ID to filter by (for multi-user scoping)
             api_key_name: Optional API key name to filter by (per-key stats)
+            model: Optional model name to filter by (per-model stats)
 
         Returns:
             Dictionary with aggregated stats
@@ -80,6 +190,7 @@ class BaseUsageRepository:
             log_type=log_type,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
         select_columns = [
@@ -198,6 +309,7 @@ class BaseUsageRepository:
         include_ttft: bool = False,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get usage statistics grouped by provider.
 
@@ -210,24 +322,10 @@ class BaseUsageRepository:
             log_type=log_type,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
-        select_columns = [
-            self.model.provider,
-            func.count().label("requests"),
-            func.coalesce(func.sum(self.model.cost_usd), 0.0).label("cost"),
-            func.coalesce(func.sum(self.model.prompt_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(self.model.completion_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(self.model.cache_creation_input_tokens), 0).label(
-                "cache_creation_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cache_read_input_tokens), 0).label(
-                "cache_read_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cached_prompt_tokens), 0).label(
-                "cached_prompt_tokens"
-            ),
-        ]
+        select_columns: list[Any] = [self.model.provider, *self._usage_aggregates()]
 
         if include_ttft and hasattr(self.model, "ttft_ms"):
             select_columns.append(
@@ -244,18 +342,9 @@ class BaseUsageRepository:
 
         response = []
         for row in rows:
-            item: dict[str, Any] = {
-                "provider": row[0],
-                "requests": row[1],
-                "cost": float(row[2] or 0.0),
-                "input_tokens": int(row[3] or 0),
-                "output_tokens": int(row[4] or 0),
-                "cache_creation_tokens": int(row[5] or 0),
-                "cache_read_tokens": int(row[6] or 0),
-                "cached_prompt_tokens": int(row[7] or 0),
-            }
+            item = self._usage_row(row, key_name="provider")
             if include_ttft and hasattr(self.model, "ttft_ms"):
-                item["avg_ttft_ms"] = float(row[8] or 0.0)
+                item["avg_ttft_ms"] = float(row._mapping["avg_ttft_ms"] or 0.0)
             response.append(item)
 
         return response
@@ -269,8 +358,13 @@ class BaseUsageRepository:
         include_ttft: bool = False,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get usage statistics grouped by model.
+
+        Args:
+            model: Optional model name to restrict the grouping to a single
+                model (useful to resolve its provider breakdown).
 
         Returns:
             List of dicts with model, provider, requests, cost
@@ -281,24 +375,13 @@ class BaseUsageRepository:
             log_type=log_type,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
-        select_columns = [
+        select_columns: list[Any] = [
             self.model.model,
             self.model.provider,
-            func.count().label("requests"),
-            func.coalesce(func.sum(self.model.cost_usd), 0.0).label("cost"),
-            func.coalesce(func.sum(self.model.prompt_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(self.model.completion_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(self.model.cache_creation_input_tokens), 0).label(
-                "cache_creation_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cache_read_input_tokens), 0).label(
-                "cache_read_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cached_prompt_tokens), 0).label(
-                "cached_prompt_tokens"
-            ),
+            *self._usage_aggregates(),
         ]
 
         if include_ttft and hasattr(self.model, "ttft_ms"):
@@ -318,19 +401,10 @@ class BaseUsageRepository:
 
         response = []
         for row in rows:
-            item: dict[str, Any] = {
-                "model": row[0],
-                "provider": row[1],
-                "requests": row[2],
-                "cost": float(row[3] or 0.0),
-                "input_tokens": int(row[4] or 0),
-                "output_tokens": int(row[5] or 0),
-                "cache_creation_tokens": int(row[6] or 0),
-                "cache_read_tokens": int(row[7] or 0),
-                "cached_prompt_tokens": int(row[8] or 0),
-            }
+            item = self._usage_row(row, key_name="model")
+            item["provider"] = row._mapping["provider"]
             if include_ttft and hasattr(self.model, "ttft_ms"):
-                item["avg_ttft_ms"] = float(row[9] or 0.0)
+                item["avg_ttft_ms"] = float(row._mapping["avg_ttft_ms"] or 0.0)
             response.append(item)
 
         return response
@@ -343,6 +417,7 @@ class BaseUsageRepository:
         log_type: str | None = "endpoint",
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get daily usage statistics.
 
@@ -356,6 +431,7 @@ class BaseUsageRepository:
             log_type=log_type,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
         if is_sqlite():
@@ -363,115 +439,98 @@ class BaseUsageRepository:
         else:
             date_func = func.to_timestamp(self.model.timestamp).cast(Date)
 
-        stmt = select(
-            date_func.label("date"),
-            func.count().label("requests"),
-            func.coalesce(func.sum(self.model.cost_usd), 0.0).label("cost"),
-            func.coalesce(func.sum(self.model.prompt_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(self.model.completion_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(self.model.cache_creation_input_tokens), 0).label(
-                "cache_creation_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cache_read_input_tokens), 0).label(
-                "cache_read_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cached_prompt_tokens), 0).label(
-                "cached_prompt_tokens"
-            ),
-        )
-        if filters:
-            stmt = stmt.where(*filters)
-        stmt = stmt.group_by("date").order_by("date")
-
-        results = await self.session.execute(stmt)
-        data_by_date: dict[str, dict[str, Any]] = {
-            str(row[0]): {
-                "date": str(row[0]),
-                "requests": row[1],
-                "cost": float(row[2] or 0.0),
-                "input_tokens": int(row[3] or 0),
-                "output_tokens": int(row[4] or 0),
-                "cache_creation_tokens": int(row[5] or 0),
-                "cache_read_tokens": int(row[6] or 0),
-                "cached_prompt_tokens": int(row[7] or 0),
-                "by_model": [],
-            }
-            for row in results.all()
-        }
+        data_by_date = await self._aggregate_by_bucket(date_func, "date", filters)
 
         model_stmt = select(
             date_func.label("date"),
             self.model.model.label("model"),
-            func.count().label("requests"),
-            func.coalesce(func.sum(self.model.cost_usd), 0.0).label("cost"),
-            func.coalesce(func.sum(self.model.prompt_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(self.model.completion_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(self.model.cache_creation_input_tokens), 0).label(
-                "cache_creation_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cache_read_input_tokens), 0).label(
-                "cache_read_tokens"
-            ),
-            func.coalesce(func.sum(self.model.cached_prompt_tokens), 0).label(
-                "cached_prompt_tokens"
-            ),
+            *self._usage_aggregates(),
         )
-        model_filters = filters + [self.model.model.isnot(None)]
-        if model_filters:
-            model_stmt = model_stmt.where(*model_filters)
+        model_filters = [*filters, self.model.model.isnot(None)]
+        model_stmt = model_stmt.where(*model_filters)
         model_stmt = model_stmt.group_by("date", "model").order_by("date", "model")
 
         model_results = await self.session.execute(model_stmt)
         for row in model_results.all():
-            date_str = str(row[0])
-            model = str(row[1])
-            if model:
-                if date_str not in data_by_date:
-                    data_by_date[date_str] = {
-                        "date": date_str,
-                        "requests": 0,
-                        "cost": 0.0,
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "cache_creation_tokens": 0,
-                        "cache_read_tokens": 0,
-                        "cached_prompt_tokens": 0,
-                        "by_model": [],
-                    }
-                data_by_date[date_str]["by_model"].append(
-                    {
-                        "model": model,
-                        "requests": row[2],
-                        "cost": float(row[3] or 0.0),
-                        "input_tokens": int(row[4] or 0),
-                        "output_tokens": int(row[5] or 0),
-                        "cache_creation_tokens": int(row[6] or 0),
-                        "cache_read_tokens": int(row[7] or 0),
-                        "cached_prompt_tokens": int(row[8] or 0),
-                    }
-                )
+            model_name = str(row._mapping["model"])
+            if not model_name:
+                continue
+            date_str = str(row._mapping["date"])
+            day = data_by_date.setdefault(date_str, self._empty_usage_row("date", date_str))
+            day.setdefault("by_model", []).append(self._usage_row(row, key_name="model"))
 
-        if start_ts is not None and end_ts is not None:
-            start_date = datetime.fromtimestamp(start_ts, tz=UTC).date()
-            end_date = datetime.fromtimestamp(end_ts, tz=UTC).date()
-            current_date = start_date
+        has_range = start_ts is not None and end_ts is not None
+        if has_range:
+            self._fill_gaps(
+                data_by_date,
+                key_name="date",
+                start_ts=start_ts,
+                end_ts=end_ts,
+                step=timedelta(days=1),
+                key_format="%Y-%m-%d",
+                tz=self._bucket_timezone(),
+            )
 
-            while current_date <= end_date:
-                date_str = current_date.isoformat()
-                if date_str not in data_by_date:
-                    data_by_date[date_str] = {
-                        "date": date_str,
-                        "requests": 0,
-                        "cost": 0.0,
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "cache_creation_tokens": 0,
-                        "cache_read_tokens": 0,
-                        "cached_prompt_tokens": 0,
-                        "by_model": [],
-                    }
-                current_date += timedelta(days=1)
+        # Every day carries a breakdown, including aggregated days that had no
+        # per-model rows and days that were zero-filled above.
+        for day in data_by_date.values():
+            day.setdefault("by_model", [])
 
-            return [data_by_date[date_str] for date_str in sorted(data_by_date.keys())]
+        if has_range:
+            return [data_by_date[key] for key in sorted(data_by_date)]
 
         return list(data_by_date.values())
+
+    async def get_hourly_usage(
+        self,
+        *,
+        start_ts: float | None = None,
+        end_ts: float | None = None,
+        log_type: str | None = "endpoint",
+        user_id: int | None = None,
+        api_key_name: str | None = None,
+        model: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get usage statistics bucketed by hour.
+
+        Returns:
+            List of dicts with bucket ("YYYY-MM-DD HH:00"), requests, cost,
+            input_tokens, output_tokens, and cache token breakdown. Buckets
+            with no rows inside [start_ts, end_ts] are zero-filled so charts
+            render a continuous axis.
+        """
+        filters = self._build_time_filters(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            log_type=log_type,
+            user_id=user_id,
+            api_key_name=api_key_name,
+            model=model,
+        )
+
+        if is_sqlite():
+            hour_func = func.strftime(
+                "%Y-%m-%d %H:00", self.model.timestamp, "unixepoch", "localtime"
+            )
+        else:
+            hour_func = func.to_char(
+                func.date_trunc("hour", func.to_timestamp(self.model.timestamp)),
+                "YYYY-MM-DD HH24:00",
+            )
+
+        data_by_bucket = await self._aggregate_by_bucket(hour_func, "bucket", filters)
+
+        has_range = start_ts is not None and end_ts is not None
+        if has_range:
+            self._fill_gaps(
+                data_by_bucket,
+                key_name="bucket",
+                start_ts=start_ts,
+                end_ts=end_ts,
+                step=timedelta(hours=1),
+                key_format="%Y-%m-%d %H:00",
+                tz=self._bucket_timezone(),
+            )
+            return [data_by_bucket[key] for key in sorted(data_by_bucket)]
+
+        return list(data_by_bucket.values())

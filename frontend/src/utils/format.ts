@@ -36,6 +36,10 @@ export const formatDate = (timestamp: number | string | null | undefined, locale
   }
 };
 
+/** Short "Mar 1" label for a usage-chart bucket date. */
+export const formatChartDate = (date: string): string =>
+  new Date(date).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
 /**
  * Get status type for StatusBadge component.
  * Returns 'success' | 'warning' | 'error' | 'unknown'

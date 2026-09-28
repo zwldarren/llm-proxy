@@ -159,6 +159,11 @@ class UsageByModel(BaseModel):
     provider: str
     requests: int
     cost: float
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    cached_prompt_tokens: int = 0
 
 
 class DailyModelUsage(BaseModel):
@@ -195,3 +200,22 @@ class UsageStatsResponse(BaseModel):
     by_provider: list[UsageByProvider]
     by_model: list[UsageByModel]
     daily_usage: list[DailyUsage]
+
+
+class HourlyUsage(BaseModel):
+    """Usage statistics for a single hour bucket."""
+
+    bucket: str  # "YYYY-MM-DD HH:00"
+    requests: int
+    cost: float
+    input_tokens: int
+    output_tokens: int
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    cached_prompt_tokens: int = 0
+
+
+class HourlyUsageResponse(BaseModel):
+    """Hourly usage statistics response."""
+
+    buckets: list[HourlyUsage]

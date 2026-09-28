@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { Filter, TrendingUp, X } from "@lucide/vue";
-import { computed, ref, onMounted, onUnmounted } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Bar } from "vue-chartjs";
 import type { TooltipItem } from "chart.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
+import { baseBarChartOptions, useChartTheme } from "@/composables/useChartTheme";
+import { formatChartDate, formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
 import { createCategoricalColorScale } from "@/utils/colorPalette";
 import { registerBarChart } from "@/lib/charts";
 
@@ -41,46 +42,7 @@ interface Props {
 const props = defineProps<Props>();
 const { t } = useI18n();
 
-const isDarkMode = ref(false);
-
-const updateDarkMode = () => {
-  isDarkMode.value = document.documentElement.classList.contains("dark");
-};
-
-onMounted(() => {
-  updateDarkMode();
-  const observer = new MutationObserver(updateDarkMode);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  onUnmounted(() => observer.disconnect());
-});
-
-/**
- * Resolve a `main.css` color token into a chart-ready color value. Tokens are
- * stored as bare HSL channels, so `cssColor("--border")` → `hsl(220 10% 22%)`.
- * Canvas can't read CSS variables, but resolving them here keeps the chart on
- * the same single source of truth as the rest of the UI instead of re-encoding
- * the palette as literals.
- */
-const cssColor = (token: string, alpha?: number): string => {
-  const channels = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
-  return alpha === undefined ? `hsl(${channels})` : `hsl(${channels} / ${alpha})`;
-};
-
-const themeColors = computed(() => {
-  // `isDarkMode` is the reactive dependency: the MutationObserver has already
-  // applied the new theme class by the time it flips, so the tokens resolve to
-  // the new palette on recompute.
-  const isDark = isDarkMode.value;
-  return {
-    tooltipBg: cssColor("--popover", 0.95),
-    tooltipTitle: cssColor("--popover-foreground"),
-    tooltipBody: cssColor("--muted-foreground"),
-    tooltipBorder: cssColor("--border"),
-    // The grid is a whisper on dark surfaces and more present on light ones.
-    gridColor: cssColor("--border", isDark ? 0.3 : 0.8),
-    tickColor: cssColor("--muted-foreground"),
-  };
-});
+const { isDark, themeColors } = useChartTheme();
 
 // Chart type state (Requests, Cost, Tokens)
 const chartType = ref<"requests" | "cost" | "tokens">("requests");
@@ -110,12 +72,6 @@ const showTopN = ref<number | null>(5);
 // 10-series cap below. A model keeps its color across Top-5/Top-10/filter
 // toggles and reloads, and chart series match the hue dots in the filter.
 const colorScale = computed(() => createCategoricalColorScale(allModels.value));
-
-// Format date for display
-const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-};
 
 // Get total usage for each model (for ranking)
 const modelTotals = computed(() => {
@@ -164,7 +120,7 @@ const chartAriaLabel = computed(() => {
   const modelCount = displayModels.value.length;
   const dateRange =
     props.dailyUsage.length > 0
-      ? `${formatDate(props.dailyUsage[0]!.date)} to ${formatDate(props.dailyUsage[props.dailyUsage.length - 1]!.date)}`
+      ? `${formatChartDate(props.dailyUsage[0]!.date)} to ${formatChartDate(props.dailyUsage[props.dailyUsage.length - 1]!.date)}`
       : "";
   return `${typeLabel} chart showing ${modelCount} models from ${dateRange}`;
 });
@@ -202,7 +158,7 @@ const truncateModelName = (name: string, maxLength = 20): string => {
 
 // Prepare chart data based on chart type
 const chartData = computed(() => {
-  const labels = props.dailyUsage.map((item) => formatDate(item.date));
+  const labels = props.dailyUsage.map((item) => formatChartDate(item.date));
   const datasets: Array<{
     label: string;
     data: number[];
@@ -227,7 +183,7 @@ const chartData = computed(() => {
     datasets.push({
       label: truncateModelName(modelName),
       data,
-      backgroundColor: colorScale.value(modelName, isDarkMode.value),
+      backgroundColor: colorScale.value(modelName, isDark.value),
     });
   });
 
@@ -238,107 +194,34 @@ const chartData = computed(() => {
 });
 
 // Chart options
-const chartOptions = computed(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: {
-      display: true,
-      position: "bottom" as const,
-      labels: {
-        boxWidth: 12,
-        padding: 15,
-        font: {
-          size: 11,
-        },
-        color: themeColors.value.tickColor,
-      },
-    },
+const chartOptions = computed(() =>
+  baseBarChartOptions(themeColors.value, {
+    interactionMode: "nearest",
+    xMaxTicksLimit: 7,
+    // Integer ticks for count series (requests/tokens) so a small total never
+    // renders a 0–1 decimal axis that reads as broken. Cost keeps default
+    // precision for cents.
+    yPrecision: chartType.value === "cost" ? undefined : 0,
+    yTickLabel: (value) =>
+      chartType.value === "cost" ? `$${value}` : formatNumberWithSuffix(value),
     tooltip: {
-      mode: "index" as const,
-      intersect: false,
-      backgroundColor: themeColors.value.tooltipBg,
-      titleColor: themeColors.value.tooltipTitle,
-      bodyColor: themeColors.value.tooltipBody,
-      borderColor: themeColors.value.tooltipBorder,
-      borderWidth: 1,
-      padding: 12,
-      cornerRadius: 8,
-      displayColors: true,
-      boxPadding: 4,
-      callbacks: {
-        label: (context: TooltipItem<"bar">) => {
-          const value = context.raw as number;
-          let formattedValue: string;
+      label: (context: TooltipItem<"bar">) => {
+        const value = context.raw as number;
+        const formattedValue =
+          chartType.value === "cost"
+            ? formatCostWithPrecision(value)
+            : formatNumberWithSuffix(value);
 
-          switch (chartType.value) {
-            case "cost":
-              formattedValue = formatCostWithPrecision(value);
-              break;
-            case "tokens":
-              formattedValue = formatNumberWithSuffix(value);
-              break;
-            default:
-              formattedValue = formatNumberWithSuffix(value);
-          }
-
-          const label = context.dataset?.label ?? "Unknown";
-          return ` ${label}: ${formattedValue}`;
-        },
+        const label = context.dataset?.label ?? "Unknown";
+        return ` ${label}: ${formattedValue}`;
       },
     },
-  },
-  scales: {
-    x: {
-      stacked: true,
-      grid: {
-        display: false,
-      },
-      ticks: {
-        color: themeColors.value.tickColor,
-        font: {
-          size: 10,
-        },
-        maxRotation: 0,
-        autoSkip: true,
-        maxTicksLimit: 7,
-      },
-    },
-    y: {
-      stacked: true,
-      grid: {
-        color: themeColors.value.gridColor,
-        drawBorder: false,
-      },
-      ticks: {
-        color: themeColors.value.tickColor,
-        font: {
-          size: 10,
-        },
-        // Integer ticks for count series (requests/tokens) so a small
-        // total never renders a 0–1 decimal axis that reads as broken. Cost
-        // keeps default precision for cents.
-        precision: chartType.value === "cost" ? undefined : 0,
-        callback: (value: string | number) => {
-          const numValue = typeof value === "number" ? value : Number.parseFloat(value);
-          if (Number.isNaN(numValue)) return "";
-
-          if (chartType.value === "cost") return `$${numValue}`;
-          return formatNumberWithSuffix(numValue);
-        },
-      },
-    },
-  },
-  interaction: {
-    mode: "nearest" as const,
-    axis: "x" as const,
-    intersect: false,
-  },
-}));
+  })
+);
 </script>
 
 <template>
-  <section class="flex flex-col border-b border-border/60">
+  <section class="flex flex-col">
     <!-- Section header row (toolbar-style, hairline beneath) -->
     <div class="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/60">
       <h2 class="flex items-center gap-1.5 text-sm md:text-base font-semibold text-foreground">
@@ -443,7 +326,7 @@ const chartOptions = computed(() => ({
                     class="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-inset ring-muted-foreground/20 dark:ring-muted-foreground/30"
                     aria-hidden="true"
                     :style="{
-                      backgroundColor: colorScale(model, isDarkMode),
+                      backgroundColor: colorScale(model, isDark),
                     }"
                   />
                   {{ model }}

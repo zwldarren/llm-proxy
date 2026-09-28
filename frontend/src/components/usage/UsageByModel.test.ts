@@ -61,6 +61,11 @@ const fixture = Array.from({ length: 15 }, (_, i) => ({
   provider: "openai",
   requests: 100 - i,
   cost: 1,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_tokens: 0,
+  cache_read_tokens: 0,
+  cached_prompt_tokens: 0,
 }));
 
 function mountModel() {

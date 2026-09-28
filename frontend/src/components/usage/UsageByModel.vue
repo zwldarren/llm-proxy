@@ -7,18 +7,24 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
+import type { UsageByModel } from "@/types/schemas";
 
 interface Props {
-  byModel: Array<{
-    model: string;
-    provider: string;
-    requests: number;
-    cost: number;
-  }>;
+  byModel: UsageByModel[];
+  /** Currently focused model — its row stays highlighted. */
+  selectedModel?: string | null;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { selectedModel: null });
+const emit = defineEmits<{
+  /** Clicking a row drills down into that model; clicking the selected row clears the filter. */
+  select: [model: string | null];
+}>();
 const { t } = useI18n();
+
+const isSelected = (model: string) => props.selectedModel === model;
+/** Clicking the focused model's row clears the filter again. */
+const toggle = (model: string) => emit("select", isSelected(model) ? null : model);
 
 // Pagination
 const itemsPerPage = ref(10);
@@ -136,7 +142,19 @@ const truncateModelName = (name: string, maxLength = 28): string => {
           <div
             v-for="(item, index) in paginatedModels"
             :key="`${item.provider}-${item.model}`"
-            class="group relative rounded-lg py-1.5 px-2 transition-colors hover:bg-muted/50 border border-transparent hover:border-border/40"
+            role="button"
+            tabindex="0"
+            :aria-pressed="isSelected(item.model)"
+            :title="t('home.filterByModel')"
+            class="group relative rounded-lg py-1.5 px-2 transition-colors hover:bg-muted/50 border cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            :class="
+              isSelected(item.model)
+                ? 'border-action-blue/50 bg-action-blue/5'
+                : 'border-transparent hover:border-border/40'
+            "
+            @click="toggle(item.model)"
+            @keydown.enter="toggle(item.model)"
+            @keydown.space.prevent="toggle(item.model)"
           >
             <div class="flex items-center gap-3 mb-1">
               <div class="flex items-start gap-2 flex-1 min-w-0">
@@ -175,6 +193,11 @@ const truncateModelName = (name: string, maxLength = 28): string => {
                     {{ formatCostWithPrecision(item.cost, 2) }}
                   </div>
                 </div>
+                <ChevronRight
+                  class="w-3.5 h-3.5 -ml-4 text-muted-foreground/0 transition-all group-hover:text-muted-foreground group-hover:translate-x-0.5"
+                  :class="{ 'text-action-blue!': isSelected(item.model) }"
+                  aria-hidden="true"
+                />
               </div>
             </div>
 

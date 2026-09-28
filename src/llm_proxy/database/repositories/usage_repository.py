@@ -85,6 +85,7 @@ class UsageRepository(BaseUsageRepository):
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> dict[str, float | int]:
         """Get aggregated usage statistics with TTFT metrics."""
         return await super().get_usage_stats(
@@ -94,6 +95,7 @@ class UsageRepository(BaseUsageRepository):
             include_ttft=include_ttft,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
     async def get_usage_by_provider(
@@ -105,6 +107,7 @@ class UsageRepository(BaseUsageRepository):
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get usage statistics grouped by provider with TTFT metrics."""
         return await super().get_usage_by_provider(
@@ -114,6 +117,7 @@ class UsageRepository(BaseUsageRepository):
             include_ttft=include_ttft,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
     async def get_usage_by_model(
@@ -125,6 +129,7 @@ class UsageRepository(BaseUsageRepository):
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get usage statistics grouped by model with TTFT metrics."""
         return await super().get_usage_by_model(
@@ -134,6 +139,7 @@ class UsageRepository(BaseUsageRepository):
             include_ttft=include_ttft,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
         )
 
     async def get_daily_usage(
@@ -144,6 +150,7 @@ class UsageRepository(BaseUsageRepository):
         log_type: str | None = "endpoint",
         user_id: int | None = None,
         api_key_name: str | None = None,
+        model: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get daily usage statistics, optionally scoped to a single API key."""
         return await super().get_daily_usage(
@@ -152,6 +159,27 @@ class UsageRepository(BaseUsageRepository):
             log_type=log_type,
             user_id=user_id,
             api_key_name=api_key_name,
+            model=model,
+        )
+
+    async def get_hourly_usage(
+        self,
+        *,
+        start_ts: float | None = None,
+        end_ts: float | None = None,
+        log_type: str | None = "endpoint",
+        user_id: int | None = None,
+        api_key_name: str | None = None,
+        model: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get hourly usage statistics, optionally scoped to a single model."""
+        return await super().get_hourly_usage(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            log_type=log_type,
+            user_id=user_id,
+            api_key_name=api_key_name,
+            model=model,
         )
 
     async def get_spend_by_api_key(

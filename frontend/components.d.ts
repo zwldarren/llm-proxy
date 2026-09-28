@@ -258,6 +258,7 @@ declare module 'vue' {
     ThemeSelector: typeof import('./src/components/settings/ThemeSelector.vue')['default']
     ToggleGroup: typeof import('./src/components/ui/toggle-group/ToggleGroup.vue')['default']
     ToggleGroupItem: typeof import('./src/components/ui/toggle-group/ToggleGroupItem.vue')['default']
+    TokenBreakdownChart: typeof import('./src/components/usage/TokenBreakdownChart.vue')['default']
     Tooltip: typeof import('./src/components/ui/tooltip/Tooltip.vue')['default']
     TooltipContent: typeof import('./src/components/ui/tooltip/TooltipContent.vue')['default']
     TooltipProvider: typeof import('./src/components/ui/tooltip/TooltipProvider.vue')['default']

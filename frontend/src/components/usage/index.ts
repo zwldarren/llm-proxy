@@ -4,3 +4,4 @@ export const UsageByModel = defineAsyncComponent(() => import("./UsageByModel.vu
 export const UsageByProvider = defineAsyncComponent(() => import("./UsageByProvider.vue"));
 export const UsageTrendsChart = defineAsyncComponent(() => import("./UsageTrendsChart.vue"));
 export const UsageMetricStrip = defineAsyncComponent(() => import("./UsageMetricStrip.vue"));
+export const TokenBreakdownChart = defineAsyncComponent(() => import("./TokenBreakdownChart.vue"));

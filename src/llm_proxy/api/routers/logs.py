@@ -1,8 +1,11 @@
 """Request logs API endpoints (admin-only)."""
 
+import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
@@ -16,6 +19,8 @@ from llm_proxy.api.dependencies import (
 from llm_proxy.api.schemas.logs import (
     DailyModelUsage,
     DailyUsage,
+    HourlyUsage,
+    HourlyUsageResponse,
     LogListItem,
     LogListResponse,
     LogRead,
@@ -28,10 +33,12 @@ from llm_proxy.config.manager import resolve_logging_config
 from llm_proxy.core.exceptions import AuthenticationFailedError, NotFoundError, ValidationError
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.utils import safe_float, safe_int
+from llm_proxy.database.connection import get_session_factory
 from llm_proxy.database.repositories import (
     LogRepository,
     UsageRepository,
 )
+from llm_proxy.database.repositories.base_usage import BaseUsageRepository
 from llm_proxy.database.repositories.log_repository import (
     _build_audit_content_hash_data,
     compute_chain_hash,
@@ -274,33 +281,62 @@ async def get_log_stats(
     return stats
 
 
+async def _on_own_session(
+    repo_cls: Callable[[AsyncSession], BaseUsageRepository],
+    query: Callable[[BaseUsageRepository], Awaitable[Any]],
+) -> Any:
+    """Run one repository query on a short-lived session of its own.
+
+    Concurrent aggregations cannot share a session: an AsyncSession proxies a
+    single underlying connection and therefore cannot interleave statements.
+    """
+    async with get_session_factory()() as session:
+        return await query(repo_cls(session))
+
+
 async def _fetch_usage_from_repo(
-    repo: LogRepository | UsageRepository,
+    repo_cls: Callable[[AsyncSession], BaseUsageRepository],
     *,
     start_ts: float | None,
     end_ts: float | None,
     log_type: str | None,
     user_id: int | None,
+    model: str | None = None,
 ) -> tuple[dict, list[dict], list[dict], list[dict]]:
     """Fetch usage summary, by_provider, by_model, and daily_usage from a repository.
 
-    The four queries share a single AsyncSession and therefore must run
-    sequentially: SQLAlchemy's AsyncSession does not permit concurrent
-    operations on the same session (it proxies one underlying connection).
+    The four aggregations are independent, so they run concurrently.
     """
-    summary = await repo.get_usage_stats(
-        start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_id
-    )
-    by_provider = await repo.get_usage_by_provider(
-        start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_id
-    )
-    by_model = await repo.get_usage_by_model(
-        start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_id
-    )
-    daily_usage = await repo.get_daily_usage(
-        start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_id
+    filters: dict[str, Any] = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "log_type": log_type,
+        "user_id": user_id,
+        "model": model,
+    }
+
+    summary, by_provider, by_model, daily_usage = await asyncio.gather(
+        _on_own_session(repo_cls, lambda repo: repo.get_usage_stats(**filters)),
+        _on_own_session(repo_cls, lambda repo: repo.get_usage_by_provider(**filters)),
+        _on_own_session(repo_cls, lambda repo: repo.get_usage_by_model(**filters)),
+        _on_own_session(repo_cls, lambda repo: repo.get_daily_usage(**filters)),
     )
     return summary, by_provider, by_model, daily_usage
+
+
+def _token_breakdown(item: dict) -> dict[str, int]:
+    """The cache-token quintet shared by every usage row shape in this module.
+
+    Extracted so the five fields travel as one value instead of being
+    re-listed, field by field, at each response builder.
+    """
+    return {
+        "input_tokens": safe_int(item.get("input_tokens", 0)),
+        "output_tokens": safe_int(item.get("output_tokens", 0)),
+        "cache_creation_tokens": safe_int(item.get("cache_creation_tokens", 0)),
+        "cache_read_tokens": safe_int(item.get("cache_read_tokens", 0)),
+        "cached_prompt_tokens": safe_int(item.get("cached_prompt_tokens", 0)),
+    }
 
 
 @router.get("/usage-stats", response_model=UsageStatsResponse)
@@ -311,6 +347,7 @@ async def get_usage_stats(
     start_date: str | None = Query(None, description="ISO8601 start datetime"),
     end_date: str | None = Query(None, description="ISO8601 end datetime"),
     log_type: str | None = Query("endpoint", description="Filter by log type (audit, endpoint)"),
+    model: str | None = Query(None, description="Filter by model name"),
 ) -> UsageStatsResponse:
     """Get aggregated usage statistics including totals, costs, and token usage.
 
@@ -319,22 +356,32 @@ async def get_usage_stats(
     available even when logs are deleted or logging is disabled.
     """
     user_filter = await _get_user_filter(request, session)
-    usage_repo = UsageRepository(session)
-    log_repo = LogRepository(session)
     start_ts = _parse_iso_datetime_to_ts(start_date)
     end_ts = _parse_iso_datetime_to_ts(end_date, is_end_date=True)
 
+    usage_filters: dict[str, Any] = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "log_type": log_type,
+        "user_id": user_filter,
+        "model": model,
+    }
+
+    # The four usage aggregations and the request_logs count summary are
+    # independent queries. They run concurrently on their own short-lived
+    # sessions (see the helpers above), which roughly quarters the endpoint's
+    # latency; the request-scoped `session` above only resolves the user filter.
     (
-        summary_dict,
-        by_provider_dicts,
-        by_model_dicts,
-        daily_usage_dicts,
-    ) = await _fetch_usage_from_repo(
-        usage_repo,
-        start_ts=start_ts,
-        end_ts=end_ts,
-        log_type=log_type,
-        user_id=user_filter,
+        (summary_dict, by_provider_dicts, by_model_dicts, daily_usage_dicts),
+        log_summary,
+    ) = await asyncio.gather(
+        _fetch_usage_from_repo(UsageRepository, **usage_filters),
+        _on_own_session(
+            LogRepository,
+            lambda repo: repo.get_usage_stats(
+                start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_filter
+            ),
+        ),
     )
 
     # request_logs captures every HTTP request (including failures), whereas
@@ -342,9 +389,6 @@ async def get_usage_stats(
     # the background writer drops them. We therefore pull the authoritative
     # request count and success rate from request_logs and keep the cost /
     # token metrics from usage_records.
-    log_summary = await log_repo.get_usage_stats(
-        start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_filter
-    )
 
     # If request_logs has more rows, trust it for counts and success rate.
     if safe_int(log_summary.get("total_requests", 0)) >= safe_int(
@@ -361,13 +405,7 @@ async def get_usage_stats(
             by_provider_dicts,
             by_model_dicts,
             daily_usage_dicts,
-        ) = await _fetch_usage_from_repo(
-            log_repo,
-            start_ts=start_ts,
-            end_ts=end_ts,
-            log_type=log_type,
-            user_id=user_filter,
-        )
+        ) = await _fetch_usage_from_repo(LogRepository, **usage_filters)
 
     return UsageStatsResponse(
         summary=UsageSummary(
@@ -391,11 +429,7 @@ async def get_usage_stats(
                 provider=item.get("provider", ""),
                 requests=safe_int(item.get("requests", 0)),
                 cost=safe_float(item.get("cost", 0.0)),
-                input_tokens=safe_int(item.get("input_tokens", 0)),
-                output_tokens=safe_int(item.get("output_tokens", 0)),
-                cache_creation_tokens=safe_int(item.get("cache_creation_tokens", 0)),
-                cache_read_tokens=safe_int(item.get("cache_read_tokens", 0)),
-                cached_prompt_tokens=safe_int(item.get("cached_prompt_tokens", 0)),
+                **_token_breakdown(item),
             )
             for item in by_provider_dicts
         ],
@@ -405,6 +439,7 @@ async def get_usage_stats(
                 provider=item.get("provider", ""),
                 requests=safe_int(item.get("requests", 0)),
                 cost=safe_float(item.get("cost", 0.0)),
+                **_token_breakdown(item),
             )
             for item in by_model_dicts
         ],
@@ -413,27 +448,66 @@ async def get_usage_stats(
                 date=item.get("date", ""),
                 requests=safe_int(item.get("requests", 0)),
                 cost=safe_float(item.get("cost", 0.0)),
-                input_tokens=safe_int(item.get("input_tokens", 0)),
-                output_tokens=safe_int(item.get("output_tokens", 0)),
-                cache_creation_tokens=safe_int(item.get("cache_creation_tokens", 0)),
-                cache_read_tokens=safe_int(item.get("cache_read_tokens", 0)),
-                cached_prompt_tokens=safe_int(item.get("cached_prompt_tokens", 0)),
+                **_token_breakdown(item),
                 by_model=[
                     DailyModelUsage(
                         model=model.get("model", ""),
                         requests=safe_int(model.get("requests", 0)),
                         cost=safe_float(model.get("cost", 0.0)),
-                        input_tokens=safe_int(model.get("input_tokens", 0)),
-                        output_tokens=safe_int(model.get("output_tokens", 0)),
-                        cache_creation_tokens=safe_int(model.get("cache_creation_tokens", 0)),
-                        cache_read_tokens=safe_int(model.get("cache_read_tokens", 0)),
-                        cached_prompt_tokens=safe_int(model.get("cached_prompt_tokens", 0)),
+                        **_token_breakdown(model),
                     )
                     for model in item.get("by_model", [])
                 ],
             )
             for item in daily_usage_dicts
         ],
+    )
+
+
+@router.get("/usage-stats/hourly", response_model=HourlyUsageResponse)
+async def get_hourly_usage_stats(
+    *,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    start_date: str | None = Query(None, description="ISO8601 start datetime"),
+    end_date: str | None = Query(None, description="ISO8601 end datetime"),
+    log_type: str | None = Query("endpoint", description="Filter by log type (audit, endpoint)"),
+    model: str | None = Query(None, description="Filter by model name"),
+) -> HourlyUsageResponse:
+    """Get usage statistics bucketed by hour, with cache token breakdown.
+
+    Powers the token breakdown chart (cache hit / cache miss / output per
+    hour). Buckets inside [start_date, end_date] with no rows are zero-filled
+    so the chart axis is continuous.
+    """
+    user_filter = await _get_user_filter(request, session)
+    start_ts = _parse_iso_datetime_to_ts(start_date)
+    end_ts = _parse_iso_datetime_to_ts(end_date, is_end_date=True)
+    filters: dict[str, Any] = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "log_type": log_type,
+        "user_id": user_filter,
+        "model": model,
+    }
+
+    buckets = await UsageRepository(session).get_hourly_usage(**filters)
+
+    # Backward compatibility: fall back to request_logs when usage_records
+    # has no rows for the query window (mirrors /usage-stats).
+    if sum(safe_int(b.get("requests", 0)) for b in buckets) == 0:
+        buckets = await LogRepository(session).get_hourly_usage(**filters)
+
+    return HourlyUsageResponse(
+        buckets=[
+            HourlyUsage(
+                bucket=item.get("bucket", ""),
+                requests=safe_int(item.get("requests", 0)),
+                cost=safe_float(item.get("cost", 0.0)),
+                **_token_breakdown(item),
+            )
+            for item in buckets
+        ]
     )
 
 
