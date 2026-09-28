@@ -55,12 +55,9 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
       </Badge>
       <span v-else class="text-xs text-muted-foreground">–</span>
     </TableCell>
-    <!-- Context / max output -->
+    <!-- Total context length -->
     <TableCell class="text-right">
-      <ModelContextCell
-        :context-length="model.context_length"
-        :max-output-tokens="model.max_output_tokens"
-      />
+      <ModelContextCell :context-length="model.context_length" />
     </TableCell>
     <!-- Providers -->
     <TableCell>

@@ -75,15 +75,6 @@ const capabilities = computed(() => props.model.capabilities ?? []);
               }}</span>
             </span>
           </template>
-          <template v-if="model.max_output_tokens">
-            <span class="text-border" aria-hidden="true">·</span>
-            <span class="tabular-nums shrink-0">
-              {{ formatContextLength(model.max_output_tokens) }}
-              <span class="font-sans lowercase tracking-wide text-muted-foreground">{{
-                t("models.outputShort")
-              }}</span>
-            </span>
-          </template>
           <!-- Smart-routing status: tinted chip, deliberately distinct from the
                plain data to its left instead of glued to the context value -->
           <template v-if="hasRoutingInfo">

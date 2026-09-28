@@ -82,12 +82,6 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
               {{ formatContextLength(model.context_length) }} {{ t("plaza.context") }}
             </span>
           </template>
-          <template v-if="model.max_output_tokens != null">
-            <span class="text-border" aria-hidden="true">·</span>
-            <span class="tabular-nums shrink-0">
-              {{ formatContextLength(model.max_output_tokens) }} {{ t("plaza.out") }}
-            </span>
-          </template>
         </span>
       </span>
 

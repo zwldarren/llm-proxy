@@ -28,7 +28,6 @@ import {
   INFO_CAPABILITIES,
   CAPABILITY_META,
 } from "@/components/plaza/capabilities";
-import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -299,7 +298,6 @@ const confirmDelete = async () => {
                 :active-dir="sortDir"
                 @sort="onSort"
               />
-              <TableHead>{{ t("common.routing") }}</TableHead>
               <SortableHead
                 :label="t('models.inputCostShort')"
                 sort-key="input_cost"
@@ -329,7 +327,7 @@ const confirmDelete = async () => {
           </TableHeader>
           <TableBody class="row-stagger">
             <TableRow v-for="model in filteredAndSortedModels" :key="model.id" class="group">
-              <!-- Name: icon + name + status + capability icons -->
+              <!-- Name: icon + name + status + routing -->
               <TableCell class="font-medium">
                 <div class="flex items-center gap-2.5 min-w-0">
                   <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
@@ -340,7 +338,31 @@ const confirmDelete = async () => {
                     <TooltipContent>{{ model.name }}</TooltipContent>
                   </Tooltip>
                   <ModelStatusChip v-if="model.status" :status="model.status" />
-                  <CapabilityIcons :capabilities="model.capabilities ?? []" />
+                  <!-- Smart routing: eligible marker + tier + assigned modes -->
+                  <div
+                    v-if="hasRoutingInfo(model)"
+                    class="flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                  >
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <span
+                          class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
+                        >
+                          <Check class="size-2.5" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("models.autoEligible") }}</TooltipContent>
+                    </Tooltip>
+                    <span v-if="model.quality_tier" class="text-xs font-medium capitalize">
+                      {{ model.quality_tier.toLowerCase() }}
+                    </span>
+                    <span
+                      v-if="model.routing_assignments?.length"
+                      class="font-mono text-[11px] text-muted-foreground"
+                    >
+                      {{ model.routing_assignments.join(", ") }}
+                    </span>
+                  </div>
                 </div>
               </TableCell>
               <!-- Providers: quiet mono text, click to filter -->
@@ -351,40 +373,9 @@ const confirmDelete = async () => {
                   @filter="handleProviderFilter"
                 />
               </TableCell>
-              <!-- Context / max output -->
+              <!-- Total context length -->
               <TableCell class="text-right">
-                <ModelContextCell
-                  :context-length="model.context_length"
-                  :max-output-tokens="model.max_output_tokens"
-                />
-              </TableCell>
-              <!-- Smart Routing -->
-              <TableCell>
-                <div
-                  v-if="hasRoutingInfo(model)"
-                  class="flex items-center gap-1.5 whitespace-nowrap"
-                >
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <span
-                        class="inline-flex items-center justify-center size-4 rounded-full bg-status-success/15 text-status-success shrink-0"
-                      >
-                        <Check class="size-2.5" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("models.autoEligible") }}</TooltipContent>
-                  </Tooltip>
-                  <span v-if="model.quality_tier" class="text-xs font-medium capitalize">
-                    {{ model.quality_tier.toLowerCase() }}
-                  </span>
-                  <span
-                    v-if="model.routing_assignments?.length"
-                    class="font-mono text-[11px] text-muted-foreground"
-                  >
-                    {{ model.routing_assignments.join(", ") }}
-                  </span>
-                </div>
-                <span v-else class="text-xs text-muted-foreground">–</span>
+                <ModelContextCell :context-length="model.context_length" />
               </TableCell>
               <TableCell class="text-right">
                 <ModelPricingCell :model="model" field="input" />
