@@ -1067,7 +1067,8 @@ class TestAnthropicProtocolWithOpenAI:
                     "completion_tokens": 5,
                     "total_tokens": 105,
                     "prompt_tokens_details": {
-                        "cached_tokens": 500,
+                        # cached_tokens is a SUBSET of prompt_tokens (OpenAI spec).
+                        "cached_tokens": 60,
                         "audio_tokens": 0,
                     },
                 },
@@ -1090,12 +1091,15 @@ class TestAnthropicProtocolWithOpenAI:
             response = await openai_adapter.chat_completion(request)
             anthropic_response = anthropic_serializer.format_response(response)
 
-            assert anthropic_response["usage"]["input_tokens"] == 100
+            # The nested OpenAI cache-read is lifted to the Anthropic wire
+            # field and removed from ``input_tokens`` (which excludes cache).
+            assert anthropic_response["usage"]["input_tokens"] == 40
+            assert anthropic_response["usage"]["cache_read_input_tokens"] == 60
             assert anthropic_response["usage"]["output_tokens"] == 5
             # OpenAI's cached_tokens is in prompt_tokens_details
             assert response.usage is not None
             assert response.usage.prompt_tokens_details is not None
-            assert response.usage.prompt_tokens_details.cached_tokens == 500
+            assert response.usage.prompt_tokens_details.cached_tokens == 60
 
 
 class TestAnthropicProtocolWithGemini:

@@ -807,6 +807,237 @@ def _message_delta_payloads(sse: str) -> list[dict]:
     return payloads
 
 
+def _message_start_usage(sse: str) -> dict:
+    """Parse the ``message_start`` usage out of a converted SSE stream."""
+    import orjson
+
+    for frame in sse.split("\n\n"):
+        if "event: message_start" not in frame:
+            continue
+        for line in frame.split("\n"):
+            if line.startswith("data: "):
+                return orjson.loads(line[len("data: ") :])["message"]["usage"]
+    raise AssertionError("no message_start event")
+
+
+def test_stream_input_tokens_exclude_cache_counters():
+    """Regression: Claude Code counted the cached prompt twice.
+
+    Canonical ``input_tokens`` INCLUDES cache reads/writes, while the Anthropic
+    wire reports them separately and expects ``input_tokens`` to exclude them.
+    Emitting the inclusive count beside ``cache_read_input_tokens`` made any
+    client that sums the three show roughly twice the real prompt size.
+    """
+    transformer = AnthropicStreamingTransformer(model="deepseek-v4.1-flash", request_id="msg_1")
+    chunk = {
+        "id": "chatcmpl-x",
+        "object": "chat.completion.chunk",
+        "created": 1234567890,
+        "model": "deepseek-v4.1-flash",
+        "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 178883,
+            "completion_tokens": 2801,
+            "total_tokens": 181684,
+            "cache_read_input_tokens": 178304,
+            "prompt_tokens_details": {"cached_tokens": 178304},
+        },
+    }
+    sse = (transformer.transform(chunk) or "") + transformer.finalize()
+
+    start_usage = _message_start_usage(sse)
+    assert start_usage["input_tokens"] == 579
+    assert start_usage["cache_read_input_tokens"] == 178304
+
+    deltas = _message_delta_payloads(sse)
+    assert deltas, "expected a terminal message_delta"
+    delta_usage = deltas[-1]["usage"]
+    assert delta_usage["input_tokens"] == 579
+    assert delta_usage["cache_read_input_tokens"] == 178304
+    # Real split: exclusive input + cache read + output.
+    assert (
+        delta_usage["input_tokens"]
+        + delta_usage["cache_read_input_tokens"]
+        + delta_usage["output_tokens"]
+        == 181684
+    )
+    # The canonical StreamingUsage total must not add the cache read twice.
+    usage = transformer.get_usage()
+    assert usage is not None
+    assert usage.total_tokens == 181684
+
+
+def test_stream_nested_openai_cache_read_splits_input_tokens():
+    """An OpenAI-family provider reports cache reads only through the nested
+    ``prompt_tokens_details.cached_tokens`` dialect; the Anthropic wire must
+    still lift them to the flat field and subtract them from ``input_tokens``."""
+    transformer = AnthropicStreamingTransformer(model="gpt-4o", request_id="msg_1")
+    chunk = {
+        "id": "chatcmpl-x",
+        "object": "chat.completion.chunk",
+        "created": 1234567890,
+        "model": "gpt-4o",
+        "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 50,
+            "total_tokens": 1050,
+            "prompt_tokens_details": {"cached_tokens": 400},
+        },
+    }
+    sse = (transformer.transform(chunk) or "") + transformer.finalize()
+
+    start_usage = _message_start_usage(sse)
+    assert start_usage["input_tokens"] == 600
+    assert start_usage["cache_read_input_tokens"] == 400
+    delta_usage = _message_delta_payloads(sse)[-1]["usage"]
+    assert delta_usage["input_tokens"] == 600
+    assert delta_usage["cache_read_input_tokens"] == 400
+
+
+_INCLUSIVE_PROMPT = 178_883
+_OUTPUT_TOKENS = 2_801
+_CACHE_READ = 178_304
+
+# Canonical usage dialects every provider family produces on the wire. The
+# internal invariant is shared: ``prompt_tokens``/``input_tokens`` is the
+# INCLUSIVE prompt total and the cache count is a subset expressed either flat
+# or in the OpenAI-nested / DeepSeek-top-level dialect.
+_PROVIDER_USAGE_DIALECTS = {
+    "anthropic-native": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+        "cache_read_input_tokens": _CACHE_READ,
+        "cache_creation_input_tokens": 0,
+        "prompt_tokens_details": {"cached_tokens": _CACHE_READ},
+    },
+    "ollama": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+        "cache_read_input_tokens": _CACHE_READ,
+        "prompt_tokens_details": {"cached_tokens": _CACHE_READ},
+    },
+    "gemini": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+        "cache_read_input_tokens": _CACHE_READ,
+    },
+    "openai-nested": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+        "prompt_tokens_details": {"cached_tokens": _CACHE_READ},
+    },
+    "deepseek-top-level": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+        "prompt_cache_hit_tokens": _CACHE_READ,
+        "prompt_cache_miss_tokens": _INCLUSIVE_PROMPT - _CACHE_READ,
+    },
+    "cache-creation-only": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+        "cache_creation_input_tokens": _CACHE_READ,
+    },
+    "no-cache": {
+        "prompt_tokens": _INCLUSIVE_PROMPT,
+        "completion_tokens": _OUTPUT_TOKENS,
+        "total_tokens": _INCLUSIVE_PROMPT + _OUTPUT_TOKENS,
+    },
+}
+
+
+def _usage_total(usage: dict) -> int:
+    return (
+        usage.get("input_tokens", 0)
+        + (usage.get("cache_read_input_tokens") or 0)
+        + (usage.get("cache_creation_input_tokens") or 0)
+    )
+
+
+@pytest.mark.parametrize("dialect", sorted(_PROVIDER_USAGE_DIALECTS))
+def test_stream_input_tokens_consistent_across_provider_dialects(dialect: str):
+    """Every provider's canonical usage must split into the Anthropic wire so
+    that ``input + cache_read + cache_creation`` equals the real prompt size.
+
+    A client summing those three (Claude Code) must never see the cached prompt
+    counted twice, whatever dialect the upstream reported it in.
+    """
+    usage = _PROVIDER_USAGE_DIALECTS[dialect]
+    transformer = AnthropicStreamingTransformer(model="m", request_id="msg_1")
+    chunk = {
+        "id": "chatcmpl-x",
+        "object": "chat.completion.chunk",
+        "created": 1234567890,
+        "model": "m",
+        "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": usage,
+    }
+    sse = (transformer.transform(chunk) or "") + transformer.finalize()
+
+    assert _usage_total(_message_start_usage(sse)) == _INCLUSIVE_PROMPT
+    assert _usage_total(_message_delta_payloads(sse)[-1]["usage"]) == _INCLUSIVE_PROMPT
+
+    streaming_usage = transformer.get_usage()
+    assert streaming_usage is not None
+    assert streaming_usage.total_tokens == _INCLUSIVE_PROMPT + _OUTPUT_TOKENS
+
+
+def test_ollama_streaming_converter_usage_flows_to_anthropic_wire():
+    """End to end for the Ollama provider: its native ``done`` chunk folds
+    ``prompt_eval_cached_count`` into canonical usage, which must then reach the
+    Anthropic wire split rather than double-counted."""
+    from llm_proxy.serialization.ollama.streaming import OllamaChunkConverter
+
+    converter = OllamaChunkConverter(model="llama3.2", request_id="msg_1")
+    canonical = converter.convert_chunk(
+        {
+            "model": "llama3.2",
+            "done": True,
+            "done_reason": "stop",
+            "message": {"role": "assistant", "content": ""},
+            "prompt_eval_count": _INCLUSIVE_PROMPT,
+            "eval_count": _OUTPUT_TOKENS,
+            "prompt_eval_cached_count": _CACHE_READ,
+        }
+    )
+    transformer = AnthropicStreamingTransformer(model="llama3.2", request_id="msg_1")
+    sse = (transformer.transform(canonical) or "") + transformer.finalize()
+
+    start_usage = _message_start_usage(sse)
+    assert start_usage["input_tokens"] == _INCLUSIVE_PROMPT - _CACHE_READ
+    assert start_usage["cache_read_input_tokens"] == _CACHE_READ
+    assert _usage_total(_message_delta_payloads(sse)[-1]["usage"]) == _INCLUSIVE_PROMPT
+
+
+def test_non_streaming_input_tokens_exclude_nested_openai_cache_read():
+    """Non-streaming counterpart: an OpenAI-family provider's nested cache read
+    is lifted to the flat Anthropic field and removed from ``input_tokens``,
+    matching the streaming formatter."""
+    from llm_proxy.models import TextBlock
+    from llm_proxy.models.internal import InternalResponse
+    from llm_proxy.models.types import PromptTokensDetails, Usage
+
+    response = InternalResponse(
+        id="msg_1",
+        model="gpt-4o",
+        output=[TextBlock(text="hi")],
+        usage=Usage(
+            input_tokens=1000,
+            output_tokens=50,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=400),
+        ),
+    )
+    usage = AnthropicProtocolSerializer().format_response(response)["usage"]
+    assert usage["input_tokens"] == 600
+    assert usage["cache_read_input_tokens"] == 400
+
+
 def test_non_streaming_safeguard_results_roundtrip(provider, protocol):
     """Server-side auto mode: ``safeguard_results`` must survive the converted
     (non-passthrough) response path, with the tool-use ids it keys on intact."""

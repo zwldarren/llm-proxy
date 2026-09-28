@@ -24,12 +24,48 @@ from llm_proxy.serialization.anthropic import (
     parse_usage_and_provider_extras,
 )
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
+from llm_proxy.serialization.openai.components.response_parser import (
+    fold_deepseek_cache_hits,
+)
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
     StreamingUsage,
 )
+
+
+def _cache_counters(usage: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Read the canonical cache counters, tolerating the nested OpenAI dialect.
+
+    Canonical usage carries cache reads in the flat ``cache_read_input_tokens``;
+    OpenAI-family providers express the same fact as
+    ``prompt_tokens_details.cached_tokens`` (DeepSeek additionally uses the
+    top-level ``prompt_cache_hit_tokens``). Either expression has to become the
+    Anthropic wire's flat ``cache_read_input_tokens`` so ``input_tokens`` can be
+    emitted exclusive of it (see :func:`_exclusive_input_tokens`).
+    """
+    cache_read = usage.get("cache_read_input_tokens")
+    if cache_read is None:
+        details = usage.get("prompt_tokens_details")
+        cached = details.get("cached_tokens") if isinstance(details, dict) else None
+        cache_read = fold_deepseek_cache_hits(cached, usage.get("prompt_cache_hit_tokens"))
+    cache_creation = usage.get("cache_creation_input_tokens")
+    return cache_read, cache_creation
+
+
+def _exclusive_input_tokens(usage: dict[str, Any]) -> int:
+    """Canonical inclusive ``input_tokens`` → Anthropic's exclusive count.
+
+    The internal invariant makes ``input_tokens`` INCLUDE cache reads/writes
+    (the Anthropic wire reports them separately). Emitting the inclusive value
+    next to the cache counters makes any client that sums the three — Claude
+    Code does — count the cached prompt twice, inflating its usage display far
+    beyond the real total. Clamped at 0 so a provider violating the invariant
+    yields 0 instead of a negative count.
+    """
+    cache_read, cache_creation = _cache_counters(usage)
+    return max(0, (usage.get("input_tokens") or 0) - (cache_read or 0) - (cache_creation or 0))
 
 
 def _message_delta_usage(usage: dict) -> dict:
@@ -42,8 +78,20 @@ def _message_delta_usage(usage: dict) -> dict:
     ``iterations``) — ride through verbatim: SDKs ignore unknown keys, and
     stripping the compaction counter would break per-iteration cost
     accounting, since top-level tokens EXCLUDE compaction iterations.
+
+    ``input_tokens`` is rewritten to the exclusive count: the delta usage
+    repeats the cumulative prompt accounting, and the wire invariant for that
+    field excludes the cache counters reported beside it.
     """
-    return {k: v for k, v in usage.items() if k != "service_tier"}
+    result = {k: v for k, v in usage.items() if k != "service_tier"}
+    cache_read, cache_creation = _cache_counters(usage)
+    if cache_read is not None:
+        result["cache_read_input_tokens"] = cache_read
+    if cache_creation is not None:
+        result["cache_creation_input_tokens"] = cache_creation
+    if "input_tokens" in result:
+        result["input_tokens"] = _exclusive_input_tokens(usage)
+    return result
 
 
 class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
@@ -666,17 +714,28 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         """Generate message_start event."""
         # Anthropic's message_start.usage carries the full usage shape; fold
         # in cache/server-tool keys already accumulated from the first chunk.
-        start_usage: dict[str, Any] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
-        if self._pending_usage:
-            for key in (
-                *ANTHROPIC_USAGE_EXTENSION_KEYS,
-                "cache_creation_input_tokens",
-                "cache_read_input_tokens",
-                "server_tool_use",
-            ):
-                value = self._pending_usage.get(key)
-                if value is not None:
-                    start_usage[key] = value
+        pending = self._pending_usage or {}
+        start_usage: dict[str, Any] = {"output_tokens": output_tokens}
+        for key in (
+            *ANTHROPIC_USAGE_EXTENSION_KEYS,
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "server_tool_use",
+        ):
+            value = pending.get(key)
+            if value is not None:
+                start_usage[key] = value
+        # Surface the nested OpenAI-dialect cache read on the wire too, then
+        # emit ``input_tokens`` exclusive of the cache counters (the internal
+        # count includes them; see _exclusive_input_tokens).
+        cache_read, cache_creation = _cache_counters(pending)
+        if cache_read is not None:
+            start_usage["cache_read_input_tokens"] = cache_read
+        if cache_creation is not None:
+            start_usage["cache_creation_input_tokens"] = cache_creation
+        start_usage["input_tokens"] = max(
+            0, input_tokens - (cache_read or 0) - (cache_creation or 0)
+        )
         message: dict[str, Any] = {
             "id": self.response_id,
             "type": "message",
@@ -1012,7 +1071,10 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             return StreamingUsage(
                 input_tokens=self._input_tokens,
                 output_tokens=self._output_tokens,
-                total_tokens=self._input_tokens + self._output_tokens + cache_read + cache_create,
+                # Canonical ``input_tokens`` already INCLUDES the cache counters
+                # (the internal invariant); adding them again would double-count
+                # the cached prompt in the log/langfuse totals.
+                total_tokens=self._input_tokens + self._output_tokens,
                 cache_read_input_tokens=cache_read if cache_read else None,
                 cache_creation_input_tokens=cache_create if cache_create else None,
                 prompt_tokens_details=prompt_details,

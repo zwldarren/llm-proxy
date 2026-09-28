@@ -170,20 +170,22 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
             # Anthropic wire format reports them separately). Clamp at 0
             # so a provider violating the invariant yields 0 instead of a
             # negative token count.
+            cache_read = response.usage.cache_read_input_tokens
+            # OpenAI-family providers express the cache-read fact only in the
+            # nested dialect; lift it so the wire reports the same split as the
+            # streaming formatter instead of folding it into ``input_tokens``.
+            if cache_read is None and response.usage.prompt_tokens_details is not None:
+                cache_read = response.usage.prompt_tokens_details.cached_tokens
+            cache_creation = response.usage.cache_creation_input_tokens
             input_tokens = max(
-                0,
-                response.usage.input_tokens
-                - (response.usage.cache_read_input_tokens or 0)
-                - (response.usage.cache_creation_input_tokens or 0),
+                0, response.usage.input_tokens - (cache_read or 0) - (cache_creation or 0)
             )
             usage_dict["input_tokens"] = input_tokens
             usage_dict["output_tokens"] = response.usage.output_tokens
-            if response.usage.cache_read_input_tokens is not None:
-                usage_dict["cache_read_input_tokens"] = response.usage.cache_read_input_tokens
-            if response.usage.cache_creation_input_tokens is not None:
-                usage_dict["cache_creation_input_tokens"] = (
-                    response.usage.cache_creation_input_tokens
-                )
+            if cache_read is not None:
+                usage_dict["cache_read_input_tokens"] = cache_read
+            if cache_creation is not None:
+                usage_dict["cache_creation_input_tokens"] = cache_creation
         else:
             usage_dict["input_tokens"] = 0
             usage_dict["output_tokens"] = 0
