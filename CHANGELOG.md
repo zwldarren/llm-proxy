@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.8](https://github.com/zwldarren/llm-proxy/compare/v0.2.7...v0.2.8) (2026-09-28)
+
+
+### Features
+
+* **usage:** add hourly token breakdown and model drill-down ([ad584f7](https://github.com/zwldarren/llm-proxy/commit/ad584f79028acc56a3d5f167ac854139a472f0f3))
+
+
+### Bug Fixes
+
+* **anthropic:** emit input_tokens exclusive of cache counters ([0acd0b4](https://github.com/zwldarren/llm-proxy/commit/0acd0b4ea45c96bc8f50c4e48a1832e19aa27b45))
+* **reasoning:** keep thinking and encrypted reasoning faithful end to end ([5b84b42](https://github.com/zwldarren/llm-proxy/commit/5b84b4263ba194c25f71cf8180644cfb40a37f4e))
+* **routing:** fall back on any provider error while one remains ([e937b4e](https://github.com/zwldarren/llm-proxy/commit/e937b4ea07820243b41ae5109c623c66125d6be7))
+
 ## [0.2.7](https://github.com/zwldarren/llm-proxy/compare/v0.2.6...v0.2.7) (2026-09-25)
 
 
