@@ -431,7 +431,11 @@ onMounted(() => {
               :buckets="tokenBreakdownBuckets"
               :granularity="useHourlyGranularity ? 'hour' : 'day'"
             />
-            <UsageTrendsChart :daily-usage="usageStats.daily_usage" />
+            <UsageTrendsChart
+              :daily-usage="usageStats.daily_usage"
+              :hourly-buckets="hourlyBuckets"
+              :granularity="useHourlyGranularity ? 'hour' : 'day'"
+            />
           </div>
 
           <div

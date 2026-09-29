@@ -495,9 +495,9 @@ class BaseUsageRepository:
 
         Returns:
             List of dicts with bucket ("YYYY-MM-DD HH:00"), requests, cost,
-            input_tokens, output_tokens, and cache token breakdown. Buckets
-            with no rows inside [start_ts, end_ts] are zero-filled so charts
-            render a continuous axis.
+            input_tokens, output_tokens, cache token breakdown, and by_model.
+            Buckets with no rows inside [start_ts, end_ts] are zero-filled so
+            charts render a continuous axis.
         """
         filters = self._build_time_filters(
             start_ts=start_ts,
@@ -520,6 +520,26 @@ class BaseUsageRepository:
 
         data_by_bucket = await self._aggregate_by_bucket(hour_func, "bucket", filters)
 
+        model_stmt = select(
+            hour_func.label("bucket"),
+            self.model.model.label("model"),
+            *self._usage_aggregates(),
+        )
+        model_filters = [*filters, self.model.model.isnot(None)]
+        model_stmt = model_stmt.where(*model_filters)
+        model_stmt = model_stmt.group_by("bucket", "model").order_by("bucket", "model")
+
+        model_results = await self.session.execute(model_stmt)
+        for row in model_results.all():
+            model_name = str(row._mapping["model"])
+            if not model_name:
+                continue
+            bucket_str = str(row._mapping["bucket"])
+            bucket = data_by_bucket.setdefault(
+                bucket_str, self._empty_usage_row("bucket", bucket_str)
+            )
+            bucket.setdefault("by_model", []).append(self._usage_row(row, key_name="model"))
+
         has_range = start_ts is not None and end_ts is not None
         if has_range:
             self._fill_gaps(
@@ -531,6 +551,13 @@ class BaseUsageRepository:
                 key_format="%Y-%m-%d %H:00",
                 tz=self._bucket_timezone(),
             )
+
+        # Every bucket carries a breakdown, including aggregated buckets that
+        # had no per-model rows and buckets zero-filled above.
+        for bucket in data_by_bucket.values():
+            bucket.setdefault("by_model", [])
+
+        if has_range:
             return [data_by_bucket[key] for key in sorted(data_by_bucket)]
 
         return list(data_by_bucket.values())

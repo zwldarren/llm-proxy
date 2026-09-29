@@ -904,6 +904,7 @@ export interface HourlyUsageBucket {
   cache_creation_tokens: number;
   cache_read_tokens: number;
   cached_prompt_tokens: number;
+  by_model?: DailyModelUsage[];
 }
 
 export interface HourlyUsageResponse {

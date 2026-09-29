@@ -132,6 +132,10 @@ export function baseBarChartOptions(themeColors: ChartTheme, overrides: BarChart
     scales: {
       x: {
         stacked: true,
+        // Sparse ranges (a single day at day granularity) would otherwise
+        // render one chart-width pillar; the cap keeps bars readable at any
+        // bucket density without touching the tight multi-bucket spacing.
+        maxBarThickness: 48,
         grid: { display: false },
         ticks: {
           color: themeColors.tickColor,

@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { baseBarChartOptions, useChartTheme } from "@/composables/useChartTheme";
 import { formatChartDate, formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
 import { createCategoricalColorScale } from "@/utils/colorPalette";
+import type { HourlyUsageBucket } from "@/types/schemas";
 import { registerBarChart } from "@/lib/charts";
 
 registerBarChart();
@@ -37,6 +38,9 @@ interface Props {
     cached_prompt_tokens: number;
     by_model: DailyModelUsage[];
   }>;
+  /** Hour buckets for short ranges; empty or absent falls back to dailyUsage. */
+  hourlyBuckets?: HourlyUsageBucket[];
+  granularity?: "hour" | "day";
 }
 
 const props = defineProps<Props>();
@@ -46,6 +50,29 @@ const { isDark, themeColors } = useChartTheme();
 
 // Chart type state (Requests, Cost, Tokens)
 const chartType = ref<"requests" | "cost" | "tokens">("requests");
+
+/** One x-axis bucket — daily or hourly — with its per-model rows. */
+interface UsageSeries {
+  key: string;
+  by_model: DailyModelUsage[];
+}
+
+const isHourly = computed(
+  () => props.granularity === "hour" && (props.hourlyBuckets?.length ?? 0) > 0
+);
+
+// The chart's single data pipeline. Short ranges render hour buckets so the
+// default "last 24 hours" view shows a real per-hour trend instead of one
+// fat daily bar; longer ranges (or a failed hourly fetch) fall back to days.
+const series = computed<UsageSeries[]>(() => {
+  if (isHourly.value) {
+    return (props.hourlyBuckets ?? []).map((bucket) => ({
+      key: bucket.bucket,
+      by_model: bucket.by_model ?? [],
+    }));
+  }
+  return props.dailyUsage.map((day) => ({ key: day.date, by_model: day.by_model }));
+});
 
 // Human label for a chart-type value, shared by the aria label and the toggle
 // buttons so the two never drift apart.
@@ -76,8 +103,8 @@ const colorScale = computed(() => createCategoricalColorScale(allModels.value));
 // Get total usage for each model (for ranking)
 const modelTotals = computed(() => {
   const totals = new Map<string, number>();
-  props.dailyUsage.forEach((day) => {
-    day.by_model.forEach((modelData) => {
+  series.value.forEach((bucket) => {
+    bucket.by_model.forEach((modelData) => {
       const current = totals.get(modelData.model) || 0;
       totals.set(modelData.model, current + modelData.requests);
     });
@@ -119,11 +146,39 @@ const chartAriaLabel = computed(() => {
   const typeLabel = chartTypeLabel(chartType.value);
   const modelCount = displayModels.value.length;
   const dateRange =
-    props.dailyUsage.length > 0
-      ? `${formatChartDate(props.dailyUsage[0]!.date)} to ${formatChartDate(props.dailyUsage[props.dailyUsage.length - 1]!.date)}`
+    series.value.length > 0
+      ? `${fullBucketLabel(series.value[0]!.key)} to ${fullBucketLabel(
+          series.value[series.value.length - 1]!.key
+        )}`
       : "";
   return `${typeLabel} chart showing ${modelCount} models from ${dateRange}`;
 });
+
+/** Short axis label: "14:00" for hourly buckets, "Sep 27" for daily. */
+const axisLabel = (key: string): string => {
+  if (isHourly.value) return key.slice(11, 16);
+  return formatChartDate(key);
+};
+
+/** Unambiguous label for non-visual contexts: the day stays attached. */
+const fullBucketLabel = (key: string): string =>
+  isHourly.value
+    ? `${formatChartDate(key.slice(0, 10))} ${key.slice(11, 16)}`
+    : formatChartDate(key);
+
+/** Tooltip header: bucket range, day-qualified once the axis spans days. */
+const bucketTitle = (key: string): string => {
+  if (isHourly.value) {
+    const hour = key.slice(11, 13);
+    const range = `${hour}:00 ~ ${hour}:59`;
+    return series.value.length > 24 ? `${formatChartDate(key.slice(0, 10))} ${range}` : range;
+  }
+  return new Date(key).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
 
 // Toggle model selection (adding is blocked once the cap is reached)
 const toggleModel = (model: string) => {
@@ -158,7 +213,7 @@ const truncateModelName = (name: string, maxLength = 20): string => {
 
 // Prepare chart data based on chart type
 const chartData = computed(() => {
-  const labels = props.dailyUsage.map((item) => formatChartDate(item.date));
+  const labels = series.value.map((bucket) => axisLabel(bucket.key));
   const datasets: Array<{
     label: string;
     data: number[];
@@ -166,8 +221,8 @@ const chartData = computed(() => {
   }> = [];
 
   displayModels.value.forEach((modelName, _index) => {
-    const data = props.dailyUsage.map((day) => {
-      const modelData = day.by_model.find((m) => m.model === modelName);
+    const data = series.value.map((bucket) => {
+      const modelData = bucket.by_model.find((m) => m.model === modelName);
       if (!modelData) return 0;
 
       switch (chartType.value) {
@@ -197,7 +252,7 @@ const chartData = computed(() => {
 const chartOptions = computed(() =>
   baseBarChartOptions(themeColors.value, {
     interactionMode: "nearest",
-    xMaxTicksLimit: 7,
+    xMaxTicksLimit: isHourly.value ? 8 : 7,
     // Integer ticks for count series (requests/tokens) so a small total never
     // renders a 0–1 decimal axis that reads as broken. Cost keeps default
     // precision for cents.
@@ -205,6 +260,12 @@ const chartOptions = computed(() =>
     yTickLabel: (value) =>
       chartType.value === "cost" ? `$${value}` : formatNumberWithSuffix(value),
     tooltip: {
+      title: (items: TooltipItem<"bar">[]) => {
+        const first = items[0];
+        if (!first) return "";
+        const bucket = series.value[first.dataIndex];
+        return bucket ? bucketTitle(bucket.key) : "";
+      },
       label: (context: TooltipItem<"bar">) => {
         const value = context.raw as number;
         const formattedValue =
@@ -359,7 +420,7 @@ const chartOptions = computed(() =>
 
     <!-- Chart panel (flush, no Card) -->
     <div class="px-4 sm:px-6 pb-4 pt-3">
-      <div v-if="dailyUsage.length > 0" class="relative w-full h-72 md:h-85">
+      <div v-if="series.length > 0" class="relative w-full h-72 md:h-85">
         <Bar :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
       </div>
       <div v-else class="py-12 text-center text-muted-foreground text-sm">

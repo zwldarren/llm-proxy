@@ -167,7 +167,7 @@ class UsageByModel(BaseModel):
 
 
 class DailyModelUsage(BaseModel):
-    """Model-specific daily usage statistics."""
+    """Model-specific usage statistics within one bucket (daily or hourly)."""
 
     model: str
     requests: int
@@ -213,6 +213,7 @@ class HourlyUsage(BaseModel):
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     cached_prompt_tokens: int = 0
+    by_model: list[DailyModelUsage] = Field(default_factory=list)
 
 
 class HourlyUsageResponse(BaseModel):

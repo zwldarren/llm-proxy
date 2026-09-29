@@ -505,6 +505,15 @@ async def get_hourly_usage_stats(
                 requests=safe_int(item.get("requests", 0)),
                 cost=safe_float(item.get("cost", 0.0)),
                 **_token_breakdown(item),
+                by_model=[
+                    DailyModelUsage(
+                        model=model.get("model", ""),
+                        requests=safe_int(model.get("requests", 0)),
+                        cost=safe_float(model.get("cost", 0.0)),
+                        **_token_breakdown(model),
+                    )
+                    for model in item.get("by_model", [])
+                ],
             )
             for item in buckets
         ]

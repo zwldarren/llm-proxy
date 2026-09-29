@@ -400,13 +400,15 @@ class TestBuildTimeFiltersModel:
 
 
 class TestGetHourlyUsage:
-    """Hourly usage buckets with zero-filling across the requested range."""
+    """Hourly usage buckets per hour, with per-model breakdown and zero-filling."""
 
-    def _repo_with_rows(self, rows):
+    def _repo_with_rows(self, rows, model_rows=None):
         session = MagicMock(spec=AsyncSession)
-        result = MagicMock()
-        result.all.return_value = rows
-        session.execute = AsyncMock(return_value=result)
+        bucket_result = MagicMock()
+        bucket_result.all.return_value = rows
+        model_result = MagicMock()
+        model_result.all.return_value = model_rows or []
+        session.execute = AsyncMock(side_effect=[bucket_result, model_result])
         return BaseUsageRepository(session, _make_model(with_ttft=False))
 
     async def test_maps_hourly_rows(self):
@@ -436,6 +438,54 @@ class TestGetHourlyUsage:
         assert bucket["output_tokens"] == 200
         assert bucket["cache_read_tokens"] == 800
         assert bucket["cached_prompt_tokens"] == 0
+        assert bucket["by_model"] == []
+
+    async def test_groups_by_bucket_and_model(self):
+        repo = self._repo_with_rows(
+            [
+                _row(
+                    bucket="2024-01-01 20:00",
+                    requests=12,
+                    cost=1.7,
+                    input_tokens=1200,
+                    output_tokens=260,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=800,
+                    cached_prompt_tokens=0,
+                )
+            ],
+            model_rows=[
+                _row(
+                    bucket="2024-01-01 20:00",
+                    model="claude-3",
+                    requests=2,
+                    cost=0.2,
+                    input_tokens=200,
+                    output_tokens=60,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=0,
+                    cached_prompt_tokens=0,
+                ),
+                _row(
+                    bucket="2024-01-01 20:00",
+                    model="gpt-4o",
+                    requests=10,
+                    cost=1.5,
+                    input_tokens=1000,
+                    output_tokens=200,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=800,
+                    cached_prompt_tokens=0,
+                ),
+            ],
+        )
+
+        buckets = await repo.get_hourly_usage()
+
+        assert len(buckets) == 1
+        assert buckets[0]["requests"] == 12
+        models = {m["model"]: m["requests"] for m in buckets[0]["by_model"]}
+        assert models == {"claude-3": 2, "gpt-4o": 10}
 
     async def test_fills_missing_hours_in_range(self):
         # Local time on purpose: the SQLite bucket expression uses 'localtime',
@@ -467,6 +517,7 @@ class TestGetHourlyUsage:
         ]
         by_key = {b["bucket"]: b for b in buckets}
         assert by_key["2024-01-01 20:00"]["requests"] == 0
+        assert by_key["2024-01-01 20:00"]["by_model"] == []
         assert by_key["2024-01-01 21:00"]["requests"] == 5
         assert by_key["2024-01-01 22:00"]["output_tokens"] == 0
 
