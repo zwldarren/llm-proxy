@@ -3,6 +3,8 @@ import { Check, Edit, Trash2 } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
+import { CAPABILITY_ORDER } from "@/components/plaza/capabilities";
+import ModelContextCell from "@/components/models/ModelContextCell.vue";
 import ModelIcon from "@/components/models/ModelIcon.vue";
 import ModelProviderList from "@/components/models/ModelProviderList.vue";
 import ModelStatusChip from "@/components/models/ModelStatusChip.vue";
@@ -31,57 +33,37 @@ const { t } = useI18n();
 
 const providers = computed(() => props.model.providers ?? []);
 const hasRoutingInfo = computed(() => Boolean(props.model.auto_eligible));
-const capabilities = computed(() => props.model.capabilities ?? []);
+// Fixed display order so icons don't shuffle between rows.
+const capabilities = computed(() =>
+  CAPABILITY_ORDER.filter((cap) => props.model.capabilities?.includes(cap))
+);
 </script>
 
 <template>
-  <article
-    class="group px-4 sm:px-6 py-2.5 border-b border-border transition-colors duration-150 hover:bg-muted/50"
-  >
-    <div class="flex items-center gap-3">
-      <!-- Icon -->
+  <article class="group border-b border-border transition-colors duration-150 hover:bg-muted/50">
+    <div class="flex items-center gap-3 px-4 py-2.5 sm:px-6">
       <ModelIcon :name="model.name" :icon-url="model.icon_url" :decorative="false" />
 
-      <!-- Name + description + meta line -->
-      <div class="flex-1 min-w-0">
+      <!-- Name block: identifier line (name + chips) over the meta line -->
+      <div class="min-w-0 flex-1">
         <div class="flex items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger as-child>
-              <h3 class="text-sm font-medium text-foreground truncate">{{ model.name }}</h3>
+              <h3 class="truncate font-mono text-[13px] font-medium text-foreground">
+                {{ model.name }}
+              </h3>
             </TooltipTrigger>
             <TooltipContent>{{ model.name }}</TooltipContent>
           </Tooltip>
           <ModelStatusChip v-if="model.status" :status="model.status" />
           <CapabilityIcons :capabilities="capabilities" />
-        </div>
-        <!-- Inline description: one scannable line, OpenRouter-list style -->
-        <Tooltip v-if="model.description">
-          <TooltipTrigger as-child>
-            <p class="mt-0.5 truncate text-xs text-muted-foreground">{{ model.description }}</p>
-          </TooltipTrigger>
-          <TooltipContent>{{ model.description }}</TooltipContent>
-        </Tooltip>
-        <!-- Meta line: providers · context; routing is kept apart as its own chip -->
-        <div
-          class="mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap font-mono text-[11px] text-muted-foreground"
-        >
-          <ModelProviderList :providers="providers" @filter="emit('filterProvider', $event)" />
-          <template v-if="model.context_length">
-            <span class="text-border" aria-hidden="true">·</span>
-            <span class="tabular-nums shrink-0">
-              {{ formatContextLength(model.context_length) }}
-              <span class="font-sans lowercase tracking-wide text-muted-foreground">{{
-                t("models.contextShort")
-              }}</span>
-            </span>
-          </template>
-          <!-- Smart-routing status: tinted chip, deliberately distinct from the
-               plain data to its left instead of glued to the context value -->
+          <!-- Smart-routing chip: kept apart from the plain data, on the
+               identifier line where it qualifies the model itself -->
           <template v-if="hasRoutingInfo">
             <Tooltip>
               <TooltipTrigger as-child>
                 <span
-                  class="ml-1 inline-flex items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px font-sans text-[10px] font-medium text-status-success shrink-0"
+                  class="inline-flex shrink-0 items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px text-[10px] font-medium text-status-success"
                 >
                   <Check class="size-2.5" aria-hidden="true" />
                   <span v-if="model.quality_tier" class="capitalize">
@@ -94,22 +76,59 @@ const capabilities = computed(() => props.model.capabilities ?? []);
             </Tooltip>
             <span
               v-if="model.routing_assignments?.length"
-              class="font-mono text-[11px] text-muted-foreground"
+              class="hidden font-mono text-[11px] text-muted-foreground sm:inline"
             >
               {{ model.routing_assignments.join(", ") }}
             </span>
           </template>
         </div>
+        <!-- Meta line: providers · context (inline below lg; a column ≥lg) · description.
+             Providers keep their natural width; the description absorbs the shrink. -->
+        <div
+          class="mt-0.5 flex min-w-0 items-center gap-x-2 font-mono text-[11px] text-muted-foreground"
+        >
+          <!-- Providers keep their natural width; the description absorbs the shrink. -->
+          <div class="shrink-0 overflow-hidden">
+            <ModelProviderList
+              nowrap
+              :providers="providers"
+              @filter="emit('filterProvider', $event)"
+            />
+          </div>
+          <template v-if="model.context_length">
+            <span class="text-border lg:hidden" aria-hidden="true">·</span>
+            <span class="shrink-0 tabular-nums lg:hidden">
+              {{ formatContextLength(model.context_length) }}
+              <span class="font-sans lowercase tracking-wide">{{ t("models.contextShort") }}</span>
+            </span>
+          </template>
+          <template v-if="model.description">
+            <span class="text-border" aria-hidden="true">·</span>
+            <span class="min-w-0 truncate font-sans">{{ model.description }}</span>
+          </template>
+        </div>
       </div>
 
-      <!-- Pricing: stacked IN/OUT/CACHED block, the primary data on the row -->
-      <div class="hidden sm:block shrink-0 text-right">
-        <ModelPricingCell :model="model" />
+      <!-- Data columns: fixed widths shared with ModelListHead so every row
+           aligns like the table. The full grammar shows at lg; between sm and
+           lg only IN/OUT stay (CACHED is one tap away in either's popover);
+           below sm the meta line above carries the context value. -->
+      <div class="model-col-ctx hidden justify-end lg:flex">
+        <ModelContextCell :context-length="model.context_length" />
+      </div>
+      <div class="model-col-price hidden justify-end sm:flex">
+        <ModelPricingCell :model="model" field="input" />
+      </div>
+      <div class="model-col-price hidden justify-end sm:flex">
+        <ModelPricingCell :model="model" field="output" />
+      </div>
+      <div class="model-col-price hidden justify-end lg:flex">
+        <ModelPricingCell :model="model" field="cached" />
       </div>
 
       <!-- Actions -->
       <div
-        class="flex items-center justify-end gap-1 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+        class="model-col-actions flex items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
       >
         <Button
           variant="ghost"

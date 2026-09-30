@@ -130,6 +130,7 @@ declare module 'vue' {
     MobileSidebarTrigger: typeof import('./src/components/layout/MobileSidebarTrigger.vue')['default']
     ModelContextCell: typeof import('./src/components/models/ModelContextCell.vue')['default']
     ModelIcon: typeof import('./src/components/models/ModelIcon.vue')['default']
+    ModelListHead: typeof import('./src/components/models/ModelListHead.vue')['default']
     ModelListItem: typeof import('./src/components/models/ModelListItem.vue')['default']
     ModelPricingCell: typeof import('./src/components/models/ModelPricingCell.vue')['default']
     ModelProviderList: typeof import('./src/components/models/ModelProviderList.vue')['default']

@@ -8,8 +8,11 @@ import type { ModelProviderMapping } from "@/types/schemas";
  * Clickable provider list for model rows: the first three names filter the
  * view on click, the rest collapse into a "+N" counter, and an en dash shows
  * when the model has no providers. Text size is inherited from the caller.
+ * `nowrap` clips to a single line (list rows); the default wraps (table cells).
  */
-const props = defineProps<{ providers: ModelProviderMapping[] }>();
+const props = withDefaults(defineProps<{ providers: ModelProviderMapping[]; nowrap?: boolean }>(), {
+  nowrap: false,
+});
 
 const emit = defineEmits<{ filter: [provider: string] }>();
 
@@ -19,7 +22,10 @@ const visibleProviders = computed(() => props.providers.slice(0, 3));
 </script>
 
 <template>
-  <div class="flex items-center gap-1 flex-wrap font-mono text-muted-foreground">
+  <div
+    class="flex items-center gap-1 font-mono text-muted-foreground"
+    :class="nowrap ? 'flex-nowrap overflow-hidden' : 'flex-wrap'"
+  >
     <template v-if="providers.length > 0">
       <template v-for="(p, i) in visibleProviders" :key="p.provider_name">
         <span v-if="i > 0" class="text-border" aria-hidden="true">·</span>

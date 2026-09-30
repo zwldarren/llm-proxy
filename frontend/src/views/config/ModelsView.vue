@@ -14,6 +14,7 @@ import SortableHead from "@/components/common/SortableHead.vue";
 import ViewToggle from "@/components/common/ViewToggle.vue";
 import {
   ModelListItem,
+  ModelListHead,
   ModelIcon,
   ModelPricingCell,
   CapabilityToggle,
@@ -21,13 +22,16 @@ import {
   ModelProviderList,
   ModelContextCell,
 } from "@/components/models";
+import type { ModelListColumn } from "@/components/models/ModelListHead.vue";
 import ModelsSyncDialog from "@/components/models/ModelsSyncDialog.vue";
 import PricingTierEditor from "@/components/models/PricingTierEditor.vue";
 import {
   BOUND_CAPABILITIES,
   INFO_CAPABILITIES,
   CAPABILITY_META,
+  CAPABILITY_ORDER,
 } from "@/components/plaza/capabilities";
+import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -133,6 +137,44 @@ onMounted(() => {
 });
 
 const hasRoutingInfo = (model: ModelRead): boolean => Boolean(model.auto_eligible);
+
+// Fixed display order so capability icons don't shuffle between rows.
+const sortedCapabilities = (model: ModelRead) =>
+  CAPABILITY_ORDER.filter((cap) => model.capabilities?.includes(cap));
+
+/**
+ * List-mode column header: same grammar as the table's SortableHeads, so both
+ * view modes sort and scan identically. The name cell is indented by the row
+ * icon's footprint (pl-11 = 32px icon + 12px gap); the tail spacer matches the
+ * rows' two-icon actions cluster.
+ */
+const listColumns = computed<ModelListColumn[]>(() => [
+  {
+    label: t("models.name"),
+    cellClass: "flex min-w-0 flex-1 pl-11",
+    sortKey: "name",
+  },
+  {
+    label: t("models.contextShort"),
+    cellClass: "model-col-ctx hidden justify-end lg:flex",
+    sortKey: "context_length",
+  },
+  {
+    label: t("models.inputShort"),
+    cellClass: "model-col-price hidden justify-end sm:flex",
+    sortKey: "input_cost",
+  },
+  {
+    label: t("models.outputShort"),
+    cellClass: "model-col-price hidden justify-end sm:flex",
+    sortKey: "output_cost",
+  },
+  {
+    label: t("models.cachedShort"),
+    cellClass: "model-col-price hidden justify-end lg:flex",
+    sortKey: "cached_read",
+  },
+]);
 
 const openCreateDialog = () => {
   isEditing.value = false;
@@ -327,17 +369,18 @@ const confirmDelete = async () => {
           </TableHeader>
           <TableBody class="row-stagger">
             <TableRow v-for="model in filteredAndSortedModels" :key="model.id" class="group">
-              <!-- Name: icon + name + status + routing -->
+              <!-- Name: icon + name + status + capabilities + routing -->
               <TableCell class="font-medium">
                 <div class="flex items-center gap-2.5 min-w-0">
                   <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
                   <Tooltip>
                     <TooltipTrigger as-child>
-                      <span class="truncate">{{ model.name }}</span>
+                      <span class="truncate font-mono text-[13px]">{{ model.name }}</span>
                     </TooltipTrigger>
                     <TooltipContent>{{ model.name }}</TooltipContent>
                   </Tooltip>
                   <ModelStatusChip v-if="model.status" :status="model.status" />
+                  <CapabilityIcons :capabilities="sortedCapabilities(model)" />
                   <!-- Smart routing: eligible marker + tier + assigned modes -->
                   <div
                     v-if="hasRoutingInfo(model)"
@@ -415,26 +458,36 @@ const confirmDelete = async () => {
             </TableRow>
             <EmptyTableRow
               v-if="filteredAndSortedModels.length === 0"
-              :colspan="8"
+              :colspan="7"
               @clear="clearFilters"
             />
           </TableBody>
         </Table>
 
-        <!-- List view -->
+        <!-- List view: same column grammar as the table — a pinned sortable
+             header (ModelListHead) over fixed-width data columns in each row -->
         <div v-else class="config-scroll">
           <EmptyFilterResults v-if="filteredAndSortedModels.length === 0" @clear="clearFilters" />
-          <div v-if="filteredAndSortedModels.length > 0" class="config-list list-stagger">
-            <ModelListItem
-              v-for="model in filteredAndSortedModels"
-              :key="model.id"
-              :model="model"
-              :is-loading="isLoading"
-              @edit="openEditDialog(model)"
-              @delete="openDeleteDialog(model.name)"
-              @filter-provider="handleProviderFilter"
+          <template v-else>
+            <ModelListHead
+              :columns="listColumns"
+              :active-field="sortField"
+              :active-dir="sortDir"
+              tail-class="model-col-actions hidden sm:block"
+              @sort="onSort"
             />
-          </div>
+            <div class="config-list list-stagger">
+              <ModelListItem
+                v-for="model in filteredAndSortedModels"
+                :key="model.id"
+                :model="model"
+                :is-loading="isLoading"
+                @edit="openEditDialog(model)"
+                @delete="openDeleteDialog(model.name)"
+                @filter-provider="handleProviderFilter"
+              />
+            </div>
+          </template>
         </div>
       </template>
     </div>

@@ -34,55 +34,80 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
     class="group border-b border-border transition-colors duration-150"
     :class="isOpen ? 'bg-muted/30' : 'hover:bg-muted/50'"
   >
-    <!-- Row header: icon · name + tier + capability icons · context · chevron -->
+    <!-- Row header: name block + fixed tier/context columns + chevron. The
+         columns share ModelListHead's widths so rows align like the table;
+         on mobile they collapse back into the meta line. -->
     <button
       type="button"
-      class="flex w-full items-center gap-3 px-4 sm:px-6 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+      class="flex w-full items-center gap-3 px-4 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 sm:px-6"
       :aria-expanded="isOpen"
       :aria-label="isOpen ? t('plaza.collapseDetails') : t('plaza.expandDetails')"
       @click="isOpen = !isOpen"
     >
       <ModelIcon :name="model.name" :icon-url="model.icon_url" />
 
-      <span class="flex-1 min-w-0">
+      <span class="min-w-0 flex-1">
         <span class="flex items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger as-child>
-              <span class="font-mono text-[13px] font-medium text-foreground truncate">
+              <span class="truncate font-mono text-[13px] font-medium text-foreground">
                 {{ model.name }}
               </span>
             </TooltipTrigger>
             <TooltipContent>{{ model.name }}</TooltipContent>
           </Tooltip>
+          <ModelStatusChip v-if="model.status" :status="model.status" />
+          <!-- Tier is a column ≥sm; on mobile it stays on the identifier line -->
           <Badge
             v-if="model.quality_tier"
             :variant="tierBadgeVariant(model.quality_tier)"
-            class="text-[11px] uppercase font-medium px-1.5 py-0 shrink-0"
+            class="shrink-0 px-1.5 py-0 text-[11px] font-medium uppercase sm:hidden"
           >
             {{ model.quality_tier }}
           </Badge>
-          <ModelStatusChip v-if="model.status" :status="model.status" />
           <CapabilityIcons :capabilities="capabilities" />
         </span>
-        <!-- Inline description: one scannable line without expanding -->
-        <Tooltip v-if="model.description">
-          <TooltipTrigger as-child>
-            <span class="block truncate text-xs text-muted-foreground">
-              {{ model.description }}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{{ model.description }}</TooltipContent>
-        </Tooltip>
-        <!-- Meta line: providers · context -->
-        <span class="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+        <!-- Meta line: providers · context (mobile) · description (≥sm) -->
+        <span
+          class="mt-0.5 flex min-w-0 items-center gap-x-1.5 font-mono text-[11px] text-muted-foreground"
+        >
           <span class="truncate">{{ model.provider_names.join(" · ") }}</span>
           <template v-if="model.context_length != null">
-            <span class="text-border" aria-hidden="true">·</span>
-            <span class="tabular-nums shrink-0">
+            <span class="text-border sm:hidden" aria-hidden="true">·</span>
+            <span class="shrink-0 tabular-nums sm:hidden">
               {{ formatContextLength(model.context_length) }} {{ t("plaza.context") }}
             </span>
           </template>
+          <template v-if="model.description">
+            <span class="hidden text-border sm:inline" aria-hidden="true">·</span>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <span class="hidden truncate font-sans sm:inline">{{ model.description }}</span>
+              </TooltipTrigger>
+              <TooltipContent>{{ model.description }}</TooltipContent>
+            </Tooltip>
+          </template>
         </span>
+      </span>
+
+      <!-- Tier column -->
+      <span class="model-col-tier hidden justify-end sm:flex">
+        <Badge
+          v-if="model.quality_tier"
+          :variant="tierBadgeVariant(model.quality_tier)"
+          class="px-1.5 py-0 text-[11px] font-medium uppercase"
+        >
+          {{ model.quality_tier }}
+        </Badge>
+        <span v-else class="text-xs text-muted-foreground">–</span>
+      </span>
+
+      <!-- Context column -->
+      <span class="model-col-ctx hidden justify-end sm:flex">
+        <span v-if="model.context_length != null" class="text-data text-xs text-muted-foreground">
+          {{ formatContextLength(model.context_length) }}
+        </span>
+        <span v-else class="text-xs text-muted-foreground">–</span>
       </span>
 
       <ChevronDown

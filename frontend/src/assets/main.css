@@ -1003,6 +1003,23 @@
     @apply border-b-0;
   }
 
+  /* Model list-row column grammar — fixed widths shared by the pinned list
+   * header (ModelListHead) and every model row, so list mode aligns and scans
+   * like the table view. Columns hide below `sm`; each row's meta line carries
+   * the same values there instead. */
+  .model-col-ctx {
+    @apply w-20;
+  }
+  .model-col-price {
+    @apply w-24;
+  }
+  .model-col-tier {
+    @apply w-20;
+  }
+  .model-col-actions {
+    @apply w-[76px];
+  }
+
   /* List row entrance stagger — mirrors .row-stagger but targets direct
    * children of any element (list rows are <article>/<div>, not <tr>, so a
    * slight physical rise is safe here; table rows stay opacity-only). */
