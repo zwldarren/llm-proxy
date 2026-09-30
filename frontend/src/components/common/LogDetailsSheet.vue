@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useClipboard } from "@vueuse/core";
 import { Activity, Check, Clock, Copy, Globe, Shield, Wrench } from "@lucide/vue";
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import LogDetailsIO from "@/components/common/LogDetailsIO.vue";
 import LogDetailsMetrics from "@/components/common/LogDetailsMetrics.vue";
@@ -30,12 +30,24 @@ const copyId = async () => {
   if (!props.log?.request_id) return;
   await copy(props.log.request_id);
 };
+
+// The sheet's default auto-focus lands on the first tabbable element, which is
+// the request-ID copy button in the header. That left a pointer-less button
+// focused on every open (and, before the app-level tooltip fix, its tooltip
+// open). Focus the heading instead: it announces the panel to screen readers
+// and keeps Tab order starting from the top of the content.
+const titleRef = ref<HTMLElement | null>(null);
+const handleOpenAutoFocus = (event: Event) => {
+  event.preventDefault();
+  titleRef.value?.focus();
+};
 </script>
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
     <SheetContent
       class="w-full sm:max-w-[550px] md:max-w-[700px] lg:max-w-[850px] xl:max-w-[1000px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card transition-colors duration-300 pb-[env(safe-area-inset-bottom\,0px)]"
+      @open-auto-focus="handleOpenAutoFocus"
     >
       <!-- Header -->
       <div
@@ -51,7 +63,9 @@ const copyId = async () => {
 
           <div class="flex flex-col min-w-0">
             <h2
-              class="text-sm sm:text-base font-semibold text-foreground flex flex-wrap items-center gap-x-2 gap-y-1"
+              ref="titleRef"
+              tabindex="-1"
+              class="text-sm sm:text-base font-semibold text-foreground flex flex-wrap items-center gap-x-2 gap-y-1 outline-none"
             >
               <span>{{ t("logs.viewDetails") }}</span>
               <span

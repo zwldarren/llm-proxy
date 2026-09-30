@@ -76,7 +76,9 @@ provideSidebarContext({
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="0">
+  <!-- Matches the app-level provider: opening tooltips on click-driven focus
+       would leave a label stuck under the pointer after a navigation. -->
+  <TooltipProvider :delay-duration="0" :ignore-non-keyboard-focus="true">
     <div
       data-slot="sidebar-wrapper"
       :style="{
