@@ -14,7 +14,13 @@ logger = get_logger(__name__)
 
 
 class RedisClient:
-    """Async Redis client with connection pooling and health checks."""
+    """Async Redis client with connection pooling and health checks.
+
+    Reads return ``bytes``, not ``str``: ``decode_responses`` is silently
+    ignored by redis-py when a pre-built connection pool is passed to
+    ``redis.Redis``, so it is deliberately not set. Consumers must decode
+    bytes themselves (or use ``orjson.loads``, which accepts bytes).
+    """
 
     def __init__(self, config: RedisConfig | None = None):
         """Initialize Redis client.
@@ -41,10 +47,14 @@ class RedisClient:
                 socket_connect_timeout=self.config.timeout,
             )
 
-            # Create Redis client
+            # Create Redis client. NOTE: decode_responses is intentionally
+            # absent — redis-py ignores it when a pre-built connection pool is
+            # passed, and every consumer already handles bytes (see class
+            # docstring). Do not re-add it here; to enable decoded reads it
+            # must go on ConnectionPool.from_url() instead, which changes the
+            # return type of every read and needs a full regression pass.
             self._client = redis.Redis(
                 connection_pool=self._pool,
-                decode_responses=True,
             )
 
             try:

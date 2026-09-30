@@ -346,6 +346,13 @@ class RedisCache:
         try:
             redis_client = await self._get_client()
             token = await redis_client.get(self._get_key("config", "generation"))
+            if isinstance(token, bytes):
+                # The pooled client returns bytes (decode_responses is silently
+                # ignored when a pre-built connection pool is passed to
+                # ``redis.Redis``); normalize before the str comparison in the
+                # caller, or every generation check reads as "unset" and peer
+                # workers never refresh their snapshots.
+                token = token.decode("utf-8")
             if not isinstance(token, str):
                 self._stats["misses"] += 1
                 return None

@@ -410,6 +410,19 @@ class TestRedisCache:
         mock_redis_client.get.assert_awaited_once_with("cache:config:generation")
 
     @pytest.mark.asyncio
+    async def test_get_config_generation_decodes_bytes(self, cache, mock_redis_client):
+        """The pooled Redis client returns bytes; the token must still compare equal."""
+        mock_redis_client.get = AsyncMock(return_value=b"gen-token")
+
+        with patch(
+            "llm_proxy.cache.redis_cache.get_redis_client_async",
+            AsyncMock(return_value=mock_redis_client),
+        ):
+            result = await cache.get_config_generation()
+
+        assert result == "gen-token"
+
+    @pytest.mark.asyncio
     async def test_get_config_generation_unset_returns_none(self, cache, mock_redis_client):
         mock_redis_client.get = AsyncMock(return_value=None)
 
