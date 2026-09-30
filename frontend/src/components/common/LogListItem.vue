@@ -5,6 +5,7 @@ import {
   Coins,
   Cpu,
   CornerDownRight,
+  DatabaseZap,
   RotateCcw,
   User,
   Zap,
@@ -20,6 +21,7 @@ import {
   formatCost,
   formatDate,
   formatDuration,
+  formatTokens,
   getActionFromEndpoint,
   getActor,
   getStatusType,
@@ -28,7 +30,14 @@ import {
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
-import { completionTokens, costUsd, promptTokens, ttftMs } from "@/utils/logEntryAccessors";
+import {
+  cachedTokens,
+  completionTokens,
+  costUsd,
+  promptTokens,
+  tokenBreakdown,
+  ttftMs,
+} from "@/utils/logEntryAccessors";
 
 interface MetricItem {
   icon: LucideIcon;
@@ -37,6 +46,8 @@ interface MetricItem {
   mono?: boolean;
   truncate?: boolean;
   provider?: string;
+  /** Hover text when the rendered value is abbreviated (e.g. the token breakdown). */
+  title?: string;
 }
 
 interface Props {
@@ -55,13 +66,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const formatTokenBreakdown = (log: LogItem): string => {
-  const input = promptTokens(log);
-  const output = completionTokens(log);
-
-  if (input === 0 && output === 0) return "-";
-  if (output === 0 && input > 0) return input.toLocaleString();
-  return `${input.toLocaleString()}/${output.toLocaleString()}`;
+// Token breakdown wording lives in logEntryAccessors so the table row, this
+// card and the details panel always render the same figures.
+const getTokenTooltip = (log: LogItem): string => {
+  const parts = [
+    `${t("logs.inputTokens")}: ${formatTokens(promptTokens(log))}`,
+    `${t("logs.outputTokens")}: ${formatTokens(completionTokens(log))}`,
+  ];
+  const cached = cachedTokens(log);
+  if (cached > 0) parts.push(`${t("logs.cachedTokens")}: ${formatTokens(cached)}`);
+  return parts.join(" | ");
 };
 
 const getMcpOperation = (log: LogItem): string => {
@@ -187,9 +201,18 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
       metrics.push({
         icon: Zap,
         label: t("logs.tokens"),
-        value: formatTokenBreakdown(props.log),
+        value: tokenBreakdown(props.log),
         mono: true,
+        title: getTokenTooltip(props.log),
       });
+      if (cachedTokens(props.log) > 0) {
+        metrics.push({
+          icon: DatabaseZap,
+          label: t("logs.cachedShort"),
+          value: formatTokens(cachedTokens(props.log)),
+          mono: true,
+        });
+      }
       const ttft = ttftMs(props.log);
       if (ttft !== null) {
         metrics.push({
@@ -379,7 +402,7 @@ const totalRetryCount = computed(() => {
               'text-xs truncate',
               metric.mono ? 'font-mono text-muted-foreground' : 'font-medium',
             ]"
-            :title="metric.value"
+            :title="metric.title ?? metric.value"
           >
             <span v-html="sanitizeHighlightText(metric.value, searchQuery)"></span>
           </span>

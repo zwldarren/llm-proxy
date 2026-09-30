@@ -64,6 +64,7 @@ import {
   formatCost,
   formatDate,
   formatDuration,
+  formatTokens,
   getActionFromEndpoint,
   getActor,
   getStatusType,
@@ -72,10 +73,11 @@ import {
 import { sanitizeHighlightText } from "@/utils/sanitize";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
 import {
+  cachedTokens,
   completionTokens,
   costUsd,
   promptTokens,
-  totalTokens,
+  tokenBreakdown,
   ttftMs,
 } from "@/utils/logEntryAccessors";
 
@@ -653,22 +655,16 @@ const submitFeedback = async (log: LogListItemType, signal: FeedbackSignal) => {
   }
 };
 
-// Token helpers — value resolution lives in logEntryAccessors; only
-// presentation (breakdown string, tooltip) stays here.
-const formatTokenBreakdown = (log: LogListItemType): string => {
-  const input = promptTokens(log);
-  const output = completionTokens(log);
-  const total = totalTokens(log);
-  if (input === 0 && output === 0 && total === 0) return "-";
-  if (output === 0 && input > 0) return input.toLocaleString();
-  return `${input.toLocaleString()} / ${output.toLocaleString()}`;
-};
-
+// Token helpers — value resolution lives in logEntryAccessors; only the
+// tooltip wording stays here.
 const getTokenTooltip = (log: LogListItemType): string => {
-  const input = promptTokens(log);
-  const output = completionTokens(log);
-  if (output === 0 && input > 0) return `Input: ${input.toLocaleString()}`;
-  return `Input: ${input.toLocaleString()} | Output: ${output.toLocaleString()}`;
+  const parts = [
+    `${t("logs.inputTokens")}: ${formatTokens(promptTokens(log))}`,
+    `${t("logs.outputTokens")}: ${formatTokens(completionTokens(log))}`,
+  ];
+  const cached = cachedTokens(log);
+  if (cached > 0) parts.push(`${t("logs.cachedTokens")}: ${formatTokens(cached)}`);
+  return parts.join(" | ");
 };
 
 const formatTTFT = (log: LogListItemType): string => {
@@ -1014,7 +1010,18 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellNumeric class="hidden sm:table-cell">
-                    <span :title="getTokenTooltip(log)">{{ formatTokenBreakdown(log) }}</span>
+                    <div class="flex flex-col items-end gap-1">
+                      <span :title="getTokenTooltip(log)">{{ tokenBreakdown(log) }}</span>
+                      <!-- Cache hits are a first-class usage signal, so they are
+                           visible on the row instead of only in the detail panel. -->
+                      <span
+                        v-if="cachedTokens(log) > 0"
+                        class="text-[10px] font-medium text-action-blue bg-action-blue/15 border border-action-blue/25 rounded px-1 py-px"
+                        :title="`${t('logs.cachedTokens')}: ${formatTokens(cachedTokens(log))}`"
+                      >
+                        {{ t("logs.cachedShort") }} {{ formatTokens(cachedTokens(log)) }}
+                      </span>
+                    </div>
                   </TableCellNumeric>
                   <TableCellNumeric class="hidden md:table-cell">
                     {{ formatCost(costUsd(log)) }}

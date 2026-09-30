@@ -1414,6 +1414,7 @@ export default {
     tps: "TPS",
     cacheSavings: "Cache Savings",
     cachedTokens: "Cached Tokens",
+    cachedShort: "Cached",
     cacheReadTokens: "Cache Hits",
     cacheCreationTokens: "Cache Writes",
     activeFilters: "{count} filter|{count} filters",

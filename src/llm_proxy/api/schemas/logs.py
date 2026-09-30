@@ -98,6 +98,12 @@ class LogListItem(BaseModel):
     total_tokens: int | None = None
     cost_usd: float | None = None
 
+    # Cache token fields — shown on the row so cache hits do not require
+    # opening the detail panel.
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    cached_prompt_tokens: int | None = None
+
     event_type: str | None = None
     action_category: str | None = None
 

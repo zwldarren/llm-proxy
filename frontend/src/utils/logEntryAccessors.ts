@@ -24,6 +24,8 @@
  *
  * Both `LogRead` (details payload) and `LogListItem` (list payload) satisfy
  * `LogUsageSource` structurally, so every consumer resolves identical values.
+ * `tokenBreakdown` goes one step further and turns those values into the one
+ * string every list surface renders, so no surface can drift.
  */
 
 /** Minimal structural view of a log entry's usage fields. */
@@ -101,3 +103,20 @@ export const ttftMs = (log: LogUsageSource): number | null =>
 /** Request cost in USD; null when unrecorded. 0 is a real measurement. */
 export const costUsd = (log: LogUsageSource): number | null =>
   asFiniteNumber(log.cost_usd) ?? metadataNumber(log, "cost_usd");
+
+/**
+ * Compact "input → output" breakdown for list surfaces. Shared so the table
+ * row, the mobile card and the details panel can never disagree about which
+ * token counts a request consumed.
+ *
+ * Returns "-" when nothing was recorded, and a single figure when only one
+ * side was recorded — "12,500 → 0" would read as an empty completion rather
+ * than as a missing measurement.
+ */
+export const tokenBreakdown = (log: LogUsageSource): string => {
+  const input = promptTokens(log);
+  const output = completionTokens(log);
+  if (input === 0 && output === 0 && totalTokens(log) === 0) return "-";
+  if (input === 0 || output === 0) return (input || output).toLocaleString();
+  return `${input.toLocaleString()} → ${output.toLocaleString()}`;
+};

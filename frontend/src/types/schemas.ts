@@ -695,6 +695,9 @@ export interface LogListItem {
   completion_tokens?: number | null;
   total_tokens?: number | null;
   cost_usd?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cached_prompt_tokens?: number | null;
   auth_method?: string | null;
   client_ip?: string | null;
   event_type?: string | null;

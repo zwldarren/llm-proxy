@@ -7,6 +7,7 @@ import {
   completionTokens,
   costUsd,
   promptTokens,
+  tokenBreakdown,
   ttftMs,
   totalTokens,
   type LogUsageSource,
@@ -151,5 +152,25 @@ describe("costUsd", () => {
     expect(costUsd(log({}))).toBeNull();
     expect(costUsd(log({ cost_usd: null }))).toBeNull();
     expect(costUsd(log({ log_metadata: { cost_usd: "0.01" } }))).toBeNull();
+  });
+});
+
+describe("tokenBreakdown", () => {
+  it("renders input followed by output", () => {
+    expect(tokenBreakdown(log({ prompt_tokens: 12500, completion_tokens: 820 }))).toBe(
+      "12,500 → 820"
+    );
+  });
+
+  it("omits a missing side instead of rendering a zero", () => {
+    expect(tokenBreakdown(log({ prompt_tokens: 31, completion_tokens: 0 }))).toBe("31");
+    expect(tokenBreakdown(log({ prompt_tokens: 0, completion_tokens: 820 }))).toBe("820");
+  });
+
+  it('renders "-" when nothing was recorded', () => {
+    expect(tokenBreakdown(log({}))).toBe("-");
+    expect(tokenBreakdown(log({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }))).toBe(
+      "-"
+    );
   });
 });

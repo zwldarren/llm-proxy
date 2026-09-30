@@ -494,6 +494,9 @@ class LogRepository(BaseUsageRepository):
         "completion_tokens",
         "total_tokens",
         "cost_usd",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "cached_prompt_tokens",
         "event_type",
         "action_category",
     )

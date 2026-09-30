@@ -1478,6 +1478,7 @@ export default {
     tps: "TPS",
     cacheSavings: "缓存节省",
     cachedTokens: "缓存 Token",
+    cachedShort: "缓存",
     cacheReadTokens: "缓存击中 (读)",
     cacheCreationTokens: "缓存创建 (写)",
     activeFilters: "{count} 个筛选条件",
