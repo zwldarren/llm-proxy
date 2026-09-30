@@ -65,6 +65,40 @@ def _make_model(*, with_ttft: bool = False) -> type:
     return _UsageLogWithTtft if with_ttft else _UsageLogNoTtft
 
 
+class TestDeleteInBatches:
+    """Retention deletes must run in bounded, separately committed batches."""
+
+    def _repo(self, *results: MagicMock) -> BaseUsageRepository:
+        session = AsyncMock(spec=AsyncSession)
+        session.bind = MagicMock()
+        session.execute = AsyncMock(side_effect=list(results))
+        return BaseUsageRepository(session, _UsageLogWithTtft)
+
+    def _result(self, rowcount: int) -> MagicMock:
+        result = MagicMock()
+        result.rowcount = rowcount
+        return result
+
+    async def test_loops_until_a_short_batch(self):
+        batch = BaseUsageRepository.DELETE_BATCH_SIZE
+        repo = self._repo(self._result(batch), self._result(3))
+
+        total = await repo._delete_in_batches([_UsageLogWithTtft.timestamp < 1.0])
+
+        assert total == batch + 3
+        assert repo.session.execute.await_count == 2
+        assert repo.session.commit.await_count == 2
+
+    async def test_no_match_stops_after_one_empty_batch(self):
+        repo = self._repo(self._result(0))
+
+        total = await repo._delete_in_batches([_UsageLogWithTtft.timestamp < 1.0])
+
+        assert total == 0
+        assert repo.session.execute.await_count == 1
+        assert repo.session.commit.await_count == 1
+
+
 def _usage_row(**overrides) -> SimpleNamespace:
     """Build a result row for get_usage_stats with sensible defaults."""
     defaults = dict(

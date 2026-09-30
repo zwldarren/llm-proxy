@@ -9,6 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Switch } from "@/components/ui/switch";
 import type { AutoSaveState } from "@/composables/useSettingAutoSave";
 import { useAutoSaveRefs } from "@/composables/useAutoSaveRefs";
+import { BYTES_PER_MB, DEFAULT_LOGGING } from "@/constants/defaults";
 import type { LoggingConfig } from "@/types/schemas";
 
 const props = defineProps<{
@@ -102,6 +103,27 @@ const { t } = useI18n();
           :aria-label="t('settings.samplingRate')"
           class="font-mono text-sm w-28 bg-background"
           @update:model-value="state.sampling_rate = $event ?? 1"
+        />
+      </template>
+    </SettingsItem>
+
+    <SettingsItem
+      v-if="isAdmin"
+      :title="t('settings.maxLoggedBodySize')"
+      :description="t('settings.maxLoggedBodySizeDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <NumberStepper
+          :model-value="Math.floor(state.max_logged_body_bytes / BYTES_PER_MB)"
+          :min="0"
+          suffix="MB"
+          :aria-label="t('settings.maxLoggedBodySize')"
+          @update:model-value="
+            state.max_logged_body_bytes =
+              ($event ?? DEFAULT_LOGGING.max_logged_body_bytes / BYTES_PER_MB) * BYTES_PER_MB
+          "
         />
       </template>
     </SettingsItem>

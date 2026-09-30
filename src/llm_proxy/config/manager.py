@@ -30,6 +30,7 @@ from .types import (
     SecurityParams,
     ServerParams,
 )
+from .types.logging_config import DEFAULT_MAX_LOGGED_BODY_BYTES, DEFAULT_RETENTION_DAYS
 
 logger = get_logger(__name__)
 
@@ -106,13 +107,20 @@ def load_logging_config(
     settings = get_settings().logging
     overrides = overrides or {}
 
-    log_input_output = _parse_bool(overrides.get("log_input_output", True))
+    log_input_output = _parse_bool(overrides.get("log_input_output", False))
     log_raw_stream = _parse_bool(overrides.get("log_raw_stream", False))
 
     try:
-        retention_days = int(overrides.get("log_retention_days", 30))
+        retention_days = int(overrides.get("log_retention_days", DEFAULT_RETENTION_DAYS))
     except (ValueError, TypeError) as exc:
         raise ConfigurationError(f"Invalid log_retention_days: {exc}") from exc
+
+    try:
+        max_logged_body_bytes = int(
+            overrides.get("max_logged_body_bytes", DEFAULT_MAX_LOGGED_BODY_BYTES)
+        )
+    except (ValueError, TypeError) as exc:
+        raise ConfigurationError(f"Invalid max_logged_body_bytes: {exc}") from exc
 
     verbose_routing_logs = _parse_bool(overrides.get("verbose_routing_logs", False))
     mask_sensitive_data = _parse_bool(overrides.get("mask_sensitive_data", True))
@@ -157,6 +165,7 @@ def load_logging_config(
         log_input_output=log_input_output,
         log_raw_stream=log_raw_stream,
         retention_days=retention_days,
+        max_logged_body_bytes=max_logged_body_bytes,
         mask_sensitive_data=mask_sensitive_data,
         log_level=log_level,
         sampling_rate=sampling_rate,

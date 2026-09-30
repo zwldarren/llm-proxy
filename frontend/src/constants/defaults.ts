@@ -13,15 +13,18 @@ import type {
   WebSearchConfig,
 } from "@/types/schemas";
 
+export const BYTES_PER_MB = 1024 * 1024;
+
 export const DEFAULT_TRACING: TracingConfig = {
   enabled: false,
   providers: [],
 };
 
 export const DEFAULT_LOGGING: LoggingConfig = {
-  log_input_output: true,
+  log_input_output: false,
   log_raw_stream: false,
   log_retention_days: 30,
+  max_logged_body_bytes: BYTES_PER_MB,
   verbose_routing_logs: false,
   mask_sensitive_data: true,
   sampling_rate: 1.0,

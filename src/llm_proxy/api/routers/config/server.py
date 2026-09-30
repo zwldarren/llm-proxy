@@ -24,6 +24,10 @@ from llm_proxy.api.schemas.admin import (
     SmartRoutingConfigUpdate,
     WebSearchConfigUpdate,
 )
+from llm_proxy.config.types.logging_config import (
+    DEFAULT_MAX_LOGGED_BODY_BYTES,
+    DEFAULT_RETENTION_DAYS,
+)
 from llm_proxy.config.types.provider_selection import ProviderSelectionConfig
 from llm_proxy.config.types.smart_routing import SmartRoutingConfig
 from llm_proxy.core.circuit_breaker import CircuitBreakerConfig
@@ -41,9 +45,10 @@ def _build_request_policy_response(value: dict | None) -> dict:
 # Defaults for the UI-managed ``logging`` server_config key. Missing keys in
 # stored (legacy) rows are filled from these defaults on read.
 _LOGGING_CONFIG_DEFAULTS: dict[str, Any] = {
-    "log_input_output": True,
+    "log_input_output": False,
     "log_raw_stream": False,
-    "log_retention_days": 30,
+    "log_retention_days": DEFAULT_RETENTION_DAYS,
+    "max_logged_body_bytes": DEFAULT_MAX_LOGGED_BODY_BYTES,
     "verbose_routing_logs": False,
     "mask_sensitive_data": True,
     "sampling_rate": 1.0,

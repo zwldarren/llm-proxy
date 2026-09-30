@@ -31,9 +31,15 @@ endpoint, and log type. Non-admins are automatically scoped to their own rows.
 
 Configured in [Settings → Log Management](settings.md#log-management):
 
-- **Sampling** (`sampling_rate`, default 1.0) limits **body capture**: sampled-out
-  bodies are stored as `{"_sampled_out": true}` while metadata is still recorded.
-  `x-log-full: true` forces full capture for one request.
+- **Bodies** (`log_input_output`, default **off**) is the master switch for persisting
+  request/response bodies. Off, every row is still written (status, tokens, cost,
+  routing, audit metadata, and both the request and response headers) but bodies are
+  stored as `{"_sampled_out": true}`. It is the master switch, not a sampling knob:
+  `x-log-full: true` cannot re-enable bodies for one request — turn it on in Settings →
+  Log Management (and back off when done) to inspect payloads.
+- **Sampling** (`sampling_rate`, default 1.0) limits **body capture** for requests that
+  do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` while
+  metadata is still recorded. `x-log-full: true` forces full capture for one request.
 - **Raw stream** (`log_raw_stream`, default off) controls how a *streaming* response is
   stored. Off, the accumulated content blocks are reassembled through the protocol
   serializer into the exact JSON a non-streaming call would have returned — the SSE
@@ -52,11 +58,23 @@ Configured in [Settings → Log Management](settings.md#log-management):
   rebuild the body: a native tier whose protocol transformer cannot, and the generic
   streams (image generation and edit) whose payloads carry no content model. Nothing is
   stored only when the request was sampled out or `log_input_output` is off.
+- **Body cap** (`max_logged_body_bytes`, default `1048576` = 1 MiB; `0` = unlimited) limits
+  body **size** at write time: a request or response body bigger than the cap is stored as
+  `{"_truncated": true, "size": N}` (the original serialized size in bytes) instead of the
+  payload. Since the cap is applied when the log row is built, it also truncates requests
+  that forced capture with `x-log-full: true`; metadata is always recorded.
 - **Masking** (`mask_sensitive_data`, default on) replaces credentials in headers,
   bodies, and MCP/tool arguments. Values ≤ 8 chars become `***`; longer values keep
   their first 3 and last 4 characters. Add your own field names via **Extra Sensitive Keys**.
 - **Retention** (`log_retention_days`, default 30; `0` = forever) is enforced by a
-  sweep per log type that runs once a day. Audit retention can be set separately.
+  sweep per log type that runs once a day. The sweep deletes in bounded
+  batches, looping until exhausted — including request logs and usage
+  records — so it never holds a single long write lock on a large store. A sweep that
+  deleted rows is followed by a bounded `PRAGMA incremental_vacuum` and
+  `PRAGMA wal_checkpoint(TRUNCATE)`, trimming the WAL and reusing freed pages on
+  SQLite databases created with `auto_vacuum=INCREMENTAL`; existing database files
+  keep their mode and reclaim space only via a one-time `VACUUM` (see
+  [Databases](../deployment/databases.md)). Audit retention can be set separately.
 
 ### Durability
 

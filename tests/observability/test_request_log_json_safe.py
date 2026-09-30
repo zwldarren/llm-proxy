@@ -12,12 +12,28 @@ import json
 
 import pytest
 
+from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.observability.service import (
     RequestLogCreate,
     _json_safe,
     _request_log_from_create,
 )
 from llm_proxy.observability.types import LogType
+
+
+def _log_create(**overrides) -> RequestLogCreate:
+    """Build a minimal ENDPOINT log payload for the DB-boundary tests."""
+    fields: dict = {
+        "request_id": "req-1",
+        "timestamp": 1.0,
+        "endpoint": "/v1/images/edits",
+        "method": "POST",
+        "status_code": 200,
+        "response_time_ms": 10,
+        "log_type": LogType.ENDPOINT,
+    }
+    fields.update(overrides)
+    return RequestLogCreate(**fields)
 
 
 class TestJsonSafe:
@@ -73,17 +89,7 @@ class TestRequestLogFromCreate:
     """The DB boundary must never receive bytes in JSON columns."""
 
     def _create(self, **overrides) -> RequestLogCreate:
-        fields: dict = {
-            "request_id": "req-1",
-            "timestamp": 1.0,
-            "endpoint": "/v1/images/edits",
-            "method": "POST",
-            "status_code": 200,
-            "response_time_ms": 10,
-            "log_type": LogType.ENDPOINT,
-        }
-        fields.update(overrides)
-        return RequestLogCreate(**fields)
+        return _log_create(**overrides)
 
     def test_binary_request_body_is_sanitized(self):
         data = self._create(
@@ -128,3 +134,66 @@ class TestRequestLogFromCreate:
             log.log_metadata,
         ):
             json.dumps(column)  # must not raise
+
+
+class TestLoggedBodyCap:
+    """``max_logged_body_bytes`` bounds one row's payload at the DB boundary."""
+
+    def test_oversized_request_body_becomes_truncation_marker(self):
+        payload = {"model": "gpt-4o", "messages": [{"content": "x" * 2000}]}
+        compact = '{"model":"gpt-4o","messages":[{"content":"' + "x" * 2000 + '"}]}'
+        log = _request_log_from_create(
+            _log_create(request_body=payload), config=LoggingConfig(max_logged_body_bytes=256)
+        )
+
+        assert log.request_body == {"_truncated": True, "size": len(compact)}
+        assert len(compact) > 256
+
+    def test_cap_applies_to_response_body_too(self):
+        log = _request_log_from_create(
+            _log_create(response_body={"text": "y" * 500}),
+            config=LoggingConfig(max_logged_body_bytes=64),
+        )
+        assert log.response_body["_truncated"] is True
+        assert log.response_body["size"] > 64
+
+    def test_raw_stream_string_is_measured_in_utf8_bytes(self):
+        raw_sse = "data: " + "é" * 100
+        log = _request_log_from_create(
+            _log_create(response_body=raw_sse), config=LoggingConfig(max_logged_body_bytes=64)
+        )
+
+        assert log.response_body == {"_truncated": True, "size": len(raw_sse.encode("utf-8"))}
+
+    def test_body_at_the_cap_is_kept(self):
+        payload = {"a": "x" * 100}
+        size = len('{"a":"' + "x" * 100 + '"}')
+        log = _request_log_from_create(
+            _log_create(request_body=payload), config=LoggingConfig(max_logged_body_bytes=size)
+        )
+
+        assert log.request_body is payload
+
+    def test_body_under_the_cap_is_kept_by_identity(self):
+        """No defensive copy on the hot path: under the cap the object is reused."""
+        payload = {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}
+        log = _request_log_from_create(
+            _log_create(request_body=payload), config=LoggingConfig(max_logged_body_bytes=1 << 20)
+        )
+
+        assert log.request_body is payload
+
+    def test_zero_cap_disables_truncation(self):
+        payload = {"content": "x" * 10_000}
+        log = _request_log_from_create(
+            _log_create(response_body=payload), config=LoggingConfig(max_logged_body_bytes=0)
+        )
+
+        assert log.response_body is payload
+
+    def test_body_cap_defaults_to_disabled_at_the_boundary(self):
+        """The cap is opt-in at this boundary; writers pass the resolved config."""
+        payload = {"content": "x" * 10_000}
+        log = _request_log_from_create(_log_create(response_body=payload))
+
+        assert log.response_body is payload

@@ -55,7 +55,8 @@ class TestGetLoggingConfigDefault:
             result = await get_logging_config(request, session)
 
         assert result["verbose_routing_logs"] is False
-        assert result["log_input_output"] is True
+        assert result["log_input_output"] is False
+        assert result["max_logged_body_bytes"] == 1024 * 1024
 
     @pytest.mark.asyncio
     async def test_existing_config_inherits_verbose_routing_logs(self):
@@ -131,7 +132,7 @@ class TestLoggingConfigAPI:
         assert res.status_code == 200
         data = res.json()
         assert data["verbose_routing_logs"] is False
-        assert data["log_input_output"] is True
+        assert data["log_input_output"] is False
         assert data["log_retention_days"] == 30
 
         # Clean up
@@ -183,6 +184,49 @@ class TestLoggingConfigAPI:
         assert res.status_code == 200
         data = res.json()
         assert data["verbose_routing_logs"] is True
+
+        # Clean up
+        del app.dependency_overrides[get_async_session_dep]
+
+    def test_put_persists_max_logged_body_bytes(self, client):
+        """PUT /logging stores the body cap and returns it."""
+        mock_repo = MagicMock()
+        existing = MagicMock()
+        existing.value = {"log_input_output": True, "log_retention_days": 30}
+        existing.description = "Logging configuration"
+        mock_repo.get_server_config = AsyncMock(return_value=existing)
+        mock_session = AsyncMock()
+        mock_config_manager = AsyncMock()
+        mock_config_manager.reload = AsyncMock()
+
+        app = client._transport.app  # type: ignore[attr-defined]
+
+        async def override_session():
+            return mock_session
+
+        app.dependency_overrides[get_async_session_dep] = override_session
+
+        with (
+            patch(
+                "llm_proxy.api.routers.config.server.get_config_repository",
+                return_value=mock_repo,
+            ),
+            patch(
+                "llm_proxy.api.dependencies.get_config_manager",
+                return_value=mock_config_manager,
+            ),
+        ):
+            res = client.put(
+                "/api/config/server/logging",
+                json={"max_logged_body_bytes": 0},
+            )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["max_logged_body_bytes"] == 0
+        # Omitted fields keep their stored values.
+        assert data["log_retention_days"] == 30
+        assert existing.value["max_logged_body_bytes"] == 0
 
         # Clean up
         del app.dependency_overrides[get_async_session_dep]

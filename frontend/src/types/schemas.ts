@@ -1059,6 +1059,8 @@ export interface WebSearchConfigUpdate {
 export interface LoggingConfig {
   log_input_output: boolean;
   log_retention_days: number;
+  /** Cap on stored request/response body size in bytes; 0 disables the cap. */
+  max_logged_body_bytes: number;
   verbose_routing_logs: boolean;
   mask_sensitive_data: boolean;
   /** Rate (0-1) at which full request/response bodies are logged. */

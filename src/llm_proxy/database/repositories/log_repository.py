@@ -4,9 +4,9 @@ import base64
 import hashlib
 import time
 from threading import RLock
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import Text, delete, func, inspect, literal, or_, select, tuple_, update
+from sqlalchemy import Text, func, inspect, literal, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -656,14 +656,15 @@ class LogRepository(BaseUsageRepository):
         """Delete logs older than the given timestamp; returns rowcount.
 
         When user_id is provided, only logs belonging to that user are deleted.
+        Deletion runs in bounded batches (see ``_delete_in_batches``) so a large
+        retention backlog cannot hold the write lock for one long transaction.
         """
-        stmt = delete(RequestLog).where(RequestLog.timestamp < older_than_ts)
+        conditions = [RequestLog.timestamp < older_than_ts]
         if log_type is not None:
-            stmt = stmt.where(RequestLog.log_type == log_type)
+            conditions.append(RequestLog.log_type == log_type)
         if user_id is not None:
-            stmt = stmt.where(RequestLog.user_id == user_id)
-        result = cast(Any, await self.session.execute(stmt))
-        return int(getattr(result, "rowcount", 0) or 0)
+            conditions.append(RequestLog.user_id == user_id)
+        return await self._delete_in_batches(conditions)
 
 
 def _build_audit_content_hash_data(log: RequestLog) -> dict[str, Any]:

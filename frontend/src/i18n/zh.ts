@@ -847,7 +847,7 @@ export default {
     setZeroToKeepIndefinitely: "设置为 0 表示永久保留",
     logInputOutput: "记录输入/输出",
     logInputOutputDescription:
-      "启用或禁用请求与响应正文记录。禁用后日志行仍会写入，但正文会被清除——端点、MCP、网络搜索与审计元数据保留；用量与费用统计不受影响。",
+      "默认关闭。启用或禁用请求与响应正文记录。禁用后日志行仍会写入，但正文会被清除——端点、MCP、网络搜索与审计元数据保留；用量与费用统计不受影响。该开关优先级最高，x-log-full: true 也无法为单个请求重新开启正文记录。",
     logRawStream: "记录原始流",
     logRawStreamDescription:
       "存储流式响应的原始 SSE 文本。默认关闭：响应会被重组为与非流式调用完全相同的 JSON，体积更小且无需 SSE 解析即可阅读。需要检查原始线格式帧时再开启。",
@@ -855,6 +855,9 @@ export default {
     maskSensitiveDataDescription: "在存储的日志中脱敏敏感字段（API 密钥、令牌、密码）。",
     samplingRate: "请求体采样率",
     samplingRateDescription: "记录完整请求/响应体的请求比例（0–1）。1.0 表示全部记录。",
+    maxLoggedBodySize: "日志正文大小上限",
+    maxLoggedBodySizeDescription:
+      "超过此大小的请求/响应正文将以 {'{'} \"_truncated\": true, \"size\": N {'}'} 的形式存储，而非完整正文。设为 0 表示不限制。对请求与响应正文均生效，包括通过 x-log-full: true 强制记录的请求。",
     auditSamplingRate: "审计采样率",
     auditSamplingRateDescription: "审计事件的采样比例（0–1）。留空则继承请求体采样率。",
     auditRetentionDays: "审计日志保留天数",

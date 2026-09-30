@@ -67,10 +67,15 @@ See [MCP Servers](../admin/mcp.md#security-policy).
 
 ## Logging and privacy
 
+- **Bodies are off by default** (`log_input_output`): every row still records status,
+  tokens, cost, routing and audit metadata, but request/response payloads are stored as
+  `{"_sampled_out": true}`. Turn it on deliberately — and back off afterwards — when you
+  need payload-level debugging. It is a master switch: `x-log-full: true` cannot
+  re-enable bodies for a single request.
 - **Masking** is on by default; add your own field names under **Sensitive keys**.
   Masked values keep their first 3 and last 4 characters (≤ 8 chars → `***`).
-- **Sampling** reduces body capture without losing metadata; `x-log-full: true` forces
-  full capture for a single request when debugging.
+- **Sampling** reduces body capture (once bodies are enabled) without losing metadata;
+  `x-log-full: true` forces full capture for a single request when debugging.
 - **Retention** defaults to 30 days for logs, audit and usage records alike. Shorten it
   for sensitive workloads.
 - **Audit chain**: verify integrity from Logs → Audit Logs → **Verify Integrity** on a

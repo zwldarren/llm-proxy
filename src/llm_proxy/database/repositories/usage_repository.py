@@ -1,8 +1,7 @@
 """Usage record repository for independent usage tracking."""
 
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,10 +70,13 @@ class UsageRepository(BaseUsageRepository):
         return len(values)
 
     async def delete_old_usage(self, *, older_than_ts: float) -> int:
-        """Delete usage records older than the given timestamp; returns rowcount."""
-        stmt = delete(UsageRecord).where(UsageRecord.timestamp < older_than_ts)
-        result = cast(Any, await self.session.execute(stmt))
-        return int(getattr(result, "rowcount", 0) or 0)
+        """Delete usage records older than the given timestamp; returns rowcount.
+
+        Runs in bounded batches (see ``_delete_in_batches``): ``usage_records``
+        is the larger of the two writers, so one unbounded sweep would hold the
+        write lock for the whole backlog.
+        """
+        return await self._delete_in_batches([UsageRecord.timestamp < older_than_ts])
 
     async def get_usage_stats(
         self,

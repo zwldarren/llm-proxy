@@ -13,8 +13,24 @@ for any multi-worker or multi-replica deployment.
 
 - Bare `postgresql://` / `postgres://` URLs are rewritten to the asyncpg driver
   automatically.
-- SQLite runs with `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
-  The file's `-wal`/`-shm` siblings are part of the database.
+- SQLite runs with `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`, and
+  `PRAGMA auto_vacuum=INCREMENTAL`. `auto_vacuum` is baked in when the file is created:
+  only new databases get it, an existing file keeps its current mode.
+  Plain `DELETE` never returns space to the filesystem — the file keeps its size. After
+  each retention sweep that deleted rows, the proxy runs a bounded
+  `PRAGMA incremental_vacuum` followed by `PRAGMA wal_checkpoint(TRUNCATE)` (only on
+  databases that have incremental auto-vacuum). To reclaim space an existing database
+  has already lost, run a one-time `VACUUM` with the service stopped — or `.backup` into
+  a fresh file and swap it in:
+
+  ```bash
+  systemctl stop llm-proxy            # or however you stop the service
+  sqlite3 ~/.local/share/llm-proxy/config.db "VACUUM;"
+  systemctl start llm-proxy
+  ```
+
+  Operate on the database file itself: the `-wal`/`-shm` siblings are part of the
+  database (SQLite manages them; a `VACUUM` or `.backup` handles them for you).
 - PostgreSQL connections get `pool_pre_ping` plus `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`,
   `DB_POOL_RECYCLE_SECONDS`, and `DB_POOL_TIMEOUT_SECONDS`
   (see [Environment Variables](../reference/environment.md)).

@@ -12,6 +12,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+import orjson
 from sqlalchemy.exc import IntegrityError
 
 from llm_proxy.config.manager import resolve_logging_config
@@ -23,6 +24,7 @@ from llm_proxy.config.settings import (
 )
 from llm_proxy.config.types.logging_config import DEFAULT_RETENTION_DAYS, LoggingConfig
 from llm_proxy.database import RequestLog, UsageRecord, get_async_session_context
+from llm_proxy.database.connection import reclaim_sqlite_space
 from llm_proxy.database.repositories import LogRepository, UsageRepository
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import LogType
@@ -305,6 +307,20 @@ class _BackgroundBatchWriter[T](ABC):
     @abstractmethod
     async def _cleanup_loop(self) -> None: ...
 
+    async def _reclaim_free_space(self) -> None:
+        """Reclaim pages freed by a retention sweep (no-op off SQLite).
+
+        A plain ``DELETE`` never returns space to the filesystem: the file keeps
+        its size and the freed pages only get reused by later writes. Called
+        only when a sweep actually deleted rows, and failures are non-fatal —
+        the space is reclaimed by a later sweep or a manual ``VACUUM``.
+        """
+        try:
+            async with get_async_session_context() as session:
+                await reclaim_sqlite_space(session)
+        except Exception as e:
+            self._logger.warning("Failed to reclaim freed database space", extra={"error": str(e)})
+
 
 class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
     """Background writer for request logs."""
@@ -342,11 +358,13 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
             repo = LogRepository(session)
 
             if other_data:
-                other_logs = [_request_log_from_create(data) for data in other_data]
+                other_logs = [
+                    _request_log_from_create(data, config=self._config) for data in other_data
+                ]
                 await repo.create_logs_bulk(other_logs)
 
             for data in audit_data:
-                audit_log = _request_log_from_create(data)
+                audit_log = _request_log_from_create(data, config=self._config)
                 await repo.create_audit_log_with_integrity(audit_log)
 
             await session.commit()
@@ -354,6 +372,7 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
     async def _cleanup_loop(self) -> None:
         await asyncio.sleep(1)
         while not self._stop_event.is_set():
+            deleted_any = False
             for log_type in (
                 LogType.AUDIT,
                 LogType.ENDPOINT,
@@ -367,9 +386,15 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
                 try:
                     async with get_async_session_context() as session:
                         repo = LogRepository(session)
-                        await repo.delete_old_logs(older_than_ts=cutoff, log_type=log_type.value)
+                        deleted = await repo.delete_old_logs(
+                            older_than_ts=cutoff, log_type=log_type.value
+                        )
+                        deleted_any = deleted_any or bool(deleted)
                 except Exception as e:
                     self._logger.error("Failed to cleanup old logs", extra={"error": str(e)})
+
+            if deleted_any:
+                await self._reclaim_free_space()
 
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=24 * 60 * 60)
@@ -410,7 +435,7 @@ class _BackgroundAuditLogWriter(_BackgroundLogWriter):
         async with get_async_session_context() as session:
             repo = LogRepository(session)
             for data in batch:
-                audit_log = _request_log_from_create(data)
+                audit_log = _request_log_from_create(data, config=self._config)
                 await repo.create_audit_log_with_integrity(audit_log)
             await session.commit()
 
@@ -557,8 +582,45 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-def _request_log_from_create(data: RequestLogCreate) -> RequestLog:
-    """Build a RequestLog ORM instance from a RequestLogCreate DTO."""
+def _cap_logged_body(body: Any, max_bytes: int) -> Any:
+    """Replace a body whose serialized size exceeds ``max_bytes`` with a marker.
+
+    The cap bounds one row's payload, not the exact byte count the dialect ends
+    up writing: the size is measured on the compact ``orjson`` form (and, for a
+    raw SSE string, on its UTF-8 byte length). ``0`` disables the cap, and a
+    payload that is neither a dict, list nor string (or that cannot be dumped)
+    is passed through untouched.
+    """
+    if max_bytes <= 0:
+        return body
+    if isinstance(body, str):
+        size = len(body.encode("utf-8"))
+    elif isinstance(body, (dict, list)):
+        try:
+            size = len(orjson.dumps(body, option=orjson.OPT_NON_STR_KEYS))
+        except TypeError:
+            return body
+    else:
+        return body
+    if size <= max_bytes:
+        return body
+    return {"_truncated": True, "size": size}
+
+
+def _request_log_from_create(
+    data: RequestLogCreate, *, config: LoggingConfig | None = None
+) -> RequestLog:
+    """Build a RequestLog ORM instance from a RequestLogCreate DTO.
+
+    ``config`` is the log store's ``LoggingConfig``; its ``max_logged_body_bytes``
+    caps bodies — bodies over it are stored as ``{"_truncated": true, "size": N}``.
+    Enforcing it here is what gives the cap a single choke point: every writer
+    (endpoint, audit, MCP, web search) builds its row through this function, and
+    the audit content hash is computed downstream from the ORM object
+    (``create_audit_log_with_integrity``), so the hash always covers the capped
+    payload the row actually stores.
+    """
+    max_body_bytes = config.max_logged_body_bytes if config is not None else 0
     return RequestLog(
         user_id=data.user_id,
         request_id=data.request_id,
@@ -572,9 +634,9 @@ def _request_log_from_create(data: RequestLogCreate) -> RequestLog:
         model=data.model,
         provider=data.provider,
         request_headers=_json_safe(data.request_headers),
-        request_body=_json_safe(data.request_body),
+        request_body=_cap_logged_body(_json_safe(data.request_body), max_body_bytes),
         response_headers=_json_safe(data.response_headers),
-        response_body=_json_safe(data.response_body),
+        response_body=_cap_logged_body(_json_safe(data.response_body), max_body_bytes),
         error_message=data.error_message,
         error_stack_trace=data.error_stack_trace,
         prompt_tokens=data.prompt_tokens,
@@ -613,7 +675,6 @@ class RequestLogService:
 
     def __init__(self, config: LoggingConfig):
         self._config = config
-        self._last_retention_cleanup_ts: float = 0.0
 
     async def create_log(self, data: RequestLogCreate) -> None:
         """Create a new log entry. Safe to call from request paths.
@@ -630,13 +691,11 @@ class RequestLogService:
 
         async with get_async_session_context() as session:
             repo = LogRepository(session)
-            log = _request_log_from_create(data)
+            log = _request_log_from_create(data, config=self._config)
             try:
                 await repo.create_log(log)
             except IntegrityError:
                 return
-
-        await self._maybe_cleanup_retention()
 
     def create_log_background(self, data: RequestLogCreate) -> None:
         """Create a log entry using a background queue. MUST NOT block."""
@@ -659,21 +718,6 @@ class RequestLogService:
             return await repo.delete_old_logs(
                 older_than_ts=older_than_ts, log_type=log_type, user_id=user_id
             )
-
-    async def _maybe_cleanup_retention(self) -> None:
-        retention_days = int(self._config.retention_days)
-        if retention_days <= 0:
-            return
-
-        now = time.time()
-        if now - self._last_retention_cleanup_ts < 3600:
-            return
-
-        cutoff = now - (retention_days * 24 * 60 * 60)
-        try:
-            await self.delete_old_logs(older_than_ts=cutoff)
-        finally:
-            self._last_retention_cleanup_ts = now
 
 
 def format_exception_stacktrace(exc: Exception) -> str:
@@ -812,11 +856,14 @@ class _BackgroundUsageWriter(_BackgroundBatchWriter["UsageRecordCreate"]):
         while not self._stop_event.is_set():
             try:
                 retention_days = self._effective_retention_days()
+                deleted = 0
                 if retention_days > 0:
                     cutoff = time.time() - (retention_days * 24 * 60 * 60)
                     async with get_async_session_context() as session:
                         repo = UsageRepository(session)
-                        await repo.delete_old_usage(older_than_ts=cutoff)
+                        deleted = await repo.delete_old_usage(older_than_ts=cutoff)
+                if deleted:
+                    await self._reclaim_free_space()
             except Exception as e:
                 self._logger.error("Failed to cleanup old usage", extra={"error": str(e)})
 

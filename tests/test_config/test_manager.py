@@ -62,9 +62,22 @@ class TestLoadLoggingConfig:
     def test_default_values(self):
         with patch.dict(os.environ, {}, clear=False):
             result = load_logging_config()
-            assert result.log_input_output is True
+            assert result.log_input_output is False
             assert result.retention_days == 30
+            assert result.max_logged_body_bytes == 1024 * 1024
             assert result.mask_sensitive_data is True
+
+    def test_max_logged_body_bytes_override(self):
+        result = load_logging_config({"max_logged_body_bytes": 4096})
+        assert result.max_logged_body_bytes == 4096
+
+    def test_max_logged_body_bytes_zero_disables_the_cap(self):
+        result = load_logging_config({"max_logged_body_bytes": 0})
+        assert result.max_logged_body_bytes == 0
+
+    def test_invalid_max_logged_body_bytes_override_raises_error(self):
+        with pytest.raises(ConfigurationError, match="Invalid max_logged_body_bytes"):
+            load_logging_config({"max_logged_body_bytes": "abc"})
 
     def test_custom_values(self):
         overrides = {

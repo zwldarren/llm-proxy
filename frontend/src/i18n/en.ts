@@ -873,7 +873,7 @@ export default {
     setZeroToKeepIndefinitely: "Set to 0 to keep logs indefinitely",
     logInputOutput: "Log Input/Output",
     logInputOutputDescription:
-      "Enable or disable logging of request and response bodies. When disabled, log rows are still written with bodies scrubbed — endpoint, MCP, web-search and audit metadata is kept. Usage and cost accounting is unaffected.",
+      "Off by default. Enable or disable logging of request and response bodies. When disabled, log rows are still written with bodies scrubbed — endpoint, MCP, web-search and audit metadata is kept. Usage and cost accounting is unaffected. This switch wins over x-log-full: true, so bodies cannot be re-enabled for a single request.",
     logRawStream: "Log Raw Stream",
     logRawStreamDescription:
       "Store the raw SSE text of streaming responses. Off by default: the response is reassembled into the same JSON a non-streaming call would return, which is smaller and readable without SSE parsing. Turn on to inspect the exact wire frames.",
@@ -883,6 +883,9 @@ export default {
     samplingRate: "Body Sampling Rate",
     samplingRateDescription:
       "Fraction (0–1) of requests whose full bodies are logged. 1.0 logs everything.",
+    maxLoggedBodySize: "Max Logged Body Size",
+    maxLoggedBodySizeDescription:
+      "Bodies larger than this are stored as {'{'} \"_truncated\": true, \"size\": N {'}'} instead of the full payload. 0 disables the cap. Applies to request and response bodies, including requests that force capture with x-log-full: true.",
     auditSamplingRate: "Audit Sampling Rate",
     auditSamplingRateDescription:
       "Fraction (0–1) of audit events sampled. Leave empty to inherit the body sampling rate.",

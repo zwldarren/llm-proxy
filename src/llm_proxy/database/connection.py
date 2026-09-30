@@ -5,6 +5,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from llm_proxy.config.settings import get_settings
@@ -109,6 +110,12 @@ def get_engine():
             @event.listens_for(_engine.sync_engine, "connect")
             def set_sqlite_pragma(dbapi_connection, _connection_record):
                 cursor = dbapi_connection.cursor()
+                # Must precede ``journal_mode``: once WAL has initialized the
+                # file, SQLite refuses the change without a full VACUUM, so the
+                # incremental reclaim would never engage on a new database.
+                # It only applies to a file created with it — an existing
+                # database keeps its mode and needs a one-time VACUUM.
+                cursor.execute("PRAGMA auto_vacuum=INCREMENTAL")
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.execute("PRAGMA synchronous=NORMAL")
                 cursor.execute("PRAGMA foreign_keys=ON")
@@ -217,6 +224,31 @@ async def get_async_session_context() -> AsyncIterator[AsyncSession]:
     """
     async for session in _session_generator():
         yield session
+
+
+#: Pages (4 KiB each ⇒ ~200 MiB) reclaimed per retention sweep. Bounded so the
+#: vacuum cannot hold the write lock for an unbounded time on a large store;
+#: whatever is left is reclaimed by the next sweep.
+_SQLITE_RECLAIM_PAGES = 50_000
+
+
+async def reclaim_sqlite_space(session: AsyncSession) -> None:
+    """Hand pages freed by a retention sweep back to the filesystem (SQLite only).
+
+    ``DELETE`` alone never shrinks a SQLite file: the pages stay on the freelist
+    and are only reused by later writes, so a store that grew to tens of GB
+    before retention was tightened keeps its size forever. This runs a bounded
+    ``incremental_vacuum`` (a no-op unless the file was created with
+    ``auto_vacuum=INCREMENTAL``) and truncates the WAL, which is where the freed
+    pages of a large delete accumulate. PostgreSQL needs none of this: its
+    autovacuum reclaims on its own.
+    """
+    if not is_sqlite():
+        return
+
+    await session.execute(text(f"PRAGMA incremental_vacuum({_SQLITE_RECLAIM_PAGES})"))
+    await session.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+    await session.commit()
 
 
 def run_migrations() -> None:

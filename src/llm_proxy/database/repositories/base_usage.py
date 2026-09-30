@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
-from sqlalchemy import Date, and_, func, select
+from sqlalchemy import Date, and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import case
 
@@ -31,6 +31,33 @@ class BaseUsageRepository:
     def __init__(self, session: AsyncSession, model_class: Any):
         self.session = session
         self.model = model_class
+
+    #: Rows removed per statement by :meth:`_delete_in_batches`. Rows here carry
+    #: request/response bodies, so this bounds both the freed-page volume a
+    #: single transaction has to journal (SQLite WAL) and the time the write
+    #: lock is held on a store that has grown to many GB.
+    DELETE_BATCH_SIZE = 2000
+
+    async def _delete_in_batches(self, conditions: list[Any]) -> int:
+        """Delete rows matching ``conditions`` in bounded, separately committed batches.
+
+        Returns the total number of deleted rows. A single unbounded DELETE over
+        a multi-GB retention backlog holds the write lock for its whole duration
+        and journals every freed page into one WAL burst; deleting by primary key
+        in chunks keeps each transaction short and releases the lock between
+        them. Every batch is its own transaction, so a failure mid-way leaves the
+        already-deleted rows deleted (retention is idempotent and re-run daily).
+        """
+        size = self.DELETE_BATCH_SIZE
+        total = 0
+        while True:
+            doomed = select(self.model.id).where(*conditions).limit(size)
+            result = await self.session.execute(delete(self.model).where(self.model.id.in_(doomed)))
+            deleted = int(getattr(result, "rowcount", 0) or 0)
+            await self.session.commit()
+            total += deleted
+            if deleted < size:
+                return total
 
     def _build_time_filters(
         self,

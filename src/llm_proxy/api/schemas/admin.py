@@ -971,8 +971,11 @@ class LoggingConfigUpdate(BaseModel):
     """Schema for updating logging config."""
 
     log_input_output: bool = Field(
-        default=True,
-        description="Log request/response bodies; when off, rows persist with bodies scrubbed",
+        default=False,
+        description=(
+            "Log request/response bodies; off by default so rows persist with bodies "
+            "scrubbed. Master switch: it cannot be overridden per request"
+        ),
     )
     log_raw_stream: bool | None = Field(
         default=None,
@@ -983,6 +986,14 @@ class LoggingConfigUpdate(BaseModel):
     )
     log_retention_days: int | None = Field(
         None, ge=0, description="Log retention days (0 = keep indefinitely)"
+    )
+    max_logged_body_bytes: int | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Cap on the serialized size of a stored request/response body in bytes; "
+            "larger bodies are stored as a truncation marker (0 = no cap)"
+        ),
     )
     verbose_routing_logs: bool | None = Field(
         default=None,
