@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.9](https://github.com/zwldarren/llm-proxy/compare/v0.2.8...v0.2.9) (2026-09-30)
+
+
+### Features
+
+* **logs:** surface cache token counts on the log list ([a06e019](https://github.com/zwldarren/llm-proxy/commit/a06e019b3839b9d5b2bac058504d8b61044b655b))
+* **models:** give list mode the table's column grammar ([f27a549](https://github.com/zwldarren/llm-proxy/commit/f27a549c84e27e4351e78d9e50f44a276ba537ab))
+* **usage:** break hourly buckets down by model in the trends chart ([ba2a978](https://github.com/zwldarren/llm-proxy/commit/ba2a9783266f1a3bd0875333263e20f2e6d4f786))
+
+
+### Bug Fixes
+
+* **config:** decode bytes generation token so peer workers refresh ([a4f99fd](https://github.com/zwldarren/llm-proxy/commit/a4f99fd663c9c60943cf8cf67e941a7b6aea0488))
+* **ui:** keep tooltips closed when focus moves programmatically ([8665f30](https://github.com/zwldarren/llm-proxy/commit/8665f30125d85c7dc5a6fe0255810fd61af512f3))
+
+
+### Performance Improvements
+
+* **logging:** cap stored bodies and reclaim space on retention sweeps ([b4f7c3b](https://github.com/zwldarren/llm-proxy/commit/b4f7c3bc85c53622970df8c9bd4dae22bf7b7862))
+
 ## [0.2.8](https://github.com/zwldarren/llm-proxy/compare/v0.2.7...v0.2.8) (2026-09-28)
 
 
