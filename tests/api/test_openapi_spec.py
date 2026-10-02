@@ -105,6 +105,17 @@ def test_undocumented_v1_route_fails_generation():
         build_v1_spec(stub)
 
 
+def test_spec_version_is_git_independent():
+    """The published version must not move when the working tree changes.
+
+    ``get_display_version`` decorates with ``git describe``, so using it here would
+    invalidate the committed artifact on the very commit that regenerates it.
+    """
+    from llm_proxy.version import get_version
+
+    assert _v1_spec()["info"]["version"] == get_version()
+
+
 def test_committed_spec_is_up_to_date():
     committed = DEFAULT_SPEC_PATH.read_text() if DEFAULT_SPEC_PATH.exists() else ""
 

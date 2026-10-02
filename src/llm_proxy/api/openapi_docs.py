@@ -40,6 +40,7 @@ from llm_proxy.protocols.openai.schemas import (
     ImageEditRequestSchema,
     ImageGenerationRequestSchema,
 )
+from llm_proxy.version import get_version
 
 #: Repository root, derived from this file's location (``src/llm_proxy/api/``).
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -247,7 +248,10 @@ def build_v1_spec(app: Any | None = None) -> dict[str, Any]:
         "openapi": full.get("openapi", "3.1.0"),
         "info": {
             "title": "LLM Proxy API",
-            "version": full["info"]["version"],
+            # ``get_version``, not the app's ``get_display_version``: the latter is
+            # decorated with git describe (``0.2.9-2-g1795736``), which would make the
+            # committed artifact stale the moment the regeneration commit lands.
+            "version": get_version(),
             "description": (
                 "The client-facing contract of the proxy: the OpenAI Chat Completions, "
                 "OpenAI Responses, and Anthropic Messages protocols plus the media "
