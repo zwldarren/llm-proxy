@@ -290,3 +290,33 @@ describe("parseLogResponse — tool calls", () => {
     });
   });
 });
+
+describe("parseLogResponse — body sentinels", () => {
+  it.each([
+    ["disabled", { _bodies_disabled: true }],
+    ["sampled out", { _sampled_out: true }],
+    ["truncated", { _truncated: true, size: 10 }],
+    ["unassembled", { streaming: true, _assembled: false }],
+  ])("treats a %s marker as a body-less response", (_name, body) => {
+    const r = parseLogResponse(body);
+
+    expect(r.hasData).toBe(false);
+    expect(r.bodySentinel).not.toBeNull();
+  });
+
+  it("maps each marker to its precise bodySentinel kind", () => {
+    expect(parseLogResponse({ _sampled_out: true }).bodySentinel).toBe("sampled-out");
+    expect(parseLogResponse({ _bodies_disabled: true }).bodySentinel).toBe("disabled");
+    expect(parseLogResponse({ _truncated: true, size: 1 }).bodySentinel).toBe("truncated");
+    expect(parseLogResponse({ streaming: true, _assembled: false }).bodySentinel).toBe(
+      "unassembled"
+    );
+  });
+
+  it("only labels the sampling marker with the sampled-out protocol", () => {
+    expect(parseLogResponse({ _sampled_out: true }).protocol).toBe("sampled-out");
+    expect(parseLogResponse({ _bodies_disabled: true }).protocol).toBe("unknown");
+    expect(parseLogResponse({ _truncated: true, size: 1 }).protocol).toBe("unknown");
+    expect(parseLogResponse({ streaming: true, _assembled: false }).protocol).toBe("unknown");
+  });
+});

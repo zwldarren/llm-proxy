@@ -72,6 +72,7 @@ import {
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { asString } from "@/utils/logFormat";
 import {
   cachedTokens,
   completionTokens,
@@ -703,7 +704,7 @@ const getMcpServer = (log: LogListItemType): string =>
   (log.log_metadata?.mcp_server as string | undefined) || log.model || "-";
 
 const getWebSearchQuery = (log: LogListItemType): string =>
-  (log.log_metadata?.web_search_query as string | undefined) || "-";
+  asString(log.log_metadata?.web_search_query) ?? "-";
 const getWebSearchResultCount = (log: LogListItemType): number =>
   (log.log_metadata?.web_search_result_count as number | undefined) || 0;
 const getWebSearchStatus = (log: LogListItemType): string =>

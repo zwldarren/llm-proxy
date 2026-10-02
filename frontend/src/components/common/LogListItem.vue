@@ -30,6 +30,7 @@ import {
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { asString } from "@/utils/logFormat";
 import {
   cachedTokens,
   completionTokens,
@@ -91,7 +92,7 @@ const getMcpServer = (log: LogItem): string => {
 };
 
 const getWebSearchQuery = (log: LogItem): string => {
-  return (log.log_metadata?.web_search_query as string | undefined) || "-";
+  return asString(log.log_metadata?.web_search_query) ?? "-";
 };
 
 const getWebSearchResultCount = (log: LogItem): number => {

@@ -18,6 +18,7 @@ from llm_proxy.observability.audit_helpers import (
 )
 from llm_proxy.observability.cost import calculate_event_cost
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.redaction import body_marker, scrub_log_metadata
 from llm_proxy.observability.service import RequestLogCreate, UsageRecordCreate, UsageService
 from llm_proxy.observability.tracing.handlers.base import TracingHandler
 from llm_proxy.observability.types import LogType
@@ -197,9 +198,12 @@ class AuditLogHandler(TracingHandler):
         if context.cost_usd is None and context.has_billable_data() and self._config_manager:
             await self._calculate_cost(context)
 
-        # Build and write log
+        # Build and write log. Resolve the service (and with it the current
+        # LoggingConfig) before building, so masking uses the same config the
+        # row is written with instead of the previous request's snapshot.
+        log_service = self._get_request_log_service()
         log_data = self._build_log_create(request, response, context)
-        self._get_request_log_service().create_log_background(log_data)
+        log_service.create_log_background(log_data)
 
         # Always create usage record (independent of sampling)
         usage_record = self._build_usage_record(context)
@@ -242,8 +246,9 @@ class AuditLogHandler(TracingHandler):
             return
 
         # Build and write error log
+        log_service = self._get_request_log_service()
         log_data = self._build_error_log_create(request, error, context)
-        self._get_request_log_service().create_log_background(log_data)
+        log_service.create_log_background(log_data)
 
         # Always create usage record on error
         usage_record = self._build_usage_record(context)
@@ -331,8 +336,9 @@ class AuditLogHandler(TracingHandler):
             context.response_body = self._logged_stream_body(context)
 
         # Build and write log
+        log_service = self._get_request_log_service()
         log_data = self._build_streaming_log_create(request, context)
-        self._get_request_log_service().create_log_background(log_data)
+        log_service.create_log_background(log_data)
 
         # Always create usage record
         usage_record = self._build_usage_record(context)
@@ -403,7 +409,10 @@ class AuditLogHandler(TracingHandler):
                 request_body = mask_sensitive(request_body, self._sensitive_keys())
 
         if not context.should_capture_full_body:
-            return {}, {"_sampled_out": True}
+            # The body is not stored; the marker explains why. Headers are
+            # metadata, so keep whatever the sampler snapshotted (full capture,
+            # or body logging off) instead of blanking them here.
+            return request_headers, body_marker(bodies_enabled=context.should_log_input_output)
 
         return request_headers, request_body
 
@@ -426,6 +435,16 @@ class AuditLogHandler(TracingHandler):
             response_headers = mask_headers(response_headers)
             if context.should_capture_full_body and isinstance(response_body, dict):
                 response_body = mask_sensitive(response_body, self._sensitive_keys())
+
+        if not context.should_log_input_output:
+            # Master switch off: the body is replaced by an explained marker;
+            # headers are masked metadata and stay, so a body-less row is still
+            # diagnosable.
+            response_body = body_marker(bodies_enabled=False)
+        elif not context.should_capture_full_body:
+            # Master switch on, but this request lost the sampling draw — or it
+            # is a stream whose frames were not buffered. The marker says so.
+            response_body = body_marker(bodies_enabled=True)
 
         return response_headers, response_body
 
@@ -629,13 +648,6 @@ class AuditLogHandler(TracingHandler):
         request_headers, request_body = self._mask_request_data(context)
         response_headers, response_body = self._mask_response_data(context)
 
-        if not context.should_capture_full_body:
-            response_headers = {}
-            response_body = {"_sampled_out": True}
-        elif not context.should_log_input_output:
-            request_body = {"_sampled_out": True}
-            response_body = {"_sampled_out": True}
-
         log_metadata = self._build_log_metadata(context, extra={"streaming": False})
 
         return RequestLogCreate(
@@ -656,12 +668,16 @@ class AuditLogHandler(TracingHandler):
         """Build RequestLogCreate for error case."""
         base = self._build_log_base(context, default_status_code=500)
         request_headers, request_body = self._mask_request_data(context)
-        if not context.should_log_input_output:
-            request_body = {"_sampled_out": True}
 
         log_metadata = self._build_log_metadata(
             context, extra={"error_details": context.error_details}
         )
+        if not context.should_log_input_output:
+            # An upstream error body (``error_details.response_body`` / the whole
+            # upstream error JSON under ``original_error``) is content too, so it
+            # must not survive the switch. Classification fields (type, status,
+            # code, url, method) are kept for diagnosis.
+            log_metadata = scrub_log_metadata(log_metadata)
 
         return RequestLogCreate(
             **base,
@@ -682,12 +698,6 @@ class AuditLogHandler(TracingHandler):
 
         request_headers, request_body = self._mask_request_data(context)
         response_headers, response_body = self._mask_response_data(context)
-
-        if not context.should_capture_full_body:
-            response_body = {"streaming": True, "truncated": context.streaming_truncated}
-        elif not context.should_log_input_output:
-            request_body = {"_sampled_out": True}
-            response_body = {"_sampled_out": True}
 
         log_metadata = self._build_log_metadata(
             context,

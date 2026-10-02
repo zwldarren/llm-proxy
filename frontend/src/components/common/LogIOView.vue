@@ -7,7 +7,7 @@ import LogRequestView from "@/components/common/LogRequestView.vue";
 import LogResponseView from "@/components/common/LogResponseView.vue";
 import { Badge } from "@/components/ui/badge";
 import type { LogRead } from "@/types/schemas";
-import { hasPayload } from "@/utils/logFormat";
+import { bodySentinel, bodySentinelMessage, hasPayload, isRecord } from "@/utils/logFormat";
 import { Brackets, Clock, Code, Database, Globe, Server, Terminal } from "@lucide/vue";
 
 const props = defineProps<{
@@ -33,25 +33,33 @@ const hasResponseBody = computed(() => hasPayload(props.log?.response_body));
 const mcpMetadata = computed(() => {
   if (!isMcpLog.value || !props.log?.log_metadata) return null;
   const meta = props.log.log_metadata as Record<string, unknown>;
+  // Body logging off replaces arguments/results with a sentinel object; keep
+  // them out of the JSON viewer and explain the marker instead.
+  const argumentsSentinel = bodySentinel(meta.mcp_arguments);
+  const resultSentinel = bodySentinel(meta.mcp_result_summary);
   return {
     server: (meta.mcp_server as string) || props.log.model || "-",
     operation: meta.mcp_operation as string | undefined,
     resourceType: meta.mcp_resource_type as string | undefined,
     resourceName: meta.mcp_resource_name as string | undefined,
-    arguments: meta.mcp_arguments as Record<string, unknown> | undefined,
-    resultSummary: meta.mcp_result_summary as Record<string, unknown> | undefined,
+    arguments: isRecord(meta.mcp_arguments) && !argumentsSentinel ? meta.mcp_arguments : undefined,
+    resultSummary:
+      isRecord(meta.mcp_result_summary) && !resultSentinel ? meta.mcp_result_summary : undefined,
+    argumentsSentinel,
+    resultSentinel,
   };
 });
 
-// Web Search log data
+// Web Search log data. Body logging off replaces query/results with a marker
+// object, so guard the types instead of blindly casting.
 const webSearchMetadata = computed(() => {
   if (!isWebSearchLog.value || !props.log?.log_metadata) return null;
   const meta = props.log.log_metadata as Record<string, unknown>;
   return {
-    query: meta.web_search_query as string | undefined,
+    query: typeof meta.web_search_query === "string" ? meta.web_search_query : undefined,
     status: meta.web_search_status as string | undefined,
     resultCount: meta.web_search_result_count as number | undefined,
-    results: meta.web_search_results as Array<Record<string, unknown>> | undefined,
+    results: Array.isArray(meta.web_search_results) ? meta.web_search_results : undefined,
     provider: meta.web_search_provider as string | undefined,
     maxUses: meta.web_search_max_uses as number | undefined,
     currentUse: meta.web_search_current_use as number | undefined,
@@ -236,6 +244,12 @@ const formatMcpOperation = (op: string | undefined): string => {
             :label="t('logs.mcpArguments')"
             max-height="max-h-[300px]"
           />
+          <p
+            v-else-if="mcpMetadata.argumentsSentinel"
+            class="text-xs text-muted-foreground italic bg-muted/5 border border-border/40 p-3 rounded-lg text-center"
+          >
+            {{ bodySentinelMessage(mcpMetadata.argumentsSentinel, t) }}
+          </p>
 
           <!-- Result Summary -->
           <JsonViewer
@@ -244,6 +258,12 @@ const formatMcpOperation = (op: string | undefined): string => {
             :label="t('logs.mcpResult')"
             max-height="max-h-[500px]"
           />
+          <p
+            v-else-if="mcpMetadata.resultSentinel"
+            class="text-xs text-muted-foreground italic bg-muted/5 border border-border/40 p-3 rounded-lg text-center"
+          >
+            {{ bodySentinelMessage(mcpMetadata.resultSentinel, t) }}
+          </p>
         </div>
       </div>
     </template>

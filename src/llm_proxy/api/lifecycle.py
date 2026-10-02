@@ -219,11 +219,13 @@ async def startup_background_services(app: FastAPI) -> None:
     from llm_proxy.observability.service import RequestLogService
 
     # Use the config manager's cached config so UI-managed logging settings
-    # (retention, masking, sampling) apply to the background writers too.
+    # (retention, masking, sampling, the body switch) apply to the background
+    # writers too. The writers keep the manager and re-resolve per batch, so
+    # later settings changes also apply without a restart.
     config_manager = getattr(app.state, "config_manager", None)
     logging_config = resolve_logging_config(config_manager)
 
-    start_background_log_writer(logging_config)
+    start_background_log_writer(logging_config, config_manager)
     # Usage records follow the same UI-managed retention window as the logs.
     start_background_usage_writer(logging_config.retention_days, config_manager)
 

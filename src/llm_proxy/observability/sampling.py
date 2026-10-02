@@ -96,6 +96,18 @@ def make_sampling_decision(
     """
     log_type = determine_log_type(path)
 
+    # The master switch short-circuits every capture decision: with body
+    # logging off there is no request or response body worth buffering, so this
+    # is also the point where the request stops paying to accumulate one (the
+    # store still scrubs defensively before persisting). Request headers are
+    # metadata, not content, and are still snapshotted by the pipeline.
+    if not config.log_input_output:
+        return SamplingDecision(
+            should_capture_full_body=False,
+            should_capture_raw_stream=False,
+            log_type=log_type,
+        )
+
     # Check force full log header
     force_full = request.headers.get(force_full_log_header, "").lower() in ("true", "1", "yes")
 

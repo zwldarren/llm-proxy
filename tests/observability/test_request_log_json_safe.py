@@ -139,11 +139,16 @@ class TestRequestLogFromCreate:
 class TestLoggedBodyCap:
     """``max_logged_body_bytes`` bounds one row's payload at the DB boundary."""
 
+    @staticmethod
+    def _cap_config(max_logged_body_bytes: int) -> LoggingConfig:
+        """Cap tests exercise sizing, not the master body switch."""
+        return LoggingConfig(log_input_output=True, max_logged_body_bytes=max_logged_body_bytes)
+
     def test_oversized_request_body_becomes_truncation_marker(self):
         payload = {"model": "gpt-4o", "messages": [{"content": "x" * 2000}]}
         compact = '{"model":"gpt-4o","messages":[{"content":"' + "x" * 2000 + '"}]}'
         log = _request_log_from_create(
-            _log_create(request_body=payload), config=LoggingConfig(max_logged_body_bytes=256)
+            _log_create(request_body=payload), config=self._cap_config(256)
         )
 
         assert log.request_body == {"_truncated": True, "size": len(compact)}
@@ -152,7 +157,7 @@ class TestLoggedBodyCap:
     def test_cap_applies_to_response_body_too(self):
         log = _request_log_from_create(
             _log_create(response_body={"text": "y" * 500}),
-            config=LoggingConfig(max_logged_body_bytes=64),
+            config=self._cap_config(64),
         )
         assert log.response_body["_truncated"] is True
         assert log.response_body["size"] > 64
@@ -160,7 +165,7 @@ class TestLoggedBodyCap:
     def test_raw_stream_string_is_measured_in_utf8_bytes(self):
         raw_sse = "data: " + "é" * 100
         log = _request_log_from_create(
-            _log_create(response_body=raw_sse), config=LoggingConfig(max_logged_body_bytes=64)
+            _log_create(response_body=raw_sse), config=self._cap_config(64)
         )
 
         assert log.response_body == {"_truncated": True, "size": len(raw_sse.encode("utf-8"))}
@@ -169,7 +174,7 @@ class TestLoggedBodyCap:
         payload = {"a": "x" * 100}
         size = len('{"a":"' + "x" * 100 + '"}')
         log = _request_log_from_create(
-            _log_create(request_body=payload), config=LoggingConfig(max_logged_body_bytes=size)
+            _log_create(request_body=payload), config=self._cap_config(size)
         )
 
         assert log.request_body is payload
@@ -178,7 +183,7 @@ class TestLoggedBodyCap:
         """No defensive copy on the hot path: under the cap the object is reused."""
         payload = {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}
         log = _request_log_from_create(
-            _log_create(request_body=payload), config=LoggingConfig(max_logged_body_bytes=1 << 20)
+            _log_create(request_body=payload), config=self._cap_config(1 << 20)
         )
 
         assert log.request_body is payload
@@ -186,7 +191,7 @@ class TestLoggedBodyCap:
     def test_zero_cap_disables_truncation(self):
         payload = {"content": "x" * 10_000}
         log = _request_log_from_create(
-            _log_create(response_body=payload), config=LoggingConfig(max_logged_body_bytes=0)
+            _log_create(response_body=payload), config=self._cap_config(0)
         )
 
         assert log.response_body is payload

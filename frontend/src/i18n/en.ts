@@ -868,7 +868,7 @@ export default {
     setZeroToKeepIndefinitely: "Set to 0 to keep logs indefinitely",
     logInputOutput: "Log Input/Output",
     logInputOutputDescription:
-      "Off by default. Enable or disable logging of request and response bodies. When disabled, log rows are still written with bodies scrubbed — endpoint, MCP, web-search and audit metadata is kept. Usage and cost accounting is unaffected. This switch wins over x-log-full: true, so bodies cannot be re-enabled for a single request.",
+      "Off by default. Enable or disable logging of request and response bodies. When disabled, log rows are still written but every content payload is replaced by a marker: request/response bodies, upstream error bodies and messages, and MCP/web-search arguments and results. Headers are kept as masked metadata, as are endpoint, routing and audit metadata; usage/cost accounting is unaffected. This switch wins over x-log-full: true, so bodies cannot be re-enabled for a single request.",
     logRawStream: "Log Raw Stream",
     logRawStreamDescription:
       "Store the raw SSE text of streaming responses. Off by default: the response is reassembled into the same JSON a non-streaming call would return, which is smaller and readable without SSE parsing. Turn on to inspect the exact wire frames.",
@@ -1244,7 +1244,13 @@ export default {
     imagePreview: "Image preview",
     imageOfN: "Image {n} of {total}",
     revisedPrompt: "Revised prompt",
-    bodySampledOut: "Response body was not stored (sampled out by the backend).",
+    bodySampledOut: "Body was not stored: this request was sampled out by the backend.",
+    bodyBodiesDisabled:
+      "Bodies are not stored: request/response body logging is disabled in Settings → Log Management.",
+    bodyTruncated:
+      "Body was not stored in full: it exceeded the configured maximum logged body size.",
+    bodyNotReassembled:
+      "Response body was not stored: the streamed response could not be reassembled for logging.",
     embeddings: "Embeddings",
     dimensions: "Dimensions",
     audioOutput: "Audio Output",

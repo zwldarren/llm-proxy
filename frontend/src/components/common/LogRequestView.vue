@@ -26,7 +26,13 @@ import LogValueChip from "@/components/common/LogValueChip.vue";
 import LogViewModeToggle from "@/components/common/LogViewModeToggle.vue";
 import { Badge } from "@/components/ui/badge";
 import type { LogRead } from "@/types/schemas";
-import { formatCharCount, hasPayload, isOversizedPayload } from "@/utils/logFormat";
+import {
+  formatCharCount,
+  bodySentinel,
+  bodySentinelMessage,
+  hasPayload,
+  isOversizedPayload,
+} from "@/utils/logFormat";
 import { parseLogRequest } from "@/utils/logRequestParser";
 
 const props = defineProps<{
@@ -53,7 +59,15 @@ const parsedRequestBody = computed(() => {
   return body;
 });
 
-const parsed = computed(() => parseLogRequest(parsedRequestBody.value));
+// Backend sentinel on the stored body: the operator disabled body logging, the
+// request lost the sampling draw, or it exceeded the size cap. Distinct
+// markers so the message explains which one.
+const requestSentinel = computed(() => bodySentinel(props.log?.request_body));
+const sentinelMessage = computed(() => bodySentinelMessage(requestSentinel.value, t));
+
+const parsed = computed(() =>
+  requestSentinel.value ? null : parseLogRequest(parsedRequestBody.value)
+);
 
 // Image request detection (guards base64 in raw request bodies).
 const requestType = computed<string>(() => {
@@ -289,12 +303,12 @@ const oversizeRequestBodyText = computed((): string | null =>
         {{ t("logs.nonStandardPayload") }}
       </div>
 
-      <!-- Body could not be parsed at all — point to Raw mode -->
+      <!-- Body could not be parsed (or was not stored — sentinel explained) -->
       <div
         v-if="!parsed"
         class="text-xs text-muted-foreground italic bg-muted/5 border border-border/40 p-3 rounded-lg text-center"
       >
-        {{ t("logs.unparseableRequest") }}
+        {{ requestSentinel ? sentinelMessage : t("logs.unparseableRequest") }}
       </div>
     </template>
 

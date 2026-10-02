@@ -5,8 +5,6 @@ Handles API key verification for client API endpoints (/v1/*, /servers/*).
 
 import asyncio
 import random
-import socket
-import time
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -33,69 +31,48 @@ from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database import get_async_session_context
+from llm_proxy.observability.audit_helpers import enqueue_log_row, write_rejection_log
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.types import (
+    ActionCategory,
+    EventType,
+    LogType,
+    ResourceType,
+)
 from llm_proxy.protocols.registry import protocol_name_for_path
 
 logger = get_logger(__name__)
 
 
-def _get_server_hostname() -> str:
-    try:
-        return socket.gethostname()
-    except Exception:
-        return "unknown"
-
-
 def _write_auth_failure_audit_log(
     request: Request,
-    request_id: str,
     status_code: int,
     error_message: str,
     client_ip: str,
 ) -> None:
-    """Write an audit log entry for a failed authentication attempt."""
-    try:
-        from llm_proxy.config.manager import resolve_logging_config
-        from llm_proxy.observability.service import RequestLogCreate, RequestLogService
-        from llm_proxy.observability.types import (
-            ActionCategory,
-            EventType,
-            LogType,
-            Outcome,
-            ResourceType,
-        )
+    """Write an audit log entry for a failed authentication attempt.
 
-        config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-
-        log_data = RequestLogCreate(
-            request_id=request_id,
-            timestamp=time.time(),
-            endpoint=request.url.path,
-            method=request.method,
-            status_code=status_code,
-            response_time_ms=0,
-            log_type=LogType.AUDIT,
-            user_identity=client_ip,
-            api_key_name=None,
-            client_ip=client_ip,
-            user_agent=request.headers.get("user-agent"),
-            auth_method="api_key",
-            error_message=error_message,
-            server_hostname=_get_server_hostname(),
-            service_name="llm-proxy",
-            event_type=EventType.AUTHENTICATION,
-            action_category=ActionCategory.EXECUTE,
-            resource_type=ResourceType.API_KEY,
-            resource_id=request.url.path,
-            outcome=Outcome.FAILURE,
-            log_metadata={"is_api_endpoint": True, "auth_failure": True},
-        )
-
-        service = RequestLogService(config)
-        service.create_log_background(log_data)
-        request.state.audit_log_written = True
-    except Exception:
-        logger.debug("Failed to write auth failure audit log to database", exc_info=True)
+    Deliberately not routed through :func:`write_rejection_log`'s dedupe: failed
+    auth is a security signal, and collapsing repeats would hide a
+    credential-stuffing attempt. The client IP stands in as the identity because
+    no key was verified.
+    """
+    enqueue_log_row(
+        request,
+        status_code=status_code,
+        error_message=error_message,
+        log_type=LogType.AUDIT,
+        event_type=EventType.AUTHENTICATION,
+        action_category=ActionCategory.EXECUTE,
+        resource_type=ResourceType.API_KEY,
+        resource_id=request.url.path,
+        user_identity=client_ip,
+        api_key_name=None,
+        user_id=None,
+        auth_method="api_key",
+        log_metadata={"is_api_endpoint": True, "auth_failure": True},
+        response_time_ms=0,
+    )
 
 
 async def add_auth_failure_delay() -> None:
@@ -124,7 +101,7 @@ async def _auth_failure_response(
     """
     get_api_key_lockout_manager().record_failed_attempt(client_ip)
     await add_auth_failure_delay()
-    _write_auth_failure_audit_log(request, request_id, status_code, error_message, client_ip)
+    _write_auth_failure_audit_log(request, status_code, error_message, client_ip)
     return ErrorResponseBuilder.create_json_response(
         message=error_message,
         error_type="authentication_error",
@@ -218,7 +195,6 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
         )
         _write_auth_failure_audit_log(
             request,
-            request_id,
             429,
             "IP locked out due to too many failed auth attempts",
             client_ip,
@@ -294,6 +270,23 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
             "Invalid API key",
         )
 
+    # The key is valid from here on, so stamp its identity before the quota
+    # checks: a rate-limit/budget rejection must still be attributable to the
+    # key in its log row. Setting it only after the checks left rejection rows
+    # with a null api_key_name — exactly the "this key is not being logged"
+    # symptom the rejection log was added to fix.
+    # (Session keys already carry an identity from _set_session_identity.)
+    existing = get_request_identity(request)
+    if existing.auth_method != "session_api_key":
+        set_request_identity(
+            request,
+            RequestIdentity(
+                api_key_name=matched_key_name,
+                auth_method="api_key",
+                user_id=verified_user_id,
+            ),
+        )
+
     # Forced password change is enforced by the JWT middleware on /api/*
     # via its own allowlist; client-API keys are not gated here.
 
@@ -305,6 +298,18 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
         if rate_limit is not None:
             limit_rpm, retry_after = rate_limit
             logger.info(f"Request rejected: rate limit exceeded for API key '{matched_key_name}'")
+            # Rejections leave no endpoint row (the pipeline never runs), so
+            # record a body-less one here or the key looks unlogged.
+            write_rejection_log(
+                request,
+                status_code=429,
+                error_message=(
+                    f"Rate limit exceeded for API key '{matched_key_name}' "
+                    f"({limit_rpm} requests/minute)"
+                ),
+                error_type="rate_limit_error",
+                resource_id=matched_key_name,
+            )
             return JSONResponse(
                 status_code=429,
                 content=rate_limit_exceeded_error_body(limit_rpm, retry_after),
@@ -324,6 +329,13 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
         )
         if rejection is not None:
             logger.info(f"Request rejected: {rejection.log_message}")
+            write_rejection_log(
+                request,
+                status_code=rejection.status_code,
+                error_message=rejection.log_message,
+                error_type="rate_limit_error" if rejection.status_code == 429 else "api_error",
+                resource_id=matched_key_name,
+            )
             return JSONResponse(status_code=rejection.status_code, content=rejection.error_body)
 
     # Claim the throttle slot synchronously so throttled requests never pay
@@ -332,19 +344,6 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
         asyncio.create_task(_update_key_last_used(matched_key_name))
 
     lockout_manager.clear_failed_attempts(client_ip)
-
-    # Set identity and pass info to downstream middlewares
-    # (skip if already set by session API key path above)
-    existing = get_request_identity(request)
-    if existing.auth_method != "session_api_key":
-        set_request_identity(
-            request,
-            RequestIdentity(
-                api_key_name=matched_key_name,
-                auth_method="api_key",
-                user_id=verified_user_id,
-            ),
-        )
 
     # Store model restriction info for model_restriction middleware.
     # Note: an empty list is a valid (deny-all) restriction and must be kept.

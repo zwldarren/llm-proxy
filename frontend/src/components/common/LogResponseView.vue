@@ -27,6 +27,8 @@ import type { LogRead } from "@/types/schemas";
 import { formatTokens } from "@/utils/format";
 import {
   MAX_INLINE_BYTES,
+  bodySentinel,
+  bodySentinelMessage,
   firstLinePreview,
   formatBytes,
   formatCharCount,
@@ -135,6 +137,11 @@ const parsedResponse = computed<ParsedResponse>(() => {
 });
 
 const isImageResponse = computed(() => parsedResponse.value.protocol === "image");
+
+// Backend sentinel on the stored body (disabled / sampled out / truncated /
+// not reassembled). Distinct markers so the message explains *why*.
+const responseSentinel = computed(() => bodySentinel(props.log?.response_body));
+const sentinelMessage = computed(() => bodySentinelMessage(responseSentinel.value, t));
 
 // Match tool calls with their results (by id / tool_use_id) for paired display.
 const toolCallsWithResults = computed(() =>
@@ -323,12 +330,13 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
         <span>{{ t("logs.parsingStream") }}</span>
       </div>
 
-      <!-- Backend sampled out the full body (only a sentinel was stored) -->
+      <!-- Backend stored no body: the sentinel says why (disabled / sampled
+           out / truncated / not reassembled) -->
       <div
-        v-else-if="parsedResponse.isSampledOut"
+        v-else-if="responseSentinel"
         class="text-xs text-muted-foreground italic bg-muted/5 border border-border/40 p-4 rounded-lg text-center"
       >
-        {{ t("logs.bodySampledOut") }}
+        {{ sentinelMessage }}
       </div>
 
       <!-- Image generation / image edit: dedicated preview (avoids base64 freeze) -->

@@ -47,6 +47,52 @@ export function hasPayload(body: unknown): boolean {
   return true;
 }
 
+/**
+ * Why a body is absent, as told by the backend's sentinel markers:
+ *
+ * - `disabled`      — body logging is off (`log_input_output=false`)
+ * - `sampled-out`   — body logging is on, this request lost the sampling draw
+ * - `truncated`     — the body exceeded `max_logged_body_bytes`
+ * - `unassembled`   — a streamed body could not be reassembled for logging
+ *
+ * The markers are distinct on purpose: the UI must not claim a body was
+ * "sampled out" when the operator simply disabled body logging.
+ */
+export type BodySentinel = "disabled" | "sampled-out" | "truncated" | "unassembled";
+
+export function bodySentinel(body: unknown): BodySentinel | null {
+  if (!isRecord(body)) return null;
+  if (body._bodies_disabled === true) return "disabled";
+  if (body._sampled_out === true) return "sampled-out";
+  if (body._truncated === true) return "truncated";
+  if (body.streaming === true && body._assembled === false) return "unassembled";
+  return null;
+}
+
+/**
+ * i18n message explaining why a body is absent, given its sentinel kind.
+ *
+ * Single mapping so every Logs view explains a marker identically and a new
+ * sentinel kind is wired up in one place. Returns "" for ``null``.
+ */
+export function bodySentinelMessage(
+  sentinel: BodySentinel | null,
+  t: (key: string) => string
+): string {
+  switch (sentinel) {
+    case "disabled":
+      return t("logs.bodyBodiesDisabled");
+    case "sampled-out":
+      return t("logs.bodySampledOut");
+    case "truncated":
+      return t("logs.bodyTruncated");
+    case "unassembled":
+      return t("logs.bodyNotReassembled");
+    default:
+      return "";
+  }
+}
+
 // --- Display formatting ---------------------------------------------------
 
 /** Human-readable byte size ("12.5 KB"); empty string for non-positive input. */

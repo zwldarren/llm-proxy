@@ -27,6 +27,7 @@ import {
   getActor,
 } from "@/utils/format";
 import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { asString } from "@/utils/logFormat";
 import {
   cachedTokens,
   completionTokens,
@@ -119,7 +120,7 @@ const webSearchMetadata = computed(() => {
   if (!isWebSearchLog.value || !props.log.log_metadata) return null;
   const meta = props.log.log_metadata as Record<string, unknown>;
   return {
-    query: meta.web_search_query as string | undefined,
+    query: asString(meta.web_search_query),
     status: meta.web_search_status as string | undefined,
     resultCount: (meta.web_search_result_count as number) ?? 0,
     provider: meta.web_search_provider as string | undefined,

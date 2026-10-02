@@ -5,6 +5,7 @@ service layer used by middleware and API routes.
 """
 
 import asyncio
+import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
@@ -27,6 +28,7 @@ from llm_proxy.database import RequestLog, UsageRecord, get_async_session_contex
 from llm_proxy.database.connection import reclaim_sqlite_space
 from llm_proxy.database.repositories import LogRepository, UsageRepository
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.redaction import BODIES_DISABLED_MARKER, scrub_log_metadata
 from llm_proxy.observability.types import LogType
 
 logger = get_logger(__name__)
@@ -328,9 +330,41 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
     def _get_batch_settings(self, settings: Settings) -> LogBatchWriterSettings:
         return settings.log_batch
 
-    def __init__(self, config: LoggingConfig) -> None:
+    def __init__(self, config: LoggingConfig, config_manager: Any = None) -> None:
         self._config = config
+        self._config_manager = config_manager
+        # Guards ``_config_manager``: the startup thread adopts a manager on a
+        # writer born lazily from a request path, while the writer's own thread
+        # reads it on every batch (``_effective_config``).
+        self._config_lock = threading.Lock()
         super().__init__()
+
+    def adopt_config_manager(self, config_manager: Any) -> None:
+        """Adopt the startup config manager when born without one.
+
+        Idempotent: never overwrites an already-resolved manager with ``None``,
+        and a no-op once a manager has been adopted. Synchronized with
+        :meth:`_effective_config` so the read is never seen half-applied.
+        """
+        with self._config_lock:
+            if self._config_manager is None and config_manager is not None:
+                self._config_manager = config_manager
+
+    def _effective_config(self) -> LoggingConfig:
+        """Resolve the logging config for one write/sweep.
+
+        The startup ``config`` is only a fallback for callers without a config
+        manager (tests, lazy/embedded use). With a manager, the UI-managed
+        config is re-read on every batch from the manager's cache — refreshed
+        on each settings change — so the master body switch, body-size cap and
+        retention window apply without a restart. The writers used to hold the
+        startup snapshot forever, which silently froze all three.
+        """
+        with self._config_lock:
+            config_manager = self._config_manager
+        if config_manager is not None:
+            return resolve_logging_config(config_manager)
+        return self._config
 
     def _on_queue_full(self, data: RequestLogCreate) -> None:
         self._logger.warning(
@@ -351,6 +385,8 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
         if not batch:
             return
 
+        # Resolve once per batch, not per row: the config governs every row here.
+        config = self._effective_config()
         audit_data = [data for data in batch if data.log_type == LogType.AUDIT]
         other_data = [data for data in batch if data.log_type != LogType.AUDIT]
 
@@ -358,13 +394,11 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
             repo = LogRepository(session)
 
             if other_data:
-                other_logs = [
-                    _request_log_from_create(data, config=self._config) for data in other_data
-                ]
+                other_logs = [_request_log_from_create(data, config=config) for data in other_data]
                 await repo.create_logs_bulk(other_logs)
 
             for data in audit_data:
-                audit_log = _request_log_from_create(data, config=self._config)
+                audit_log = _request_log_from_create(data, config=config)
                 await repo.create_audit_log_with_integrity(audit_log)
 
             await session.commit()
@@ -373,13 +407,14 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
         await asyncio.sleep(1)
         while not self._stop_event.is_set():
             deleted_any = False
+            config = self._effective_config()
             for log_type in (
                 LogType.AUDIT,
                 LogType.ENDPOINT,
                 LogType.MCP,
                 LogType.WEB_SEARCH,
             ):
-                retention_days = self._config.get_retention_days(log_type)
+                retention_days = config.get_retention_days(log_type)
                 if retention_days <= 0:
                     continue
                 cutoff = time.time() - (retention_days * 24 * 60 * 60)
@@ -432,10 +467,11 @@ class _BackgroundAuditLogWriter(_BackgroundLogWriter):
     async def _write_batch(self, batch: list[RequestLogCreate]) -> None:
         if not batch:
             return
+        config = self._effective_config()
         async with get_async_session_context() as session:
             repo = LogRepository(session)
             for data in batch:
-                audit_log = _request_log_from_create(data, config=self._config)
+                audit_log = _request_log_from_create(data, config=config)
                 await repo.create_audit_log_with_integrity(audit_log)
             await session.commit()
 
@@ -449,14 +485,30 @@ _background_writer: _BackgroundLogWriter | None = None
 _background_audit_writer: _BackgroundAuditLogWriter | None = None
 
 
-def start_background_log_writer(config: LoggingConfig) -> None:
+def start_background_log_writer(config: LoggingConfig, config_manager: Any = None) -> None:
+    """Start the endpoint/audit log writers (idempotent).
+
+    ``config_manager`` is kept by the writers so each batch resolves the
+    current UI-managed :class:`LoggingConfig` (master body switch, body cap,
+    retention) instead of the startup snapshot. ``config`` is the fallback used
+    when no manager is available.
+
+    A writer created lazily from a request path (``RequestLogService`` passes no
+    manager) later adopts the manager from app startup, mirroring
+    :func:`start_background_usage_writer`; without that it would stay frozen on
+    the snapshot it was born with — the exact failure this parameter fixes.
+    """
     global _background_writer, _background_audit_writer
     if _background_writer is None:
-        _background_writer = _BackgroundLogWriter(config)
+        _background_writer = _BackgroundLogWriter(config, config_manager)
         _background_writer.start()
+    else:
+        _background_writer.adopt_config_manager(config_manager)
     if _background_audit_writer is None:
-        _background_audit_writer = _BackgroundAuditLogWriter(config)
+        _background_audit_writer = _BackgroundAuditLogWriter(config, config_manager)
         _background_audit_writer.start()
+    else:
+        _background_audit_writer.adopt_config_manager(config_manager)
 
 
 async def stop_background_log_writer() -> None:
@@ -612,15 +664,43 @@ def _request_log_from_create(
 ) -> RequestLog:
     """Build a RequestLog ORM instance from a RequestLogCreate DTO.
 
-    ``config`` is the log store's ``LoggingConfig``; its ``max_logged_body_bytes``
-    caps bodies — bodies over it are stored as ``{"_truncated": true, "size": N}``.
-    Enforcing it here is what gives the cap a single choke point: every writer
-    (endpoint, audit, MCP, web search) builds its row through this function, and
-    the audit content hash is computed downstream from the ORM object
-    (``create_audit_log_with_integrity``), so the hash always covers the capped
-    payload the row actually stores.
+    ``config`` is the log store's ``LoggingConfig``. Two policies are enforced
+    here, at the single choke point every writer (endpoint, audit, MCP, web
+    search, realtime, middleware) builds its row through:
+
+    - ``max_logged_body_bytes`` caps bodies — bodies over it are stored as
+      ``{"_truncated": true, "size": N}``.
+    - ``log_input_output`` (the master switch) replaces bodies and
+      content-bearing metadata with an explained marker. A writer cannot opt
+      out by forgetting to check the setting, and a writer added later is
+      covered automatically.
+
+    The audit content hash is computed downstream from the ORM object
+    (``create_audit_log_with_integrity``), so it always covers the payload the
+    row actually stores. A ``config`` of ``None`` means "no policy" (tests and
+    direct calls), matching the historical treatment of the byte cap.
     """
     max_body_bytes = config.max_logged_body_bytes if config is not None else 0
+    request_headers = _json_safe(data.request_headers)
+    response_headers = _json_safe(data.response_headers)
+    if config is not None and not config.log_input_output:
+        # Body logging is off. Keep the row (metadata, tokens, cost, routing,
+        # headers and audit fields are unaffected) and replace every content
+        # payload with a marker the Logs UI explains.
+        #
+        # ``error_message`` / ``error_stack_trace`` are deliberately kept: they
+        # are the diagnostic reason (rate limit vs budget vs upstream failure)
+        # and the rejection rows depend on that text, while the content-bearing
+        # upstream error payload lives in ``log_metadata["error_details"]``,
+        # which ``scrub_log_metadata`` replaces above.
+        request_body = dict(BODIES_DISABLED_MARKER)
+        response_body = dict(BODIES_DISABLED_MARKER)
+        log_metadata = _json_safe(scrub_log_metadata(data.log_metadata))
+    else:
+        request_body = _cap_logged_body(_json_safe(data.request_body), max_body_bytes)
+        response_body = _cap_logged_body(_json_safe(data.response_body), max_body_bytes)
+        log_metadata = _json_safe(data.log_metadata)
+
     return RequestLog(
         user_id=data.user_id,
         request_id=data.request_id,
@@ -633,10 +713,10 @@ def _request_log_from_create(
         user_identity=data.user_identity,
         model=data.model,
         provider=data.provider,
-        request_headers=_json_safe(data.request_headers),
-        request_body=_cap_logged_body(_json_safe(data.request_body), max_body_bytes),
-        response_headers=_json_safe(data.response_headers),
-        response_body=_cap_logged_body(_json_safe(data.response_body), max_body_bytes),
+        request_headers=request_headers,
+        request_body=request_body,
+        response_headers=response_headers,
+        response_body=response_body,
         error_message=data.error_message,
         error_stack_trace=data.error_stack_trace,
         prompt_tokens=data.prompt_tokens,
@@ -649,7 +729,7 @@ def _request_log_from_create(
         audio_output_tokens=data.audio_output_tokens,
         cost_usd=data.cost_usd,
         cache_savings_usd=data.cache_savings_usd,
-        log_metadata=_json_safe(data.log_metadata),
+        log_metadata=log_metadata,
         api_key_name=data.api_key_name,
         ttft_ms=data.ttft_ms,
         client_ip=data.client_ip,

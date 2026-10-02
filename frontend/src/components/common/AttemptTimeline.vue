@@ -2,6 +2,7 @@
 import { computed, ref, type Component } from "vue";
 import { useI18n } from "vue-i18n";
 import type { FallbackAttempt, RetryAttempt } from "@/types/schemas";
+import { bodySentinel, bodySentinelMessage, safeStringify } from "@/utils/logFormat";
 
 type AttemptEntry = FallbackAttempt | RetryAttempt;
 
@@ -38,6 +39,23 @@ const isSuccess = computed(() => {
   const code = props.statusCode;
   return typeof code === "number" && code >= 200 && code < 300;
 });
+
+// With body logging off the backend replaces attempt error text with a marker
+// object. Only explain a real sentinel; any other object is stringified so a
+// structured error is shown rather than mislabelled as "bodies disabled".
+const errorMessageText = (attempt: AttemptEntry): string | null => {
+  const message = attempt.error_message as unknown;
+  if (typeof message === "string") return message;
+  const sentinel = bodySentinel(message);
+  if (sentinel) return bodySentinelMessage(sentinel, t);
+  return safeStringify(message) ?? null;
+};
+
+// Resolve each attempt's error text once (the template used to call
+// ``errorMessageText`` twice per row), keyed to the visible slice.
+const visibleWithErrors = computed(() =>
+  visible.value.map((attempt) => ({ attempt, errorText: errorMessageText(attempt) }))
+);
 </script>
 
 <template>
@@ -70,7 +88,7 @@ const isSuccess = computed(() => {
       <!-- Vertical Timeline -->
       <div class="relative pl-6 border-l-2 border-border/40 space-y-4 ml-2.5">
         <div
-          v-for="(attempt, index) in visible"
+          v-for="({ attempt, errorText }, index) in visibleWithErrors"
           :key="index"
           class="relative p-3 rounded-lg bg-background/50 border border-border/20 hover:border-border/40 transition-colors"
         >
@@ -102,10 +120,10 @@ const isSuccess = computed(() => {
             <span class="font-mono text-[11px] text-foreground/80">{{ attempt.error_type }}</span>
           </div>
           <div
-            v-if="attempt.error_message"
+            v-if="errorText"
             class="text-xs text-muted-foreground mt-1 bg-destructive/5 dark:bg-destructive/10 border border-destructive/10 p-2 rounded break-all"
           >
-            {{ attempt.error_message }}
+            {{ errorText }}
           </div>
         </div>
 

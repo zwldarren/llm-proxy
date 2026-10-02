@@ -30,6 +30,7 @@ from llm_proxy.observability.audit_helpers import (
     get_server_hostname,
 )
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.redaction import body_marker
 from llm_proxy.observability.sampling import should_exclude_from_logging
 from llm_proxy.observability.types import LogType
 from llm_proxy.security.passwords import SENSITIVE_KEYS, mask_headers, mask_sensitive
@@ -126,8 +127,8 @@ def _write_audit_log(
         if not config.log_input_output:
             # log_input_output=false keeps the metadata row but scrubs bodies.
             # resource_id is derived from the real body above, before scrubbing.
-            request_body = {"_sampled_out": True}
-            response_body = {"_sampled_out": True}
+            request_body = body_marker(bodies_enabled=False)
+            response_body = body_marker(bodies_enabled=False)
 
         log_data = RequestLogCreate(
             request_id=request_id,

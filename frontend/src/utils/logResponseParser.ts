@@ -24,7 +24,8 @@ import {
   parseAnthropicStreamResponse,
   parseStreamResponse,
 } from "@/utils/sse";
-import { asString, isRecord, parseToolArgs, safeStringify } from "@/utils/logFormat";
+import { asString, bodySentinel, isRecord, parseToolArgs, safeStringify } from "@/utils/logFormat";
+import type { BodySentinel } from "@/utils/logFormat";
 
 /**
  * Reduce a Responses `web_search_call` item to its query — either the single
@@ -149,8 +150,8 @@ export interface ParsedResponse {
   audioText?: string;
   /** Raw-byte audio marker (speech / text-format audio) */
   audioRaw?: { size: number };
-  /** Backend sampled out the full body (only a sentinel was stored) */
-  isSampledOut?: boolean;
+  /** Backend stored only a sentinel instead of the body (see BodySentinel) */
+  bodySentinel?: BodySentinel;
   /** Whether any parseable data was found */
   hasData: boolean;
 }
@@ -913,9 +914,17 @@ export function parseLogResponse(body: unknown, requestType?: string): ParsedRes
 
   if (!isRecord(body)) return empty();
 
-  // Backend sentinel: full body was sampled out and not stored.
-  if (body._sampled_out === true) {
-    return empty({ protocol: "sampled-out", isSampledOut: true });
+  // Backend stored only a sentinel: body logging off, sampled out, over the
+  // size cap, or a stream that could not be reassembled. None of these carry
+  // body content, so parse must not walk them as if they were a request.
+  const sentinel = bodySentinel(body);
+  if (sentinel) {
+    return empty({
+      // Only the sampling draw gets the protocol label; the other sentinel
+      // kinds stay neutral, and ``bodySentinel`` carries the precise reason.
+      protocol: sentinel === "sampled-out" ? "sampled-out" : "unknown",
+      bodySentinel: sentinel,
+    });
   }
 
   // Raw-byte audio (speech, or text-format transcription/translation).

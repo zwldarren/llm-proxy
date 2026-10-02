@@ -60,13 +60,19 @@ SENSITIVE_KEYS: frozenset[str] = frozenset(
         "key",
         "credentials",
         "private_key",
+        # Session/CSRF credentials ride in Cookie / Set-Cookie. Headers are kept
+        # on body-less rows now, so leaving these unmasked would persist the
+        # session token on every default-config log row.
+        "cookie",
     }
 )
 
 #: Equivalent to ``any(pattern in key.lower() for pattern in SENSITIVE_KEYS)``
-#: but evaluated as one case-insensitive substring scan per header instead of
-#: 17 ``in`` checks. Header masking runs on every logged request (request and
-#: response headers), so this is a measurable hot-path saving.
+#: but evaluated as one case-insensitive substring scan per header instead of a
+#: membership check per key. Header masking runs on every logged request
+#: (request and response headers), so this is a measurable hot-path saving.
+#: Substring matching is deliberate: it catches ``Set-Cookie`` and
+#: ``proxy-authorization`` too.
 _SENSITIVE_HEADER_RE = re.compile(
     "|".join(re.escape(pattern) for pattern in sorted(SENSITIVE_KEYS)),
     re.IGNORECASE,

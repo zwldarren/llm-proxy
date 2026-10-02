@@ -84,6 +84,44 @@ class TestPerKeyRateLimit:
         assert "Retry-After" in response.headers
 
     @pytest.mark.asyncio
+    async def test_rejection_row_is_attributed_to_the_key(self, app, make_auth_info):
+        """A capped key's rejection row must carry its api_key_name.
+
+        The identity is stamped before the quota checks precisely so this
+        holds; otherwise the row lands with a null api_key_name and a capped
+        key still looks unlogged in the Logs UI.
+        """
+        captured: list = []
+
+        class _CapturingService:
+            def __init__(self, config):
+                pass
+
+            def create_log_background(self, data):
+                captured.append(data)
+
+        p1, p2, p3 = self._patchers(make_auth_info(rate_limit_rpm=1))
+        with (
+            p1,
+            p2,
+            p3,
+            patch("llm_proxy.observability.service.RequestLogService", _CapturingService),
+        ):
+            transport = ASGITransport(app=app, raise_app_exceptions=False)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                headers = {"Authorization": "Bearer sk-test"}
+                assert (await client.get("/v1/models", headers=headers)).status_code == 200
+                assert (await client.get("/v1/models", headers=headers)).status_code == 429
+
+        assert captured, "the 429 must leave a rejection row"
+        row = captured[-1]
+        assert row.api_key_name == "test-key"
+        assert row.user_id == 1
+        assert row.auth_method == "api_key"
+        assert row.request_body == {}
+        assert row.response_body == {}
+
+    @pytest.mark.asyncio
     async def test_no_limit_means_unlimited(self, app, make_auth_info):
         p1, p2, p3 = self._patchers(make_auth_info(rate_limit_rpm=None))
         with p1, p2, p3:

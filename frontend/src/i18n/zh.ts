@@ -842,7 +842,7 @@ export default {
     setZeroToKeepIndefinitely: "设置为 0 表示永久保留",
     logInputOutput: "记录输入/输出",
     logInputOutputDescription:
-      "默认关闭。启用或禁用请求与响应正文记录。禁用后日志行仍会写入，但正文会被清除——端点、MCP、网络搜索与审计元数据保留；用量与费用统计不受影响。该开关优先级最高，x-log-full: true 也无法为单个请求重新开启正文记录。",
+      "默认关闭。启用或禁用请求与响应正文记录。禁用后日志行仍会写入，但所有内容都会被替换为标记：请求/响应正文、上游错误正文与消息，以及 MCP/网络搜索的参数与结果。请求头作为已脱敏的元数据保留，端点、路由与审计元数据同样保留；用量与费用统计不受影响。该开关优先级最高，x-log-full: true 也无法为单个请求重新开启正文记录。",
     logRawStream: "记录原始流",
     logRawStreamDescription:
       "存储流式响应的原始 SSE 文本。默认关闭：响应会被重组为与非流式调用完全相同的 JSON，体积更小且无需 SSE 解析即可阅读。需要检查原始线格式帧时再开启。",
@@ -1310,7 +1310,10 @@ export default {
     imagePreview: "图片预览",
     imageOfN: "第 {n} 张，共 {total} 张",
     revisedPrompt: "优化后的提示词",
-    bodySampledOut: "响应体未被存储（已被后端采样跳过）。",
+    bodySampledOut: "正文未被存储：该请求已被后端采样跳过。",
+    bodyBodiesDisabled: "正文未被存储：请求/响应正文记录已在「设置 → 日志管理」中关闭。",
+    bodyTruncated: "正文未完整存储：超过了配置的正文大小上限。",
+    bodyNotReassembled: "响应正文未被存储：流式响应无法重组为可记录的正文。",
     embeddings: "向量嵌入",
     dimensions: "维度",
     audioOutput: "音频输出",

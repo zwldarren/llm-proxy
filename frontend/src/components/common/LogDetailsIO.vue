@@ -17,12 +17,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { LogRead, LogRoutingMetadata, RetryAttempt, FallbackAttempt } from "@/types/schemas";
+import { bodySentinel, bodySentinelMessage } from "@/utils/logFormat";
 
 const props = defineProps<{
   log: LogRead;
 }>();
 
 const { t } = useI18n();
+
+// Body logging off (or an oversize/unreassembled body) makes the backend store
+// a marker object in place of error_details payloads. Explain it rather than
+// dumping the raw marker JSON.
+const markerExplanation = (value: unknown): string | null =>
+  bodySentinelMessage(bodySentinel(value), t) || null;
+
+const errorDetails = computed<Record<string, unknown> | undefined>(() => {
+  const details = props.log.log_metadata?.error_details;
+  return details && typeof details === "object" ? (details as Record<string, unknown>) : undefined;
+});
+const originalErrorExplanation = computed(() =>
+  markerExplanation(errorDetails.value?.original_error)
+);
+const responseBodyExplanation = computed(() =>
+  markerExplanation(errorDetails.value?.response_body)
+);
 
 const isAuditLog = computed(() => props.log.log_type === "audit");
 const isMcpLog = computed(() => props.log.log_type === "mcp");
@@ -246,7 +264,11 @@ defineExpose({
         <!-- Original Error -->
         <div v-if="log.log_metadata.error_details.original_error" class="mt-2 md:col-span-2">
           <span class="error-detail-label">Original Error:</span>
+          <p v-if="originalErrorExplanation" class="mt-1 text-xs text-muted-foreground italic">
+            {{ originalErrorExplanation }}
+          </p>
           <JsonViewer
+            v-else
             :data="log.log_metadata.error_details.original_error"
             class="mt-1"
             max-height="max-h-96"
@@ -256,7 +278,10 @@ defineExpose({
         <!-- Response Body -->
         <div v-if="log.log_metadata.error_details.response_body" class="mt-2 md:col-span-2">
           <span class="error-detail-label">Response Body:</span>
-          <div class="mt-1 rounded-md bg-background/60 p-3">
+          <p v-if="responseBodyExplanation" class="mt-1 text-xs text-muted-foreground italic">
+            {{ responseBodyExplanation }}
+          </p>
+          <div v-else class="mt-1 rounded-md bg-background/60 p-3">
             <JsonViewer
               :data="log.log_metadata.error_details.response_body"
               :deep="2"

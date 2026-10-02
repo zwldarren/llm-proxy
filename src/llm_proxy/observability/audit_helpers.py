@@ -15,9 +15,11 @@ classification above cannot recover.
 
 import re
 import socket
+import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import (
@@ -32,6 +34,75 @@ if TYPE_CHECKING:
     from fastapi import Request
 
 logger = get_logger(__name__)
+
+#: Rejection rows are deduplicated per (API key, status) inside this window. A
+#: quota rejection is the one path a client can trigger on *every* retry, so the
+#: row itself (not just its body) must be bounded or a retry storm turns into a
+#: database write storm. The first rejection in a window is recorded; repeats
+#: are collapsed and their count is reported on the next written row, so the
+#: operator can still see that a retry storm is under way.
+#:
+#: The window is process-local: N workers collapse to at most N rows per window.
+REJECTION_LOG_DEDUPE_WINDOW_S = 10.0
+
+#: Cap on tracked (key, status) pairs. Stale entries are pruned on insert; if a
+#: single window still holds more fresh pairs than the cap (a spray of
+#: short-lived keys), the oldest are evicted so the dict stays bounded even
+#: within one window.
+_MAX_DEDUPE_ENTRIES = 1024
+
+#: Per (key, status): ``[last_written_at, suppressed_since_last_write]``.
+_recent_rejections: dict[tuple[str | None, int], list[float]] = {}
+_recent_rejections_lock = threading.Lock()
+
+
+def _reserve_rejection(dedupe_key: tuple[str | None, int], now: float) -> int | None:
+    """Reserve the right to write one rejection row for this (key, status).
+
+    Returns ``None`` when a row for this pair was written inside the current
+    window (the attempt is collapsed), otherwise the number of attempts that
+    were suppressed since the previous row, to be attached to the new row.
+    """
+    with _recent_rejections_lock:
+        entry = _recent_rejections.get(dedupe_key)
+        if entry is not None and (now - entry[0]) < REJECTION_LOG_DEDUPE_WINDOW_S:
+            entry[1] += 1
+            return None
+        suppressed = int(entry[1]) if entry is not None else 0
+        _recent_rejections[dedupe_key] = [now, 0.0]
+        if len(_recent_rejections) > _MAX_DEDUPE_ENTRIES:
+            cutoff = now - REJECTION_LOG_DEDUPE_WINDOW_S
+            for key, (seen_at, _suppressed) in list(_recent_rejections.items()):
+                if seen_at < cutoff:
+                    del _recent_rejections[key]
+            # Fresh entries can still exceed the cap within one window; evict
+            # oldest-first so the dict stays bounded under a key spray. The
+            # entry just reserved has ``now`` for its timestamp, so it is the
+            # youngest and is never the one evicted.
+            if len(_recent_rejections) > _MAX_DEDUPE_ENTRIES:
+                by_age = sorted(_recent_rejections, key=lambda k: _recent_rejections[k][0])
+                for key in by_age[: len(_recent_rejections) - _MAX_DEDUPE_ENTRIES]:
+                    del _recent_rejections[key]
+        return suppressed
+
+
+def _release_rejection(dedupe_key: tuple[str | None, int], now: float) -> None:
+    """Allow the next attempt to write again after a failed enqueue.
+
+    The reservation is normally spent by the row it was made for. If that row
+    never reached the writer, the reservation must not swallow the attempts that
+    follow it.
+    """
+    with _recent_rejections_lock:
+        entry = _recent_rejections.get(dedupe_key)
+        if entry is not None and entry[0] == now:
+            del _recent_rejections[dedupe_key]
+
+
+def reset_rejection_log_dedupe() -> None:
+    """Clear the rejection-log dedupe window (tests, config changes)."""
+    with _recent_rejections_lock:
+        _recent_rejections.clear()
 
 
 def get_server_hostname() -> str:
@@ -316,3 +387,147 @@ async def write_provider_key_reveal_audit_log(
         request.state.audit_log_written = True
     except Exception:
         logger.warning("Failed to write provider key reveal audit log", exc_info=True)
+
+
+def enqueue_log_row(
+    request: Request,
+    *,
+    status_code: int,
+    error_message: str,
+    log_type: LogType,
+    event_type: EventType,
+    action_category: ActionCategory,
+    resource_type: ResourceType,
+    resource_id: str | None,
+    user_identity: str | None,
+    api_key_name: str | None,
+    user_id: int | None,
+    auth_method: str | None,
+    log_metadata: dict[str, Any],
+    response_time_ms: int | None = None,
+) -> bool:
+    """Build a log row from explicit classification and enqueue it.
+
+    Shared tail for the middleware writers that must record a request the
+    endpoint pipeline never reached (auth failures, quota/model rejections).
+    Resolving the *current* logging config here is what makes the body switch
+    and retention apply immediately, without any writer holding a snapshot.
+
+    Returns True when the row was handed to the background writer. Never
+    raises: a lost diagnostic row must not turn a clean 401/403/429 into a 500.
+    On success it sets ``request.state.audit_log_written`` so the HTTP logging
+    middleware does not append a second audit row for the same request.
+    """
+    try:
+        from llm_proxy.config.manager import resolve_logging_config
+        from llm_proxy.observability.service import RequestLogCreate, RequestLogService
+
+        config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
+
+        log_data = RequestLogCreate(
+            request_id=getattr(request.state, "request_id", None) or "unknown",
+            timestamp=time.time(),
+            endpoint=request.url.path,
+            method=request.method,
+            status_code=status_code,
+            response_time_ms=response_time_ms,
+            log_type=log_type,
+            user_identity=user_identity,
+            user_id=user_id,
+            api_key_name=api_key_name,
+            client_ip=get_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            auth_method=auth_method,
+            error_message=error_message,
+            server_hostname=get_server_hostname(),
+            service_name="llm-proxy",
+            event_type=event_type,
+            action_category=action_category,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            outcome=determine_outcome(status_code, error_message),
+            log_metadata=log_metadata,
+        )
+
+        RequestLogService(config).create_log_background(log_data)
+        request.state.audit_log_written = True
+        return True
+    except Exception:
+        logger.warning("Failed to write audit log row", exc_info=True)
+        return False
+
+
+def write_rejection_log(
+    request: Request,
+    *,
+    status_code: int,
+    error_message: str,
+    error_type: str,
+    event_type: EventType = EventType.AUTHORIZATION,
+    resource_type: ResourceType = ResourceType.API_KEY,
+    resource_id: str | None = None,
+) -> None:
+    """Write a body-less log row for a request rejected before processing.
+
+    Per-key rate limits, budget caps and model restrictions short-circuit in
+    middleware, so the endpoint pipeline never runs and no log row would
+    otherwise exist. Operationally that reads as "this API key is not being
+    logged at all": a healthy key fills the Logs page while a capped or
+    restricted key leaves no trace.
+
+    The row records the status and the reason only. There is no response body,
+    and the request body is deliberately not persisted — this is the path a
+    client can trigger cheaply, so it must not become a write amplifier for
+    arbitrary prompt content. ``/v1/*`` rejections are ENDPOINT rows (endpoint
+    retention and dashboard visibility); console paths stay AUDIT.
+
+    Attribution comes from the request identity, so a caller that rejects
+    before the auth middleware has stamped one must set it first (the API-key
+    middleware stamps the key's identity before its quota checks for exactly
+    this reason).
+
+    Rows are deduplicated per (API key, status) within
+    :data:`REJECTION_LOG_DEDUPE_WINDOW_S`, so a client hammering a quota leaves
+    one row per window rather than one per attempt. The attempts collapsed since
+    the previous window are reported as ``suppressed_since_last`` in the row's
+    metadata, so a retry storm is still visible.
+
+    Failures are logged at warning level and swallowed (see
+    :func:`enqueue_log_row`): a lost diagnostic row must not turn a clean
+    429/403 into a 500.
+    """
+    identity = get_request_identity(request)
+    dedupe_key = (identity.api_key_name or resource_id, status_code)
+    now = time.time()
+    suppressed = _reserve_rejection(dedupe_key, now)
+    if suppressed is None:
+        return
+
+    is_api_endpoint = request.url.path.startswith("/v1/")
+    log_metadata: dict[str, Any] = {
+        "is_api_endpoint": is_api_endpoint,
+        "rejected": True,
+        "error_type": error_type,
+    }
+    if suppressed:
+        log_metadata["suppressed_since_last"] = suppressed
+
+    written = enqueue_log_row(
+        request,
+        status_code=status_code,
+        error_message=error_message,
+        log_type=LogType.ENDPOINT if is_api_endpoint else LogType.AUDIT,
+        event_type=event_type,
+        action_category=ActionCategory.EXECUTE,
+        resource_type=resource_type,
+        resource_id=resource_id or identity.api_key_name,
+        user_identity=identity.display_name,
+        api_key_name=identity.api_key_name,
+        user_id=identity.user_id,
+        auth_method=identity.auth_method,
+        log_metadata=log_metadata,
+    )
+    if not written:
+        # The row never reached the writer; do not let this reservation swallow
+        # the attempts that follow it.
+        _release_rejection(dedupe_key, now)

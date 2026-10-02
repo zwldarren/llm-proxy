@@ -37,15 +37,26 @@ class TestDetermineLogType:
 class TestRawStreamSampling:
     """Raw SSE capture is opt-in and never happens for sampled-out requests."""
 
-    def test_default_config_captures_body_but_not_raw_stream(self):
-        decision = make_sampling_decision(LoggingConfig(), _FakeRequest(), CHAT_PATH)
+    def test_body_capture_without_raw_stream(self):
+        decision = make_sampling_decision(
+            LoggingConfig(log_input_output=True), _FakeRequest(), CHAT_PATH
+        )
 
         assert decision.log_type == LogType.ENDPOINT
         assert decision.should_capture_full_body is True
         assert decision.should_capture_raw_stream is False
 
+    def test_master_switch_off_short_circuits_every_capture(self):
+        """Body logging off means nothing is buffered, whatever else is set."""
+        config = LoggingConfig(log_input_output=False, log_raw_stream=True, sampling_rate=1.0)
+
+        decision = make_sampling_decision(config, _FakeRequest({"x-log-full": "true"}), CHAT_PATH)
+
+        assert decision.should_capture_full_body is False
+        assert decision.should_capture_raw_stream is False
+
     def test_log_raw_stream_enables_capture(self):
-        config = LoggingConfig(log_raw_stream=True)
+        config = LoggingConfig(log_input_output=True, log_raw_stream=True)
 
         decision = make_sampling_decision(config, _FakeRequest(), CHAT_PATH)
 
@@ -53,7 +64,7 @@ class TestRawStreamSampling:
         assert decision.should_capture_raw_stream is True
 
     def test_sampled_out_requests_never_buffer_the_raw_stream(self):
-        config = LoggingConfig(log_raw_stream=True)
+        config = LoggingConfig(log_input_output=True, log_raw_stream=True)
         with patch("llm_proxy.observability.sampling.random.random", return_value=0.99):
             decision = make_sampling_decision(
                 config.model_copy(update={"sampling_rate": 0.0}), _FakeRequest(), CHAT_PATH
@@ -65,7 +76,7 @@ class TestRawStreamSampling:
     def test_x_log_full_forces_raw_stream_even_when_disabled(self):
         """The x-log-full debugging escape hatch must hand back the raw frames."""
         decision = make_sampling_decision(
-            LoggingConfig(log_raw_stream=False, sampling_rate=0.0),
+            LoggingConfig(log_input_output=True, log_raw_stream=False, sampling_rate=0.0),
             _FakeRequest({"x-log-full": "true"}),
             CHAT_PATH,
         )
@@ -75,7 +86,7 @@ class TestRawStreamSampling:
 
     def test_x_log_full_is_case_insensitive(self):
         decision = make_sampling_decision(
-            LoggingConfig(sampling_rate=0.0),
+            LoggingConfig(log_input_output=True, sampling_rate=0.0),
             _FakeRequest({"x-log-full": "YES"}),
             CHAT_PATH,
         )

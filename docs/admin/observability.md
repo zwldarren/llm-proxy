@@ -33,13 +33,21 @@ Configured in [Settings → Log Management](settings.md#log-management):
 
 - **Bodies** (`log_input_output`, default **off**) is the master switch for persisting
   request/response bodies. Off, every row is still written (status, tokens, cost,
-  routing, audit metadata, and both the request and response headers) but bodies are
-  stored as `{"_sampled_out": true}`. It is the master switch, not a sampling knob:
-  `x-log-full: true` cannot re-enable bodies for one request — turn it on in Settings →
-  Log Management (and back off when done) to inspect payloads.
+  routing, audit metadata, and headers) but every content payload is replaced by
+  `{"_bodies_disabled": true}`: the request and response bodies, **upstream error bodies**
+  and messages (`error_details.response_body` / `original_error` / `detail`, plus the
+  error text recorded in each **fallback/retry attempt**), and **MCP arguments/results**
+  and **web-search queries/results** in `log_metadata`. It is the master switch, not a sampling
+  knob: `x-log-full: true` cannot re-enable bodies for one request — turn it on in
+  Settings → Log Management (and back off when done) to inspect payloads.
+  The row's free-text `error_message` and `error_stack_trace` columns are kept: they
+  are the diagnostic reason (rate limit vs budget vs upstream failure) and the rejection
+  rows below depend on that text. The upstream error payload they can echo lives in
+  `log_metadata.error_details`, which *is* scrubbed.
 - **Sampling** (`sampling_rate`, default 1.0) limits **body capture** for requests that
-  do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` while
-  metadata is still recorded. `x-log-full: true` forces full capture for one request.
+  do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` (a
+  distinct marker, so the UI never reports "sampled out" when bodies are simply disabled)
+  while metadata is still recorded. `x-log-full: true` forces full capture for one request.
 - **Raw stream** (`log_raw_stream`, default off) controls how a *streaming* response is
   stored. Off, the accumulated content blocks are reassembled through the protocol
   serializer into the exact JSON a non-streaming call would have returned — the SSE
@@ -56,8 +64,9 @@ Configured in [Settings → Log Management](settings.md#log-management):
   rebuild the message block by block, and a native Responses stream carries the whole
   response on its terminal event. Raw frames are kept only where there is no way to
   rebuild the body: a native tier whose protocol transformer cannot, and the generic
-  streams (image generation and edit) whose payloads carry no content model. Nothing is
-  stored only when the request was sampled out or `log_input_output` is off.
+  streams (image generation and edit) whose payloads carry no content model. A stream
+  whose body cannot be rebuilt stores `{"streaming": true, "_assembled": false}`, and
+  nothing is stored when the request was sampled out or `log_input_output` is off.
 - **Body cap** (`max_logged_body_bytes`, default `1048576` = 1 MiB; `0` = unlimited) limits
   body **size** at write time: a request or response body bigger than the cap is stored as
   `{"_truncated": true, "size": N}` (the original serialized size in bytes) instead of the
@@ -75,6 +84,23 @@ Configured in [Settings → Log Management](settings.md#log-management):
   SQLite databases created with `auto_vacuum=INCREMENTAL`; existing database files
   keep their mode and reclaim space only via a one-time `VACUUM` (see
   [Databases](../deployment/databases.md)). Audit retention can be set separately.
+
+### Rejected requests
+
+Requests rejected before the pipeline still leave a row, so an API key whose traffic is
+being refused is not invisible in Logs:
+
+- Invalid API keys and IP lockouts are recorded as AUDIT rows by the auth middleware.
+- Per-key **rate limits** (429), **budget caps** (429/503) and **model restrictions**
+  (403) are recorded too. These rows carry the status and reason but deliberately **no
+  body**: they are the path a client can trigger cheaply, so they must not become a
+  write amplifier for prompt content. Repeated rejections for the same key and status
+  are collapsed into one row per short window, so a client stuck in a retry loop cannot
+  flood the log either; the collapsed attempts are reported in that row's metadata as
+  `suppressed_since_last`. The window is per worker, so a multi-worker deployment can
+  write up to one row per worker per window.
+- Headers are kept on body-less rows (they are masked metadata), so a rejected or
+  body-less request stays diagnosable.
 
 ### Durability
 

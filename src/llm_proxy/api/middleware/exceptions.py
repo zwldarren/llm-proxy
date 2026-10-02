@@ -32,6 +32,7 @@ from llm_proxy.core.exceptions import (
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.redaction import body_marker
 from llm_proxy.observability.types import LogType
 from llm_proxy.protocols.openresponses.errors import (
     is_openresponses_path,
@@ -331,7 +332,7 @@ def _write_error_log_to_db(
         request_headers, request_body = _capture_early_failure_request_data(request)
         if not config.log_input_output:
             # log_input_output=false keeps the metadata row but scrubs the body.
-            request_body = {"_sampled_out": True}
+            request_body = body_marker(bodies_enabled=False)
 
         # Reuse the shared classifier so outcome semantics stay in one place.
         log_data = RequestLogCreate(

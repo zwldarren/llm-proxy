@@ -181,6 +181,22 @@ class TestMaskHeaders:
         assert masked["Content-Type"] == "application/json"
         assert masked["Accept"] == "text/plain"
 
+    def test_mask_cookie_headers(self):
+        """Cookie / Set-Cookie carry session credentials and must be masked.
+
+        Headers are kept on body-less rows, so an unmasked Cookie would put the
+        session token on every default-config log row.
+        """
+        headers = {
+            "Cookie": "session=abc123",
+            "Set-Cookie": "session=abc123; HttpOnly",
+            "X-CSRF-Token": "csrf123",
+        }
+        masked = mask_headers(headers)
+        assert masked["Cookie"] == "***"
+        assert masked["Set-Cookie"] == "***"
+        assert masked["X-CSRF-Token"] == "***"
+
     def test_case_insensitive_matching(self):
         """Header matching should be case-insensitive."""
         headers = {"AUTHORIZATION": "Bearer token", "Content-Type": "application/json"}

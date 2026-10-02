@@ -40,6 +40,21 @@ def _reset_security_config_manager():
 
 
 @pytest.fixture(autouse=True)
+def _reset_rejection_log_dedupe():
+    """Reset the rejection-log dedupe window between tests.
+
+    The dedupe is module-level so it survives across requests by design; without
+    a reset, a test that triggers a 429 would suppress the rejection row a later
+    test expects to see.
+    """
+    from llm_proxy.observability.audit_helpers import reset_rejection_log_dedupe
+
+    reset_rejection_log_dedupe()
+    yield
+    reset_rejection_log_dedupe()
+
+
+@pytest.fixture(autouse=True)
 def _reset_reasoning_cache():
     """Clear the process-wide reasoning cache around every test.
 
