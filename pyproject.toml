@@ -65,6 +65,7 @@ build-backend = "uv_build"
 [project.scripts]
 llm-proxy = "llm_proxy.__main__:main_wrapper"
 llm-proxy-dev = "llm_proxy.__main__:main_wrapper_dev"
+llm-proxy-openapi = "llm_proxy.api.openapi_docs:main"
 
 [tool.ruff]
 line-length = 100

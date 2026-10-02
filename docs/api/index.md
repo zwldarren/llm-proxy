@@ -56,6 +56,7 @@ token counting.
 ## Cross-cutting
 
 - [Authentication](authentication.md) — API keys vs console JWT
+- [OpenAPI Specification](openapi.md) — generated `/v1` contract, rendered from code
 - [Endpoint Index](endpoints.md) — every route, including WebSocket, MCP, health, admin
 - [Streaming](streaming.md) — SSE formats per protocol, WebSocket transports
 - [Errors & Rate Limits](errors.md) — error envelopes, status codes, budgets

@@ -359,3 +359,32 @@ text with a .kicker-<category> class in their frontmatter pageClass. */
     max-width: 860px;
   }
 }
+
+/* --- OpenAPI specification page ----------------------------------------------
+   The rendered spec (vitepress-openapi) is table-heavy, so it wants the wide
+   container the API reference pages use — but not their two-column code rail
+   grid, which only applies to their hand-written pages. */
+
+.api-openapi .vp-doc > div > h1:first-child::before {
+  content: 'API Reference';
+  display: block;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-3);
+  margin-bottom: 0.75rem;
+}
+
+@media (min-width: 1280px) {
+  .api-openapi .VPDoc .container {
+    max-width: none;
+    padding-left: 3rem;
+    padding-right: 3rem;
+  }
+
+  .api-openapi .VPDoc .content-container {
+    max-width: none;
+  }
+}

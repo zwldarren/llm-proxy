@@ -106,8 +106,12 @@ LLM-level observability.
 
 ## Is there an OpenAPI/Swagger page?
 
-No — the FastAPI docs (`/docs`, `/redoc`, `/openapi.json`) are disabled. This
-documentation and the [Endpoint Index](../api/endpoints.md) are the reference.
+Not at runtime — the FastAPI docs (`/docs`, `/redoc`, `/openapi.json`) stay disabled.
+A generated OpenAPI 3.1 document covering the `/v1` surface is published in this site
+instead: [OpenAPI Specification](../api/openapi.md). It is rendered from
+`docs/public/v1-openapi.json`, which `uv run llm-proxy-openapi` regenerates from the
+app itself, so the request schemas match what the server validates. Together with the
+[Endpoint Index](../api/endpoints.md), that is the reference.
 
 ## Can I run multiple replicas?
 

@@ -99,11 +99,12 @@ routing). Without the build, those paths 404 and only the API is served.
 
 ## Not available
 
-- **OpenAPI / Swagger / ReDoc** — not registered (`docs_url=None`, `redoc_url=None`,
-  `openapi_url=None`), so `/docs`, `/redoc`, and `/openapi.json` are never mounted. A
-  GET to those paths therefore follows the SPA fallback from the
+- **OpenAPI / Swagger / ReDoc at runtime** — not registered (`docs_url=None`,
+  `redoc_url=None`, `openapi_url=None`), so `/docs`, `/redoc`, and `/openapi.json` are
+  never mounted. A GET to those paths therefore follows the SPA fallback from the
   [Static frontend](#static-frontend) section: `index.html` (200) when `frontend/dist`
-  exists, 404 without it. Use this documentation instead.
+  exists, 404 without it. The generated `/v1` contract is published as
+  [OpenAPI Specification](openapi.md) inside this documentation instead.
 - **Log export endpoints** — query `GET /api/logs` with pagination instead.
 
 ## Related

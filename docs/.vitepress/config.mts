@@ -37,6 +37,7 @@ const api = [
     text: 'Overview',
     items: [
       { text: 'API Reference', link: '/api/' },
+      { text: 'OpenAPI Specification', link: '/api/openapi' },
       { text: 'Authentication', link: '/api/authentication' },
       { text: 'Endpoint Index', link: '/api/endpoints' },
       { text: 'Streaming', link: '/api/streaming' },
