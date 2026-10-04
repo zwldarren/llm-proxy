@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/zwldarren/llm-proxy/compare/v0.2.9...v0.3.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **systemone:** adds the `systemone` request type, the `typesafe` provider type and `POST /v1/systemone` to the `/v1` contract. The shared OpenRouter cost predicate now rejects a boolean or zero `usage.cost` instead of billing it as USD 1.0. No existing endpoint, provider config or payload changes shape.
+
+### Features
+
+* **openapi:** publish a generated /v1 contract in the docs ([1795736](https://github.com/zwldarren/llm-proxy/commit/1795736630a4aa5b7b611a124b11797ba0068335))
+* **systemone:** add System One evaluation across TypeSafe, OpenRouter and Ollama ([08f0387](https://github.com/zwldarren/llm-proxy/commit/08f03879a51fed8b4a10453de297e81589041bea))
+
+
+### Bug Fixes
+
+* **logging:** enforce the body switch at the store and log rejections ([40b71fb](https://github.com/zwldarren/llm-proxy/commit/40b71fb4ffe34f538537d014093d6f49d7552f2f))
+* **openapi:** pin the published spec version to the release version ([acc768d](https://github.com/zwldarren/llm-proxy/commit/acc768d1799f827c310f146c70c14f13964d8d94))
+
 ## [0.2.9](https://github.com/zwldarren/llm-proxy/compare/v0.2.8...v0.2.9) (2026-09-30)
 
 
