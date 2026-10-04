@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         InternalEmbeddingRequest,
         InternalRequest,
         InternalSpeechRequest,
+        InternalSystemOneRequest,
         InternalTranscriptionRequest,
         InternalTranscriptionResponse,
         InternalTranslationRequest,
@@ -134,6 +135,16 @@ class EmbeddingSelf(CapabilityHost, Protocol):
     def _embeddings_headers(self) -> dict[str, str]: ...
 
 
+class SystemOneSelf(CapabilityHost, Protocol):
+    """Self-type for ``SystemOneCapabilityMixin``."""
+
+    SYSTEMONE_ENDPOINT: str
+
+    def _systemone_url(self, request: InternalSystemOneRequest) -> str: ...
+
+    def _systemone_headers(self) -> dict[str, str]: ...
+
+
 class ImageSelf(CapabilityHost, Protocol):
     """Self-type for ``ImageCapabilityMixin``."""
 
@@ -215,4 +226,5 @@ __all__ = [
     "ChatSelf",
     "EmbeddingSelf",
     "ImageSelf",
+    "SystemOneSelf",
 ]

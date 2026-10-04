@@ -23,6 +23,7 @@ Every route the proxy serves. `X` in the auth column means "API key
 | POST | `/v1/messages` | X | Anthropic | Anthropic Messages |
 | POST | `/v1/messages/count_tokens` | X | Anthropic | Native upstream count when available, otherwise a local o200k_base estimate |
 | POST | `/v1/embeddings` | X | OpenAI | Embeddings |
+| POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models) |
 | POST | `/v1/images/generations` | X | OpenAI | JSON body |
 | POST | `/v1/images/edits` | X | OpenAI | JSON or multipart (`image`, `image[]`, `mask`) |
 | POST | `/v1/audio/speech` | X | OpenAI | Binary audio response |
@@ -48,8 +49,11 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
 | Audio (speech, STT) | `openai`, the `openai-compatible` family, `gemini` (native TTS/STT), `openrouter` (STT) |
 | Audio (translation) | `openai`, the `openai-compatible` family, `gemini`. `openrouter` has no upstream endpoint and rejects the request |
+| System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold), `ollama` (local models, v0.35+). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
 
-The dedicated `anthropic` provider type is chat-only.
+The dedicated `anthropic` provider type is chat-only. The `typesafe` provider
+type is System One-only — assign it to models that serve `/v1/systemone`, and
+note that chat requests against such a model are rejected with a `400`.
 
 ## WebSocket endpoints
 

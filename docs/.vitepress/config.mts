@@ -1,6 +1,4 @@
-import { defineConfig } from 'vitepress'
-import type MarkdownIt from 'markdown-it'
-import type Token from 'markdown-it/lib/token.mjs'
+import { defineConfig, type MarkdownOptions } from 'vitepress'
 
 const repo = 'https://github.com/zwldarren/llm-proxy'
 const base = '/llm-proxy/'
@@ -78,6 +76,10 @@ const api = [
     items: [{ text: 'Create embeddings', link: '/api/embeddings' }],
   },
   {
+    text: 'Evaluation',
+    items: [{ text: 'System One evaluation', link: '/api/systemone' }],
+  },
+  {
     text: 'Models',
     items: [{ text: 'List models', link: '/api/models' }],
   },
@@ -101,10 +103,21 @@ const reference = [
 ]
 
 /**
+ * The markdown-it instance VitePress hands to `markdown.config`.
+ *
+ * Derived from VitePress's own config type rather than `import type MarkdownIt
+ * from 'markdown-it'`: `@types/markdown-it` ships two declaration trees (ESM
+ * `index.d.mts` and CJS `index.d.ts`), and a direct import can land on a
+ * different module identity than the one VitePress's declarations reference —
+ * which makes these plugins structurally incompatible at their call sites.
+ */
+type MarkdownItInstance = Parameters<NonNullable<MarkdownOptions['config']>>[0]
+
+/**
  * API reference container: renders `::: endpoint POST /v1/...  # note` blocks as
  * OpenAI-style endpoint header cards (method badge + monospace path + copy button).
  */
-const apiEndpointPlugin = (md: MarkdownIt) => {
+const apiEndpointPlugin = (md: MarkdownItInstance) => {
   md.block.ruler.before(
     'fence',
     'api_endpoint',
@@ -143,9 +156,13 @@ const apiEndpointPlugin = (md: MarkdownIt) => {
       const [method = '', path = ''] = head.split(/\s+/)
       if (!method || !path) return false
 
-      const oldParent = state.parentType
+      // markdown-it types `parentType` as the built-in block kinds only, but a
+      // custom container (as markdown-it-container does) sets its own kind. View
+      // the state through a widened shape so the custom kind needs no cast.
+      const container = state as { parentType: string }
+      const oldParent = container.parentType
       const oldLineMax = state.lineMax
-      state.parentType = 'api_endpoint'
+      container.parentType = 'api_endpoint'
       state.lineMax = nextLine
 
       const open = state.push('api_endpoint_open', 'div', 1)
@@ -153,7 +170,7 @@ const apiEndpointPlugin = (md: MarkdownIt) => {
       state.md.block.tokenize(state, startLine + 1, nextLine)
       state.push('api_endpoint_close', 'div', -1)
 
-      state.parentType = oldParent
+      container.parentType = oldParent
       state.lineMax = oldLineMax
       state.line = nextLine + (autoClosed ? 1 : 0)
       return true
@@ -195,7 +212,7 @@ const apiEndpointPlugin = (md: MarkdownIt) => {
  * ` ```python [Request — OpenAI SDK] ` — the label becomes the panel head and
  * is stripped from the info before highlighting.
  */
-const apiCodeRailPlugin = (md: MarkdownIt) => {
+const apiCodeRailPlugin = (md: MarkdownItInstance) => {
   md.core.ruler.push('api_code_rail', (state) => {
     const env = state.env as { frontmatter?: { pageClass?: string } }
     const pageClass = env.frontmatter?.pageClass ?? ''
@@ -213,7 +230,7 @@ const apiCodeRailPlugin = (md: MarkdownIt) => {
     }
     if (topLevel.length === 0) return
 
-    const html = (content: string): Token => {
+    const html = (content: string) => {
       const token = new state.Token('html_block', '', 0)
       token.content = content
       return token
@@ -230,7 +247,7 @@ const apiCodeRailPlugin = (md: MarkdownIt) => {
       return { head: lang.toUpperCase(), cleanInfo: info }
     }
 
-    const rail: Token[] = [html('<div class="api-code-rail">\n')]
+    const rail = [html('<div class="api-code-rail">\n')]
     for (const index of topLevel) {
       const fence = state.tokens[index]
       const { head, cleanInfo } = parseInfo(fence.info)

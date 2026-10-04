@@ -23,9 +23,11 @@ from llm_proxy.providers.anthropic.client_headers import (
     get_client_headers as get_anthropic_client_headers,
 )
 from llm_proxy.providers.base import extract_rate_limit_headers
+from llm_proxy.providers.capabilities import SystemOneCapabilityMixin
 from llm_proxy.providers.headers import merge_passthrough_headers
 from llm_proxy.providers.openai.client_headers import get_openrouter_client_headers
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
+from llm_proxy.serialization.providers.field_utils import reported_cost
 from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 logger = get_logger(__name__)
@@ -40,7 +42,7 @@ DEFAULT_ATTRIBUTION_TITLE = "LLM Proxy"
 
 
 @register_adapter("openrouter")
-class OpenRouterAdapter(NativePassthroughChatBase):
+class OpenRouterAdapter(SystemOneCapabilityMixin, NativePassthroughChatBase):
     """OpenRouter provider using direct HTTP calls to OpenAI-compatible API.
 
     OpenRouter provides unified access to multiple LLM providers through a
@@ -163,6 +165,10 @@ class OpenRouterAdapter(NativePassthroughChatBase):
         # /api/v1/audio/transcriptions takes provider options; routing
         # preferences (order/only/ignore) are explicitly not applied upstream.
         RequestType.TRANSCRIPTION: frozenset({"provider"}),
+        # /api/v1/systemone documents the shared provider routing block plus
+        # the session/trace/user observability fields (the same superset the
+        # TypeSafe SDKs send).
+        RequestType.SYSTEMONE: frozenset({"provider", "session_id", "trace", "user"}),
     }
 
     def _models_params(self) -> dict[str, Any]:
@@ -275,7 +281,7 @@ class OpenRouterAdapter(NativePassthroughChatBase):
         # endpoint including the native Messages one.
         usage = response.get("usage", {})
         if isinstance(usage, dict):
-            cost = _reported_cost(usage)
+            cost = reported_cost(usage)
             if cost is not None:
                 result.provider_info["openrouter_cost"] = cost
 
@@ -336,7 +342,7 @@ class OpenRouterAdapter(NativePassthroughChatBase):
         response = await self._post_json_with_retry(url, headers, outbound.json_body)
 
         # Extract OpenRouter's reported cost before parsing.
-        openrouter_cost = _reported_cost(response.get("usage"))
+        openrouter_cost = reported_cost(response.get("usage"))
 
         result = self.from_image_provider_format(response)
         if openrouter_cost is not None:
@@ -383,7 +389,7 @@ class OpenRouterAdapter(NativePassthroughChatBase):
         result = self._parse_transcription_response(response_data, request.response_format)
         # STT is billed per second upstream; ``usage.cost`` is the authoritative
         # figure and takes precedence over the local audio-duration estimate.
-        openrouter_cost = _reported_cost(response_data.get("usage"))
+        openrouter_cost = reported_cost(response_data.get("usage"))
         if openrouter_cost is not None:
             result.provider_info["openrouter_cost"] = openrouter_cost
         # Parity with AudioCapabilityMixin.transcription, which this override
@@ -511,21 +517,6 @@ def _require_response_format(value: str | None, supported: frozenset[str], endpo
         code="invalid_request_error",
         status_code=400,
     )
-
-
-def _reported_cost(usage: Any) -> float | None:
-    """Return the billed cost reported in an OpenRouter ``usage`` object.
-
-    OpenRouter prices every endpoint itself and reports the charge in
-    ``usage.cost``; the billing pipeline reads it from
-    ``provider_info["openrouter_cost"]`` in preference to a local estimate.
-    """
-    if not isinstance(usage, dict):
-        return None
-    cost = usage.get("cost")
-    if isinstance(cost, int | float) and cost > 0:
-        return float(cost)
-    return None
 
 
 def _infer_audio_format(filename: str) -> str:

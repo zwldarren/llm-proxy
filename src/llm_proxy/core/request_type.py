@@ -13,3 +13,4 @@ class RequestType(StrEnum):
     SPEECH = "speech"
     TRANSCRIPTION = "transcription"
     TRANSLATION = "translation"
+    SYSTEMONE = "systemone"

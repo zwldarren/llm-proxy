@@ -257,6 +257,10 @@ text with a .kicker-<category> class in their frontmatter pageClass. */
   content: 'Embeddings';
 }
 
+.kicker-systemone .vp-doc > div > h1:first-child::before {
+  content: 'Evaluation';
+}
+
 .kicker-models .vp-doc > div > h1:first-child::before {
   content: 'Models';
 }

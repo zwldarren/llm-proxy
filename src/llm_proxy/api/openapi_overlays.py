@@ -128,6 +128,10 @@ TAGS: list[dict[str, str]] = [
         "description": "OpenAI Responses API (create, retrieve, cancel, compact).",
     },
     {"name": "embeddings", "description": "Text embeddings."},
+    {
+        "name": "systemone",
+        "description": "System One evaluation (TypeSafe's Jev; also OpenRouter and Ollama).",
+    },
     {"name": "images", "description": "Image generation and editing."},
     {"name": "audio", "description": "Speech synthesis, transcription, and translation."},
     {"name": "models", "description": "The model catalogue visible to the calling API key."},
@@ -281,6 +285,26 @@ COMPONENTS: dict[str, Any] = {
             ),
         },
         required=["object", "data", "model"],
+    ),
+    "SystemOneResponse": _passthrough(
+        {
+            "model": _str("The model that performed the evaluation."),
+            "answers": _passthrough(
+                {},
+                description="One typed answer per question id (`noul`, `choice`, or `score`).",
+            ),
+            "usage": _passthrough(
+                {
+                    "input_tokens": _int(),
+                    "output_tokens": _int(),
+                    "cost": _num("Billed cost in USD (OpenRouter only)."),
+                },
+                required=["input_tokens", "output_tokens"],
+            ),
+            "id": _str("OpenRouter generation id."),
+            "provider": _str("Upstream provider name (OpenRouter only)."),
+        },
+        required=["model", "answers", "usage"],
     ),
     "ImageResponse": _passthrough(
         {
@@ -567,6 +591,18 @@ OPERATION_OVERLAYS: dict[tuple[str, str], dict[str, Any]] = {
         "tags": ["embeddings"],
         "responses": {
             "200": json_response("The embeddings.", ref("EmbeddingResponse")),
+        },
+    },
+    ("/v1/systemone", "post"): {
+        "summary": "Evaluate a state with System One",
+        "tags": ["systemone"],
+        "description": (
+            "Sends `state` and typed `questions` to a System One model such as Jev and "
+            "returns one typed answer per question. TypeSafe and OpenRouter share the "
+            "wire format."
+        ),
+        "responses": {
+            "200": json_response("The answers, one per question id.", ref("SystemOneResponse")),
         },
     },
     ("/v1/images/generations", "post"): {

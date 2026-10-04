@@ -64,6 +64,10 @@ from llm_proxy.models.params import (
     OpenAISpecificParams,
 )
 from llm_proxy.models.provider import ProviderModelInfo
+from llm_proxy.models.systemone import (
+    InternalSystemOneRequest,
+    InternalSystemOneResponse,
+)
 from llm_proxy.models.tools.core import (
     AllowedToolsConfig,
     CustomTool,
@@ -139,6 +143,8 @@ __all__ = [
     "InternalResponse",
     "InternalSpeechRequest",
     "InternalSpeechResponse",
+    "InternalSystemOneRequest",
+    "InternalSystemOneResponse",
     "InternalTranscriptionRequest",
     "InternalTranscriptionResponse",
     "InternalTranslationRequest",

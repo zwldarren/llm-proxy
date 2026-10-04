@@ -280,6 +280,16 @@ async def build_translation_request_context(
     )
 
 
+async def build_systemone_request_context(
+    request: HasModel,
+    req: Request,
+) -> RequestContext:
+    """Build RequestContext for System One evaluation request processing."""
+    return await _build_request_context(
+        request, req, request_type=RequestType.SYSTEMONE, protocol_name="systemone"
+    )
+
+
 async def build_request_context(
     request: HasModel,
     req: Request,

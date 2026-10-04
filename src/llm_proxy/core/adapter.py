@@ -16,6 +16,8 @@ from llm_proxy.models import (
     InternalResponse,
     InternalSpeechRequest,
     InternalSpeechResponse,
+    InternalSystemOneRequest,
+    InternalSystemOneResponse,
     InternalTranscriptionRequest,
     InternalTranscriptionResponse,
     InternalTranslationRequest,
@@ -232,6 +234,14 @@ class BaseAdapter(ABC):
     ) -> InternalEmbeddingResponse:
         """Generate embeddings for the input text."""
         raise NotImplementedError(f"{self.provider_name} does not support embeddings.")
+
+    async def systemone(
+        self,
+        request: InternalSystemOneRequest,
+        **kwargs: Any,
+    ) -> InternalSystemOneResponse:
+        """Evaluate a state against typed questions (TypeSafe System One)."""
+        raise NotImplementedError(f"{self.provider_name} does not support System One requests.")
 
     def from_image_provider_format(self, response: dict[str, Any]) -> InternalImageResponse:
         """Convert image generation response from provider's native format to unified format.

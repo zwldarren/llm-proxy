@@ -14,11 +14,16 @@ from llm_proxy.models.embedding import (
     InternalEmbeddingRequest,
     InternalEmbeddingResponse,
 )
+from llm_proxy.models.systemone import (
+    InternalSystemOneRequest,
+    InternalSystemOneResponse,
+)
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.providers.field_utils import (
     extract_unknown_response_fields as _extract_unknown_fields,
 )
+from llm_proxy.serialization.providers.field_utils import reported_cost
 from llm_proxy.streaming.transformer import StreamingTransformer
 
 
@@ -284,6 +289,56 @@ class ProviderSerializer(ABC):
             model=response.get("model", model),
             data=data_list,
             usage=usage,
+        )
+
+    def build_provider_systemone_request(self, request: InternalSystemOneRequest) -> dict[str, Any]:
+        """Build a provider-specific System One request body.
+
+        Every upstream shares the same wire format, so the default is the whole
+        body. Optional non-shared fields (OpenRouter's ``provider`` routing,
+        ``session_id``, ``trace``, ``user``; Ollama's ``images`` and
+        ``keep_alive``) ride ``request.extra`` and are merged by the adapter's
+        field-policy chokepoint, not here.
+        """
+        return {
+            "model": request.model,
+            "state": request.state,
+            "questions": request.questions,
+        }
+
+    def parse_provider_systemone_response(
+        self, response: dict[str, Any], model: str = ""
+    ) -> InternalSystemOneResponse:
+        """Parse a provider System One response into InternalSystemOneResponse.
+
+        Shared by every System One provider. The upstream response shape is
+        ``{model, answers, usage, [id], [provider]}``; OpenRouter additionally
+        reports ``usage.cost`` and the upstream ``usage`` object is preserved
+        verbatim so the protocol formatter can echo it losslessly.
+        """
+        raw_usage = response.get("usage")
+        usage = None
+        provider_info: dict[str, Any] = {}
+        if isinstance(raw_usage, dict):
+            usage = Usage(
+                input_tokens=raw_usage.get("input_tokens", 0) or 0,
+                output_tokens=raw_usage.get("output_tokens", 0) or 0,
+            )
+            provider_info["systemone_usage"] = raw_usage
+            cost = reported_cost(raw_usage)
+            if cost is not None:
+                # Provider-reported billed cost; the billing pipeline reads it
+                # in preference to a local estimate (same key the chat and
+                # media endpoints use for an OpenRouter-reported charge).
+                provider_info["openrouter_cost"] = cost
+
+        return InternalSystemOneResponse(
+            model=response.get("model", model),
+            answers=response.get("answers", {}) or {},
+            usage=usage,
+            id=response.get("id"),
+            provider=response.get("provider"),
+            provider_info=provider_info,
         )
 
 

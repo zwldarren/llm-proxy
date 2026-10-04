@@ -34,6 +34,26 @@ def extract_extra_fields(data: dict[str, Any], known_fields: set[str]) -> dict[s
     return {k: v for k, v in data.items() if k not in known_fields}
 
 
+def reported_cost(usage: Any) -> float | None:
+    """Return the billed cost reported in an OpenRouter-style ``usage`` object.
+
+    OpenRouter prices every endpoint itself and reports the charge in
+    ``usage.cost``; the billing pipeline reads it from
+    ``provider_info["openrouter_cost"]`` in preference to a local estimate.
+    ``bool`` is rejected explicitly: it is an ``int`` subclass, so ``cost:
+    true`` would otherwise be read as a 1.0 USD charge.
+
+    Shared by the OpenRouter adapter's hand-written parse paths and the
+    ``ProviderSerializer`` defaults so both apply the same predicate.
+    """
+    if not isinstance(usage, dict):
+        return None
+    cost = usage.get("cost")
+    if isinstance(cost, int | float) and not isinstance(cost, bool) and cost > 0:
+        return float(cost)
+    return None
+
+
 def extract_unknown_response_fields(
     response: dict[str, Any], known_fields: set[str]
 ) -> dict[str, Any]:
@@ -52,4 +72,5 @@ __all__ = [
     "INTERNAL_EXTRA_KEYS",
     "extract_extra_fields",
     "extract_unknown_response_fields",
+    "reported_cost",
 ]

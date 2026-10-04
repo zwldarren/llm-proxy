@@ -9,6 +9,7 @@ from llm_proxy.core.processing.strategies.base import ProcessingStrategy
 from llm_proxy.core.processing.strategies.chat import ChatStrategy
 from llm_proxy.core.processing.strategies.embedding import EmbeddingStrategy
 from llm_proxy.core.processing.strategies.image import ImageEditStrategy, ImageStrategy
+from llm_proxy.core.processing.strategies.systemone import SystemOneStrategy
 from llm_proxy.core.request_type import RequestType
 
 _STRATEGIES: dict[RequestType, type[ProcessingStrategy]] = {
@@ -19,6 +20,7 @@ _STRATEGIES: dict[RequestType, type[ProcessingStrategy]] = {
     RequestType.SPEECH: SpeechStrategy,
     RequestType.TRANSCRIPTION: TranscriptionStrategy,
     RequestType.TRANSLATION: TranslationStrategy,
+    RequestType.SYSTEMONE: SystemOneStrategy,
 }
 
 

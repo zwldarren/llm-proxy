@@ -18,6 +18,7 @@ from llm_proxy.providers.capabilities import (
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
     ImageCapabilityMixin,
+    SystemOneCapabilityMixin,
 )
 
 #: Capability verbs each mixin implements that ``BaseAdapter`` also declares
@@ -39,6 +40,7 @@ MIXIN_VERBS: dict[type, tuple[str, ...]] = {
         "stream_transcription",
         "translation",
     ),
+    SystemOneCapabilityMixin: ("systemone",),
 }
 
 _BASE_ADAPTER_MODULE = "llm_proxy.core.adapter"
@@ -56,6 +58,7 @@ EXPECTED_PROVIDERS = {
     "openai",
     "openai-compatible",
     "openrouter",
+    "typesafe",
 }
 
 

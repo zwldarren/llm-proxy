@@ -21,6 +21,7 @@ from llm_proxy.core.processing.strategies.chat import ChatStrategy
 from llm_proxy.core.processing.strategies.embedding import EmbeddingStrategy
 from llm_proxy.core.processing.strategies.image import ImageEditStrategy, ImageStrategy
 from llm_proxy.core.processing.strategies.registry import get_strategy
+from llm_proxy.core.processing.strategies.systemone import SystemOneStrategy
 
 __all__ = [
     "ChatStrategy",
@@ -30,6 +31,7 @@ __all__ = [
     "ProcessingStrategy",
     "SpeechStrategy",
     "StreamingResponseMarker",
+    "SystemOneStrategy",
     "TranscriptionStrategy",
     "TranslationStrategy",
     "get_strategy",

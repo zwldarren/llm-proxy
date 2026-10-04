@@ -25,6 +25,10 @@
       "description": "Text embeddings."
     },
     {
+      "name": "systemone",
+      "description": "System One evaluation (TypeSafe's Jev; also OpenRouter and Ollama)."
+    },
+    {
       "name": "images",
       "description": "Image generation and editing."
     },
@@ -1412,6 +1416,88 @@
             }
           }
         }
+      }
+    },
+    "/v1/systemone": {
+      "post": {
+        "tags": [
+          "systemone"
+        ],
+        "summary": "Evaluate a state with System One",
+        "operationId": "systemone_endpoint_endpoint_v1_systemone_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemOneRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The answers, one per question id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemOneResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Sends `state` and typed `questions` to a System One model such as Jev and returns one typed answer per question. TypeSafe and OpenRouter share the wire format."
       }
     },
     "/v1/audio/transcriptions": {
@@ -7469,6 +7555,236 @@
         ],
         "title": "SystemMessageItemParam",
         "description": "System message item for request."
+      },
+      "SystemOneQuestionSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "noul",
+              "choice",
+              "score"
+            ],
+            "title": "Type"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "criteria": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteria"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "instructions"
+        ],
+        "title": "SystemOneQuestionSchema",
+        "description": "A typed System One question.\n\n``noul`` is a yes/no question, ``choice`` picks one option from a map, and\n``score`` rates the state across an ordered array of levels. Unknown keys\nare allowed so a future upstream field is not rejected client-side."
+      },
+      "SystemOneRequestSchema": {
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "State",
+            "description": "The content to evaluate: a plain string, or a JSON object/array of related context (chat logs, records, application state)."
+          },
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "The System One model, e.g. 'jev-latest'."
+          },
+          "questions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SystemOneQuestionSchema"
+            },
+            "type": "object",
+            "title": "Questions",
+            "description": "Map of question id to a typed question; answers come back under the same ids."
+          },
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images",
+            "description": "Base64-encoded images shared by all questions, in request order (Ollama only; needs a vision-capable System One model such as Clef). URLs and data URLs are not accepted."
+          },
+          "keep_alive": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Alive",
+            "description": "How long to keep the model loaded after the request, as a duration string such as '5m' or seconds (Ollama only)."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Provider routing preferences (OpenRouter only)."
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Observability grouping id, never sent to the provider (OpenRouter only)."
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace",
+            "description": "Observability/tracing metadata (OpenRouter only)."
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User",
+            "description": "End-user identifier (OpenRouter only)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "model",
+          "questions"
+        ],
+        "title": "SystemOneRequestSchema",
+        "description": "Top-level System One request body."
+      },
+      "SystemOneResponse": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "The model that performed the evaluation."
+          },
+          "answers": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "One typed answer per question id (`noul`, `choice`, or `score`)."
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "input_tokens": {
+                "type": "integer"
+              },
+              "output_tokens": {
+                "type": "integer"
+              },
+              "cost": {
+                "type": "number",
+                "description": "Billed cost in USD (OpenRouter only)."
+              }
+            },
+            "additionalProperties": true,
+            "required": [
+              "input_tokens",
+              "output_tokens"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "OpenRouter generation id."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Upstream provider name (OpenRouter only)."
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "model",
+          "answers",
+          "usage"
+        ]
       },
       "TextParam": {
         "properties": {

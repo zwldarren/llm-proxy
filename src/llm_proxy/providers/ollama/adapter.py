@@ -18,7 +18,11 @@ from llm_proxy.models import (
 from llm_proxy.models.content_blocks import ImageBlock
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import BaseHttpProvider
-from llm_proxy.providers.capabilities import ChatCapabilityMixin, EmbeddingCapabilityMixin
+from llm_proxy.providers.capabilities import (
+    ChatCapabilityMixin,
+    EmbeddingCapabilityMixin,
+    SystemOneCapabilityMixin,
+)
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.ollama.request_builder import (
     OLLAMA_NATIVE_OPTIONS,
@@ -37,8 +41,19 @@ _serializer = get_provider_serializer("ollama")
 
 
 @register_adapter("ollama")
-class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvider):
-    """Provider adapter for Ollama native API."""
+class OllamaAdapter(
+    ChatCapabilityMixin,
+    EmbeddingCapabilityMixin,
+    SystemOneCapabilityMixin,
+    BaseHttpProvider,
+):
+    """Provider adapter for Ollama's native API.
+
+    Chat and embeddings speak the native ``/api/*`` surface. System One
+    (Ollama v0.35+) is served from ``/v1/systemone`` -- the OpenAI-compatibility
+    prefix, not the native one -- and shares TypeSafe's wire format, so it
+    reuses the capability mixin's body builder, parser and endpoint plumbing.
+    """
 
     #: Branding for the admin provider catalog (GET /api/config/provider-types).
     DISPLAY_NAME_EN = "Ollama"
@@ -53,11 +68,18 @@ class OllamaAdapter(ChatCapabilityMixin, EmbeddingCapabilityMixin, BaseHttpProvi
     _DEFAULT_PROVIDER_NAME = "ollama"
     CHAT_ENDPOINT = "/api/chat"
     EMBEDDINGS_ENDPOINT = "/api/embed"
+    #: System One sits under Ollama's OpenAI-compatibility prefix rather than
+    #: the native ``/api`` one; ``DEFAULT_BASE_URL`` is the server root, so this
+    #: resolves to ``http://localhost:11434/v1/systemone``.
+    SYSTEMONE_ENDPOINT = "/v1/systemone"
 
-    #: Extra keys that are native /api/embed parameters; exempt from the
-    #: unknown-fields policy so they survive the merge into the body.
+    #: Extra keys the upstream documents as supported, per request type; exempt
+    #: from the unknown-fields policy so they survive the merge into the body.
+    #: Embeddings: native /api/embed parameters. System One: the base64
+    #: ``images`` array (shared by every question) and its own ``keep_alive``.
     EXEMPT_EXTRA_KEYS = {
         RequestType.EMBEDDING: frozenset({"keep_alive", "truncate", "options"}),
+        RequestType.SYSTEMONE: frozenset({"images", "keep_alive"}),
     }
 
     async def _download_images_in_conversation(

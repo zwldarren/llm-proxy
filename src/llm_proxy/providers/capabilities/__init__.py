@@ -8,10 +8,12 @@ from llm_proxy.providers.capabilities.audio import AudioCapabilityMixin
 from llm_proxy.providers.capabilities.chat import ChatCapabilityMixin
 from llm_proxy.providers.capabilities.embedding import EmbeddingCapabilityMixin
 from llm_proxy.providers.capabilities.image import ImageCapabilityMixin
+from llm_proxy.providers.capabilities.systemone import SystemOneCapabilityMixin
 
 __all__ = [
     "AudioCapabilityMixin",
     "ChatCapabilityMixin",
     "EmbeddingCapabilityMixin",
     "ImageCapabilityMixin",
+    "SystemOneCapabilityMixin",
 ]
