@@ -497,6 +497,7 @@ export default {
       stt: "STT",
       embedding: "向量嵌入",
       realtime: "实时语音",
+      systemone: "System One",
       reasoning: "推理",
       toolCall: "工具调用",
       structuredOutput: "结构化输出",
@@ -608,6 +609,8 @@ export default {
       stt: "处理语音转写请求（models.dev: modalities.input · audio），控制 /v1/audio/transcriptions 端点。",
       embedding: "处理向量嵌入请求，控制 /v1/embeddings 端点。",
       realtime: "通过 Realtime WebSocket 中继提供服务（对应 models.dev 的实时语音类模型）。",
+      systemone:
+        "处理 System One 评估请求（评估内容 + 类型化问题，逐题返回答案），控制 /v1/systemone 端点。",
     },
     // 能力配置页：仅展示的 models.dev 属性
     capInfoHeader: "展示属性（models.dev）",
@@ -1316,6 +1319,11 @@ export default {
     bodyNotReassembled: "响应正文未被存储：流式响应无法重组为可记录的正文。",
     embeddings: "向量嵌入",
     dimensions: "维度",
+    // System One evaluation logs
+    systemOneState: "评估内容",
+    systemOneQuestions: "问题",
+    systemOneAnswers: "答案",
+    systemOneConfidence: "置信度",
     audioOutput: "音频输出",
     audioRawSize: "原始大小",
     transcription: "转录",

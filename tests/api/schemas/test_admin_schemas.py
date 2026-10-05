@@ -85,10 +85,11 @@ def test_model_read_derives_capabilities() -> None:
         providers=[],
         supports_images=True,
         supports_tts=True,
+        supports_systemone=True,
         reasoning=True,
         experimental=True,
     )
-    assert read.capabilities == ["vision", "tts", "reasoning", "experimental"]
+    assert read.capabilities == ["vision", "tts", "systemone", "reasoning", "experimental"]
 
 
 # --- Context-tier pricing tests ---

@@ -144,6 +144,10 @@ There is no streaming variant: System One is a single synchronous evaluation.
 
 ## Provider support
 
+The model named in the request must be marked as a System One model
+(`supports_systemone`) in the admin model configuration; a chat model is
+rejected with a `400 invalid_request_error` before any provider is called.
+
 | Provider type | Base URL | Notes |
 | --- | --- | --- |
 | `typesafe` | `https://api.typesafe.ai/v1` | TypeSafe direct (the Jev model). Chat requests are rejected. An OpenRouter-namespaced `typesafe/…` model id is reduced to the bare id before the request is sent. |

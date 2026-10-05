@@ -310,6 +310,13 @@ class ModelConfig(BaseModel):
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",
     )
+    supports_systemone: bool = Field(
+        default=False,
+        description=(
+            "Whether this model serves System One evaluations (e.g. /v1/systemone); "
+            "gates that endpoint. Additive like the other capability flags"
+        ),
+    )
     context_length: int | None = Field(
         default=None,
         ge=0,

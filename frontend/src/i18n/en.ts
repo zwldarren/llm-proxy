@@ -511,6 +511,7 @@ export default {
       stt: "STT",
       embedding: "Embedding",
       realtime: "Realtime",
+      systemone: "System One",
       reasoning: "Reasoning",
       toolCall: "Tool call",
       structuredOutput: "Structured output",
@@ -626,6 +627,8 @@ export default {
       embedding: "Serves embedding requests. Gates the /v1/embeddings endpoint.",
       realtime:
         "Served through the Realtime WebSocket relay (models.dev: realtime-capable models).",
+      systemone:
+        "Serves System One evaluation requests — a state plus typed questions, one answer each. Gates the /v1/systemone endpoint.",
     },
     // Capability tab: informational models.dev attributes (display-only)
     capInfoHeader: "Informational (models.dev)",
@@ -1253,6 +1256,11 @@ export default {
       "Response body was not stored: the streamed response could not be reassembled for logging.",
     embeddings: "Embeddings",
     dimensions: "Dimensions",
+    // System One evaluation logs
+    systemOneState: "State",
+    systemOneQuestions: "Questions",
+    systemOneAnswers: "Answers",
+    systemOneConfidence: "Confidence",
     audioOutput: "Audio Output",
     audioRawSize: "Raw size",
     transcription: "Transcription",

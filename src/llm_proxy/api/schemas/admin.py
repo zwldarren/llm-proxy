@@ -235,6 +235,8 @@ def derive_model_capabilities(model: Any) -> list[str]:
         capabilities.append("embedding")
     if model.supports_realtime:
         capabilities.append("realtime")
+    if model.supports_systemone:
+        capabilities.append("systemone")
     # Informational models.dev attributes (display-only).
     if model.reasoning:
         capabilities.append("reasoning")
@@ -367,6 +369,13 @@ class ModelBase(BaseModel, ValidatorMixin):
     supports_realtime: bool = Field(
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",
+    )
+    supports_systemone: bool = Field(
+        default=False,
+        description=(
+            "Whether this model serves System One evaluations (e.g. /v1/systemone); "
+            "gates that endpoint. Additive like the other capability flags"
+        ),
     )
     # Display-only attributes, named after their models.dev counterparts so
     # operators familiar with models.dev can map entries 1:1. These do not
@@ -502,6 +511,7 @@ class ModelUpdate(BaseModel):
     supports_stt: bool | None = None
     supports_embedding: bool | None = None
     supports_realtime: bool | None = None
+    supports_systemone: bool | None = None
     attachment: bool | None = None
     reasoning: bool | None = None
     tool_call: bool | None = None
@@ -662,6 +672,13 @@ class ModelRead(BaseModel):
     supports_realtime: bool = Field(
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",
+    )
+    supports_systemone: bool = Field(
+        default=False,
+        description=(
+            "Whether this model serves System One evaluations (e.g. /v1/systemone); "
+            "gates that endpoint. Additive like the other capability flags"
+        ),
     )
     attachment: bool = Field(
         default=False,

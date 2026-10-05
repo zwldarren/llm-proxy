@@ -160,6 +160,9 @@ class ModelRecord(Base):
     supports_realtime: Mapped[bool] = mapped_column(
         default=False, nullable=False, server_default=false()
     )
+    supports_systemone: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default=false()
+    )
 
     # Display-only model attributes aligned with models.dev model fields so
     # operators familiar with models.dev can map entries 1:1. None of these

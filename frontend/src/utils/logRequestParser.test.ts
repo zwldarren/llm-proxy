@@ -318,3 +318,74 @@ describe("parseLogRequest", () => {
     });
   });
 });
+
+describe("parseLogRequest — System One", () => {
+  const body = {
+    model: "jev-latest",
+    state: "Help! My payouts fail.",
+    questions: {
+      is_urgent: { type: "noul", instructions: "Urgent?" },
+      department: {
+        type: "choice",
+        instructions: "Which team?",
+        criteria: { billing: "Payments", technical: "Bugs" },
+      },
+      frustration: { type: "score", instructions: "How angry?", criteria: ["Calm", "Angry"] },
+    },
+  };
+
+  it("detects the systemone protocol and extracts state/questions", () => {
+    const r = parseLogRequest(body)!;
+    expect(r.protocol).toBe("systemone");
+    expect(r.systemOne?.state).toBe("Help! My payouts fail.");
+    expect(r.systemOne?.questions.map((q) => q.id)).toEqual([
+      "is_urgent",
+      "department",
+      "frustration",
+    ]);
+    expect(r.systemOne?.questions[1]?.criteria).toEqual({ billing: "Payments", technical: "Bugs" });
+  });
+
+  it("keeps state/questions out of the generic parameter grid", () => {
+    const r = parseLogRequest(body)!;
+    const keys = [...r.scalarParams.map((p) => p.key), ...r.objectParams.map((p) => p.key)];
+    expect(keys).not.toContain("state");
+    expect(keys).not.toContain("questions");
+    expect(r.scalarParams.map((p) => p.key)).toContain("model");
+  });
+
+  it("keeps state/questions in the parameter grid for a non-System-One body", () => {
+    // Only a body rendered as System One treats these as dedicated sections;
+    // any other shape must keep them visible as ordinary parameters.
+    const r = parseLogRequest({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+      state: "legacy",
+      questions: { a: 1 },
+    })!;
+    expect(r.protocol).toBe("openai-chat");
+    expect(r.systemOne).toBeUndefined();
+    expect(r.scalarParams.map((p) => p.key)).toContain("state");
+    expect(r.objectParams.map((p) => p.key)).toContain("questions");
+  });
+
+  it("keeps unmodeled question fields and structured instructions in extra", () => {
+    const r = parseLogRequest({
+      state: "s",
+      questions: {
+        q1: {
+          type: "choice",
+          instructions: { prompt: "Pick one", locale: "en" },
+          criteria: { a: "A" },
+          weight: 3,
+        },
+      },
+    })!;
+    const question = r.systemOne!.questions[0]!;
+    expect(question.instructions).toBeUndefined();
+    expect(question.extra).toEqual({
+      weight: 3,
+      instructions: { prompt: "Pick one", locale: "en" },
+    });
+  });
+});

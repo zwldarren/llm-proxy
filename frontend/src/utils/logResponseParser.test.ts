@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLogResponse } from "./logResponseParser";
+import { formatSystemOneAnswerValue, parseLogResponse } from "./logResponseParser";
 
 /**
  * Verifies tool-call parsing across all three inbound chat protocols, both
@@ -318,5 +318,106 @@ describe("parseLogResponse — body sentinels", () => {
     expect(parseLogResponse({ _bodies_disabled: true }).protocol).toBe("unknown");
     expect(parseLogResponse({ _truncated: true, size: 1 }).protocol).toBe("unknown");
     expect(parseLogResponse({ streaming: true, _assembled: false }).protocol).toBe("unknown");
+  });
+});
+
+describe("parseLogResponse — System One", () => {
+  const body = {
+    model: "jev-1.13.0",
+    answers: {
+      is_urgent: { type: "noul", noul: 0.95 },
+      department: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 0.88, technical: 0.12 },
+        confidence: 0.81,
+      },
+      frustration: {
+        type: "score",
+        score: 1.05,
+        legend: { "0": "Calm", "1": "Frustrated", "2": "Very angry" },
+        probabilities: { "0": 0, "1": 0.95, "2": 0.05 },
+        confidence: 0.92,
+      },
+    },
+  };
+
+  it("parses one answer per question id for the systemone request type", () => {
+    const r = parseLogResponse(body, "systemone");
+    expect(r.protocol).toBe("systemone");
+    expect(r.hasData).toBe(true);
+    expect(r.meta.model).toBe("jev-1.13.0");
+    expect(r.systemOneAnswers?.map((a) => a.id)).toEqual([
+      "is_urgent",
+      "department",
+      "frustration",
+    ]);
+  });
+
+  it("resolves the primary value per question type", () => {
+    const r = parseLogResponse(body, "systemone");
+    const byId = Object.fromEntries((r.systemOneAnswers ?? []).map((a) => [a.id, a]));
+    expect(byId.is_urgent?.value).toBe(0.95);
+    expect(byId.department?.value).toBe("billing");
+    expect(byId.frustration?.value).toBe(1.05);
+  });
+
+  it("labels score probabilities through the legend and keeps confidence", () => {
+    const r = parseLogResponse(body, "systemone");
+    const frustration = r.systemOneAnswers?.find((a) => a.id === "frustration");
+    expect(frustration?.probabilities).toEqual([
+      { label: "Calm", value: 0 },
+      { label: "Frustrated", value: 0.95 },
+      { label: "Very angry", value: 0.05 },
+    ]);
+    expect(frustration?.confidence).toBe(0.92);
+  });
+
+  it("falls back to shape detection when request_type is absent", () => {
+    expect(parseLogResponse(body).protocol).toBe("systemone");
+  });
+
+  it("keeps unmodeled answer fields in extra", () => {
+    const r = parseLogResponse(
+      { model: "m", answers: { q: { type: "noul", noul: 0.5, note: "why" } } },
+      "systemone"
+    );
+    expect(r.systemOneAnswers?.[0]?.extra).toEqual({ note: "why" });
+  });
+
+  it("normalizes the kind and keeps an unrecognized type raw", () => {
+    const r = parseLogResponse(
+      { answers: { a: { type: "noul", noul: 0.5 }, b: { type: "pairwise", answer: "x" } } },
+      "systemone"
+    );
+    const byId = Object.fromEntries((r.systemOneAnswers ?? []).map((a) => [a.id, a]));
+    expect(byId.a?.kind).toBe("noul");
+    expect(byId.b?.kind).toBeUndefined();
+    expect(byId.b?.type).toBe("pairwise");
+    expect(byId.b?.value).toBe("x");
+  });
+
+  it("formats the primary value per kind, resolving score legends", () => {
+    const r = parseLogResponse(body, "systemone");
+    const byId = Object.fromEntries((r.systemOneAnswers ?? []).map((a) => [a.id, a]));
+    expect(formatSystemOneAnswerValue(byId.is_urgent!)).toBe("95.0%");
+    expect(formatSystemOneAnswerValue(byId.department!)).toBe("billing");
+    expect(formatSystemOneAnswerValue(byId.frustration!)).toBe("1.05 · Frustrated");
+  });
+
+  it("formats an answer with no value as an em dash", () => {
+    const r = parseLogResponse({ answers: { a: { type: "noul" } } }, "systemone");
+    expect(formatSystemOneAnswerValue(r.systemOneAnswers![0]!)).toBe("—");
+  });
+
+  it("falls back to whichever value field is present when type is absent", () => {
+    const r = parseLogResponse(
+      { answers: { a: { noul: 0.4 }, b: { score: 2 }, c: { choice: "x" } } },
+      "systemone"
+    );
+    const byId = Object.fromEntries((r.systemOneAnswers ?? []).map((a) => [a.id, a]));
+    expect(byId.a?.value).toBe(0.4);
+    expect(byId.b?.value).toBe(2);
+    expect(byId.c?.value).toBe("x");
   });
 });

@@ -6,7 +6,7 @@ import pytest
 
 from llm_proxy.api.dependencies import extract_session_id, extract_trace_id, extract_user_id
 from llm_proxy.config.settings import SecuritySettings, Settings, set_settings
-from llm_proxy.core.exceptions import ModelNotFoundError
+from llm_proxy.core.exceptions import ModelNotFoundError, ValidationError
 from llm_proxy.core.identity import RequestIdentity, set_request_identity
 
 
@@ -31,6 +31,39 @@ def _make_request(
     request.client = MagicMock(host=peer_ip, port=0)
     if identity is not None:
         set_request_identity(request, identity)
+    return request
+
+
+def _make_context_request(
+    model_config,
+    *,
+    headers: dict[str, str] | None = None,
+    peer_ip: str = "127.0.0.1",
+):
+    """Create the FastAPI request `_build_request_context` needs.
+
+    On top of the headers/identity `_make_request` covers, it reads the server
+    params, the provider configs, the resolved model config and the app-state
+    services, so every test that calls it would otherwise repeat that setup.
+    """
+    request = _make_request(
+        identity=RequestIdentity(api_key_name="test-key", auth_method="api_key"),
+        headers=headers,
+        peer_ip=peer_ip,
+    )
+    request.app.state.redis_client = None
+    request.app.state.web_search_interceptor = None
+
+    config = MagicMock()
+    config.provider_configs = {}
+    config.server_params.max_fallback_attempts = 3
+    config.server_params.max_retries = 3
+
+    config_manager = MagicMock()
+    config_manager.get_config = AsyncMock(return_value=config)
+    config_manager.get_model_config = AsyncMock(return_value=model_config)
+    request.app.state.config_manager = config_manager
+
     return request
 
 
@@ -153,35 +186,16 @@ async def test_build_request_context_trusted_proxy_includes_session(reset_settin
     mock_request = MagicMock()
     mock_request.model = "test-model"
 
-    mock_fastapi_request = MagicMock()
-    mock_fastapi_request.headers = {
-        "x-session-id": "session-abc",
-        "x-user-id": "user-xyz",
-    }
-    mock_fastapi_request.client = MagicMock(host="127.0.0.1", port=0)
-    mock_fastapi_request.app.state.redis_client = None
-    mock_fastapi_request.app.state.web_search_interceptor = None
-    # Simulate API-key authentication
-    set_request_identity(
-        mock_fastapi_request,
-        RequestIdentity(api_key_name="test-key", auth_method="api_key"),
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.max_retries = None
+
+    fastapi_request = _make_context_request(
+        model_config,
+        headers={"x-session-id": "session-abc", "x-user-id": "user-xyz"},
     )
 
-    mock_config_manager = MagicMock()
-    mock_config = MagicMock()
-    mock_config.provider_configs = {}
-    mock_config.server_params.max_fallback_attempts = 3
-    mock_config.server_params.max_retries = 3
-
-    mock_model_config = MagicMock()
-    mock_model_config.providers = []
-    mock_model_config.max_retries = None
-
-    mock_config_manager.get_config = AsyncMock(return_value=mock_config)
-    mock_config_manager.get_model_config = AsyncMock(return_value=mock_model_config)
-    mock_fastapi_request.app.state.config_manager = mock_config_manager
-
-    result = await _build_request_context(mock_request, mock_fastapi_request)
+    result = await _build_request_context(mock_request, fastapi_request)
 
     assert result.session_id == "session-abc"
     assert result.user_id is None
@@ -197,35 +211,21 @@ async def test_build_request_context_untrusted_source_ignores_telemetry_headers(
     mock_request = MagicMock()
     mock_request.model = "test-model"
 
-    mock_fastapi_request = MagicMock()
-    mock_fastapi_request.headers = {
-        "x-session-id": "session-abc",
-        "x-trace-id": "trace-xyz",
-        "x-user-id": "user-xyz",
-    }
-    mock_fastapi_request.client = MagicMock(host="203.0.113.5", port=0)
-    mock_fastapi_request.app.state.redis_client = None
-    mock_fastapi_request.app.state.web_search_interceptor = None
-    set_request_identity(
-        mock_fastapi_request,
-        RequestIdentity(api_key_name="test-key", auth_method="api_key"),
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.max_retries = None
+
+    fastapi_request = _make_context_request(
+        model_config,
+        headers={
+            "x-session-id": "session-abc",
+            "x-trace-id": "trace-xyz",
+            "x-user-id": "user-xyz",
+        },
+        peer_ip="203.0.113.5",
     )
 
-    mock_config_manager = MagicMock()
-    mock_config = MagicMock()
-    mock_config.provider_configs = {}
-    mock_config.server_params.max_fallback_attempts = 3
-    mock_config.server_params.max_retries = 3
-
-    mock_model_config = MagicMock()
-    mock_model_config.providers = []
-    mock_model_config.max_retries = None
-
-    mock_config_manager.get_config = AsyncMock(return_value=mock_config)
-    mock_config_manager.get_model_config = AsyncMock(return_value=mock_model_config)
-    mock_fastapi_request.app.state.config_manager = mock_config_manager
-
-    result = await _build_request_context(mock_request, mock_fastapi_request)
+    result = await _build_request_context(mock_request, fastapi_request)
 
     assert result.session_id is None
     assert result.trace_id is None
@@ -240,26 +240,51 @@ async def test_build_request_context_unknown_model_raises_model_not_found():
     mock_request = MagicMock()
     mock_request.model = "unknown-model"
 
-    mock_fastapi_request = MagicMock()
-    mock_fastapi_request.headers = {}
-    mock_fastapi_request.client = MagicMock(host="127.0.0.1", port=0)
-    mock_fastapi_request.app.state.redis_client = None
-    mock_fastapi_request.app.state.web_search_interceptor = None
-
-    set_request_identity(
-        mock_fastapi_request,
-        RequestIdentity(api_key_name="test-key", auth_method="api_key"),
-    )
-
-    mock_config_manager = MagicMock()
-    mock_config = MagicMock()
-    mock_config.provider_configs = {}
-    mock_config.server_params.max_fallback_attempts = 3
-    mock_config.server_params.max_retries = 3
-
-    mock_config_manager.get_config = AsyncMock(return_value=mock_config)
-    mock_config_manager.get_model_config = AsyncMock(return_value=None)
-    mock_fastapi_request.app.state.config_manager = mock_config_manager
+    fastapi_request = _make_context_request(None)
 
     with pytest.raises(ModelNotFoundError, match="unknown-model"):
-        await _build_request_context(mock_request, mock_fastapi_request)
+        await _build_request_context(mock_request, fastapi_request)
+
+
+@pytest.mark.asyncio
+async def test_build_request_context_rejects_non_systemone_model():
+    """A model not marked System One cannot serve /v1/systemone (clear 400)."""
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.core.request_type import RequestType
+
+    mock_request = MagicMock()
+    mock_request.model = "chat-only"
+
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.supports_systemone = False
+
+    fastapi_request = _make_context_request(model_config)
+
+    with pytest.raises(ValidationError, match="not marked as a System One model"):
+        await _build_request_context(
+            mock_request, fastapi_request, request_type=RequestType.SYSTEMONE
+        )
+
+
+@pytest.mark.asyncio
+async def test_build_request_context_allows_systemone_model():
+    """A model marked System One passes the gate and builds a context."""
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.core.request_type import RequestType
+
+    mock_request = MagicMock()
+    mock_request.model = "jev-latest"
+
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.supports_systemone = True
+    model_config.max_retries = None
+
+    fastapi_request = _make_context_request(model_config)
+
+    result = await _build_request_context(
+        mock_request, fastapi_request, request_type=RequestType.SYSTEMONE
+    )
+
+    assert result.request_type is RequestType.SYSTEMONE

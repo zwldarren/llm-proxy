@@ -15,6 +15,7 @@
  *  - Streaming SSE      (raw string; OpenAI / Anthropic / Responses streams)
  *  - Images             (`created` + `data[]` with `b64_json`|`url`)
  *  - Embeddings         (`object:"list"`, `data[].embedding`)
+ *  - System One         (`answers` map keyed by question id; type-specific values)
  *  - Audio              (`{raw:true,size}` or `{text}`)
  */
 
@@ -26,6 +27,7 @@ import {
 } from "@/utils/sse";
 import { asString, bodySentinel, isRecord, parseToolArgs, safeStringify } from "@/utils/logFormat";
 import type { BodySentinel } from "@/utils/logFormat";
+import { formatProbability } from "@/utils/format";
 
 /**
  * Reduce a Responses `web_search_call` item to its query — either the single
@@ -50,6 +52,7 @@ type ResponseProtocol =
   | "stream-responses"
   | "image"
   | "embedding"
+  | "systemone"
   | "audio-raw"
   | "audio-text"
   | "sampled-out"
@@ -101,6 +104,46 @@ interface EmbeddingInfo {
 }
 
 /**
+ * Kinds the upstreams document: `noul` (a yes/no probability), `choice` (a
+ * picked option key) and `score` (a level value). Declared once so the value
+ * readers, the extras filter and the display formatter below share one set.
+ */
+export type SystemOneKind = "noul" | "choice" | "score";
+
+/** Every kind, in the order their value fields are tried as a fallback. */
+const SYSTEMONE_KINDS: readonly SystemOneKind[] = ["noul", "choice", "score"];
+
+/** Normalize a raw upstream type onto the closed kind set. */
+function normalizeSystemOneKind(type: string | undefined): SystemOneKind | undefined {
+  return SYSTEMONE_KINDS.find((kind) => kind === type);
+}
+
+/**
+ * One System One evaluation answer, keyed by the question id the client sent.
+ * The upstreams share the shape but vary by question type: ``noul`` carries a
+ * yes/no probability, ``choice`` a picked option, ``score`` a level value —
+ * all optionally with ``confidence`` and a ``probabilities`` distribution.
+ */
+export interface SystemOneAnswerInfo {
+  /** Question id (the key under `answers`). */
+  id: string;
+  /** Raw upstream type string, shown verbatim: noul | choice | score | ... */
+  type?: string;
+  /** `type` normalized onto the closed kind set; undefined when absent/unknown. */
+  kind?: SystemOneKind;
+  /** Primary answer value: noul probability, choice key, or score value. */
+  value?: string | number;
+  /** Model confidence in the answer, 0..1. */
+  confidence?: number;
+  /** Probability distribution over options/levels, labels resolved via legend. */
+  probabilities: { label: string; value: number }[];
+  /** Score-level legend mapping level index to its human label. */
+  legend?: Record<string, string>;
+  /** Any answer fields we did not model, kept for the raw viewer. */
+  extra: Record<string, unknown>;
+}
+
+/**
  * One output item in the order it appeared in the response — this is what
  * makes the parsed view as faithful as reading the raw stream: reasoning,
  * text and tool calls stay interleaved exactly as the model emitted them.
@@ -146,6 +189,8 @@ export interface ParsedResponse {
   images: ImageInfo[];
   /** Embedding vectors (embedding requests) */
   embeddings?: EmbeddingInfo[];
+  /** System One answers, one per question id (systemone requests) */
+  systemOneAnswers?: SystemOneAnswerInfo[];
   /** Transcription/translation text (audio-text requests) */
   audioText?: string;
   /** Raw-byte audio marker (speech / text-format audio) */
@@ -580,6 +625,138 @@ function parseEmbedding(body: Record<string, unknown>): ParsedResponse {
   };
 }
 
+/** Coerce a record's values to strings, dropping non-primitive entries. */
+function toStringRecord(value: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const text = asString(entry);
+    if (text !== undefined) out[key] = text;
+  }
+  return out;
+}
+
+/** Keys consumed by the dedicated System One fields, not echoed as extras. */
+const SYSTEMONE_ENVELOPE_KEYS = ["type", "answer", "confidence", "probabilities", "legend"];
+const SYSTEMONE_KNOWN_KEYS = new Set<string>([...SYSTEMONE_KINDS, ...SYSTEMONE_ENVELOPE_KEYS]);
+
+/**
+ * Read an answer's primary value. The field carrying it is kind-specific, so
+ * each kind gets exactly one reader: noul is a probability, choice an option
+ * key (falling back to `answer`), score a level value.
+ */
+const SYSTEMONE_VALUE_READERS: Record<
+  SystemOneKind,
+  (raw: Record<string, unknown>) => string | number | undefined
+> = {
+  noul: (raw) => (typeof raw.noul === "number" ? raw.noul : undefined),
+  choice: (raw) => asString(raw.choice) ?? asString(raw.answer),
+  score: (raw) => (typeof raw.score === "number" ? raw.score : undefined),
+};
+
+/**
+ * Primary value of an answer: the reader for its kind, or — when the upstream
+ * reported no type or one we don't model — whichever documented value field is
+ * present, tried noul → score → answer → choice.
+ */
+function readSystemOneValue(
+  raw: Record<string, unknown>,
+  kind: SystemOneKind | undefined
+): string | number | undefined {
+  if (kind) return SYSTEMONE_VALUE_READERS[kind](raw);
+  return (
+    SYSTEMONE_VALUE_READERS.noul(raw) ??
+    SYSTEMONE_VALUE_READERS.score(raw) ??
+    asString(raw.answer) ??
+    asString(raw.choice)
+  );
+}
+
+function parseSystemOneAnswer(id: string, raw: unknown): SystemOneAnswerInfo {
+  if (!isRecord(raw)) {
+    return {
+      id,
+      value: typeof raw === "number" || typeof raw === "string" ? raw : undefined,
+      probabilities: [],
+      extra: {},
+    };
+  }
+
+  const type = asString(raw.type);
+  const kind = normalizeSystemOneKind(type);
+  const value = readSystemOneValue(raw, kind);
+
+  const legend = isRecord(raw.legend) ? toStringRecord(raw.legend) : undefined;
+  const probabilities: { label: string; value: number }[] = [];
+  if (isRecord(raw.probabilities)) {
+    for (const [label, probability] of Object.entries(raw.probabilities)) {
+      if (typeof probability !== "number") continue;
+      probabilities.push({ label: legend?.[label] ?? label, value: probability });
+    }
+  }
+
+  const extra: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    if (!SYSTEMONE_KNOWN_KEYS.has(key)) extra[key] = entry;
+  }
+
+  return {
+    id,
+    type,
+    kind,
+    value,
+    confidence: typeof raw.confidence === "number" ? raw.confidence : undefined,
+    probabilities,
+    legend,
+    extra,
+  };
+}
+
+/**
+ * Display string for an answer's primary value. Lives beside
+ * `SystemOneAnswerInfo` rather than in the view because it reads nothing but
+ * that type's own fields: noul renders as a percentage, score resolves its
+ * level label through the legend, choice is its bare value.
+ */
+export function formatSystemOneAnswerValue(answer: SystemOneAnswerInfo): string {
+  if (answer.value === undefined) return "—";
+  switch (answer.kind) {
+    case "noul":
+      return typeof answer.value === "number"
+        ? formatProbability(answer.value)
+        : String(answer.value);
+    case "score": {
+      const label =
+        typeof answer.value === "number"
+          ? answer.legend?.[String(Math.round(answer.value))]
+          : undefined;
+      return label ? `${answer.value} · ${label}` : String(answer.value);
+    }
+    case "choice":
+    case undefined:
+      return String(answer.value);
+  }
+}
+
+function parseSystemOne(body: Record<string, unknown>): ParsedResponse {
+  const answers = body.answers;
+  if (!isRecord(answers)) return empty({ protocol: "systemone" });
+
+  const parsed = Object.entries(answers).map(([id, raw]) => parseSystemOneAnswer(id, raw));
+
+  return {
+    protocol: "systemone",
+    content: "",
+    reasoning: "",
+    toolCalls: [],
+    toolResults: [],
+    items: [],
+    meta: { model: asString(body.model), id: asString(body.id) },
+    images: [],
+    systemOneAnswers: parsed,
+    hasData: parsed.length > 0,
+  };
+}
+
 function parseAudioText(body: Record<string, unknown>): ParsedResponse {
   const text = asString(body.text) ?? "";
   return {
@@ -885,7 +1062,7 @@ function parseStream(body: string): ParsedResponse {
  * @param body        The raw `response_body` value (object, string, or other).
  * @param requestType Optional `log_metadata.request_type` ("chat" | "image_generation"
  *                    | "image_edit" | "embedding" | "speech" | "transcription"
- *                    | "translation" | ...) — used to disambiguate shapes that
+ *                    | "translation" | "systemone" | ...) — used to disambiguate shapes that
  *                    share fields (e.g. audio vs chat both can have a `text`).
  */
 export function parseLogResponse(body: unknown, requestType?: string): ParsedResponse {
@@ -947,6 +1124,11 @@ export function parseLogResponse(body: unknown, requestType?: string): ParsedRes
     if ("text" in body) return parseAudioText(body);
   }
 
+  // System One evaluation: one answer per question id.
+  if (requestType === "systemone") {
+    return parseSystemOne(body);
+  }
+
   // Protocol detection by shape.
   const object = asString(body.object);
 
@@ -979,6 +1161,11 @@ export function parseLogResponse(body: unknown, requestType?: string): ParsedRes
   // Anthropic.
   if (body.type === "message" || Array.isArray(body.content)) {
     return parseAnthropic(body);
+  }
+
+  // System One fallback by shape when request_type is absent.
+  if (isRecord(body.answers)) {
+    return parseSystemOne(body);
   }
 
   // Audio text fallback (no request_type but has only a text field).

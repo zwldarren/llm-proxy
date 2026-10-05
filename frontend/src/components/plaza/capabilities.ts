@@ -10,6 +10,7 @@ import {
   Mic,
   Paperclip,
   Radio,
+  Scale,
   Thermometer,
   Wrench,
   type LucideIcon,
@@ -77,6 +78,13 @@ export const CAPABILITY_META: Record<ModelCapability, CapabilityMeta> = {
     icon: Radio,
     badgeClass: "border-action-blue/30 bg-action-blue/5 text-action-blue",
     iconClass: "text-action-blue",
+    bound: true,
+  },
+  systemone: {
+    labelKey: "plaza.capability.systemone",
+    icon: Scale,
+    badgeClass: "border-action-violet/30 bg-action-violet/5 text-action-violet",
+    iconClass: "text-action-violet",
     bound: true,
   },
   reasoning: {

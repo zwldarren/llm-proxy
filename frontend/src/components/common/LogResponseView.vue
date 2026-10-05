@@ -10,7 +10,7 @@
  * Formatted/Raw view-mode toggle (LogViewModeToggle), never mixed into
  * the formatted flow.
  */
-import { Brackets, Code, Database, Gauge, Loader2, Terminal } from "@lucide/vue";
+import { Brackets, Code, Database, Gauge, Loader2, Scale, Terminal } from "@lucide/vue";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import JsonViewer from "@/components/common/JsonViewer.vue";
@@ -18,13 +18,14 @@ import LogCollapsibleRow from "@/components/common/LogCollapsibleRow.vue";
 import LogExpandControls from "@/components/common/LogExpandControls.vue";
 import LogImagePreview from "@/components/common/LogImagePreview.vue";
 import LogRawSection from "@/components/common/LogRawSection.vue";
+import LogSystemOneCard from "@/components/common/LogSystemOneCard.vue";
 import LogTextBlock from "@/components/common/LogTextBlock.vue";
 import LogToolCallCard from "@/components/common/LogToolCallCard.vue";
 import LogValueChip from "@/components/common/LogValueChip.vue";
 import LogViewModeToggle from "@/components/common/LogViewModeToggle.vue";
 import { Badge } from "@/components/ui/badge";
 import type { LogRead } from "@/types/schemas";
-import { formatTokens } from "@/utils/format";
+import { formatProbability, formatTokens } from "@/utils/format";
 import {
   MAX_INLINE_BYTES,
   bodySentinel,
@@ -45,6 +46,7 @@ import {
   totalTokens,
 } from "@/utils/logEntryAccessors";
 import {
+  formatSystemOneAnswerValue,
   isResponsesStreamResponse,
   parseLogResponse,
   type ParsedResponse,
@@ -261,6 +263,11 @@ function setAllTextItems(expanded: boolean) {
 
 // --- Helpers --------------------------------------------------------------------
 
+/** Clamp a probability into a CSS width for the distribution bars. */
+function probabilityWidth(value: number): string {
+  return `${Math.max(0, Math.min(1, value)) * 100}%`;
+}
+
 const hasResponseBody = computed(() => hasPayload(props.log?.response_body));
 const hasResponseHeaders = computed(() => hasPayload(props.log?.response_headers));
 
@@ -377,6 +384,77 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
               }}{{ emb.fullLength > emb.vectorPreview.length ? ", …" : "" }}]
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- System One evaluation: one typed answer per question id -->
+      <div
+        v-else-if="parsedResponse.protocol === 'systemone' && parsedResponse.systemOneAnswers"
+        class="space-y-3"
+      >
+        <h4 class="text-xs uppercase font-bold text-muted-foreground flex items-center gap-2">
+          <Scale class="size-3.5" />
+          {{ t("logs.systemOneAnswers") }}
+          <span class="text-muted-foreground font-mono normal-case tracking-normal">
+            ({{ parsedResponse.systemOneAnswers.length }})
+          </span>
+        </h4>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <LogSystemOneCard
+            v-for="answer in parsedResponse.systemOneAnswers"
+            :key="answer.id"
+            :id="answer.id"
+            :type="answer.type"
+          >
+            <template #header-end>
+              <span
+                v-if="answer.confidence !== undefined"
+                class="ml-auto text-[11px] font-mono tabular-nums text-muted-foreground shrink-0"
+                :title="t('logs.systemOneConfidence')"
+              >
+                {{ formatProbability(answer.confidence) }}
+              </span>
+            </template>
+            <div class="font-mono text-sm font-semibold text-foreground/90 break-words">
+              {{ formatSystemOneAnswerValue(answer) }}
+            </div>
+            <div
+              v-if="answer.probabilities.length > 0"
+              class="space-y-1 border-t border-border/30 pt-2"
+            >
+              <div
+                v-for="(prob, i) in answer.probabilities"
+                :key="i"
+                class="flex items-center gap-2"
+              >
+                <span
+                  class="text-[11px] font-mono text-muted-foreground w-24 truncate shrink-0"
+                  :title="prob.label"
+                >
+                  {{ prob.label }}
+                </span>
+                <div class="h-1.5 flex-1 rounded-full bg-muted/40 overflow-hidden">
+                  <div
+                    class="h-full rounded-full bg-action-violet/70"
+                    :style="{ width: probabilityWidth(prob.value) }"
+                  />
+                </div>
+                <span
+                  class="text-[11px] font-mono tabular-nums text-muted-foreground w-12 text-right shrink-0"
+                >
+                  {{ formatProbability(prob.value) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- fields we do not model, so nothing in the body is hidden -->
+            <JsonViewer
+              v-if="Object.keys(answer.extra).length > 0"
+              :data="answer.extra"
+              :deep="1"
+              max-height="max-h-40"
+            />
+          </LogSystemOneCard>
         </div>
       </div>
 

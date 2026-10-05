@@ -28,6 +28,7 @@ from llm_proxy.core.conversation_key import conversation_key
 from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
     ModelNotFoundError,
+    ValidationError,
 )
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.processing import RequestContext
@@ -123,6 +124,20 @@ async def _build_request_context(
 
     if model_config is None:
         raise ModelNotFoundError(model_name)
+
+    # System One is an evaluation endpoint, not chat: only models explicitly
+    # marked as System One models may serve it. Without this check a chat model
+    # would resolve to an adapter that does not implement ``systemone`` and fail
+    # with an opaque 500 instead of a clear 400.
+    if request_type == RequestType.SYSTEMONE and not model_config.supports_systemone:
+        raise ValidationError(
+            message=(
+                f"Model '{model_name}' is not marked as a System One model. "
+                "Enable 'System One' on the model to serve /v1/systemone."
+            ),
+            code="invalid_request_error",
+            status_code=400,
+        )
 
     # ``get_model_config`` may have refreshed the snapshot when a peer worker
     # added the model (multi-worker deployments). Re-read it so the provider

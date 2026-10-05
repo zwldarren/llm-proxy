@@ -202,6 +202,11 @@ export const formatPercentage = (value: number, locale?: string): string => {
 };
 
 /**
+ * Format a 0..1 probability (or model confidence) as a percentage.
+ */
+export const formatProbability = (value: number): string => formatPercentage(value * 100);
+
+/**
  * Format cost in USD with configurable precision.
  */
 export const formatCostWithPrecision = (

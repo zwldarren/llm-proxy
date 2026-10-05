@@ -12,10 +12,11 @@
  *  - raw headers/body live behind the Formatted/Raw view-mode toggle
  *    (LogViewModeToggle), never mixed into the formatted flow.
  */
-import { Braces, ChevronDown, Code, Database, Settings, Shield } from "@lucide/vue";
+import { Braces, ChevronDown, Code, Database, Scale, Settings, Shield } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import JsonViewer from "@/components/common/JsonViewer.vue";
+import LogSystemOneCard from "@/components/common/LogSystemOneCard.vue";
 import LogCollapsibleRow from "@/components/common/LogCollapsibleRow.vue";
 import LogExpandControls from "@/components/common/LogExpandControls.vue";
 import LogMessageItem from "@/components/common/LogMessageItem.vue";
@@ -32,6 +33,7 @@ import {
   bodySentinelMessage,
   hasPayload,
   isOversizedPayload,
+  isRecord,
 } from "@/utils/logFormat";
 import { parseLogRequest } from "@/utils/logRequestParser";
 
@@ -115,6 +117,9 @@ const objectParamsAsRecord = computed(() => {
   for (const p of parsed.value?.objectParams ?? []) out[p.key] = p.value;
   return out;
 });
+
+// System One evaluation payload (state + typed questions); undefined otherwise.
+const systemOne = computed(() => parsed.value?.systemOne);
 
 const showAdvancedParams = ref(false);
 
@@ -242,6 +247,84 @@ const oversizeRequestBodyText = computed((): string | null =>
         :tool-choice="parsed.toolChoice"
       />
 
+      <!-- System One evaluation: evaluated state + typed questions -->
+      <div v-if="systemOne" class="space-y-4">
+        <div class="space-y-2">
+          <h4
+            class="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2"
+          >
+            <Scale class="size-3.5" />
+            {{ t("logs.systemOneState") }}
+          </h4>
+          <div v-if="typeof systemOne.state === 'string'" class="code-container p-4 shadow-xs">
+            <LogTextBlock
+              :text="systemOne.state"
+              class="text-xs font-mono text-foreground/90 max-h-72 overflow-y-auto scrollbar-thin"
+            />
+          </div>
+          <JsonViewer v-else :data="systemOne.state" :deep="2" max-height="max-h-72" />
+        </div>
+
+        <div v-if="systemOne.questions.length > 0" class="space-y-2">
+          <h4
+            class="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2"
+          >
+            {{ t("logs.systemOneQuestions") }}
+            <span class="text-[11px] font-mono text-muted-foreground normal-case tracking-normal">
+              ({{ systemOne.questions.length }})
+            </span>
+          </h4>
+          <div class="grid grid-cols-1 gap-3">
+            <LogSystemOneCard
+              v-for="q in systemOne.questions"
+              :key="q.id"
+              :id="q.id"
+              :type="q.type"
+            >
+              <p v-if="q.instructions" class="text-xs text-foreground/90 leading-relaxed">
+                {{ q.instructions }}
+              </p>
+
+              <!-- score rubric: ordered levels -->
+              <div v-if="Array.isArray(q.criteria)" class="flex flex-wrap gap-1">
+                <span
+                  v-for="(level, i) in q.criteria"
+                  :key="i"
+                  class="text-[11px] font-mono bg-muted/40 rounded-full px-2 py-0.5 text-muted-foreground"
+                >
+                  {{ i }} · {{ level }}
+                </span>
+              </div>
+
+              <!-- choice / noul rubric: option map -->
+              <div
+                v-else-if="isRecord(q.criteria)"
+                class="space-y-1 border-t border-border/30 pt-2"
+              >
+                <div
+                  v-for="(description, key) in q.criteria as Record<string, unknown>"
+                  :key="key"
+                  class="flex items-start gap-2"
+                >
+                  <span class="text-[11px] font-mono text-action-violet shrink-0">{{ key }}</span>
+                  <span class="text-[11px] text-muted-foreground leading-relaxed">
+                    {{ description }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- fields we do not model, so nothing in the body is hidden -->
+              <JsonViewer
+                v-if="Object.keys(q.extra).length > 0"
+                :data="q.extra"
+                :deep="1"
+                max-height="max-h-40"
+              />
+            </LogSystemOneCard>
+          </div>
+        </div>
+      </div>
+
       <!-- System prompt -->
       <LogCollapsibleRow
         v-if="parsed && parsed.systemPrompt"
@@ -295,6 +378,7 @@ const oversizeRequestBodyText = computed((): string | null =>
         v-if="
           parsed &&
           !parsed.isChatLike &&
+          !parsed.systemOne &&
           parsed.scalarParams.length === 0 &&
           parsed.objectParams.length === 0
         "

@@ -146,6 +146,16 @@ describe("useModelForm seeding", () => {
     expect(form.parameterOverrides.value).toEqual({ temperature: 0.7 });
   });
 
+  it("openForEdit keeps a stored capability flag in the payload", () => {
+    // Regression: a capability missing from the load path is sent as false by
+    // the PUT, silently clearing the flag on every edit.
+    const form = useModelForm();
+    form.openForEdit(savedModel({ supports_systemone: true, supports_realtime: true }));
+
+    expect(form.getCapability("systemone")).toBe(true);
+    expect(form.buildPayload().supports_systemone).toBe(true);
+  });
+
   it("openForEdit seeds model and provider pricing tiers", () => {
     const form = useModelForm();
     form.openForEdit(

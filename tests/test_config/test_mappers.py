@@ -87,6 +87,7 @@ def _model_record(mappings, **overrides) -> SimpleNamespace:
         supports_stt=False,
         supports_embedding=False,
         supports_realtime=False,
+        supports_systemone=False,
         context_length=None,
         model_metadata={},
         provider_mappings=mappings,
@@ -238,6 +239,7 @@ def test_map_model_record_with_providers():
     assert config.quality_tier == "premium"
     assert config.routing_assignments == ["auto"]
     assert config.supports_images is True
+    assert config.supports_systemone is False
     assert config.input_cost_per_1m == 5.0
     assert config.context_length is None
     assert len(config.pricing_tiers) == 1

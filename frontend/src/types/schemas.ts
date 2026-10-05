@@ -139,6 +139,8 @@ interface ModelBase {
   supports_embedding?: boolean;
   /** Whether this model is served through the Realtime WebSocket relay */
   supports_realtime?: boolean;
+  /** Whether this model serves System One evaluations (e.g. /v1/systemone) */
+  supports_systemone?: boolean;
   /** models.dev: attachment — supports file attachments (display-only) */
   attachment?: boolean;
   /** models.dev: reasoning — produces reasoning/thinking output (display-only) */
@@ -200,6 +202,7 @@ export interface ModelUpdate {
   supports_stt?: boolean | null;
   supports_embedding?: boolean | null;
   supports_realtime?: boolean | null;
+  supports_systemone?: boolean | null;
   attachment?: boolean | null;
   reasoning?: boolean | null;
   tool_call?: boolean | null;
@@ -239,6 +242,7 @@ export type ModelCapability =
   | "stt"
   | "embedding"
   | "realtime"
+  | "systemone"
   | "reasoning"
   | "tool_call"
   | "structured_output"

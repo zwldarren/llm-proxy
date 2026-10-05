@@ -133,6 +133,7 @@ async def test_catalog_reports_configured_capabilities(tmp_path, monkeypatch):
         session.add(ModelRecord(name="whisper", supports_stt=True))
         session.add(ModelRecord(name="text-embedding-3-small", supports_embedding=True))
         session.add(ModelRecord(name="realtime-1", supports_realtime=True))
+        session.add(ModelRecord(name="jev-latest", supports_systemone=True))
         # Flags compose; pricing alone does not mark a capability.
         session.add(
             ModelRecord(
@@ -156,6 +157,7 @@ async def test_catalog_reports_configured_capabilities(tmp_path, monkeypatch):
     assert caps["whisper"] == ["stt"]
     assert caps["text-embedding-3-small"] == ["embedding"]
     assert caps["realtime-1"] == ["realtime"]
+    assert caps["jev-latest"] == ["systemone"]
     assert caps["gpt-4o-image"] == ["vision", "image_generation"]
     # Pricing dimensions alone must not surface a capability badge.
     assert caps["priced-only"] == []

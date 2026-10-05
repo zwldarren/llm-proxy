@@ -23,7 +23,7 @@ Every route the proxy serves. `X` in the auth column means "API key
 | POST | `/v1/messages` | X | Anthropic | Anthropic Messages |
 | POST | `/v1/messages/count_tokens` | X | Anthropic | Native upstream count when available, otherwise a local o200k_base estimate |
 | POST | `/v1/embeddings` | X | OpenAI | Embeddings |
-| POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models) |
+| POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models). The named model must carry the `supports_systemone` flag, otherwise `400 invalid_request_error` |
 | POST | `/v1/images/generations` | X | OpenAI | JSON body |
 | POST | `/v1/images/edits` | X | OpenAI | JSON or multipart (`image`, `image[]`, `mask`) |
 | POST | `/v1/audio/speech` | X | OpenAI | Binary audio response |
@@ -54,6 +54,12 @@ Provider support varies by capability — the table summarizes who can serve wha
 The dedicated `anthropic` provider type is chat-only. The `typesafe` provider
 type is System One-only — assign it to models that serve `/v1/systemone`, and
 note that chat requests against such a model are rejected with a `400`.
+
+Capability flags are additive: `supports_systemone` gates `/v1/systemone` and
+does not restrict the model's chat service, so a model can serve both when its
+providers support both. A `/v1/systemone` request naming a model without the
+flag is rejected with a `400 invalid_request_error` before any provider is
+called.
 
 ## WebSocket endpoints
 

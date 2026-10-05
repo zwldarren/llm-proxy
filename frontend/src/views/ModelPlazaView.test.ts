@@ -43,6 +43,7 @@ vi.mock("@lucide/vue", () => {
     Plus: Stub,
     Radio: Stub,
     RefreshCw: Stub,
+    Scale: Stub,
     Search: Stub,
     Table2: Stub,
     Thermometer: Stub,

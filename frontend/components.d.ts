@@ -107,6 +107,7 @@ declare module 'vue' {
     LogRequestView: typeof import('./src/components/common/LogRequestView.vue')['default']
     LogResponseView: typeof import('./src/components/common/LogResponseView.vue')['default']
     LogsFilters: typeof import('./src/components/common/LogsFilters.vue')['default']
+    LogSystemOneCard: typeof import('./src/components/common/LogSystemOneCard.vue')['default']
     LogTextBlock: typeof import('./src/components/common/LogTextBlock.vue')['default']
     LogToolCallCard: typeof import('./src/components/common/LogToolCallCard.vue')['default']
     LogValueChip: typeof import('./src/components/common/LogValueChip.vue')['default']

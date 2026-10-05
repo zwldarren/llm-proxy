@@ -11,7 +11,7 @@ or more providers with capability flags, context size, and prices.
 | --- | --- |
 | **Name** | The client-facing alias (e.g. `gpt-5.6-luna`). Unique. Exact match only — no wildcards |
 | **Provider mappings** | One entry per provider that can serve it: `provider_name`, upstream `provider_model_name`, and `priority` |
-| **Capability flags** | `supports_images` (vision), `supports_image_generation`, `supports_tts`, `supports_stt`, `supports_embedding`, `supports_realtime` |
+| **Capability flags** | `supports_images` (vision), `supports_image_generation`, `supports_tts`, `supports_stt`, `supports_embedding`, `supports_realtime`, `supports_systemone` |
 | **Catalog metadata** | `context_length`, `max_output_tokens`, family, release date, knowledge cut-off, and models.dev attributes (`attachment`, `reasoning`, `tool_call`, `structured_output`, `temperature`, `open_weights`, `status`) |
 | **Pricing** | Model-level rates, optionally overridden per mapping (see below) |
 | **Parameter overrides** | Extra parameters injected by provider config → model → mapping (most specific wins) |
@@ -19,8 +19,9 @@ or more providers with capability flags, context size, and prices.
 | **Smart routing fields** | `auto_eligible`, `quality_tier` (`economy`/`balanced`/`premium`), `routing_assignments`, used only when [smart routing](../api/routing.md) is on |
 
 Not every flag is enforced everywhere: `supports_images` and `context_length` filter
-smart-routing candidates, and `supports_realtime` is enforced on the Realtime
-WebSocket; the remaining flags are catalog/display metadata.
+smart-routing candidates, `supports_realtime` is enforced on the Realtime
+WebSocket, and `supports_systemone` gates `/v1/systemone`; the remaining flags
+are catalog/display metadata.
 
 ## Provider priority and fallback
 

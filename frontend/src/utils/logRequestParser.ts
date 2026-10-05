@@ -11,6 +11,7 @@
  *  - OpenAI Chat        (`messages[]`, `tools[].function`, top-level scalars)
  *  - Anthropic          (`messages[]`, top-level `system`, `tools[].input_schema`)
  *  - OpenAI Responses   (`input` string|items, `instructions`, `tools[]`)
+ *  - System One         (`state` + typed `questions` map)
  *
  * Design goals:
  *  - Nothing in the body is hidden: unrecognized top-level keys land in
@@ -25,7 +26,7 @@ import { asString, isRecord, parseToolArgs, safeStringify } from "@/utils/logFor
 
 // --- Types -------------------------------------------------------------
 
-export type RequestProtocol = "openai-chat" | "anthropic" | "responses" | "unknown";
+export type RequestProtocol = "openai-chat" | "anthropic" | "responses" | "systemone" | "unknown";
 
 export type MessageBlock =
   | { kind: "text"; text: string }
@@ -96,6 +97,33 @@ export interface ParsedLogRequest {
   messages: ParsedLogMessage[];
   /** False when the body matched no known chat shape (non-standard payload) */
   isChatLike: boolean;
+  /** System One evaluation payload (state + typed questions), when present. */
+  systemOne?: SystemOneRequestInfo;
+}
+
+/** One typed System One question, rendered as a card in the request view. */
+export interface SystemOneQuestionInfo {
+  /** Question id, echoed as the key of the matching answer. */
+  id: string;
+  /**
+   * Raw upstream type: noul | choice | score | .... Left as the raw string
+   * because the badge shows it verbatim and the card is driven by the criteria
+   * shape, not by the kind, so there is nothing to normalize it for.
+   */
+  type?: string;
+  /** Free-form instructions the model answers against, when sent as a string. */
+  instructions?: string;
+  /** noul rubric object, choice option map, or score level array. */
+  criteria?: unknown;
+  /** Question fields we did not model, incl. non-string `instructions`. */
+  extra: Record<string, unknown>;
+}
+
+/** System One request payload: the evaluated state plus its typed questions. */
+export interface SystemOneRequestInfo {
+  /** Content under evaluation: a string, or a JSON object/array of context. */
+  state: unknown;
+  questions: SystemOneQuestionInfo[];
 }
 
 // --- Helpers -----------------------------------------------------------
@@ -144,6 +172,16 @@ function compactSummary(obj: Record<string, unknown>, skipKeys: string[]): strin
 
 /** Top-level keys rendered as dedicated sections, never as generic params. */
 const SECTION_KEYS = new Set(["messages", "input", "tools", "functions", "system", "instructions"]);
+
+/**
+ * Section keys only a System One payload carries. Scoped to that protocol so a
+ * `state` or `questions` field on a body of any other shape still lands in the
+ * generic parameter grid instead of silently disappearing.
+ */
+const SYSTEMONE_SECTION_KEYS = new Set(["state", "questions"]);
+
+/** Question keys the card renders explicitly; everything else is kept in `extra`. */
+const SYSTEMONE_QUESTION_KEYS = new Set(["type", "instructions", "criteria"]);
 
 // --- Block-level normalization ------------------------------------------
 
@@ -693,25 +731,9 @@ export function parseLogRequest(body: unknown): ParsedLogRequest | null {
   }
   if (!isRecord(body)) return null;
 
-  // --- Params: every top-level scalar except section keys ----------------
-  const scalarParams: RequestScalarParam[] = [];
-  const objectParams: RequestObjectParam[] = [];
-  for (const [key, value] of Object.entries(body)) {
-    if (SECTION_KEYS.has(key) || value === undefined) continue;
-    if (isScalar(value)) {
-      scalarParams.push({ key, value: formatScalar(value) });
-    } else if (Array.isArray(value) && value.every(isScalar)) {
-      // stop sequences, include[], modalities... render as a joined scalar.
-      scalarParams.push({ key, value: value.map(formatScalar).join(", ") });
-    } else {
-      objectParams.push({ key, value });
-    }
-  }
-
-  const tools = normalizeToolDefs(body);
-  const toolChoice = formatToolChoice(body.tool_choice);
-
-  // --- Protocol-specific conversation extraction --------------------------
+  // --- Protocol detection --------------------------------------------------
+  // Runs before the parameter scan: it also decides whether the System One-only
+  // keys are dedicated sections rather than generic params.
   let protocol: RequestProtocol = "unknown";
   let systemPrompt = "";
   let messages: ParsedLogMessage[] = [];
@@ -751,12 +773,37 @@ export function parseLogRequest(body: unknown): ParsedLogRequest | null {
         .map(parseResponsesInputItem)
         .filter((m): m is ParsedLogMessage => m !== null);
     }
+  } else if (body.state !== undefined && isRecord(body.questions)) {
+    // System One evaluation: a state plus a map of typed questions.
+    protocol = "systemone";
   }
 
   // Anthropic system arrays may hold non-text entries; fall back to raw text.
   if (!systemPrompt && protocol === "anthropic" && body.system !== undefined) {
     systemPrompt = flattenMessageText(body.system);
   }
+
+  // --- Params: every top-level scalar except section keys ----------------
+  const scalarParams: RequestScalarParam[] = [];
+  const objectParams: RequestObjectParam[] = [];
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined) continue;
+    if (SECTION_KEYS.has(key)) continue;
+    if (protocol === "systemone" && SYSTEMONE_SECTION_KEYS.has(key)) continue;
+    if (isScalar(value)) {
+      scalarParams.push({ key, value: formatScalar(value) });
+    } else if (Array.isArray(value) && value.every(isScalar)) {
+      // stop sequences, include[], modalities... render as a joined scalar.
+      scalarParams.push({ key, value: value.map(formatScalar).join(", ") });
+    } else {
+      objectParams.push({ key, value });
+    }
+  }
+
+  const tools = normalizeToolDefs(body);
+  const toolChoice = formatToolChoice(body.tool_choice);
+
+  const systemOne = protocol === "systemone" ? parseSystemOneRequest(body) : undefined;
 
   return {
     protocol,
@@ -767,5 +814,36 @@ export function parseLogRequest(body: unknown): ParsedLogRequest | null {
     systemPrompt,
     messages,
     isChatLike,
+    systemOne,
   };
+}
+
+/** Extract the System One state and its typed questions for display. */
+function parseSystemOneRequest(body: Record<string, unknown>): SystemOneRequestInfo {
+  const questions: SystemOneQuestionInfo[] = [];
+  const rawQuestions = body.questions;
+  if (isRecord(rawQuestions)) {
+    for (const [id, question] of Object.entries(rawQuestions)) {
+      if (!isRecord(question)) continue;
+      const instructions = asString(question.instructions);
+      const extra: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(question)) {
+        if (SYSTEMONE_QUESTION_KEYS.has(key)) continue;
+        extra[key] = value;
+      }
+      // Structured instructions (dict or list) have no plain-text paragraph to
+      // render into, so they stay lossless in `extra` rather than stringified.
+      if (instructions === undefined && question.instructions !== undefined) {
+        extra.instructions = question.instructions;
+      }
+      questions.push({
+        id,
+        type: asString(question.type),
+        instructions,
+        criteria: question.criteria,
+        extra,
+      });
+    }
+  }
+  return { state: body.state, questions };
 }
