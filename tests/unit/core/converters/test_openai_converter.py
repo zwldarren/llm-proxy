@@ -241,12 +241,12 @@ class TestFormatConversation:
                                 WebSearchResultContentBlock(
                                     url="https://example.com",
                                     title="Example Site",
-                                    encoded_content="base64...",
+                                    encrypted_content="base64...",
                                 ),
                                 WebSearchResultContentBlock(
                                     url="https://docs.example.com",
                                     title="Documentation",
-                                    encoded_content="base64...",
+                                    encrypted_content="base64...",
                                 ),
                             ],
                         ),

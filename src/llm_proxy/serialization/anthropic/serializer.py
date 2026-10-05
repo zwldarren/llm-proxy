@@ -480,12 +480,15 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
 
             content = self.format_content_blocks(msg.content, context=context)
             role = "user" if msg.role == "tool" else msg.role
-            messages.append(
-                {
-                    "role": role,
-                    "content": content if isinstance(content, list) else [content],
-                }
-            )
+            message: dict[str, Any] = {
+                "role": role,
+                "content": content if isinstance(content, list) else [content],
+            }
+            # Re-emit Anthropic message-level fields (mid-conversation system
+            # ``clear_at`` / ``output_config``) captured at parse time.
+            if msg.anthropic_extra:
+                message.update(msg.anthropic_extra)
+            messages.append(message)
 
         if developer_texts:
             developer_block = {"type": "text", "text": "\n\n".join(developer_texts)}
@@ -845,6 +848,12 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                     tool_def["max_content_tokens"] = tool.max_content_tokens
                 if tool.max_uses is not None:
                     tool_def["max_uses"] = tool.max_uses
+                if tool.use_cache is not None:
+                    # web_fetch_20260309+: bypass the fetch cache when false.
+                    tool_def["use_cache"] = tool.use_cache
+                if tool.url_sources is not None:
+                    # Limit fetchable URLs by source; forwarded verbatim.
+                    tool_def["url_sources"] = tool.url_sources
                 if tool.response_inclusion is not None:
                     # web_fetch_20260318+: "full" | "excluded"; mirrors web_search.
                     tool_def["response_inclusion"] = tool.response_inclusion

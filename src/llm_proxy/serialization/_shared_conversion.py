@@ -1,6 +1,8 @@
 """Shared conversion logic: convert unsupported blocks to natively-supported ones."""
 
-from typing import Any
+from typing import Any, cast
+
+import orjson
 
 from llm_proxy.models import ContentBlock
 
@@ -66,8 +68,10 @@ def try_convert_block(block: ContentBlock) -> ContentBlock | None:
         return None
 
     # Tool result variants: all structurally match ToolResultBlock.
-    # Some variants carry list[dict[str, Any]] content (e.g. WebSearchToolResultBlock);
-    # we stringify those so the resulting ToolResultBlock stays type-safe.
+    # Some variants carry raw server-tool payloads (a dict such as
+    # ``web_fetch_result``/``web_search_tool_result_error``, or a list of
+    # ``web_search_result`` dicts); those are JSON-encoded so the payload is
+    # preserved instead of being dropped, keeping ToolResultBlock type-safe.
     if isinstance(
         block,
         (
@@ -79,14 +83,14 @@ def try_convert_block(block: ContentBlock) -> ContentBlock | None:
             ToolSearchToolResultBlock,
         ),
     ):
-        content: str | list[Any] = block.content
-        if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict):
-            import orjson
-
-            content = orjson.dumps(content).decode()
+        raw_content = block.content
+        is_raw_payload = isinstance(raw_content, dict) or (
+            isinstance(raw_content, list) and bool(raw_content) and isinstance(raw_content[0], dict)
+        )
+        content = orjson.dumps(raw_content).decode() if is_raw_payload else raw_content
         return ToolResultBlock(
             tool_use_id=block.tool_use_id,
-            content=content,  # type: ignore[arg-type]
+            content=cast("str | list[Any]", content),
             is_error=block.is_error,
         )
 

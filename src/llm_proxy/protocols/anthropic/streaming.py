@@ -131,6 +131,11 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         self._tool_id = ""
         self._tool_name = ""
         self._tool_args = ""
+        # True when the open tool block is an upstream ``server_tool_use``
+        # (web_fetch, bash, code_execution, tool_search, ...) rather than a
+        # plain client ``tool_use``. Set from the canonical marker the
+        # provider converter attaches.
+        self._tool_is_server_tool_use = False
         # Pending terminal state (stop_reason / stop_sequence / stop_details /
         # container / usage) is owned by ``PendingTerminalState``; captured in
         # ``_transform_openai_chunk`` and flushed in ``finalize``.
@@ -485,6 +490,10 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 reasoning = delta.get("reasoning_content")
                 if reasoning is None or reasoning == "":
                     reasoning = delta.get("reasoning")
+                # thinking-token-count beta: ``estimated_tokens`` may accompany
+                # the text (or arrive with empty text under ``display:
+                # \"omitted\"``).
+                estimated_tokens = delta.get("reasoning_estimated_tokens")
                 if reasoning is not None and reasoning != "":
                     if self._text_output_started:
                         continue
@@ -515,43 +524,40 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                         if delta.get("encrypted_content"):
                             self._thinking_redacted_data = delta["encrypted_content"]
 
-                    if not self._in_thinking_block:
-                        # Close whatever block is open first: the canonical stream
-                        # carries no boundary chunk on a tool block stop, so a
-                        # tool_use followed by thinking (interleaved thinking) would
-                        # otherwise open a second block at the same index with no
-                        # intervening content_block_stop.
-                        self._close_current_open_block(result_chunks)
-                        self._in_thinking_block = True
-                        result_chunks.append(
-                            self._content_block_start(
-                                self._current_block_index, {"type": "thinking", "thinking": ""}
-                            )
-                        )
+                    self._ensure_thinking_block(result_chunks)
                     self._thinking_buffer += reasoning
+                    thinking_delta: dict[str, Any] = {
+                        "type": "thinking_delta",
+                        "thinking": reasoning,
+                    }
+                    if estimated_tokens is not None:
+                        thinking_delta["estimated_tokens"] = estimated_tokens
+                        estimated_tokens = None
+                    result_chunks.append(
+                        self._content_block_delta(self._current_block_index, thinking_delta)
+                    )
+
+                if estimated_tokens is not None and not self._text_output_started:
+                    # ``estimated_tokens`` with no thinking text: keep a
+                    # (possibly empty) thinking block open and emit the count on
+                    # its own delta so the value is not dropped.
+                    self._ensure_thinking_block(result_chunks)
                     result_chunks.append(
                         self._content_block_delta(
                             self._current_block_index,
-                            {"type": "thinking_delta", "thinking": reasoning},
+                            {
+                                "type": "thinking_delta",
+                                "thinking": "",
+                                "estimated_tokens": estimated_tokens,
+                            },
                         )
                     )
 
                 reasoning_sig = delta.get("reasoning_signature")
                 if reasoning_sig is not None and reasoning_sig != "":
-                    if not self._in_thinking_block:
-                        # The canonical stream carries signature_delta inside the
-                        # thinking block, so a signature with no open block is an
-                        # interleaved/degenerate provider. Open a (possibly
-                        # empty-text) thinking block for it instead of leaking
-                        # the value onto the next unrelated block or dropping it.
-                        self._close_current_open_block(result_chunks)
-                        self._in_thinking_block = True
-                        result_chunks.append(
-                            self._content_block_start(
-                                self._current_block_index,
-                                {"type": "thinking", "thinking": ""},
-                            )
-                        )
+                    # A signature with no open block is an interleaved/degenerate
+                    # provider; give it a (possibly empty-text) thinking block.
+                    self._ensure_thinking_block(result_chunks)
                     self._thinking_signature += reasoning_sig
                     result_chunks.append(
                         self._content_block_delta(
@@ -582,7 +588,15 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
 
                             normalized = self._tool_name.lower().replace("_", "").replace("-", "")
                             is_ws = normalized == "websearch" and self._intercept_web_search
-                            block_type = "server_tool_use" if is_ws else "tool_use"
+                            # Upstream server_tool_use blocks carry the marker
+                            # the converter attaches; web_search interception
+                            # synthesises the same block type.
+                            self._tool_is_server_tool_use = bool(tc.get("server_tool_use"))
+                            block_type = (
+                                "server_tool_use"
+                                if is_ws or self._tool_is_server_tool_use
+                                else "tool_use"
+                            )
                             result_chunks.append(
                                 self._content_block_start(
                                     self._current_block_index,
@@ -881,6 +895,24 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         events.append(self._content_block_stop(index))
         return "".join(events)
 
+    def _ensure_thinking_block(self, result_chunks: list[str]) -> None:
+        """Open a thinking block if none is currently open.
+
+        The canonical stream carries no boundary chunk on a text/tool block
+        stop, so a thinking delta that follows one must close the open block
+        and start a fresh thinking block first; otherwise it would open a
+        second block at the same index with no intervening content_block_stop.
+        """
+        if self._in_thinking_block:
+            return
+        self._close_current_open_block(result_chunks)
+        self._in_thinking_block = True
+        result_chunks.append(
+            self._content_block_start(
+                self._current_block_index, {"type": "thinking", "thinking": ""}
+            )
+        )
+
     def _close_current_open_block(
         self, result_chunks: list[str], *, server_aware: bool = False
     ) -> None:
@@ -938,7 +970,9 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 tool_input = {}
 
             normalized = self._tool_name.lower().replace("_", "").replace("-", "")
-            if server_aware and normalized == "websearch" and self._intercept_web_search:
+            if self._tool_is_server_tool_use or (
+                server_aware and normalized == "websearch" and self._intercept_web_search
+            ):
                 self._accumulated_output.append(
                     ServerToolUseBlock(
                         id=self._tool_id,
@@ -963,6 +997,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         self._tool_id = ""
         self._tool_name = ""
         self._tool_args = ""
+        self._tool_is_server_tool_use = False
         self._text_buffer = ""
         self._thinking_buffer = ""
 

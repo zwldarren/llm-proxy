@@ -149,6 +149,11 @@ class WebFetchTool(ToolDefinition):
     defer_loading: bool | None = None
     max_content_tokens: int | None = None
     max_uses: int | None = None
+    # web_fetch_20260309+: bypass the fetch cache when false (default true).
+    use_cache: bool | None = None
+    # Limit fetchable URLs by source (client_tool_results / server_tool_results /
+    # user_input filters). Forwarded verbatim.
+    url_sources: dict[str, Any] | None = None
     # web_fetch_20260318+: "full" (default) or "excluded" — mirrors web_search.
     response_inclusion: str | None = None
     strict: bool | None = None

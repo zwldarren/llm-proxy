@@ -852,7 +852,9 @@ def test_parse_web_search_result_block(serializer):
 
     Individual search result items inside web_search_tool_result.content
     must parse into WebSearchResultContentBlock with url, title, and
-    encoded_content fields preserved.
+    encrypted_content fields preserved. ``encrypted_content`` is the official
+    Anthropic field name (the API rejects a later turn if it is missing or
+    modified).
     """
     from llm_proxy.models.content_blocks.anthropic_builtin import WebSearchResultContentBlock
 
@@ -862,7 +864,7 @@ def test_parse_web_search_result_block(serializer):
                 "type": "web_search_result",
                 "url": "https://docs.example.com",
                 "title": "Documentation",
-                "encoded_content": "ZW5jcnlwdGVk...",
+                "encrypted_content": "ZW5jcnlwdGVk...",
                 "page_age": "2025-01-15",
             },
         ]
@@ -872,8 +874,52 @@ def test_parse_web_search_result_block(serializer):
     assert isinstance(blocks[0], WebSearchResultContentBlock)
     assert blocks[0].url == "https://docs.example.com"
     assert blocks[0].title == "Documentation"
-    assert blocks[0].encoded_content == "ZW5jcnlwdGVk..."
+    assert blocks[0].encrypted_content == "ZW5jcnlwdGVk..."
     assert blocks[0].page_age == "2025-01-15"
+
+
+def test_parse_web_search_result_block_accepts_legacy_encoded_content(serializer):
+    """The legacy internal ``encoded_content`` spelling is still accepted."""
+    from llm_proxy.models.content_blocks.anthropic_builtin import WebSearchResultContentBlock
+
+    blocks = serializer.parse_content_blocks(
+        [
+            {
+                "type": "web_search_result",
+                "url": "https://docs.example.com",
+                "title": "Documentation",
+                "encoded_content": "legacy...",
+            },
+        ]
+    )
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], WebSearchResultContentBlock)
+    assert blocks[0].encrypted_content == "legacy..."
+
+
+def test_format_web_search_result_block_emits_encrypted_content(serializer):
+    """Formatting emits the official ``encrypted_content`` field name."""
+    from llm_proxy.models.content_blocks.anthropic_builtin import WebSearchResultContentBlock
+
+    formatted = serializer.format_content_blocks(
+        [
+            WebSearchResultContentBlock(
+                url="https://docs.example.com",
+                title="Documentation",
+                encrypted_content="ZW5jcnlwdGVk...",
+            )
+        ]
+    )
+
+    assert formatted == [
+        {
+            "type": "web_search_result",
+            "url": "https://docs.example.com",
+            "title": "Documentation",
+            "encrypted_content": "ZW5jcnlwdGVk...",
+        }
+    ]
 
 
 def test_parse_web_search_tool_result_with_error(serializer):

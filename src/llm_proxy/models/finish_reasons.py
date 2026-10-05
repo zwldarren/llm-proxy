@@ -54,6 +54,9 @@ ANTHROPIC_TO_OPENAI: dict[str, str] = {
     "pause_turn": "stop",
     "refusal": "content_filter",
     "model_context_window_exceeded": "context_length",
+    # Beta compaction turns carry no OpenAI equivalent; preserve the value so
+    # the Anthropic client still sees ``stop_reason: "compaction"``.
+    "compaction": "compaction",
 }
 
 # OpenAI → Anthropic mapping
@@ -66,6 +69,7 @@ OPENAI_TO_ANTHROPIC: dict[str, str] = {
     "refusal": "refusal",
     "context_length": "model_context_window_exceeded",
     "stop_sequence": "stop_sequence",
+    "compaction": "compaction",
 }
 
 # Gemini → Anthropic mapping

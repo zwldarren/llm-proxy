@@ -2,7 +2,7 @@
 """Message and ConversationContext for unified protocol format."""
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from llm_proxy.models.content_blocks import ContentBlock, TextBlock
 
@@ -68,6 +68,11 @@ class Message:
     # OpenResponses assistant message phase ("commentary" | "final_answer").
     # Preserved so follow-up requests can resend it (spec 2026-04-24).
     phase: str | None = None
+    # Message-level provider extras that are not content blocks, keyed by
+    # provider dialect. Anthropic mid-conversation ``role: "system"`` messages
+    # carry ``clear_at`` and a per-message ``output_config``; both must be
+    # re-emitted verbatim on the rebuilt request path.
+    anthropic_extra: dict[str, Any] | None = None
 
     @property
     def text_content(self) -> str:

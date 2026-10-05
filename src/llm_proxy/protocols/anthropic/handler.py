@@ -127,7 +127,10 @@ async def handle_count_tokens(
 
 
 # Fields the official ``POST /v1/messages/count_tokens`` endpoint accepts
-# (MessageCountTokensParams in the Anthropic SDK's OpenAPI spec).
+# (MessageCountTokensParams in the Anthropic SDK's OpenAPI spec). The beta
+# reference additionally accepts the counting-relevant beta fields
+# (context_management, compaction, mcp_servers, speed) so a count matches the
+# corresponding /v1/messages request.
 _COUNT_TOKENS_FORWARD_FIELDS = frozenset(
     {
         "model",
@@ -138,6 +141,10 @@ _COUNT_TOKENS_FORWARD_FIELDS = frozenset(
         "thinking",
         "cache_control",
         "output_config",
+        "context_management",
+        "compaction",
+        "mcp_servers",
+        "speed",
     }
 )
 

@@ -369,11 +369,16 @@ class AnthropicContentMixin:
                         continue
 
                     if part_type == "web_search_result":
+                        # Official Anthropic field is ``encrypted_content``;
+                        # ``encoded_content`` is the proxy's legacy internal
+                        # spelling, accepted for back-compat.
                         blocks.append(
                             WebSearchResultContentBlock(
                                 url=part.get("url", ""),
                                 title=part.get("title", ""),
-                                encoded_content=part.get("encoded_content", ""),
+                                encrypted_content=part.get(
+                                    "encrypted_content", part.get("encoded_content", "")
+                                ),
                                 page_age=part.get("page_age"),
                             )
                         )
@@ -457,6 +462,10 @@ class AnthropicContentMixin:
         if isinstance(block, RedactedThinkingBlock):
             return self._format_redacted_thinking_block(block)
         if isinstance(block, RefusalBlock):
+            # Anthropic has no ``refusal`` content block (refusal is a
+            # ``stop_reason``/``stop_details``). Sending the block shape the
+            # OpenAI/Responses dialects use is rejected upstream, so the
+            # refusal text is carried as a plain text block instead.
             return self._format_refusal_block(block)
         if isinstance(block, ImageBlock):
             return self._format_image_block(block, context=context)
@@ -617,11 +626,8 @@ class AnthropicContentMixin:
         }
 
     def _format_refusal_block(self, block: RefusalBlock) -> dict[str, Any]:
-        """Format a RefusalBlock to Anthropic wire format."""
-        return {
-            "type": "refusal",
-            "refusal": block.refusal,
-        }
+        """Format a RefusalBlock as a text block (Anthropic has no refusal block)."""
+        return {"type": "text", "text": block.refusal}
 
     @staticmethod
     def _format_file_source(
@@ -941,7 +947,7 @@ class AnthropicContentMixin:
             "type": "web_search_result",
             "url": block.url,
             "title": block.title,
-            "encoded_content": block.encoded_content,
+            "encrypted_content": block.encrypted_content,
         }
         if block.page_age:
             ws_block["page_age"] = block.page_age
@@ -1047,8 +1053,13 @@ class AnthropicContentMixin:
                 content = block.content
             else:
                 content = self.format_content_blocks(block.content, context=context)
+        elif isinstance(block.content, (str, dict)):
+            # A dict is an official server-tool result object (e.g.
+            # ``web_fetch_result`` or ``web_search_tool_result_error``); it is
+            # forwarded verbatim rather than stringified into a Python repr.
+            content = block.content
         else:
-            content = block.content if isinstance(block.content, str) else str(block.content)
+            content = str(block.content)
 
         result: dict[str, Any] = {
             "type": block_type,

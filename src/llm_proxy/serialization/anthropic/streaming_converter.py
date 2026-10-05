@@ -105,6 +105,11 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
         self._cache_creation_input_tokens: int = 0
         # Buffer for thinking signature across content_block_start → content_block_stop.
         self._thinking_signature_buffer: str = ""
+        # A compaction block may arrive whole (on-demand) or stream its summary
+        # through ``compaction_delta`` events (threshold). It is buffered until
+        # ``content_block_stop`` so the canonical channel always carries the
+        # complete block.
+        self._pending_compaction: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API — called by the adapter
@@ -236,6 +241,20 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
             tool_name = block.get("name", "")
             self._current_tool_index = self._tool_call_index
             self._tool_call_index += 1
+            tool_call: dict[str, Any] = {
+                "index": self._current_tool_index,
+                "id": tool_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": "",
+                },
+            }
+            if block_type == "server_tool_use":
+                # Marker the protocol transformer reads to re-emit a
+                # ``server_tool_use`` block instead of a plain ``tool_use``
+                # (web_fetch, bash, code_execution, tool_search, ...).
+                tool_call["server_tool_use"] = True
             return _make_openai_chunk(
                 self._response_id,
                 self._model,
@@ -243,23 +262,16 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
                 choices=[
                     {
                         "index": 0,
-                        "delta": {
-                            "tool_calls": [
-                                {
-                                    "index": self._current_tool_index,
-                                    "id": tool_id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool_name,
-                                        "arguments": "",
-                                    },
-                                }
-                            ],
-                        },
+                        "delta": {"tool_calls": [tool_call]},
                         "finish_reason": None,
                     }
                 ],
             )
+
+        if block_type == "compaction":
+            # Buffer; the complete block is emitted on content_block_stop.
+            self._pending_compaction = dict(block)
+            return None
 
         # Unknown block type (web_search_tool_result, web_fetch_tool_result,
         # container_upload, ...): forward the complete block losslessly in a
@@ -301,6 +313,12 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
 
         if delta_type == "thinking_delta":
             text = delta.get("thinking", "")
+            thinking_delta: dict[str, Any] = {"reasoning_content": text}
+            estimated = delta.get("estimated_tokens")
+            if estimated is not None:
+                # thinking-token-count beta: carried through for the protocol
+                # transformer to re-emit on the ``thinking_delta``.
+                thinking_delta["reasoning_estimated_tokens"] = estimated
             return _make_openai_chunk(
                 self._response_id,
                 self._model,
@@ -308,7 +326,7 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
                 choices=[
                     {
                         "index": 0,
-                        "delta": {"reasoning_content": text},
+                        "delta": thinking_delta,
                         "finish_reason": None,
                     }
                 ],
@@ -342,6 +360,13 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
                 ],
             )
 
+        if delta_type == "compaction_delta":
+            if self._pending_compaction is not None:
+                for key in ("content", "encrypted_content"):
+                    if key in delta:
+                        self._pending_compaction[key] = delta[key]
+            return None
+
         if delta_type == "citations_delta":
             # Lossless citation passthrough (attached to the current text block).
             citation = delta.get("citation")
@@ -360,8 +385,35 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
 
         return None  # Unknown delta type → skip
 
+    def _flush_pending_compaction(self) -> dict[str, Any] | None:
+        """Return the buffered compaction block as a ``raw_content_block`` chunk, if any.
+
+        A compaction block is withheld on ``content_block_start`` (whether it
+        arrives whole or streams via ``compaction_delta``) and released only on
+        ``content_block_stop``, so every stop path shares this flush.
+        """
+        block = self._pending_compaction
+        if block is None:
+            return None
+        self._pending_compaction = None
+        return _make_openai_chunk(
+            self._response_id,
+            self._model,
+            self._created_at,
+            choices=[
+                {
+                    "index": 0,
+                    "delta": {"raw_content_block": block},
+                    "finish_reason": None,
+                }
+            ],
+        )
+
     def _handle_content_block_stop(self, event: dict[str, Any]) -> dict[str, Any] | None:
-        """content_block_stop: emit buffered signature if any."""
+        """content_block_stop: flush a buffered compaction block or thinking signature."""
+        compaction = self._flush_pending_compaction()
+        if compaction is not None:
+            return compaction
         sig = self._thinking_signature_buffer
         self._thinking_signature_buffer = ""
         if sig:
@@ -538,8 +590,14 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
 
     def finalize_chunks(self) -> list[dict[str, Any]]:
         """Return any pending chunks on premature stream end (no message_stop)."""
+        chunks: list[dict[str, Any]] = []
+        compaction = self._flush_pending_compaction()
+        if compaction is not None:
+            chunks.append(compaction)
         chunk = self._build_final_chunk()
-        return [chunk] if chunk else []
+        if chunk:
+            chunks.append(chunk)
+        return chunks
 
 
 # ------------------------------------------------------------------

@@ -142,7 +142,12 @@ class WebSearchToolResultBlock(ContentBlock):
     """Result from web_search built-in tool."""
 
     tool_use_id: str
-    content: str | list[ContentBlock] | list[dict[str, Any]]
+    # ``content`` is either the error object (a single dict), a list of
+    # ``web_search_result`` blocks, or a plain string. The dict/list-of-dict
+    # forms are kept verbatim so the official ``encrypted_content`` payload
+    # survives the round trip (it must be echoed back unmodified on later
+    # turns or the API rejects the request).
+    content: str | dict[str, Any] | list[ContentBlock] | list[dict[str, Any]]
     is_error: bool = False
     caller: Caller | None = None
     cache_control: Any | None = None
@@ -150,10 +155,15 @@ class WebSearchToolResultBlock(ContentBlock):
 
 @dataclass
 class WebFetchToolResultBlock(ContentBlock):
-    """Result from web_fetch built-in tool."""
+    """Result from web_fetch built-in tool.
+
+    ``content`` is the official ``web_fetch_result`` object (a dict holding the
+    fetched ``document``, ``url`` and ``retrieved_at``) or an error object; it
+    is preserved verbatim rather than parsed into internal blocks.
+    """
 
     tool_use_id: str
-    content: str | list[ContentBlock]
+    content: str | dict[str, Any] | list[ContentBlock]
     is_error: bool = False
     caller: Caller | None = None
     cache_control: Any | None = None
@@ -168,7 +178,10 @@ class WebSearchResultContentBlock(ContentBlock):
 
     url: str
     title: str
-    encoded_content: str
+    # Official Anthropic field name. ``encoded_content`` is the proxy's legacy
+    # internal spelling and is still accepted on parse for back-compat, but
+    # only ``encrypted_content`` is ever emitted on the wire.
+    encrypted_content: str
     page_age: str | None = None
     type: str = "web_search_result"
 

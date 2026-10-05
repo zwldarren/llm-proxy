@@ -335,7 +335,9 @@ class WebSearchInterceptor:
                     "type": "web_search_result",
                     "url": result.url,
                     "title": result.title,
-                    "encoded_content": self._encode_content(result.snippet),
+                    # Official Anthropic field name: clients echo this verbatim
+                    # on later turns, so it must match the wire schema.
+                    "encrypted_content": self._encode_content(result.snippet),
                     # Generate a unique encoded_index for each result
                     # This is used for multi-turn citation references
                     "encoded_index": self._generate_encoded_index(result.url, idx),
@@ -556,7 +558,9 @@ class WebSearchInterceptor:
             for item in items:
                 if isinstance(item, dict):
                     item_dict = cast("dict[str, Any]", item)
-                    raw = item_dict.get("encoded_content", "")
+                    # Accept the official ``encrypted_content`` and the legacy
+                    # internal ``encoded_content`` spelling.
+                    raw = item_dict.get("encrypted_content") or item_dict.get("encoded_content", "")
                     content = base64.b64decode(raw).decode("utf-8")
                     results.append(
                         {

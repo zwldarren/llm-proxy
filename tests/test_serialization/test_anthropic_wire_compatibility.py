@@ -1140,3 +1140,284 @@ def test_stream_safeguard_results_survives_without_stop_reason_or_usage():
     )
     deltas = _message_delta_payloads(sse)
     assert deltas[-1]["delta"]["safeguard_results"] == results
+
+
+# ---------------------------------------------------------------------------
+# API-fidelity regressions (official Anthropic Messages reference, 2026)
+# ---------------------------------------------------------------------------
+
+
+def _content_block_starts(sse: str) -> list[dict]:
+    """Parse every ``content_block_start`` block out of a converted SSE stream."""
+    import orjson
+
+    blocks: list[dict] = []
+    for frame in sse.split("\n\n"):
+        if "event: content_block_start" not in frame:
+            continue
+        for line in frame.split("\n"):
+            if line.startswith("data: "):
+                blocks.append(orjson.loads(line[len("data: ") :])["content_block"])
+    return blocks
+
+
+def test_web_search_result_encrypted_content_survives_round_trip(protocol):
+    """``encrypted_content`` is the official field and must survive a round trip.
+
+    The API rejects a later turn when it is missing or modified, so a rebuild
+    path that drops it breaks multi-turn web search.
+    """
+    blocks = protocol.parse_content_blocks(
+        [
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": [
+                    {
+                        "type": "web_search_result",
+                        "url": "https://example.com",
+                        "title": "Example",
+                        "encrypted_content": "EqgfCioIARgB...",
+                        "page_age": "April 30, 2025",
+                    }
+                ],
+            }
+        ]
+    )
+    formatted = protocol.format_content_blocks(blocks)
+    result = formatted[0]["content"][0]
+    assert result["encrypted_content"] == "EqgfCioIARgB..."
+    assert "encoded_content" not in result
+
+
+def test_web_search_error_object_content_is_not_stringified(protocol):
+    """A failed search's ``content`` is an object, not a list/string."""
+    blocks = protocol.parse_content_blocks(
+        [
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_2",
+                "content": {
+                    "type": "web_search_tool_result_error",
+                    "error_code": "max_uses_exceeded",
+                },
+            }
+        ]
+    )
+    formatted = protocol.format_content_blocks(blocks)
+    content = formatted[0]["content"]
+    assert content == {
+        "type": "web_search_tool_result_error",
+        "error_code": "max_uses_exceeded",
+    }
+
+
+def test_web_fetch_result_object_content_is_not_stringified(protocol):
+    """``web_fetch_tool_result.content`` is the ``web_fetch_result`` object."""
+    fetched = {
+        "type": "web_fetch_result",
+        "url": "https://example.com/a",
+        "content": {
+            "type": "document",
+            "source": {"type": "text", "media_type": "text/plain", "data": "hi"},
+        },
+        "retrieved_at": "2025-08-25T10:30:00Z",
+    }
+    blocks = protocol.parse_content_blocks(
+        [{"type": "web_fetch_tool_result", "tool_use_id": "srvtoolu_3", "content": fetched}]
+    )
+    formatted = protocol.format_content_blocks(blocks)
+    assert formatted[0]["content"] == fetched
+
+
+def test_web_fetch_result_survives_provider_parse_and_format(protocol, provider):
+    """Full non-streaming path: upstream web_fetch result reaches the client intact."""
+    raw = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5",
+        "content": [
+            {
+                "type": "web_fetch_tool_result",
+                "tool_use_id": "srvtoolu_9",
+                "content": {
+                    "type": "web_fetch_result",
+                    "url": "https://example.com/a",
+                    "content": {
+                        "type": "document",
+                        "source": {"type": "text", "media_type": "text/plain", "data": "d"},
+                    },
+                    "retrieved_at": "2025-08-25T10:30:00Z",
+                },
+            }
+        ],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    out = protocol.format_response(provider.parse_provider_response(raw, model="claude-opus-5"))
+    block = next(c for c in out["content"] if c["type"] == "web_fetch_tool_result")
+    assert block["content"]["type"] == "web_fetch_result"
+    assert block["content"]["url"] == "https://example.com/a"
+
+
+def test_refusal_block_formats_as_text_not_invalid_block(protocol):
+    """Anthropic has no ``refusal`` content block; degrade to text instead."""
+    from llm_proxy.models import RefusalBlock
+
+    formatted = protocol.format_content_blocks([RefusalBlock(refusal="cannot help with that")])
+    assert formatted == [{"type": "text", "text": "cannot help with that"}]
+
+
+def test_web_fetch_use_cache_reaches_upstream(provider):
+    """``use_cache`` (web_fetch_20260309+) must not be dropped on the rebuild path."""
+    body = build(
+        provider,
+        {
+            "model": "claude-opus-5",
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [{"type": "web_fetch_20260309", "name": "web_fetch", "use_cache": False}],
+        },
+    )
+    assert body["tools"][0]["use_cache"] is False
+
+
+def test_web_fetch_url_sources_reaches_upstream(provider):
+    """``url_sources`` URL-source filters must not be dropped on the rebuild path."""
+    url_sources = {
+        "client_tool_results": {"type": "only", "tools": [{"type": "tool_reference", "name": "x"}]},
+        "user_input": {"type": "all"},
+        "server_tool_results": {"type": "none"},
+    }
+    body = build(
+        provider,
+        {
+            "model": "claude-opus-5",
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [
+                {"type": "web_fetch_20260318", "name": "web_fetch", "url_sources": url_sources}
+            ],
+        },
+    )
+    assert body["tools"][0]["url_sources"] == url_sources
+
+
+def test_mid_conversation_system_fields_reach_upstream(provider):
+    """``clear_at`` / per-message ``output_config`` are message-level, not blocks."""
+    body = build(
+        provider,
+        {
+            "model": "claude-opus-5",
+            "max_tokens": 10,
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "system",
+                    "clear_at": "next_user_message",
+                    "output_config": {"effort": "low"},
+                    "content": "be brief",
+                },
+            ],
+        },
+    )
+    system_messages = [m for m in body["messages"] if m["role"] == "system"]
+    assert system_messages, "mid-conversation system message was dropped"
+    assert system_messages[-1]["clear_at"] == "next_user_message"
+    assert system_messages[-1]["output_config"] == {"effort": "low"}
+
+
+def test_stream_preserves_server_tool_use_block_type():
+    """An upstream ``server_tool_use`` for a non-web_search tool stays that type."""
+    sse = _run_stream(
+        [
+            {"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_1",
+                    "name": "web_fetch",
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": '{"url":"https://x"}'},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_stop"},
+        ]
+    )
+    blocks = _content_block_starts(sse)
+    assert blocks[0]["type"] == "server_tool_use"
+    assert blocks[0]["name"] == "web_fetch"
+    assert '"tool_use"' not in sse or blocks[0]["type"] == "server_tool_use"
+
+
+def test_stream_buffers_compaction_delta_into_complete_block():
+    """Threshold compaction streams its summary via ``compaction_delta``."""
+    sse = _run_stream(
+        [
+            {"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "compaction", "content": None, "encrypted_content": None},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "compaction_delta",
+                    "content": "SUMMARY",
+                    "encrypted_content": "ENC",
+                },
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_stop"},
+        ]
+    )
+    blocks = _content_block_starts(sse)
+    assert blocks[0]["type"] == "compaction"
+    assert blocks[0]["content"] == "SUMMARY"
+    assert blocks[0]["encrypted_content"] == "ENC"
+
+
+def test_stream_preserves_thinking_estimated_tokens():
+    """thinking-token-count beta: ``estimated_tokens`` must not be dropped."""
+    sse = _run_stream(
+        [
+            {"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "", "estimated_tokens": 42},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_stop"},
+        ]
+    )
+    assert '"estimated_tokens":42' in sse
+
+
+def test_non_streaming_compaction_stop_reason_is_preserved(protocol, provider):
+    """Beta ``stop_reason: "compaction"`` must not collapse to ``end_turn``."""
+    raw = {
+        "id": "msg_2",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-opus-5",
+        "content": [{"type": "compaction", "content": "s", "encrypted_content": "e"}],
+        "stop_reason": "compaction",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    out = protocol.format_response(provider.parse_provider_response(raw, model="claude-opus-5"))
+    assert out["stop_reason"] == "compaction"

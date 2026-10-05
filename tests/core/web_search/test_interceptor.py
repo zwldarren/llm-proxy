@@ -629,7 +629,7 @@ class TestWebSearchStreamProcessor:
                         "type": "web_search_result",
                         "url": "https://example.com",
                         "title": "Example",
-                        "encoded_content": interceptor._encode_content("result snippet"),
+                        "encrypted_content": interceptor._encode_content("result snippet"),
                     }
                 ],
                 is_error=False,
@@ -690,7 +690,7 @@ class TestWebSearchStreamProcessor:
                         "type": "web_search_result",
                         "url": "https://example.com/1",
                         "title": "Result 1",
-                        "encoded_content": interceptor._encode_content("snippet 1"),
+                        "encrypted_content": interceptor._encode_content("snippet 1"),
                     }
                 ],
                 is_error=False,
@@ -723,7 +723,7 @@ class TestWebSearchStreamProcessor:
                         "type": "web_search_result",
                         "url": "https://example.com/2",
                         "title": "Result 2",
-                        "encoded_content": interceptor._encode_content("snippet 2"),
+                        "encrypted_content": interceptor._encode_content("snippet 2"),
                     }
                 ],
                 is_error=False,
@@ -814,7 +814,7 @@ class TestWebSearchStreamProcessor:
                         "type": "web_search_result",
                         "url": "https://example.com",
                         "title": "AI News",
-                        "encoded_content": interceptor._encode_content("latest AI news"),
+                        "encrypted_content": interceptor._encode_content("latest AI news"),
                     }
                 ],
                 is_error=False,

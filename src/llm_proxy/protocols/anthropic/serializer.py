@@ -141,7 +141,20 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                 else:
                     conv.messages.append(Message(role="user", content=content))
             else:
-                conv.messages.append(Message(role=role, content=content))
+                # Anthropic mid-conversation ``role: "system"`` messages carry
+                # the message-level ``clear_at`` and per-message
+                # ``output_config`` fields; they are not content blocks, so keep
+                # them separately for the provider builder to re-emit.
+                anthropic_extra = None
+                if role == "system":
+                    anthropic_extra = {
+                        key: msg[key]
+                        for key in ("clear_at", "output_config")
+                        if msg.get(key) is not None
+                    } or None
+                conv.messages.append(
+                    Message(role=role, content=content, anthropic_extra=anthropic_extra)
+                )
 
         return conv
 
@@ -424,6 +437,8 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                         defer_loading=tool.get("defer_loading"),
                         max_content_tokens=tool.get("max_content_tokens"),
                         max_uses=tool.get("max_uses"),
+                        use_cache=tool.get("use_cache"),
+                        url_sources=tool.get("url_sources"),
                         response_inclusion=tool.get("response_inclusion"),
                         strict=tool.get("strict"),
                         cache_control=tool.get("cache_control"),
