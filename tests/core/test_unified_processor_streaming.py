@@ -8,6 +8,7 @@ import pytest
 
 from llm_proxy.config.types import LoggingConfig
 from llm_proxy.config.types.provider import ProviderConfig
+from llm_proxy.core.exceptions import WebSearchError
 from llm_proxy.core.processing.base import RequestContext, ServiceDependencies
 from llm_proxy.core.processing.strategies import StreamingResponseMarker
 from llm_proxy.core.processing.unified import UnifiedProcessor
@@ -50,6 +51,22 @@ class _FakeWebSearchProvider(WebSearchProvider):
                 SearchResult(url=f"https://example.com?q={query}", title=f"R {query}", snippet="s")
             ],
             search_id="ws-test",
+        )
+
+    async def close(self) -> None:
+        pass
+
+
+class _FailingWebSearchProvider(WebSearchProvider):
+    """Stub provider whose searches always fail, for error-path tests."""
+
+    name = "ollama"
+
+    async def search(self, query: str, config=None, **kwargs: Any) -> WebSearchResponse:
+        raise WebSearchError(
+            message="Ollama web search failed: 401",
+            error_code="invalid_api_key",
+            provider_name="ollama",
         )
 
     async def close(self) -> None:
@@ -367,6 +384,105 @@ class TestWebSearchStreaming:
         assert '"query":"quantum computing"' in payload
         assert "Quantum computing is a rapidly evolving field." in payload
         assert "response.completed" in payload
+
+    @pytest.mark.asyncio
+    async def test_openresponses_streaming_reports_web_search_failure(self) -> None:
+        """A search the provider rejects must reach the client with its real reason.
+
+        Regression: the transformer hardcoded ``error_code="unavailable"`` and
+        ``error_message="Web search failed"``, so an invalid search API key was
+        indistinguishable from any other failure at the client.
+        """
+
+        async def _provider_stream():
+            yield {
+                "id": "chatcmpl-ws-err",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "glm-5",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_ws_err",
+                                    "function": {
+                                        "name": "web_search",
+                                        "arguments": '{"query": "quantum computing"}',
+                                    },
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+            yield {
+                "id": "chatcmpl-ws-err",
+                "object": "chat.completion.chunk",
+                "created": 2,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            }
+
+        async def _continuation_stream():
+            yield {
+                "id": "chatcmpl-ws-err-cont",
+                "object": "chat.completion.chunk",
+                "created": 3,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {"content": "I could not search."}}],
+            }
+            yield {
+                "id": "chatcmpl-ws-err-cont",
+                "object": "chat.completion.chunk",
+                "created": 4,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+
+        adapter = MagicMock()
+        adapter.supports_native_streaming = MagicMock(return_value=False)
+        adapter.provider_name = "openai-compatible"
+        adapter.stream_chat_completion = AsyncMock(
+            side_effect=[_provider_stream(), _continuation_stream()]
+        )
+
+        orchestrator = MagicMock()
+        orchestrator.should_retry.return_value = False
+        orchestrator.select_next_provider.return_value = None
+        orchestrator.needs_role_transform.return_value = False
+        orchestrator.exhausted = False
+
+        interceptor = WebSearchInterceptor(_FailingWebSearchProvider())
+        context = RequestContext(
+            orchestrator=orchestrator,
+            services=ServiceDependencies(
+                adapter_factory=AsyncMock(return_value=adapter),
+                web_search_interceptor=interceptor,
+            ),
+            protocol_name="openresponses",
+            proxy_web_search_active=True,
+        )
+
+        processor = UnifiedProcessor(protocol_endpoint=openresponses_protocol)
+        streaming_marker = StreamingResponseMarker(_build_request_with_web_search(), adapter)
+        response = await processor._streaming_processor.process(
+            streaming_marker=streaming_marker,
+            raw_request_data={"model": "glm-5", "stream": True},
+            req=_build_mock_request(),
+            context=context,
+            trace_id="trace-ws-openresponses-error",
+        )
+
+        payload = await _collect_stream_text(response)
+        assert '"type":"web_search_call"' in payload
+        assert '"query":"quantum computing"' in payload
+        assert '"status":"failed"' in payload
+        assert '"error_code":"invalid_api_key"' in payload
+        assert '"error_message":"Ollama web search failed: 401"' in payload
+        assert "I could not search." in payload
 
     @pytest.mark.asyncio
     async def test_openai_streaming_builtin_web_search_replaced(self) -> None:

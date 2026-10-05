@@ -25,6 +25,7 @@ from llm_proxy.models import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from llm_proxy.models.content_blocks.anthropic_builtin import WebSearchToolResultBlock
 from llm_proxy.models.types import Usage
 from llm_proxy.protocols.openresponses import (
     OpenResponsesProtocolSerializer,
@@ -655,6 +656,39 @@ class TestWebSearchRoundtrip:
 
         messages = _find_output_of_type(result["output"], "message")
         assert len(messages) >= 1
+
+    def test_failed_web_search_reports_status_and_reason(self):
+        """An intercepted failure must not be reported as a completed search."""
+        sim_response = InternalResponse(
+            id="resp_ws_err",
+            model="gpt-5",
+            output=[
+                ToolUseBlock(id="call_ws_err", name="web_search", input={"query": "tech news"}),
+                WebSearchToolResultBlock(
+                    tool_use_id="call_ws_err",
+                    content=orjson.dumps(
+                        {
+                            "type": "web_search_tool_result_error",
+                            "error_code": "invalid_api_key",
+                            "error_message": "Ollama web search failed: 401",
+                        }
+                    ).decode(),
+                    is_error=True,
+                ),
+                TextBlock(text="I could not search the web."),
+            ],
+            usage=Usage(input_tokens=40, output_tokens=30, total_tokens=70),
+            finish_reason="stop",
+        )
+
+        result = _protocol.format_response(sim_response, FormatContext())
+
+        ws_calls = _find_output_of_type(result["output"], "web_search_call")
+        assert len(ws_calls) == 1
+        assert ws_calls[0]["status"] == "failed"
+        assert ws_calls[0]["action"]["error_code"] == "invalid_api_key"
+        assert ws_calls[0]["action"]["error_message"] == "Ollama web search failed: 401"
+        assert "sources" not in ws_calls[0]["action"]
 
     def test_web_search_function_declaration_emits_function_call(self):
         """A client that declared web_search as a client-executed function tool

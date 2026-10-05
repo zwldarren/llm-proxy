@@ -15,8 +15,10 @@ from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.openresponses.handler import get_format_context
 from llm_proxy.protocols.openresponses.serializer import (
+    WEB_SEARCH_ERROR_FALLBACK,
     conversation_to_input_items,
     incomplete_reason_from_finish,
+    parse_web_search_error,
 )
 from llm_proxy.protocols.openresponses.streaming_emitter import StreamingContentEmitter
 from llm_proxy.protocols.openresponses.streaming_events import StreamingEventFactory
@@ -55,6 +57,22 @@ def _normalize_reasoning_event(data: dict[str, Any], chunk_type: str) -> str:
     data["type"] = summary_type
     data["summary_index"] = data.pop("content_index", 0)
     return summary_type
+
+
+def _web_search_error_fields(results: list[dict[str, Any] | str]) -> tuple[str, str]:
+    """Pick the ``(error_code, error_message)`` to report for a failed search.
+
+    The interceptor encodes a failed search as the Anthropic-compatible
+    ``web_search_tool_result_error`` object; OpenResponses carries the same
+    information in the ``web_search_call.action`` fields, so the client sees the
+    real reason (e.g. ``invalid_api_key``) instead of a generic code. Falls back
+    to :data:`WEB_SEARCH_ERROR_FALLBACK` when no candidate carries a reason.
+    """
+    for candidate in results:
+        parsed = parse_web_search_error(candidate)
+        if parsed is not None:
+            return parsed
+    return WEB_SEARCH_ERROR_FALLBACK
 
 
 @dataclass
@@ -1019,6 +1037,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         results: list[dict[str, Any] | str],
         is_error: bool = False,
         query: str = "",
+        error_message: str | None = None,
     ) -> str:
         """Generate SSE events for a web search result block.
 
@@ -1032,6 +1051,8 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             results: List of web search result dicts or error content
             is_error: Whether this is an error result
             query: The search query that produced these results
+            error_message: Failure reason reported by the search provider; wins
+                over the message embedded in the error payload
 
         Returns:
             SSE events string
@@ -1044,8 +1065,9 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         }
 
         if is_error:
-            action["error_code"] = "unavailable"
-            action["error_message"] = "Web search failed"
+            error_code, payload_message = _web_search_error_fields(results)
+            action["error_code"] = error_code
+            action["error_message"] = error_message or payload_message
         else:
             sources = []
             for r in results:

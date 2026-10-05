@@ -1293,3 +1293,69 @@ class TestConversationToInputItemsMedia:
         assert isinstance(reparsed_blocks[1], FileBlock)
         assert reparsed_blocks[1].file_id == "file_1"
         assert reparsed_blocks[1].filename == "d.pdf"
+
+
+class TestWebSearchFailureReporting:
+    """A failed search must report its real reason on the web_search_call.
+
+    Regression: the transformer hardcoded ``error_code="unavailable"`` and
+    ``error_message="Web search failed"``, so a provider failure (an invalid
+    search API key, a reverse proxy rejecting the request) reached clients as
+    an unattributable "unavailable" and could not be diagnosed from the API
+    response.
+    """
+
+    @staticmethod
+    def _events(results: list, error_message: str | None = None) -> list[dict]:
+        from llm_proxy.protocols.openresponses.streaming import (
+            OpenResponsesStreamingTransformer,
+        )
+
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5.2", request_id="r1")
+        return _parse_sse_events(
+            transformer._web_search_result_block(
+                0,
+                "ws_1",
+                results,
+                is_error=True,
+                query="pi web access",
+                error_message=error_message,
+            )
+        )
+
+    @staticmethod
+    def _item(events: list, event_name: str) -> dict:
+        return next(data["item"] for name, data in events if name == event_name)
+
+    def test_error_code_and_provider_message_reach_the_action(self):
+        payload = orjson.dumps(
+            {"type": "web_search_tool_result_error", "error_code": "invalid_api_key"}
+        ).decode()
+
+        events = self._events([payload], error_message="Ollama web search failed: 401")
+
+        action = self._item(events, "response.output_item.added")["action"]
+        assert action["error_code"] == "invalid_api_key"
+        assert action["error_message"] == "Ollama web search failed: 401"
+        assert action["query"] == "pi web access"
+        assert self._item(events, "response.output_item.done")["status"] == "failed"
+
+    def test_payload_message_is_used_without_an_override(self):
+        payload = orjson.dumps(
+            {
+                "type": "web_search_tool_result_error",
+                "error_code": "too_many_requests",
+                "error_message": "SearXNG web search failed: 429",
+            }
+        ).decode()
+
+        action = self._item(self._events([payload]), "response.output_item.added")["action"]
+
+        assert action["error_code"] == "too_many_requests"
+        assert action["error_message"] == "SearXNG web search failed: 429"
+
+    def test_unparseable_payload_falls_back_to_the_generic_fields(self):
+        action = self._item(self._events(["not json"]), "response.output_item.added")["action"]
+
+        assert action["error_code"] == "unavailable"
+        assert action["error_message"] == "Web search failed"

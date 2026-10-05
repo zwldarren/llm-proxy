@@ -30,6 +30,8 @@ class OllamaProvider(WebSearchProvider):
     These tool config fields are ignored when using this provider.
     """
 
+    name = "ollama"
+
     def __init__(self, config: OllamaConfig):
         """Initialize Ollama provider.
 

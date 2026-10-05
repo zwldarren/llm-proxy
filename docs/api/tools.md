@@ -68,11 +68,11 @@ reasoning within one provider where possible.
 ## Web search
 
 The proxy can answer `web_search` tool calls itself, so **every** model becomes
-web-aware through your own search backend.
+web-aware through your own search provider.
 
 ### Enable
 
-1. **Settings → General → Web Search** — turn on interception and configure a backend:
+1. **Settings → General → Web Search** — turn on interception and configure a search provider:
    - **SearXNG**: `url` required; optional API key or basic auth; `engines` list;
      `timeout` (default 30 s); `max_results` (default 10, max 20). Queries over 4000
      characters are rejected.
@@ -87,20 +87,20 @@ web-aware through your own search backend.
   through unchanged.
 - In Chat Completions, a `web_search_options` field (or a `web_search` tool definition)
   enables it; the proxy replaces the tool with a plain function named `web_search`
-  taking a single `query` string, and executes the model's call against your backend.
+  taking a single `query` string, and executes the model's call against your search provider.
 - The proxy re-calls the provider with the results until the model stops searching, and
   returns the **final answer** to the client — intermediate tool chatter is not exposed
   on non-streaming paths; usage across the re-calls is summed.
 - `max_uses` on the tool definition is enforced per request.
 - Requests taking the native-passthrough tier disable interception for that request.
 
-The interceptor also reads further per-tool options; only some reach the backend:
+The interceptor also reads further per-tool options; only some reach the search provider:
 
 | Option | Behavior |
 | --- | --- |
 | `allowed_domains`, `blocked_domains` | SearXNG filters results to/excluding these domains; ignored by Ollama |
 | `user_location` | SearXNG: passed as `location` (city/region/country) with `language` derived from `timezone`; ignored by Ollama |
-| `search_context_size`, `external_web_access`, `return_token_budget`, `search_content_types` | Captured from the tool definition but not enforced by any backend |
+| `search_context_size`, `external_web_access`, `return_token_budget`, `search_content_types` | Captured from the tool definition but not enforced by any search provider |
 
 ### What clients see
 
@@ -110,15 +110,23 @@ The interceptor also reads further per-tool options; only some reach the backend
 - Other protocols receive result blocks: `{"type":"web_search_result", "url", "title",
   "encoded_content": <base64 snippet>, "encoded_index": <base64 sha256>, "page_age"?}`.
   Note: this is base64 encoding, **not** Anthropic's encryption.
-- Backend failures do **not** fail the HTTP request: the model receives a
+- Search failures do **not** fail the HTTP request: the model receives a
   `web_search_tool_result_error` with a code —
   `too_many_requests` (429/timeout), `invalid_input` (400), `query_too_long`,
-  `unavailable` (5xx), `invalid_api_key` (Ollama 401), `max_uses_exceeded`.
+  `unavailable` (5xx), `invalid_api_key` (401 from the search provider),
+  `max_uses_exceeded`.
+  The same code and the search provider's message are reported on the client-visible
+  `web_search_call.action` (`error_code` / `error_message`, item `status`
+  `failed`); Anthropic-protocol clients get the code inside the
+  `web_search_tool_result_error` object, which has no message field.
 
 ### Observability
 
 Every intercepted search is logged (Logs → **Web Search**): query, provider, status,
-result count, and current-vs-maximum use.
+result count, and current-vs-maximum use. The query is stored verbatim; it is a
+content field, so the **Log Input/Output** master switch scrubs it together with
+the other bodies. The `provider` column holds the search provider's wire name
+(`searxng` / `ollama`).
 
 ## MCP is separate
 

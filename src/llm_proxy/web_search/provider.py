@@ -83,6 +83,11 @@ class WebSearchProvider(ABC):
     and implement the search method.
     """
 
+    #: Wire name recorded on search logs and diagnostics. Every concrete
+    #: provider must override it: the ``unknown`` default would make a failed
+    #: search unattributable in the admin logs.
+    name: str = "unknown"
+
     @abstractmethod
     async def search(
         self,
@@ -173,8 +178,12 @@ class WebSearchExecutionResult:
         tool_use_block: The original server_tool_use block (to be included in response)
         result_block: The web_search_tool_result block with search results or error
         web_search_count: Number of successful web searches performed (for usage tracking)
+        error_message: Human-readable failure reason. Kept out-of-band from
+            ``result_block`` because the Anthropic wire error object defines
+            only ``error_code`` and clients echo that object back verbatim.
     """
 
     tool_use_block: Any  # ServerToolUseBlock - avoiding circular import
     result_block: Any  # WebSearchToolResultBlock
     web_search_count: int = 0
+    error_message: str | None = None

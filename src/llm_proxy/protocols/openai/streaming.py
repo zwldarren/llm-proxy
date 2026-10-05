@@ -788,6 +788,7 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         content: list[dict[str, Any]] | str,
         is_error: bool = False,
         query: str = "",
+        error_message: str | None = None,
     ) -> str:
         """Emit a web search result block in OpenAI Chat Completions SSE format.
 

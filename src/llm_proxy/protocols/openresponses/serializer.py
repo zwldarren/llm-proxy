@@ -1618,6 +1618,38 @@ def _resolve_format_context(context: FormatContext | None) -> FormatContext:
     return context
 
 
+#: Reason reported when a failed web search carries no usable error payload.
+WEB_SEARCH_ERROR_FALLBACK: tuple[str, str] = ("unavailable", "Web search failed")
+
+
+def parse_web_search_error(content: Any) -> tuple[str, str] | None:
+    """Return the ``(error_code, error_message)`` behind a failed web search.
+
+    The interceptor encodes a failure as the Anthropic-compatible
+    ``web_search_tool_result_error`` object — either as the object itself
+    (native passthrough keeps the upstream/client shape) or as the JSON string
+    it stores. OpenResponses reports the reason on the
+    ``web_search_call.action`` fields, so both the non-streaming formatter and
+    the streaming transformer read it through this one verb. Returns ``None``
+    when ``content`` is not such an object.
+    """
+    payload = content
+    if isinstance(payload, str):
+        try:
+            payload = orjson.loads(payload)
+        except orjson.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict) or payload.get("type") != "web_search_tool_result_error":
+        return None
+    code = payload.get("error_code")
+    message = payload.get("error_message")
+    fallback_code, fallback_message = WEB_SEARCH_ERROR_FALLBACK
+    return (
+        code if isinstance(code, str) and code else fallback_code,
+        message if isinstance(message, str) and message else fallback_message,
+    )
+
+
 def _collect_web_search_results(output: list[Any]) -> dict[str, dict[str, Any]]:
     """First pass: collect web search results keyed by tool_use_id."""
     web_search_results: dict[str, dict[str, Any]] = {}
@@ -1633,10 +1665,17 @@ def _collect_web_search_results(output: list[Any]) -> dict[str, dict[str, Any]]:
                                 "title": str(item.get("title", "")),
                             }
                         )
-            web_search_results[block.tool_use_id] = {
+            entry: dict[str, Any] = {
                 "sources": sources,
                 "is_error": block.is_error,
             }
+            if block.is_error:
+                # A failed search has no sources; keep its reason so the
+                # web_search_call can report why instead of looking completed.
+                code, message = parse_web_search_error(block.content) or WEB_SEARCH_ERROR_FALLBACK
+                entry["error_code"] = code
+                entry["error_message"] = message
+            web_search_results[block.tool_use_id] = entry
     return web_search_results
 
 
@@ -1797,7 +1836,7 @@ def _format_tool_use_block(
         ws_item: dict[str, Any] = {
             "type": "web_search_call",
             "id": f"ws_{secrets.token_hex(12)}",
-            "status": "completed",
+            "status": "failed" if result_data and result_data.get("is_error") else "completed",
         }
         upstream_action = None
         if isinstance(block, (ToolUseBlock, ServerToolUseBlock)) and block.extra:
@@ -1811,10 +1850,16 @@ def _format_tool_use_block(
                 "queries": [query] if query else [],
             }
         if result_data:
-            if include and "web_search_call.action.sources" in include:
-                ws_item["action"]["sources"] = result_data["sources"]
-            if include and "web_search_call.results" in include:
-                ws_item["results"] = result_data["sources"]
+            if result_data.get("is_error"):
+                # Mirror the streaming shape: the reason travels on the action
+                # so a failed search is not reported as a completed one.
+                ws_item["action"]["error_code"] = result_data["error_code"]
+                ws_item["action"]["error_message"] = result_data["error_message"]
+            else:
+                if include and "web_search_call.action.sources" in include:
+                    ws_item["action"]["sources"] = result_data["sources"]
+                if include and "web_search_call.results" in include:
+                    ws_item["results"] = result_data["sources"]
         return ws_item
 
     if name == "tool_search":

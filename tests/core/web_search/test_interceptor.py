@@ -1,7 +1,11 @@
 """Tests for web search interceptor."""
 
+from unittest.mock import MagicMock
+
+import orjson
 import pytest
 
+from llm_proxy.core.exceptions import WebSearchError
 from llm_proxy.models import (
     InternalRequest,
     InternalResponse,
@@ -13,6 +17,7 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.content_blocks.anthropic_builtin import WebSearchToolResultBlock
 from llm_proxy.models.tools import UserLocation, WebSearchTool
+from llm_proxy.observability.tool_logging import WebSearchLogEntry
 from llm_proxy.web_search.interceptor import WebSearchInterceptor
 from llm_proxy.web_search.provider import (
     SearchResult,
@@ -268,6 +273,58 @@ class TestWebSearchInterceptor:
         error_dict = orjson.loads(result.result_block.content)
         assert error_dict["type"] == "web_search_tool_result_error"
         assert error_dict["error_code"] == "invalid_input"
+        assert result.error_message == "Missing 'query' parameter"
+
+    @pytest.mark.asyncio
+    async def test_execute_search_carries_provider_failure_message(
+        self, interceptor, mock_provider, monkeypatch
+    ):
+        """The provider's reason must survive on the result, not the wire object.
+
+        The Anthropic wire error object defines only ``error_code`` and clients
+        echo it back verbatim, so the human-readable reason travels out of band
+        on the execution result. Without it every failure reached the client as
+        a generic "Web search failed" — an expired search API key was
+        indistinguishable from a rate limit.
+        """
+
+        async def _fail(query, config=None, **kwargs):
+            raise WebSearchError(
+                message="Ollama web search failed: 401",
+                error_code="invalid_api_key",
+                provider_name="ollama",
+            )
+
+        monkeypatch.setattr(mock_provider, "search", _fail)
+        tool_use = ServerToolUseBlock(id="srvtoolu_err", name="web_search", input={"query": "q"})
+
+        result = await interceptor.execute_search(tool_use)
+
+        assert result.result_block.is_error is True
+        assert result.error_message == "Ollama web search failed: 401"
+        assert orjson.loads(result.result_block.content)["error_code"] == "invalid_api_key"
+
+    @pytest.mark.asyncio
+    async def test_failed_search_logs_the_actual_provider_name(self, mock_provider, monkeypatch):
+        """Regression: an Ollama provider was logged as ``searxng``.
+
+        The interceptor read ``getattr(provider, "name", "searxng")`` while no
+        provider defined ``name``, so the admin log always claimed SearXNG.
+        """
+        entries: list[WebSearchLogEntry] = []
+        log_service = MagicMock()
+        log_service.log_web_search_background.side_effect = lambda entry, **kwargs: entries.append(
+            entry
+        )
+        monkeypatch.setattr(
+            "llm_proxy.web_search.interceptor.get_tool_log_service", lambda: log_service
+        )
+        mock_provider.name = "ollama"
+
+        tool_use = ServerToolUseBlock(id="srvtoolu_log", name="web_search", input={"query": "q"})
+        await WebSearchInterceptor(mock_provider).execute_search(tool_use)
+
+        assert [entry.provider for entry in entries] == ["ollama"]
 
     @pytest.mark.asyncio
     async def test_execute_search_max_uses_exceeded(self, interceptor):

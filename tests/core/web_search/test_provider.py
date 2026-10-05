@@ -11,6 +11,7 @@ from llm_proxy.web_search import create_web_search_provider
 from llm_proxy.web_search.ollama import OllamaProvider
 from llm_proxy.web_search.provider import (
     SearchResult,
+    WebSearchProvider,
     WebSearchResponse,
     WebSearchToolConfig,
 )
@@ -235,6 +236,33 @@ class TestSearXNGProvider:
                 await searxng_provider.search("test query")
 
             assert exc_info.value.code == "too_many_requests"
+
+    @pytest.mark.asyncio
+    async def test_search_http_error_401_is_invalid_api_key(self, searxng_provider):
+        """A 401 means rejected credentials, not an outage.
+
+        SearXNG does not authenticate itself, so this comes from the reverse
+        proxy in front of it or from a wrong api_key/basic-auth credential.
+        Reporting it as ``unavailable`` hid the real cause from the client.
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+
+        with patch.object(searxng_provider, "_ensure_client") as mock_ensure:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(
+                side_effect=httpx2.HTTPStatusError(
+                    "Unauthorized",
+                    request=MagicMock(),
+                    response=mock_response,
+                )
+            )
+            mock_ensure.return_value = mock_client
+
+            with pytest.raises(WebSearchError) as exc_info:
+                await searxng_provider.search("test query")
+
+            assert exc_info.value.code == "invalid_api_key"
 
     @pytest.mark.asyncio
     async def test_close(self, searxng_provider):
@@ -773,3 +801,24 @@ class TestCreateWebSearchProvider:
             ollama=OllamaConfig(api_key=""),
         )
         assert create_web_search_provider(config) is None
+
+
+class TestProviderWireNames:
+    """``name`` is what a search log records, so it must identify the provider.
+
+    Regression: the interceptor read ``getattr(provider, "name", "searxng")``
+    while no provider defined ``name``, so every Ollama failure was logged as a
+    SearXNG one and the real provider could not be identified from the log.
+    """
+
+    def test_searxng_reports_its_own_name(self):
+        provider = SearXNGProvider(SearXNGConfig(url="http://localhost:8080"))
+        assert provider.name == "searxng"
+
+    def test_ollama_reports_its_own_name(self):
+        provider = OllamaProvider(OllamaConfig(api_key="key"))
+        assert provider.name == "ollama"
+
+    def test_base_class_default_is_not_a_provider_name(self):
+        """A provider that forgets to override it must not masquerade as SearXNG."""
+        assert WebSearchProvider.name == "unknown"

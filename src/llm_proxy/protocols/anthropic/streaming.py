@@ -852,6 +852,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         results: list[dict[str, Any]] | list[str],
         is_error: bool = False,
         query: str = "",
+        error_message: str | None = None,
     ) -> str:
         """Generate complete web_search_tool_result content block events.
 
@@ -863,6 +864,9 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             results: List of web search result dicts
             is_error: Whether this is an error result
             query: The search query (ignored for Anthropic protocol)
+            error_message: Failure reason (ignored: the Anthropic wire error
+                object defines only ``error_code`` and clients echo it back
+                verbatim, so an extra field would break the round trip)
 
         Returns:
             SSE events string for the complete web_search_tool_result block

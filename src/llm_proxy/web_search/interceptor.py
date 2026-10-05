@@ -295,6 +295,7 @@ class WebSearchInterceptor:
                     tool_use.id, "invalid_input", "Missing 'query' parameter"
                 ),
                 web_search_count=0,
+                error_message="Missing 'query' parameter",
             )
 
         # Check max_uses using a per-request counter supplied by the caller.
@@ -320,6 +321,7 @@ class WebSearchInterceptor:
                         f"Maximum searches ({tool_config.max_uses}) exceeded",
                     ),
                     web_search_count=0,
+                    error_message=f"Maximum searches ({tool_config.max_uses}) exceeded",
                 )
             state["count"] = count + 1
 
@@ -372,7 +374,11 @@ class WebSearchInterceptor:
             )
 
         except Exception as e:
-            error_code = getattr(e, "error_code", "unavailable")
+            # ``WebSearchError`` carries the Anthropic-compatible code on
+            # ``.code`` (set by ``LLMProxyError.__init__``); reading
+            # ``.error_code`` never matched it, so every failure was reported as
+            # "unavailable" — a 401 API-key rejection looked like a 5xx outage.
+            error_code = getattr(e, "code", None) or "unavailable"
             error_message = str(e) if str(e) else "Search failed"
             logger.error(f"Web search failed: query='{query}', error={e}", exc_info=True)
 
@@ -398,6 +404,7 @@ class WebSearchInterceptor:
                 tool_use_block=tool_use,
                 result_block=self._create_error_result(tool_use.id, error_code, error_message),
                 web_search_count=0,
+                error_message=error_message,
             )
 
     def _log_search(
@@ -431,7 +438,7 @@ class WebSearchInterceptor:
                 error_message=error_message,
                 status_code=status_code,
                 response_time_ms=int((time.time() - start_time) * 1000),
-                provider=getattr(self._provider, "name", "searxng"),
+                provider=self._provider.name,
                 max_uses=max_uses,
                 current_use=current_use,
             )

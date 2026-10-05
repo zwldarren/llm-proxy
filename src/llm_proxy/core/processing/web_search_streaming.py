@@ -11,8 +11,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
-import orjson
-
 from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.utils import quiet_aclose
 from llm_proxy.models import (
@@ -133,23 +131,18 @@ class WebSearchStreamProcessor:
             query = tool_use.input.get("query", "") if isinstance(tool_use.input, dict) else ""
 
             if result.result_block.is_error:
-                error_code = orjson.loads(result.result_block.content).get(
-                    "error_code", "unavailable"
-                )
+                # Pass the interceptor's error payload through untouched: the
+                # protocol transformers own its wire shape (Anthropic emits the
+                # object verbatim, OpenResponses maps it onto the
+                # ``web_search_call.action`` fields).
                 events.append(
                     transformer._web_search_result_block(
                         current_index,
                         tool_use.id,
-                        [
-                            orjson.dumps(
-                                {
-                                    "type": "web_search_tool_result_error",
-                                    "error_code": error_code,
-                                }
-                            ).decode()
-                        ],
+                        [result.result_block.content],
                         is_error=True,
                         query=query,
+                        error_message=result.error_message,
                     )
                 )
             else:

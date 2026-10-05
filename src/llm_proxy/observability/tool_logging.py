@@ -4,7 +4,6 @@ This module provides logging support for tool invocations like
 MCP server calls and web search queries.
 """
 
-import hashlib
 import threading
 import time
 import uuid
@@ -40,20 +39,6 @@ class McpLogEntry:
     error_message: str | None = None
     status_code: int = 200
     response_time_ms: int | None = None
-
-
-def _mask_query(query: str) -> str:
-    """Partially mask a web search query for privacy while keeping correlation.
-
-    Returns the first 32 characters of the query followed by a short hash of the
-    full query. This reduces the risk of logging PII while still allowing
-    operators to see the general topic and detect repeated queries.
-    """
-    if not isinstance(query, str):
-        query = str(query)
-    prefix = query[:32]
-    suffix_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:8]
-    return f"{prefix}... [hash:{suffix_hash}]"
 
 
 @dataclass(frozen=True)
@@ -170,9 +155,12 @@ class ToolLogService:
         request_id = self._generate_request_id()
         timestamp = time.time()
 
-        # Build metadata with web search fields
+        # Build metadata with web search fields. The query is stored verbatim so
+        # operators can see exactly what was searched; it is still a content
+        # field, so with the body-logging master switch off
+        # ``scrub_log_metadata`` replaces it with ``_bodies_disabled``.
         metadata: dict[str, Any] = {
-            "web_search_query": _mask_query(entry.query),
+            "web_search_query": entry.query,
             "web_search_status": entry.status.value,
             "web_search_result_count": entry.result_count,
             # Limit to 10 results for storage efficiency

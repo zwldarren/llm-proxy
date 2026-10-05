@@ -30,6 +30,8 @@ class SearXNGProvider(WebSearchProvider):
     See: https://docs.searxng.org/dev/search_api.html
     """
 
+    name = "searxng"
+
     def __init__(self, config: SearXNGConfig):
         """Initialize SearXNG provider.
 
@@ -241,6 +243,11 @@ class SearXNGProvider(WebSearchProvider):
             return "too_many_requests"
         if status_code == 400:
             return "invalid_input"
+        # SearXNG itself does not authenticate; a 401 comes from the reverse
+        # proxy in front of it or from a wrong api_key/basic-auth credential.
+        # Reporting it as "unavailable" hid that from the client.
+        if status_code == 401:
+            return "invalid_api_key"
         if status_code >= 500:
             return "unavailable"
         return "unavailable"
