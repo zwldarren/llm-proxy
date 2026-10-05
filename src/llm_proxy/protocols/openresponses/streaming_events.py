@@ -16,12 +16,14 @@ from llm_proxy.observability.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _create_output_text_part(text: str) -> dict[str, Any]:
+def _create_output_text_part(
+    text: str, annotations: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Create a schema-complete OpenResponses output_text content part."""
     return {
         "type": "output_text",
         "text": text,
-        "annotations": [],
+        "annotations": list(annotations) if annotations else [],
         "logprobs": [],
     }
 
@@ -381,11 +383,15 @@ class StreamingEventFactory:
         return self._create_sse_event("response.output_item.added", data)
 
     @staticmethod
-    def _build_content_part(content_type: str, text: str = "") -> dict[str, Any]:
+    def _build_content_part(
+        content_type: str,
+        text: str = "",
+        annotations: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Create a schema-complete content part dict for the given type."""
         part: dict[str, Any] = {"type": content_type}
         if content_type == "output_text":
-            part["annotations"] = []
+            part["annotations"] = list(annotations) if annotations else []
             part["logprobs"] = []
             part["text"] = text
         elif content_type == "refusal":
@@ -731,6 +737,7 @@ class StreamingEventFactory:
         item_id: str | None = None,
         content_type: str = "output_text",
         text: str = "",
+        annotations: list[dict[str, Any]] | None = None,
     ) -> str:
         """Create response.content_part.done event.
 
@@ -740,11 +747,13 @@ class StreamingEventFactory:
             item_id: Optional item ID for the parent item
             content_type: Type of content (output_text, reasoning_text, refusal)
             text: The complete text for this content part
+            annotations: url_citation/file_citation annotations accumulated for
+                this part (output_text only)
 
         Returns:
             SSE event string
         """
-        part = self._build_content_part(content_type, text)
+        part = self._build_content_part(content_type, text, annotations)
 
         data: dict[str, Any] = {
             "type": "response.content_part.done",
@@ -756,6 +765,33 @@ class StreamingEventFactory:
             data["item_id"] = item_id
         return self._create_sse_event("response.content_part.done", data)
 
+    def _create_annotation_added_event(
+        self,
+        item_index: int,
+        content_index: int,
+        annotation_index: int,
+        annotation: dict[str, Any],
+        item_id: str,
+    ) -> str:
+        """Create a response.output_text.annotation.added event.
+
+        Emitted when an annotation (e.g. a url_citation from web search) is
+        added to the output text part currently streaming. Mirrors the upstream
+        Responses event so the converted path matches native passthrough.
+
+        ``item_id`` is always present: the official event schema lists it as
+        required (along with ``sequence_number``, added by _create_sse_event).
+        """
+        data: dict[str, Any] = {
+            "type": "response.output_text.annotation.added",
+            "item_id": item_id,
+            "output_index": item_index,
+            "content_index": content_index,
+            "annotation_index": annotation_index,
+            "annotation": annotation,
+        }
+        return self._create_sse_event("response.output_text.annotation.added", data)
+
     def _create_output_item_done_event(
         self,
         item_id: str,
@@ -764,6 +800,7 @@ class StreamingEventFactory:
         status: str = "completed",
         content_type: str = "output_text",
         text: str = "",
+        annotations: list[dict[str, Any]] | None = None,
     ) -> str:
         """Create response.output_item.done event.
 
@@ -774,6 +811,7 @@ class StreamingEventFactory:
             status: Item status
             content_type: Type of content (for message/reasoning items)
             text: Accumulated text content
+            annotations: Annotations accumulated for the output_text part
 
         Returns:
             SSE event string
@@ -790,7 +828,7 @@ class StreamingEventFactory:
             item["phase"] = "final_answer"
             if text:
                 if content_type == "output_text":
-                    item["content"].append(_create_output_text_part(text))
+                    item["content"].append(_create_output_text_part(text, annotations))
                 else:
                     item["content"].append(
                         {
@@ -1038,7 +1076,9 @@ class StreamingEventFactory:
                 if content_type == "refusal":
                     content.append({"type": "refusal", "refusal": text})
                 else:
-                    content.append(_create_output_text_part(text))
+                    content.append(
+                        _create_output_text_part(text, self.state.accumulated_annotations.get(key))
+                    )
 
             output.append(
                 {

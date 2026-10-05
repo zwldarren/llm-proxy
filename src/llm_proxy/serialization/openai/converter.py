@@ -50,6 +50,7 @@ from llm_proxy.serialization._shared_degradation import (
     should_degrade_block,
 )
 from llm_proxy.serialization.content_parsers import (
+    attach_prompt_cache_breakpoint,
     parse_image_block_anthropic,
     parse_text_block,
 )
@@ -1121,6 +1122,10 @@ def content_to_openai_parts(
     provider_name = _context_provider_type(context)
     supported_blocks = context.supported_content_blocks if context else frozenset()
     responses_target = context is not None and context.target_endpoint == "responses"
+    # Explicit prompt-cache breakpoints are an OpenAI-dialect feature. Only the
+    # native OpenAI provider and Responses targets accept the content-part field;
+    # every other Chat Completions provider would reject the unknown key.
+    breakpoint_supported = responses_target or provider_name == "openai"
 
     for block in content:
         if responses_target:
@@ -1129,6 +1134,9 @@ def content_to_openai_parts(
             # form while the block is still available.
             responses_part = _block_to_responses_part(block)
             if responses_part is not None:
+                attach_prompt_cache_breakpoint(
+                    responses_part, block, supported=breakpoint_supported
+                )
                 parts.append(responses_part)
                 continue
 
@@ -1148,6 +1156,7 @@ def content_to_openai_parts(
 
         part = _block_to_openai_part(block, provider_name)
         if part is not None:
+            attach_prompt_cache_breakpoint(part, block, supported=breakpoint_supported)
             parts.append(part)
         else:
             # Handle unsupported block types via shared degradation logic.

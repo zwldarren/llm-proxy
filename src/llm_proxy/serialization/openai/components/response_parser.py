@@ -178,6 +178,11 @@ class OpenAIResponseParser:
             provider_info["system_fingerprint"] = response.get("system_fingerprint")
         if response.get("service_tier"):
             provider_info["service_tier"] = response.get("service_tier")
+        # Moderated completions: the top-level ``moderation`` result object
+        # (request input + generated output) must reach the client; without
+        # this the Chat response silently loses it.
+        if response.get("moderation") is not None:
+            provider_info["moderation"] = response.get("moderation")
         if annotations:
             provider_info["annotations"] = annotations
 
@@ -437,6 +442,7 @@ class OpenAIResponseParser:
             "usage",
             "system_fingerprint",
             "service_tier",
+            "moderation",
             "object",
             "created",
         }

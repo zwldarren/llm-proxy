@@ -55,6 +55,54 @@ class StreamingContentEmitter:
         """Emit refusal content events."""
         return self._emit_content(content, "refusal")
 
+    def _emit_annotations(self, annotations: list[Any]) -> str:
+        """Emit ``response.output_text.annotation.added`` events.
+
+        Annotations ride the canonical chunk's delta (surfaced from the upstream
+        ``response.output_text.annotation.added`` event) and belong to the
+        output_text part currently streaming. They are accumulated per
+        (item, content) index so the part's ``annotations`` array is complete at
+        content_part.done / output_item.done / the terminal snapshot.
+
+        Non-dict entries are skipped rather than forwarded as malformed events.
+        """
+        item_idx = self.state.current_item_index
+        content_idx = self.state.current_content_index.get(item_idx, 0)
+        key = (item_idx, content_idx)
+
+        # Official ResponseOutputTextAnnotationAddedEvent requires ``item_id``
+        # (and ``sequence_number``). The pending item normally exists — it is
+        # created by _emit_content when the same delta carried text — but an
+        # annotation can arrive in a text-less delta, so ensure it exists and
+        # announce it exactly like _emit_content does.
+        pending_item = self.state.pending_items.get(item_idx)
+        if pending_item is None:
+            item_id = generate_item_id()
+            self.state.pending_items[item_idx] = {"id": item_id, "type": "message"}
+            events_prefix = self._factory._create_output_item_added_event(
+                item_id=item_id,
+                item_type="message",
+            )
+        else:
+            item_id = pending_item["id"]
+            events_prefix = ""
+
+        bucket: list[dict[str, Any]] = self.state.accumulated_annotations.setdefault(key, [])
+
+        events = events_prefix
+        for annotation in annotations:
+            if not isinstance(annotation, dict):
+                continue
+            events += self._factory._create_annotation_added_event(
+                item_index=item_idx,
+                content_index=content_idx,
+                annotation_index=len(bucket),
+                annotation=annotation,
+                item_id=item_id,
+            )
+            bucket.append(annotation)
+        return events
+
     def _emit_content(self, content: str, content_type: str) -> str:
         """Emit content events for a given content type.
 

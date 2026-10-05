@@ -85,6 +85,14 @@ class OpenResponsesStreamingState:
     # Reasoning summary text accumulated from response.reasoning_summary_text.delta
     # (keyed by (item_idx, content_idx))
     reasoning_summary_text: dict[tuple[int, int], str] = field(default_factory=dict)
+    # url_citation/file_citation annotations accumulated for an output_text
+    # part (keyed by (item_idx, content_idx)). Fed by annotation deltas surfaced
+    # from the upstream ``response.output_text.annotation.added`` event; echoed
+    # in the part's ``annotations`` array at content_part.done / output_item.done
+    # and in the terminal snapshot.
+    accumulated_annotations: dict[tuple[int, int], list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     # Whether stream_options.include_obfuscation was requested
     include_obfuscation: bool | None = None
     # Sequence number for OpenResponses events (starts from -1, first event → 0)
@@ -740,6 +748,10 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         if refusal:
             events += self._emitter._emit_refusal_content(refusal)
 
+        annotations = delta.get("annotations")
+        if annotations:
+            events += self._emitter._emit_annotations(annotations)
+
         tool_calls = delta.get("tool_calls")
         if tool_calls:
             events += self._emitter._emit_tool_calls(tool_calls)
@@ -829,6 +841,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     item_id=item_id,
                     content_type=content_type,
                     text=accumulated,
+                    annotations=self.state.accumulated_annotations.get(key),
                 )
                 events += self._factory._create_output_item_done_event(
                     item_id=item_id,
@@ -837,6 +850,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     status="completed",
                     content_type=content_type,
                     text=accumulated,
+                    annotations=self.state.accumulated_annotations.get(key),
                 )
 
         if self._has_pending_web_search_continuation():

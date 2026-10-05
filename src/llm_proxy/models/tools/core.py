@@ -22,6 +22,13 @@ class FunctionTool(ToolDefinition):
     defer_loading: bool | None = None
     eager_input_streaming: bool | None = None
     input_examples: list[dict[str, Any]] | None = None
+    # Maps to the Responses API ``async`` tool field (the bare name is reserved
+    # in Python): the tool's output may be returned later, out of band, instead
+    # of on the next turn.
+    async_: bool | None = None
+    # JSON schema describing the JSON value encoded in this function's string
+    # output. Responses API only.
+    output_schema: dict[str, Any] | None = None
     # Anthropic prompt-cache breakpoint on the tool definition itself;
     # dict passthrough ("ephemeral" + optional "ttl") — other providers ignore it.
     cache_control: dict[str, Any] | None = None
@@ -35,6 +42,9 @@ class CustomTool(ToolDefinition):
     format_type: str | None = None
     grammar_definition: str | None = None
     grammar_syntax: str | None = None
+    allowed_callers: list[str] | None = None
+    defer_loading: bool | None = None
+    async_: bool | None = None
 
 
 def custom_tool_bridge_description(tool: CustomTool) -> str:

@@ -16,7 +16,9 @@ cannot accept (video and audio).
 from llm_proxy.models import (
     AudioBlock,
     ConversationContext,
+    CustomTool,
     FileBlock,
+    FunctionTool,
     GenerationParams,
     ImageBlock,
     InternalRequest,
@@ -577,3 +579,151 @@ class TestAssistantMedia:
             ]
         )[0]["content"]
         assert content == "here [Image: image/png]"
+
+
+class TestFunctionToolControls:
+    """Responses-only function/custom tool controls must reach the upstream.
+
+    ``allowed_callers`` (programmatic tool calling), ``async`` (async tool
+    calling), ``defer_loading`` (tool search) and ``output_schema`` are Responses
+    API tool fields. They used to be dropped while parsing the tool dict into the
+    unified ``FunctionTool``, silently disabling those features through the
+    proxy.
+    """
+
+    def _tools(self, tools: list) -> list[dict]:
+        request = InternalRequest(
+            model="gpt-6-luna",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            params=GenerationParams(),
+            tools=tools,
+        )
+        body = serializer._build_provider_request(request, _ctx())
+        return body["tools"]
+
+    def test_function_tool_controls_are_emitted(self):
+        tools = self._tools(
+            [
+                FunctionTool(
+                    name="lookup",
+                    parameters={"type": "object"},
+                    allowed_callers=["programmatic"],
+                    defer_loading=True,
+                    async_=True,
+                    output_schema={"type": "object"},
+                )
+            ]
+        )
+        assert tools == [
+            {
+                "type": "function",
+                "name": "lookup",
+                "parameters": {"type": "object"},
+                "allowed_callers": ["programmatic"],
+                "defer_loading": True,
+                "async": True,
+                "output_schema": {"type": "object"},
+            }
+        ]
+
+    def test_custom_tool_controls_are_emitted(self):
+        tools = self._tools(
+            [
+                CustomTool(
+                    name="exec",
+                    allowed_callers=["direct", "programmatic"],
+                    defer_loading=True,
+                    async_=False,
+                )
+            ]
+        )
+        assert tools == [
+            {
+                "type": "custom",
+                "name": "exec",
+                "allowed_callers": ["direct", "programmatic"],
+                "defer_loading": True,
+                "async": False,
+            }
+        ]
+
+    def test_absent_controls_are_not_emitted(self):
+        # ``async: false`` and an empty ``allowed_callers`` must still be dropped
+        # rather than sent as null/empty arrays.
+        tools = self._tools([FunctionTool(name="plain", allowed_callers=[], output_schema=None)])
+        assert tools == [{"type": "function", "name": "plain", "parameters": {}}]
+
+
+class TestPromptCacheBreakpoint:
+    """Explicit OpenAI prompt-cache boundaries must survive to the upstream.
+
+    ``prompt_cache_breakpoint`` (``{"mode": "explicit"}``) was collapsed into
+    Anthropic-style ``cache_control`` at parse time and never re-emitted, so a
+    client's explicit cache boundary silently disappeared on the way to a native
+    OpenAI upstream.
+    """
+
+    BP = {"mode": "explicit"}
+    IMAGE = ImageSource(type="url", data="https://x/a.png", media_type=None)
+
+    def test_text_breakpoint_is_emitted(self):
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        TextBlock(text="hi", prompt_cache_breakpoint=self.BP),
+                        ImageBlock(source=self.IMAGE),
+                    ],
+                )
+            ]
+        )
+        assert parts[0] == {
+            "type": "input_text",
+            "text": "hi",
+            "prompt_cache_breakpoint": self.BP,
+        }
+
+    def test_image_breakpoint_is_emitted(self):
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        TextBlock(text="look"),
+                        ImageBlock(source=self.IMAGE, prompt_cache_breakpoint=self.BP),
+                    ],
+                )
+            ]
+        )
+        assert parts[1] == {
+            "type": "input_image",
+            "image_url": "https://x/a.png",
+            "prompt_cache_breakpoint": self.BP,
+        }
+
+    def test_file_breakpoint_is_emitted(self):
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[FileBlock(file_id="file_1", prompt_cache_breakpoint=self.BP)],
+                )
+            ]
+        )
+        assert parts == [
+            {"type": "input_file", "file_id": "file_1", "prompt_cache_breakpoint": self.BP}
+        ]
+
+    def test_part_without_breakpoint_omits_the_field(self):
+        parts = _parts(
+            [
+                Message(
+                    role="user",
+                    content=[TextBlock(text="hi"), ImageBlock(source=self.IMAGE)],
+                )
+            ]
+        )
+        assert all("prompt_cache_breakpoint" not in part for part in parts)

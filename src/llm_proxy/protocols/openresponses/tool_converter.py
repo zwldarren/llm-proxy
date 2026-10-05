@@ -7,22 +7,15 @@ Converts raw Responses API tool dictionaries into protocol-agnostic
 import logging
 from typing import Any
 
-from llm_proxy.models.tools.core import CustomTool, FunctionTool, ToolDefinition
+from llm_proxy.models.tools.core import CustomTool, ToolDefinition
 from llm_proxy.models.tools.openai_builtin import OpenAIToolSearchTool, WebSearchTool
 from llm_proxy.serialization.responses_toolkit.namespace import NamespaceMapping
+from llm_proxy.serialization.responses_toolkit.tools import (
+    parse_function_tool as _parse_tool,
+)
+from llm_proxy.serialization.responses_toolkit.tools import read_tool_controls
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_tool(tool: dict[str, Any]) -> FunctionTool:
-    """Parse a function-type tool dict into a FunctionTool."""
-    src = tool.get("function", tool)
-    return FunctionTool(
-        name=src.get("name", ""),
-        description=src.get("description"),
-        parameters=src.get("parameters", {"type": "object"}),
-        strict=tool.get("strict", False),
-    )
 
 
 def _build_web_search_tool(tool_dict: dict[str, Any]) -> WebSearchTool:
@@ -79,6 +72,7 @@ def _build_custom_tool(tool_dict: dict[str, Any]) -> CustomTool:
         format_type=format_info.get("type"),
         grammar_definition=grammar_info.get("definition") if is_grammar else None,
         grammar_syntax=grammar_info.get("syntax") if is_grammar else None,
+        **read_tool_controls(tool_dict),
     )
 
 

@@ -32,7 +32,6 @@ from llm_proxy.models import (
     ToolUseBlock,
 )
 from llm_proxy.models.tools import (
-    FunctionTool,
     ToolChoice,
     ToolChoiceFunction,
     ToolDefinition,
@@ -47,6 +46,10 @@ from llm_proxy.serialization.content_parsers import (
     parse_text_block,
     parse_video_block_openai,
     unparseable_image_placeholder,
+)
+from llm_proxy.serialization.responses_toolkit import (
+    parse_function_tool,
+    read_tool_controls,
 )
 
 
@@ -506,15 +509,12 @@ class OpenAIParsingMixin:
         for tool in tools:
             tool_type = tool.get("type", "function")
             if tool_type == "function":
-                func = tool.get("function", {})
-                result.append(
-                    FunctionTool(
-                        name=func.get("name", ""),
-                        description=func.get("description"),
-                        parameters=func.get("parameters", {"type": "object"}),
-                        strict=func.get("strict", False),
-                    )
-                )
+                # parse_function_tool also reads the Responses-only controls
+                # (allowed_callers / defer_loading / async / output_schema);
+                # they are absent from the Chat Completions schema but a
+                # Responses-shaped tool still round-trips when the client
+                # reuses it.
+                result.append(parse_function_tool(tool))
             elif tool_type == "custom":
                 from llm_proxy.models import CustomTool
 
@@ -532,6 +532,7 @@ class OpenAIParsingMixin:
                         grammar_syntax=grammar_info.get("syntax")
                         if format_info.get("type") == "grammar"
                         else None,
+                        **read_tool_controls(tool),
                     )
                 )
             elif tool_type in ("web_search", "web_search_preview"):

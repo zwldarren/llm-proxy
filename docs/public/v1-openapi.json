@@ -5218,6 +5218,19 @@
             "title": "Format",
             "description": "Audio format",
             "default": "wav"
+          },
+          "prompt_cache_breakpoint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Breakpoint",
+            "description": "Explicit prompt-cache breakpoint for this content part"
           }
         },
         "type": "object",
@@ -5296,6 +5309,19 @@
             ],
             "title": "Detail",
             "description": "Rendering detail level for the file"
+          },
+          "prompt_cache_breakpoint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Breakpoint",
+            "description": "Explicit prompt-cache breakpoint for this content part"
           }
         },
         "type": "object",
@@ -5345,6 +5371,19 @@
             "title": "Detail",
             "description": "Image detail level",
             "default": "auto"
+          },
+          "prompt_cache_breakpoint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Breakpoint",
+            "description": "Explicit prompt-cache breakpoint for this content part"
           }
         },
         "type": "object",
@@ -5409,6 +5448,19 @@
             "type": "string",
             "title": "Text",
             "description": "The text input"
+          },
+          "prompt_cache_breakpoint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Breakpoint",
+            "description": "Explicit prompt-cache breakpoint for this content part"
           }
         },
         "type": "object",

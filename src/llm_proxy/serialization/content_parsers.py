@@ -4,6 +4,8 @@ Extracted as standalone functions so that both ProtocolSerializer and
 ProviderSerializer classes can use them without inheriting from a common base.
 """
 
+from typing import Any
+
 from llm_proxy.core.utils import create_image_source_from_url
 from llm_proxy.models import (
     AudioBlock,
@@ -130,8 +132,48 @@ def parse_text_block(part: dict) -> TextBlock | None:
     if part_type == "text":
         text = part.get("text", "")
         cache_control = _parse_text_block_cache_control(part)
-        return TextBlock(text=text, cache_control=cache_control)
+        return TextBlock(
+            text=text,
+            cache_control=cache_control,
+            prompt_cache_breakpoint=extract_prompt_cache_breakpoint(part),
+        )
     return None
+
+
+def extract_prompt_cache_breakpoint(part: dict) -> dict[str, Any] | None:
+    """Return an OpenAI explicit prompt-cache breakpoint from a content part.
+
+    Both Chat Completions and the Responses API spell the per-part boundary
+    ``prompt_cache_breakpoint`` (``{"mode": "explicit"}``); on Responses it
+    also appears on the content items inside a ``function_call_output``. Kept
+    verbatim (a copy of the raw dict) so an OpenAI target re-emits the client's
+    exact boundary, while non-OpenAI targets ignore it.
+    """
+    raw = part.get("prompt_cache_breakpoint")
+    return dict(raw) if isinstance(raw, dict) else None
+
+
+def attach_prompt_cache_breakpoint(
+    part: dict[str, Any], block: Any, *, supported: bool = True
+) -> None:
+    """Carry an explicit OpenAI prompt-cache breakpoint onto an emitted part.
+
+    ``prompt_cache_breakpoint`` (``{"mode": "explicit"}``) is OpenAI's
+    per-content-part cache boundary. It is stored on the unified block and
+    re-emitted verbatim here; without this the breakpoint would be lost between
+    parse and emit and the client's explicit cache boundary would never reach
+    the native upstream.
+
+    ``supported`` guards the emission: only the native OpenAI provider and
+    Responses targets accept the field, while other Chat Completions providers
+    would reject the unknown content-part key. Those keep the previous behavior
+    of dropping it.
+    """
+    if not supported:
+        return
+    breakpoint = getattr(block, "prompt_cache_breakpoint", None)
+    if breakpoint and "prompt_cache_breakpoint" not in part:
+        part["prompt_cache_breakpoint"] = breakpoint
 
 
 def _parse_text_block_cache_control(part: dict) -> CacheControl | None:
@@ -193,7 +235,11 @@ def parse_image_block_openai(part: dict) -> ImageBlock | None:
     url, detail = extract_image_reference(part)
     source = create_image_source_from_url(url)
     if source:
-        return ImageBlock(source=source, detail=detail)
+        return ImageBlock(
+            source=source,
+            detail=detail,
+            prompt_cache_breakpoint=extract_prompt_cache_breakpoint(part),
+        )
     return None
 
 
@@ -242,7 +288,10 @@ def parse_audio_block_openai(part: dict) -> AudioBlock | None:
         "mp3": "audio/mpeg",
     }
     media_type = _MEDIA_TYPE_MAP.get(audio_format, f"audio/{audio_format}")
-    return AudioBlock(source=AudioSource(type="base64", data=data, media_type=media_type))
+    return AudioBlock(
+        source=AudioSource(type="base64", data=data, media_type=media_type),
+        prompt_cache_breakpoint=extract_prompt_cache_breakpoint(part),
+    )
 
 
 def parse_file_block_openai(part: dict) -> FileBlock | None:
@@ -256,6 +305,7 @@ def parse_file_block_openai(part: dict) -> FileBlock | None:
         file_data=file_info.get("file_data") or part.get("file_data"),
         file_id=file_info.get("file_id") or part.get("file_id"),
         filename=file_info.get("filename") or part.get("filename"),
+        prompt_cache_breakpoint=extract_prompt_cache_breakpoint(part),
     )
 
 

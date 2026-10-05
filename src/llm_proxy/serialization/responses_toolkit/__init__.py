@@ -14,6 +14,11 @@ from llm_proxy.serialization.responses_toolkit.namespace import (
     flatten_history_tool_name,
     restore_tool_name,
 )
+from llm_proxy.serialization.responses_toolkit.tools import (
+    parse_function_tool,
+    read_tool_controls,
+    write_tool_controls,
+)
 
 __all__ = [
     "NamespaceMapping",
@@ -22,4 +27,7 @@ __all__ = [
     "generate_item_id",
     "extract_reasoning_text",
     "extract_summary_text",
+    "parse_function_tool",
+    "read_tool_controls",
+    "write_tool_controls",
 ]

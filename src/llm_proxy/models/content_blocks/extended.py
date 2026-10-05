@@ -73,6 +73,7 @@ class FileBlock(ContentBlock):
     filename: str | None = None
     detail: str | None = None
     cache_control: Any | None = None
+    prompt_cache_breakpoint: dict[str, Any] | None = None
 
 
 @dataclass

@@ -20,7 +20,6 @@ from llm_proxy.core.utils import create_image_source_from_url, generate_response
 from llm_proxy.models import (
     ContentBlock,
     ConversationContext,
-    FunctionTool,
     InternalRequest,
     InternalResponse,
     Message,
@@ -61,16 +60,22 @@ from llm_proxy.protocols.serializer_base import ProtocolSerializer
 from llm_proxy.routing.message_extract import function_call_output_to_text
 from llm_proxy.serialization.content_parsers import (
     REDACTED_THINKING_TEXT,
+    attach_prompt_cache_breakpoint,
     extract_image_reference,
+    extract_prompt_cache_breakpoint,
     unparseable_image_placeholder,
 )
 from llm_proxy.serialization.format_context import FormatContext
+from llm_proxy.serialization.openai.response_fields import RESPONSE_PASSTHROUGH_KEYS
 from llm_proxy.serialization.responses_toolkit import (
     NamespaceMapping,
     extract_reasoning_text,
     extract_summary_text,
     generate_item_id,
     restore_tool_name,
+)
+from llm_proxy.serialization.responses_toolkit import (
+    parse_function_tool as _parse_tool,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,14 +126,19 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
             continue
 
         part_type = part_dict.get("type")
+        cache_breakpoint = extract_prompt_cache_breakpoint(part_dict)
         if part_type == "input_text":
-            result.append(TextBlock(text=part_dict.get("text", "")))
+            result.append(
+                TextBlock(text=part_dict.get("text", ""), prompt_cache_breakpoint=cache_breakpoint)
+            )
         elif part_type == "output_text":
             # Assistant message content round-tripped from a prior response.
             # Must be recognized so assistant messages keep their text instead
             # of degrading to an empty TextBlock (which yields an assistant message
             # with no content/tool_calls that providers reject).
-            result.append(TextBlock(text=part_dict.get("text", "")))
+            result.append(
+                TextBlock(text=part_dict.get("text", ""), prompt_cache_breakpoint=cache_breakpoint)
+            )
         elif part_type == "reasoning_text":
             # Reasoning content round-tripped from a prior reasoning item. Keep
             # it as a ThinkingBlock so it serializes back to reasoning_content.
@@ -152,6 +162,7 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
                     ImageBlock(
                         source=ImageSource(type="file_id", data=file_id, media_type=None),
                         detail=detail,
+                        prompt_cache_breakpoint=cache_breakpoint,
                     )
                 )
             elif not image_url:
@@ -165,7 +176,11 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
                     # represented as a source; keep a placeholder.
                     result.append(unparseable_image_placeholder("input_image"))
                 else:
-                    result.append(ImageBlock(source=source, detail=detail))
+                    result.append(
+                        ImageBlock(
+                            source=source, detail=detail, prompt_cache_breakpoint=cache_breakpoint
+                        )
+                    )
         elif part_type == "input_file":
             from llm_proxy.models.content_blocks import FileBlock
 
@@ -176,6 +191,7 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
                     file_url=part_dict.get("file_url"),
                     filename=part_dict.get("filename"),
                     detail=part_dict.get("detail"),
+                    prompt_cache_breakpoint=cache_breakpoint,
                 )
             )
         elif part_type == "input_video":
@@ -192,7 +208,8 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
             if audio_data:
                 result.append(
                     AudioBlock(
-                        source=AudioSource(type="base64", data=audio_data, media_type=media_type)
+                        source=AudioSource(type="base64", data=audio_data, media_type=media_type),
+                        prompt_cache_breakpoint=cache_breakpoint,
                     )
                 )
             elif audio_url.startswith("data:"):
@@ -205,13 +222,15 @@ def _convert_input_content(content: Any) -> list[ContentBlock]:
                             type="base64",
                             data=data,
                             media_type=mime_type or media_type,
-                        )
+                        ),
+                        prompt_cache_breakpoint=cache_breakpoint,
                     )
                 )
             else:
                 result.append(
                     AudioBlock(
-                        source=AudioSource(type="url", data=audio_url, media_type=media_type)
+                        source=AudioSource(type="url", data=audio_url, media_type=media_type),
+                        prompt_cache_breakpoint=cache_breakpoint,
                     )
                 )
     return result if result else [TextBlock(text="")]
@@ -422,12 +441,15 @@ def conversation_to_input_items(
                         }
                     )
             elif isinstance(block, TextBlock):
-                content_parts.append({"type": "input_text", "text": block.text})
+                text_part: dict[str, Any] = {"type": "input_text", "text": block.text}
+                attach_prompt_cache_breakpoint(text_part, block)
+                content_parts.append(text_part)
             elif isinstance(block, ImageBlock):
                 source = block.source
+                image_part: dict[str, Any]
                 if source.type == "base64":
                     media = source.media_type or "image/png"
-                    image_part: dict[str, Any] = {
+                    image_part = {
                         "type": "input_image",
                         "image_url": f"data:{media};base64,{source.data}",
                     }
@@ -437,6 +459,7 @@ def conversation_to_input_items(
                     image_part = {"type": "input_image", "image_url": source.data}
                 if block.detail is not None:
                     image_part["detail"] = block.detail
+                attach_prompt_cache_breakpoint(image_part, block)
                 content_parts.append(image_part)
             elif isinstance(block, FileBlock):
                 file_part: dict[str, Any] = {"type": "input_file"}
@@ -450,6 +473,7 @@ def conversation_to_input_items(
                     if value is not None:
                         file_part[key] = value
                 if len(file_part) > 1:
+                    attach_prompt_cache_breakpoint(file_part, block)
                     content_parts.append(file_part)
             elif isinstance(block, AudioBlock):
                 if block.source.type == "file_id":
@@ -469,6 +493,7 @@ def conversation_to_input_items(
                         audio_part["audio_url"] = block.source.data
                     else:
                         audio_part["audio_data"] = block.source.data
+                    attach_prompt_cache_breakpoint(audio_part, block)
                     content_parts.append(audio_part)
             elif isinstance(block, DocumentBlock):
                 # The Responses wire has no ``document`` content type: re-emit
@@ -538,16 +563,6 @@ def _parse_tool_arguments(args: Any) -> dict[str, Any]:
     except orjson.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {"value": parsed}
-
-
-def _parse_tool(tool: dict[str, Any]) -> ToolDefinition:
-    src = tool.get("function", tool)
-    return FunctionTool(
-        name=src.get("name", ""),
-        description=src.get("description"),
-        parameters=src.get("parameters", {"type": "object"}),
-        strict=tool.get("strict", False),
-    )
 
 
 def _parse_tool_choice(choice: Any) -> ToolChoiceSpec | None:
@@ -2087,9 +2102,10 @@ def _build_response_resource(
     error: dict[str, Any] | None,
     usage: dict[str, Any],
     incomplete_details: dict[str, Any] | None,
+    provider_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the final Responses ResponseResource payload."""
-    return {
+    resource: dict[str, Any] = {
         "id": response_id,
         "object": "response",
         "created_at": created_at,
@@ -2133,6 +2149,19 @@ def _build_response_resource(
         "prompt_cache_key": context.prompt_cache_key,
         "incomplete_details": incomplete_details,
     }
+
+    # Echo upstream response-level fields the internal model does not carry so
+    # the converted path matches the native/wire-reuse tiers, which forward the
+    # raw body untouched. Each key is a valid ResponseResource field.
+    for passthrough_key in RESPONSE_PASSTHROUGH_KEYS:
+        value = (provider_info or {}).get(passthrough_key)
+        # access_programs is a required (nullable) field in the official
+        # Response schema: it must be present even when the upstream did not
+        # set it. The rest appear only when set.
+        if value is not None or passthrough_key == "access_programs":
+            resource[passthrough_key] = value
+
+    return resource
 
 
 @register_protocol_serializer("openresponses")
@@ -2235,6 +2264,7 @@ class OpenResponsesProtocolSerializer(ProtocolSerializer):
             error=error,
             usage=usage,
             incomplete_details=incomplete_details,
+            provider_info=response.provider_info or {},
         )
 
 

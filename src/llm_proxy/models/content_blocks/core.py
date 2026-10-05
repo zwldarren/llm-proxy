@@ -18,6 +18,11 @@ class TextBlock(ContentBlock):
     text: str
     citations: list[dict[str, Any]] | None = None
     cache_control: Any | None = None
+    # OpenAI explicit prompt-cache boundary (``{"mode": "explicit"}``) carried
+    # on this content part. Preserved verbatim (separately from
+    # ``cache_control``) so a native OpenAI upstream receives the client's exact
+    # breakpoint instead of the Anthropic-style mirror.
+    prompt_cache_breakpoint: dict[str, Any] | None = None
 
 
 @dataclass
@@ -29,6 +34,7 @@ class ImageBlock(ContentBlock):
     cache_control: Any | None = None
     # Anthropic image transformations config (e.g. oversized_image: error).
     transformations: dict[str, Any] | None = None
+    prompt_cache_breakpoint: dict[str, Any] | None = None
 
 
 @dataclass
@@ -37,6 +43,7 @@ class AudioBlock(ContentBlock):
 
     source: AudioSource
     cache_control: Any | None = None
+    prompt_cache_breakpoint: dict[str, Any] | None = None
 
 
 @dataclass

@@ -267,6 +267,31 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         """response.output_text.done: no client-visible chunk."""
         return None
 
+    def _handle_annotation_added(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """response.output_text.annotation.added: forward the annotation.
+
+        The canonical Chat chunk has no annotation field, so the annotation
+        rides the delta's ``annotations`` array. The OpenResponses streaming
+        transformer reads it and re-emits the annotation event (and folds it
+        into the final output_text part); other protocols ignore the key.
+        """
+        annotation = data.get("annotation")
+        if not isinstance(annotation, dict):
+            return None
+        return {
+            "id": self._response_id or "chatcmpl-proxy",
+            "object": "chat.completion.chunk",
+            "created": self._created_at or time.time_ns() // 1_000_000_000,
+            "model": self._model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"annotations": [annotation]},
+                    "finish_reason": None,
+                }
+            ],
+        }
+
     def _reasoning_item_state(self, item_id: str | None) -> _ReasoningItemState:
         """Return the per-reasoning-item state, creating it on first use."""
         iid = item_id or self._current_item_id
@@ -575,6 +600,9 @@ _RESPONSES_EVENT_HANDLERS: dict[str, Any] = {
     "response.output_item.added": (OpenAIResponsesChunkConverter._handle_output_item_added),
     "response.output_text.delta": OpenAIResponsesChunkConverter._handle_text_delta,
     "response.output_text.done": OpenAIResponsesChunkConverter._handle_text_done,
+    "response.output_text.annotation.added": (
+        OpenAIResponsesChunkConverter._handle_annotation_added
+    ),
     "response.reasoning.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
     "response.reasoning_text.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
     "response.reasoning_summary_text.delta": (

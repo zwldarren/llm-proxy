@@ -51,11 +51,13 @@ from llm_proxy.serialization.openai.converter import (
     _message_to_openai,
     content_to_openai_parts,
 )
+from llm_proxy.serialization.openai.response_fields import RESPONSE_PASSTHROUGH_KEYS
 from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.providers.registry import register_provider_serializer
 from llm_proxy.serialization.responses_toolkit import (
     extract_reasoning_text,
     extract_summary_text,
+    write_tool_controls,
 )
 
 logger = get_logger(__name__)
@@ -501,6 +503,8 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             image: dict[str, Any] = {"type": "input_image", "image_url": url}
             if detail is not None:
                 image["detail"] = detail
+            if part.get("prompt_cache_breakpoint"):
+                image["prompt_cache_breakpoint"] = part["prompt_cache_breakpoint"]
             return image
 
         if part_type == "file":
@@ -509,7 +513,13 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             payload = part.get("file")
             if not isinstance(payload, dict):
                 return {**{k: v for k, v in part.items() if k != "file"}, "type": "input_file"}
-            return {"type": "input_file", **{k: v for k, v in payload.items() if v is not None}}
+            normalized: dict[str, Any] = {
+                "type": "input_file",
+                **{k: v for k, v in payload.items() if v is not None},
+            }
+            if part.get("prompt_cache_breakpoint"):
+                normalized["prompt_cache_breakpoint"] = part["prompt_cache_breakpoint"]
+            return normalized
 
         if part_type == "video_url":
             # OpenAI's Responses API has no video input content type, so a video
@@ -677,6 +687,9 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                     tool_def["description"] = tool.description
                 if tool.strict:
                     tool_def["strict"] = tool.strict
+                write_tool_controls(tool_def, tool)
+                if tool.output_schema is not None:
+                    tool_def["output_schema"] = tool.output_schema
                 result.append(tool_def)
             elif isinstance(tool, OpenAIWebSearchTool):
                 # Preserve the client's requested tool type. Newer controls
@@ -752,6 +765,7 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                         if tool.grammar_syntax:
                             format_dict["syntax"] = tool.grammar_syntax
                     tool_def["format"] = format_dict
+                write_tool_controls(tool_def, tool)
                 result.append(tool_def)
         return result
 
@@ -944,6 +958,11 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             provider_info["upstream_error"] = (
                 dict(upstream_error) if isinstance(upstream_error, dict) else None
             )
+
+        for passthrough_key in RESPONSE_PASSTHROUGH_KEYS:
+            value = response.get(passthrough_key)
+            if value is not None:
+                provider_info[passthrough_key] = value
 
         if finish_reason is None:
             has_tool_calls = any(isinstance(b, ToolUseBlock) for b in output)

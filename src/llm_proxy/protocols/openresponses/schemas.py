@@ -18,6 +18,10 @@ class InputTextContent(BaseModel):
 
     type: Literal["input_text"] = "input_text"
     text: str = Field(..., description="The text input")
+    # OpenAI explicit prompt-cache boundary (``{"mode": "explicit"}``).
+    prompt_cache_breakpoint: dict[str, Any] | None = Field(
+        None, description="Explicit prompt-cache breakpoint for this content part"
+    )
 
 
 class InputImageContent(BaseModel):
@@ -34,6 +38,9 @@ class InputImageContent(BaseModel):
     detail: Literal["low", "high", "auto", "original"] = Field(
         "auto", description="Image detail level"
     )
+    prompt_cache_breakpoint: dict[str, Any] | None = Field(
+        None, description="Explicit prompt-cache breakpoint for this content part"
+    )
 
 
 class InputFileContent(BaseModel):
@@ -46,6 +53,9 @@ class InputFileContent(BaseModel):
     filename: str | None = Field(None, description="Name of the file")
     detail: Literal["auto", "low", "high"] | None = Field(
         None, description="Rendering detail level for the file"
+    )
+    prompt_cache_breakpoint: dict[str, Any] | None = Field(
+        None, description="Explicit prompt-cache breakpoint for this content part"
     )
 
 
@@ -64,6 +74,9 @@ class InputAudioContent(BaseModel):
     audio_url: str | None = Field(None, description="URL or base64 data URL of the audio")
     format: Literal["wav", "mp3", "ogg", "flac", "webm", "mp4"] = Field(
         "wav", description="Audio format"
+    )
+    prompt_cache_breakpoint: dict[str, Any] | None = Field(
+        None, description="Explicit prompt-cache breakpoint for this content part"
     )
 
 

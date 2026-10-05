@@ -181,6 +181,11 @@ class OpenAIFormattingMixin:
         if response.provider_info.get("service_tier"):
             result["service_tier"] = response.provider_info["service_tier"]
 
+        # Moderated completions: echo the upstream's top-level moderation
+        # result (input + output) so Chat clients can read it.
+        if response.provider_info.get("moderation") is not None:
+            result["moderation"] = response.provider_info["moderation"]
+
         if response.logprobs or choice_meta:
             # Add logprobs to each choice using per-choice metadata when available
             for i, choice in enumerate(choices):
