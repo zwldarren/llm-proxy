@@ -57,3 +57,27 @@ jobs:
         run: uv sync --extra smart-routing
       - name: Run tests
         run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+      - name: Lint
+        run: bun run lint:check
+        working-directory: frontend
+      - name: Check formatting
+        run: bun run format:check
+        working-directory: frontend
+      - name: Type check
+        run: bun run type-check
+        working-directory: frontend
+      - name: Run tests
+        run: bun run test
+        working-directory: frontend
