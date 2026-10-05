@@ -24,15 +24,25 @@ Text embeddings (``text-embedding-v1..v4``, ``qwen3.7-text-embedding``) ride
 the OpenAI-compatible ``{base_url}/embeddings`` endpoint
 (help.aliyun.com/zh/model-studio/text-embedding-synchronous-api).
 
-Image generation/editing (wanx, e.g. ``wan2.7-image-pro``) is **not** served
-through the OpenAI compatibility mode — the official docs state image models
-are DashScope-native only
-(help.aliyun.com/zh/model-studio/wan-image-generation-and-editing-api-reference).
-This adapter implements the native async task flow: submit
+Image generation/editing is served by DashScope-native endpoints, and both
+image families (Wan and Qwen-Image) expose the async task API. Qwen-Image
+also has an OpenAI-compatible **synchronous** ``{base_url}/images/generations``
+surface whose vendor extension fields sit flat on the body (``image`` for
+image-to-image, ``negative_prompt``, ``seed``, ``prompt_extend``,
+``watermark`` —
+help.aliyun.com/zh/model-studio/qwen-image-generation-and-editing-api-reference).
+This adapter uses the native async task flow for every image model: it is the
+one path both families share, and it also carries the multi-reference-image
+edit shape the proxy's ``/v1/images/edits`` maps onto. It submits
 ``POST {root}/api/v1/services/aigc/image-generation/generation`` with the
-``X-DashScope-Async: enable`` header, then poll
+``X-DashScope-Async: enable`` header, then polls
 ``GET {root}/api/v1/tasks/{task_id}`` until the task reaches a terminal
 status. The task data and generated image URLs expire after 24 hours.
+
+Speech has no OpenAI-compatible surface: Qwen-Audio is DashScope-only,
+Qwen-TTS (and CosyVoice) ride the native multimodal-generation endpoint, and
+OpenAI-compatible ASR is ``/chat/completions`` with ``input_audio`` content
+parts. The inherited ``/audio/*`` endpoints are therefore blanked.
 """
 
 import asyncio
@@ -46,6 +56,8 @@ import orjson
 from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.exceptions import ProviderError, ValidationError
 from llm_proxy.models import (
+    InternalEmbeddingRequest,
+    InternalEmbeddingResponse,
     InternalImageEditRequest,
     InternalImageRequest,
     InternalImageResponse,
@@ -98,6 +110,103 @@ class QwenAdapter(NativePassthroughChatBase):
     #: Only wanx models accept these specs; qwen-image models require the
     #: explicit ``{width}*{height}`` pixel form (see ``_dashscope_image_size``).
     _SQUARE_SIZE_SPECS: dict[int, str] = {1024: "1K", 2048: "2K", 4096: "4K"}
+
+    #: DashScope serves no OpenAI-compatible audio endpoint (see the module
+    #: docstring). Blanking the inherited constants makes every audio method
+    #: fail with a clear 400 instead of POSTing to a path the upstream does not
+    #: serve.
+    SPEECH_ENDPOINT = ""
+    TRANSCRIPTION_ENDPOINT = ""
+    TRANSLATION_ENDPOINT = ""
+
+    #: ``request.extra`` keys that are content rather than ``parameters``: the
+    #: OpenAI-compatible top-level ``image`` (and its ``images`` alias) selects
+    #: the reference images for image-to-image, and DashScope wants them inside
+    #: ``input.messages[].content`` as ``{"image": ...}`` entries.
+    _CONTENT_EXTRA_KEYS: frozenset[str] = frozenset({"image", "images"})
+
+    #: Documented ``dimensions`` values across the DashScope text-embedding
+    #: family (``text-embedding-v1..v4``, ``qwen3.7-text-embedding``). The
+    #: per-model subsets are narrower; validating against the documented union
+    #: catches genuine mistakes without guessing at those subsets.
+    _EMBEDDING_DIMENSIONS: frozenset[int] = frozenset(
+        {2560, 2048, 1536, 1024, 768, 512, 256, 128, 64}
+    )
+
+    #: Maximum input rows per request by model prefix (a bare string is always
+    #: one row; lists and files cap at these counts).
+    _EMBEDDING_BATCH_LIMITS: tuple[tuple[str, int], ...] = (
+        ("qwen3.7-text-embedding", 20),
+        ("text-embedding-v4", 10),
+        ("text-embedding-v3", 10),
+        ("text-embedding-v2", 25),
+        ("text-embedding-v1", 25),
+    )
+
+    # ------------------------------------------------------------------
+    # OpenAI-compatible audio surface (intentionally absent)
+    # ------------------------------------------------------------------
+
+    def _audio_unsupported(self, endpoint: str) -> ValidationError:
+        """Error for an audio endpoint DashScope does not expose."""
+        return ValidationError(
+            message=(
+                f"{self.provider_name} does not serve '{endpoint}' over the OpenAI "
+                "compatible API. DashScope speech synthesis (Qwen-TTS) uses the native "
+                "'/api/v1/services/aigc/multimodal-generation/generation' endpoint, and "
+                "Qwen3-ASR-Flash is called through '/chat/completions' with "
+                "'input_audio' content parts."
+            ),
+            code="invalid_request_error",
+            status_code=400,
+        )
+
+    def _speech_url(self, request: Any = None) -> str:
+        raise self._audio_unsupported("/audio/speech")
+
+    def _transcription_url(self, request: Any = None) -> str:
+        raise self._audio_unsupported("/audio/transcriptions")
+
+    def _translation_url(self, request: Any = None) -> str:
+        raise self._audio_unsupported("/audio/translations")
+
+    # ------------------------------------------------------------------
+    # Embeddings — DashScope's documented dimension / batch limits
+    # ------------------------------------------------------------------
+
+    async def embeddings(
+        self, request: InternalEmbeddingRequest, **kwargs: Any
+    ) -> InternalEmbeddingResponse:
+        self._validate_embedding_request(request)
+        return await super().embeddings(request, **kwargs)
+
+    def _validate_embedding_request(self, request: InternalEmbeddingRequest) -> None:
+        """Reject dimensions and batch sizes DashScope documents as invalid."""
+        dimensions = request.dimensions
+        if dimensions is not None and dimensions not in self._EMBEDDING_DIMENSIONS:
+            allowed = ", ".join(
+                str(value) for value in sorted(self._EMBEDDING_DIMENSIONS, reverse=True)
+            )
+            raise ValidationError(
+                message=f"Invalid dimensions '{dimensions}'. Expected one of: {allowed}",
+                code="invalid_request_error",
+                status_code=400,
+            )
+        inputs = request.input
+        count = len(inputs) if isinstance(inputs, list) else 1
+        for prefix, limit in self._EMBEDDING_BATCH_LIMITS:
+            if not (request.model or "").startswith(prefix):
+                continue
+            if count > limit:
+                raise ValidationError(
+                    message=(
+                        f"{request.model} accepts at most {limit} input rows per request "
+                        f"(got {count})"
+                    ),
+                    code="invalid_request_error",
+                    status_code=400,
+                )
+            return
 
     def _native_root_base_url(self) -> str:
         """Site root hosting the Anthropic endpoint.
@@ -163,6 +272,66 @@ class QwenAdapter(NativePassthroughChatBase):
                 return spec
         return f"{size.width}*{size.height}"
 
+    def _validate_dashscope_image_n(
+        self, request: InternalImageRequest | InternalImageEditRequest
+    ) -> None:
+        """Reject ``n`` values the target image model family cannot produce.
+
+        Only families with a documented cap are checked, so unknown models are
+        left to the upstream. Qwen-Image generates 1-6 images per request; Wan
+        1-4, or 1-12 in sequential (``enable_sequential``) mode.
+        """
+        n = getattr(request, "n", 1)
+        if not isinstance(n, int):
+            return
+        model = request.model or ""
+        if model.startswith("qwen-image"):
+            maximum = 6
+        elif model.startswith("wan"):
+            maximum = 12 if request.extra.get("enable_sequential") else 4
+        else:
+            return
+        if not 1 <= n <= maximum:
+            raise ValidationError(
+                message=f"{model} supports n between 1 and {maximum}",
+                code="invalid_request_error",
+                status_code=400,
+            )
+
+    def _dashscope_generation_images(self, request: InternalImageRequest) -> list[str]:
+        """Reference images from the top-level ``image`` / ``images`` extension.
+
+        DashScope's OpenAI-compatible generations endpoint takes ``image`` as a
+        public URL, a base64 data URL, or an array of either; omitting it means
+        text-to-image. Values pass through verbatim — the native API accepts the
+        same encodings.
+        """
+        raw = request.extra.get("image")
+        if raw is None:
+            raw = request.extra.get("images")
+        if raw is None:
+            return []
+        values = [raw] if isinstance(raw, str) else raw
+        if not isinstance(values, list):
+            raise ValidationError(
+                message="image must be a string or an array of strings",
+                code="invalid_request_error",
+                status_code=400,
+            )
+        sources: list[str] = []
+        for value in values:
+            if not isinstance(value, str) or not value:
+                raise ValidationError(
+                    message=(
+                        "image entries must be public image URLs or base64 data URLs, "
+                        "not objects or empty strings"
+                    ),
+                    code="invalid_request_error",
+                    status_code=400,
+                )
+            sources.append(value)
+        return sources
+
     def _build_dashscope_image_body(
         self,
         model: str,
@@ -171,24 +340,37 @@ class QwenAdapter(NativePassthroughChatBase):
         images: list[str] | None = None,
         request: InternalImageRequest | InternalImageEditRequest,
     ) -> dict[str, Any]:
-        """Build the wanx generation body (single-turn messages shape).
+        """Build the DashScope image task body (single-turn messages shape).
 
         ``request.extra`` keys (``seed``, ``watermark``, ``thinking_mode``,
-        ``color_palette``, ``bbox_list``, ``enable_sequential``, ...) are
-        merged into ``parameters`` — the wanx parameter namespace.
+        ``color_palette``, ``bbox_list``, ``enable_sequential``, ...) are merged
+        into ``parameters`` — the DashScope parameter namespace. The
+        ``_CONTENT_EXTRA_KEYS`` reference images are excluded: they belong in the
+        message content, not in ``parameters``.
         """
         content: list[dict[str, Any]] = []
         if images:
             content.extend({"image": url} for url in images)
         content.append({"text": prompt})
         parameters: dict[str, Any] = {}
+        # DashScope's sequential (multi-panel) mode defaults to n=12, so an
+        # omitted n would silently over-deliver against the OpenAI default of 1.
+        # Every other mode defaults to 1 and older image models reject an
+        # explicit n, so n is only sent when it differs from that default or
+        # when the mode's own default does.
         n = getattr(request, "n", 1)
-        if n and n > 1:
+        if n and (n > 1 or request.extra.get("enable_sequential")):
             parameters["n"] = n
         size = self._dashscope_image_size(request)
         if size:
             parameters["size"] = size
-        parameters.update(request.extra)
+        parameters.update(
+            {
+                key: value
+                for key, value in request.extra.items()
+                if key not in self._CONTENT_EXTRA_KEYS
+            }
+        )
         body: dict[str, Any] = {
             "model": model,
             "input": {"messages": [{"role": "user", "content": content}]},
@@ -295,7 +477,13 @@ class QwenAdapter(NativePassthroughChatBase):
     async def image_generation(
         self, request: InternalImageRequest, **kwargs: Any
     ) -> InternalImageResponse:
-        body = self._build_dashscope_image_body(request.model, request.prompt, request=request)
+        self._validate_dashscope_image_n(request)
+        body = self._build_dashscope_image_body(
+            request.model,
+            request.prompt,
+            images=self._dashscope_generation_images(request),
+            request=request,
+        )
         task_id = await self._submit_image_task(body)
         return self._parse_image_task_result(await self._poll_image_task(task_id), request.model)
 
@@ -353,6 +541,7 @@ class QwenAdapter(NativePassthroughChatBase):
     async def image_edit(
         self, request: InternalImageEditRequest, **kwargs: Any
     ) -> InternalImageResponse:
+        self._validate_dashscope_image_n(request)
         images = self._dashscope_edit_images(request)
         body = self._build_dashscope_image_body(
             request.model, request.prompt, images=images, request=request

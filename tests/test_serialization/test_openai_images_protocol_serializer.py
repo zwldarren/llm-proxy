@@ -81,6 +81,30 @@ class TestImageGenerationsProtocolSerializer:
         assert result.background == "transparent"
         assert result.output_format == "png"
         assert result.moderation == "low"
+        assert result.extra == {}
+
+    def test_parse_request_provider_extension_fields_ride_extra(self):
+        """Unknown body keys become ``extra`` so adapters can forward them."""
+        serializer = get_protocol_serializer("image_generations")
+        result = serializer.parse_request(
+            {
+                "prompt": "Test",
+                "model": "qwen-image-3.0-pro",
+                "image": ["https://example.com/a.png"],
+                "prompt_extend": True,
+                "negative_prompt": "blurry",
+                "seed": 7,
+                "omitted": None,
+            }
+        )
+        # ``None`` values are dropped: an explicit null is not equivalent to an
+        # omitted field in the upstream parameter blocks adapters merge into.
+        assert result.extra == {
+            "image": ["https://example.com/a.png"],
+            "prompt_extend": True,
+            "negative_prompt": "blurry",
+            "seed": 7,
+        }
 
     def test_format_response_basic(self):
         """format_response converts InternalImageResponse to wire dict."""

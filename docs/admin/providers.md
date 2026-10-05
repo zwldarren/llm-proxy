@@ -139,6 +139,44 @@ of its request shapes intact:
   lookup is an exact name match — register each variant you want to expose as
   its own model, or route to it with a model alias.
 
+### Qwen (Model Studio / DashScope) specifics
+
+Two provider types cover the region-bound DashScope domains: `qwen` (Beijing,
+`dashscope.aliyuncs.com`) and `qwen-intl` (Singapore, `dashscope-intl.aliyuncs.com`).
+API keys are region-bound, so an international key only works with `qwen-intl` and
+vice versa. Business-space dedicated domains
+(`https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/…`) work through the provider
+**Base URL** field.
+
+- **Native protocols.** Anthropic Messages (`{host}/apps/anthropic/v1/messages`) and
+  OpenAI Responses (`{base_url}/responses`) are forwarded verbatim, so Claude Code
+  request shapes, `cache_control` breakpoints and Responses items reach DashScope
+  unchanged. The Anthropic endpoint exposes only `/v1/messages` — there is no
+  model-list endpoint, so clients that probe `/v1/models` see a 404 from upstream.
+- **Chat vendor fields.** Unrecognized chat fields pass through to DashScope, so
+  `enable_thinking`, `thinking_budget`, `enable_search`, `search_options`,
+  `tool_stream` and `enable_code_interpreter` work from a client's `extra_body`.
+- **Images.** Wan and Qwen-Image both run through the DashScope async task API.
+  DashScope's image extension fields are accepted and forwarded, flat on the body:
+  `image` (URL / base64 / array, turning the call into image-to-image),
+  `negative_prompt`, `seed`, `prompt_extend`, `prompt_extend_mode`,
+  `enable_thinking`, `watermark`, and on edits `bbox_list`, `color_palette`,
+  `enable_sequential`, `thinking_mode`. There is no mask concept — pass `bbox_list`
+  instead.
+- **Embeddings.** `text-embedding-v1..v4` and `qwen3.7-text-embedding` ride
+  `{base_url}/embeddings`. `dimensions` is validated against DashScope's documented
+  value set, and per-request row caps (20 for `qwen3.7-text-embedding`, 10 for
+  v3/v4, 25 for v1/v2) are enforced at the proxy.
+- **No audio.** DashScope has no OpenAI-compatible audio surface. Speech synthesis
+  (Qwen-TTS, CosyVoice) uses the native
+  `/api/v1/services/aigc/multimodal-generation/generation` endpoint, and
+  OpenAI-compatible ASR (`qwen3-asr-flash`) is `/chat/completions` with `input_audio`
+  content parts. `/v1/audio/*` against a qwen provider is rejected with a `400`.
+- **Web search.** DashScope's Responses API has its own `web_search` /
+  `web_extractor` / `code_interpreter` tools. Set provider metadata
+  `native_web_search: true` to let `web_search` tools reach it; otherwise the proxy
+  intercepts them and runs its own web search.
+
 ## Verifying a provider
 
 - `GET /api/config/providers/{name}/models` queries the upstream

@@ -4527,8 +4527,8 @@
         "title": "HTTPValidationError"
       },
       "ImageEditRequestSchema": {
-        "additionalProperties": false,
-        "description": "Request model for OpenAI-compatible image edits.",
+        "additionalProperties": true,
+        "description": "Request model for OpenAI-compatible image edits.\n\nUnknown keys are accepted and forwarded to the provider as\n``InternalImageEditRequest.extra`` (see\n``ImageGenerationRequestSchema`` for the rationale).",
         "properties": {
           "prompt": {
             "description": "Text description of the edit to apply",
@@ -4628,7 +4628,7 @@
           "n": {
             "anyOf": [
               {
-                "maximum": 10,
+                "maximum": 12,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -4637,7 +4637,7 @@
               }
             ],
             "default": null,
-            "description": "Number of images to generate (1-10)",
+            "description": "Number of images to generate (1-12)",
             "title": "N"
           },
           "output_compression": {
@@ -4827,8 +4827,8 @@
         "description": "Hosted image-generation call item."
       },
       "ImageGenerationRequestSchema": {
-        "additionalProperties": false,
-        "description": "Request model for OpenAI-compatible image generation.",
+        "additionalProperties": true,
+        "description": "Request model for OpenAI-compatible image generation.\n\nUnknown keys are accepted and forwarded to the provider as\n``InternalImageRequest.extra``: OpenAI-compatible image upstreams document\nvendor extension fields at the request-body top level (DashScope's\n``image``, ``prompt_extend``, ``negative_prompt``, ``seed``, ``watermark``,\n...), and the OpenAI SDK has no `extra_body` for images.",
         "properties": {
           "prompt": {
             "description": "Text description of the desired image(s)",
@@ -4851,7 +4851,7 @@
           "n": {
             "anyOf": [
               {
-                "maximum": 10,
+                "maximum": 12,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -4860,7 +4860,7 @@
               }
             ],
             "default": null,
-            "description": "Number of images to generate (1-10)",
+            "description": "Number of images to generate (1-12)",
             "title": "N"
           },
           "quality": {

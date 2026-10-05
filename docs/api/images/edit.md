@@ -9,7 +9,9 @@ Edit (or extend) an existing image with a text prompt — JSON body referencing
 uploaded files, or multipart with raw image files.
 
 ::: endpoint POST /v1/images/edits
-JSON or multipart. Strict schema: unknown fields return **400** `invalid_request_error`.
+JSON or multipart. Unrecognized fields are forwarded to the provider as extension
+parameters rather than rejected — see
+[Vendor extension fields](create.md#vendor-extension-fields).
 :::
 
 ```bash [Request — multipart]
@@ -49,7 +51,11 @@ print(img.data[0].url)
 `images` (1–16 entries with `file_id` or `image_url`), optional `mask`
 (`file_id`/`image_url`), plus `prompt`, `model`, `n`, `size`, `quality`,
 `response_format`, `user`, `background`, `input_fidelity`, `moderation`,
-`output_compression`, `output_format`, `partial_images`, `stream`.
+`output_compression`, `output_format`, `partial_images`, `stream`. Unknown fields
+reach the provider as extension parameters (see
+[Vendor extension fields](create.md#vendor-extension-fields)); for `qwen`/`qwen-intl`
+those include `watermark`, `seed`, `bbox_list`, `color_palette` and
+`enable_sequential`.
 
 ## Multipart
 

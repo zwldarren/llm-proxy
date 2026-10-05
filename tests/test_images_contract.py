@@ -28,7 +28,24 @@ def test_generation_accepts_auto_size_and_rejects_invalid_values():
     with pytest.raises(PydanticValidationError):
         ImageGenerationRequestSchema.model_validate({"prompt": "cat", "n": 0})
     with pytest.raises(PydanticValidationError):
-        ImageGenerationRequestSchema.model_validate({"prompt": "cat", "unknown": True})
+        ImageGenerationRequestSchema.model_validate({"prompt": "cat", "n": 13})
+
+
+def test_generation_accepts_provider_extension_fields():
+    """Vendor extension fields are not rejected by the request schema.
+
+    OpenAI-compatible image upstreams document extra fields flat on the body
+    (DashScope's ``image`` for image-to-image, ``prompt_extend``,
+    ``negative_prompt``, ``seed``, ``watermark``), and the OpenAI SDK exposes no
+    ``extra_body`` for images.
+    """
+    request = ImageGenerationRequestSchema.model_validate(
+        {"prompt": "cat", "image": "https://example.com/a.png", "prompt_extend": True}
+    )
+    assert request.model_extra == {
+        "image": "https://example.com/a.png",
+        "prompt_extend": True,
+    }
 
 
 def test_edit_requires_at_least_one_json_image():

@@ -49,8 +49,8 @@ fields.
 
 ## Provider support
 
-`openai` and the `openai-compatible` family — see the
-[capability matrix](../endpoints.md#capability-matrix).
+`openai` and the `openai-compatible` family (except `qwen`/`qwen-intl`, which
+reject the route) — see the [capability matrix](../endpoints.md#capability-matrix).
 
 ## Related
 

@@ -71,8 +71,10 @@ SSE; the proxy adds `include[]=usage` upstream automatically.
 
 ## Provider support
 
-`openai`, the `openai-compatible` family, `gemini` (native STT), and `openrouter`
-(STT) — see the [capability matrix](../endpoints.md#capability-matrix).
+`openai`, the `openai-compatible` family (except `qwen`/`qwen-intl`, whose
+OpenAI-compatible ASR surface is `/chat/completions` with `input_audio` instead),
+`gemini` (native STT), and `openrouter` (STT) — see the
+[capability matrix](../endpoints.md#capability-matrix).
 
 ## Related
 

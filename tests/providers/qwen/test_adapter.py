@@ -580,3 +580,148 @@ class TestImageEdit:
         )
         with pytest.raises(ValidationError):
             adapter._dashscope_edit_images(request)
+
+
+class TestImageExtensionFields:
+    """DashScope's OpenAI-compatible extension fields ride ``request.extra``."""
+
+    @pytest.mark.asyncio
+    async def test_reference_images_become_content_entries(self, adapter, mock_response_cls):
+        adapter.IMAGE_TASK_POLL_INTERVAL = 0
+        request = InternalImageRequest(
+            model="wan2.7-image-pro",
+            prompt="repaint the car",
+            extra={
+                "image": ["https://img.example.com/car.webp"],
+                "watermark": True,
+                "seed": 7,
+            },
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            return_value=mock_response_cls(
+                json_data={"output": {"task_status": "PENDING", "task_id": "t1"}}
+            )
+        )
+        mock_client.get = AsyncMock(
+            return_value=mock_response_cls(
+                json_data={
+                    "output": {
+                        "task_status": "SUCCEEDED",
+                        "choices": [{"message": {"content": [{"image": "https://x/out.png"}]}}],
+                    }
+                }
+            )
+        )
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            result = await adapter.image_generation(request)
+
+        sent = mock_client.post.call_args.kwargs["json"]
+        assert sent["input"]["messages"][0]["content"] == [
+            {"image": "https://img.example.com/car.webp"},
+            {"text": "repaint the car"},
+        ]
+        # ``image`` is content, not a parameter; the rest still reaches parameters.
+        assert sent["parameters"] == {"watermark": True, "seed": 7}
+        assert result.data[0].url == "https://x/out.png"
+
+    def test_scalar_image_extension_is_accepted(self, adapter):
+        request = InternalImageRequest(
+            model="qwen-image-3.0-pro", prompt="x", extra={"image": "https://x/a.png"}
+        )
+        assert adapter._dashscope_generation_images(request) == ["https://x/a.png"]
+
+    def test_text_to_image_has_no_reference_images(self, adapter):
+        request = InternalImageRequest(model="qwen-image-3.0-pro", prompt="x")
+        assert adapter._dashscope_generation_images(request) == []
+
+    def test_non_string_image_entry_is_rejected(self, adapter):
+        request = InternalImageRequest(
+            model="qwen-image-3.0-pro", prompt="x", extra={"image": [{"url": "x"}]}
+        )
+        with pytest.raises(ValidationError):
+            adapter._dashscope_generation_images(request)
+
+    def test_sequential_mode_sends_an_explicit_n(self, adapter):
+        # DashScope's sequential (multi-panel) mode defaults to 12 images, so an
+        # omitted n would over-deliver against the OpenAI default of 1.
+        request = InternalImageRequest(
+            model="wan2.7-image-pro", prompt="x", n=1, extra={"enable_sequential": True}
+        )
+        body = adapter._build_dashscope_image_body(request.model, request.prompt, request=request)
+        assert body["parameters"] == {"enable_sequential": True, "n": 1}
+
+    def test_default_n_is_not_sent(self, adapter):
+        request = InternalImageRequest(model="wan2.7-image-pro", prompt="x")
+        body = adapter._build_dashscope_image_body(request.model, request.prompt, request=request)
+        assert "parameters" not in body
+
+
+class TestImageNValidation:
+    def test_qwen_image_caps_at_six(self, adapter):
+        request = InternalImageRequest(model="qwen-image-3.0-pro", prompt="x", n=7)
+        with pytest.raises(ValidationError):
+            adapter._validate_dashscope_image_n(request)
+        request.n = 6
+        adapter._validate_dashscope_image_n(request)
+
+    def test_wan_caps_at_four_unless_sequential(self, adapter):
+        request = InternalImageRequest(model="wan2.7-image-pro", prompt="x", n=5)
+        with pytest.raises(ValidationError):
+            adapter._validate_dashscope_image_n(request)
+        request.extra["enable_sequential"] = True
+        adapter._validate_dashscope_image_n(request)
+
+    def test_unknown_model_family_is_left_to_upstream(self, adapter):
+        request = InternalImageRequest(model="z-image-turbo", prompt="x", n=12)
+        adapter._validate_dashscope_image_n(request)
+
+
+class TestUnsupportedAudioEndpoints:
+    def test_audio_endpoints_are_blank(self, adapter):
+        assert adapter.SPEECH_ENDPOINT == ""
+        assert adapter.TRANSCRIPTION_ENDPOINT == ""
+        assert adapter.TRANSLATION_ENDPOINT == ""
+
+    @pytest.mark.parametrize("method", ["_speech_url", "_transcription_url", "_translation_url"])
+    def test_audio_urls_raise_a_clear_400(self, adapter, method):
+        with pytest.raises(ValidationError) as excinfo:
+            getattr(adapter, method)()
+        assert "does not serve" in str(excinfo.value)
+        assert excinfo.value.status_code == 400
+
+
+class TestEmbeddingValidation:
+    def test_dimensions_are_whitelisted(self, adapter):
+        adapter._validate_embedding_request(
+            InternalEmbeddingRequest(model="text-embedding-v4", input="x", dimensions=2048)
+        )
+        with pytest.raises(ValidationError) as excinfo:
+            adapter._validate_embedding_request(
+                InternalEmbeddingRequest(model="text-embedding-v4", input="x", dimensions=3000)
+            )
+        assert "Invalid dimensions" in str(excinfo.value)
+
+    def test_batch_cap_depends_on_model_family(self, adapter):
+        rows = [f"row-{i}" for i in range(11)]
+        with pytest.raises(ValidationError) as excinfo:
+            adapter._validate_embedding_request(
+                InternalEmbeddingRequest(model="text-embedding-v4", input=rows)
+            )
+        assert "at most 10 input rows" in str(excinfo.value)
+        # qwen3.7-text-embedding documents a 20-row cap, so 11 rows is fine.
+        adapter._validate_embedding_request(
+            InternalEmbeddingRequest(model="qwen3.7-text-embedding", input=rows)
+        )
+
+    def test_unknown_model_family_is_left_to_upstream(self, adapter):
+        adapter._validate_embedding_request(
+            InternalEmbeddingRequest(model="custom-embed", input=[str(i) for i in range(50)])
+        )
+
+    @pytest.mark.asyncio
+    async def test_embeddings_validates_before_calling_upstream(self, adapter):
+        with pytest.raises(ValidationError):
+            await adapter.embeddings(
+                InternalEmbeddingRequest(model="text-embedding-v4", input="x", dimensions=3000)
+            )

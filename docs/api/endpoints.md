@@ -47,13 +47,21 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Chat | All types |
 | Embeddings | `openai`, the `openai-compatible` family (including DeepSeek, Kimi, MiniMax, Moonshot, Qwen, xAI, vLLM, SGLang, Chutes, Mistral, NanoGPT, OpenRouter), `gemini`, `ollama` |
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
-| Audio (speech, STT) | `openai`, the `openai-compatible` family, `gemini` (native TTS/STT), `openrouter` (STT) |
-| Audio (translation) | `openai`, the `openai-compatible` family, `gemini`. `openrouter` has no upstream endpoint and rejects the request |
+| Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `openrouter` (STT) |
+| Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |
 | System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold), `ollama` (local models, v0.35+). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
 
 The dedicated `anthropic` provider type is chat-only. The `typesafe` provider
 type is System One-only — assign it to models that serve `/v1/systemone`, and
 note that chat requests against such a model are rejected with a `400`.
+
+`qwen`/`qwen-intl` serve no `/audio/*` route: DashScope has no OpenAI-compatible
+audio surface. Speech synthesis (Qwen-TTS, CosyVoice) uses the native
+`/api/v1/services/aigc/multimodal-generation/generation` endpoint, and
+OpenAI-compatible speech recognition (`qwen3-asr-flash`) is called through
+`/chat/completions` with `input_audio` content parts. Audio requests against a
+qwen model are rejected with a `400` `invalid_request_error` naming the
+limitation.
 
 Capability flags are additive: `supports_systemone` gates `/v1/systemone` and
 does not restrict the model's chat service, so a model can serve both when its

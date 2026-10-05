@@ -53,7 +53,8 @@ Content-Type: audio/mpeg
 
 ## Provider support
 
-`openai`, the `openai-compatible` family, and `gemini` (native TTS) — see the
+`openai`, the `openai-compatible` family (except `qwen`/`qwen-intl`, which have no
+upstream speech endpoint), and `gemini` (native TTS) — see the
 [capability matrix](../endpoints.md#capability-matrix).
 
 ## Related

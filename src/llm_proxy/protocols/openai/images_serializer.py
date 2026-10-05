@@ -35,6 +35,26 @@ class BaseOpenAIImagesSerializer(ProtocolSerializer):
     _SIZE_MAX_EDGE = 3840
     _SIZE_MAX_RATIO = 3
 
+    #: Fields the concrete serializer consumes explicitly. Every other key on
+    #: the request body is a provider extension field and rides
+    #: ``InternalImageRequest.extra`` / ``InternalImageEditRequest.extra`` to
+    #: the adapter (which merges it into the upstream body).
+    _KNOWN_FIELDS: frozenset[str] = frozenset()
+
+    @classmethod
+    def _parse_extra(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Collect provider extension fields (unknown keys) from the body.
+
+        ``None`` values are dropped: adapters merge ``extra`` straight into the
+        upstream request (e.g. DashScope's ``parameters`` block) and an explicit
+        null is not equivalent to an omitted field there.
+        """
+        return {
+            key: value
+            for key, value in data.items()
+            if key not in cls._KNOWN_FIELDS and value is not None
+        }
+
     @staticmethod
     def _validate_choice(value: Any, field: str, choices: frozenset[str]) -> str | None:
         if value is None:
@@ -215,6 +235,25 @@ class BaseOpenAIImagesSerializer(ProtocolSerializer):
 class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
     """Protocol serializer for /v1/images/generations."""
 
+    _KNOWN_FIELDS = frozenset(
+        {
+            "prompt",
+            "model",
+            "n",
+            "quality",
+            "response_format",
+            "size",
+            "style",
+            "user",
+            "background",
+            "moderation",
+            "output_format",
+            "output_compression",
+            "partial_images",
+            "stream",
+        }
+    )
+
     @property
     def protocol_name(self) -> str:
         return "image_generations"
@@ -244,7 +283,7 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
             model=data.get("model", ""),
             prompt=data.get("prompt", ""),
             stream=data.get("stream", False),
-            n=self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=10)
+            n=self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=12)
             or 1,
             size=size,
             size_auto=size_raw == "auto",
@@ -269,6 +308,7 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
                 minimum=0,
                 maximum=3,
             ),
+            extra=self._parse_extra(data),
         )
 
     def format_response(self, response: object, context=None) -> dict[str, Any]:
@@ -283,6 +323,27 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
 class ImageEditsSerializer(BaseOpenAIImagesSerializer):
     """Protocol serializer for /v1/images/edits."""
 
+    _KNOWN_FIELDS = frozenset(
+        {
+            "prompt",
+            "model",
+            "images",
+            "mask",
+            "background",
+            "input_fidelity",
+            "moderation",
+            "n",
+            "response_format",
+            "output_compression",
+            "output_format",
+            "partial_images",
+            "quality",
+            "size",
+            "user",
+            "stream",
+        }
+    )
+
     @property
     def protocol_name(self) -> str:
         return "image_edits"
@@ -291,7 +352,7 @@ class ImageEditsSerializer(BaseOpenAIImagesSerializer):
         size = self._parse_size(data.get("size"))
         size_raw = data.get("size")
 
-        n = self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=10) or 1
+        n = self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=12) or 1
         quality = self._validate_choice(
             data.get("quality"),
             "quality",
@@ -348,7 +409,7 @@ class ImageEditsSerializer(BaseOpenAIImagesSerializer):
             size=size,
             size_auto=size_raw == "auto",
             user=data.get("user"),
-            extra={},
+            extra=self._parse_extra(data),
         )
 
     def format_response(self, response: object, context=None) -> dict[str, Any]:

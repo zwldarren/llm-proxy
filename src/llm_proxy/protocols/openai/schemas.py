@@ -62,16 +62,23 @@ class EmbeddingRequestSchema(BaseModel):
 
 
 class ImageGenerationRequestSchema(BaseModel):
-    """Request model for OpenAI-compatible image generation."""
+    """Request model for OpenAI-compatible image generation.
 
-    model_config = ConfigDict(extra="forbid")
+    Unknown keys are accepted and forwarded to the provider as
+    ``InternalImageRequest.extra``: OpenAI-compatible image upstreams document
+    vendor extension fields at the request-body top level (DashScope's
+    ``image``, ``prompt_extend``, ``negative_prompt``, ``seed``, ``watermark``,
+    ...), and the OpenAI SDK has no `extra_body` for images.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     prompt: str = Field(..., description="Text description of the desired image(s)")
     model: str | None = Field(
         None,
         description="Model to use for image generation (defaults to dall-e-2)",
     )
-    n: int | None = Field(None, ge=1, le=10, description="Number of images to generate (1-10)")
+    n: int | None = Field(None, ge=1, le=12, description="Number of images to generate (1-12)")
     # GPT Image 2.5 models add the "xhigh" and "max" quality tiers.
     quality: Literal["standard", "hd", "low", "medium", "high", "xhigh", "max", "auto"] | None = (
         Field(
@@ -119,9 +126,14 @@ class ImageGenerationRequestSchema(BaseModel):
 
 
 class ImageEditRequestSchema(BaseModel):
-    """Request model for OpenAI-compatible image edits."""
+    """Request model for OpenAI-compatible image edits.
 
-    model_config = ConfigDict(extra="forbid")
+    Unknown keys are accepted and forwarded to the provider as
+    ``InternalImageEditRequest.extra`` (see
+    ``ImageGenerationRequestSchema`` for the rationale).
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     prompt: str = Field(..., description="Text description of the edit to apply")
     model: str | None = Field(None, description="Model to use for image editing")
@@ -136,7 +148,7 @@ class ImageEditRequestSchema(BaseModel):
     moderation: Literal["low", "auto"] | None = Field(
         None, description="Content moderation level (e.g., low, auto)"
     )
-    n: int | None = Field(None, ge=1, le=10, description="Number of images to generate (1-10)")
+    n: int | None = Field(None, ge=1, le=12, description="Number of images to generate (1-12)")
     output_compression: int | None = Field(
         None, ge=0, le=100, description="Compression level 0-100%"
     )
