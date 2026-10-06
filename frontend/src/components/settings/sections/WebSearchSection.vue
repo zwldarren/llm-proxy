@@ -27,6 +27,21 @@ const { t } = useI18n();
 
 const { state, pending, error } = useAutoSaveRefs(props.autoSave);
 
+const OLLAMA_DEFAULT_BASE_URL = "https://ollama.com";
+
+/**
+ * A blank base URL is stored verbatim and used to build the request URL, which
+ * then becomes a relative "/api/web_search" and fails before any network call.
+ * Restore the default when the field is left empty (the backend enforces the
+ * same rule on load, so an old blank value heals itself too).
+ */
+function restoreDefaultBaseUrl() {
+  const ollama = state.value.ollama;
+  if (ollama && !(ollama.base_url ?? "").trim()) {
+    ollama.base_url = OLLAMA_DEFAULT_BASE_URL;
+  }
+}
+
 // Lazily create the per-provider config object the first time a provider is
 // selected, so the form below has a defined object to bind against.
 watch(
@@ -42,7 +57,7 @@ watch(
     if (provider === "ollama" && !state.value.ollama) {
       state.value.ollama = {
         api_key: "",
-        base_url: "https://ollama.com",
+        base_url: OLLAMA_DEFAULT_BASE_URL,
         timeout: 30,
         max_results: 10,
       };
@@ -200,6 +215,7 @@ watch(
               v-model="state.ollama.base_url"
               :placeholder="t('settings.ollama.baseUrlPlaceholder')"
               class="font-mono text-sm w-full bg-background"
+              @blur="restoreDefaultBaseUrl"
             />
           </div>
 

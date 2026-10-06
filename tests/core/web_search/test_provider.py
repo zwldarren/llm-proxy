@@ -567,6 +567,26 @@ class TestOllamaProvider:
         """Create an Ollama provider instance."""
         return OllamaProvider(ollama_config)
 
+    def test_blank_base_url_falls_back_to_the_hosted_default(self):
+        """A blank base URL would build a relative request URL.
+
+        The settings form binds the field directly, so clearing it stores an
+        empty string. Used verbatim that yields ``/api/web_search`` and fails
+        before any network call, reporting a confusing search error instead of
+        the real cause.
+        """
+        config = OllamaConfig(api_key="key", base_url="")
+
+        assert config.base_url == "https://ollama.com"
+        assert OllamaProvider(config)._base_url == "https://ollama.com"
+
+    def test_whitespace_base_url_falls_back_to_the_hosted_default(self):
+        assert OllamaConfig(api_key="key", base_url="   ").base_url == "https://ollama.com"
+
+    def test_custom_base_url_is_preserved(self):
+        config = OllamaConfig(api_key="key", base_url="http://localhost:11434")
+        assert config.base_url == "http://localhost:11434"
+
     @pytest.mark.asyncio
     async def test_search_success(self, ollama_provider):
         """Test successful search."""

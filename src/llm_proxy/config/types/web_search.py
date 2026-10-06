@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+DEFAULT_OLLAMA_BASE_URL = "https://ollama.com"
 
 
 class SearXNGConfig(BaseModel):
@@ -30,11 +32,22 @@ class OllamaConfig(BaseModel):
         ..., description="Ollama API key for web search (from https://ollama.com/settings/keys)"
     )
     base_url: str = Field(
-        "https://ollama.com",
+        DEFAULT_OLLAMA_BASE_URL,
         description="Ollama API base URL",
     )
     timeout: float = Field(30.0, description="Request timeout in seconds")
     max_results: int = Field(10, ge=1, le=10, description="Maximum number of results to return")
+
+    @field_validator("base_url")
+    @classmethod
+    def _default_blank_base_url(cls, value: str) -> str:
+        """Use the hosted default when the field is blank or whitespace.
+
+        The settings form binds this field directly, so clearing it stores an
+        empty string; used verbatim that builds a relative request URL
+        (``/api/web_search``) which fails before any network call.
+        """
+        return (value or "").strip() or DEFAULT_OLLAMA_BASE_URL
 
 
 class WebSearchConfig(BaseModel):
