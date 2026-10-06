@@ -27,6 +27,20 @@ def mock_langfuse_cls():
 
 
 @pytest.fixture
+def mock_propagate():
+    """Patch ``propagate_attributes`` so trace-level attributes can be asserted.
+
+    The SDK's real function attaches OpenTelemetry baggage and needs an active
+    span; the handler passes user/session/trace-name through it instead of the
+    (silently ignored) ``observation.update(trace_user_id=...)`` kwargs.
+    """
+    with patch(
+        "llm_proxy.observability.tracing.handlers.providers.langfuse.handler.propagate_attributes"
+    ) as propagate:
+        yield propagate
+
+
+@pytest.fixture
 def mock_client(mock_langfuse_cls):
     """Return a mock Langfuse client instance."""
     client = MagicMock()
@@ -114,6 +128,34 @@ class TestLangfuseTracingHandler:
         LangfuseTracingHandler.create_handler(settings)
         assert mock_langfuse_cls.call_args.kwargs["timeout"] == 30
 
+    def test_create_handler_scopes_sample_rate_to_a_project_provider(
+        self, mock_client, mock_langfuse_cls
+    ):
+        """A sub-1.0 rate must not land on the process-wide sampler."""
+        settings = {"public_key": "pk-sampled", "secret_key": "sk-test", "sample_rate": 0.5}
+        LangfuseTracingHandler.create_handler(settings)
+        first_provider = mock_langfuse_cls.call_args.kwargs["tracer_provider"]
+        assert first_provider is not None
+        assert mock_langfuse_cls.call_args.kwargs["sample_rate"] == 0.5
+
+        # A rebuild for the same project reuses the provider (no leaked thread).
+        LangfuseTracingHandler.create_handler(settings)
+        assert mock_langfuse_cls.call_args.kwargs["tracer_provider"] is first_provider
+
+    def test_create_handler_keeps_default_provider_at_full_rate(
+        self, mock_client, mock_langfuse_cls
+    ):
+        LangfuseTracingHandler.create_handler(
+            {"public_key": "pk-full", "secret_key": "sk-test", "sample_rate": 1.0}
+        )
+        assert "tracer_provider" not in mock_langfuse_cls.call_args.kwargs
+
+    def test_create_handler_rejects_invalid_sample_rate(self, mock_langfuse_cls):
+        with pytest.raises(ValueError, match="sample_rate"):
+            LangfuseTracingHandler.create_handler(
+                {"public_key": "pk", "secret_key": "sk", "sample_rate": 1.5}
+            )
+
     def test_missing_public_key_raises(self):
         settings = {"secret_key": "sk-test"}
         with pytest.raises(ValueError, match="public_key"):
@@ -180,7 +222,7 @@ class TestLangfuseTracingHandler:
         handler = LangfuseTracingHandler.create_handler(settings)
         assert handler.name == "my-langfuse"
 
-    async def test_on_request_start_creates_generation(self, mock_client):
+    async def test_on_request_start_creates_generation(self, mock_client, mock_propagate):
         settings = {"public_key": "pk-test", "secret_key": "sk-test"}
         handler = LangfuseTracingHandler.create_handler(settings)
 
@@ -205,10 +247,72 @@ class TestLangfuseTracingHandler:
         assert call_kwargs["name"] == "chat completions"
         assert call_kwargs["model"] == "gpt-4"
         assert call_kwargs["end_on_exit"] is False
+        # "trace-1" is not a 32-char hex Langfuse trace id, so the generated id
+        # is left to the SDK rather than handed to it (it would raise).
+        assert call_kwargs["trace_context"] is None
         assert isinstance(call_kwargs["input"], list)
+
+        # Trace-level attributes must go through propagate_attributes: SDK v4
+        # ignores them as observation.update() kwargs.
+        propagate_kwargs = mock_propagate.call_args.kwargs
+        assert propagate_kwargs["trace_name"] == "chat completions"
+        assert propagate_kwargs["user_id"] == "user-42"
+        assert propagate_kwargs["session_id"] == "session-42"
 
         assert handler.get_trace_id() == "trace-123"
         assert handler.get_observation_id() == "obs-456"
+
+    async def test_on_request_start_links_caller_trace_id(self, mock_client, mock_propagate):
+        """A caller-supplied x-langfuse-trace-id nests the observation in its trace."""
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_request_with_conversation()
+        context = EventContext(
+            request_id="req-1",
+            trace_id="0123456789abcdef0123456789abcdef",
+            model="gpt-4",
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(request, context)
+
+        call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
+        assert call_kwargs["trace_context"] == {"trace_id": "0123456789abcdef0123456789abcdef"}
+
+    async def test_on_stream_end_still_closes_a_released_generation(
+        self, mock_client, mock_propagate
+    ):
+        """A config change mid-request must not lose the in-flight trace.
+
+        Registry invalidation calls ``release()`` (flush) rather than
+        ``shutdown()``; the handler dropped from the registry must still end the
+        generation it created, otherwise the span is never exported.
+        """
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_request_with_conversation()
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(request, context)
+        await handler.release()
+        await handler.on_stream_end(request, context)
+
+        gen.end.assert_called_once()
+        mock_client.flush.assert_called_once()
+        mock_client.shutdown.assert_not_called()
 
     async def test_on_request_end_updates_generation(self, mock_client):
         settings = {"public_key": "pk-test", "secret_key": "sk-test"}
@@ -381,24 +485,55 @@ class TestLangfuseSDKDataBuilders:
         details = build_usage_details(context)
         assert details == {"input": 5, "output": 10, "total": 15}
 
-    def test_build_usage_details_with_cache_and_audio(self):
+    def test_build_usage_details_are_exclusive_buckets(self):
+        """Cache/audio/reasoning details are subtracted from input/output.
+
+        Langfuse treats each usage key as a mutually exclusive bucket; passing an
+        inclusive input plus its detail keys double-counts (and double-prices)
+        the tokens.
+        """
         context = EventContext(
             request_id="req-1",
             trace_id="trace-1",
             model="gpt-4",
-            prompt_tokens=5,
-            completion_tokens=10,
-            total_tokens=15,
-            cache_read_input_tokens=2,
-            audio_input_tokens=1,
-            audio_output_tokens=1,
-            reasoning_tokens=3,
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            cache_read_input_tokens=30,
+            cache_creation_input_tokens=10,
+            audio_input_tokens=5,
+            audio_output_tokens=4,
+            reasoning_tokens=20,
         )
         details = build_usage_details(context)
-        assert details["cache_read_input_tokens"] == 2
-        assert details["audio_input_tokens"] == 1
-        assert details["audio_output_tokens"] == 1
-        assert details["reasoning_tokens"] == 3
+        assert details["input"] == 55  # 100 - 30 - 10 - 5
+        assert details["output"] == 26  # 50 - 4 - 20
+        assert details["total"] == 150
+        assert details["cache_read_input_tokens"] == 30
+        assert details["cache_creation_input_tokens"] == 10
+        assert details["input_audio_tokens"] == 5
+        assert details["output_audio_tokens"] == 4
+        assert details["output_reasoning_tokens"] == 20
+
+    def test_build_usage_details_reads_canonical_cache_fields(self):
+        """Dialect aliases are normalized at capture time; tracing reads canonical
+        ``cache_read_input_tokens`` only (CONTEXT.md "Canonical usage record")."""
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            prompt_tokens=100,
+            completion_tokens=10,
+            total_tokens=110,
+            cache_read_input_tokens=25,
+        )
+        details = build_usage_details(context)
+        assert details["cache_read_input_tokens"] == 25
+        assert details["input"] == 75
+
+    def test_build_usage_details_none_without_token_data(self):
+        context = EventContext(request_id="req-1", trace_id="trace-1", model="gpt-4")
+        assert build_usage_details(context) is None
 
     def test_build_cost_details(self):
         context = EventContext(
@@ -409,8 +544,13 @@ class TestLangfuseSDKDataBuilders:
             provider_reported_cost=0.0015,
         )
         details = build_cost_details(context)
-        assert details["total"] == 0.002
-        assert details["provider_reported"] == 0.0015
+        # Only the proxy-computed total is a real cost bucket; the
+        # provider-reported cost rides in metadata (see build_metadata).
+        assert details == {"total": 0.002}
+
+    def test_build_cost_details_none_without_cost(self):
+        context = EventContext(request_id="req-1", trace_id="trace-1", model="gpt-4")
+        assert build_cost_details(context) is None
 
     def test_build_metadata(self):
         context = EventContext(

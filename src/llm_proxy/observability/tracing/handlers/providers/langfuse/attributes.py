@@ -250,39 +250,67 @@ def build_response_output_data(response: InternalResponse) -> dict[str, Any] | N
 
 
 def build_usage_details(context: EventContext) -> dict[str, int] | None:
-    """Build Langfuse ``usage_details`` from token counts in the event context."""
+    """Build Langfuse ``usage_details`` as mutually exclusive buckets.
+
+    Langfuse treats every key as a non-overlapping bucket: ``input`` must exclude
+    ``input_*`` values and ``output`` must exclude ``output_*`` values, or the
+    tokens are counted (and priced) twice. The proxy's own token counts are
+    inclusive — ``prompt_tokens`` already contains cache reads/writes and audio
+    tokens, ``completion_tokens`` already contains reasoning and audio tokens —
+    so each detail is subtracted from ``input``/``output`` before being emitted
+    under its own bucket (see the Langfuse token & cost tracking contract).
+
+    Image tokens stay inside ``input``: Langfuse's image usage key varies by
+    model definition, so carving them out could silently price them at zero.
+    """
+    if not context.has_token_data():
+        return None
+
+    # Canonical fields only (CONTEXT.md "Canonical usage record"): dialect
+    # aliases are normalized into these at capture time.
+    cache_read = context.cache_read_input_tokens
+    cache_write = context.cache_creation_input_tokens
+    audio_in = context.audio_input_tokens
+    audio_out = context.audio_output_tokens
+    reasoning = context.reasoning_tokens
+
     details: dict[str, int] = {}
     if context.prompt_tokens is not None:
-        details["input"] = context.prompt_tokens
+        exclusive_input = context.prompt_tokens - (
+            (cache_read or 0) + (cache_write or 0) + (audio_in or 0)
+        )
+        details["input"] = max(exclusive_input, 0)
     if context.completion_tokens is not None:
-        details["output"] = context.completion_tokens
+        exclusive_output = context.completion_tokens - ((audio_out or 0) + (reasoning or 0))
+        details["output"] = max(exclusive_output, 0)
     if context.total_tokens is not None:
         details["total"] = context.total_tokens
 
-    # Include cache and audio token details when available so the Langfuse UI
-    # can display them alongside the standard input/output counts.
-    if context.cache_read_input_tokens is not None:
-        details["cache_read_input_tokens"] = context.cache_read_input_tokens
-    if context.cache_creation_input_tokens is not None:
-        details["cache_creation_input_tokens"] = context.cache_creation_input_tokens
-    if context.audio_input_tokens is not None:
-        details["audio_input_tokens"] = context.audio_input_tokens
-    if context.audio_output_tokens is not None:
-        details["audio_output_tokens"] = context.audio_output_tokens
-    if context.reasoning_tokens is not None:
-        details["reasoning_tokens"] = context.reasoning_tokens
+    if cache_read:
+        details["cache_read_input_tokens"] = cache_read
+    if cache_write:
+        details["cache_creation_input_tokens"] = cache_write
+    if audio_in:
+        details["input_audio_tokens"] = audio_in
+    if audio_out:
+        details["output_audio_tokens"] = audio_out
+    if reasoning:
+        details["output_reasoning_tokens"] = reasoning
 
     return details if details else None
 
 
 def build_cost_details(context: EventContext) -> dict[str, float] | None:
-    """Build Langfuse ``cost_details`` from cost data in the event context."""
-    details: dict[str, float] = {}
-    if context.cost_usd is not None:
-        details["total"] = context.cost_usd
-    if context.provider_reported_cost is not None:
-        details["provider_reported"] = context.provider_reported_cost
-    return details if details else None
+    """Build Langfuse ``cost_details`` from cost data in the event context.
+
+    Only ``total`` is emitted: the proxy computes a single USD total and does not
+    split it per usage bucket. The provider-reported cost is informational (it is
+    the same total when it wins cost precedence) and is carried in metadata
+    instead of as a phantom cost bucket.
+    """
+    if context.cost_usd is None:
+        return None
+    return {"total": context.cost_usd}
 
 
 def build_metadata(context: EventContext) -> dict[str, Any]:
@@ -313,6 +341,17 @@ def build_metadata(context: EventContext) -> dict[str, Any]:
         metadata["latency_ms"] = round(context.latency_ms, 3)
     if context.error_message:
         metadata["error_message"] = context.error_message
+
+    # Token/usage facts that are not emitted as ``usage_details`` buckets (see
+    # ``build_usage_details``) stay visible here.
+    if context.image_input_tokens is not None:
+        metadata["image_input_tokens"] = context.image_input_tokens
+    if context.cache_savings_usd is not None:
+        metadata["cache_savings_usd"] = context.cache_savings_usd
+    if context.provider_reported_cost is not None:
+        metadata["provider_reported_cost"] = context.provider_reported_cost
+    if context.provider_model_name:
+        metadata["provider_model_name"] = context.provider_model_name
 
     return metadata
 

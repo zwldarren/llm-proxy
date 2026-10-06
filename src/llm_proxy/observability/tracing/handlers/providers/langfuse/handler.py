@@ -9,10 +9,16 @@ async load.
 
 import asyncio
 import contextlib
+import re
+import threading
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from langfuse import Langfuse
+from langfuse import Langfuse, propagate_attributes
+from langfuse.types import TraceContext
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.logger import get_logger
@@ -35,6 +41,76 @@ if TYPE_CHECKING:
     from llm_proxy.observability.event_context import EventContext
 
 logger = get_logger(__name__)
+
+#: Langfuse trace ids are 32-char lowercase hex (an OTel trace id). Anything
+#: else (a proxy-generated UUID, an arbitrary correlation id) cannot be used as
+#: a ``trace_context`` and must not be handed to the SDK, which raises on it.
+_LANGFUSE_TRACE_ID_RE = re.compile(r"[0-9a-f]{32}\Z")
+
+#: Langfuse validates propagated string attributes (user_id, session_id,
+#: trace_name, tags): US-ASCII, at most 200 characters. Invalid values are
+#: dropped server-side with a warning, so drop them here instead.
+_MAX_PROPAGATED_ATTRIBUTE_LENGTH = 200
+
+
+def _sanitize_propagated_attribute(value: str | None) -> str | None:
+    """Return a value accepted by ``propagate_attributes``, or ``None``."""
+    if not value or len(value) > _MAX_PROPAGATED_ATTRIBUTE_LENGTH:
+        return None
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+    return value
+
+
+def _langfuse_trace_context(trace_id: str | None) -> TraceContext | None:
+    """Build the SDK ``trace_context`` for a caller-provided Langfuse trace id.
+
+    The proxy accepts ``x-langfuse-trace-id`` (or ``x-trace-id``) so a caller can
+    nest this request's observation inside the trace it already started. Only a
+    canonical 32-char lowercase hex id is usable; the SDK logs and then raises on
+    anything else, so non-Langfuse correlation ids are ignored.
+    """
+    if trace_id and _LANGFUSE_TRACE_ID_RE.match(trace_id):
+        return {"trace_id": trace_id}
+    return None
+
+
+@dataclass
+class _RequestState:
+    """Per-request Langfuse state stored in the handler's ContextVar.
+
+    Keeping this per-request (instead of a handler-wide set) means one request's
+    bookkeeping can never leak into another's under concurrent async load.
+    """
+
+    generation: Any
+    ttft_recorded: bool = False
+
+
+#: Per-project TracerProvider holding a configured sampling rate. The SDK installs
+#: a sampler on the process-wide OpenTelemetry TracerProvider, so two users on
+#: different Langfuse projects would otherwise share whichever rate was configured
+#: first (and the later project's rate would be silently ignored).
+_SAMPLED_TRACER_PROVIDERS: dict[str, TracerProvider] = {}
+_SAMPLED_TRACER_PROVIDERS_LOCK = threading.Lock()
+
+
+def _sampled_tracer_provider(public_key: str, sample_rate: float) -> TracerProvider:
+    """Return the process-wide sampled ``TracerProvider`` for a Langfuse project.
+
+    Only used when a rate below 1.0 is configured: without sampling the shared
+    default provider behaves identically. Keyed by public key so repeated handler
+    rebuilds (config changes) reuse one provider instead of leaking a span-processor
+    thread each time.
+    """
+    with _SAMPLED_TRACER_PROVIDERS_LOCK:
+        provider = _SAMPLED_TRACER_PROVIDERS.get(public_key)
+        if provider is None:
+            provider = TracerProvider(sampler=TraceIdRatioBased(sample_rate))
+            _SAMPLED_TRACER_PROVIDERS[public_key] = provider
+        return provider
 
 
 class LangfuseTracingHandler(TracingHandler):
@@ -160,6 +236,12 @@ class LangfuseTracingHandler(TracingHandler):
             if not (0.0 <= sample_rate_val <= 1.0):
                 raise ValueError("sample_rate must be between 0.0 and 1.0")
             client_kwargs["sample_rate"] = sample_rate_val
+            if sample_rate_val < 1.0:
+                # Scope the sampler to this project; the SDK's default would put it
+                # on the process-wide provider and apply it to every other project.
+                client_kwargs["tracer_provider"] = _sampled_tracer_provider(
+                    public_key, sample_rate_val
+                )
 
         try:
             client = Langfuse(**client_kwargs)
@@ -195,35 +277,40 @@ class LangfuseTracingHandler(TracingHandler):
         self._active_request_id: ContextVar[str | None] = ContextVar(
             f"langfuse_active_request_id_{id(self)}", default=None
         )
-        self._request_generations: ContextVar[dict[str, Any] | None] = ContextVar(
-            f"langfuse_generations_{id(self)}", default=None
+        self._request_states: ContextVar[dict[str, _RequestState] | None] = ContextVar(
+            f"langfuse_states_{id(self)}", default=None
         )
         self._request_trace_ids: ContextVar[dict[str, tuple[str, str]] | None] = ContextVar(
             f"langfuse_trace_ids_{id(self)}", default=None
         )
-        # Track request IDs for which TTFT has already been recorded to avoid
-        # redundant updates on every streaming chunk.
-        self._recorded_ttft: set[str] = set()
 
     def _set_active_request_id(self, context: EventContext) -> None:
         self._active_request_id.set(context.request_id)
 
-    def _get_generation_for_request(self, request_id: str) -> Any | None:
-        current = self._request_generations.get()
-        if current is None:
-            return None
-        return current.get(request_id)
+    def _get_state_for_request(self, request_id: str) -> _RequestState | None:
+        return (self._request_states.get() or {}).get(request_id)
 
-    def _set_generation_for_request(self, request_id: str, generation: Any) -> None:
-        current = dict(self._request_generations.get() or {})
-        current[request_id] = generation
-        self._request_generations.set(current)
+    def _set_state_for_request(self, request_id: str, state: _RequestState) -> None:
+        current = dict(self._request_states.get() or {})
+        current[request_id] = state
+        self._request_states.set(current)
 
     def _pop_generation_for_request(self, request_id: str) -> Any | None:
-        current = dict(self._request_generations.get() or {})
-        generation = current.pop(request_id, None)
-        self._request_generations.set(current)
-        return generation
+        """Remove a request's state and return its generation (``None`` if absent)."""
+        current = dict(self._request_states.get() or {})
+        state = current.pop(request_id, None)
+        self._request_states.set(current)
+        return state.generation if state else None
+
+    def _fail_update(self, stage: str, error: Exception, generation: Any) -> None:
+        """Log a failed observation update and still end the generation.
+
+        A second failure while ending must not mask the original error, so it is
+        suppressed after the log.
+        """
+        logger.error(f"Langfuse handler failed to {stage}: {error}", exc_info=True)
+        with contextlib.suppress(Exception):
+            generation.end()
 
     def _set_trace_ids_for_request(
         self, request_id: str, trace_id: str, observation_id: str
@@ -237,29 +324,20 @@ class LangfuseTracingHandler(TracingHandler):
         current.pop(request_id, None)
         self._request_trace_ids.set(current)
 
-    def _get_current_trace_id(self) -> str | None:
+    def _get_current_trace_ids(self) -> tuple[str, str] | None:
+        """Return the active request's ``(trace_id, observation_id)``, if any."""
         request_id = self._active_request_id.get()
         if request_id is None:
             return None
-        current = self._request_trace_ids.get()
-        if current is None:
-            return None
-        ids = current.get(request_id)
-        if ids is None:
-            return None
-        return ids[0]
+        return (self._request_trace_ids.get() or {}).get(request_id)
+
+    def _get_current_trace_id(self) -> str | None:
+        ids = self._get_current_trace_ids()
+        return ids[0] if ids is not None else None
 
     def _get_current_observation_id(self) -> str | None:
-        request_id = self._active_request_id.get()
-        if request_id is None:
-            return None
-        current = self._request_trace_ids.get()
-        if current is None:
-            return None
-        ids = current.get(request_id)
-        if ids is None:
-            return None
-        return ids[1]
+        ids = self._get_current_trace_ids()
+        return ids[1] if ids is not None else None
 
     async def on_request_start(
         self,
@@ -269,40 +347,40 @@ class LangfuseTracingHandler(TracingHandler):
         if not self._enabled:
             return
         self._set_active_request_id(context)
+        client = self._client
+        if client is None:
+            return
         try:
-            c = self._client
-            if c is None:
-                return
             span_name = self._build_span_name(request, context)
             input_data = build_request_input_data(request)
             model = getattr(request, "model", None)
             model_parameters = build_model_parameters(getattr(request, "params", None))
 
-            trace_name = span_name
-            tags: list[str] = []
-
+            # Trace-level attributes (name, user, session) are not accepted by
+            # ``observation.update()`` in SDK v4 — it swallows unknown keyword
+            # arguments — so they must be propagated when the span is created.
+            #
             # Create a generation that persists across async lifecycle calls.
             # ``end_on_exit=False`` keeps the observation open after the context
             # manager exits; we end it explicitly in on_request_end/on_stream_end.
-            with c.start_as_current_observation(
-                as_type="generation",
-                name=span_name,
-                input=input_data,
-                model=model,
-                model_parameters=model_parameters,
-                version=self._version,
-                end_on_exit=False,
-            ) as generation:
-                generation.update(
-                    trace_name=trace_name,
-                    tags=tags or None,
-                )
-                if context.user_id:
-                    generation.update(trace_user_id=context.user_id)
-                if context.session_id:
-                    generation.update(session_id=context.session_id)
-
-                self._set_generation_for_request(context.request_id, generation)
+            with (
+                propagate_attributes(
+                    trace_name=span_name,
+                    user_id=_sanitize_propagated_attribute(context.user_id),
+                    session_id=_sanitize_propagated_attribute(context.session_id),
+                ),
+                client.start_as_current_observation(
+                    as_type="generation",
+                    name=span_name,
+                    input=input_data,
+                    model=model,
+                    model_parameters=model_parameters,
+                    version=self._version,
+                    end_on_exit=False,
+                    trace_context=_langfuse_trace_context(context.trace_id),
+                ) as generation,
+            ):
+                self._set_state_for_request(context.request_id, _RequestState(generation))
                 self._set_trace_ids_for_request(
                     context.request_id, generation.trace_id, generation.id
                 )
@@ -317,10 +395,11 @@ class LangfuseTracingHandler(TracingHandler):
         response: InternalResponse,
         context: EventContext,
     ) -> None:
-        if not self._enabled:
-            return
         self._set_active_request_id(context)
         request_id = context.request_id
+        # Deliberately not gated on ``self._enabled``: a handler that was released
+        # while this request was in flight must still end the generation it
+        # already created, or the trace is never exported.
         generation = self._pop_generation_for_request(request_id)
         if generation is None:
             return
@@ -349,11 +428,8 @@ class LangfuseTracingHandler(TracingHandler):
                 generation, extract_tool_uses(getattr(response, "output", None))
             )
             generation.end()
-            self._recorded_ttft.discard(context.request_id)
         except Exception as e:
-            logger.error(f"Langfuse handler failed to end generation: {e}", exc_info=True)
-            with contextlib.suppress(Exception):
-                generation.end()
+            self._fail_update("end generation", e, generation)
 
     async def on_error(
         self,
@@ -361,8 +437,6 @@ class LangfuseTracingHandler(TracingHandler):
         error: Exception,
         context: EventContext,
     ) -> None:
-        if not self._enabled:
-            return
         self._set_active_request_id(context)
         request_id = context.request_id
         generation = self._pop_generation_for_request(request_id)
@@ -377,27 +451,22 @@ class LangfuseTracingHandler(TracingHandler):
                 metadata=metadata,
             )
             generation.end()
-            self._recorded_ttft.discard(request_id)
         except Exception as e:
-            logger.error(f"Langfuse handler failed to record error: {e}", exc_info=True)
-            with contextlib.suppress(Exception):
-                generation.end()
+            self._fail_update("record error", e, generation)
 
     async def on_stream_start(
         self,
         request: InternalRequest,
         context: EventContext,
     ) -> None:
-        if not self._enabled:
-            return
         self._set_active_request_id(context)
-        generation = self._get_generation_for_request(context.request_id)
-        if generation is None:
+        state = self._get_state_for_request(context.request_id)
+        if state is None:
             return
         try:
             metadata = build_metadata(context)
             metadata["streaming"] = True
-            generation.update(metadata=metadata)
+            state.generation.update(metadata=metadata)
         except Exception as e:
             logger.error(f"Langfuse handler failed to mark stream start: {e}", exc_info=True)
 
@@ -407,26 +476,23 @@ class LangfuseTracingHandler(TracingHandler):
         chunk: str,
         context: EventContext,
     ) -> None:
-        if not self._enabled:
-            return
         self._set_active_request_id(context)
-        generation = self._get_generation_for_request(context.request_id)
-        if generation is None:
+        state = self._get_state_for_request(context.request_id)
+        if state is None:
             return
         try:
-            request_id = context.request_id
             if (
                 context.first_chunk_time is not None
                 and context.ttft_ms is not None
-                and request_id not in self._recorded_ttft
+                and not state.ttft_recorded
             ):
                 metadata = build_metadata(context)
                 metadata["ttft_ms"] = context.ttft_ms
-                generation.update(
+                state.generation.update(
                     metadata=metadata,
                     completion_start_time=context.first_chunk_time,
                 )
-                self._recorded_ttft.add(request_id)
+                state.ttft_recorded = True
         except Exception as e:
             logger.error(f"Langfuse handler failed to record stream chunk: {e}", exc_info=True)
 
@@ -436,10 +502,10 @@ class LangfuseTracingHandler(TracingHandler):
         context: EventContext,
         error: Exception | None = None,
     ) -> None:
-        if not self._enabled:
-            return
         self._set_active_request_id(context)
         request_id = context.request_id
+        # As in ``on_request_end``: a released handler must still close the
+        # generation it created so the trace reaches Langfuse.
         generation = self._pop_generation_for_request(request_id)
         if generation is None:
             return
@@ -478,11 +544,8 @@ class LangfuseTracingHandler(TracingHandler):
                 generation, extract_tool_uses(self._extract_stream_output_blocks(context))
             )
             generation.end()
-            self._recorded_ttft.discard(request_id)
         except Exception as e:
-            logger.error(f"Langfuse handler failed to end stream generation: {e}", exc_info=True)
-            with contextlib.suppress(Exception):
-                generation.end()
+            self._fail_update("end stream generation", e, generation)
 
     def _build_span_name(self, request: InternalRequest, context: EventContext) -> str:
         """Build a span name from the requested endpoint path.
@@ -572,6 +635,28 @@ class LangfuseTracingHandler(TracingHandler):
 
     def get_trace_header_name(self) -> str:
         return "x-trace-id"
+
+    async def release(self) -> None:
+        """Release the handler from a live registry without tearing down the SDK.
+
+        Called when the owning registry is dropped (the user changed their tracing
+        config, or a peer worker did). ``LangfuseResourceManager`` is a
+        process-wide singleton keyed by public key, so ``client.shutdown()`` here
+        would stop the media/score consumers for *every* handler sharing the
+        project — and, because a client rebuilt from the same singletons reuses
+        the stopped resource manager, degrade the user's tracing until restart.
+
+        Flush instead and keep the client usable: requests already in flight hold
+        this handler and must be able to end their generation. The client is
+        garbage-collected once the old registry is dropped.
+        """
+        client = self._client
+        if client is None:
+            return
+        try:
+            await asyncio.to_thread(client.flush)
+        except Exception as e:
+            logger.warning(f"Failed to flush Langfuse client for {self.name}: {e}")
 
     async def shutdown(self) -> None:
         client = self._client

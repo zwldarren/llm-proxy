@@ -27,7 +27,11 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.tracing.handlers import get_handler_type
 from llm_proxy.observability.tracing.handlers.base import TracingHandler
 from llm_proxy.observability.tracing.handlers.registry import TracingRegistry
-from llm_proxy.observability.tracing_config import TracingConfig, _shutdown_handler
+from llm_proxy.observability.tracing_config import (
+    TracingConfig,
+    _release_handler,
+    _shutdown_handler,
+)
 
 logger = get_logger(__name__)
 
@@ -242,16 +246,22 @@ class UserTracingManager:
         await self.invalidate(user_id)
 
     async def invalidate(self, user_id: int) -> None:
-        """Drop the cached registry for a user and shut down their handlers.
+        """Drop the cached registry for a user and flush their handlers.
 
         The next request for that user rebuilds the registry from the updated
         config. The shared system handlers are left running.
+
+        ``release`` — not ``shutdown`` — is used deliberately: requests already in
+        flight still hold the dropped registry, and their end hooks must be able
+        to finish the generation they started. Shutting the backend down here
+        silently lost those traces (and, for Langfuse, tore down the process-wide
+        SDK resource manager shared by every handler on the project).
         """
         async with self._lock:
             self._registries.pop(user_id, None)
             handlers = self._user_handlers.pop(user_id, [])
         for handler in handlers:
-            await _shutdown_handler(handler)
+            await _release_handler(handler)
 
     async def shutdown_all(self) -> None:
         """Shut down all cached user-owned handlers (app shutdown)."""

@@ -111,12 +111,13 @@ class TestFinalizeEventCost:
         assert context.cost_usd == 0.02
 
 
-class TestUpdateUsageCacheWrite:
+class TestUpdateUsageNormalizesCacheDialects:
     def test_cache_write_tokens_map_to_cache_creation(self):
         """OpenAI-style prompt_tokens_details.cache_write_tokens is billed at
         the cache-write rate, same as Anthropic cache_creation_input_tokens.
-        The mapping happens at the billing seam (extract_tokens_from_usage),
-        not in update_usage (ADR-0006: tolerance in exactly one place)."""
+        update_usage normalizes the dialect into the canonical field at capture
+        time (CONTEXT.md "Canonical usage record"); the billing seam's
+        flat-wins guard (ADR-0006) stays as defense, not the primary mapping."""
         from llm_proxy.billing.tokens import extract_tokens_from_usage
         from llm_proxy.models.types import PromptTokensDetails, Usage
 
@@ -128,12 +129,30 @@ class TestUpdateUsageCacheWrite:
                 prompt_tokens_details=PromptTokensDetails(cache_write_tokens=40),
             )
         )
-        # Dialect value carried as-is; the flat Anthropic field stays unset.
+        # Canonical field populated at capture; dialect field still carried for
+        # the billing seam's nested expression.
         assert context.cache_write_tokens == 40
-        assert context.cache_creation_input_tokens is None
-        # Billing seam maps nested cache_write_tokens to cache_creation_input_tokens.
-        token_usage = extract_tokens_from_usage(context.to_usage_dict())
-        assert token_usage.cache_creation_input_tokens == 40
+        assert context.cache_creation_input_tokens == 40
+        assert extract_tokens_from_usage(context.to_usage_dict()).cache_creation_input_tokens == 40
+
+    def test_cached_tokens_map_to_cache_read(self):
+        """OpenAI prompt_tokens_details.cached_tokens is the same fact as the
+        Anthropic flat cache_read_input_tokens: update_usage populates the
+        canonical field so tracing and billing read one authoritative field."""
+        from llm_proxy.billing.tokens import extract_tokens_from_usage
+        from llm_proxy.models.types import PromptTokensDetails, Usage
+
+        context = _context()
+        context.update_usage(
+            Usage(
+                input_tokens=100,
+                output_tokens=10,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=30),
+            )
+        )
+        assert context.cached_prompt_tokens == 30
+        assert context.cache_read_input_tokens == 30
+        assert extract_tokens_from_usage(context.to_usage_dict()).cache_read_input_tokens == 30
 
     def test_flat_cache_creation_wins_over_details(self):
         """Anthropic flat cache_creation_input_tokens takes precedence over

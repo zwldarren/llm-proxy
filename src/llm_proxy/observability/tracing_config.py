@@ -87,6 +87,23 @@ async def _shutdown_handler(handler: Any) -> None:
         logger.debug(f"Error shutting down tracing handler: {e}")
 
 
+async def _release_handler(handler: Any) -> None:
+    """Release a handler whose registry is being dropped (not process teardown).
+
+    Unlike :func:`_shutdown_handler`, this must not tear the backend down: a
+    request already in flight still holds the old registry and needs the handler
+    to finish recording its trace.
+    """
+    release = getattr(handler, "release", None)
+    if release is None:
+        await _shutdown_handler(handler)
+        return
+    try:
+        await release()
+    except Exception as e:
+        logger.warning(f"Error releasing tracing handler: {e}")
+
+
 __all__ = [
     "TracingConfig",
     "TracingProviderConfig",

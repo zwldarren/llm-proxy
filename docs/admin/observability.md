@@ -161,11 +161,24 @@ When enabled, each request exports one generation observation:
 - Name and model from the request, with model parameters.
 - `input` = messages (or `{tools, messages}` when tools are present); `output` = the
   assistant message with tool calls separated out.
-- `usage_details` (input/output/cache/audio tokens) and `cost_details.total`.
-- Metadata: request id, trace id, user id, session id.
+- `usage_details` as **mutually exclusive** buckets: `input`/`output` exclude the
+  cache, audio and reasoning detail counts, which are emitted under their own
+  buckets (`cache_read_input_tokens`, `cache_creation_input_tokens`,
+  `input_audio_tokens`, `output_audio_tokens`, `output_reasoning_tokens`) so
+  Langfuse's inferred cost does not double-count them. `cost_details.total` is the
+  proxy-computed (or provider-reported) USD total.
+- A `tool` observation per tool call the model requested.
+- Trace-level attributes via `propagate_attributes`: trace name, **user id** and
+  **session id**. Metadata carries the request id, trace id, provider, endpoint,
+  latency, TTFT, token details not used as buckets, cache savings, and fallback/retry
+  information.
 
 Correlate a trace with a request by sending `x-langfuse-trace-id` (or `x-trace-id`);
-the proxy echoes a trace id header on responses and both headers are CORS-exposed.
+when it is a canonical 32-character hex Langfuse trace id the proxy's generation is
+nested inside that trace, otherwise the proxy starts its own trace. The proxy echoes a
+trace id header on responses and both headers are CORS-exposed. A generated trace id is
+also a 32-character hex id, so the `trace_id` in the request logs matches the Langfuse
+trace id exactly.
 
 ## Related
 

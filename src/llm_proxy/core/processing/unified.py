@@ -254,7 +254,10 @@ class UnifiedProcessor:
         context: RequestContext,
     ) -> Response:
         """Run the processing pipeline and return the response."""
-        trace_id = context.trace_id or str(uuid.uuid4())
+        # ``uuid4().hex`` (no dashes) is a valid OTel/Langfuse trace id, so a
+        # generated id can be handed to the Langfuse SDK as ``trace_context`` —
+        # keeping the request log's trace id and the Langfuse trace id identical.
+        trace_id = context.trace_id or uuid.uuid4().hex
 
         event_context = await self._create_event_context(
             request=req,

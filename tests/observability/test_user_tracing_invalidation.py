@@ -145,3 +145,51 @@ async def test_publish_failure_still_invalidates_locally():
     # still dropped.
     assert manager._versions == {}
     manager.invalidate.assert_awaited_once_with(7)
+
+
+class _RecordingHandler:
+    """Fake handler that records which teardown verb was called."""
+
+    name = "fake"
+
+    def __init__(self, called: list[str]):
+        self._called = called
+
+    async def release(self) -> None:
+        self._called.append("release")
+
+    async def shutdown(self) -> None:
+        self._called.append("shutdown")
+
+
+async def test_invalidate_releases_handlers_without_shutting_them_down():
+    """Dropping a registry must not tear down in-flight-capable handlers.
+
+    A config change (or a peer worker's change) drops the cached registry while
+    requests that already captured it may still be running. Shutting the handler
+    down silently lost their traces; ``release`` flushes and keeps it usable.
+    """
+    called: list[str] = []
+
+    manager = UserTracingManager()
+    manager._registries[7] = object()
+    manager._user_handlers[7] = [_RecordingHandler(called)]  # type: ignore[list-item]
+
+    await manager.invalidate(7)
+
+    assert called == ["release"]
+    assert 7 not in manager._registries
+    assert 7 not in manager._user_handlers
+
+
+async def test_shutdown_all_still_fully_shuts_handlers_down():
+    """Process teardown must use ``shutdown`` so buffered data is flushed."""
+    called: list[str] = []
+
+    manager = UserTracingManager()
+    manager._registries[7] = object()
+    manager._user_handlers[7] = [_RecordingHandler(called)]  # type: ignore[list-item]
+
+    await manager.shutdown_all()
+
+    assert called == ["shutdown"]

@@ -165,6 +165,18 @@ class TracingHandler:
         """
         pass
 
+    async def release(self) -> None:
+        """Called when the handler is dropped from a live registry.
+
+        Registries are rebuilt when the owning configuration changes (for
+        example, when a user edits their tracing backends). Unlike
+        :meth:`shutdown`, this is not process teardown: requests already in
+        flight still hold this handler and must be able to finish recording.
+        Handlers that hold external resources should flush what they have and
+        keep working; the default is a no-op.
+        """
+        pass
+
     def get_observation_id(self) -> str | None:
         """Get the current observation ID for trace correlation.
 

@@ -178,6 +178,12 @@ class EventContext:
             cache_write = _get_attr_or_item(ptd, "cache_write_tokens")
             if cached is not None:
                 self.cached_prompt_tokens = cached
+                # Same fact as the canonical cache-read field in another dialect
+                # (CONTEXT.md "Canonical usage record"): populate the canonical
+                # field so downstream readers see one authoritative field. The
+                # dialect field stays for the billing seam's nested expression.
+                if self.cache_read_input_tokens is None:
+                    self.cache_read_input_tokens = cached
             if audio_in is not None:
                 self.audio_input_tokens = audio_in
             if image_in is not None:
@@ -185,6 +191,8 @@ class EventContext:
             # Kept in the dialect field; mapped at the billing seam (ADR-0006).
             if cache_write is not None:
                 self.cache_write_tokens = cache_write
+                if self.cache_creation_input_tokens is None:
+                    self.cache_creation_input_tokens = cache_write
 
         # Handle gpt-image style input_tokens_details (image tokens in prompt)
         # Only fall back to input_tokens_details if prompt_tokens_details
