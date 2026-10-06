@@ -278,8 +278,8 @@ Dark mode adds 0.05 to body line-height for light-on-dark readability: `.dark bo
 
 A fixed left-rail / fluid-`main` app shell built for scan-first density, not marketing space.
 
-- **App shell:** `flex h-screen overflow-hidden`. Fixed `NavSidebar` (desktop `hidden md:flex`, mobile `Sheet` drawer) + `main` on a faint `bg-muted/5` page tint with responsive padding `px-4 sm:px-6 lg:px-10 xl:px-16 py-5 sm:py-6`. A `full` layout mode (no padding, child-managed) drives the console pages.
-- **Sidebar:** `w-64` expanded / `w-16` collapsed, `bg-sidebar` on a `border-r border-sidebar-border` rail. Collapsible with 100ms-delay tooltip labels in collapsed state.
+- **App shell:** `flex h-screen overflow-hidden`. Fixed `NavSidebar` (desktop `hidden md:flex`, mobile `Sheet` drawer) + `main` on a faint `bg-muted/5` page tint with responsive padding `px-4 sm:px-6 py-5 sm:py-6`. A `full` layout mode (no padding, child-managed) drives the console pages.
+- **Sidebar:** `16rem` expanded / `3rem` icon-collapsed (`--sidebar-width` → `--sidebar-width-icon`), `bg-sidebar` on a `border-r border-sidebar-border` rail. Collapsible with 200ms-delay tooltip labels in collapsed state.
 - **Page header:** one per page, the consistent anchor — `flex` row with an `.icon-container` at its `.icon-container-sm` page-header size (tinted tile, top sheen), a `.brand-heading` title (`text-xl sm:text-2xl`, `#page-title`), a `text-muted-foreground text-xs max-w-2xl` description, and an `actions` slot (`animate-in fade-in duration-300`, optionally in a `rounded-xl border-border/55 bg-card/76` toolbar).
 - **Grids:** Tailwind grid utilities, composed per surface — `grid-cols-1 lg:grid-cols-2` (gap 4/6), `md:grid-cols-3` (gap 4), `grid-cols-2 lg:grid-cols-4` (gap 4).
 - **Spacing rhythm:** Tailwind scale — 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64px. Page sections are `space-y-4 md:space-y-6`.
@@ -301,7 +301,6 @@ Flat-by-default. Depth is conveyed by **tonal background steps** (`--card` over 
 
 ### Shadow Vocabulary
 - **Rest card shadow** (`shadow-xs`): the default on `rounded-xl border border-border bg-card` cards and primary buttons — a barely-there lift that confirms the card sits above the page.
-- **Sidebar edge shadow** (`16px 0 36px -32px sidebar/0.95`): the soft right-edge shadow on the nav rail.
 - **Hover glow** (`0 0 20px -6px hsl(<color> / 0.35–0.4)`): `.hover-glow-primary/-blue/-amber/-success` — a constrained ambient halo on interactive elements in the matching semantic color.
 - **Inset top highlight** (`inset 0 1px 0 hsl(var(--foreground) / 0.06)` on cards; `inset 0 1px 0 hsl(var(--background) / 0.9)` on inputs): the single-pixel top sheen that reads as a lit edge on raised surfaces.
 - **Auth-mark shadow** (`0 18px 36px -20px hsl(var(--primary) / 0.55)` + inset): the floating login mark.
@@ -320,12 +319,12 @@ Rounded, restrained, and tiered by component class. Corners never get loud.
 - **Buttons, inputs, badges' outer containers, code containers** (`rounded-md`, 10px): the control radius.
 - **Nav items, tooltips, code containers** (`rounded-lg`, 12px): nav items get a slightly softer corner than controls.
 - **Tags, status chips, the range thumb** (`rounded-full` / pill, 9999px): full-pill is reserved for tags and status chips, never for cards or buttons.
-- **Borders:** 1px `--border` everywhere by default; the one 2px exception is the active-nav gradient indicator and the `config-thead` bottom rule. `border-left/right` colored accent stripes on cards/list items/alerts are prohibited (the 2px active nav indicator is the dedicated active-state affordance, not decoration).
+- **Borders:** 1px `--border` everywhere by default. The only >1px rules are neutral 2px bottom rules on the pinned console header cells (`config-thead` / `ModelListHead`, `border-b-2 border-border/70`). A colored `border-left/right` accent stripe on cards, list items, or alerts is prohibited: active state is a tonal step, never a stripe.
 
 ### Named Rules
 **The Radius Cap Rule.** Cards and panels cap at `rounded-xl` (16px). Save full-pill for tags and status chips; `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii, no pill buttons.
 
-**The One 2px Stripe Rule.** The only colored >1px stripe in the system is the 2px active-nav gradient indicator. Never use a colored `border-left/right` accent stripe on cards, list items, or alerts.
+**The No-Stripe Rule.** A colored >1px stripe never marks state anywhere in the system — active nav items are a filled `--sidebar-accent` step plus `font-medium`, and the only >1px rules are the neutral 2px console header bottom rules. Never use a colored `border-left/right` accent stripe on cards, list items, or alerts.
 
 ## Components
 
@@ -366,10 +365,11 @@ A lit-edge control with the strongest focus signal in the system.
 - **Auth input (login/setup):** `.auth-input` — `bg-card/62 backdrop-blur(10px)`, `border-border/70`; focus shifts to `bg-background/92`, `border-primary/55`, `box-shadow: 0 0 0 3px primary/18`. The other place `backdrop-blur` is allowed.
 
 ### Navigation (`NavSidebar`)
-A recessed column with a gradient rail; items are quiet until active, then marked by a 2px gradient indicator.
-- **Shell:** `w-64`/`w-16`, `bg-sidebar`, `border-r border-sidebar-border`, soft right shadow.
-- **Items:** `rounded-lg px-3 py-2.5 text-sm font-medium transition-all 200ms`, `min-h-11 min-w-11`. Active: `bg-sidebar-accent/95` + the 2px gradient indicator line (`from-sidebar-primary to-sidebar-primary/60`, `rounded-r-full`, active glow) + icon `scale-110`. Hover: `bg-sidebar-accent/70` + a horizontal reflection sweep (`via-sidebar-primary/12`, opacity 0→100). Logout hover tints `destructive/16`.
-- **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/50` — a tracked eyebrow used **only** for the three nav section groups (Overview / Tools / Config), never as a page-section eyebrow.
+A recessed rail; items are quiet at rest and marked by a filled tonal step when active.
+- **Shell:** `--sidebar-width` 16rem / icon-collapsed 3rem / mobile drawer 18rem, `bg-sidebar`, `border-r border-sidebar-border` (left side), fixed `inset-y-0`, width transition 200ms ease-linear. The inner shell is a `role="complementary"` landmark so the brand header and account footer (which sit outside the inner `<nav>`) stay reachable by landmark navigation.
+- **Items:** shadcn `SidebarMenuButton` — `rounded-md p-2 text-sm`, `h-8` (`max-md:h-11` for touch), `SidebarMenu` `gap-0.5`, `transition-colors`. Active: `data-[active=true]:bg-sidebar-accent` + `text-sidebar-accent-foreground` + `font-medium`, and the link itself is `aria-current="page"` — the tonal step plus the label carries the state, never a stripe. Hover uses the same step. Collapsed state shows the label as a tooltip.
+- **Brand header / account footer:** the version chip is a mono `text-[10px]` badge on `border-sidebar-border/60`, with a `bg-status-warning` dot plus `sr-only` text when an update is available. The footer account button is an avatar-initials tile (`rounded-md bg-muted`) + name + role, opening a `DropdownMenu` whose logout item is `text-destructive focus:bg-destructive/10`.
+- **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70` — a tracked eyebrow used **only** for the nav section groups (Overview / Catalog for viewers / Playground / Configuration / Settings), never as a page-section eyebrow.
 
 ### Role-Switched Routes
 One route may render different views by role when both roles work on the same data: `/models` renders the management UI for admins and the read-only catalog for viewers. Rules for this pattern:
@@ -413,10 +413,10 @@ Concrete visual guardrails grounded in the implemented system.
 - **Don't** ship the generic 2026 AI-tool aesthetic — no cream/sand warm-neutral body backgrounds, no gradient-text headlines, no identical icon+heading+text card grids, no big-number hero-metric template. This is monochrome editorial, not warm SaaS. *(PRODUCT.md anti-reference.)*
 - **Don't** pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern). Pick a tonal step or `shadow-xs`, never a wide decorative shadow.
 - **Don't** over-round — cards and panels cap at `rounded-xl` (16px); save full-pill for tags and status chips, `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii.
-- **Don't** use `border-left`/`border-right` greater than 1px as a colored accent stripe on cards, list items, or alerts. The 2px active nav indicator is the one exception, and it is a dedicated active-state affordance, not decoration.
+- **Don't** use `border-left`/`border-right` greater than 1px as a colored accent stripe on cards, list items, or alerts. State is a tonal step, never a stripe.
 - **Don't** use glassmorphism decoratively. `backdrop-blur-sm` appears only on `outline` buttons, inputs, and the login-screen `auth-input`/`auth-mark` — a deliberate, constrained set, never a default card treatment.
 - **Don't** use `background-clip: text` with a gradient. Display emphasis comes from weight and size, in a single solid color.
-- **Don't** put a tiny uppercase tracked eyebrow above every page section. The tracked eyebrow is reserved for the three nav section groups only.
+- **Don't** put a tiny uppercase tracked eyebrow above every page section. The tracked eyebrow is reserved for the nav section groups only.
 - **Don't** set a metric or number in Manrope, or introduce a fourth type family. Space Grotesk + Manrope + IBM Plex Mono is the whole system.
 - **Don't** introduce true-gray (`0 0%`) or warm-neutral (`hue 30–100`) tokens. Every neutral carries the 220° cool undertone.
 - **Don't** reuse the JSON/code syntax tokens outside code surfaces — no rainbow syntax themes, no syntax-colored badges or chart series.
