@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0](https://github.com/zwldarren/llm-proxy/compare/v0.2.9...v0.3.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **systemone:** adds the `systemone` request type, the `typesafe` provider type and `POST /v1/systemone` to the `/v1` contract. The shared OpenRouter cost predicate now rejects a boolean or zero `usage.cost` instead of billing it as USD 1.0. No existing endpoint, provider config or payload changes shape.
+
+### Features
+
+* **openapi:** publish a generated /v1 contract in the docs ([1795736](https://github.com/zwldarren/llm-proxy/commit/1795736630a4aa5b7b611a124b11797ba0068335))
+* **systemone:** add System One evaluation across TypeSafe, OpenRouter and Ollama ([08f0387](https://github.com/zwldarren/llm-proxy/commit/08f03879a51fed8b4a10453de297e81589041bea))
+* **systemone:** gate /v1/systemone on a capability flag and log its payloads ([4e97763](https://github.com/zwldarren/llm-proxy/commit/4e97763a11d913ebea5965004bf84a63c0a7e2ef))
+
+
+### Bug Fixes
+
+* **anthropic:** keep beta blocks, tool results and token counts faithful ([886f575](https://github.com/zwldarren/llm-proxy/commit/886f5754fd2d35befc574a35193544679f7dd631))
+* **config:** apply settings and derived caches on every worker ([06281c5](https://github.com/zwldarren/llm-proxy/commit/06281c5c5c13ad6e8f8ae2105e17ab941796ba77))
+* **logging:** enforce the body switch at the store and log rejections ([40b71fb](https://github.com/zwldarren/llm-proxy/commit/40b71fb4ffe34f538537d014093d6f49d7552f2f))
+* **openai:** keep Responses fields, tool controls and annotations on the converted path ([8ae1616](https://github.com/zwldarren/llm-proxy/commit/8ae1616e8eb0db4028037e01536502e202831e78))
+* **openapi:** pin the published spec version to the release version ([acc768d](https://github.com/zwldarren/llm-proxy/commit/acc768d1799f827c310f146c70c14f13964d8d94))
+* **qwen:** forward image extension fields and drop phantom audio routes ([c760a37](https://github.com/zwldarren/llm-proxy/commit/c760a3745e4bf34a68749c05ebde6f8894a3a4ea))
+* **web-search:** report the real failure reason, provider and query in logs ([6584415](https://github.com/zwldarren/llm-proxy/commit/658441560966a4d17f14265043f610226c6a6b0b))
+
 ## [0.2.9](https://github.com/zwldarren/llm-proxy/compare/v0.2.8...v0.2.9) (2026-09-30)
 
 
