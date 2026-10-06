@@ -265,6 +265,12 @@ export default {
     settingsApplyNextMessage: "Settings will apply to your next message",
     scrollToBottom: "Scroll to bottom",
     messageFailed: "Failed to send message",
+    emptyResponse:
+      "The response ended without any output. If web search is enabled, make sure server-side web search is configured in Settings.",
+    generationFailed: "Generation failed",
+    webSearchServerDisabledHelp:
+      "Server-side web search is not configured. Answers will not include search results. Enable it in Settings → Server → Web Search.",
+    stopGeneration: "Stop generating",
     copyFailed: "Failed to copy",
     retry: "Retry",
     retryFailedUserMsgNotFound: "Cannot retry: user message not found.",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  AlertTriangle,
   Brain,
   Wrench,
   Copy,
@@ -153,6 +154,13 @@ const handleContentClick = (e: MouseEvent) => {
 
 const isThinkingExpanded = ref(false);
 const isToolCallsExpanded = ref(false);
+
+/** Failure detail for the error panel: the message text without its error marker. */
+const failureDetail = computed(() =>
+  getMessageText(props.message)
+    .replace(/\*\*Error:\*\*\s*/g, "")
+    .trim()
+);
 
 const hasReasoningContent = computed(() => {
   return (props.message.reasoning_content?.trim().length ?? 0) > 0;
@@ -504,10 +512,10 @@ const handleReadAloud = async () => {
         {{ message.role === "user" ? "Human" : message.role === "tool" ? "Tool" : "Model" }}
       </span>
 
-      <!-- Actions (Visible on hover) -->
+      <!-- Actions (Visible on hover; always visible on touch devices) -->
       <div
-        v-if="message.role === 'assistant' && getMessageText(message)"
-        class="flex items-center gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 transition-opacity duration-200"
+        v-if="message.role === 'assistant' && !message.failed && getMessageText(message)"
+        class="flex items-center gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity duration-200"
       >
         <button
           type="button"
@@ -759,6 +767,36 @@ const handleReadAloud = async () => {
               </div>
             </div>
           </template>
+        </div>
+
+        <!-- Failed generation: persistent error panel with an always-visible
+             retry — hover-only actions vanish exactly when they are needed. -->
+        <div
+          v-else-if="message.failed"
+          class="w-full rounded-lg border border-status-error/30 bg-status-error/5 p-3.5 flex items-start gap-3"
+          role="alert"
+        >
+          <AlertTriangle class="w-4 h-4 text-status-error shrink-0 mt-0.5" />
+          <div class="flex-1 min-w-0 space-y-1">
+            <p class="text-sm font-medium text-status-error">
+              {{ t("chat.generationFailed") }}
+            </p>
+            <p
+              v-if="failureDetail"
+              class="text-xs text-status-error/90 break-words leading-relaxed whitespace-pre-wrap"
+            >
+              {{ failureDetail }}
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="emit('retry', message)"
+            class="shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md border border-status-error/40 text-status-error text-xs font-medium hover:bg-status-error/10 transition-colors cursor-pointer"
+            :aria-label="t('chat.retry')"
+          >
+            <RotateCcw class="w-3.5 h-3.5" />
+            {{ t("chat.retry") }}
+          </button>
         </div>
 
         <!-- eslint-disable vue/no-v-html -->

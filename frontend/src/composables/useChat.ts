@@ -5,11 +5,9 @@ import { chatApi } from "@/services/api/chat";
 import { useChatStore } from "@/stores/chat";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import type { ChatMessage, ContentPart } from "@/types/schemas";
-import type { ChatRun, ChatRunStatus } from "@/types/runs";
 import type { ToolDefinition } from "@/adapters/types";
 import type { GenerationSettings } from "@/adapters/endpointProfiles";
 import { planChatRequest } from "@/adapters/endpointProfiles";
-import { makeRunId } from "@/utils/runs";
 
 /**
  * Coalesce streamed deltas into one reactive write per animation frame.
@@ -192,23 +190,7 @@ export function useChat() {
     store.setLoading(true);
     store.setError(null);
 
-    // Run telemetry for the specimen tray: one record per API request, emitted
-    // when the request starts and again when it settles. Stored in the chat
-    // store so the tray survives route navigation (session-scoped, never
-    // persisted — payloads can be large).
-    const emitRun = (run: ChatRun) => store.upsertRun(run);
-    const runStart = performance.now();
-    const runBase: ChatRun = {
-      id: makeRunId(),
-      endpoint,
-      model,
-      // The exact wire payload: JSON round-trip mirrors what JSON.stringify
-      // sends (drops undefined values, e.g. adapter-set tool_calls: undefined).
-      payload: JSON.parse(JSON.stringify({ ...requestPayload, stream: true })),
-      startedAt: Date.now(),
-      status: "streaming",
-    };
-    let runError: string | undefined;
+    let runFailed = false;
     let runStopped = false;
 
     // Every in-place mutation of the transcript must be paired with a dirty
@@ -220,16 +202,12 @@ export function useChat() {
       store.touchChat();
     };
 
-    const settleRun = (
-      status: ChatRunStatus,
-      overrides?: Partial<Pick<ChatRun, "payload" | "responseChars">>
-    ) => {
-      emitRun({
-        ...runBase,
-        ...overrides,
-        status,
-        latencyMs: Math.round(performance.now() - runStart),
-        errorMessage: runError,
+    /** Record a failed generation: error banner plus a marked message. */
+    const failGeneration = (message: ChatMessage, errorMsg: string) => {
+      runFailed = true;
+      store.setError(errorMsg);
+      mutateChat(() => {
+        message.failed = true;
       });
     };
 
@@ -255,7 +233,6 @@ export function useChat() {
       }
 
       const audioPayload = { model, input: rawText.trim(), voice, speed, response_format };
-      emitRun({ ...runBase, payload: audioPayload });
 
       try {
         const response = await fetch(endpoint, {
@@ -292,7 +269,6 @@ export function useChat() {
           assistantMessage.audioUrl = audioUrl;
           assistantMessage.explicitAudio = true;
         });
-        settleRun("ok", { payload: audioPayload });
       } catch (e: unknown) {
         console.error(e);
         const errorObj = e as Error;
@@ -300,9 +276,8 @@ export function useChat() {
         store.setError(errMsg);
         mutateChat(() => {
           assistantMessage.content = `**Error:** ${errMsg}`;
+          assistantMessage.failed = true;
         });
-        runError = errMsg;
-        settleRun("error", { payload: audioPayload });
       } finally {
         store.setLoading(false);
       }
@@ -312,8 +287,6 @@ export function useChat() {
       await handleAudioSpeech();
       return;
     }
-
-    emitRun(runBase);
 
     // Add placeholder assistant message
     const assistantMessage = reactive<ChatMessage>({
@@ -346,9 +319,8 @@ export function useChat() {
         },
         (streamError) => {
           const errorMsg = `Stream error: ${streamError}`;
-          store.setError(errorMsg);
           contentBuffer.push(`**Error:** ${errorMsg}`);
-          runError = errorMsg;
+          failGeneration(assistantMessage, errorMsg);
         },
         (reasoningChunk) => {
           reasoningBuffer.push(reasoningChunk);
@@ -373,19 +345,26 @@ export function useChat() {
           });
           if (onChunk) onChunk("");
         },
-        (_index, id, query, status) => {
+        (_index, id, query, status, payload) => {
           mutateChat(() => {
-            if (!assistantMessage.web_search_calls) {
-              assistantMessage.web_search_calls = [];
-            }
+            const calls = (assistantMessage.web_search_calls ??= []);
             // Use id as the key to avoid duplicates from mismatched output_index values
-            const existingIdx = assistantMessage.web_search_calls.findIndex(
-              (c) => c && c.id === id
-            );
+            const existingIdx = calls.findIndex((c) => c && c.id === id);
+            const previous = existingIdx >= 0 ? calls[existingIdx] : undefined;
+            // The completion event settles the trace and carries the native
+            // result payload that later turns replay to the model; keep the
+            // query the in-progress event may not have had yet.
+            const call = {
+              id,
+              query: query || previous?.query || "",
+              status,
+              sources: payload?.sources ?? previous?.sources,
+              result: payload?.result ?? previous?.result,
+            };
             if (existingIdx >= 0) {
-              assistantMessage.web_search_calls[existingIdx] = { id, query, status };
+              calls[existingIdx] = call;
             } else {
-              assistantMessage.web_search_calls.push({ id, query, status });
+              calls.push(call);
             }
           });
           if (onChunk) onChunk("");
@@ -397,21 +376,42 @@ export function useChat() {
       if (e instanceof Error && e.name === "AbortError") {
         contentBuffer.push("\n\n*[Generation stopped]*");
         runStopped = true;
+      } else if (e instanceof Error && e.name === "TimeoutError") {
+        // The request never started responding within the first-byte deadline
+        // (see services/api/chat.ts). Surface the real reason instead of the
+        // generic failure copy.
+        console.error(e);
+        const errorMsg = e.message || t("dialogs.errorGenerating");
+        contentBuffer.push(`**Error:** ${errorMsg}`);
+        failGeneration(assistantMessage, errorMsg);
       } else {
         console.error(e);
         const errorMsg = t("dialogs.errorGenerating");
-        store.setError(errorMsg);
         contentBuffer.push(`\n\n**Error:** ${errorMsg}`);
-        runError = e instanceof Error ? e.message : errorMsg;
+        failGeneration(assistantMessage, errorMsg);
       }
     } finally {
       contentBuffer.flush();
       reasoningBuffer.flush();
       abortController.value = null;
       store.setLoading(false);
-      settleRun(runStopped ? "stopped" : runError ? "error" : "ok", {
-        responseChars: assistantMessage.content.length,
-      });
+
+      // Dead-end guard: the stream settled without an error but the message
+      // has no text and no client-executable tool calls. This happens when a
+      // hosted-tool request ends after the tool call without a final answer
+      // (e.g. web search enabled while the proxy has no server-side search
+      // configured). Surface it as a failure so the user gets an error and a
+      // retry instead of a silently empty bubble.
+      const hasExecutableToolCalls = (assistantMessage.tool_calls ?? []).some((tc) => tc && tc.id);
+      if (
+        !runStopped &&
+        !runFailed &&
+        !hasExecutableToolCalls &&
+        typeof assistantMessage.content === "string" &&
+        assistantMessage.content.trim() === ""
+      ) {
+        failGeneration(assistantMessage, t("chat.emptyResponse"));
+      }
     }
   };
 

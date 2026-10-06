@@ -572,6 +572,8 @@ export interface ChatMessage {
   name?: string;
   audioUrl?: string; // For text-to-speech audio files
   explicitAudio?: boolean; // True if generated directly from /v1/audio/speech
+  /** Set when the generation failed or ended without any output. */
+  failed?: boolean;
 }
 
 export interface Token {

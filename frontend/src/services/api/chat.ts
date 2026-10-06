@@ -1,10 +1,17 @@
 import { http, handleUnauthorized, TimeoutError } from "@/services/http";
 import { getAdapterForEndpoint } from "@/adapters";
+import type { WebSearchResultPayload } from "@/adapters/types";
 
 const BASE_URL = "/v1";
 
-/** Default timeout for streaming chat requests (30 seconds to first byte). */
-const STREAM_TIMEOUT_MS = 30_000;
+/**
+ * How long the server may take to START responding (time to first byte).
+ *
+ * Only the connection is bounded, never the stream: a web-search turn performs
+ * several upstream calls before it produces text, so an overall deadline would
+ * cut long (but healthy) generations. See `streamChatCompletion`.
+ */
+const FIRST_BYTE_TIMEOUT_MS = 30_000;
 
 export const chatApi = {
   /**
@@ -25,19 +32,30 @@ export const chatApi = {
       index: number,
       id: string,
       query: string,
-      status: "in_progress" | "completed" | "failed"
+      status: "in_progress" | "completed" | "failed",
+      payload?: WebSearchResultPayload
     ) => void,
     signal?: AbortSignal
   ) => {
     // Strip leading /v1 if present in endpoint
     const relativePath = endpoint.startsWith("/v1") ? endpoint.slice(3) : endpoint;
 
-    // Timeout signal ensures the connection attempt cannot hang forever.
-    // Once the stream is established, individual reads may take longer.
-    const timeoutSignal = AbortSignal.timeout(STREAM_TIMEOUT_MS);
+    // Bound only the wait for the first byte. `AbortSignal.timeout` must NOT
+    // be used here: it stays attached to the response body for the lifetime of
+    // the request, so it aborts the stream itself once the deadline passes
+    // (verified: a reader throws `TimeoutError` mid-stream). Long web-search
+    // turns routinely outlive a fixed deadline while streaming perfectly well.
+    const firstByteController = new AbortController();
+    const firstByteTimer = setTimeout(() => {
+      firstByteController.abort(
+        new DOMException("Timed out waiting for the response to start", "TimeoutError")
+      );
+    }, FIRST_BYTE_TIMEOUT_MS);
 
-    // Combine timeout signal with any caller-provided signal
-    const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    // Combine the first-byte deadline with any caller-provided signal.
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, firstByteController.signal])
+      : firstByteController.signal;
 
     let response: Response;
     try {
@@ -57,6 +75,10 @@ export const chatApi = {
         );
       }
       throw e;
+    } finally {
+      // The response headers arrived (or the attempt failed): disarm the
+      // first-byte deadline so it can never interrupt the streaming body.
+      clearTimeout(firstByteTimer);
     }
 
     if (!response.ok) {

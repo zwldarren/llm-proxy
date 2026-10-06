@@ -262,6 +262,12 @@ export default {
     settingsApplyNextMessage: "设置将应用于下一条消息",
     scrollToBottom: "滚动到底部",
     messageFailed: "发送消息失败",
+    emptyResponse:
+      "响应在没有任何输出的情况下结束了。如果启用了网络搜索，请确认已在设置中配置服务端网络搜索。",
+    generationFailed: "生成失败",
+    webSearchServerDisabledHelp:
+      "服务端网络搜索未配置，回答将不包含搜索结果。请在 设置 → 服务器 → 网络搜索 中启用。",
+    stopGeneration: "停止生成",
     copyFailed: "复制失败",
     retry: "重新生成",
     retryFailedUserMsgNotFound: "无法重试：未找到对应的用户消息。",
