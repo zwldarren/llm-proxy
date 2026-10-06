@@ -18,7 +18,7 @@ vi.mock("vue-i18n", () => {
 
 vi.mock("vue-router", () => {
   return {
-    useRoute: () => ({ query: {} }),
+    useRoute: () => ({ name: "logs", query: {} }),
     useRouter: () => ({ replace: vi.fn() }),
     createRouter: vi.fn(() => ({
       beforeEach: vi.fn(),

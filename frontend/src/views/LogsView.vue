@@ -395,6 +395,11 @@ watch(
 
 // Tab changes
 watch(activeTab, async (newTab) => {
+  // This view is kept alive: while deactivated its watchers still fire, and
+  // writing the tab into another page's query string (e.g. Settings reading
+  // the same ?tab= key) would corrupt that page. Only sync the URL while
+  // this view actually owns the current route.
+  if (!isComponentActive.value || route.name !== "logs") return;
   isSwitchingTab.value = true;
   currentPage.value = 1;
   router.replace({ query: { ...route.query, tab: newTab } });
@@ -428,6 +433,10 @@ watch(activeTab, async (newTab) => {
 watch(
   () => route.query.tab,
   (newTab) => {
+    // Ignore query changes that belong to other pages while this view is
+    // kept alive in the background — resetting the tab here would re-enter
+    // the activeTab watcher and rewrite the other page's URL.
+    if (!isComponentActive.value || route.name !== "logs") return;
     const tab = (newTab as LogTab) || "proxy";
     if (
       (tab === "proxy" || tab === "audit" || tab === "mcp" || tab === "websearch") &&
@@ -492,6 +501,20 @@ watch(
 
 onActivated(() => {
   isComponentActive.value = true;
+  // Reconcile the tab with the URL we returned to. While deactivated the
+  // query watcher is inert, so a plain /logs link lands here with no ?tab=
+  // even though the restored state may still show another tab.
+  const tabParam = route.query.tab as string;
+  if (
+    tabParam === "proxy" ||
+    tabParam === "audit" ||
+    tabParam === "mcp" ||
+    tabParam === "websearch"
+  ) {
+    if (tabParam !== activeTab.value) activeTab.value = tabParam;
+  } else {
+    router.replace({ query: { ...route.query, tab: activeTab.value } });
+  }
   fetchLogs(false);
   if (autoRefresh.value) {
     startAutoRefresh();
