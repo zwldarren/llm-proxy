@@ -28,6 +28,7 @@ const { t } = useI18n();
         <TagsInputSimple
           v-model="state.origins"
           :placeholder="t('cors.originPlaceholder')"
+          :aria-label="t('cors.allowedOrigins')"
           class="max-w-md"
         />
       </template>

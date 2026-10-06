@@ -100,6 +100,7 @@ const envKeyOverlap = computed(() => {
         <TagsInputSimple
           v-model="state.allowed_commands"
           :placeholder="t('mcpSecurity.itemPlaceholder')"
+          :aria-label="t('mcpSecurity.allowedCommands')"
           class="max-w-md"
         />
       </template>
@@ -116,6 +117,7 @@ const envKeyOverlap = computed(() => {
         <TagsInputSimple
           v-model="state.blocked_commands"
           :placeholder="t('mcpSecurity.itemPlaceholder')"
+          :aria-label="t('mcpSecurity.blockedCommands')"
           class="max-w-md"
         />
         <p
@@ -139,6 +141,7 @@ const envKeyOverlap = computed(() => {
         <TagsInputSimple
           v-model="state.allowed_env_keys"
           :placeholder="t('mcpSecurity.itemPlaceholder')"
+          :aria-label="t('mcpSecurity.allowedEnvKeys')"
           class="max-w-md"
         />
       </template>
@@ -155,6 +158,7 @@ const envKeyOverlap = computed(() => {
         <TagsInputSimple
           v-model="state.blocked_env_keys"
           :placeholder="t('mcpSecurity.itemPlaceholder')"
+          :aria-label="t('mcpSecurity.blockedEnvKeys')"
           class="max-w-md"
         />
         <p
@@ -178,6 +182,7 @@ const envKeyOverlap = computed(() => {
         <TagsInputSimple
           v-model="state.blocked_url_hosts"
           :placeholder="t('mcpSecurity.itemPlaceholder')"
+          :aria-label="t('mcpSecurity.blockedUrlHosts')"
           class="max-w-md"
         />
       </template>
@@ -194,6 +199,7 @@ const envKeyOverlap = computed(() => {
         <TagsInputSimple
           v-model="state.blocked_url_ips"
           :placeholder="t('mcpSecurity.itemPlaceholder')"
+          :aria-label="t('mcpSecurity.blockedUrlIps')"
           :validate="isValidCidr"
           class="max-w-md"
         />

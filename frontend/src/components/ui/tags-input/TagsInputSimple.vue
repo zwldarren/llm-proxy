@@ -14,6 +14,13 @@ const props = withDefaults(
     modelValue?: string[];
     placeholder?: string;
     disabled?: boolean;
+    /**
+     * Accessible name for the entry field. Required in practice: the
+     * placeholder is dropped once the first tag exists, and an input with
+     * neither is unlabelled for assistive tech (the visible `SettingsItem`
+     * heading is not associated with it).
+     */
+    ariaLabel?: string;
     validate?: (value: string) => boolean | string;
     class?: HTMLAttributes["class"];
   }>(),
@@ -21,6 +28,7 @@ const props = withDefaults(
     modelValue: () => [],
     placeholder: "",
     disabled: false,
+    ariaLabel: undefined,
   }
 );
 
@@ -72,6 +80,7 @@ const delimiterRegExp = /[,\n;]+/;
 
     <TagsInputInput
       :placeholder="tags.length === 0 ? placeholder : ''"
+      :aria-label="props.ariaLabel"
       class="font-mono text-xs placeholder:text-muted-foreground flex-1 min-w-[120px]"
     />
   </TagsInput>
