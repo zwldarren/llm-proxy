@@ -34,6 +34,7 @@ class TestMCPServerEnabledToggle:
         mock_session = MagicMock(spec=AsyncSession)
         mock_session.flush = AsyncMock()
         mock_session.refresh = AsyncMock()
+        mock_session.commit = AsyncMock()
 
         # Create a mock server record that is initially enabled
         mock_server = MagicMock(spec=McpServerRecord)
@@ -67,6 +68,7 @@ class TestMCPServerEnabledToggle:
         mock_request.app.state.mcp_manager = MagicMock(spec=MCPProxyManager)
         mock_request.app.state.mcp_manager.stop_server = AsyncMock()
         mock_request.app.state.mcp_manager.list_active_servers = AsyncMock(return_value=[])
+        mock_request.app.state.config_manager = MagicMock(publish_generation=AsyncMock())
 
         # Create update data
         update_data = McpServerUpdate(enabled=False)
@@ -84,6 +86,7 @@ class TestMCPServerEnabledToggle:
         ):
             # Call the update function
             await update_server(
+                request=mock_request,
                 name="test-server",
                 data=update_data,
                 session=mock_session,
@@ -98,6 +101,9 @@ class TestMCPServerEnabledToggle:
         # but if the bug exists, it might not be called with the correct value
         assert "enabled" in call_kwargs, "enabled field should be in update kwargs"
         assert not call_kwargs["enabled"], f"enabled should be False, got {call_kwargs['enabled']}"
+        # The persisted change must wake peer workers after the commit.
+        mock_session.commit.assert_awaited_once()
+        mock_request.app.state.config_manager.publish_generation.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_update_enabled_status_flow(self):
@@ -113,6 +119,7 @@ class TestMCPServerEnabledToggle:
         mock_session = MagicMock(spec=AsyncSession)
         mock_session.flush = AsyncMock()
         mock_session.refresh = AsyncMock()
+        mock_session.commit = AsyncMock()
 
         mock_server = MagicMock(spec=McpServerRecord)
         mock_server.id = 1
@@ -135,6 +142,7 @@ class TestMCPServerEnabledToggle:
         mock_request.app.state.mcp_manager = MagicMock(spec=MCPProxyManager)
         mock_request.app.state.mcp_manager.stop_server = AsyncMock()
         mock_request.app.state.mcp_manager.list_active_servers = AsyncMock(return_value=[])
+        mock_request.app.state.config_manager = MagicMock(publish_generation=AsyncMock())
 
         update_data = McpServerUpdate(enabled=False)
 
@@ -164,6 +172,7 @@ class TestMCPServerEnabledToggle:
             patch.object(McpServerRepository, "update_server", return_value=mock_server),
         ):
             await update_server(
+                request=mock_request,
                 name="test-server",
                 data=update_data,
                 session=mock_session,
@@ -180,3 +189,64 @@ class TestMCPServerEnabledToggle:
         # Verify enabled was set to False
         last_update_call = update_calls[-1]
         assert not last_update_call[2]["enabled"], "enabled should be False"
+
+    @pytest.mark.asyncio
+    async def test_definition_change_restarts_a_running_server(self):
+        """Editing command/args/env/base_url must rebuild the child process."""
+        mock_session = MagicMock(spec=AsyncSession)
+        mock_session.flush = AsyncMock()
+        mock_session.refresh = AsyncMock()
+        mock_session.commit = AsyncMock()
+
+        mock_server = MagicMock(spec=McpServerRecord)
+        mock_server.id = 1
+        mock_server.name = "test-server"
+        mock_server.type = "stdio"
+        mock_server.command = "new-command"
+        mock_server.args = []
+        mock_server.base_url = None
+        mock_server.env = {}
+        mock_server.enabled = True
+        mock_server.proxy_url = "/servers/test-server/mcp"
+        mock_server.server_metadata = {}
+        mock_server.created_at = MagicMock()
+        mock_server.updated_at = MagicMock()
+
+        mock_manager = MagicMock(spec=MCPProxyManager)
+        mock_manager.list_active_servers = AsyncMock(return_value=["test-server"])
+        mock_manager.get_server_fingerprint = AsyncMock(return_value="stale-definition")
+        mock_manager.restart_server = AsyncMock()
+        mock_manager.start_server = AsyncMock()
+        mock_manager.stop_server = AsyncMock()
+
+        mock_request = MagicMock()
+        mock_request.app = MagicMock()
+        mock_request.app.state = MagicMock()
+        mock_request.app.state.mcp_manager = mock_manager
+        mock_request.app.state.config_manager = MagicMock(publish_generation=AsyncMock())
+
+        with (
+            patch.object(ConfigRepository, "__init__", lambda self, session: None),
+            patch.object(ConfigRepository, "get_mcp_server", return_value=mock_server),
+            patch.object(ConfigRepository, "update_mcp_server", return_value=mock_server),
+            patch.object(McpServerRepository, "__init__", lambda self, session: None),
+            patch.object(McpServerRepository, "get_server", return_value=mock_server),
+            patch.object(McpServerRepository, "update_server", return_value=mock_server),
+            patch(
+                "llm_proxy.api.routers.mcp._validate_mcp_security_async",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            await update_server(
+                request=mock_request,
+                name="test-server",
+                data=McpServerUpdate(command="new-command"),
+                session=mock_session,
+                mcp_manager=mock_manager,
+            )
+
+        mock_manager.restart_server.assert_awaited_once()
+        mock_manager.start_server.assert_not_awaited()
+        mock_manager.stop_server.assert_not_awaited()
+        mock_session.commit.assert_awaited_once()
+        mock_request.app.state.config_manager.publish_generation.assert_awaited_once()

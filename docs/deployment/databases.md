@@ -71,6 +71,9 @@ storage.
 | --- | --- |
 | Shared rate limiting across workers/replicas | `REDIS_ENABLED=true` **and** `REDIS_RATE_LIMIT_ENABLED=true` |
 | Config cache (provider/model lookups) | `REDIS_ENABLED=true` **and** `REDIS_CACHE_ENABLED=true` |
+| Settings hot-reload on every worker/replica (web search, circuit breaker, MCP servers, MCP security policy) | `REDIS_ENABLED=true` |
+| API-key / user-role changes across workers/replicas (revocation, role, activation, budget, model allowlist) | `REDIS_ENABLED=true` |
+| Personal tracing config changes on every worker/replica | `REDIS_ENABLED=true` |
 | Sticky provider routing | `REDIS_ENABLED=true` **and** provider selection strategy `session_sticky` (global default is `random`) — other strategies never read or write the sticky key |
 | Last-model continuity (smart routing `auto`/`fast`/`best`) | Redis connected (`REDIS_ENABLED=true`) and smart routing enabled |
 | OpenResponses response store: `GET`/`DELETE`/cancel/`input_items`, and `background: true` | Redis connected |

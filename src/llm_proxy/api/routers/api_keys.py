@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import (
     get_async_session_dep,
+    publish_config_generation,
     require_authenticated,
 )
 from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
@@ -74,6 +75,17 @@ async def _get_current_user_id(request: Request, session: AsyncSession) -> int:
     if user_id is None:
         raise AuthenticationFailedError(message="User not found")
     return user_id
+
+
+async def _invalidate_api_key_caches(request: Request) -> None:
+    """Drop this worker's key caches and wake peer workers to drop theirs.
+
+    The API-key / budget-spend caches are process-local. ``publish_generation``
+    makes every other worker drop its snapshot when it adopts the generation
+    (about a second) instead of serving a revoked key until the 60-second TTL.
+    """
+    invalidate_api_key_cache()
+    await publish_config_generation(request)
 
 
 def _validate_models_within_user_allowlist(
@@ -168,7 +180,7 @@ async def create_api_key(
     )
     await session.commit()
 
-    invalidate_api_key_cache()
+    await _invalidate_api_key_caches(request)
 
     return ApiKeyResponse(
         name=api_key.name,
@@ -327,7 +339,7 @@ async def update_api_key_models(
         raise NotFoundError(message=f"Failed to update API key models for '{name}'")
     await session.commit()
 
-    invalidate_api_key_cache()
+    await _invalidate_api_key_caches(request)
 
     # Use the ownership-checked record instead of re-fetching
     return ApiKeyRead.model_validate(api_key)
@@ -405,7 +417,7 @@ async def update_api_key(
     )
     await session.commit()
 
-    invalidate_api_key_cache()
+    await _invalidate_api_key_caches(request)
 
     return ApiKeyRead.model_validate(api_key)
 
@@ -433,7 +445,7 @@ async def reset_api_key_budget(
         raise NotFoundError(message=f"API key '{name}' not found")
     await session.commit()
 
-    invalidate_api_key_cache()
+    await _invalidate_api_key_caches(request)
 
     return ApiKeyRead.model_validate(api_key)
 
@@ -454,7 +466,7 @@ async def delete_api_key(
         raise NotFoundError(message=f"Failed to delete API key '{name}'")
     await session.commit()
 
-    invalidate_api_key_cache()
+    await _invalidate_api_key_caches(request)
 
     return ApiKeyDeleteResponse(
         name=name,

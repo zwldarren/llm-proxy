@@ -123,6 +123,22 @@ class TestApiKeyRouter:
         assert data["name"] == "new-key"
 
     @pytest.mark.asyncio
+    async def test_delete_publishes_generation_for_peers(self, client, app, mock_repo):
+        """A key revocation must wake peer workers to drop their key cache."""
+        config_manager = MagicMock()
+        config_manager.publish_generation = AsyncMock()
+        app.state.config_manager = config_manager
+
+        mock_repo.get_api_key_by_name = AsyncMock(return_value=make_api_key("k"))
+        mock_repo.delete_api_key = AsyncMock(return_value=True)
+
+        with patch.object(api_keys_module, "get_api_key_repository", return_value=mock_repo):
+            response = await client.delete("/api/api-keys/k")
+
+        assert response.status_code == 200
+        config_manager.publish_generation.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_create_api_key_with_mcp_fields(self, client, mock_repo):
         """Test creating an API key with MCP permission fields."""
         mock_repo.get_api_key_by_name = AsyncMock(return_value=None)

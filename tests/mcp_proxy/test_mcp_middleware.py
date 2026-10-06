@@ -31,6 +31,17 @@ def _collect_send():
     return messages, send
 
 
+def _main_app(**state_attrs) -> MagicMock:
+    """Build a main-app double whose state has no config manager by default.
+
+    ``state_attrs`` lets a test attach a real (or awaitable) config manager so
+    the middleware's generation refresh can be asserted.
+    """
+    app = MagicMock()
+    app.state = MagicMock(**state_attrs)
+    return app
+
+
 @pytest.mark.asyncio
 async def test_routes_servers_to_mcp_app() -> None:
     """/servers/* requests are dispatched directly to the MCP app."""
@@ -38,7 +49,7 @@ async def test_routes_servers_to_mcp_app() -> None:
     mcp_app = AsyncMock()
     middleware = MCPProxyMiddleware(
         app=main_app,
-        main_app=MagicMock(),
+        main_app=_main_app(),
         mcp_app=mcp_app,
     )
 
@@ -77,7 +88,7 @@ async def test_passes_non_server_paths_to_app() -> None:
     mcp_app = AsyncMock()
     middleware = MCPProxyMiddleware(
         app=main_app,
-        main_app=MagicMock(),
+        main_app=_main_app(),
         mcp_app=mcp_app,
     )
 
@@ -96,7 +107,7 @@ async def test_rejects_missing_authorization() -> None:
     mcp_app = AsyncMock()
     middleware = MCPProxyMiddleware(
         app=main_app,
-        main_app=MagicMock(),
+        main_app=_main_app(),
         mcp_app=mcp_app,
     )
 
@@ -119,7 +130,7 @@ async def test_rejects_invalid_api_key() -> None:
     mcp_app = AsyncMock()
     middleware = MCPProxyMiddleware(
         app=main_app,
-        main_app=MagicMock(),
+        main_app=_main_app(),
         mcp_app=mcp_app,
     )
 
@@ -149,7 +160,7 @@ async def test_respects_ip_lockout() -> None:
     mcp_app = AsyncMock()
     middleware = MCPProxyMiddleware(
         app=main_app,
-        main_app=MagicMock(),
+        main_app=_main_app(),
         mcp_app=mcp_app,
     )
 
@@ -179,3 +190,38 @@ async def test_respects_ip_lockout() -> None:
     mock_verify.assert_not_awaited()
     mcp_app.assert_not_awaited()
     assert messages[0]["status"] == 429
+
+
+@pytest.mark.asyncio
+async def test_refreshes_config_before_reading_derived_caches() -> None:
+    """An MCP-only worker adopts peer generations before reading cached state.
+
+    /servers/* is short-circuited before the FastAPI pipeline, so this refresh
+    is the only chance such a worker gets to run the reload listeners.
+    """
+    config_manager = MagicMock()
+    config_manager.get_config = AsyncMock()
+    main_app = _main_app(config_manager=config_manager)
+    mcp_app = AsyncMock()
+    middleware = MCPProxyMiddleware(app=AsyncMock(), main_app=main_app, mcp_app=mcp_app)
+
+    scope = _make_scope(
+        "/servers/github/mcp",
+        headers=[(b"authorization", b"Bearer sk-test")],
+    )
+    auth_info = {
+        "principal_type": "api_key",
+        "principal_id": "agent",
+        "allowed_models": None,
+        "allowed_mcp_servers": ["github"],
+    }
+    messages, send = _collect_send()
+
+    with patch(
+        "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+        new=AsyncMock(return_value=auth_info),
+    ):
+        await middleware(scope, _receive, send)
+
+    config_manager.get_config.assert_awaited_once()
+    mcp_app.assert_awaited_once()

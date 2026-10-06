@@ -55,6 +55,7 @@ def team_client():
     mock_config.server_params.auth = ProxyAuthConfig(jwt_secret=TEST_SECRET)
     mock_config_manager = MagicMock()
     mock_config_manager.get_config = AsyncMock(return_value=mock_config)
+    mock_config_manager.publish_generation = AsyncMock()
 
     with (
         patch("llm_proxy.api.dependencies.UserRepository", return_value=auth_repo),

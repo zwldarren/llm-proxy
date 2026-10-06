@@ -3,6 +3,7 @@
 import asyncio
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.core.constants import DEFAULT_MAX_FALLBACK_ATTEMPTS, DEFAULT_MAX_RETRIES
@@ -268,6 +269,12 @@ class DatabaseConfigManager:
         self._config: ProxyConfig | None = None
         self._redis_cache: RedisCache | None = None
         self._cache_enabled: bool = False
+        # Shared Redis channel for peer-visible change tokens. Set whenever
+        # Redis is connected, *independently* of ``_cache_enabled``: the
+        # generation token is a change *signal* for process-local runtime
+        # state (web search, circuit breaker, MCP processes, API-key and role
+        # caches), not part of the provider/model cache it reads through.
+        self._generation_cache: RedisCache | None = None
         # Cross-process config freshness. ``_generation`` identifies the
         # snapshot this process holds; peers publish a new token on every
         # mutation so a stale worker reloads instead of serving an outdated
@@ -275,6 +282,15 @@ class DatabaseConfigManager:
         self._generation: str | None = None
         self._generation_checked_at: float = 0.0
         self._refresh_lock = asyncio.Lock()
+        # Listeners notified after the snapshot is swapped, on both a local
+        # ``reload()`` and a peer-triggered generation refresh. They own the
+        # process-local runtime state derived from config (web-search
+        # interceptor, circuit-breaker thresholds, MCP server processes) so a
+        # peer's settings change is applied by *every* worker, not just the one
+        # that handled the admin request. Listeners must not call back into
+        # this manager (``get_config``/``reload``): they receive the fresh
+        # ``ProxyConfig`` they need as an argument.
+        self._reload_listeners: list[Callable[[ProxyConfig], Awaitable[None]]] = []
 
     async def load(self) -> ProxyConfig:
         """Load configuration from database."""
@@ -475,7 +491,42 @@ class DatabaseConfigManager:
         """
         self._redis_cache = redis_cache
         self._cache_enabled = True
+        if self._generation_cache is None:
+            self._generation_cache = redis_cache
         logger.info("Redis cache enabled for configuration manager")
+
+    def set_generation_channel(self, redis_cache: RedisCache) -> None:
+        """Enable the shared config-generation channel without config caching.
+
+        The generation token is how peers learn that *any* worker mutated
+        configuration (including tables read outside ``ProxyConfig``), and it
+        drives the reload listeners that own process-local runtime state. It
+        must therefore be available whenever Redis is connected, not only when
+        ``REDIS_CACHE_ENABLED`` turns on the provider/model cache.
+        """
+        self._generation_cache = redis_cache
+        logger.info("Redis config-generation channel enabled")
+
+    def add_reload_listener(self, listener: Callable[[ProxyConfig], Awaitable[None]]) -> None:
+        """Register a coroutine called after every config snapshot swap.
+
+        Runs on a local :meth:`reload` and on a peer-triggered generation
+        refresh, which is how process-local runtime state stays in sync across
+        workers. A listener must not call back into this manager.
+        """
+        self._reload_listeners.append(listener)
+
+    async def _notify_reload_listeners(self, config: ProxyConfig) -> None:
+        """Fan the fresh snapshot out to registered listeners.
+
+        A failing listener is logged and skipped: it must never abort config
+        loading or block the other listeners.
+        """
+        for listener in self._reload_listeners:
+            try:
+                await listener(config)
+            except Exception as e:
+                logger.warning(f"Config reload listener failed: {e}", exc_info=e)
 
     def get_cached_config(self) -> ProxyConfig | None:
         """Return the in-memory cached config without triggering a load.
@@ -590,13 +641,27 @@ class DatabaseConfigManager:
     async def reload(self) -> None:
         """Reload configuration from database and invalidate cache.
 
-        Publishes a fresh configuration generation so peer worker processes
-        (multi-worker deployments share Redis) drop their stale in-memory
-        snapshots on their next lookup.
+        Notifies reload listeners so this worker's process-local runtime state
+        (web search, circuit breaker, MCP servers) follows the new snapshot,
+        then publishes a fresh configuration generation so peer worker
+        processes (multi-worker deployments share Redis) drop their stale
+        in-memory snapshots on their next lookup.
         """
         self._config = None
-        await self.load()
+        config = await self.load()
+        await self._notify_reload_listeners(config)
         await self.invalidate_all_cache()
+        await self._publish_generation()
+
+    async def publish_generation(self) -> None:
+        """Publish a fresh generation token for changes outside server_config.
+
+        Provider/model tables, the MCP server table, API keys and user rows are
+        read outside :class:`ProxyConfig`; an admin mutation there still needs
+        peer workers to refresh their snapshot and re-run the reload listeners.
+        A no-op when Redis is not connected — then this process is the only
+        worker, and every mutation already reloads its own state.
+        """
         await self._publish_generation()
 
     async def sync_generation(self) -> None:
@@ -606,20 +671,22 @@ class DatabaseConfigManager:
         request does not trigger a redundant reload for a generation this
         process already loaded from the database.
         """
-        if not (self._cache_enabled and self._redis_cache):
+        cache = self._generation_cache
+        if cache is None:
             return
         try:
-            self._generation = await self._redis_cache.get_config_generation()
+            self._generation = await cache.get_config_generation()
         except Exception as e:
             logger.warning(f"Failed to sync config generation: {e}")
 
     async def _publish_generation(self) -> None:
         """Publish a new configuration generation token for peer workers."""
-        if not (self._cache_enabled and self._redis_cache):
+        cache = self._generation_cache
+        if cache is None:
             return
         token = uuid.uuid4().hex
         try:
-            published = await self._redis_cache.set_config_generation(token)
+            published = await cache.set_config_generation(token)
         except Exception as e:
             logger.warning(f"Failed to publish config generation: {e}")
             return
@@ -632,16 +699,18 @@ class DatabaseConfigManager:
         Returns ``True`` when the config was reloaded. Checks are throttled to
         ``_CONFIG_GENERATION_CHECK_INTERVAL`` seconds unless ``force`` is set,
         so the hot path pays at most one shared-cache read per interval. A
-        no-op when Redis caching is disabled: a single process already reloads
+        no-op when Redis is not connected: a single process already reloads
         on every mutation.
         """
-        if not (self._cache_enabled and self._redis_cache):
+        cache = self._generation_cache
+        if cache is None:
             return False
 
         now = time.monotonic()
         if not force and now - self._generation_checked_at < _CONFIG_GENERATION_CHECK_INTERVAL:
             return False
 
+        refreshed: ProxyConfig | None = None
         async with self._refresh_lock:
             now = time.monotonic()
             if not force and now - self._generation_checked_at < _CONFIG_GENERATION_CHECK_INTERVAL:
@@ -649,7 +718,7 @@ class DatabaseConfigManager:
             self._generation_checked_at = now
 
             try:
-                generation = await self._redis_cache.get_config_generation()
+                generation = await cache.get_config_generation()
             except Exception as e:
                 logger.warning(f"Config generation check failed: {e}")
                 return False
@@ -657,10 +726,16 @@ class DatabaseConfigManager:
             if generation is None or generation == self._generation:
                 return False
 
-            await self.load()
+            refreshed = await self.load()
             self._generation = generation
+
+        # Notify outside the refresh lock: a listener may open a database
+        # session (MCP reconcile), and must never risk a re-entrant lock wait.
+        if refreshed is not None:
+            await self._notify_reload_listeners(refreshed)
             logger.debug("Config refreshed after a peer worker changed it")
             return True
+        return False
 
     async def invalidate_all_cache(self) -> None:
         """Invalidate all cached configurations."""

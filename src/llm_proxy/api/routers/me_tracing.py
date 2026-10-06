@@ -98,9 +98,9 @@ async def update_my_tracing(
             await repo.set_tracing_config(user.id, config.to_dict())
             await session.commit()
 
-        # Drop any cached per-user registry so the next request rebuilds it
-        # from the updated config.
-        await get_user_tracing_manager().invalidate(user.id)
+        # Drop this worker's cached per-user registry and signal peer workers
+        # to do the same, so the updated config takes effect everywhere.
+        await get_user_tracing_manager().publish_invalidation(user.id)
 
         config_read = _build_config_read(config.to_dict())
 

@@ -7,7 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Receive, Scope, Send
 
-from llm_proxy.api.dependencies import require_admin_role, require_authenticated
+from llm_proxy.api.dependencies import (
+    publish_config_generation,
+    require_admin_role,
+    require_authenticated,
+)
 from llm_proxy.api.schemas.admin import (
     McpServerCapabilities,
     McpServerCreate,
@@ -142,6 +146,17 @@ class MCPProxyApp:
         self._policy_ts = now
         return self._policy
 
+    def reset_policy_cache(self) -> None:
+        """Drop the cached security policy so the next request reloads it.
+
+        Called by the config reload listener when this worker adopts a peer's
+        ``mcp_security_policy`` edit: the TTL alone would let the old policy
+        (including the ``require_key_mcp_permissions`` gate) survive for up to
+        a minute. Process-local, so each worker resets its own.
+        """
+        self._policy = None
+        self._policy_ts = 0.0
+
     async def _send_json(self, send: Send, status: int, body: dict) -> None:
         """Send a JSON response using ASGI send."""
         await send(
@@ -249,6 +264,7 @@ async def list_servers(
 @router.post("/servers", response_model=McpServerRead, status_code=201)
 async def create_server(
     data: McpServerCreate,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
     mcp_manager=Depends(get_mcp_manager),
 ) -> McpServerRead:
@@ -280,6 +296,15 @@ async def create_server(
         mcp_repo = McpServerRepository(session)
         await mcp_manager.start_server(mcp_repo, server.name)
         await session.refresh(server)
+
+    # Commit before publishing: a peer that adopts the new generation must see
+    # the persisted row. The session dependency's commit runs only after this
+    # handler returns, so relying on it would let a peer reconcile stale state
+    # and then never revisit this mutation.
+    await session.commit()
+
+    # Wake peer workers so their reload listener starts the new server too.
+    await publish_config_generation(request)
 
     return _build_server_read(
         server,
@@ -343,6 +368,7 @@ async def get_server(
 @router.put("/servers/{name:path}", response_model=McpServerRead)
 async def update_server(
     data: McpServerUpdate,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
     mcp_manager=Depends(get_mcp_manager),
     name: str = Path(...),
@@ -378,19 +404,39 @@ async def update_server(
         if "env" in update_data:
             update_data["env"] = filtered_env
 
-    if data.enabled is not None:
-        from llm_proxy.database.repositories.config_mcp import McpServerRepository
-
-        mcp_repo = McpServerRepository(session)
-        if data.enabled:
-            await mcp_manager.start_server(mcp_repo, name)
-        else:
-            await mcp_manager.stop_server(mcp_repo, name)
-
     server = await repo.update_mcp_server(name, **update_data)
 
     if not server:
         raise MCPServerNotFoundError(server_name=name)
+
+    # Apply the persisted state to this worker *after* persisting: a definition
+    # edit of a running server must restart the child process, and starting or
+    # stopping before the update would build it from the pre-edit record. The
+    # reload listener does the same on peer workers.
+    from llm_proxy.database.repositories.config_mcp import McpServerRepository
+    from llm_proxy.mcp.manager import MCPProxyManager
+
+    mcp_repo = McpServerRepository(session)
+    was_active = name in await mcp_manager.list_active_servers()
+    if server.enabled:
+        if not was_active:
+            await mcp_manager.start_server(mcp_repo, name)
+        else:
+            fingerprint = MCPProxyManager.server_fingerprint(server)
+            active_fingerprint = await mcp_manager.get_server_fingerprint(name)
+            if active_fingerprint is not None and active_fingerprint != fingerprint:
+                await mcp_manager.restart_server(mcp_repo, name)
+    elif was_active:
+        await mcp_manager.stop_server(mcp_repo, name)
+
+    if update_data:
+        # Commit before publishing so peers observe the persisted change (the
+        # dependency's commit runs only after this handler returns). A no-op
+        # update must not wake every peer for nothing.
+        await session.commit()
+
+        # Wake peer workers so their reload listener mirrors the update.
+        await publish_config_generation(request)
 
     active_servers = await mcp_manager.list_active_servers()
 
@@ -402,6 +448,7 @@ async def update_server(
 
 @router.delete("/servers/{name:path}")
 async def delete_server(
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
     mcp_manager=Depends(get_mcp_manager),
     name: str = Path(...),
@@ -418,5 +465,11 @@ async def delete_server(
 
     if not success:
         raise MCPServerNotFoundError(server_name=name)
+
+    # Commit before publishing so a peer's reconcile sees the row gone.
+    await session.commit()
+
+    # Wake peer workers so their reload listener stops the removed server.
+    await publish_config_generation(request)
 
     return {"message": f"MCP server '{name}' has been deleted"}

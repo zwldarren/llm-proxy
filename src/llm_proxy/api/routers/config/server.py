@@ -9,7 +9,6 @@ from llm_proxy.api.dependencies import get_async_session_dep, require_admin_role
 from llm_proxy.api.routers.config.helpers import (
     commit_and_reload,
     get_config_repository,
-    rebuild_web_search_interceptor,
 )
 from llm_proxy.api.schemas.admin import (
     CorsConfig,
@@ -30,7 +29,6 @@ from llm_proxy.config.types.logging_config import (
 )
 from llm_proxy.config.types.provider_selection import ProviderSelectionConfig
 from llm_proxy.config.types.smart_routing import SmartRoutingConfig
-from llm_proxy.core.circuit_breaker import CircuitBreakerConfig
 
 router = APIRouter(
     prefix="/server", tags=["configuration"], dependencies=[Depends(require_admin_role)]
@@ -177,11 +175,11 @@ async def update_web_search_config(
 
     await repo.set_web_search_config(config_value)
 
-    # Clear configuration cache
+    # Persist and reload this worker's config snapshot. ``reload()`` runs the
+    # reload listeners synchronously, rebuilding this worker's web-search
+    # interceptor here; peer workers rebuild theirs when they adopt the new
+    # generation.
     await commit_and_reload(session, request)
-
-    # Rebuild interceptor so new max_results / URL / auth take effect immediately
-    await rebuild_web_search_interceptor(request)
 
     return config_value
 
@@ -199,8 +197,6 @@ async def delete_web_search_config(
     await repo.delete_server_config("web_search_config")
 
     await commit_and_reload(session, request)
-
-    await rebuild_web_search_interceptor(request)
 
     return {"message": "Web search configuration deleted"}
 
@@ -387,18 +383,6 @@ async def update_resilience_config(
         description="Global resilience configuration",
     )
     await commit_and_reload(session, request)
-
-    # Also update the circuit breaker store at runtime
-    circuit_breaker = getattr(request.app.state, "circuit_breaker", None)
-    if circuit_breaker is not None:
-        cb = config_data.circuit_breaker
-        circuit_breaker.update_config(
-            CircuitBreakerConfig(
-                enabled=cb.enabled,
-                failure_threshold=cb.failure_threshold,
-                cooldown_seconds=cb.cooldown_seconds,
-            )
-        )
 
     # Re-read from DB to return the persisted state
     row = await repo.get_server_config("resilience")

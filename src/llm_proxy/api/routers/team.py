@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from llm_proxy.api.dependencies import (
     get_async_session_dep,
     get_auth_config,
+    publish_config_generation,
     require_admin_role,
 )
 from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
@@ -90,6 +91,12 @@ async def _commit_member_operation(request: Request, op: MemberOperation) -> Non
         invalidate_api_key_cache()
     if op.invalidate_role_usernames:
         invalidate_user_role_cache(*op.invalidate_role_usernames)
+    if op.invalidate_api_keys or op.invalidate_role_usernames:
+        # Both caches are process-local and built from the users/api_keys tables
+        # (not from ProxyConfig). Wake peer workers so they drop their snapshot
+        # when they adopt the new generation, instead of honouring a demoted
+        # role or a deactivated key until the 60-second TTL.
+        await publish_config_generation(request)
     if op.log_message:
         logger.info(op.log_message, **(op.log_fields or {}))
     await write_member_audit_log(

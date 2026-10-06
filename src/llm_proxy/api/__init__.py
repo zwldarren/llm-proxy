@@ -20,6 +20,7 @@ from llm_proxy.api.lifecycle import (
     startup_circuit_breaker,
     startup_config,
     startup_database,
+    startup_derived_caches,
     startup_embedding_signal,
     startup_http_client,
     startup_mcp_servers,
@@ -106,6 +107,7 @@ async def lifespan(app: FastAPI):
         await startup_protocols(app, config_manager)
         await startup_tracing(app, config_manager)
         await startup_redis(app, config_manager)
+        await startup_derived_caches(config_manager)
         await startup_web_search(app, config_manager)
         await startup_mcp_servers(app, config_manager)
         await startup_background_services(app)

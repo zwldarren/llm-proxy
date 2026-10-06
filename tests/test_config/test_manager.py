@@ -548,6 +548,71 @@ class TestCrossProcessConfigRefresh:
         assert token and token == manager._generation
 
     @pytest.mark.asyncio
+    async def test_reload_notifies_listeners_with_the_fresh_snapshot(self):
+        manager = self._manager()
+        fresh = self._config()
+        manager.load = AsyncMock(return_value=fresh)
+        seen = []
+
+        async def _listener(config):
+            seen.append(config)
+
+        manager.add_reload_listener(_listener)
+        await manager.reload()
+
+        assert seen == [fresh]
+
+    @pytest.mark.asyncio
+    async def test_peer_generation_refresh_notifies_listeners(self):
+        manager = self._manager(generation="gen-1", generation_after="gen-2")
+        fresh = self._config()
+        manager.load = AsyncMock(return_value=fresh)
+        seen = []
+
+        async def _listener(config):
+            seen.append(config)
+
+        manager.add_reload_listener(_listener)
+
+        assert await manager._refresh_if_generation_changed(force=True) is True
+        assert seen == [fresh]
+
+    @pytest.mark.asyncio
+    async def test_unchanged_generation_does_not_notify_listeners(self):
+        manager = self._manager(generation="gen-1", generation_after="gen-1")
+        manager.load = AsyncMock()
+        seen = []
+
+        async def _listener(config):
+            seen.append(config)
+
+        manager.add_reload_listener(_listener)
+
+        assert await manager._refresh_if_generation_changed(force=True) is False
+        assert seen == []
+
+    @pytest.mark.asyncio
+    async def test_failing_listener_does_not_abort_reload(self):
+        manager = self._manager()
+        fresh = self._config()
+        manager.load = AsyncMock(return_value=fresh)
+        seen = []
+
+        async def _boom(config):
+            raise RuntimeError("listener failed")
+
+        async def _ok(config):
+            seen.append(config)
+
+        manager.add_reload_listener(_boom)
+        manager.add_reload_listener(_ok)
+
+        await manager.reload()
+
+        # The healthy listener still ran despite the earlier failure.
+        assert seen == [fresh]
+
+    @pytest.mark.asyncio
     async def test_sync_generation_adopts_the_token_without_reloading(self):
         manager = self._manager(generation_after="gen-9")
         manager.load = AsyncMock()
@@ -565,6 +630,53 @@ class TestCrossProcessConfigRefresh:
 
         assert await manager._refresh_if_generation_changed(force=True) is False
         manager.load.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_publish_generation_is_a_noop_without_redis_caching(self):
+        manager = DatabaseConfigManager()
+        manager._redis_cache = MagicMock()
+
+        # No cache channel means no peers to notify; must not touch Redis.
+        await manager.publish_generation()
+
+        manager._redis_cache.set_config_generation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generation_channel_publishes_without_config_cache(self):
+        """REDIS_ENABLED alone drives cross-worker reloads, not REDIS_CACHE_ENABLED."""
+        manager = DatabaseConfigManager()
+        manager._config = self._config()
+        manager._generation = "gen-1"
+        cache = MagicMock()
+        cache.get_config_generation = AsyncMock(return_value="gen-1")
+        cache.set_config_generation = AsyncMock(return_value=True)
+        manager.set_generation_channel(cache)
+
+        await manager.publish_generation()
+
+        cache.set_config_generation.assert_awaited_once()
+        assert manager._generation == cache.set_config_generation.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_generation_channel_refreshes_without_config_cache(self):
+        manager = DatabaseConfigManager()
+        fresh = self._config()
+        cache = MagicMock()
+        cache.get_config_generation = AsyncMock(return_value="gen-2")
+        manager.set_generation_channel(cache)
+        manager._config = self._config()
+        manager._generation = "gen-1"
+        manager.load = AsyncMock(return_value=fresh)
+        seen = []
+
+        async def _listener(config):
+            seen.append(config)
+
+        manager.add_reload_listener(_listener)
+
+        assert await manager._refresh_if_generation_changed(force=True) is True
+        assert manager._generation == "gen-2"
+        assert seen == [fresh]
 
     @pytest.mark.asyncio
     async def test_peer_worker_picks_up_a_new_model_end_to_end(self):

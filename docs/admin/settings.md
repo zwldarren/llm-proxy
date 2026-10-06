@@ -4,6 +4,17 @@
 features, resilience, and security policy. Every section here is written to the
 database and **hot-reloaded** — no restart, ever.
 
+Hot reload covers every worker process, not just the one that served the request:
+a peer picks up the shared revision on its next request (checked at most once per
+second) and re-applies the setting, including the state that is not part of the
+config row itself — the web search interceptor, circuit-breaker thresholds, MCP
+server processes, and personal tracing registries. API-key and team-role edits
+propagate the same way, so a revoked key or a demoted role takes effect on every
+worker in about a second instead of waiting out the in-process cache TTL. This
+needs Redis (`REDIS_ENABLED=true`), which the shipped compose sets. Without Redis
+a multi-worker deployment only hot-reloads the worker that handled the change; the
+provider/model lookup cache is a separate, optional switch (`REDIS_CACHE_ENABLED`).
+
 The screen has two tabs: **General** and **Advanced**. Preference and Tracing are
 available to all users; everything else is admin-only.
 

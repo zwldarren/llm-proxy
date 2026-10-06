@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 from fastapi import FastAPI
 
 from llm_proxy.config.manager import (
@@ -5,6 +7,7 @@ from llm_proxy.config.manager import (
     resolve_logging_config,
 )
 from llm_proxy.config.settings import get_settings
+from llm_proxy.config.types import ProxyConfig
 from llm_proxy.database import close_db, init_db
 from llm_proxy.database.redis_client import close_redis_client, get_redis_client
 from llm_proxy.http.client import ProviderHTTPClientManager
@@ -164,36 +167,125 @@ async def startup_redis(app: FastAPI, config_manager: DatabaseConfigManager) -> 
         redis_client = await get_redis_client(config.redis)
         app.state.redis_client = redis_client
 
-        if config.redis.cache.enabled:
-            from llm_proxy.cache.redis_cache import RedisCache
+        from llm_proxy.cache.redis_cache import RedisCache
 
-            redis_cache = RedisCache(redis_client=redis_client, config=config.redis.cache)
-            config_manager.enable_cache(redis_cache)
-            # Adopt the shared generation the snapshot was loaded from so a
-            # peer worker's earlier mutation does not force a redundant reload
-            # on this process's first request.
-            await config_manager.sync_generation()
+        # The generation channel is a change *signal* for process-local state
+        # (web search, circuit breaker, MCP processes, API-key/role caches), so
+        # it is enabled whenever Redis is connected. Config caching additionally
+        # turns on the provider/model cache and is opt-in via REDIS_CACHE_ENABLED.
+        generation_cache = RedisCache(redis_client=redis_client, config=config.redis.cache)
+        if config.redis.cache.enabled:
+            config_manager.enable_cache(generation_cache)
+        else:
+            config_manager.set_generation_channel(generation_cache)
+        # Adopt the shared generation the snapshot was loaded from so a peer
+        # worker's earlier mutation does not force a redundant reload on this
+        # process's first request.
+        await config_manager.sync_generation()
     else:
         app.state.redis_client = None
 
+    # Give the per-user tracing manager a shared client so a personal tracing
+    # config change made on one worker invalidates the cached registry on every
+    # other worker (falls back to local-only invalidation without Redis).
+    from llm_proxy.observability.user_tracing import get_user_tracing_manager
+
+    redis_client = getattr(app.state, "redis_client", None)
+    get_user_tracing_manager().set_redis_client(redis_client.client if redis_client else None)
+
+
+async def startup_derived_caches(config_manager: DatabaseConfigManager) -> None:
+    """Register reload listeners for caches derived from non-ProxyConfig tables.
+
+    The API-key, user-role and MCP security-policy caches are process-local and
+    built from database rows outside :class:`ProxyConfig`. A peer's mutation
+    publishes a generation; when this worker adopts it these listeners drop the
+    caches, so a key revocation or role change takes effect in about a second on
+    every worker instead of waiting out the per-cache TTL.
+    """
+    from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
+    from llm_proxy.api.routers.logs import clear_user_role_cache
+
+    async def _drop_identity_caches(_config: ProxyConfig) -> None:
+        invalidate_api_key_cache()
+        clear_user_role_cache()
+
+    config_manager.add_reload_listener(_drop_identity_caches)
+
+    async def _reset_mcp_policy_cache(_config: ProxyConfig) -> None:
+        from llm_proxy.api.routers.mcp import mcp_proxy_app
+
+        mcp_proxy_app.reset_policy_cache()
+
+    config_manager.add_reload_listener(_reset_mcp_policy_cache)
+
 
 async def startup_web_search(app: FastAPI, config_manager: DatabaseConfigManager) -> None:
+    from llm_proxy.web_search.runtime import ensure_web_search_interceptor
+
     config = await config_manager.get_config()
-    web_search_interceptor = None
+    await ensure_web_search_interceptor(app, config.server_params.web_search)
 
-    if config.server_params.web_search and config.server_params.web_search.enabled:
-        from llm_proxy.web_search import create_web_search_provider
-        from llm_proxy.web_search.interceptor import WebSearchInterceptor
+    async def _sync_web_search_interceptor(config: ProxyConfig) -> None:
+        await ensure_web_search_interceptor(app, config.server_params.web_search)
 
-        try:
-            search_provider = create_web_search_provider(config.server_params.web_search)
-            if search_provider:
-                web_search_interceptor = WebSearchInterceptor(provider=search_provider)
-                logger.debug("Web search interceptor initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize web search interceptor: {e}", exc_info=True)
+    config_manager.add_reload_listener(_sync_web_search_interceptor)
 
-    app.state.web_search_interceptor = web_search_interceptor
+
+def _mcp_reconcile_listener(app: FastAPI) -> Callable[[ProxyConfig], Awaitable[None]]:
+    """Build the reload listener that reconciles this worker's MCP processes."""
+
+    async def _listener(_config: ProxyConfig) -> None:
+        await _reconcile_mcp_servers(app)
+
+    return _listener
+
+
+async def _reconcile_mcp_servers(app: FastAPI) -> None:
+    """Start/stop/restart MCP server processes to match the persisted state.
+
+    MCP servers are child processes owned per worker, and their enable/disable
+    mutations live outside :class:`ProxyConfig`, so a worker that did not handle
+    the admin request must reconcile them when it adopts a new generation. A
+    definition edit (command/args/env/base_url/type) does not change the enabled
+    set, so it is detected by fingerprint and restarted.
+    """
+    from llm_proxy.database import ConfigRepository, get_async_session_context
+    from llm_proxy.mcp.manager import MCPProxyManager
+
+    manager = getattr(app.state, "mcp_manager", None)
+    if manager is None:
+        return
+
+    async with get_async_session_context() as session:
+        repo = ConfigRepository(session)
+        mcp_repo = repo._mcp_servers
+        enabled = await mcp_repo.get_all_servers(enabled_only=True)
+        desired = {server.name: MCPProxyManager.server_fingerprint(server) for server in enabled}
+        active = await manager.list_server_fingerprints()
+
+        for name in set(active) - set(desired):
+            try:
+                await manager.stop_server(mcp_repo, name)
+                logger.debug(f"Stopped MCP server disabled on a peer: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to stop stale MCP server '{name}': {e}")
+
+        for name in set(desired) - set(active):
+            try:
+                await manager.start_server(mcp_repo, name)
+                logger.debug(f"Started MCP server enabled on a peer: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to start MCP server '{name}': {e}")
+
+        for name in set(active) & set(desired):
+            if active[name] == desired[name]:
+                continue
+            try:
+                await manager.restart_server(mcp_repo, name)
+                logger.debug(f"Restarted MCP server after a definition change: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to restart MCP server '{name}': {e}")
 
 
 async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManager) -> None:
@@ -214,6 +306,8 @@ async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManage
                 logger.error(f"Failed to auto-start MCP server {server.name}: {e}", exc_info=True)
                 # Continue with remaining servers; do not crash app startup.
 
+    config_manager.add_reload_listener(_mcp_reconcile_listener(app))
+
 
 async def startup_background_services(app: FastAPI) -> None:
     from llm_proxy.observability.service import RequestLogService
@@ -231,6 +325,24 @@ async def startup_background_services(app: FastAPI) -> None:
 
     tool_log_service = RequestLogService(logging_config)
     get_tool_log_service(tool_log_service)
+
+
+async def _sync_circuit_breaker_config(app: FastAPI, config: ProxyConfig) -> None:
+    """Apply UI-managed circuit-breaker thresholds to this worker's store."""
+    from llm_proxy.core.circuit_breaker import CircuitBreakerConfig
+
+    store = getattr(app.state, "circuit_breaker", None)
+    if store is None:
+        return
+
+    cb = config.server_params.circuit_breaker
+    new_config = CircuitBreakerConfig(
+        enabled=cb.enabled,
+        failure_threshold=cb.failure_threshold,
+        cooldown_seconds=cb.cooldown_seconds,
+    )
+    if store.config != new_config:
+        store.update_config(new_config)
 
 
 async def startup_circuit_breaker(app: FastAPI) -> None:
@@ -253,6 +365,15 @@ async def startup_circuit_breaker(app: FastAPI) -> None:
 
     app.state.circuit_breaker = CircuitBreakerStore(config=cb_config)
     logger.debug("Circuit breaker store initialized")
+
+    if config_manager is not None:
+
+        async def _sync_circuit_breaker(config: ProxyConfig) -> None:
+            await _sync_circuit_breaker_config(app, config)
+
+        # A peer's resilience edit must retune every worker, not just the one
+        # that served the admin request.
+        config_manager.add_reload_listener(_sync_circuit_breaker)
 
 
 async def startup_provider_stats(app: FastAPI) -> None:

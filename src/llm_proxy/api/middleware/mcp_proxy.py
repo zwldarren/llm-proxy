@@ -549,13 +549,22 @@ class MCPProxyMiddleware:
         client_ip = get_client_ip(request)
         lockout_manager = get_api_key_lockout_manager()
 
+        # Adopt a peer worker's configuration generation before reading any
+        # process-local derived cache below (API-key snapshot, MCP security
+        # policy). An MCP-only worker is short-circuited here and never enters
+        # the FastAPI pipeline, so this is its only chance to refresh and run
+        # the reload listeners.
+        config_manager = getattr(getattr(self.main_app, "state", None), "config_manager", None)
+        if config_manager is not None:
+            try:
+                await config_manager.get_config()
+            except Exception as e:
+                logger.warning(f"MCP config refresh failed: {e}")
+
         # This middleware short-circuits before the security-headers middleware,
         # so its own responses must carry the same header set.
         security_headers = [
-            (k.encode(), v.encode())
-            for k, v in build_security_headers(
-                getattr(getattr(self.main_app, "state", None), "config_manager", None)
-            ).items()
+            (k.encode(), v.encode()) for k, v in build_security_headers(config_manager).items()
         ]
 
         if lockout_manager.is_locked_out(client_ip):

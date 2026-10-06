@@ -288,3 +288,28 @@ async def test_build_request_context_allows_systemone_model():
     )
 
     assert result.request_type is RequestType.SYSTEMONE
+
+
+@pytest.mark.asyncio
+async def test_publish_config_generation_reaches_the_manager():
+    from llm_proxy.api.dependencies import publish_config_generation
+
+    manager = MagicMock()
+    manager.publish_generation = AsyncMock()
+    request = MagicMock()
+    request.app.state = MagicMock(config_manager=manager)
+
+    await publish_config_generation(request)
+
+    manager.publish_generation.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_publish_config_generation_is_a_noop_without_a_manager():
+    """A minimal app (tests, early startup) must not fail a mutation endpoint."""
+    from llm_proxy.api.dependencies import publish_config_generation
+
+    request = MagicMock()
+    request.app.state = MagicMock(config_manager=None)
+
+    await publish_config_generation(request)

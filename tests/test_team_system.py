@@ -193,6 +193,7 @@ async def app_and_db(monkeypatch, request):
     # Mock config manager — must be on app.state for the JWT middleware
     mock_config_manager = MagicMock()
     mock_config_manager.get_config = AsyncMock(return_value=_make_test_config())
+    mock_config_manager.publish_generation = AsyncMock()
     app.state.config_manager = mock_config_manager
 
     # Mock MCP manager

@@ -443,6 +443,9 @@ class TestMcpHttpEndToEnd:
         app.dependency_overrides[require_admin_role] = lambda: None
         app.include_router(router)
         app.state.mcp_manager = mock_mcp_manager
+        # MCP mutations publish a config generation so peer workers reconcile;
+        # the minimal test app has no lifespan, so provide a stub manager.
+        app.state.config_manager = MagicMock(publish_generation=AsyncMock())
 
         # Mount the MCP proxy ASGI app so /servers/*/mcp requests reach it.
         app.mount("/servers", mcp_proxy_app, name="mcp_proxy")
@@ -545,6 +548,8 @@ class TestMcpHttpEndToEnd:
         assert body["name"] == "github-mcp"
         assert body["type"] == "stdio"
         assert body["status"] == "stopped"
+        # The new server must be published so peer workers start it too.
+        app.state.config_manager.publish_generation.assert_awaited_once()
 
     def test_create_server_duplicate_name_returns_409(self):
         """POST /api/mcp/servers with duplicate name returns 409."""

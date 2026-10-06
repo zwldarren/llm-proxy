@@ -9,6 +9,7 @@ from llm_proxy.api.dependencies import (
     get_async_session_dep,
     get_auth_config,
     get_current_user,
+    publish_config_generation,
     require_authenticated,
 )
 from llm_proxy.api.routers.logs import invalidate_user_role_cache
@@ -121,8 +122,10 @@ async def change_username(
 
     assert updated is not None  # user was resolved by get_current_user
     # The logs router caches role/user_id keyed by username; drop both names
-    # so a recycled username cannot inherit this user's cached entry.
+    # so a recycled username cannot inherit this user's cached entry, and wake
+    # peer workers to drop theirs (the cache is process-local).
     invalidate_user_role_cache(old_username, updated.username)
+    await publish_config_generation(request)
     auth_config = await get_auth_config(request)
     token = JWTManager(auth_config).create_token(
         updated.username, role=updated.role, token_version=updated.token_version

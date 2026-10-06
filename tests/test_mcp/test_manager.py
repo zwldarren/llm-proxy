@@ -87,6 +87,7 @@ class TestMCPProxyManagerThreadSafety:
         mock_server.command = "/bin/test"
         mock_server.args = []
         mock_server.env = {}
+        mock_server.base_url = None
 
         mock_repo = AsyncMock()
         mock_repo.get_server = AsyncMock(return_value=mock_server)

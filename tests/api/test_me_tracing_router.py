@@ -130,7 +130,7 @@ class TestMeTracingRouter:
             patch("llm_proxy.api.routers.me_tracing.UserRepository", return_value=repo),
             patch(
                 "llm_proxy.api.routers.me_tracing.get_user_tracing_manager",
-                return_value=MagicMock(invalidate=invalidate_mock),
+                return_value=MagicMock(publish_invalidation=invalidate_mock),
             ),
         ):
             response = client.put(
@@ -221,7 +221,7 @@ class TestMeTracingRouter:
             patch("llm_proxy.api.routers.me_tracing.UserRepository", return_value=repo),
             patch(
                 "llm_proxy.api.routers.me_tracing.get_user_tracing_manager",
-                return_value=MagicMock(invalidate=invalidate_mock),
+                return_value=MagicMock(publish_invalidation=invalidate_mock),
             ),
         ):
             response = client.put("/api/me/tracing/", json=payload)

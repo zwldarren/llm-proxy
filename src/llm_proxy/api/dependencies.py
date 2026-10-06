@@ -88,6 +88,24 @@ async def get_config_from_state(request: Request) -> ProxyConfig:
     return await get_config_manager(request).get_config()
 
 
+async def publish_config_generation(request: Request) -> None:
+    """Publish a config generation so peer workers drop derived caches.
+
+    Called after mutations to tables that are read outside ``ProxyConfig``
+    (API keys, users, MCP servers): a peer that adopts the new generation runs
+    its reload listeners and drops its process-local caches, instead of
+    honouring a revoked key or a demoted role until the cache TTL expires.
+
+    A no-op when the config manager is absent (minimal test apps, early
+    startup): the local invalidation already happened, and a mutation endpoint
+    must not fail because the cross-worker signal cannot be sent.
+    """
+    config_manager = getattr(request.app.state, "config_manager", None)
+    if config_manager is None:
+        return
+    await config_manager.publish_generation()
+
+
 async def get_auth_config(request: Request):
     return (await get_config_from_state(request)).server_params.auth
 

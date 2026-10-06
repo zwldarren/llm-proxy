@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any
 
+import orjson
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from llm_proxy.mcp.backend import BackendConnection, HTTPBackend, StdioBackend
@@ -59,7 +60,31 @@ class MCPProxyManager:
         self._lifespan_tasks: dict[str, asyncio.Task[None]] = {}
         self._stop_events: dict[str, asyncio.Event] = {}
         self._starting_servers: set[str] = set()
+        # Definition fingerprint per running server. Lets a reconciler tell a
+        # plain enable/disable apart from a config edit, which must restart the
+        # child process instead of leaving it on the old definition.
+        self._fingerprints: dict[str, str] = {}
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def server_fingerprint(server: McpServerRecord) -> str:
+        """Return a stable identity for the definition a proxy is built from.
+
+        Covers every field :meth:`_create_backend` reads. ``proxy_url`` is
+        deliberately excluded: ``start_server`` writes it back to the record,
+        so including it would make an unchanged server look edited and restart
+        itself on every reconcile.
+        """
+        return orjson.dumps(
+            {
+                "type": server.type,
+                "command": server.command,
+                "args": list(server.args or []),
+                "env": dict(server.env or {}),
+                "base_url": server.base_url,
+            },
+            option=orjson.OPT_SORT_KEYS,
+        ).decode()
 
     async def start_server(
         self,
@@ -88,6 +113,7 @@ class MCPProxyManager:
             )
 
         start_time = time.time()
+        fingerprint = self.server_fingerprint(server)
 
         async with self._lock:
             if server_name in self._active_servers:
@@ -138,6 +164,7 @@ class MCPProxyManager:
                 self._stop_events[server_name] = stop_event
                 self._active_servers[server_name] = proxy
                 self._session_managers[server_name] = session_manager
+                self._fingerprints[server_name] = fingerprint
 
             await repo.update_server(server_name, proxy_url=proxy_url)
 
@@ -174,6 +201,7 @@ class MCPProxyManager:
                         if existing_proxy:
                             await existing_proxy.stop()
                     del self._active_servers[server_name]
+                    self._fingerprints.pop(server_name, None)
                 if server_name in self._session_managers:
                     del self._session_managers[server_name]
 
@@ -288,6 +316,7 @@ class MCPProxyManager:
                 except Exception as e:
                     logger.warning(f"Error stopping MCP server '{server_name}': {e}")
                 del self._active_servers[server_name]
+                self._fingerprints.pop(server_name, None)
 
             if server_name in self._session_managers:
                 del self._session_managers[server_name]
@@ -329,6 +358,29 @@ class MCPProxyManager:
         """List all currently active MCP servers."""
         async with self._lock:
             return list(self._active_servers.keys())
+
+    async def get_server_fingerprint(self, server_name: str) -> str | None:
+        """Return the definition fingerprint of a running server, or None."""
+        async with self._lock:
+            return self._fingerprints.get(server_name)
+
+    async def list_server_fingerprints(self) -> dict[str, str]:
+        """Return a copy of the running servers' definition fingerprints."""
+        async with self._lock:
+            return dict(self._fingerprints)
+
+    async def restart_server(
+        self,
+        repo: McpServerRepository,
+        server_name: str,
+    ) -> str:
+        """Stop a running proxy and start it again from the persisted record.
+
+        Used when a server's definition changed: the child process must be
+        rebuilt, not just left running with the old command/args/env/URL.
+        """
+        await self.stop_server(repo, server_name)
+        return await self.start_server(repo, server_name)
 
     async def shutdown_all(
         self,

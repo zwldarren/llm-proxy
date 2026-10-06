@@ -215,7 +215,16 @@ async def _build_request_context(
         # error logs record the user-facing model even before ProviderSelectionStage.
         req.state.model = requested_model
 
-    web_search_interceptor = getattr(req.app.state, "web_search_interceptor", None)
+    # The interceptor is process-local, so resolve it from the runtime against
+    # the snapshot fetched above instead of reading app state directly: a reload
+    # listener may still be swapping it, and the runtime rebuilds under its own
+    # lock. In steady state this is a single equality check that returns the
+    # cached interceptor.
+    from llm_proxy.web_search.runtime import ensure_web_search_interceptor
+
+    web_search_interceptor = await ensure_web_search_interceptor(
+        req.app, config.server_params.web_search
+    )
     if web_search_interceptor is not None:
         ctx.web_search_interceptor = web_search_interceptor
         if hasattr(request, "tools") and request.tools:

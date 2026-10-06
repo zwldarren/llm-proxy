@@ -128,8 +128,9 @@ and `uvx`, so Python/Node MCP servers work without extra installs.
 
 - **Start/stop**: create, enable (`PUT enabled: true`), disable (`PUT enabled: false`),
   delete. Disabling stops the process; enabling starts it.
-- **No restart endpoint**: changing command/args/env/base_url of a *running* server
-  does not restart it. Disable, then re-enable to apply changes.
+- **No restart endpoint**: editing command/args/env/base_url of a *running* server
+  restarts its process so the new definition takes effect, on the worker that
+  served the edit and on every peer that adopts the change.
 - **Status** (`GET /api/mcp/servers/{name}/status`) reports `running`/`stopped` from
   the in-memory registry. There is no periodic health check; stdio/HTTP backends
   attempt a one-shot reconnect on connection errors.

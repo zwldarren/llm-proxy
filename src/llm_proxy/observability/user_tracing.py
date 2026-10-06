@@ -17,6 +17,8 @@ exported to anyone else's (e.g. an admin's) Langfuse.
 """
 
 import asyncio
+import time
+import uuid
 from typing import Any
 
 from llm_proxy.database import get_async_session_context
@@ -28,6 +30,15 @@ from llm_proxy.observability.tracing.handlers.registry import TracingRegistry
 from llm_proxy.observability.tracing_config import TracingConfig, _shutdown_handler
 
 logger = get_logger(__name__)
+
+#: Redis key holding a per-user tracing-config version token. Bumped on every
+#: mutation so peer workers drop their cached registry instead of continuing to
+#: export a user's traces to a backend they just removed.
+_TRACING_VERSION_PREFIX = "llm_proxy:tracing_version:"
+
+#: Throttle for the cross-worker version check (seconds). Mirrors the config
+#: manager's generation check: at most one shared read per user per interval.
+_TRACING_VERSION_CHECK_INTERVAL = 1.0
 
 
 def _build_user_handlers(config: TracingConfig) -> list[TracingHandler]:
@@ -84,6 +95,57 @@ class UserTracingManager:
         self._user_handlers: dict[int, list[TracingHandler]] = {}
         self._system_handlers: list[TracingHandler] = []
         self._lock = asyncio.Lock()
+        # Cross-worker invalidation. ``_redis`` is the shared client (None when
+        # Redis is disabled — then this process is the only worker). The
+        # version token and its last-check time are tracked per user so the hot
+        # path pays at most one shared read per interval.
+        self._redis: Any | None = None
+        self._versions: dict[int, str] = {}
+        self._version_checked_at: dict[int, float] = {}
+
+    def set_redis_client(self, redis: Any | None) -> None:
+        """Attach the shared Redis client used to propagate invalidations."""
+        self._redis = redis
+
+    @staticmethod
+    def _version_key(user_id: int) -> str:
+        return f"{_TRACING_VERSION_PREFIX}{user_id}"
+
+    async def _read_shared_version(self, user_id: int) -> str | None:
+        """Read this user's shared version token.
+
+        Returns ``""`` when the key is absent (never mutated) and ``None`` when
+        the lookup itself failed, so a transient Redis error never invalidates a
+        warm registry.
+        """
+        if self._redis is None:
+            return None
+        try:
+            raw = await self._redis.get(self._version_key(user_id))
+        except Exception as e:
+            logger.warning(f"Failed to read tracing version for user {user_id}: {e}")
+            return None
+        if raw is None:
+            return ""
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8", "replace")
+        return str(raw)
+
+    async def _refresh_if_version_changed(self, user_id: int) -> None:
+        """Drop the local registry when a peer bumped this user's version."""
+        if self._redis is None:
+            return
+        now = time.monotonic()
+        if now - self._version_checked_at.get(user_id, 0.0) < _TRACING_VERSION_CHECK_INTERVAL:
+            return
+        self._version_checked_at[user_id] = now
+
+        version = await self._read_shared_version(user_id)
+        if version is None or version == self._versions.get(user_id, ""):
+            return
+        self._versions[user_id] = version
+        await self.invalidate(user_id)
+        logger.debug(f"Dropped stale tracing registry for user {user_id} (peer change)")
 
     def set_system_handlers(self, handlers: list[TracingHandler]) -> None:
         """Register the shared, always-on handlers (logging + audit)."""
@@ -100,6 +162,10 @@ class UserTracingManager:
         Both the "has registry" and "no config" results are cached per user so
         this is O(1) after the first request for a given user.
         """
+        # A peer worker may have changed this user's config; drop the local
+        # cache first so the rebuild below reads the fresh value.
+        await self._refresh_if_version_changed(user_id)
+
         async with self._lock:
             if user_id in self._registries:
                 return self._registries[user_id]
@@ -136,6 +202,44 @@ class UserTracingManager:
         for handler in self._system_handlers:
             registry.register(handler)
         return registry, user_handlers
+
+    async def _write_shared_version(self, user_id: int, token: str) -> bool:
+        """Write the version token, retrying once on a transient Redis error.
+
+        A failed write means no peer can observe the change, so one retry is
+        worth the round trip.
+        """
+        redis = self._redis
+        if redis is None:
+            return False
+        for attempt in (1, 2):
+            try:
+                await redis.set(self._version_key(user_id), token)
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.warning(
+                        f"Failed to publish tracing invalidation for user {user_id}: {e}"
+                    )
+        return False
+
+    async def publish_invalidation(self, user_id: int) -> None:
+        """Invalidate this worker and signal peer workers to do the same.
+
+        Call after the user's ``tracing_config`` row changes. Without Redis the
+        call degrades to a local invalidation (single-process deployment).
+        """
+        token: str | None = None
+        if self._redis is not None:
+            token = uuid.uuid4().hex
+            if not await self._write_shared_version(user_id, token):
+                token = None
+        if token is not None:
+            # Record the version we just published so this worker does not
+            # treat its own write as a peer change on the next request.
+            self._versions[user_id] = token
+            self._version_checked_at[user_id] = time.monotonic()
+        await self.invalidate(user_id)
 
     async def invalidate(self, user_id: int) -> None:
         """Drop the cached registry for a user and shut down their handlers.

@@ -76,6 +76,16 @@ def invalidate_user_role_cache(*usernames: str) -> None:
         _user_role_cache.pop(username, None)
 
 
+def clear_user_role_cache() -> None:
+    """Drop the entire role cache.
+
+    Used by the config reload listener: a role or activation change made on a
+    peer worker cannot name the affected usernames here, so the whole cache is
+    dropped when this worker adopts the new generation.
+    """
+    _user_role_cache.clear()
+
+
 def _evict_expired_cache_entries() -> None:
     """Remove expired entries from the user role cache."""
     now = time.monotonic()
