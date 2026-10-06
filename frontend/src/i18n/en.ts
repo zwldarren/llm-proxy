@@ -864,6 +864,7 @@ export default {
   settings: {
     title: "Settings",
     description: "Manage your instance configuration.",
+    onThisPage: "On this page",
     generalDescription: "Basic interface and system configuration.",
     advancedDescription: "Advanced routing, policy, and security configuration.",
     preference: "Preference",

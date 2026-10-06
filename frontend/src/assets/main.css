@@ -1054,6 +1054,35 @@
     animation-delay: 270ms;
   }
 
+  /* Anchor-target flash — brief ring pulse marking the section a deep link
+   * or in-page nav jump landed on (see utils/scroll.ts). A primary tint rather
+   * than the focus-ring value: this is a landing marker, not focus. The class
+   * is removed on a timer, so the reduced-motion branch below can hold a
+   * static ring instead of losing the feedback. */
+  .anchor-target-flash {
+    animation: anchor-target-flash 900ms cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: var(--radius);
+  }
+
+  @keyframes anchor-target-flash {
+    0% {
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+    }
+    15% {
+      box-shadow: 0 0 0 2px hsl(var(--primary) / 0.32);
+    }
+    100% {
+      box-shadow: 0 0 0 3px hsl(var(--primary) / 0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anchor-target-flash {
+      animation: none;
+      box-shadow: 0 0 0 2px hsl(var(--primary) / 0.32);
+    }
+  }
+
   /* Console page entrance — coordinated fade+rise for the whole console block
    * (header + toolbar + content). Re-triggered on each activation by AppLayout
    * (onActivated), so revisiting a config page always animates instead of

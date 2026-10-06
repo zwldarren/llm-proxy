@@ -42,6 +42,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useTracingProviderEditor } from "@/composables/useTracingProviders";
 import { useSettingsStore } from "@/stores/settings";
 import { logsApi } from "@/services/api/logs";
+import { scrollToAnchor } from "@/utils/scroll";
 import {
   configApi,
   meTracingApi,
@@ -95,12 +96,20 @@ const router = useRouter();
 
 type SettingsSectionId = "general" | "advanced";
 
-const activeSection = computed<SettingsSectionId>(
-  () => (route.query.tab as SettingsSectionId) || "general"
+/* The ?tab= query is shared URL state — the kept-alive Logs view also reads
+ * a `tab` key, so an unrelated value (e.g. ?tab=proxy) can land here. Treat
+ * anything that is not a real settings tab as General instead of blanking
+ * the page. The Advanced tab is entirely admin-only, so a viewer stays on
+ * General even when the URL asks for it (otherwise the page renders empty). */
+const activeSection = computed<SettingsSectionId>(() =>
+  authStore.isAdmin && route.query.tab === "advanced" ? "advanced" : "general"
 );
 
 const switchTab = (tab: SettingsSectionId) => {
   router.push({ path: route.path, query: { tab } });
+  // Each tab is a fresh context — restart from the top rather than landing
+  // mid-scroll at whatever offset the other tab happened to be at.
+  scrollEl.value?.scrollTo({ top: 0, behavior: "instant" });
 };
 
 /* Tab-switch reveal — the general/advanced sections use v-show to preserve
@@ -127,29 +136,18 @@ const onContentRevealEnd = (event: AnimationEvent) => {
 };
 
 /* Deep links into a specific settings card — e.g. the sidebar version badge
- * pointing at /config/settings#about. The target is not guaranteed to be in the
- * DOM when the route changes (admin configs load behind a spinner on a cold
- * visit, and the v-show tab sections are only revealed once the tab resolves),
- * so retry briefly instead of scrolling once into an empty tree. */
-let hashScrollTimer: ReturnType<typeof setTimeout> | null = null;
+ * pointing at /config/settings#about. The target is not guaranteed to be
+ * visible when the route changes (admin configs load behind a spinner on a
+ * cold visit, and the v-show tab sections render as display:none until their
+ * tab activates), so the scroll helper retries until the target has a box. */
+let cancelHashScroll: (() => void) | null = null;
 
-function scrollToHash(attempt = 0) {
-  if (hashScrollTimer) {
-    clearTimeout(hashScrollTimer);
-    hashScrollTimer = null;
-  }
+function scrollToHash() {
+  cancelHashScroll?.();
+  cancelHashScroll = null;
   const id = route.hash.replace("#", "");
   if (!id) return;
-
-  const el = document.getElementById(id);
-  if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
-  // ~2s budget covers the DOM settling after data arrives.
-  if (attempt < 20) {
-    hashScrollTimer = setTimeout(() => scrollToHash(attempt + 1), 100);
-  }
+  cancelHashScroll = scrollToAnchor(id, { highlight: true });
 }
 
 watch(
@@ -158,6 +156,112 @@ watch(
   { immediate: true }
 );
 
+/* In-page section index — each tab stacks many cards, so a sticky index
+ * (desktop only) gives one-click jumps and a scrollspy reading position. */
+interface SettingsSectionMeta {
+  id: string;
+  tab: SettingsSectionId;
+  labelKey: string;
+  adminOnly?: boolean;
+}
+
+const SECTION_INDEX: SettingsSectionMeta[] = [
+  { id: "interface", tab: "general", labelKey: "settings.preference" },
+  { id: "server", tab: "general", labelKey: "settings.serverLogs", adminOnly: true },
+  { id: "webSearch", tab: "general", labelKey: "settings.webSearch", adminOnly: true },
+  { id: "tracing", tab: "general", labelKey: "nav.tracing" },
+  { id: "about", tab: "general", labelKey: "about.title", adminOnly: true },
+  { id: "requestPolicy", tab: "advanced", labelKey: "requestPolicy.title", adminOnly: true },
+  { id: "smartRouting", tab: "advanced", labelKey: "smartRouting.title", adminOnly: true },
+  {
+    id: "providerSelection",
+    tab: "advanced",
+    labelKey: "providerSelection.title",
+    adminOnly: true,
+  },
+  { id: "retryFallback", tab: "advanced", labelKey: "resilience.title", adminOnly: true },
+  { id: "circuitBreaker", tab: "advanced", labelKey: "circuitBreaker.title", adminOnly: true },
+  { id: "security", tab: "advanced", labelKey: "security.title", adminOnly: true },
+  { id: "keepalive", tab: "advanced", labelKey: "keepalive.title", adminOnly: true },
+  { id: "rateLimits", tab: "advanced", labelKey: "rateLimits.title", adminOnly: true },
+  { id: "cors", tab: "advanced", labelKey: "cors.title", adminOnly: true },
+  { id: "mcpSecurity", tab: "advanced", labelKey: "mcpSecurity.title", adminOnly: true },
+];
+
+/* The index gutter is mirrored by a spacer in the header band, so the page
+ * title and the section cards share a left edge at every width. Both sides use
+ * this one string so the two can never drift apart. */
+const INDEX_GUTTER_CLASS = "hidden xl:block w-44 xl:w-52 shrink-0";
+
+const navItems = computed(() =>
+  SECTION_INDEX.filter((s) => s.tab === activeSection.value && (!s.adminOnly || authStore.isAdmin))
+);
+
+const activeAnchor = ref("");
+const scrollEl = ref<HTMLElement | null>(null);
+let anchorFrame = 0;
+
+/* Reading position = the section nearest the line 15% down the scrollport.
+ * An intersection band cannot mark a short final section: it can never reach
+ * the top of the scrollport, so scrolling to the end of a tab left the last
+ * entry unhighlighted. The end-of-scroll case is therefore explicit. */
+function updateActiveAnchor() {
+  const root = scrollEl.value;
+  const items = navItems.value;
+  if (!root || items.length === 0) {
+    activeAnchor.value = "";
+    return;
+  }
+  if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+    activeAnchor.value = items[items.length - 1].id;
+    return;
+  }
+  const rootTop = root.getBoundingClientRect().top;
+  const line = root.clientHeight * 0.15;
+  let current = items[0].id;
+  let currentTop = -Infinity;
+  for (const item of items) {
+    const el = document.getElementById(item.id);
+    // getClientRects() is empty for display:none subtrees — the v-show'd
+    // sections of the inactive tab.
+    if (!el || el.getClientRects().length === 0) continue;
+    const top = el.getBoundingClientRect().top - rootTop;
+    if (top <= line && top > currentTop) {
+      current = item.id;
+      currentTop = top;
+    }
+  }
+  activeAnchor.value = current;
+}
+
+/* Scroll events arrive in bursts; one geometry read per frame is enough. */
+function scheduleActiveAnchor() {
+  if (anchorFrame) return;
+  anchorFrame = requestAnimationFrame(() => {
+    anchorFrame = 0;
+    updateActiveAnchor();
+  });
+}
+
+watch(
+  [activeSection, () => authStore.isAdmin],
+  async () => {
+    await nextTick();
+    updateActiveAnchor();
+  },
+  { immediate: true }
+);
+
+function jumpToSection(id: string) {
+  activeAnchor.value = id;
+  if (route.hash === `#${id}`) {
+    // Hash unchanged → no route event fires; scroll directly.
+    scrollToAnchor(id, { highlight: true });
+    return;
+  }
+  router.replace({ query: route.query, hash: `#${id}` });
+}
+
 // Show loading spinner only when we have no cached data at all
 // Non-admin users don't fetch configs, so skip the spinner
 const showLoadingSpinner = computed(() => authStore.isAdmin && !settingsStore.hasCache());
@@ -165,7 +269,11 @@ const showLoadingSpinner = computed(() => authStore.isAdmin && !settingsStore.ha
 // First visit renders the settings cards only after fetchAll() resolves; honour a
 // hash that was set before the spinner cleared once the content column mounts.
 watch(showLoadingSpinner, (loading) => {
-  if (!loading) nextTick(() => scrollToHash());
+  if (!loading)
+    nextTick(() => {
+      scrollToHash();
+      updateActiveAnchor();
+    });
 });
 
 // ── Auto-save instances ─────────────────────────────────────────────
@@ -499,10 +607,8 @@ onUnmounted(() => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
-  if (hashScrollTimer) {
-    clearTimeout(hashScrollTimer);
-    hashScrollTimer = null;
-  }
+  if (anchorFrame) cancelAnimationFrame(anchorFrame);
+  cancelHashScroll?.();
 });
 </script>
 
@@ -510,65 +616,105 @@ onUnmounted(() => {
   <AppLayout layoutMode="full">
     <template #header>
       <header class="config-header-bar px-4 sm:px-6 py-4">
-        <!-- Capped to the same measure as the content column below so the band
-             and the section cards share both a left and a right edge. -->
-        <div class="w-full max-w-5xl">
-          <PageHeader
-            :title="t('settings.title')"
-            :description="t('settings.description')"
-            :icon="Settings2"
-          >
-            <template #actions>
-              <div
-                class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40"
-                :aria-label="t('settings.title')"
-              >
-                <button
-                  type="button"
-                  :aria-pressed="activeSection === 'general'"
-                  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-                  :class="
-                    activeSection === 'general'
-                      ? 'bg-background text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:text-foreground'
-                  "
-                  @click="switchTab('general')"
+        <!-- The gutter spacer mirrors the index column below, so the band and
+             the section cards share a left edge (and the tab switcher aligns
+             with the cards' right edge). -->
+        <div class="w-full max-w-6xl flex items-start gap-8 xl:gap-12">
+          <div v-if="navItems.length > 1" :class="INDEX_GUTTER_CLASS" aria-hidden="true" />
+          <div class="flex-1 min-w-0">
+            <PageHeader
+              :title="t('settings.title')"
+              :description="t('settings.description')"
+              :icon="Settings2"
+            >
+              <template #actions>
+                <!-- Viewers only ever get the General tab, so the switcher
+                     would be a one-segment control: omit it rather than offer
+                     a tab that renders nothing. -->
+                <div
+                  v-if="authStore.isAdmin"
+                  class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40"
+                  :aria-label="t('settings.title')"
                 >
-                  {{ t("nav.general") }}
-                </button>
-                <button
-                  type="button"
-                  :aria-pressed="activeSection === 'advanced'"
-                  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-                  :class="
-                    activeSection === 'advanced'
-                      ? 'bg-background text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:text-foreground'
-                  "
-                  @click="switchTab('advanced')"
-                >
-                  {{ t("nav.advanced") }}
-                </button>
-              </div>
-            </template>
-          </PageHeader>
+                  <button
+                    type="button"
+                    :aria-pressed="activeSection === 'general'"
+                    class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                    :class="
+                      activeSection === 'general'
+                        ? 'bg-background text-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    "
+                    @click="switchTab('general')"
+                  >
+                    {{ t("nav.general") }}
+                  </button>
+                  <button
+                    type="button"
+                    :aria-pressed="activeSection === 'advanced'"
+                    class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                    :class="
+                      activeSection === 'advanced'
+                        ? 'bg-background text-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    "
+                    @click="switchTab('advanced')"
+                  >
+                    {{ t("nav.advanced") }}
+                  </button>
+                </div>
+              </template>
+            </PageHeader>
+          </div>
         </div>
       </header>
     </template>
 
-    <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 relative">
+    <div
+      ref="scrollEl"
+      class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 relative"
+      @scroll.passive="scheduleActiveAnchor"
+    >
       <LoadingState v-if="showLoadingSpinner" :show-text="false" />
 
       <div
         v-else
         ref="contentEl"
-        class="max-w-5xl w-full flex flex-col gap-6"
+        class="w-full max-w-6xl flex items-start gap-8 xl:gap-12"
         @animationend="onContentRevealEnd"
       >
+        <!-- Section index — sticky jump list for the active tab (desktop only),
+             doubling as the reading position. The label is the landmark name
+             only: a visible eyebrow above every section is not this system's
+             vocabulary. -->
+        <aside v-if="navItems.length > 1" :class="[INDEX_GUTTER_CLASS, 'sticky top-0']">
+          <nav :aria-label="t('settings.onThisPage')" class="flex flex-col gap-0.5">
+            <button
+              v-for="item in navItems"
+              :key="item.id"
+              type="button"
+              :aria-current="activeAnchor === item.id ? 'location' : undefined"
+              class="rounded-md px-3 py-1.5 text-left text-sm leading-snug transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              :class="
+                activeAnchor === item.id
+                  ? 'bg-muted/50 text-foreground font-medium'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/25'
+              "
+              @click="jumpToSection(item.id)"
+            >
+              {{ t(item.labelKey) }}
+            </button>
+          </nav>
+        </aside>
+
         <!-- Content Area -->
-        <div class="flex-1 min-w-0 space-y-8">
+        <div class="flex-1 min-w-0 space-y-8 pb-20">
           <!-- General tab -->
-          <div v-show="activeSection === 'general'" id="interface" class="space-y-6 mt-0">
+          <div
+            v-show="activeSection === 'general'"
+            id="interface"
+            class="space-y-6 mt-0 scroll-mt-6"
+          >
             <PreferenceSection />
           </div>
 
@@ -576,7 +722,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="server"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <ServerLogsSection
               :auto-save="loggingAutoSave"
@@ -589,12 +735,12 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="webSearch"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <WebSearchSection :auto-save="webSearchAutoSave" />
           </div>
 
-          <div v-show="activeSection === 'general'" id="tracing" class="space-y-6 mt-0">
+          <div v-show="activeSection === 'general'" id="tracing" class="space-y-6 mt-0 scroll-mt-6">
             <TracingSection
               :auto-save="tracingAutoSave"
               :editor="tracing"
@@ -606,7 +752,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="about"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <AboutSection />
           </div>
@@ -616,7 +762,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="requestPolicy"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <RequestPolicySection :auto-save="requestPolicyAutoSave" />
           </div>
@@ -625,7 +771,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="smartRouting"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <SmartRoutingSection
               :auto-save="smartRoutingAutoSave"
@@ -637,7 +783,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="providerSelection"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <ProviderSelectionSection :auto-save="providerSelectionAutoSave" />
           </div>
@@ -646,7 +792,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="retryFallback"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <ResilienceSection :auto-save="resilienceAutoSave" />
           </div>
@@ -655,7 +801,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="circuitBreaker"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <CircuitBreakerSection
               :auto-save="resilienceAutoSave"
@@ -672,7 +818,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="security"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <SecuritySection :auto-save="securityAutoSave" />
           </div>
@@ -681,7 +827,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="keepalive"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <KeepaliveSection :auto-save="keepaliveAutoSave" />
           </div>
@@ -690,7 +836,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="rateLimits"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <RateLimitsSection :auto-save="rateLimitsAutoSave" />
           </div>
@@ -699,7 +845,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="cors"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <CorsSection :auto-save="corsAutoSave" />
           </div>
@@ -708,7 +854,7 @@ onUnmounted(() => {
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="mcpSecurity"
-            class="space-y-6 mt-0"
+            class="space-y-6 mt-0 scroll-mt-6"
           >
             <McpSecuritySection
               :auto-save="mcpSecurityAutoSave"

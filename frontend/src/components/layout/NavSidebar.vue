@@ -66,6 +66,7 @@ import McpIcon from "@/components/common/McpIcon.vue";
 import { useChangePassword } from "@/composables/useChangePassword";
 import { meApi } from "@/services/api/me";
 import { getErrorMessage } from "@/utils/error";
+import { scrollToAnchor } from "@/utils/scroll";
 import { useStorage } from "@vueuse/core";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { useAuthStore } from "@/stores/auth";
@@ -347,10 +348,11 @@ const prefetchRoute = (href: string) => {
 
 /** The badge is a RouterLink to the About card, but a click that does not change
  * the URL (already on Settings, same hash) never fires the view's hash watcher.
- * Scroll directly in that case so the jump always happens. */
+ * Scroll directly in that case so the jump always happens. The helper retries
+ * while the target is still display:none (e.g. the Advanced tab is active). */
 const handleVersionBadgeClick = () => {
   if (route.name !== "settings") return;
-  document.getElementById("about")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  scrollToAnchor("about", { highlight: true });
 };
 </script>
 

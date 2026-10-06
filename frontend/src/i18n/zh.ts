@@ -838,6 +838,7 @@ export default {
   settings: {
     title: "设置",
     description: "管理实例的系统配置。",
+    onThisPage: "本页导航",
     generalDescription: "基本界面与系统配置。",
     advancedDescription: "高级路由、策略与安全配置。",
     preference: "偏好",
