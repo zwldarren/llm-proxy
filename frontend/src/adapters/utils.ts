@@ -1,3 +1,5 @@
+import type { WebSearchCall, WebSearchSource } from "@/types/schemas";
+
 /**
  * Safely parse a JSON string into a plain object.
  * Logs parse errors for debugging so failures don't silently pass `{}`.
@@ -36,4 +38,34 @@ export function numberOrDefault(val: unknown, fallback: number): number {
  */
 export function stringOrEmpty(val: unknown): string {
   return typeof val === "string" ? val : "";
+}
+
+/**
+ * Extract `{url, title}` pairs from a raw wire list of search results,
+ * skipping entries that carry neither.
+ */
+export function toWebSearchSources(raw: unknown): WebSearchSource[] {
+  if (!Array.isArray(raw)) return [];
+  const sources: WebSearchSource[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const url = stringOrEmpty(record.url);
+    const title = stringOrEmpty(record.title);
+    if (url || title) sources.push({ url, title });
+  }
+  return sources;
+}
+
+/**
+ * Web searches whose recorded result can be replayed to the model on a later
+ * turn. `canReplay` encodes the protocol's notion of a complete search; a call
+ * it rejects has no result to pair with the rebuilt request, so it is dropped
+ * and the replayed history stays valid.
+ */
+export function replayableWebSearches(
+  calls: WebSearchCall[] | undefined,
+  canReplay: (call: WebSearchCall) => boolean
+): WebSearchCall[] {
+  return (calls ?? []).filter((call) => !!call?.id && canReplay(call));
 }

@@ -542,10 +542,23 @@ interface FileContentPart {
 export type ContentPart =
   TextContentPart | ImageURLContentPart | ToolUseContentPart | FileContentPart;
 
-interface WebSearchCall {
+export interface WebSearchSource {
+  url: string;
+  title: string;
+}
+
+export interface WebSearchCall {
   id: string;
   query: string;
   status: "in_progress" | "completed" | "failed";
+  /** Result URLs/titles, kept for the trace and for replaying to the model. */
+  sources?: WebSearchSource[];
+  /**
+   * Protocol-native result payload exactly as received, replayed on later
+   * turns so the model keeps the search context (Anthropic:
+   * `web_search_tool_result.content`; OpenResponses: `web_search_call.action`).
+   */
+  result?: unknown;
 }
 
 export interface ChatMessage {

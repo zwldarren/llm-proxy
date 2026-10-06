@@ -592,7 +592,11 @@ class TestWebSearchRoundtrip:
                     "type": "web_search_call",
                     "id": "ws_1",
                     "status": "completed",
-                    "action": {"type": "search", "query": "tech news"},
+                    "action": {
+                        "type": "search",
+                        "query": "tech news",
+                        "sources": [{"url": "https://example.com/tech", "title": "Tech News"}],
+                    },
                 },
                 {"type": "message", "role": "user", "content": "Summarize the results"},
             ],
@@ -612,7 +616,11 @@ class TestWebSearchRoundtrip:
 
         res_block = internal_req.conversation.messages[2].content[0]
         assert isinstance(res_block, ToolResultBlock)
-        assert "Web search performed" in res_block.content
+        # The replayed result keeps whatever the search recorded (sources),
+        # shaped like the proxy's own continuation results.
+        assert orjson.loads(res_block.content) == {
+            "results": [{"url": "https://example.com/tech", "title": "Tech News", "snippet": ""}]
+        }
 
         # Verify tools include web_search
         assert internal_req.tools is not None

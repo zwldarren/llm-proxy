@@ -895,7 +895,48 @@ class TestConvertOpenresponsesRequestToUnified:
         res = tool_msg.content[0]
         assert isinstance(res, ToolResultBlock)
         assert res.tool_use_id == "ws_skip1"
-        assert "Web search performed" in res.content
+        # A replayed call with no recorded sources still yields the result
+        # envelope the model expects, not a bare "search happened" notice.
+        import orjson
+
+        assert orjson.loads(res.content) == {"results": []}
+
+    def test_web_search_call_replay_keeps_sources(self):
+        # The replayed placeholder must name what the search found. The
+        # ``web_search_call`` item itself carries no result text, so a history
+        # replay that drops ``action.sources`` leaves the model with nothing
+        # and it re-searches for facts it already fetched.
+        request = ResponsesRequest(
+            model="gpt-4",
+            input=[
+                {"type": "message", "role": "user", "content": "hi"},
+                {
+                    "type": "web_search_call",
+                    "id": "ws_src",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "query": "iran news",
+                        "sources": [
+                            {"url": "https://reuters.com/world/iran/", "title": "Iran War"}
+                        ],
+                    },
+                },
+                {"type": "message", "role": "user", "content": "bye"},
+            ],
+        )
+        result = _serializer.parse_request(request.model_dump())
+        from llm_proxy.models.content_blocks import ToolResultBlock
+
+        res = result.conversation.messages[2].content[0]
+        assert isinstance(res, ToolResultBlock)
+        import orjson
+
+        assert orjson.loads(res.content) == {
+            "results": [
+                {"url": "https://reuters.com/world/iran/", "title": "Iran War", "snippet": ""}
+            ]
+        }
 
     def test_agent_message_becomes_user_message(self):
         request = ResponsesRequest(

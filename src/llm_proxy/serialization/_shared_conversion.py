@@ -1,5 +1,6 @@
 """Shared conversion logic: convert unsupported blocks to natively-supported ones."""
 
+import base64
 from typing import Any, cast
 
 import orjson
@@ -67,6 +68,20 @@ def try_convert_block(block: ContentBlock) -> ContentBlock | None:
             return TextBlock(text=text)
         return None
 
+    # A client replaying a prior turn echoes its ``web_search_tool_result``
+    # block verbatim. Providers without native web search can only take plain
+    # tool-result text, so render the results instead of degrading each item to
+    # a title placeholder (which would make the model re-search for facts it
+    # already fetched).
+    if isinstance(block, WebSearchToolResultBlock):
+        decoded = _decode_web_search_results(block.content)
+        if decoded is not None:
+            return ToolResultBlock(
+                tool_use_id=block.tool_use_id,
+                content=decoded,
+                is_error=block.is_error,
+            )
+
     # Tool result variants: all structurally match ToolResultBlock.
     # Some variants carry raw server-tool payloads (a dict such as
     # ``web_fetch_result``/``web_search_tool_result_error``, or a list of
@@ -95,6 +110,57 @@ def try_convert_block(block: ContentBlock) -> ContentBlock | None:
         )
 
     return None
+
+
+def _decode_web_search_results(items: Any) -> str | None:
+    """Decode replayed ``web_search_tool_result`` items into the proxy's result JSON.
+
+    Mirrors ``WebSearchInterceptor.decode_search_results`` — the exact shape the
+    proxy's own continuation sends upstream — so a replayed result reaches
+    providers without native web search exactly like a fresh search does:
+    ``{"results": [{"url", "title", "snippet"}]}``, with the snippet decoded
+    from the base64 ``encrypted_content`` the interceptor stored.
+
+    Returns None when the items are not per-result objects, so error payloads
+    keep the generic verbatim handling.
+    """
+    from llm_proxy.models.content_blocks.anthropic_builtin import (
+        WebSearchResultContentBlock,
+    )
+
+    if not isinstance(items, list) or not items:
+        return None
+    if not all(isinstance(item, WebSearchResultContentBlock) for item in items):
+        return None
+
+    results = [
+        {
+            "url": item.url,
+            "title": item.title,
+            "snippet": _decode_encrypted_content(item.encrypted_content),
+        }
+        for item in items
+    ]
+    return orjson.dumps({"results": results}).decode()
+
+
+def _decode_encrypted_content(value: str | None) -> str:
+    """Decode the proxy's base64 ``encrypted_content`` to its snippet text.
+
+    Returns an empty string when the payload is absent, not valid base64, or not
+    UTF-8 text (a real Anthropic encrypted payload), so a native result still
+    renders without its snippet instead of failing.
+    """
+    if not value:
+        return ""
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except ValueError:
+        return ""
+    try:
+        return decoded.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return ""
 
 
 def _content_blocks_to_text(blocks: list[Any] | None) -> str:

@@ -1,7 +1,13 @@
-import type { ChatMessage, ContentPart } from "@/types/schemas";
+import type { ChatMessage, ContentPart, WebSearchCall } from "@/types/schemas";
 import type { ToolDefinition } from "./types";
 import type { ProtocolAdapter, StreamChunkCallbacks } from "./types";
-import { safeJsonParse, numberOrDefault, stringOrEmpty } from "./utils";
+import {
+  replayableWebSearches,
+  safeJsonParse,
+  numberOrDefault,
+  stringOrEmpty,
+  toWebSearchSources,
+} from "./utils";
 
 /**
  * Transform content parts from canonical (OpenAI-style) format to Responses API format.
@@ -35,6 +41,23 @@ function transformContent(content: string | ContentPart[]): string | unknown[] {
   });
 }
 
+/** Rebuild the `web_search_call` output item for a replayed search. */
+function webSearchCallItem(call: WebSearchCall): Record<string, unknown> {
+  const action =
+    call.result ??
+    ({
+      type: "search",
+      query: call.query,
+      queries: call.query ? [call.query] : [],
+    } as Record<string, unknown>);
+  return {
+    type: "web_search_call",
+    id: call.id,
+    status: call.status === "failed" ? "failed" : "completed",
+    action,
+  };
+}
+
 function formatMessages(
   storeMessages: ChatMessage[],
   systemPrompt?: string
@@ -55,7 +78,14 @@ function formatMessages(
         output: msg.content,
       });
     } else if (msg.role === "assistant") {
-      if (msg.tool_calls && msg.tool_calls.length > 0) {
+      // Replay intercepted web searches as their native output items so the
+      // model keeps the search context across later turns. A search still
+      // running when the turn ended is skipped.
+      const webSearches = replayableWebSearches(
+        msg.web_search_calls,
+        (call) => call.status !== "in_progress"
+      );
+      if ((msg.tool_calls && msg.tool_calls.length > 0) || webSearches.length > 0) {
         if (msg.content) {
           items.push({
             type: "message",
@@ -63,7 +93,10 @@ function formatMessages(
             content: [{ type: "output_text", text: msg.content }],
           });
         }
-        for (const tc of msg.tool_calls) {
+        for (const call of webSearches) {
+          items.push(webSearchCallItem(call));
+        }
+        for (const tc of msg.tool_calls || []) {
           if (!tc || !tc.id) continue;
           items.push({
             type: "function_call",
@@ -166,7 +199,8 @@ function parseStreamChunk(
         index,
         stringOrEmpty(item.id),
         stringOrEmpty(action?.query),
-        (stringOrEmpty(item.status) as "in_progress" | "completed" | "failed") || "completed"
+        (stringOrEmpty(item.status) as "in_progress" | "completed" | "failed") || "completed",
+        { result: action, sources: toWebSearchSources(action?.sources) }
       );
     }
   }

@@ -709,19 +709,11 @@ def _flush_pending_assistant(
             Message(role="assistant", content=list(pending_assistant_blocks), phase=phase)
         )
         pending_assistant_blocks.clear()
-    for ws_call_id, ws_query in pending_web_search_calls:
-        placeholder = (
-            (
-                f'[Web search performed for "{ws_query}"; '
-                "results not retained in conversation history.]"
-            )
-            if ws_query
-            else ("[Web search performed; results not retained in conversation history.]")
-        )
+    for ws_call_id, ws_note in pending_web_search_calls:
         messages.append(
             Message(
                 role="tool",
-                content=[ToolResultBlock(tool_use_id=ws_call_id, content=placeholder)],
+                content=[ToolResultBlock(tool_use_id=ws_call_id, content=ws_note)],
             )
         )
     pending_web_search_calls.clear()
@@ -976,6 +968,24 @@ def _process_agent_message_item(
         messages.append(Message(role="user", content=[TextBlock(text=text)]))
 
 
+def _web_search_result_json(sources: list[dict[str, str]]) -> str:
+    """Result payload for a replayed ``web_search_call`` item.
+
+    The OpenResponses ``web_search_call`` carries no result text, only the
+    query (kept on the replayed tool call) and the source URLs/titles. Emit the
+    same ``{"results": [...]}`` shape the proxy's own continuation sends, so a
+    later turn keeps whatever the search found instead of losing it.
+    """
+    return orjson.dumps(
+        {
+            "results": [
+                {"url": source.get("url", ""), "title": source.get("title", ""), "snippet": ""}
+                for source in sources
+            ]
+        }
+    ).decode()
+
+
 def _process_web_search_call_item(
     item_dict: dict[str, Any],
     pending_assistant_blocks: list[ContentBlock],
@@ -984,6 +994,7 @@ def _process_web_search_call_item(
     """Process a ``web_search_call`` input item."""
     action = item_dict.get("action") or {}
     ws_query = ""
+    sources: list[dict[str, str]] = []
     if isinstance(action, dict):
         ws_query = action.get("query") or ""
         if not ws_query:
@@ -991,11 +1002,20 @@ def _process_web_search_call_item(
             if isinstance(queries, list) and queries:
                 first = queries[0]
                 ws_query = str(first) if first else ""
+        raw_sources = action.get("sources")
+        if isinstance(raw_sources, list):
+            for source in raw_sources:
+                if not isinstance(source, dict):
+                    continue
+                title = source.get("title") or ""
+                url = source.get("url") or ""
+                if title or url:
+                    sources.append({"url": url, "title": title})
     ws_call_id = item_dict.get("id") or generate_item_id()
     pending_assistant_blocks.append(
         ToolUseBlock(id=ws_call_id, name="web_search", input={"query": ws_query})
     )
-    pending_web_search_calls.append((ws_call_id, ws_query))
+    pending_web_search_calls.append((ws_call_id, _web_search_result_json(sources)))
 
 
 def _tool_entry_name(tool: Any) -> str | None:

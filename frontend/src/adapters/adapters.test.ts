@@ -170,6 +170,148 @@ describe("Protocol Adapters", () => {
     });
   });
 
+  describe("anthropicAdapter.parseStreamChunk web search", () => {
+    /** Replay the exact frame sequence the proxy emits for an intercepted search. */
+    const replayInterceptedSearch = (callbacks: Record<string, unknown>) => {
+      const frames = [
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "server_tool_use",
+            id: "call_ws_1",
+            name: "web_search",
+            input: {},
+          },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"query": "latest news"}' },
+        },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "content_block_start",
+          index: 1,
+          content_block: {
+            type: "web_search_tool_result",
+            tool_use_id: "call_ws_1",
+            content: [{ type: "web_search_result", url: "https://example.com/1", title: "One" }],
+          },
+        },
+        { type: "content_block_stop", index: 1 },
+        {
+          type: "content_block_start",
+          index: 2,
+          content_block: { type: "text", text: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 2,
+          delta: { type: "text_delta", text: "The answer is 42." },
+        },
+        { type: "content_block_stop", index: 2 },
+      ];
+      for (const frame of frames) {
+        anthropicAdapter.parseStreamChunk(frame, "", callbacks as never);
+      }
+    };
+
+    it("surfaces server_tool_use as a web-search trace, not a phantom tool call", () => {
+      const text: string[] = [];
+      const toolCalls: unknown[] = [];
+      const wsCalls: { id: string; q: string; s: string }[] = [];
+      // One callbacks object per stream — mirrors chat.ts production usage.
+      const callbacks = {
+        onChunk: (c: string) => text.push(c),
+        onToolCall: (...args: unknown[]) => toolCalls.push(args),
+        onWebSearchCall: (_i: number, id: string, q: string, s: string) =>
+          wsCalls.push({ id, q, s }),
+      };
+
+      replayInterceptedSearch(callbacks);
+
+      expect(text.join("")).toBe("The answer is 42.");
+      expect(toolCalls).toEqual([]);
+      expect(wsCalls).toEqual([
+        { id: "call_ws_1", q: "", s: "in_progress" },
+        { id: "call_ws_1", q: "latest news", s: "completed" },
+      ]);
+    });
+
+    it("marks the trace failed when the result block carries an error payload", () => {
+      const wsCalls: { id: string; q: string; s: string }[] = [];
+      const callbacks = {
+        onChunk: () => {},
+        onWebSearchCall: (_i: number, id: string, q: string, s: string) =>
+          wsCalls.push({ id, q, s }),
+      };
+      anthropicAdapter.parseStreamChunk(
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "server_tool_use",
+            id: "call_ws_1",
+            name: "web_search",
+            input: {},
+          },
+        },
+        "",
+        callbacks as never
+      );
+      anthropicAdapter.parseStreamChunk(
+        {
+          type: "content_block_start",
+          index: 1,
+          content_block: {
+            type: "web_search_tool_result",
+            tool_use_id: "call_ws_1",
+            content: '{"type": "web_search_tool_result_error", "error_code": "unavailable"}',
+          },
+        },
+        "",
+        callbacks as never
+      );
+
+      expect(wsCalls).toEqual([
+        { id: "call_ws_1", q: "", s: "in_progress" },
+        { id: "call_ws_1", q: "", s: "failed" },
+      ]);
+    });
+
+    it("still forwards regular tool_use blocks as executable tool calls", () => {
+      const toolCalls: unknown[] = [];
+      const callbacks = {
+        onChunk: () => {},
+        onToolCall: (...args: unknown[]) => toolCalls.push(args),
+      };
+      anthropicAdapter.parseStreamChunk(
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "call_1", name: "get_weather", input: {} },
+        },
+        "",
+        callbacks as never
+      );
+      anthropicAdapter.parseStreamChunk(
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"city":' },
+        },
+        "",
+        callbacks as never
+      );
+
+      expect(toolCalls).toEqual([
+        [0, "call_1", "get_weather", ""],
+        [0, "", "", '{"city":'],
+      ]);
+    });
+  });
+
   describe("openResponsesAdapter.parseStreamChunk", () => {
     it("extracts text delta from responses format", () => {
       const chunks: string[] = [];
@@ -217,6 +359,185 @@ describe("Protocol Adapters", () => {
         }
       );
       expect(toolCalls).toEqual([[0, "", "", '{"loc":"NY"}']]);
+    });
+  });
+
+  describe("web search replay across turns", () => {
+    const anthropicResult = [
+      {
+        type: "web_search_result",
+        url: "https://reuters.com/world/iran/",
+        title: "Iran War",
+        encrypted_content: "cmVsZXZhbnQ=",
+      },
+    ];
+
+    it("anthropicAdapter captures the native result payload", () => {
+      const calls: Array<{
+        id: string;
+        status: string;
+        result: unknown;
+        sources: unknown;
+      }> = [];
+      anthropicAdapter.parseStreamChunk(
+        {
+          type: "content_block_start",
+          index: 1,
+          content_block: {
+            type: "web_search_tool_result",
+            tool_use_id: "ws_1",
+            content: anthropicResult,
+          },
+        },
+        "",
+        {
+          onChunk: () => {},
+          onWebSearchCall: (_i, id, _q, status, payload) =>
+            calls.push({
+              id,
+              status,
+              result: payload?.result,
+              sources: payload?.sources,
+            }),
+        } as never
+      );
+
+      expect(calls).toEqual([
+        {
+          id: "ws_1",
+          status: "completed",
+          result: anthropicResult,
+          sources: [{ url: "https://reuters.com/world/iran/", title: "Iran War" }],
+        },
+      ]);
+    });
+
+    it("anthropicAdapter replays the search as a server-tool exchange", () => {
+      const result = anthropicAdapter.formatMessages([
+        { role: "user", content: "news?" },
+        {
+          role: "assistant",
+          content: "Here you go.",
+          web_search_calls: [
+            { id: "ws_1", query: "news", status: "completed", result: anthropicResult },
+          ],
+        },
+        { role: "user", content: "thanks" },
+      ]) as Array<{ role: string; content: unknown }>;
+
+      expect(result[1]).toEqual({
+        role: "assistant",
+        content: [
+          { type: "text", text: "Here you go." },
+          { type: "server_tool_use", id: "ws_1", name: "web_search", input: { query: "news" } },
+        ],
+      });
+      // The result message merges with the following user turn, as the API expects.
+      expect(result[2]).toEqual({
+        role: "user",
+        content: [
+          { type: "web_search_tool_result", tool_use_id: "ws_1", content: anthropicResult },
+          { type: "text", text: "thanks" },
+        ],
+      });
+    });
+
+    it("anthropicAdapter ignores searches with no replayable result", () => {
+      const result = anthropicAdapter.formatMessages([
+        {
+          role: "assistant",
+          content: "answer",
+          web_search_calls: [{ id: "ws_1", query: "news", status: "in_progress" }],
+        },
+      ]);
+      expect(result).toEqual([{ role: "assistant", content: "answer" }]);
+    });
+
+    it("openResponsesAdapter captures action and sources", () => {
+      const calls: Array<{ id: string; result: unknown; sources: unknown }> = [];
+      openResponsesAdapter.parseStreamChunk(
+        {
+          type: "response.output_item.done",
+          output_index: 2,
+          item: {
+            type: "web_search_call",
+            id: "ws_1",
+            status: "completed",
+            action: {
+              type: "search",
+              query: "news",
+              queries: ["news"],
+              sources: [{ url: "https://reuters.com/world/iran/", title: "Iran War" }],
+            },
+          },
+        },
+        "",
+        {
+          onChunk: () => {},
+          onWebSearchCall: (_i, id, _q, _s, payload) =>
+            calls.push({ id, result: payload?.result, sources: payload?.sources }),
+        } as never
+      );
+
+      expect(calls).toEqual([
+        {
+          id: "ws_1",
+          result: {
+            type: "search",
+            query: "news",
+            queries: ["news"],
+            sources: [{ url: "https://reuters.com/world/iran/", title: "Iran War" }],
+          },
+          sources: [{ url: "https://reuters.com/world/iran/", title: "Iran War" }],
+        },
+      ]);
+    });
+
+    it("openResponsesAdapter replays the search as a web_search_call item", () => {
+      const result = openResponsesAdapter.formatMessages([
+        { role: "user", content: "news?" },
+        {
+          role: "assistant",
+          content: "Here you go.",
+          web_search_calls: [
+            {
+              id: "ws_1",
+              query: "news",
+              status: "completed",
+              result: { type: "search", query: "news", queries: ["news"] },
+            },
+          ],
+        },
+      ]);
+
+      expect(result[1]).toEqual({
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Here you go." }],
+      });
+      expect(result[2]).toEqual({
+        type: "web_search_call",
+        id: "ws_1",
+        status: "completed",
+        action: { type: "search", query: "news", queries: ["news"] },
+      });
+    });
+
+    it("openResponsesAdapter synthesizes an action for a result-less search", () => {
+      const result = openResponsesAdapter.formatMessages([
+        {
+          role: "assistant",
+          content: "answer",
+          web_search_calls: [{ id: "ws_1", query: "news", status: "failed" }],
+        },
+      ]);
+
+      expect(result[1]).toEqual({
+        type: "web_search_call",
+        id: "ws_1",
+        status: "failed",
+        action: { type: "search", query: "news", queries: ["news"] },
+      });
     });
   });
 });

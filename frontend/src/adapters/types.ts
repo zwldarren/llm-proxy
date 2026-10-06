@@ -1,3 +1,5 @@
+import type { ChatMessage, WebSearchSource } from "@/types/schemas";
+
 export interface CustomVariable {
   key: string;
   value: string;
@@ -15,7 +17,13 @@ export interface ToolDefinition {
   enabled: boolean;
 }
 
-import type { ChatMessage } from "@/types/schemas";
+/** Result payload accompanying a completed web-search call. */
+export interface WebSearchResultPayload {
+  /** Result URLs/titles extracted from the wire payload. */
+  sources?: WebSearchSource[];
+  /** Protocol-native payload, replayed verbatim on later turns. */
+  result?: unknown;
+}
 
 /**
  * Protocol adapter interface.
@@ -50,6 +58,7 @@ export interface StreamChunkCallbacks {
     index: number,
     id: string,
     query: string,
-    status: "in_progress" | "completed" | "failed"
+    status: "in_progress" | "completed" | "failed",
+    payload?: WebSearchResultPayload
   ) => void;
 }
