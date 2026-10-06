@@ -13,41 +13,48 @@ import {
 } from "@lucide/vue";
 
 defineOptions({ name: "ImagesView" });
-import { computed, onActivated, onMounted, ref, watch } from "vue";
+import { computed, onActivated, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import EmptyState from "@/components/common/EmptyState.vue";
 import ImagesSettings from "@/components/images/ImagesSettings.vue";
 import RunInspector from "@/components/playground/RunInspector.vue";
-import RunSpecimen from "@/components/playground/RunSpecimen.vue";
-import SpecimenTray from "@/components/playground/SpecimenTray.vue";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { chatApi } from "@/services/api/chat";
-import { getErrorMessage } from "@/utils/error";
 import { imagesApi } from "@/services/api/images";
+import { getErrorMessage } from "@/utils/error";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
-import { formatLatency, endpointName, makeRunId, appendRun } from "@/utils/runs";
+import { formatLatency, makeRunId } from "@/utils/runs";
 import { useAuthStore } from "@/stores/auth";
 import type { ImageData, UploadedImage } from "@/types/schemas";
 import type { ImageRun } from "@/types/runs";
+import ModelPickerPlaceholder from "@/components/common/ModelPickerPlaceholder.vue";
+import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
+import { useModelStore } from "@/stores/models";
+import { useModelCatalog } from "@/composables/useModelCatalog";
 
 const { t } = useI18n();
 
-// Models
-interface ModelOption {
-  id: string;
-  provider: string;
-}
+const authStore = useAuthStore();
+const apiKey = computed(() => authStore.sessionApiKey ?? "");
 
-const models = ref<ModelOption[]>([]);
-const selectedModel = ref<string | null>(localStorage.getItem(STORAGE_KEYS.IMAGES_MODEL));
-const isLoadingModels = ref(false);
-
-import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
-import { useModelStore } from "@/stores/models";
+// Models — loaded, retried and persisted by the catalog composable shared with
+// the Chat picker; this view only renders its state.
+const {
+  models,
+  selectedModel,
+  isLoadingModels,
+  modelsError,
+  modelsPlaceholderLabel,
+  loadModels,
+  refreshModels,
+} = useModelCatalog({
+  apiKey,
+  storageKey: STORAGE_KEYS.IMAGES_MODEL,
+  namespace: "images",
+});
 
 const modelStore = useModelStore();
 
@@ -56,14 +63,6 @@ const getModelIcon = (modelId: string | null | undefined) => {
   const model = models.value.find((m) => m.id === modelId);
   return getModelIconUrl(modelId, model?.provider);
 };
-
-watch(selectedModel, (val) => {
-  if (val) {
-    localStorage.setItem(STORAGE_KEYS.IMAGES_MODEL, val);
-  } else {
-    localStorage.removeItem(STORAGE_KEYS.IMAGES_MODEL);
-  }
-});
 
 // Prompt
 const prompt = ref("");
@@ -86,44 +85,22 @@ const outputCompression = ref<number | null>(null);
 const outputFormat = ref<string | null>(null);
 const partialImages = ref<number | null>(null);
 
-// Results — run history: every generation/edit deposits a specimen in the tray.
-/** Keep the tray bounded — base64 payloads are heavy. */
-const MAX_RUNS = 12;
-
-const runs = ref<ImageRun[]>([]);
-const activeRunId = ref<string | null>(null);
+// Results — the canvas renders the latest generation/edit run.
+const currentRun = ref<ImageRun | null>(null);
 const isGenerating = ref(false);
 
 // Computed
-const activeRun = computed(() => runs.value.find((r) => r.id === activeRunId.value) ?? null);
-
-const activeRunNumber = computed(() => runs.value.findIndex((r) => r.id === activeRunId.value) + 1);
-
 const isEditMode = computed(() => uploadedImages.value.length > 0);
 
-const selectRun = (id: string) => {
-  activeRunId.value = id;
-};
-
-// The run inspector opens from the canvas readout; specimens stay selectors.
+// The run inspector opens from the canvas readout.
 const showInspector = ref(false);
 
 const runEndpoint = (run: ImageRun): string =>
   run.mode === "edits" ? "/v1/images/edits" : "/v1/images/generations";
 
-const runThumb = (run: ImageRun): string | null => {
-  const first = run.images[0];
-  return first ? getImageSource(first) : null;
-};
-
 const clearRuns = () => {
-  runs.value = [];
-  activeRunId.value = null;
+  currentRun.value = null;
 };
-
-const authStore = useAuthStore();
-
-const apiKey = computed(() => authStore.sessionApiKey ?? "");
 
 const isSubmitDisabled = computed(
   () => !prompt.value.trim() || isGenerating.value || !selectedModel.value || !apiKey.value.trim()
@@ -194,40 +171,6 @@ function onDropMain(e: DragEvent) {
   if (e.dataTransfer?.files?.length) handleImageFiles(e.dataTransfer.files);
 }
 
-// API Key
-async function loadModels() {
-  try {
-    isLoadingModels.value = true;
-    const res = await chatApi.getModels(apiKey.value);
-
-    // Map each model and resolve provider name via modelStore mapping
-    models.value = res.data.map((m) => {
-      let provider = m.provider;
-      if (!provider) {
-        const configModel = modelStore.models.find((cm) => cm.name === m.id);
-        provider = configModel?.providers?.[0]?.provider_name || "";
-      }
-      return {
-        id: m.id,
-        provider: provider,
-      };
-    });
-
-    const savedModel = localStorage.getItem(STORAGE_KEYS.IMAGES_MODEL);
-    if (savedModel && models.value.some((m) => m.id === savedModel)) {
-      selectedModel.value = savedModel;
-    } else if (models.value.length > 0) {
-      selectedModel.value = models.value[0]?.id ?? null;
-    }
-  } catch (error) {
-    console.error("Failed to load models:", error);
-    models.value = [];
-    selectedModel.value = null;
-  } finally {
-    isLoadingModels.value = false;
-  }
-}
-
 function resetSettings() {
   numberOfImages.value = 1;
   size.value = "auto";
@@ -255,7 +198,7 @@ async function handleSubmit() {
 
   isGenerating.value = true;
 
-  // Deposit the run specimen immediately — it settles to ok or error.
+  // Deposit the run immediately — it settles to ok or error.
   const run: ImageRun = {
     id: makeRunId(),
     mode: isEditMode.value ? "edits" : "generations",
@@ -269,8 +212,7 @@ async function handleSubmit() {
     payload: {},
     images: [],
   };
-  runs.value = appendRun(runs.value, run, MAX_RUNS);
-  activeRunId.value = run.id;
+  currentRun.value = run;
   const runStart = performance.now();
 
   try {
@@ -389,23 +331,24 @@ onMounted(async () => {
 });
 
 onActivated(async () => {
-  if (!isFirstLoad.value) {
-    if (authStore.isAdmin) {
-      try {
-        await modelStore.fetchModels(true);
-      } catch (err) {
-        console.error("Failed to fetch models store in images view on activation:", err);
-      }
+  // First activation is the mount itself; onMounted already owns that load.
+  if (isFirstLoad.value) return;
+
+  if (authStore.isAdmin) {
+    try {
+      await modelStore.fetchModels(true);
+    } catch (err) {
+      console.error("Failed to fetch models store in images view on activation:", err);
     }
   }
-});
 
-watch(
-  () => modelStore.models,
-  async () => {
-    await loadModels();
+  // Re-entry is the natural retry point. KeepAlive never re-runs onMounted, so
+  // a load that failed while the page was hidden used to leave the selector
+  // empty for the rest of the session.
+  if (models.value.length === 0 && !isLoadingModels.value) {
+    void loadModels();
   }
-);
+});
 </script>
 
 <template>
@@ -480,21 +423,15 @@ watch(
             </SelectContent>
           </Select>
 
-          <!-- Model Selector Placeholder/Loading -->
-          <div
+          <!-- Model Selector placeholder: stays interactive so a failed or
+               empty load is retryable in place. -->
+          <ModelPickerPlaceholder
             v-else
-            class="border border-border/60 bg-transparent opacity-85 rounded-md h-8 px-2.5 gap-3 text-muted-foreground flex items-center min-w-0 font-mono text-[11px] select-none cursor-not-allowed"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <Loader2
-                v-if="isLoadingModels"
-                class="w-3 h-3 animate-spin shrink-0 text-muted-foreground/70"
-              />
-              <span class="font-medium text-muted-foreground truncate min-w-0 max-w-[200px]">
-                {{ isLoadingModels ? `${t("common.loading")}…` : t("images.selectModel") }}
-              </span>
-            </div>
-          </div>
+            :loading="isLoadingModels"
+            :error="modelsError"
+            :label="modelsPlaceholderLabel"
+            @retry="refreshModels"
+          />
 
           <!-- Hairline divider between the primary model picker and the secondary endpoint -->
           <div class="hidden sm:block h-4 w-px bg-border/60 shrink-0" aria-hidden="true" />
@@ -539,7 +476,7 @@ watch(
           </Tooltip>
 
           <!-- Clear Results -->
-          <Tooltip v-if="runs.length > 0">
+          <Tooltip v-if="currentRun">
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
@@ -733,30 +670,29 @@ watch(
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 pb-6">
           <div class="max-w-3xl mx-auto">
             <EmptyState
-              v-if="runs.length === 0"
+              v-if="!currentRun"
               :text="t('images.noResults')"
               :show-cta="false"
               class="py-16"
             />
 
-            <template v-else-if="activeRun">
+            <template v-else-if="currentRun">
               <!-- Run readout: mono telemetry line above the canvas -->
               <div class="flex items-center justify-between gap-3 mb-4">
                 <div class="flex items-center gap-2 min-w-0 text-data-xs text-muted-foreground">
-                  <span class="text-foreground/80">
-                    #{{ String(activeRunNumber).padStart(2, "0") }}
-                  </span>
                   <span class="shrink-0">
-                    {{ activeRun.mode === "edits" ? "/v1/images/edits" : "/v1/images/generations" }}
+                    {{
+                      currentRun.mode === "edits" ? "/v1/images/edits" : "/v1/images/generations"
+                    }}
                   </span>
-                  <span class="hidden sm:inline truncate">{{ activeRun.model }}</span>
+                  <span class="hidden sm:inline truncate">{{ currentRun.model }}</span>
                 </div>
                 <div class="flex items-center gap-2 shrink-0 text-data-xs text-muted-foreground">
-                  <span>{{ activeRun.size }}</span>
+                  <span>{{ currentRun.size }}</span>
                   <span aria-hidden="true" class="text-border">·</span>
-                  <span>n{{ activeRun.n }}</span>
+                  <span>n{{ currentRun.n }}</span>
                   <span aria-hidden="true" class="text-border">·</span>
-                  <span>{{ formatLatency(activeRun.latencyMs) }}</span>
+                  <span>{{ formatLatency(currentRun.latencyMs) }}</span>
                   <Tooltip>
                     <TooltipTrigger as-child>
                       <button
@@ -774,22 +710,22 @@ watch(
               </div>
 
               <!-- In-flight: skeleton frames sized to the expected grid -->
-              <div v-if="activeRun.status === 'streaming'" class="space-y-4">
+              <div v-if="currentRun.status === 'streaming'" class="space-y-4">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div
-                    v-for="i in activeRun.n"
+                    v-for="i in currentRun.n"
                     :key="i"
                     class="aspect-square rounded-md border border-border/60 bg-muted/30 animate-pulse"
                   />
                 </div>
                 <p class="text-center text-code-xs text-muted-foreground">
-                  {{ activeRun.mode === "edits" ? t("images.editing") : t("images.generating") }}…
+                  {{ currentRun.mode === "edits" ? t("images.editing") : t("images.generating") }}…
                 </p>
               </div>
 
               <!-- Held failure: the run freezes on the canvas with its error -->
               <div
-                v-else-if="activeRun.status === 'error'"
+                v-else-if="currentRun.status === 'error'"
                 class="rounded-xl border border-status-error/30 bg-status-error/5 p-4 flex items-start gap-3"
                 role="alert"
               >
@@ -799,7 +735,7 @@ watch(
                     {{ t("playground.runFailed") }}
                   </p>
                   <p class="text-code-xs text-status-error/90 break-words leading-relaxed">
-                    {{ activeRun.errorMessage }}
+                    {{ currentRun.errorMessage }}
                   </p>
                 </div>
               </div>
@@ -807,21 +743,21 @@ watch(
               <!-- Gallery -->
               <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4 stagger-fast">
                 <div
-                  v-for="(image, index) in activeRun.images"
+                  v-for="(image, index) in currentRun.images"
                   :key="image.url || image.b64_json || `img-${index}`"
                   class="group relative rounded-md border border-border/60 overflow-hidden bg-card/75 shadow-xs"
                 >
                   <img
                     v-if="image.url"
                     :src="image.url"
-                    :alt="`Generated image: ${activeRun.prompt}`"
+                    :alt="`Generated image: ${currentRun.prompt}`"
                     loading="lazy"
                     class="w-full aspect-square object-cover"
                   />
                   <img
                     v-else-if="image.b64_json"
                     :src="`data:image/png;base64,${image.b64_json}`"
-                    :alt="`Generated image: ${activeRun.prompt}`"
+                    :alt="`Generated image: ${currentRun.prompt}`"
                     loading="lazy"
                     class="w-full aspect-square object-cover"
                   />
@@ -879,44 +815,22 @@ watch(
             </template>
           </div>
         </div>
-
-        <!-- Run tray: every generation deposits a specimen -->
-        <SpecimenTray :count="runs.length">
-          <RunSpecimen
-            v-for="(run, i) in runs"
-            :key="run.id"
-            :status="run.status"
-            :selected="activeRunId === run.id"
-            @click="selectRun(run.id)"
-          >
-            <img
-              v-if="runThumb(run)"
-              :src="runThumb(run)!"
-              class="size-5 rounded-sm object-cover border border-border/50"
-              alt=""
-            />
-            <span class="text-foreground/80">#{{ String(i + 1).padStart(2, "0") }}</span>
-            <span>{{ endpointName(runEndpoint(run)) }}</span>
-            <span class="text-muted-foreground">{{ formatLatency(run.latencyMs) }}</span>
-          </RunSpecimen>
-        </SpecimenTray>
       </div>
 
       <RunInspector
-        v-if="activeRun"
+        v-if="currentRun"
         :open="showInspector"
-        :run-number="activeRunNumber"
-        :status="activeRun.status"
-        :endpoint="runEndpoint(activeRun)"
-        :model="activeRun.model"
-        :started-at="activeRun.startedAt"
-        :latency-ms="activeRun.latencyMs"
-        :error-message="activeRun.errorMessage"
-        :payload="activeRun.payload"
+        :status="currentRun.status"
+        :endpoint="runEndpoint(currentRun)"
+        :model="currentRun.model"
+        :started-at="currentRun.startedAt"
+        :latency-ms="currentRun.latencyMs"
+        :error-message="currentRun.errorMessage"
+        :payload="currentRun.payload"
         :extra-rows="[
-          { label: t('images.size'), value: activeRun.size },
-          { label: t('images.quality'), value: activeRun.quality },
-          { label: t('images.numberOfImages'), value: String(activeRun.n) },
+          { label: t('images.size'), value: currentRun.size },
+          { label: t('images.quality'), value: currentRun.quality },
+          { label: t('images.numberOfImages'), value: String(currentRun.n) },
         ]"
         @close="showInspector = false"
       />

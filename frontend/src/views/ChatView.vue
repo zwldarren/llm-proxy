@@ -5,6 +5,7 @@ import {
   Loader2,
   ArrowUp,
   Settings2,
+  Square,
   Wrench,
   Paperclip,
   X,
@@ -15,7 +16,6 @@ import {
   Cpu,
 } from "@lucide/vue";
 import { useThrottleFn, useWindowSize } from "@vueuse/core";
-import { storeToRefs } from "pinia";
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
 
 defineOptions({ name: "ChatView" });
@@ -24,9 +24,7 @@ import { toast } from "vue-sonner";
 import ChatEmptyState from "@/components/chat/ChatEmptyState.vue";
 import ChatMessage from "@/components/chat/ChatMessage.vue";
 import ChatSettings from "@/components/chat/ChatSettings.vue";
-import RunInspector from "@/components/playground/RunInspector.vue";
-import RunSpecimen from "@/components/playground/RunSpecimen.vue";
-import SpecimenTray from "@/components/playground/SpecimenTray.vue";
+import ModelPickerPlaceholder from "@/components/common/ModelPickerPlaceholder.vue";
 import type { ToolDefinition } from "@/adapters/types";
 import type { CustomVariable } from "@/adapters/types";
 import { Button } from "@/components/ui/button";
@@ -54,7 +52,7 @@ import {
   type GenerationSettings,
   type ReasoningEffort,
 } from "@/adapters/endpointProfiles";
-import { chatApi } from "@/services/api/chat";
+import { webSearchApi } from "@/services/api/config";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
@@ -66,24 +64,32 @@ import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Input } from "@/components/ui/input";
 import { useModelStore } from "@/stores/models";
 import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
-import { endpointName, formatLatency } from "@/utils/runs";
-
-interface ModelOption {
-  id: string;
-  provider: string;
-}
-
-const loadSelectedModel = (): string | null => {
-  return localStorage.getItem(STORAGE_KEYS.CHAT_MODEL);
-};
+import { useModelCatalog } from "@/composables/useModelCatalog";
 
 const loadSelectedEndpoint = (): string => {
   const stored = localStorage.getItem(STORAGE_KEYS.CHAT_ENDPOINT);
   return stored && isChatEndpoint(stored) ? stored : DEFAULT_CHAT_ENDPOINT;
 };
 
-const models = ref<ModelOption[]>([]);
-const selectedModel = ref<string | null>(loadSelectedModel());
+const authStore = useAuthStore();
+const apiKey = computed(() => authStore.sessionApiKey ?? "");
+
+// Loading, retrying and persisting the /v1/models catalog lives in the
+// composable shared with the Images picker; this view only renders its state.
+const {
+  models,
+  selectedModel,
+  isLoadingModels,
+  modelsError,
+  modelsPlaceholderLabel,
+  loadModels,
+  refreshModels,
+} = useModelCatalog({
+  apiKey,
+  storageKey: STORAGE_KEYS.CHAT_MODEL,
+  namespace: "chat",
+});
+
 const input = ref("");
 
 const getModelIcon = (modelId: string | null | undefined) => {
@@ -96,7 +102,6 @@ const getModelIcon = (modelId: string | null | undefined) => {
     configModel?.icon_url
   );
 };
-const isLoadingModels = ref(false);
 
 interface AttachedFile {
   id: string;
@@ -351,14 +356,6 @@ watch(selectedEndpoint, (val) => {
   localStorage.setItem(STORAGE_KEYS.CHAT_ENDPOINT, val);
 });
 
-watch(selectedModel, (val) => {
-  if (val) {
-    localStorage.setItem(STORAGE_KEYS.CHAT_MODEL, val);
-  } else {
-    localStorage.removeItem(STORAGE_KEYS.CHAT_MODEL);
-  }
-});
-
 const loadTools = (): ToolDefinition[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.CHAT_TOOLS);
@@ -392,6 +389,35 @@ watch(
     }
   },
   { deep: true }
+);
+
+/**
+ * Server-side web search interception status. Tri-state: null = unknown
+ * (non-admin users cannot read the server config), false = the proxy has no
+ * search backend configured, so a web search request can never return
+ * results — warn instead of letting the turn dead-end quietly.
+ */
+const serverWebSearchEnabled = ref<boolean | null>(null);
+
+const loadServerWebSearchStatus = async () => {
+  if (!authStore.isAdmin) return;
+  try {
+    const config = await webSearchApi.getConfig();
+    serverWebSearchEnabled.value = Boolean(config?.enabled);
+  } catch (e) {
+    console.error("Failed to load server web search status:", e);
+  }
+};
+
+watch(
+  () => webSearch.value.enabled,
+  (enabled) => {
+    if (enabled && serverWebSearchEnabled.value === false) {
+      toast.warning(t("chat.webSearch"), {
+        description: t("chat.webSearchServerDisabledHelp"),
+      });
+    }
+  }
 );
 
 const temperature = ref(defaultSettings.temperature);
@@ -527,46 +553,6 @@ const canSend = computed(
     apiKey.value.trim().length > 0
 );
 
-const loadModels = async () => {
-  try {
-    isLoadingModels.value = true;
-    const res = await chatApi.getModels(apiKey.value);
-
-    // Map each model to resolve the provider name from the modelStore
-    models.value = res.data.map((m) => {
-      let provider = m.provider;
-      if (!provider) {
-        const configModel = modelStore.models.find((cm) => cm.name === m.id);
-        provider = configModel?.providers?.[0]?.provider_name || "";
-      }
-      return {
-        id: m.id,
-        provider: provider,
-      };
-    });
-
-    // Restore saved model if it exists in the models list, otherwise default to first model
-    const savedModel = localStorage.getItem(STORAGE_KEYS.CHAT_MODEL);
-    if (savedModel && models.value.some((m) => m.id === savedModel)) {
-      selectedModel.value = savedModel;
-    } else if (models.value.length > 0) {
-      selectedModel.value = models.value[0]?.id ?? null;
-    }
-  } catch (error) {
-    console.error("Failed to load models:", error);
-    models.value = [];
-    selectedModel.value = null;
-  } finally {
-    isLoadingModels.value = false;
-  }
-};
-
-const authStore = useAuthStore();
-
-const apiKey = computed(() => {
-  return authStore.sessionApiKey ?? "";
-});
-
 const isFirstLoad = ref(true);
 
 onMounted(async () => {
@@ -577,6 +563,7 @@ onMounted(async () => {
       } catch (e) {
         console.error("Failed to fetch model configs:", e);
       }
+      void loadServerWebSearchStatus();
     }
     await loadModels();
     isFirstLoad.value = false;
@@ -584,25 +571,26 @@ onMounted(async () => {
 });
 
 onActivated(async () => {
-  if (!isFirstLoad.value) {
-    if (authStore.isAdmin) {
-      try {
-        // Force reload model configurations from the server config
-        await modelStore.fetchModels(true);
-      } catch (e) {
-        console.error("Failed to fetch model configs on activation:", e);
-      }
+  // First activation is the mount itself; onMounted already owns that load.
+  if (isFirstLoad.value) return;
+
+  if (authStore.isAdmin) {
+    try {
+      // Force reload model configurations from the server config
+      await modelStore.fetchModels(true);
+    } catch (e) {
+      console.error("Failed to fetch model configs on activation:", e);
     }
   }
-});
 
-// Automatically sync model options if the global model configuration store updates
-watch(
-  () => modelStore.models,
-  async () => {
-    await loadModels();
+  // Re-entry is the natural retry point. KeepAlive never re-runs onMounted, so
+  // a load that failed while the page was hidden (backend restart, transient
+  // network error, rate-limit window) used to leave the selector empty for the
+  // rest of the session.
+  if (models.value.length === 0 && !isLoadingModels.value) {
+    void loadModels();
   }
-);
+});
 
 const isNearBottom = (threshold = 100): boolean => {
   if (!messagesContainer.value) return true;
@@ -634,29 +622,10 @@ const { messages, isLoading, sendMessage, clearChat, stopGeneration } = useChat(
 
 const isSubmitting = ref(false);
 
-// Run specimens live in the chat store so the tray survives route navigation.
 const chatStore = useChatStore();
-const { runs } = storeToRefs(chatStore);
-const selectedRunId = ref<string | null>(null);
-
-const selectedRun = computed(() => runs.value.find((r) => r.id === selectedRunId.value) ?? null);
-const selectedRunNumber = computed(
-  () => runs.value.findIndex((r) => r.id === selectedRunId.value) + 1
-);
-
-// Inspector and settings share the right lane — opening one closes the other.
-const toggleRunSelection = (id: string) => {
-  if (selectedRunId.value === id) {
-    selectedRunId.value = null;
-  } else {
-    selectedRunId.value = id;
-    showSettings.value = false;
-  }
-};
 
 const toggleSettings = () => {
   showSettings.value = !showSettings.value;
-  if (showSettings.value) selectedRunId.value = null;
 };
 
 const getBaseChatOptions = (): ChatOptions => {
@@ -947,7 +916,6 @@ const handleClearChat = () => {
 
 const confirmClearChat = () => {
   clearChat();
-  selectedRunId.value = null;
   showClearConfirmDialog.value = false;
 };
 
@@ -1039,21 +1007,15 @@ watch(
             </SelectContent>
           </Select>
 
-          <!-- Model Selector Placeholder/Loading -->
-          <div
+          <!-- Model Selector placeholder: stays interactive so a failed or
+               empty load is retryable in place. -->
+          <ModelPickerPlaceholder
             v-else
-            class="border border-border/60 bg-transparent opacity-85 rounded-md h-8 px-2.5 gap-3 text-muted-foreground flex items-center min-w-0 font-mono text-[11px] select-none cursor-not-allowed"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <Loader2
-                v-if="isLoadingModels"
-                class="w-3 h-3 animate-spin shrink-0 text-muted-foreground/70"
-              />
-              <span class="font-medium text-muted-foreground truncate min-w-0 max-w-[200px]">
-                {{ isLoadingModels ? `${t("common.loading")}…` : t("chat.selectModel") }}
-              </span>
-            </div>
-          </div>
+            :loading="isLoadingModels"
+            :error="modelsError"
+            :label="modelsPlaceholderLabel"
+            @retry="refreshModels"
+          />
 
           <!-- Hairline divider between the primary model picker and the secondary endpoint -->
           <div class="hidden sm:block h-4 w-px bg-border/60 shrink-0" aria-hidden="true" />
@@ -1429,13 +1391,26 @@ watch(
                     ↵ send / ⇧↵ new line
                   </span>
 
+                  <!-- While a stream is in flight the send button becomes a
+                       stop button — aborting must always be one tap away. -->
                   <Button
+                    v-if="isLoading"
+                    type="button"
+                    size="icon"
+                    @click="stopGeneration"
+                    class="h-11 w-11 shrink-0 flex items-center justify-center transition-[transform,colors] duration-200 active:scale-95 rounded-md bg-foreground text-background hover:bg-foreground/90"
+                    :aria-label="t('chat.stopGeneration')"
+                  >
+                    <Square class="w-3.5 h-3.5 fill-current" />
+                  </Button>
+                  <Button
+                    v-else
                     type="submit"
                     size="icon"
                     :disabled="!canSend"
                     class="h-11 w-11 shrink-0 flex items-center justify-center transition-[transform,colors] duration-200 active:scale-95 rounded-md"
                     :class="
-                      isLoading || isSubmitting
+                      isSubmitting
                         ? 'bg-muted text-foreground'
                         : canSend
                           ? 'bg-foreground text-background hover:bg-foreground/90'
@@ -1443,7 +1418,7 @@ watch(
                     "
                     :aria-label="isSubmitting ? t('chat.sending') : t('chat.sendMessage')"
                   >
-                    <Loader2 v-if="isLoading || isSubmitting" class="w-4 h-4 animate-spin" />
+                    <Loader2 v-if="isSubmitting" class="w-4 h-4 animate-spin" />
                     <ArrowUp v-else class="w-4 h-4" />
                   </Button>
                 </div>
@@ -1451,37 +1426,7 @@ watch(
             </form>
           </div>
         </div>
-
-        <!-- Run tray: every API request deposits an inspectable specimen -->
-        <SpecimenTray :count="runs.length">
-          <RunSpecimen
-            v-for="(run, i) in runs"
-            :key="run.id"
-            :status="run.status"
-            :selected="selectedRunId === run.id"
-            @click="toggleRunSelection(run.id)"
-          >
-            <span class="text-foreground/80">#{{ String(i + 1).padStart(2, "0") }}</span>
-            <span>{{ endpointName(run.endpoint) }}</span>
-            <span class="text-muted-foreground">{{ formatLatency(run.latencyMs) }}</span>
-          </RunSpecimen>
-        </SpecimenTray>
       </div>
-
-      <RunInspector
-        v-if="selectedRun"
-        :open="!!selectedRun"
-        :run-number="selectedRunNumber"
-        :status="selectedRun.status"
-        :endpoint="selectedRun.endpoint"
-        :model="selectedRun.model"
-        :started-at="selectedRun.startedAt"
-        :latency-ms="selectedRun.latencyMs"
-        :response-chars="selectedRun.responseChars"
-        :error-message="selectedRun.errorMessage"
-        :payload="selectedRun.payload"
-        @close="selectedRunId = null"
-      />
 
       <ChatSettings
         v-model:open="showSettings"
@@ -1504,6 +1449,7 @@ watch(
         v-model:customVariables="customVariables"
         v-model:tools="tools"
         v-model:webSearch="webSearch"
+        :server-web-search-enabled="serverWebSearchEnabled"
         v-model:speechVoice="speechVoice"
         v-model:speechSpeed="speechSpeed"
         v-model:speechModel="speechModel"

@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * Run inspector — the drawer a tray specimen opens, shared by Chat and Images.
- * Shows the exact wire payload plus real run telemetry. A failed run is held
- * here as an inspectable tableau: status, error, and the payload that caused
- * it stay frozen until dismissed. Runs restored from a previous session carry
- * telemetry only — their payload was never persisted.
+ * Run inspector — the drawer the Images canvas readout opens. Shows the exact
+ * wire payload plus real run telemetry. A failed run is held here as an
+ * inspectable tableau: status, error, and the payload that caused it stay
+ * frozen until dismissed.
  */
 import { Activity, AlertTriangle, X } from "@lucide/vue";
 import { computed } from "vue";
@@ -12,15 +11,15 @@ import { useI18n } from "vue-i18n";
 import JsonViewer from "@/components/common/JsonViewer.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Button } from "@/components/ui/button";
-import type { ChatRunStatus } from "@/types/runs";
+import type { RunStatus } from "@/types/runs";
 import { formatClock, formatLatency } from "@/utils/runs";
 
 const props = withDefaults(
   defineProps<{
     open: boolean;
-    /** 1-based position of the run in the tray. */
-    runNumber: number;
-    status: ChatRunStatus;
+    /** 1-based run position, when the caller keeps a history. */
+    runNumber?: number;
+    status: RunStatus;
     endpoint: string;
     model: string;
     startedAt: number;
@@ -103,7 +102,11 @@ const statusLabel = computed(() => {
                 <Activity class="w-4 h-4 text-primary" />
               </div>
               <h3 class="font-semibold text-sm font-mono truncate">
-                {{ t("playground.runNumber", { n: String(runNumber).padStart(2, "0") }) }}
+                {{
+                  runNumber !== undefined
+                    ? t("playground.runNumber", { n: String(runNumber).padStart(2, "0") })
+                    : t("playground.inspector")
+                }}
               </h3>
               <StatusBadge variant="status" :status="statusVariant">{{ statusLabel }}</StatusBadge>
             </div>

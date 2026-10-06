@@ -179,6 +179,11 @@ export default {
     description: "Test models with live conversations",
     selectModel: "Select Model",
     startChatting: "Select a model and start chatting!",
+    // Model picker fallback states. Both stay clickable: the list is loaded
+    // once per session, so a failed call must remain retryable in place.
+    retryModels: "Models unavailable — retry",
+    noModelsAvailable: "No models available — retry",
+    modelsLoadFailed: "Could not load the model list",
     // API test console reframe — operational copy, not consumer chat
     apiConsoleTitle: "API Test Console",
     apiConsoleSubtitle:
@@ -343,8 +348,6 @@ export default {
 
   // Playground instrument family — shared run tray + inspector (Chat & Images)
   playground: {
-    runs: "RUNS",
-    runsEmpty: "Send a request to record a run",
     inspector: "Run Inspector",
     runNumber: "Run #{n}",
     endpoint: "Endpoint",
@@ -369,6 +372,11 @@ export default {
     description: "Generate images from text prompts",
     selectModel: "Select Model",
     startGenerating: "Select a model and start creating!",
+    // Model picker fallback states. Both stay clickable: the list is loaded
+    // once per session, so a failed call must remain retryable in place.
+    retryModels: "Models unavailable — retry",
+    noModelsAvailable: "No models available — retry",
+    modelsLoadFailed: "Could not load the model list",
     enterPrompt: "Describe the image you want to create...",
     apiKeyRequired: "Please enter an API key to use /v1 endpoints.",
     create: "Create",

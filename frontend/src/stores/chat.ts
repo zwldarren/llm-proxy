@@ -3,23 +3,8 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import type { ChatMessage } from "@/types/schemas";
-import type { ChatRun } from "@/types/runs";
-import { appendRun } from "@/utils/runs";
 
 const MAX_STORED_MESSAGES = 100;
-/** Tray specimens are session-scoped; cap them since payloads can be large. */
-const MAX_RUNS = 50;
-
-/** Persisted runs are telemetry stubs only — payloads never hit localStorage. */
-function loadRuns(): ChatRun[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.CHAT_RUNS);
-    if (raw) return JSON.parse(raw) as ChatRun[];
-  } catch {
-    // ignore parse errors
-  }
-  return [];
-}
 
 function generateMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -64,8 +49,8 @@ export const useChatStore = defineStore("chat", () => {
    * Persistence is driven by an explicit dirty counter rather than a deep
    * watcher: streaming mutates the last message in place on every chunk, and a
    * deep watcher re-traverses the whole transcript for each one (the debounced
-   * write never fixed the traversal). Every mutation of the message list or the
-   * run tray must call touchChat().
+   * write never fixed the traversal). Every mutation of the message list must
+   * call touchChat().
    */
   const revision = ref(0);
 
@@ -148,39 +133,12 @@ export const useChatStore = defineStore("chat", () => {
     touchChat();
   }
 
-  // Run specimens for the playground tray — one record per API request.
-  // Payloads stay in memory only (they can hold base64 attachments, too heavy
-  // for localStorage); lightweight telemetry stubs persist so a restored
-  // transcript keeps a matching tray.
-  const runs = ref<ChatRun[]>(loadRuns());
-
-  const saveRuns = useDebounceFn(() => {
-    try {
-      const stubs = runs.value.slice(-MAX_RUNS).map((r) => ({ ...r, payload: null }));
-      localStorage.setItem(STORAGE_KEYS.CHAT_RUNS, JSON.stringify(stubs));
-    } catch {
-      // ignore localStorage errors (e.g. quota exceeded)
-    }
-  }, 800);
-
   watch(revision, () => {
     saveMessages();
-    saveRuns();
   });
-
-  function upsertRun(run: ChatRun) {
-    const idx = runs.value.findIndex((r) => r.id === run.id);
-    if (idx >= 0) {
-      runs.value[idx] = run;
-    } else {
-      runs.value = appendRun(runs.value, run, MAX_RUNS);
-    }
-    touchChat();
-  }
 
   function clearMessages() {
     messages.value = [];
-    runs.value = [];
     error.value = null;
     stopAudio();
     touchChat();
@@ -194,6 +152,7 @@ export const useChatStore = defineStore("chat", () => {
     clearMessages();
     try {
       localStorage.removeItem(STORAGE_KEYS.CHAT_MESSAGES);
+      // Legacy key from the removed run tray — clean up stale data.
       localStorage.removeItem(STORAGE_KEYS.CHAT_RUNS);
     } catch {
       // ignore localStorage errors
@@ -213,8 +172,6 @@ export const useChatStore = defineStore("chat", () => {
     isLoading,
     error,
     currentlyPlayingId,
-    runs,
-    upsertRun,
     playAudio,
     stopAudio,
     pushMessage,

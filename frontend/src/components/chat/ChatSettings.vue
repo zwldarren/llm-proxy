@@ -69,6 +69,8 @@ const props = defineProps<{
   customVariables: CustomVariable[];
   tools: ToolDefinition[];
   webSearch: WebSearchConfig;
+  /** Tri-state: null = unknown (non-admin or not loaded), false = warn the user. */
+  serverWebSearchEnabled?: boolean | null;
   speechVoice: string;
   speechSpeed: number;
   speechModel: string;
@@ -1007,6 +1009,17 @@ const close = () => emit("update:open", false);
             >
               <p class="text-[11px] text-muted-foreground leading-relaxed">
                 {{ t("chat.webSearchHelp") }}
+              </p>
+
+              <!-- Server-side interception is off: the tool never reaches a
+                   search backend, so answers come back without results. -->
+              <p
+                v-if="serverWebSearchEnabled === false"
+                class="text-[11px] text-action-amber leading-relaxed flex items-start gap-1.5"
+                role="status"
+              >
+                <AlertTriangle class="w-3.5 h-3.5 shrink-0 mt-px" />
+                <span>{{ t("chat.webSearchServerDisabledHelp") }}</span>
               </p>
 
               <!-- Anthropic: max_uses -->

@@ -180,6 +180,11 @@ export default {
     description: "通过实时对话测试模型",
     selectModel: "选择模型",
     startChatting: "选择一个模型并开始聊天！",
+    // 模型选择器的降级状态。两者都保持可点击：模型列表每个会话只加载一次，
+    // 加载失败必须在原地可重试。
+    retryModels: "模型列表不可用，点击重试",
+    noModelsAvailable: "暂无可用模型，点击重试",
+    modelsLoadFailed: "无法加载模型列表",
     // API test console reframe — operational copy, not consumer chat
     apiConsoleTitle: "API 测试控制台",
     apiConsoleSubtitle: "通过代理发送请求，验证路由、延迟与工具调用。",
@@ -334,8 +339,6 @@ export default {
 
   // Playground 仪表家族 — 共享运行托盘 + 检查器（Chat 与 Images）
   playground: {
-    runs: "运行",
-    runsEmpty: "发送请求以记录运行",
     inspector: "运行检查器",
     runNumber: "运行 #{n}",
     endpoint: "端点",
@@ -360,6 +363,11 @@ export default {
     description: "根据文本提示生成图像",
     selectModel: "选择模型",
     startGenerating: "选择一个模型并开始创建！",
+    // 模型选择器的降级状态。两者都保持可点击：模型列表每个会话只加载一次，
+    // 加载失败必须在原地可重试。
+    retryModels: "模型列表不可用，点击重试",
+    noModelsAvailable: "暂无可用模型，点击重试",
+    modelsLoadFailed: "无法加载模型列表",
     enterPrompt: "描述你想创建的图像...",
     apiKeyRequired: "请先输入 API Key 才能使用 /v1 接口。",
     create: "创建",
