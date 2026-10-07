@@ -12,18 +12,14 @@ from fastapi import Depends, Request
 from llm_proxy.config.manager import DatabaseConfigManager
 from llm_proxy.config.types.main import ProxyConfig
 from llm_proxy.config.types.provider import ProviderConfig
-from llm_proxy.core.adapter import BaseAdapter, list_providers
-from llm_proxy.core.exceptions import (
-    AdapterNotFoundError as CoreAdapterNotFoundError,
-)
+from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
     ConfigurationError,
     ForbiddenError,
-    NotFoundError,
-    ValidationError,
 )
 from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.internal_call import build_provider_adapter
 from llm_proxy.core.provider_selector import ProviderSelectionResult
 from llm_proxy.database import UserRecord, UserRepository, get_async_session
 from llm_proxy.http.client import AsyncSession, ProviderHTTPClientManager
@@ -179,55 +175,22 @@ def _create_adapter(
     http_client_manager: ProviderHTTPClientManager | None = None,
     max_retries: int = 3,
 ) -> BaseAdapter:
-    from llm_proxy.core.adapter import get_adapter
+    """Thin compatibility shim for :func:`llm_proxy.core.internal_call.build_provider_adapter`.
 
-    if not provider_config.type or not provider_config.type.strip():
-        raise ValidationError(
-            message=(
-                f"Provider '{provider_name}' has no type configured. "
-                f"Please ensure provider_config.type is set (e.g., 'ollama', 'openai')."
-            ),
-        )
-
-    try:
-        return get_adapter(
-            provider_config.type,
-            provider_name=provider_name,
-            api_key=provider_config.get_api_key(),
-            base_url=provider_config.base_url,
-            timeout=provider_config.timeout,
-            max_retries=max_retries,
-            custom_headers=provider_config.custom_headers,
-            parameter_overrides=provider_config.parameter_overrides,
-            endpoint_base_urls=provider_config.endpoint_base_urls,
-            # Kill switch for providers with native-protocol endpoints
-            # (e.g. DeepSeek's Anthropic/Responses passthrough); forwarded
-            # opaquely through AdapterConfig.extra — only adapters that read
-            # it are affected.
-            native_passthrough=provider_config.metadata.get("native_passthrough", True),
-            # Upstream API dialect for Gemini ("generate_content" default |
-            # "interactions") — forwarded opaquely through AdapterConfig.extra;
-            # only the Gemini adapter reads it.
-            api_variant=provider_config.metadata.get("api_variant", "generate_content"),
-            # App-attribution identity (OpenRouter's HTTP-Referer /
-            # X-OpenRouter-Title). Forwarded opaquely; only adapters for
-            # upstreams that track client apps read it.
-            app_attribution=provider_config.app_attribution.model_dump(),
-            unknown_fields_policy=unknown_fields_policy,
-            unsupported_block_policy=unsupported_block_policy,
-            http_client=http_client,
-            http_client_manager=http_client_manager,
-        )
-    except CoreAdapterNotFoundError as e:
-        raise NotFoundError(
-            message=f"Provider '{provider_name}' not found. Available: {list_providers()}",
-        ) from e
-    except ConfigurationError:
-        raise
-    except Exception as e:
-        raise ConfigurationError(
-            message=f"Failed to create provider adapter: {e}",
-        ) from e
+    Adapter construction is request-free and lives in core, where the routing
+    layer may use it without importing this package (ADR-0018). Kept here so
+    existing importers — adapter tests today, anything external tomorrow — keep a
+    working path; new code should call the core function.
+    """
+    return build_provider_adapter(
+        provider_name,
+        provider_config,
+        http_client=http_client,
+        unknown_fields_policy=unknown_fields_policy,
+        unsupported_block_policy=unsupported_block_policy,
+        http_client_manager=http_client_manager,
+        max_retries=max_retries,
+    )
 
 
 async def create_adapter_for_provider(
@@ -235,6 +198,13 @@ async def create_adapter_for_provider(
     selection: ProviderSelectionResult,
     http_client: AsyncSession | None = None,
 ) -> BaseAdapter:
+    """Build the adapter for a selection, reading what only the request knows.
+
+    Construction itself is request-free
+    (:func:`llm_proxy.core.internal_call.build_provider_adapter`); this wrapper
+    exists for the three ``app.state`` lookups the API layer owns — the pooled
+    HTTP client, its manager, and the global field policies.
+    """
     manager = _get_http_manager(request)
     if http_client is None:
         http_client = await get_provider_http_client(request, selection.provider_name)
@@ -246,15 +216,13 @@ async def create_adapter_for_provider(
     # (e.g. vLLM/SGLang default to ``passthrough``); ``_resolve_field_policy``
     # treats a missing/None value accordingly.
     config = await get_config_manager(request).get_config()
-    ufp = config.server_params.unknown_fields_policy
-    ubp = config.server_params.unsupported_block_policy
 
-    return _create_adapter(
+    return build_provider_adapter(
         selection.provider_name,
         selection.provider_config,
-        http_client,
-        unknown_fields_policy=ufp,
-        unsupported_block_policy=ubp,
+        http_client=http_client,
+        unknown_fields_policy=config.server_params.unknown_fields_policy,
+        unsupported_block_policy=config.server_params.unsupported_block_policy,
         http_client_manager=manager_instance,
         max_retries=selection.max_retries,
     )

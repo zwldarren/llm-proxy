@@ -21,6 +21,7 @@ export default {
     proxyLogs: "Proxy Logs",
     mcpLogs: "MCP Calls",
     webSearchLogs: "Web Search",
+    judgeLogs: "Judge Calls",
     apiKeys: "API Keys",
     providers: "Providers",
     models: "Models",
@@ -1019,6 +1020,50 @@ export default {
     routingDiagnostics: "Routing Diagnostics",
     routingDiagnosticsDescription:
       "Logging setting: when enabled, proxy logs include per-candidate scorecards, selection weights, guardrail notes, and signal votes for each smart-routed request.",
+    judge: "Routing Judge",
+    judgeDescription:
+      "Ask a System One model to settle ambiguous first turns. Off by default; while shadow mode is on the verdict is recorded in the request log but does not change the decision. Adds one short upstream call per judged turn, so the gate below is what limits its cost and latency.",
+    judgeModel: "Judge Model",
+    judgeModelDescription:
+      "Consulted for its typed answers, not its prose. Only models marked as System One models can serve it.",
+    judgeModelNone:
+      "No System One model is configured. Mark a model as a System One model in Models first.",
+    judgeModelPlaceholder: "Select a model",
+    judgeModes: "Judged Modes",
+    judgeModesDescription:
+      "Virtual models whose turns may be judged. 'fast' is usually left out: cheap model choice is its purpose, and a judge call works against it.",
+    judgeGate: "When to Ask",
+    judgeGateDescription:
+      "The judge is only consulted on the first turn of a conversation. This decides which of those turns are worth asking about.",
+    judgeGateAlways: "Every eligible turn",
+    judgeGateConfidence: "When confidence is low",
+    judgeGateBand: "When complexity is mid-range",
+    judgeGateBoth: "When either signal fires",
+    judgeConfidenceBelow: "Confidence Threshold",
+    judgeConfidenceBelowDescription:
+      "Ask when the router's confidence is below this value. Calibrated confidence is not P(correct), so pick the value from measured data: the routing judge tooling reports how often each threshold would fire.",
+    judgeBand: "Complexity Band",
+    judgeBandDescription:
+      "Ask when the router's complexity estimate falls inside this range (start included, end excluded). Most requests land on one of a few anchors (0.00, 0.40, 0.68, 0.90), so a narrow band around 0.40 is what a mid-range gate catches.",
+    judgeBandLow: "Band start",
+    judgeBandHigh: "Band end",
+    judgeDeadline: "Judge Deadline",
+    judgeDeadlineDescription:
+      "Seconds a judge call gets before the request falls back to the router's own decision. A judge that is cancelled at the deadline does not stay loaded, so keep this above the model's cold start if you want it to answer at all.",
+    judgeDeadlineUnit: "s",
+    judgeShadow: "Shadow Mode",
+    judgeShadowDescription:
+      "Record what the judge would have said without letting it change the decision. This is the first state to run in: it is the only way to see whether the judge agrees with the router on real traffic before depending on it.",
+    judgeShadowSampleRate: "Shadow Sample Rate",
+    judgeShadowSampleRateDescription:
+      "Share of eligible turns the gate did not fire that are judged anyway, for measurement. Agreement measured only inside the gate says nothing about what the gate let through.",
+    judgeContext: "Judge Context Budget",
+    judgeContextDescription:
+      "How much of the request the judge sees: the current ask always, plus this many earlier user turns. Assistant and tool output is never included — the judge classifies the request, not the model's own prior work.",
+    judgeContextTurns: "Earlier user turns",
+    judgeContextChars: "Characters per turn",
+    judgeContextTurnsUnit: "turns",
+    judgeContextCharsUnit: "chars",
   },
 
   // Theme
@@ -1434,6 +1479,8 @@ export default {
     },
     // Proxy logs specific
     proxyDescription: "Monitor LLM API calls and usage metrics",
+    judgeDescription:
+      "Model calls the routing judge made while resolving virtual models. Each row is an ordinary model call with its own model, provider, tokens and cost, attributed to the request that triggered it — but kept out of the proxy request counts.",
     inputTokens: "Input",
     outputTokens: "Output",
     totalTokens: "Total",
@@ -1517,6 +1564,21 @@ export default {
       latency: "Latency",
       reliability: "Reliability",
       quality: "Quality",
+      judge: "Routing Judge",
+      judgeVerdict: "Verdict",
+      judgeAbstained: "abstained",
+      judgeShadowBadge: "shadow",
+      judgeGate: "Gate",
+      judgeModel: "Judge Model",
+      judgeLatency: "Judge Latency",
+      judgeConfidence: "Confidence (peakiness)",
+      judgeAbstainProb: "Abstain P",
+      judgeEscalationProb: "Escalation P",
+      judgeCost: "Judge Cost",
+      judgeParentRequest: "Parent Request",
+      judgeRequestedModel: "Requested Model",
+      judgeResolvedModel: "Resolved Model",
+      judgeProviderModel: "Provider Model",
       standardOnly:
         "Enable routing diagnostics in Smart Routing settings to see per-candidate scorecards, weights, and signal votes.",
     },

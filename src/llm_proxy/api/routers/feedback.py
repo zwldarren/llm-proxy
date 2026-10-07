@@ -1,9 +1,10 @@
 """Explicit user feedback on smart-routing decisions.
 
-Closes the feedback loop: a user rates a routed request (ok/weak/strong),
-the signal is applied to the model's experience (Thompson sampling picks it
-up on the next routing decision), and the row doubles as a calibration eval
-sample for future Platt temperature re-fitting.
+Closes the feedback loop: a user rates a routed request (ok/weak/strong) and
+the signal is applied to the model's experience (Thompson sampling picks it up
+on the next routing decision). The stored row is the audit trail of that
+rating; nothing re-fits the router's calibration from it, and no such
+calibration machinery exists (ADR-0018).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query

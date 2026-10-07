@@ -1,5 +1,6 @@
 """Shared base class for usage statistics query building."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
@@ -64,19 +65,31 @@ class BaseUsageRepository:
         *,
         start_ts: float | None,
         end_ts: float | None,
-        log_type: str | None,
+        log_type: str | Sequence[str] | None,
         user_id: int | None = None,
         api_key_name: str | None = None,
         model: str | None = None,
     ) -> list[Any]:
-        """Build common time, log_type, user_id, api_key_name, and model filters."""
+        """Build common time, log_type, user_id, api_key_name, and model filters.
+
+        ``log_type`` accepts several values so a caller can aggregate rows that
+        belong to one view together without pretending they are the same kind of
+        row (e.g. a key's spend spans ``endpoint`` and ``judge`` records).
+        """
         filters: list[Any] = []
         if start_ts is not None:
             filters.append(self.model.timestamp >= start_ts)
         if end_ts is not None:
             filters.append(self.model.timestamp <= end_ts)
-        if log_type is not None:
+        if isinstance(log_type, str):
             filters.append(self.model.log_type == log_type)
+        elif log_type is not None:
+            # An empty sequence means "no log type filter", the same as ``None``.
+            # ``in_(())`` compiles to an always-false predicate, which would
+            # silently return no rows instead.
+            log_types = tuple(log_type)
+            if log_types:
+                filters.append(self.model.log_type.in_(log_types))
         if user_id is not None:
             filters.append(self.model.user_id == user_id)
         if api_key_name is not None:
@@ -191,7 +204,7 @@ class BaseUsageRepository:
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
@@ -202,7 +215,7 @@ class BaseUsageRepository:
         Args:
             start_ts: Start timestamp for filtering
             end_ts: End timestamp for filtering
-            log_type: Filter by log type (default: "endpoint" for proxy logs)
+            log_type: Filter by log type — one value or several (default: "endpoint" for proxy logs)
             include_ttft: Include TTFT (time to first token) metrics
             user_id: Optional user ID to filter by (for multi-user scoping)
             api_key_name: Optional API key name to filter by (per-key stats)
@@ -332,7 +345,7 @@ class BaseUsageRepository:
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         include_ttft: bool = False,
         user_id: int | None = None,
         api_key_name: str | None = None,
@@ -381,7 +394,7 @@ class BaseUsageRepository:
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         include_ttft: bool = False,
         user_id: int | None = None,
         api_key_name: str | None = None,
@@ -441,7 +454,7 @@ class BaseUsageRepository:
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         user_id: int | None = None,
         api_key_name: str | None = None,
         model: str | None = None,
@@ -513,7 +526,7 @@ class BaseUsageRepository:
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         user_id: int | None = None,
         api_key_name: str | None = None,
         model: str | None = None,

@@ -14,6 +14,7 @@ from pydantic import (
 
 from llm_proxy.config.types.model import ProviderSelectionStrategy, normalize_pricing_tiers
 from llm_proxy.config.types.provider import AppAttributionValidators
+from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.provider import ProviderModelInfo
 from llm_proxy.security.passwords import validate_password_strength
@@ -374,7 +375,8 @@ class ModelBase(BaseModel, ValidatorMixin):
         default=False,
         description=(
             "Whether this model serves System One evaluations (e.g. /v1/systemone); "
-            "gates that endpoint. Additive like the other capability flags"
+            "gates that endpoint, and gates being selected as the routing judge. "
+            "Additive like the other capability flags"
         ),
     )
     # Display-only attributes, named after their models.dev counterparts so
@@ -677,7 +679,8 @@ class ModelRead(BaseModel):
         default=False,
         description=(
             "Whether this model serves System One evaluations (e.g. /v1/systemone); "
-            "gates that endpoint. Additive like the other capability flags"
+            "gates that endpoint, and gates being selected as the routing judge. "
+            "Additive like the other capability flags"
         ),
     )
     attachment: bool = Field(
@@ -1712,6 +1715,13 @@ class SmartRoutingConfigUpdate(BaseModel):
     mode_weights: dict[str, float] | None = Field(
         default=None,
         description="Weights for each routing mode (fast, auto, best)",
+    )
+    judge: RoutingJudgeConfig | None = Field(
+        default=None,
+        description=(
+            "System One routing judge: consulted for ambiguous first turns when enabled, "
+            "and recorded without changing the decision while shadow is on (ADR-0018)"
+        ),
     )
 
 

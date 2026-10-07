@@ -10,6 +10,11 @@ class LogType(StrEnum):
     ENDPOINT = "endpoint"
     MCP = "mcp"
     WEB_SEARCH = "web_search"
+    #: An internal model call made while a client request waits: today the
+    #: routing judge (ADR-0018). It has its own row and its own usage record so
+    #: the spend is visible per model, but it is not a client request, so it is
+    #: kept out of the endpoint dashboards' request counts.
+    JUDGE = "judge"
 
 
 class EventType(StrEnum):

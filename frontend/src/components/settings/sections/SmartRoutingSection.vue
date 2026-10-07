@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { SettingsItem, SettingsSection } from "@/components/settings";
 import CollapsiblePanel from "@/components/common/CollapsiblePanel.vue";
 import ModeWeightSlider from "@/components/settings/sections/ModeWeightSlider.vue";
+import RoutingJudgePanel from "@/components/settings/sections/RoutingJudgePanel.vue";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import type { AutoSaveState } from "@/composables/useSettingAutoSave";
@@ -96,6 +97,9 @@ function setModeWeight(key: ModeKey, value: number) {
           />
         </template>
       </SettingsItem>
+
+      <!-- Routing judge -->
+      <RoutingJudgePanel :auto-save="autoSave" />
 
       <!-- Virtual Models -->
       <div class="px-5.5 py-5 border-t border-border/40 bg-muted/5">

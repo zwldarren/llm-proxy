@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LLM Proxy API",
-    "version": "0.2.9",
+    "version": "0.3.0",
     "description": "The client-facing contract of the proxy: the OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages protocols plus the media endpoints, all served under `/v1`. Request schemas are generated from the same Pydantic models the server validates with; response schemas are descriptive and permissive, since upstream bodies are passed through. See https://zwldarren.github.io/llm-proxy/api/ for the full reference, including WebSocket and streaming behaviour."
   },
   "servers": [

@@ -121,6 +121,11 @@ The **Usage** dashboard and `GET /api/logs/usage-stats` aggregate:
 Metrics come from the dedicated `usage_records` table, which is pruned on the same
 retention window as the logs and survives the manual **Cleanup Logs** action; request
 counts and success rate come from `request_logs` when available.
+Budget windows, the per-key spend figures, and the per-key usage view include `judge`
+usage records — a routing-judge call is billed on the key whose request triggered it,
+so it appears in that key's by-model breakdown. The global **Usage** dashboard and the
+Logs request counters stay `endpoint`-only, because a judge call is not a request the
+client made.
 Averages are the only latency/throughput statistics reported — no percentiles. Cache
 savings require a `cached_read_cost_per_1m` price on the model; without it the metric
 is skipped with a warning.
@@ -143,12 +148,18 @@ detectable.
 
 Audit rows are admin-only in the console and API.
 
-## MCP Calls and Web Search tabs
+## MCP Calls, Web Search and Judge Calls tabs
 
 | Tab | Contents |
 | --- | --- |
 | **MCP Calls** | One row per MCP operation: server, operation, resource type/name, arguments and result summary (masked), status, duration |
 | **Web Search** | One row per intercepted search: query, provider, status, result count, max uses vs. current use |
+| **Judge Calls** | One row per routing-judge call (log type `judge`): judge model, provider, resolved upstream model, tokens, cost and its source, status, duration, plus gate, shadow flag, verdict and error in metadata. Attributed to the request that triggered the call, which is named as `parent_request_id` |
+
+A judge row is written before its parent request is served, so a call is still
+accounted for when the parent later fails. Its request id is the parent's with a
+`:judge` suffix. Bodies are never stored on these rows: the input is a bounded excerpt
+the parent row already holds, and the output is the verdict in metadata.
 
 ## Tracing
 

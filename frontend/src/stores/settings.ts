@@ -109,9 +109,21 @@ export const useSettingsStore = defineStore("settings", () => {
   function normalizeSmartRouting(res: unknown): SmartRoutingConfig {
     const data = res as Partial<SmartRoutingConfig> | undefined;
     const weights = data?.mode_weights;
+    const judge = data?.judge;
+    const judgeDefaults = DEFAULT_SMART_ROUTING.judge;
     return {
       enabled: data?.enabled ?? DEFAULT_SMART_ROUTING.enabled,
       mode_weights: weights ? { ...weights } : { ...DEFAULT_SMART_ROUTING.mode_weights },
+      // The judge block is newer than the stored rows: fill every field from the
+      // defaults so a section rendered from an old row still has all its inputs.
+      judge: {
+        ...judgeDefaults,
+        ...judge,
+        modes: judge?.modes ? [...judge.modes] : [...judgeDefaults.modes],
+        complexity_between: judge?.complexity_between
+          ? ([...judge.complexity_between] as [number, number])
+          : null,
+      },
     };
   }
 

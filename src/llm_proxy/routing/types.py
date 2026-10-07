@@ -332,6 +332,18 @@ class RoutingDecision:
     weights_used: dict[str, float] = field(default_factory=dict)
     guardrail_notes: list[str] = field(default_factory=list)
     signal_votes: dict[str, Any] = field(default_factory=dict)
+    #: The judge consultation behind this decision, when there was one: its
+    #: verdict, why it was asked, and what it cost. Telemetry only — the
+    #: verdict's own confidence never becomes a signal vote, and the judge's tier
+    #: shows up in ``tier``/``complexity`` only when it owned the decision.
+    #: See ADR-0018.
+    judge: dict[str, Any] | None = None
+    #: Conversation this decision belongs to, when one could be derived. Carried
+    #: for outcome telemetry: without it, turns cannot be stitched into
+    #: conversations, so no outcome proxy (escalation, resend, abandonment) is
+    #: computable from the request log. Set by the application layer, not by
+    #: ``route()``. See ADR-0018.
+    conversation_key: str | None = None
 
 
 @dataclass

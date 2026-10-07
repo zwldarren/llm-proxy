@@ -42,6 +42,7 @@ from llm_proxy.routing.features import (
     extract_routing_features,
     messages_contextual_followup_floor,
 )
+from llm_proxy.routing.judge.policy import JudgeConsultation
 from llm_proxy.routing.selector import _derive_tier, select_from_pool
 from llm_proxy.routing.signal_tuning import (
     DEFAULT_SIGNAL_TUNING,
@@ -509,6 +510,20 @@ class V2ClassifyResult:
     vote_c: TierVote
 
 
+@dataclass(frozen=True, slots=True)
+class RoutingClassification:
+    """One classification pass: the features extracted, and the ensemble on them.
+
+    Callers that need the ensemble's verdict *before* routing — the judge gate
+    does, since it decides whether to ask a second model — classify once and pass
+    the result to :func:`route`, so the confidence the gate acts on is the
+    confidence the decision was made from.
+    """
+
+    features: RoutingFeatures
+    v2: V2ClassifyResult
+
+
 def _build_signal_row(
     messages: list[dict[str, Any]] | None,
     routing_features: RoutingFeatures | None,
@@ -725,6 +740,38 @@ def _v2_classify(
     )
 
 
+def classify(
+    messages: list[dict[str, Any]] | None,
+    features: RoutingFeatures | None = None,
+    embedding_signal: EmbeddingSignal | None = None,
+    *,
+    max_output_tokens: int = _DEFAULT_MAX_OUTPUT_TOKENS,
+    risk_tolerance: float = 0.5,
+) -> RoutingClassification:
+    """Extract routing features and run the signal ensemble, in one pass.
+
+    ``route()`` performs exactly this work when it is not handed the result, so
+    callers that need the ensemble's confidence or complexity *before* deciding
+    anything — the judge gate is the only one today — can classify once and pass
+    it along instead of classifying twice.
+    """
+    if features is None:
+        features = extract_routing_features(messages, max_output_tokens=max_output_tokens)
+    else:
+        features = _enrich_features_from_messages(
+            features,
+            messages,
+            max_output_tokens=max_output_tokens,
+        )
+    v2 = _v2_classify(
+        messages,
+        features,
+        embedding_signal=embedding_signal,
+        risk_tolerance=risk_tolerance,
+    )
+    return RoutingClassification(features=features, v2=v2)
+
+
 def route(
     messages: list[dict[str, Any]],
     features: RoutingFeatures | None,
@@ -738,6 +785,8 @@ def route(
     rng: random.Random | None = None,
     mode_weights: dict[str, float] | None = None,
     require_images: bool = False,
+    classification: RoutingClassification | None = None,
+    judge: JudgeConsultation | None = None,
 ) -> RoutingDecision:
     """Route a request to the best model using the v2 multi-signal ensemble.
 
@@ -750,17 +799,19 @@ def route(
     previous_model: If set, the model used for the previous turn in this
         conversation. The router gives it a stickiness bonus to preserve
         provider-side prompt caching across turns.
+    classification: A prior :func:`classify` result to reuse instead of
+        classifying again, so a caller that already looked at the ensemble's
+        confidence is deciding from the numbers it saw.
+    judge: A judge consultation for this turn. When its verdict owns the tier,
+        that tier replaces the ensemble's complexity before floors and caps are
+        applied — so a judge can never lift a request above a cap or drop it
+        below a floor, and it never contributes a fourth signal vote
+        (ADR-0018). Consultations in shadow mode are recorded and ignored.
     """
     cfg = config or DEFAULT_CONFIG
     constraints = RoutingConstraints()
-    if features is None:
-        features = extract_routing_features(messages, max_output_tokens=_DEFAULT_MAX_OUTPUT_TOKENS)
-    else:
-        features = _enrich_features_from_messages(
-            features,
-            messages,
-            max_output_tokens=_DEFAULT_MAX_OUTPUT_TOKENS,
-        )
+    classification = classification or classify(messages, features, embedding_signal)
+    features = classification.features
     mode = mode if isinstance(mode, RoutingMode) else RoutingMode(mode)
     effective_max_output_tokens = features.requested_max_output_tokens or _DEFAULT_MAX_OUTPUT_TOKENS
 
@@ -768,7 +819,7 @@ def route(
     estimated_tokens = _estimate_conversation_tokens(messages)
 
     # ─── v2: multi-signal ensemble ───
-    v2 = _v2_classify(messages, features, embedding_signal=embedding_signal)
+    v2 = classification.v2
 
     signal_votes = {
         "metadata": {"tier_id": v2.vote_a.tier_id, "confidence": v2.vote_a.confidence},
@@ -874,8 +925,29 @@ def route(
     if early_semantic_failure_cap_applied and cap_softened_note:
         effective_tier_cap = Tier.MEDIUM
         cap_softened_note = "tier-cap-preserved(early-semantic-failure)"
+    # ─── Judge: an eligible verdict owns the tier, bounds still apply after ───
+    # The substitution happens here — below the floor/cap machinery, above
+    # ``_apply_tier_bounds`` — which is what keeps the judge from overruling a
+    # floor or a cap. The ensemble's own vote stays visible in ``signals_text``
+    # and ``signal_votes``, so disagreement stays measurable instead of being
+    # overwritten by the verdict.
+    judge_meta: dict[str, Any] | None = None
+    judge_note: str | None = None
+    base_complexity = v2.complexity
+    verdict = judge.verdict if judge is not None else None
+    if judge is not None:
+        judge_meta = judge.as_meta()
+        if judge.owns_tier and verdict is not None and verdict.tier is not None:
+            base_complexity = _PUBLIC_TIER_COMPLEXITY[verdict.tier]
+            judge_note = f"judge={verdict.tier.value}({judge.plan.reason})"
+        elif judge.plan.shadow:
+            shadow_tier = verdict.tier.value if verdict is not None and verdict.tier else "abstain"
+            judge_note = f"judge-shadow={shadow_tier}({judge.plan.reason})"
+        else:
+            judge_note = f"judge=abstained({judge.error or 'ambiguous'})"
+
     bounded_complexity, bound_notes = _apply_tier_bounds(
-        v2.complexity,
+        base_complexity,
         tier_floor=effective_tier_floor,
         tier_cap=effective_tier_cap,
     )
@@ -884,6 +956,8 @@ def route(
     # directly and the calibration_* args to select_from_pool stay default.
     confidence = v2.confidence
     reasoning_parts = list(v2.signals_text)
+    if judge_note:
+        reasoning_parts.append(judge_note)
     if pressure_floor_note:
         reasoning_parts.append(pressure_floor_note)
     if cap_softened_note:
@@ -892,7 +966,7 @@ def route(
     reasoning_parts.extend(bound_notes)
     reasoning = ", ".join(reasoning_parts)
 
-    return select_from_pool(
+    decision = select_from_pool(
         complexity=bounded_complexity,
         mode=mode,
         confidence=confidence,
@@ -916,3 +990,7 @@ def route(
         context_lengths=getattr(pool, "context_lengths", None),
         signal_votes=signal_votes,
     )
+
+    if judge_meta is None:
+        return decision
+    return replace(decision, judge=judge_meta)

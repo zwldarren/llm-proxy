@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI
@@ -310,6 +311,7 @@ async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManage
 
 
 async def startup_background_services(app: FastAPI) -> None:
+    from llm_proxy.observability.internal_call_logging import get_internal_call_log_service
     from llm_proxy.observability.service import RequestLogService
 
     # Use the config manager's cached config so UI-managed logging settings
@@ -325,6 +327,8 @@ async def startup_background_services(app: FastAPI) -> None:
 
     tool_log_service = RequestLogService(logging_config)
     get_tool_log_service(tool_log_service)
+    # Judge rows share the same log store (and batch writers) as every other row.
+    get_internal_call_log_service(tool_log_service)
 
 
 async def _sync_circuit_breaker_config(app: FastAPI, config: ProxyConfig) -> None:
@@ -418,6 +422,62 @@ async def startup_embedding_signal(app: FastAPI) -> None:
         logger.debug("Embedding signal eagerly initialized at startup")
     except Exception:
         logger.debug("Embedding signal warm-up skipped (deps may be unavailable)")
+
+
+async def startup_judge_warmup(app: FastAPI) -> None:
+    """Warm the routing judge in the background, on startup and on every reload.
+
+    A judged turn is rare by construction — the gate exists to bound its cost — and a
+    judge call cancelled at its deadline does not leave the model loaded. Warming once
+    is what keeps the first *real* gated turn inside its deadline instead of paying a
+    cold model load that the deadline then cancels (ADR-0018).
+
+    Scheduled rather than awaited: this call can take seconds against a cold model, and
+    readiness must not depend on the judge being reachable. The reload listener covers
+    the operator flow — turning the judge on in the UI must not mean "wait for traffic".
+    """
+    config_manager = getattr(app.state, "config_manager", None)
+    if config_manager is None:
+        logger.debug("Judge warm-up skipped: no config manager yet")
+        return
+
+    _schedule_judge_warmup(app)
+
+    async def _on_reload(config: ProxyConfig) -> None:
+        _schedule_judge_warmup(app, config=config)
+
+    config_manager.add_reload_listener(_on_reload)
+
+
+def _schedule_judge_warmup(app: FastAPI, *, config: ProxyConfig | None = None) -> None:
+    """Run one judge warm-up in the background, at most one at a time."""
+    from llm_proxy.routing.judge.consult import warm_judge
+
+    existing = getattr(app.state, "judge_warmup_task", None)
+    if existing is not None and not existing.done():
+        return
+
+    background_tasks: set[asyncio.Task] | None = getattr(app.state, "background_tasks", None)
+    if background_tasks is None:
+        background_tasks = set()
+        app.state.background_tasks = background_tasks
+
+    async def _warm() -> None:
+        try:
+            fresh = config
+            if fresh is None:
+                config_manager = getattr(app.state, "config_manager", None)
+                if config_manager is None:
+                    return
+                fresh = await config_manager.get_config()
+            await warm_judge(config=fresh, app_state=app.state)
+        except Exception:  # noqa: BLE001 - never let a warm-up escape into a task
+            logger.debug("Routing judge warm-up skipped", exc_info=True)
+
+    task = asyncio.create_task(_warm())
+    app.state.judge_warmup_task = task
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
 
 async def shutdown_services(app: FastAPI) -> None:

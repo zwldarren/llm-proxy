@@ -7,6 +7,7 @@ import type {
   RateLimitsConfig,
   RequestPolicyConfig,
   ResilienceConfig,
+  RoutingJudgeConfig,
   SecurityConfig,
   SmartRoutingConfig,
   TracingConfig,
@@ -40,9 +41,25 @@ export const DEFAULT_WEB_SEARCH: WebSearchConfig = {
   ollama: { api_key: "", base_url: "https://ollama.com", timeout: 30, max_results: 10 },
 };
 
+// Mirrors the backend's RoutingJudgeConfig defaults: off, and shadowed when it
+// is switched on, so enabling the feature starts as a measurement.
+export const DEFAULT_ROUTING_JUDGE: RoutingJudgeConfig = {
+  enabled: false,
+  model: "",
+  modes: ["auto", "best"],
+  deadline_s: 0.5,
+  confidence_below: null,
+  complexity_between: null,
+  shadow: true,
+  shadow_sample_rate: 0.05,
+  context_turns: 3,
+  context_chars: 4000,
+};
+
 export const DEFAULT_SMART_ROUTING: SmartRoutingConfig = {
   enabled: false,
   mode_weights: { fast: 0.35, auto: 0.65, best: 1.0 },
+  judge: DEFAULT_ROUTING_JUDGE,
 };
 
 export const DEFAULT_PROVIDER_SELECTION: ProviderSelectionConfig = {

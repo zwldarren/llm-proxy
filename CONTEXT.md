@@ -14,6 +14,52 @@ _Avoid_: format, frontend API
 An upstream LLM API the proxy forwards requests to (OpenAI, Anthropic, Gemini, Ollama, …).
 _Avoid_: backend, upstream service
 
+### Smart routing
+
+**Virtual model**:
+A model name (`auto`, `fast`, `best`) the proxy resolves to a concrete configured model by routing instead of forwarding. Each carries an intent — `fast` is cost-pressed, `best` is quality-pressed — and virtual models are chat-only.
+_Avoid_: router model, alias, pseudo-model
+
+**Routing complexity**:
+The router's continuous estimate of how hard a request is to answer, mapped by `_derive_tier` onto the routing tier it is served from. It describes the request; a model's capability is its served quality lane.
+_Avoid_: difficulty score, prompt score
+
+**Routing tier**:
+The band a request's routing complexity falls into — `SIMPLE`, `MEDIUM` or `COMPLEX`. A different axis from a model's served quality lane (`economy`/`balanced`/`premium`), which describes the model, and from a billing tier (ADR-0014), which is a price band.
+_Avoid_: tier (unqualified), model tier, quality tier
+
+**Routing signal**:
+One independent in-process vote on the routing tier: metadata (A), structural (B), or embedding (C). The ensemble combines the signals that did not abstain; a judge verdict is not a signal. See ADR-0018.
+_Avoid_: classifier (that is signal B), heuristic, score
+
+**Routing judge**:
+A System One decision model the router consults when the signals are not confident. It answers typed questions about the request and returns calibrated probabilities, never text. Inert until an operator points it at a model marked as a System One model. Every consulted call is also logged as a row of its own (log type `judge`), attributed to the request it served. See ADR-0018.
+_Avoid_: classifier, arbiter, LLM-as-a-judge, decision model
+
+**Judge verdict**:
+The judge's typed answers for one request: a tier choice with its distribution, and an escalation probability. An *ambiguous* answer is a verdict of no verdict.
+_Avoid_: judge output, prediction
+
+**Judge gate**:
+The configured predicate that decides whether an eligible turn is worth asking the judge about: ensemble confidence below a threshold, complexity inside a band, or no predicate at all — which asks about every eligible turn and is what the seed corpus measured best. Eligibility itself is narrower: a first human turn, in a mode where the judge is enabled. The gate is the knob that sizes the judge's added latency and cost.
+_Avoid_: trigger, threshold
+
+**Judge abstention**:
+The judge declining to decide, whether by answering *ambiguous* or by not answering at all (deadline, failure, open circuit). The ensemble decides the tier in every abstention case.
+_Avoid_: fallback model, failure
+
+**Judge shadow**:
+Running the judge and recording its verdict without letting that verdict own the tier — the state a judge ships in first, so agreement with the ensemble can be measured on live traffic before anything depends on it. A shadow window also samples a small share of turns the gate did *not* fire, because agreement measured only inside the gate cannot show whether the gate itself is leaking ambiguous turns.
+_Avoid_: dry run, test mode, canary
+
+**Judge context**:
+The bounded excerpt of the request the judge receives as its `state`: the current ask, a capped number of prior user turns, and structured capability flags. Its content is data, never instruction.
+_Avoid_: prompt, summary
+
+**Judge deadline**:
+The wall-clock budget a single judge call gets before the router gives up and treats it as an abstention.
+_Avoid_: timeout (unqualified)
+
 ### OpenResponses protocol module
 
 **OpenResponses protocol module**:

@@ -54,7 +54,7 @@ interface MetricItem {
 interface Props {
   log: LogItem;
   searchQuery?: string;
-  tab: "proxy" | "audit" | "mcp" | "websearch";
+  tab: "proxy" | "audit" | "mcp" | "websearch" | "judge";
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -134,7 +134,8 @@ const auditActionLabel = (log: LogItem): string => {
 
 const primaryContent = computed(() => {
   switch (props.tab) {
-    case "proxy": {
+    case "proxy":
+    case "judge": {
       const requestedModel = getRequestedModel(props.log);
       const resolvedModel = getResolvedModel(props.log);
       const hasRoutingDisplay = requestedModel && resolvedModel && requestedModel !== resolvedModel;
@@ -175,7 +176,8 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
   const metrics: MetricItem[] = [];
 
   switch (props.tab) {
-    case "proxy": {
+    case "proxy":
+    case "judge": {
       if (props.log.provider) {
         metrics.push({
           icon: Cpu,
@@ -327,7 +329,7 @@ const totalRetryCount = computed(() => {
           :variant="tab === 'audit' ? 'http' : 'status'"
           :status="getStatusType(log.status_code)"
           :http-method="tab === 'audit' ? log.method : undefined"
-          :mono="tab === 'proxy'"
+          :mono="tab === 'proxy' || tab === 'judge'"
           class="shrink-0"
         >
           <template v-if="tab === 'websearch'">{{ getWebSearchStatus(log) }}</template>

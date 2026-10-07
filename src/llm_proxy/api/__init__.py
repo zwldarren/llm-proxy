@@ -23,6 +23,7 @@ from llm_proxy.api.lifecycle import (
     startup_derived_caches,
     startup_embedding_signal,
     startup_http_client,
+    startup_judge_warmup,
     startup_mcp_servers,
     startup_protocols,
     startup_provider_stats,
@@ -114,6 +115,7 @@ async def lifespan(app: FastAPI):
         await startup_circuit_breaker(app)
         await startup_provider_stats(app)
         await startup_embedding_signal(app)
+        await startup_judge_warmup(app)
         yield
         # Cancel any in-flight background OpenResponses tasks (e.g. background
         # mode responses) so they do not outlive the event loop.

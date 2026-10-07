@@ -146,7 +146,9 @@ There is no streaming variant: System One is a single synchronous evaluation.
 
 The model named in the request must be marked as a System One model
 (`supports_systemone`) in the admin model configuration; a chat model is
-rejected with a `400 invalid_request_error` before any provider is called.
+rejected with a `400 invalid_request_error` before any provider is called. The
+same flag gates the [routing judge](../api/routing.md#routing-judge), which consults
+a System One model on the request path without going through this endpoint.
 
 | Provider type | Base URL | Notes |
 | --- | --- | --- |

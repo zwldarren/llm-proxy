@@ -33,7 +33,10 @@ from llm_proxy.core.exceptions import (
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.database import ApiKeyRepository, UserRepository
 from llm_proxy.database.repositories.api_keys import _UNSET, ApiKeyRecord, _UnsetType
-from llm_proxy.database.repositories.usage_repository import UsageRepository
+from llm_proxy.database.repositories.usage_repository import (
+    BILLABLE_SPEND_LOG_TYPES,
+    UsageRepository,
+)
 from llm_proxy.database.tables import UserRecord
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.security.passwords import generate_api_key, hash_api_key
@@ -287,19 +290,22 @@ async def get_api_key_usage(
     end_ts = _parse_iso_datetime_to_ts(end_date, is_end_date=True)
 
     usage_repo = UsageRepository(session)
-    # One AsyncSession proxies a single connection: run sequentially.
+    # One AsyncSession proxies a single connection: run sequentially. The usage view
+    # for a key spans everything billed on its behalf — endpoint requests and the
+    # routing judge's own call rows — so its cost matches the key's spend and budget
+    # figures, and the judge model shows up in the by-model breakdown.
     summary = await usage_repo.get_usage_stats(
-        start_ts=start_ts, end_ts=end_ts, log_type="endpoint", api_key_name=name
+        start_ts=start_ts, end_ts=end_ts, log_type=BILLABLE_SPEND_LOG_TYPES, api_key_name=name
     )
     by_model = await usage_repo.get_usage_by_model(
         start_ts=start_ts,
         end_ts=end_ts,
-        log_type="endpoint",
+        log_type=BILLABLE_SPEND_LOG_TYPES,
         include_ttft=False,
         api_key_name=name,
     )
     daily_usage = await usage_repo.get_daily_usage(
-        start_ts=start_ts, end_ts=end_ts, log_type="endpoint", api_key_name=name
+        start_ts=start_ts, end_ts=end_ts, log_type=BILLABLE_SPEND_LOG_TYPES, api_key_name=name
     )
 
     return ApiKeyUsageResponse(

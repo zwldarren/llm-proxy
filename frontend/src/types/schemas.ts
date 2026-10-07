@@ -612,10 +612,49 @@ export interface LogRoutingMetadata {
   tier?: string | null;
   requested_model?: string | null;
   resolved_model?: string | null;
+  /** Conversation handle: turns sharing it form one conversation (ADR-0018). */
+  conversation_key?: string | null;
+  /** The judge consultation, when there was one. Recorded whether or not diagnostics are on. */
+  judge?: RoutingJudgeMetadata | null;
   candidate_scorecards?: Array<Record<string, unknown>> | null;
   weights_used?: Record<string, number> | null;
   guardrail_notes?: string[] | null;
   signal_votes?: Record<string, unknown> | null;
+}
+
+/** One routing-judge consultation, as flattened onto the request's routing metadata. */
+export interface RoutingJudgeMetadata {
+  /** Why the judge was asked (gate reason) or why it was not. */
+  gate?: string | null;
+  /** True when the verdict was recorded but did not change the decision. */
+  shadow?: boolean | null;
+  model?: string | null;
+  /** Rubric version the verdict was produced under; verdicts are comparable within one version. */
+  rubric_version?: number | null;
+  answered?: boolean | null;
+  /** The tier the judge named, absent when it abstained or failed. */
+  tier?: string | null;
+  /** Normalised distribution over the tier options, including `ambiguous`. */
+  probabilities?: Record<string, number> | null;
+  /** Mass the judge put on its chosen option — peakiness, not P(correct). */
+  confidence?: number | null;
+  abstain_probability?: number | null;
+  escalation_probability?: number | null;
+  /** The provider's own confidence field, kept for telemetry only. */
+  upstream_confidence?: number | null;
+  latency_ms?: number | null;
+  provider?: string | null;
+  /** The concrete upstream model the judge's provider reported serving the call. */
+  provider_model_name?: string | null;
+  /** Wall-clock bounds of the call (epoch seconds); the judge's own row is timestamped from these. */
+  started_at?: number | null;
+  finished_at?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  /** Judge spend in USD, and whether the provider reported it or it was estimated. */
+  cost?: number | null;
+  cost_source?: "provider" | "estimated" | null;
+  error?: string | null;
 }
 
 export interface RetryAttempt {
@@ -1097,9 +1136,37 @@ export interface LoggingConfig {
   log_raw_stream: boolean;
 }
 
+export type RoutingJudgeMode = "auto" | "fast" | "best";
+
+/**
+ * System One routing judge (ADR-0018). Off by default, and shadowed when first
+ * switched on: a shadow verdict is recorded in the request log but does not
+ * change the decision.
+ */
+export interface RoutingJudgeConfig {
+  enabled: boolean;
+  /** Name of a configured model that is marked as a System One model. */
+  model: string;
+  /** Virtual models whose first turns may be judged. */
+  modes: RoutingJudgeMode[];
+  /** Hard ceiling for one judge call, in seconds. */
+  deadline_s: number;
+  /** Gate: judge when ensemble confidence is below this. Null = not used. */
+  confidence_below: number | null;
+  /** Gate: judge when ensemble complexity lands inside the half-open band
+   *  [low, high), same convention as the public tier mapping. Null = not used. */
+  complexity_between: [number, number] | null;
+  shadow: boolean;
+  /** Share of eligible turns the gate did not fire, still judged for measurement. */
+  shadow_sample_rate: number;
+  context_turns: number;
+  context_chars: number;
+}
+
 export interface SmartRoutingConfig {
   enabled: boolean;
   mode_weights: Record<"fast" | "auto" | "best", number>;
+  judge: RoutingJudgeConfig;
 }
 
 export type ProviderSelectionStrategy = "random" | "session_sticky" | "cost_optimized" | "balanced";

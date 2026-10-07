@@ -314,7 +314,8 @@ class ModelConfig(BaseModel):
         default=False,
         description=(
             "Whether this model serves System One evaluations (e.g. /v1/systemone); "
-            "gates that endpoint. Additive like the other capability flags"
+            "gates that endpoint, and gates being selected as the routing judge. "
+            "Additive like the other capability flags"
         ),
     )
     context_length: int | None = Field(

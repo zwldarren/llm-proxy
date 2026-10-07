@@ -208,8 +208,8 @@ async def get_smart_routing_config(
 ) -> dict:
     """Get smart routing configuration.
 
-    Returns the smart routing configuration including enabled status
-    and mode weights.
+    Returns the smart routing configuration including enabled status,
+    mode weights and the routing-judge block.
     """
     repo = get_config_repository(session)
     row = await repo.get_server_config("smart_routing")
@@ -226,8 +226,8 @@ async def update_smart_routing_config(
     """Update smart routing configuration.
 
     Args:
-        config_data: Smart routing configuration including enabled status
-            and mode weights.
+        config_data: Smart routing configuration including enabled status,
+            mode weights and the routing-judge block.
 
     Returns:
         Updated smart routing configuration
@@ -240,6 +240,8 @@ async def update_smart_routing_config(
         current.enabled = config_data.enabled
     if config_data.mode_weights is not None:
         current.mode_weights = config_data.mode_weights
+    if config_data.judge is not None:
+        current.judge = config_data.judge
 
     await repo.set_server_config(
         "smart_routing",

@@ -313,3 +313,72 @@ async def test_publish_config_generation_is_a_noop_without_a_manager():
     request.app.state = MagicMock(config_manager=None)
 
     await publish_config_generation(request)
+
+
+@pytest.mark.asyncio
+async def test_build_request_context_records_the_judge_call_as_its_own_row(
+    reset_settings, monkeypatch
+):
+    """A judge consultation is logged from routing, before the request is served.
+
+    Routing happens before the pipeline's EventContext exists, so this is the only
+    point where the call can be recorded without waiting on the parent request — and
+    the call may have been billed even if the parent later fails.
+    """
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.routing.orchestrator import SmartRoutingResult
+    from llm_proxy.routing.types import RoutingDecision, Tier
+
+    mock_request = MagicMock()
+    mock_request.model = "auto"
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.max_retries = None
+    fastapi_request = _make_context_request(model_config)
+
+    decision = RoutingDecision(
+        model="anthropic/claude",
+        tier=Tier.MEDIUM,
+        conversation_key="conv-1",
+        judge={
+            "gate": "gate:open",
+            "model": "jev",
+            "tier": "MEDIUM",
+            "provider": "openrouter",
+            "started_at": 1000.0,
+            "input_tokens": 12,
+            "cost": 0.00004,
+        },
+    )
+    routing_result = SmartRoutingResult(
+        resolved_model="anthropic/claude",
+        routing_decision=decision,
+        requested_model="auto",
+    )
+
+    async def fake_orchestrate(**kwargs):
+        return routing_result
+
+    monkeypatch.setattr("llm_proxy.api.context.orchestrate_smart_routing", fake_orchestrate)
+
+    calls: list = []
+
+    class _CapturingService:
+        def log_call_background(self, entry, **kwargs):
+            calls.append((entry, kwargs))
+
+    monkeypatch.setattr(
+        "llm_proxy.observability.internal_call_logging.get_internal_call_log_service",
+        lambda: _CapturingService(),
+    )
+
+    await _build_request_context(mock_request, fastapi_request)
+
+    entry, attribution = calls[0]
+    assert entry.request_id == f"{fastapi_request.state.request_id}:judge"
+    assert entry.model == "jev"
+    assert entry.provider == "openrouter"
+    assert entry.prompt_tokens == 12
+    assert entry.cost_usd == 0.00004
+    assert entry.log_metadata["parent_request_id"] == fastapi_request.state.request_id
+    assert attribution["api_key_name"] == "test-key"

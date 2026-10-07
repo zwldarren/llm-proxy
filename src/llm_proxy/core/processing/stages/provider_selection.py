@@ -60,6 +60,14 @@ class ProviderSelectionStage(PipelineStage):
                 "tier": str(getattr(decision, "tier", "unknown")),
                 "requested_model": context.requested_model,
                 "resolved_model": internal_model,
+                # The conversation handle: turns sharing it form one conversation,
+                # which is what makes outcome proxies (escalation, resend,
+                # abandonment) computable from the log store. See ADR-0018.
+                "conversation_key": getattr(decision, "conversation_key", None),
+                # The judge consultation, when there was one: verdict, gate, cost.
+                # Recorded here rather than in a separate classifier row so the
+                # verdict and the decision it may have changed stay together.
+                "judge": getattr(decision, "judge", None),
             }
             if context.verbose_routing_logs:
                 routing_meta.update(

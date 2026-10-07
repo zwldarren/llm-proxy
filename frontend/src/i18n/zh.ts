@@ -22,6 +22,7 @@ export default {
     proxyLogs: "代理日志",
     mcpLogs: "MCP 调用",
     webSearchLogs: "网页搜索",
+    judgeLogs: "裁判调用",
     apiKeys: "API 密钥",
     providers: "提供商",
     models: "模型",
@@ -981,6 +982,48 @@ export default {
     routingDiagnostics: "路由诊断",
     routingDiagnosticsDescription:
       "日志设置：开启后，代理日志会为每次智能路由请求记录候选模型评分卡、选择权重、护栏说明和信号投票。",
+    judge: "路由裁判",
+    judgeDescription:
+      "让 System One 模型裁定含糊的首轮请求。默认关闭；影子模式开启时，裁判结论只写入请求日志，不会改变决策。每个被裁判的请求都会增加一次短上游调用，因此下方的触发条件才是控制其成本与延迟的开关。",
+    judgeModel: "裁判模型",
+    judgeModelDescription:
+      "使用其结构化答案而非自然语言文本。只有标记为 System One 模型的模型才能承担。",
+    judgeModelNone: "尚未配置 System One 模型。请先在模型页面把某个模型标记为 System One 模型。",
+    judgeModelPlaceholder: "选择模型",
+    judgeModes: "参与裁判的模式",
+    judgeModesDescription:
+      "允许被裁判的虚拟模型。通常不勾选 fast：该模式的目的就是低成本选型，而裁判调用与此相背。",
+    judgeGate: "何时询问",
+    judgeGateDescription: "裁判只会被用于对话的首轮请求。此项决定哪些首轮请求值得询问。",
+    judgeGateAlways: "所有符合条件的请求",
+    judgeGateConfidence: "置信度较低时",
+    judgeGateBand: "复杂度处于中间区间时",
+    judgeGateBoth: "任一信号触发时",
+    judgeConfidenceBelow: "置信度阈值",
+    judgeConfidenceBelowDescription:
+      "当路由置信度低于该值时询问裁判。校准后的置信度并不等于正确概率，因此请依据实测数据取值：路由裁判工具会报告各阈值下的触发频率。",
+    judgeBand: "复杂度区间",
+    judgeBandDescription:
+      "当路由复杂度估计落入该区间（含下限、不含上限）时询问裁判。多数请求会落在少数几个锚点上（0.00、0.40、0.68、0.90），因此以 0.40 为中心的窄区间才是中间区门槛实际会命中的部分。",
+    judgeBandLow: "区间下限",
+    judgeBandHigh: "区间上限",
+    judgeDeadline: "裁判超时",
+    judgeDeadlineDescription:
+      "单次裁判调用在退回路由自身决策前可用的秒数。在超时点被取消的调用不会让模型保持加载，若希望裁判真正给出结果，请将该值设在模型冷启动时间之上。",
+    judgeDeadlineUnit: "秒",
+    judgeShadow: "影子模式",
+    judgeShadowDescription:
+      "记录裁判本会给出的结论，但不让它改变决策。这是应当首先运行的状态：只有这样才能在依赖裁判之前，先在真实流量上观察它与路由器是否一致。",
+    judgeShadowSampleRate: "影子抽样比例",
+    judgeShadowSampleRateDescription:
+      "对未触发触发条件的合格请求，仍按此比例询问裁判以作测量。只在触发范围内测量一致性，无法反映触发范围放过了什么。",
+    judgeContext: "裁判上下文预算",
+    judgeContextDescription:
+      "裁判可见的请求范围：始终包含当前提问，另加此前若干轮用户消息。绝不包含助手与工具输出 —— 裁判判断的是请求本身，而非模型自己先前的产出。",
+    judgeContextTurns: "此前用户轮数",
+    judgeContextChars: "每轮字符数",
+    judgeContextTurnsUnit: "轮",
+    judgeContextCharsUnit: "字符",
   },
 
   // Theme
@@ -1495,6 +1538,8 @@ export default {
     },
     // Proxy logs specific
     proxyDescription: "监控 LLM API 调用和使用指标",
+    judgeDescription:
+      "路由裁判在解析虚拟模型时发起的模型调用。每一行都是一次普通的模型调用，拥有自己的模型、提供商、token 与成本，并归属到触发它的请求，但不计入代理请求数。",
     inputTokens: "输入",
     outputTokens: "输出",
     totalTokens: "总计",
@@ -1577,6 +1622,21 @@ export default {
       latency: "延迟",
       reliability: "可靠性",
       quality: "质量",
+      judge: "路由裁判",
+      judgeVerdict: "裁定结果",
+      judgeAbstained: "弃权",
+      judgeShadowBadge: "影子",
+      judgeGate: "触发条件",
+      judgeModel: "裁判模型",
+      judgeLatency: "裁判延迟",
+      judgeConfidence: "置信度（分布峰值）",
+      judgeAbstainProb: "弃权概率",
+      judgeEscalationProb: "升级概率",
+      judgeCost: "裁判成本",
+      judgeParentRequest: "父请求",
+      judgeRequestedModel: "请求的模型",
+      judgeResolvedModel: "实际解析模型",
+      judgeProviderModel: "提供商模型",
       standardOnly: "在智能路由设置中启用路由诊断，即可查看候选评分卡、权重和信号投票。",
     },
   },

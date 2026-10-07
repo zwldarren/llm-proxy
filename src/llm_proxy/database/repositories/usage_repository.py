@@ -1,5 +1,6 @@
 """Usage record repository for independent usage tracking."""
 
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -8,6 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.database.repositories.base_usage import BaseUsageRepository
 from llm_proxy.database.tables import UsageRecord
+
+#: Log types whose cost is real spend on a key's or user's behalf, and therefore
+#: belongs in a budget window. ``judge`` is the routing judge's own row
+#: (ADR-0018): a model call made while the key's request waited, billed to the
+#: key like any other call. Request *counts* stay ``endpoint``-only — a judge call
+#: is not a request the client made, so counting it would inflate request volume.
+BILLABLE_SPEND_LOG_TYPES = ("endpoint", "judge")
 
 
 class UsageRepository(BaseUsageRepository):
@@ -83,7 +91,7 @@ class UsageRepository(BaseUsageRepository):
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
@@ -105,7 +113,7 @@ class UsageRepository(BaseUsageRepository):
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
@@ -127,7 +135,7 @@ class UsageRepository(BaseUsageRepository):
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         include_ttft: bool = True,
         user_id: int | None = None,
         api_key_name: str | None = None,
@@ -149,7 +157,7 @@ class UsageRepository(BaseUsageRepository):
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         user_id: int | None = None,
         api_key_name: str | None = None,
         model: str | None = None,
@@ -169,7 +177,7 @@ class UsageRepository(BaseUsageRepository):
         *,
         start_ts: float | None = None,
         end_ts: float | None = None,
-        log_type: str | None = "endpoint",
+        log_type: str | Sequence[str] | None = "endpoint",
         user_id: int | None = None,
         api_key_name: str | None = None,
         model: str | None = None,
@@ -193,16 +201,18 @@ class UsageRepository(BaseUsageRepository):
     ) -> list[dict[str, Any]]:
         """Get spend and request counts grouped by API key name.
 
-        Only counts billable endpoint usage (log_type='endpoint') for named
-        (non-NULL) keys. ``user_id`` scopes the result to one owner's keys.
+        Counts billable usage for named (non-NULL) keys: ``cost`` sums endpoint
+        and judge spend (both are real spend on the key's behalf), while
+        ``requests`` counts endpoint rows only — a judge call is not a request the
+        client made. ``user_id`` scopes the result to one owner's keys.
 
         Returns:
             List of dicts with api_key_name, requests, cost
         """
-        from sqlalchemy import func, select
+        from sqlalchemy import case, func, select
 
         filters = [
-            self.model.log_type == "endpoint",
+            self.model.log_type.in_(BILLABLE_SPEND_LOG_TYPES),
             self.model.api_key_name.isnot(None),
         ]
         if user_id is not None:
@@ -215,7 +225,12 @@ class UsageRepository(BaseUsageRepository):
         stmt = (
             select(
                 self.model.api_key_name,
-                func.count().label("requests"),
+                func.coalesce(
+                    func.sum(
+                        case((self.model.log_type == "endpoint", 1), else_=0),
+                    ),
+                    0,
+                ).label("requests"),
                 func.coalesce(func.sum(self.model.cost_usd), 0.0).label("cost"),
             )
             .where(*filters)
@@ -228,27 +243,30 @@ class UsageRepository(BaseUsageRepository):
         ]
 
     async def get_key_spend_since(self, api_key_name: str, since_ts: float) -> float:
-        """Return total endpoint spend (USD) for one key at or after ``since_ts``.
+        """Return total billable spend (USD) for one key at or after ``since_ts``.
 
-        Used for budget enforcement; hits the ``ix_usage_records_api_key``
-        index. Returns 0.0 when the key has no recorded usage in the window.
+        Used for budget enforcement; hits the ``ix_usage_records_api_key`` index.
+        Endpoint and judge rows both count: a judge call is spend the key caused,
+        so a budget must see it. Returns 0.0 when the key has no recorded usage in
+        the window.
         """
         from sqlalchemy import func, select
 
         stmt = select(func.coalesce(func.sum(self.model.cost_usd), 0.0)).where(
             self.model.api_key_name == api_key_name,
-            self.model.log_type == "endpoint",
+            self.model.log_type.in_(BILLABLE_SPEND_LOG_TYPES),
             self.model.timestamp >= since_ts,
         )
         result = await self.session.execute(stmt)
         return float(result.scalar_one())
 
     async def get_spend_since_by_api_key(self, windows: dict[str, float]) -> dict[str, float]:
-        """Return per-key endpoint spend (USD) at or after each key's own window start.
+        """Return per-key billable spend (USD) at or after each key's own window start.
 
         ``windows`` maps API key name -> window start unix timestamp. All keys
         are summarized in a single grouped query, avoiding one SUM query per
-        key when summarizing budgets for many keys. Keys with no usage rows at
+        key when summarizing budgets for many keys. Endpoint and judge rows both
+        count (see :data:`BILLABLE_SPEND_LOG_TYPES`). Keys with no usage rows at
         or after the earliest window start are absent from the result; callers
         should default missing keys to 0.0.
         """
@@ -269,7 +287,7 @@ class UsageRepository(BaseUsageRepository):
                 func.coalesce(func.sum(in_window_spend), 0.0).label("cost"),
             )
             .where(
-                self.model.log_type == "endpoint",
+                self.model.log_type.in_(BILLABLE_SPEND_LOG_TYPES),
                 self.model.api_key_name.in_(list(windows)),
                 # Cheap pre-filter: only rows new enough to fall into at least
                 # one key's window need the per-key CASE evaluation.
@@ -281,29 +299,30 @@ class UsageRepository(BaseUsageRepository):
         return {str(row[0]): float(row[1] or 0.0) for row in result.all()}
 
     async def get_user_spend_since(self, user_id: int, since_ts: float) -> float:
-        """Return total endpoint spend (USD) for one user at or after ``since_ts``.
+        """Return total billable spend (USD) for one user at or after ``since_ts``.
 
         Used for user-level budget enforcement; aggregates spend across all of
-        the user's API keys. Returns 0.0 when the user has no recorded usage in
-        the window.
+        the user's API keys, endpoint and judge rows alike (a judge call is spend
+        the user's request caused). Returns 0.0 when the user has no recorded usage
+        in the window.
         """
         from sqlalchemy import func, select
 
         stmt = select(func.coalesce(func.sum(self.model.cost_usd), 0.0)).where(
             self.model.user_id == user_id,
-            self.model.log_type == "endpoint",
+            self.model.log_type.in_(BILLABLE_SPEND_LOG_TYPES),
             self.model.timestamp >= since_ts,
         )
         result = await self.session.execute(stmt)
         return float(result.scalar_one())
 
     async def get_spend_since_by_user(self, windows: dict[int, float]) -> dict[int, float]:
-        """Return per-user endpoint spend (USD) at or after each user's own window start.
+        """Return per-user billable spend (USD) at or after each user's own window start.
 
         ``windows`` maps user id -> window start unix timestamp. All users are
-        summarized in a single grouped query. Users with no usage rows at or
-        after the earliest window start are absent from the result; callers
-        should default missing users to 0.0.
+        summarized in a single grouped query. Endpoint and judge rows both count.
+        Users with no usage rows at or after the earliest window start are absent
+        from the result; callers should default missing users to 0.0.
         """
         if not windows:
             return {}
@@ -322,7 +341,7 @@ class UsageRepository(BaseUsageRepository):
                 func.coalesce(func.sum(in_window_spend), 0.0).label("cost"),
             )
             .where(
-                self.model.log_type == "endpoint",
+                self.model.log_type.in_(BILLABLE_SPEND_LOG_TYPES),
                 self.model.user_id.in_(list(windows)),
                 # Cheap pre-filter: only rows new enough to fall into at least
                 # one user's window need the per-user CASE evaluation.

@@ -109,6 +109,7 @@ vi.mock("@lucide/vue", () => {
     Pause: Stub,
     Play: Stub,
     RefreshCw: Stub,
+    Scale: Stub,
     ScrollText: Stub,
     Search: Stub,
     Shield: Stub,

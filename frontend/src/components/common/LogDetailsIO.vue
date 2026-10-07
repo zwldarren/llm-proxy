@@ -6,6 +6,7 @@ import AttemptTimeline from "@/components/common/AttemptTimeline.vue";
 import AuditInfoView from "@/components/common/AuditInfoView.vue";
 import JsonViewer from "@/components/common/JsonViewer.vue";
 import LogIOView from "@/components/common/LogIOView.vue";
+import LogJudgePanel from "@/components/common/LogJudgePanel.vue";
 import LogMetadataView from "@/components/common/LogMetadataView.vue";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,7 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { LogRead, LogRoutingMetadata, RetryAttempt, FallbackAttempt } from "@/types/schemas";
+import type {
+  LogRead,
+  LogRoutingMetadata,
+  RetryAttempt,
+  FallbackAttempt,
+  RoutingJudgeMetadata,
+} from "@/types/schemas";
 import { bodySentinel, bodySentinelMessage } from "@/utils/logFormat";
 
 const props = defineProps<{
@@ -134,6 +141,26 @@ const routingGuardrailNotes = computed(() => {
 const routingScorecards = computed(() => {
   const value = routingMeta.value?.candidate_scorecards;
   return Array.isArray(value) ? (value as unknown as RoutingScorecard[]) : undefined;
+});
+// The judge consultation is recorded whether or not diagnostics are on — it is
+// how a shadow rollout is reviewed — so it renders outside the diagnostics gate.
+// It lives in two places: nested under `routing.judge` on the request the judge
+// served, and as `log_metadata.judge` on the judge call's own row (a `judge`
+// log_type row has no routing metadata of its own).
+const judgeCallMeta = computed<RoutingJudgeMetadata | null>(() => {
+  const value = props.log.log_metadata?.judge;
+  return value && typeof value === "object" ? (value as RoutingJudgeMetadata) : null;
+});
+
+const routingJudge = computed(() => routingMeta.value?.judge ?? judgeCallMeta.value);
+
+// A judge call's own row has no routing metadata; a request the judge served
+// keeps its routing tab and nests the verdict underneath. Pick the tab that
+// actually has content to show.
+const defaultTab = computed(() => {
+  if (isAuditLog.value) return "audit";
+  if (judgeCallMeta.value && !routingMeta.value) return "judge";
+  return "io";
 });
 
 const hasRoutingDiagnostics = computed(
@@ -373,7 +400,7 @@ defineExpose({
   </AttemptTimeline>
 
   <!-- Main Content Tabs -->
-  <Tabs :default-value="isAuditLog ? 'audit' : 'io'" :key="log.request_id" class="w-full">
+  <Tabs :default-value="defaultTab" :key="log.request_id" class="w-full">
     <TabsList
       class="w-full justify-start border-b border-border/60 rounded-none h-auto p-0 bg-transparent gap-4 sm:gap-6 overflow-x-auto scrollbar-none"
     >
@@ -393,6 +420,12 @@ defineExpose({
         value="routing"
         class="rounded-none border-b border-border/30 data-[state=active]:border-primary data-[state=active]:bg-transparent text-muted-foreground data-[state=active]:text-foreground px-1.5 sm:px-2 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold transition-all shrink-0"
         >{{ t("logs.routing.title") }}</TabsTrigger
+      >
+      <TabsTrigger
+        v-if="judgeCallMeta && !routingMeta"
+        value="judge"
+        class="rounded-none border-b border-border/30 data-[state=active]:border-primary data-[state=active]:bg-transparent text-muted-foreground data-[state=active]:text-foreground px-1.5 sm:px-2 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold transition-all shrink-0"
+        >{{ t("logs.routing.judge") }}</TabsTrigger
       >
       <TabsTrigger
         value="metadata"
@@ -501,6 +534,11 @@ defineExpose({
           >
             {{ routingReasoning }}
           </p>
+        </div>
+
+        <!-- Routing judge consultation: recorded whether or not diagnostics are on -->
+        <div v-if="routingJudge" class="border-t border-border/30 pt-5">
+          <LogJudgePanel :judge="routingJudge" />
         </div>
 
         <!-- Verbose Diagnostics -->
@@ -619,6 +657,22 @@ defineExpose({
         <p v-else class="text-xs text-muted-foreground italic">
           {{ t("logs.routing.standardOnly") }}
         </p>
+      </TabsContent>
+
+      <!-- Judge Call View: the judge's own log row (log_type 'judge') has no
+           routing metadata, so the same consultation panel gets its own tab,
+           plus the request that triggered the call. -->
+      <TabsContent
+        v-if="judgeCallMeta && !routingMeta"
+        value="judge"
+        class="m-0 focus-visible:ring-0"
+      >
+        <LogJudgePanel
+          :judge="judgeCallMeta"
+          :parent-request-id="(log.log_metadata?.parent_request_id as string | undefined) ?? null"
+          :requested-model="(log.log_metadata?.requested_model as string | undefined) ?? null"
+          :resolved-model="(log.log_metadata?.resolved_model as string | undefined) ?? null"
+        />
       </TabsContent>
 
       <!-- Metadata View -->

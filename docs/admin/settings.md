@@ -107,11 +107,18 @@ dropping: a block with no specific placeholder gets a generic `[<TypeName> block
 | --- | --- | --- |
 | **Enabled** | off | Enables the virtual models `auto`, `fast`, `best` |
 | **Mode weights** | `fast 0.35`, `auto 0.65`, `best 1.0` | Quality-vs-cost bias per virtual model |
+| **Routing Judge** | off | Consults a System One model on ambiguous first turns; see [Routing Judge](../api/routing.md#routing-judge) |
 | **Routing Diagnostics** | off | Adds the full routing decision payload to smart-routing log metadata (diagnostics) |
 
-The classifier runs in-process — no extra LLM call. With the `smart-routing` extra
-installed, an embedding signal sharpens the prediction; without it, structural signals
-are used. Per-request feedback can be submitted from the log detail view.
+The signal ensemble runs in-process. With the `smart-routing` extra installed, an
+embedding signal sharpens the prediction; without it, structural signals are used.
+The optional routing judge is the only part of smart routing that makes an extra
+upstream call — one short System One request per judged turn, bounded by its gate
+and deadline, with the verdict and its cost recorded in the request's routing
+metadata. Each such call is also a row of its own in Logs → **Judge Calls**
+(log type `judge`), attributed to the request that triggered it; that row is what
+spend and budget aggregates count. Per-request feedback can be submitted from the log
+detail view.
 
 See [Virtual Models & Routing](../api/routing.md).
 

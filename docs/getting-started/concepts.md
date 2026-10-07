@@ -58,8 +58,10 @@ When [smart routing](../api/routing.md) is enabled, three extra names exist:
 | `auto` | Balanced (default bias) |
 | `best` | Highest quality, cost secondary |
 
-The classifier runs in-process (no extra LLM call) and picks a concrete mapped model,
-which is then subject to the same allowlists, budgets, and fallback rules.
+The classifier runs in-process and picks a concrete mapped model, which is then
+subject to the same allowlists, budgets, and fallback rules. With the optional
+[routing judge](../api/routing.md#routing-judge) enabled, an ambiguous first turn may
+instead be settled by one short System One call.
 
 ## Priority, retries, fallback
 

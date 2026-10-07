@@ -413,6 +413,7 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
                 LogType.ENDPOINT,
                 LogType.MCP,
                 LogType.WEB_SEARCH,
+                LogType.JUDGE,
             ):
                 retention_days = config.get_retention_days(log_type)
                 if retention_days <= 0:

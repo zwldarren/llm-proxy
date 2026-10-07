@@ -77,6 +77,7 @@ class TestStartupBackgroundServices:
     async def test_starts_writers_and_tool_log_service(self):
         app = FastAPI()
         get_tool_log_service = MagicMock()
+        get_internal_call_log_service = MagicMock()
         logging_config = MagicMock()
         logging_config.retention_days = 45
         with (
@@ -85,6 +86,10 @@ class TestStartupBackgroundServices:
             patch.object(
                 lifecycle, "get_tool_log_service", return_value=get_tool_log_service
             ) as set_tool_log,
+            patch(
+                "llm_proxy.observability.internal_call_logging.get_internal_call_log_service",
+                get_internal_call_log_service,
+            ) as set_internal_log,
             patch("llm_proxy.observability.service.RequestLogService", MagicMock()),
             patch.object(
                 lifecycle, "resolve_logging_config", MagicMock(return_value=logging_config)
@@ -97,6 +102,10 @@ class TestStartupBackgroundServices:
         # manager so later settings changes are picked up per sweep.
         start_usage.assert_called_once_with(45, None)
         set_tool_log.assert_called_once()
+        # Judge rows are written through the same log service, so they land in the
+        # same batch writers and retention window as every other row.
+        set_internal_log.assert_called_once()
+        assert set_internal_log.call_args[0][0] is set_tool_log.call_args[0][0]
 
 
 class TestShutdownServices:

@@ -7,12 +7,14 @@ import {
   Eye,
   Filter,
   Globe,
+  Scale,
   ScrollText,
   Shield,
   ThumbsUp,
   Wrench,
 } from "@lucide/vue";
 import {
+  type Component,
   computed,
   defineAsyncComponent,
   markRaw,
@@ -100,18 +102,22 @@ const authStore = useAuthStore();
 const isDesktop = useMediaQuery(CONSOLE_DESKTOP_QUERY);
 
 // Log tab type
-type LogTab = "proxy" | "audit" | "mcp" | "websearch";
+const LOG_TABS = ["proxy", "audit", "mcp", "websearch", "judge"] as const;
+type LogTab = (typeof LOG_TABS)[number];
 
-const getInitialTab = (): LogTab => {
-  const tabParam = route.query.tab as string;
-  if (
-    tabParam === "audit" ||
-    tabParam === "proxy" ||
-    tabParam === "mcp" ||
-    tabParam === "websearch"
-  )
-    return tabParam;
-  return "proxy";
+const isLogTab = (value: unknown): value is LogTab =>
+  typeof value === "string" && (LOG_TABS as readonly string[]).includes(value);
+
+const getInitialTab = (): LogTab => (isLogTab(route.query.tab) ? route.query.tab : "proxy");
+
+// One place that names a tab's description and empty-state icon, so adding a
+// tab cannot leave one of the lookups behind (as the judge tab did at first).
+const TAB_META: Record<LogTab, { descriptionKey: string; icon: Component }> = {
+  proxy: { descriptionKey: "logs.proxyDescription", icon: Activity },
+  audit: { descriptionKey: "logs.auditDescription", icon: Shield },
+  mcp: { descriptionKey: "logs.mcpDescription", icon: Wrench },
+  websearch: { descriptionKey: "logs.webSearchDescription", icon: Globe },
+  judge: { descriptionKey: "logs.judgeDescription", icon: Scale },
 };
 
 const activeTab = ref<LogTab>(getInitialTab());
@@ -144,6 +150,7 @@ const pageCache = reactive<Record<LogTab, Map<number, PageCacheEntry>>>({
   audit: markRaw(new Map()),
   mcp: markRaw(new Map()),
   websearch: markRaw(new Map()),
+  judge: markRaw(new Map()),
 });
 
 const isComponentActive = ref(true);
@@ -204,6 +211,8 @@ const logType = computed(() => {
       return "mcp";
     case "websearch":
       return "web_search";
+    case "judge":
+      return "judge";
     default:
       return "endpoint";
   }
@@ -404,11 +413,12 @@ watch(activeTab, async (newTab) => {
   currentPage.value = 1;
   router.replace({ query: { ...route.query, tab: newTab } });
 
-  if (newTab !== "proxy") {
+  if (newTab !== "proxy" && newTab !== "judge") {
     filters.model = "";
     filters.provider = "";
-    // The API key filter is proxy-tab only: non-endpoint logs may carry a
-    // null api_key_name, and a stale key filter would silently hide them.
+    // The API key filter applies to endpoint-shaped rows (proxy and judge):
+    // tool logs may carry a null api_key_name, and a stale key filter would
+    // silently hide them.
     filters.api_key = "";
   } else {
     filters.user = "";
@@ -437,12 +447,8 @@ watch(
     // kept alive in the background — resetting the tab here would re-enter
     // the activeTab watcher and rewrite the other page's URL.
     if (!isComponentActive.value || route.name !== "logs") return;
-    const tab = (newTab as LogTab) || "proxy";
-    if (
-      (tab === "proxy" || tab === "audit" || tab === "mcp" || tab === "websearch") &&
-      tab !== activeTab.value
-    ) {
-      activeTab.value = tab;
+    if (isLogTab(newTab) && newTab !== activeTab.value) {
+      activeTab.value = newTab;
     }
   }
 );
@@ -504,13 +510,8 @@ onActivated(() => {
   // Reconcile the tab with the URL we returned to. While deactivated the
   // query watcher is inert, so a plain /logs link lands here with no ?tab=
   // even though the restored state may still show another tab.
-  const tabParam = route.query.tab as string;
-  if (
-    tabParam === "proxy" ||
-    tabParam === "audit" ||
-    tabParam === "mcp" ||
-    tabParam === "websearch"
-  ) {
+  const tabParam = route.query.tab;
+  if (isLogTab(tabParam)) {
     if (tabParam !== activeTab.value) activeTab.value = tabParam;
   } else {
     router.replace({ query: { ...route.query, tab: activeTab.value } });
@@ -786,15 +787,7 @@ const auditListAction = (log: LogListItemType): string => {
                 </div>
               </h1>
               <p class="text-muted-foreground text-xs max-w-2xl hidden sm:block truncate">
-                {{
-                  activeTab === "proxy"
-                    ? t("logs.proxyDescription")
-                    : activeTab === "audit"
-                      ? t("logs.auditDescription")
-                      : activeTab === "mcp"
-                        ? t("logs.mcpDescription")
-                        : t("logs.webSearchDescription")
-                }}
+                {{ t(TAB_META[activeTab].descriptionKey) }}
               </p>
             </div>
           </div>
@@ -861,6 +854,10 @@ const auditListAction = (log: LogListItemType): string => {
                 <Globe class="w-3.5 h-3.5" />
                 <span>{{ t("nav.webSearchLogs") }}</span>
               </TabsTrigger>
+              <TabsTrigger value="judge" :class="tabTriggerClass">
+                <Scale class="w-3.5 h-3.5" />
+                <span>{{ t("nav.judgeLogs") }}</span>
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -900,17 +897,7 @@ const auditListAction = (log: LogListItemType): string => {
         <EmptyState
           v-else-if="logs.length === 0 && !isFetching"
           :text="hasAnyActiveFilter ? t('common.noMatchingResults') : t('logs.noLogs')"
-          :icon="
-            hasAnyActiveFilter
-              ? Filter
-              : activeTab === 'proxy'
-                ? Activity
-                : activeTab === 'audit'
-                  ? Shield
-                  : activeTab === 'mcp'
-                    ? Wrench
-                    : Globe
-          "
+          :icon="hasAnyActiveFilter ? Filter : TAB_META[activeTab].icon"
           class="flex-1 animate-in fade-in duration-300"
           role="status"
           aria-live="polite"
@@ -921,9 +908,11 @@ const auditListAction = (log: LogListItemType): string => {
         <div v-else class="flex-1 overflow-hidden">
           <!-- Desktop view -->
           <template v-if="isDesktop">
-            <!-- Proxy Logs Table -->
+            <!-- Proxy Logs Table. The judge tab reuses it: a judge call's row
+                 is a model call with the same columns (model, provider, tokens,
+                 cost), just a different log_type. -->
             <Table
-              v-if="activeTab === 'proxy'"
+              v-if="activeTab === 'proxy' || activeTab === 'judge'"
               class="table-modern"
               container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >

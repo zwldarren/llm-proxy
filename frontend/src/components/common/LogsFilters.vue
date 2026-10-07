@@ -22,8 +22,12 @@ import type { LogFilter } from "@/types/schemas";
 
 const props = defineProps<{
   filters: LogFilter;
-  activeTab: "proxy" | "audit" | "mcp" | "websearch";
+  activeTab: "proxy" | "audit" | "mcp" | "websearch" | "judge";
 }>();
+
+// Judge rows are ordinary model calls (model, provider, API key, status), so the
+// judge tab gets the proxy tab's filter set rather than the tool tabs' reduced one.
+const usesProxyFilters = computed(() => props.activeTab === "proxy" || props.activeTab === "judge");
 
 const emit = defineEmits<{
   (e: "update:filters", value: LogFilter): void;
@@ -413,7 +417,7 @@ onUnmounted(() => {
     </div>
     <div
       class="filters-grid gap-3 sm:gap-4"
-      :class="activeTab === 'proxy' ? 'filters-grid-6col' : 'filters-grid-4col'"
+      :class="usesProxyFilters ? 'filters-grid-6col' : 'filters-grid-4col'"
     >
       <!-- Search -->
       <div class="flex flex-col">
@@ -516,8 +520,8 @@ onUnmounted(() => {
         </Popover>
       </div>
 
-      <!-- Proxy-specific filters -->
-      <template v-if="activeTab === 'proxy'">
+      <!-- Proxy-specific filters (judge rows carry the same columns) -->
+      <template v-if="usesProxyFilters">
         <div class="flex flex-col">
           <label for="filter-model" class="text-xs font-medium text-muted-foreground mb-1.5">{{
             t("logs.model")

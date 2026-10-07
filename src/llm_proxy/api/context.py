@@ -11,6 +11,8 @@ factory) remain in :mod:`llm_proxy.api.dependencies`; this module imports them
 one-directionally to avoid import cycles.
 """
 
+import time
+import uuid
 from typing import Any, Protocol
 
 from fastapi import Request
@@ -34,7 +36,10 @@ from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.processing import RequestContext
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.core.request_utils import peer_is_trusted_proxy
+from llm_proxy.observability.logger import get_logger
 from llm_proxy.routing.orchestrator import orchestrate_smart_routing
+
+logger = get_logger(__name__)
 
 
 def _peer_is_trusted_proxy(request: Request) -> bool:
@@ -65,6 +70,99 @@ def _get_redis_client(redis_client_wrapper) -> Any | None:
     return None
 
 
+def _optional_number(value: Any) -> float | None:
+    """Return ``value`` as a float, or None when it is not a real number.
+
+    Booleans are excluded deliberately: they are ints in Python, and routing
+    telemetry is JSON that may round-trip through the log store before it is read
+    back. None means "not reported", which is not the same fact as 0.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _log_judge_call(
+    req: Request,
+    decision: Any,
+    *,
+    request_id: str,
+    requested_model: str | None,
+    session_id: str | None,
+) -> None:
+    """Record a routing judge consultation as its own log row and usage record.
+
+    Called as soon as routing returns, before the request is served: the call has
+    already happened and been billed, so its record must not depend on the parent
+    request succeeding (a 403 on the resolved model, for instance). The judge's
+    spend is attributed to the request that caused it, but stays out of that
+    request's own cost; the row is the single accounting source (ADR-0018).
+
+    A consultation without a provider never reached an upstream: nothing was
+    billed, and its diagnostic stays on the parent's routing metadata.
+    """
+    judge = getattr(decision, "judge", None)
+    if not isinstance(judge, dict) or not judge.get("provider"):
+        return
+
+    from llm_proxy.core.request_utils import get_client_ip
+    from llm_proxy.observability.internal_call_logging import (
+        InternalCallLogEntry,
+        get_internal_call_log_service,
+    )
+
+    input_tokens = _optional_number(judge.get("input_tokens"))
+    output_tokens = _optional_number(judge.get("output_tokens"))
+    total_tokens = (
+        int((input_tokens or 0.0) + (output_tokens or 0.0))
+        if input_tokens is not None or output_tokens is not None
+        else None
+    )
+    latency_ms = _optional_number(judge.get("latency_ms"))
+    started_at = _optional_number(judge.get("started_at"))
+
+    identity = get_request_identity(req)
+    entry = InternalCallLogEntry(
+        # Deterministic child id: the same parent can never write two judge rows,
+        # and the pair stays greppable next to each other.
+        request_id=f"{request_id}:judge",
+        timestamp=started_at if started_at is not None else time.time(),
+        model=str(judge.get("model") or ""),
+        provider=judge["provider"],
+        provider_model_name=judge.get("provider_model_name"),
+        # A billed HTTP call is a success even when the verdict abstains; only a
+        # call that never came back (deadline, transport error) has no status.
+        status_code=200 if judge.get("error") is None else None,
+        response_time_ms=int(latency_ms) if latency_ms is not None else None,
+        prompt_tokens=int(input_tokens) if input_tokens is not None else None,
+        completion_tokens=int(output_tokens) if output_tokens is not None else None,
+        total_tokens=total_tokens,
+        cost_usd=_optional_number(judge.get("cost")),
+        error_message=judge.get("error"),
+        log_metadata={
+            "internal_call": "routing_judge",
+            "parent_request_id": request_id,
+            "requested_model": requested_model,
+            "resolved_model": getattr(decision, "model", None),
+            "conversation_key": getattr(decision, "conversation_key", None),
+            "judge": dict(judge),
+        },
+    )
+    try:
+        get_internal_call_log_service().log_call_background(
+            entry,
+            user_id=identity.user_id,
+            user_identity=identity.user,
+            api_key_name=identity.api_key_name,
+            auth_method=identity.auth_method,
+            session_id=session_id,
+            client_ip=get_client_ip(req),
+            user_agent=req.headers.get("user-agent"),
+        )
+    except Exception:  # noqa: BLE001 - accounting must never fail the request
+        logger.warning("Failed to record routing judge call", exc_info=True)
+
+
 async def _build_request_context(
     request: Any,
     req: Request,
@@ -84,6 +182,15 @@ async def _build_request_context(
     session_id = extract_session_id(req) if peer_trusted else None
     redis = _get_redis_client(getattr(req.app.state, "redis_client", None))
 
+    # Mint the request id before routing so a judge call made during routing can be
+    # logged as its own row and still name the request it belongs to. The pipeline
+    # reuses it from ``request.state`` when it builds the request's EventContext.
+    # ``isinstance`` rather than truthiness: a test double's state may answer with
+    # an arbitrary object where a real Starlette State raises AttributeError.
+    existing_id = getattr(req.state, "request_id", None)
+    request_id = existing_id if isinstance(existing_id, str) and existing_id else str(uuid.uuid4())
+    req.state.request_id = request_id
+
     # Intercept virtual models (auto/fast/best) and resolve to real models.
     routing_decision = None
     requested_model = None
@@ -94,7 +201,7 @@ async def _build_request_context(
         config=config,
         config_manager=config_manager,
         app_state=req.app.state,
-        request_id=req.headers.get("x-request-id") or None,
+        request_id=request_id,
         session_id=session_id,
         redis=redis,
     )
@@ -102,6 +209,16 @@ async def _build_request_context(
         routing_decision = routing_result.routing_decision
         requested_model = routing_result.requested_model
         model_name = routing_result.resolved_model
+
+        # Record the judge call before any later failure can discard it: the call
+        # was made and billed while routing ran.
+        _log_judge_call(
+            req,
+            routing_decision,
+            request_id=request_id,
+            requested_model=requested_model,
+            session_id=session_id,
+        )
 
         # Enforce per-API-key model restrictions against the resolved concrete
         # model. The middleware only validates the virtual model name requested

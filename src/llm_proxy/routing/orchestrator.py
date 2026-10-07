@@ -3,8 +3,12 @@
 Extracted from ``llm_proxy.api.dependencies._build_request_context``. Owns the
 application-layer routing workflow that runs when a client requests a virtual
 model (``auto``/``fast``/``best``): conversation-continuity lookup, resolution
-against the candidate pool with route-record persistence, and storing the
-chosen model for the next turn.
+against the candidate pool, and storing the chosen model for the next turn.
+
+The derived conversation key is returned on the decision's ``conversation_key``
+so request logs can stitch turns into conversations; it is computed whether or
+not Redis is configured, because outcome measurement must not depend on the
+continuity cache being available (ADR-0018).
 
 The per-API-key model-restriction re-check intentionally stays in the API
 context layer (``llm_proxy.api.context``) so this module never depends on
@@ -80,25 +84,26 @@ async def orchestrate_smart_routing(
     messages = extract_messages_for_routing(request)
 
     # ─── Conversation continuity: retrieve previous model ───
+    # Derived unconditionally: the key is also the telemetry handle that stitches
+    # turns into conversations, and that must not depend on Redis being present.
+    conv_key = conversation_key(session_id, messages)
     previous_model: str | None = None
-    conv_key: str | None = None
-    if redis is not None:
-        conv_key = conversation_key(session_id, messages)
-        if conv_key:
-            try:
-                prev = await redis.get(f"routing:conv:{conv_key}:last_model")
-                if prev:
-                    previous_model = prev.decode("utf-8") if isinstance(prev, bytes) else prev
-            except Exception as exc:
-                # Degrade gracefully: continue without continuity, but leave a
-                # diagnostic trace so Redis outages/wrong-types are visible.
-                logger.warning(
-                    "Redis conversation-continuity lookup failed for key %s: %s",
-                    conv_key,
-                    exc,
-                )
+    if redis is not None and conv_key:
+        try:
+            prev = await redis.get(f"routing:conv:{conv_key}:last_model")
+            if prev:
+                previous_model = prev.decode("utf-8") if isinstance(prev, bytes) else prev
+        except Exception as exc:
+            # Degrade gracefully: continue without continuity, but leave a
+            # diagnostic trace so Redis outages/wrong-types are visible.
+            logger.warning(
+                "Redis conversation-continuity lookup failed for key %s: %s",
+                conv_key,
+                exc,
+            )
 
-    # Resolve against a short-lived session for route_records persistence.
+    # A short-lived session carries the experience-store side effects this
+    # resolution writes (per-model EWMA stats); there is no route-record table.
     async with get_async_session_context() as routing_session:
         routing_decision = await resolve_virtual_model(
             mode=routing_mode,
@@ -111,8 +116,9 @@ async def orchestrate_smart_routing(
             request_id=request_id,
             mode_weights=smart_cfg.mode_weights,
             previous_model=previous_model,
+            conversation_key=conv_key,
         )
-        await routing_session.commit()  # persist the route_record row
+        await routing_session.commit()  # persist the experience-store upserts
 
     # ─── Store the chosen model for next turn ───
     if redis is not None and conv_key:

@@ -145,6 +145,19 @@ class TestBuildTimeFilters:
         filters = self.repo._build_time_filters(start_ts=None, end_ts=None, log_type="endpoint")
         assert len(filters) == 1
 
+    def test_several_log_types_become_one_in_predicate(self):
+        # A key's spend spans endpoint and judge rows; both belong in one view.
+        filters = self.repo._build_time_filters(
+            start_ts=None, end_ts=None, log_type=("endpoint", "judge")
+        )
+        assert len(filters) == 1
+        assert "IN" in str(filters[0]).upper()
+
+    def test_an_empty_log_type_sequence_means_no_filter(self):
+        # ``in_(())`` compiles to an always-false predicate, which would silently
+        # return no rows; an empty collection must behave like ``None``.
+        assert self.repo._build_time_filters(start_ts=None, end_ts=None, log_type=()) == []
+
     def test_user_id_filter(self):
         filters = self.repo._build_time_filters(
             start_ts=None, end_ts=None, log_type=None, user_id=7
