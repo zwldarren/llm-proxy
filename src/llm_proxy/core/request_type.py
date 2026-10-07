@@ -14,3 +14,4 @@ class RequestType(StrEnum):
     TRANSCRIPTION = "transcription"
     TRANSLATION = "translation"
     SYSTEMONE = "systemone"
+    DECISIONS = "decisions"

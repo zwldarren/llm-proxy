@@ -245,3 +245,68 @@ class TestBaseUrlTolerantPathAliases:
                 assert resp.status_code == 200, (path, resp.text)
 
         assert anthropic_processor.process.await_count == 3
+
+
+DECISIONS_BODY = {
+    "model": "gpt-6-luna",
+    "input": "I was charged twice for my order.",
+    "questions": [
+        {"type": "predicate", "name": "urgent", "instructions": "Is it urgent?"},
+        {
+            "type": "choice",
+            "name": "department",
+            "instructions": "Which department?",
+            "choices": [{"value": "billing", "description": "Payments."}],
+        },
+    ],
+}
+
+
+def test_decisions_route_parses_the_typed_questions(app):
+    """``/v1/decisions`` validates its body and reaches the decisions processor."""
+    from llm_proxy.protocols.openai_decisions.handler import openai_decisions_protocol
+
+    processor = _install_processor(app, "openai_decisions")
+    app.include_router(create_protocol_router(openai_decisions_protocol))
+
+    with _patch_context_builder("openai_decisions"), TestClient(app) as client:
+        resp = client.post("/v1/decisions", json=DECISIONS_BODY)
+
+    assert resp.status_code == 200, resp.text
+    parsed = processor.process.call_args.kwargs["protocol_request"]
+    assert parsed.model == "gpt-6-luna"
+    assert [q.type for q in parsed.questions] == ["predicate", "choice"]
+
+
+def test_decisions_route_rejects_a_malformed_question(app):
+    """The endpoint's own schema rejects an impossible question up front."""
+    from llm_proxy.protocols.openai_decisions.handler import openai_decisions_protocol
+
+    _install_processor(app, "openai_decisions")
+    app.include_router(create_protocol_router(openai_decisions_protocol))
+
+    body = {
+        "model": "gpt-6-luna",
+        "input": "x",
+        # A predicate has no options, so this question cannot be answered.
+        "questions": [
+            {"type": "predicate", "instructions": "Is it urgent?", "choices": [{"value": "a"}]}
+        ],
+    }
+
+    with _patch_context_builder("openai_decisions"), TestClient(app) as client:
+        resp = client.post("/v1/decisions", json=body)
+
+    assert resp.status_code == 422, resp.text
+
+
+def test_decisions_protocol_uses_the_decisions_context_builder():
+    """The router's protocol -> context-builder table must know the new endpoint.
+
+    Without the entry the request would fall through to the chat builder and be
+    processed as a chat completion.
+    """
+    from llm_proxy.api.context import build_decisions_request_context
+    from llm_proxy.api.routers.protocol import _NON_CHAT_CONTEXT_BUILDERS
+
+    assert _NON_CHAT_CONTEXT_BUILDERS["openai_decisions"] is build_decisions_request_context

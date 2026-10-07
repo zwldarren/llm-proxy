@@ -132,6 +132,13 @@ TAGS: list[dict[str, str]] = [
         "name": "systemone",
         "description": "System One evaluation (TypeSafe's Jev; also OpenRouter and Ollama).",
     },
+    {
+        "name": "decisions",
+        "description": (
+            "Decisions evaluation (OpenAI's /v1/decisions; also served by System One "
+            "upstreams through the bridge)."
+        ),
+    },
     {"name": "images", "description": "Image generation and editing."},
     {"name": "audio", "description": "Speech synthesis, transcription, and translation."},
     {"name": "models", "description": "The model catalogue visible to the calling API key."},
@@ -305,6 +312,55 @@ COMPONENTS: dict[str, Any] = {
             "provider": _str("Upstream provider name (OpenRouter only)."),
         },
         required=["model", "answers", "usage"],
+    ),
+    "DecisionsResponse": _passthrough(
+        {
+            "model": _str("The model that performed the evaluation."),
+            "answers": _array(
+                _passthrough(
+                    {
+                        "type": _str("Answer kind: `predicate`, `choice`, `score`, or `refusal`."),
+                        "name": _str("The question name this answer belongs to."),
+                        "probability": _num(
+                            "`predicate`: estimated probability the condition is true, 0 to 1."
+                        ),
+                        "choice": {
+                            "type": ["string", "boolean"],
+                            "description": (
+                                "`choice`: the selected option value. Values are typed, so "
+                                "a boolean and its string form are distinct options."
+                            ),
+                        },
+                        "score": _num(
+                            "`score`: probability-weighted average of the level indices, "
+                            "which can fall between levels."
+                        ),
+                        "confidence": _num("`choice`/`score`: confidence in the answer, 0 to 1."),
+                        "probabilities": _passthrough(
+                            {}, description="Probability of every option or level."
+                        ),
+                    },
+                    required=["type"],
+                ),
+                description="One typed answer per question, in question order.",
+            ),
+            "usage": _passthrough(
+                {
+                    "input_tokens": _int(),
+                    "input_tokens_details": _passthrough(
+                        {
+                            "cache_write_tokens": _int(),
+                            "cached_tokens": _int(),
+                        }
+                    ),
+                    "output_tokens": _int(),
+                    "output_tokens_details": _passthrough({"reasoning_tokens": _int()}),
+                    "total_tokens": _int(),
+                },
+                required=["input_tokens", "output_tokens", "total_tokens"],
+            ),
+        },
+        required=["answers", "model", "usage"],
     ),
     "ImageResponse": _passthrough(
         {
@@ -599,10 +655,25 @@ OPERATION_OVERLAYS: dict[tuple[str, str], dict[str, Any]] = {
         "description": (
             "Sends `state` and typed `questions` to a System One model such as Jev and "
             "returns one typed answer per question. TypeSafe and OpenRouter share the "
-            "wire format."
+            "wire format. A model on the `openai` provider is bridged: its System One "
+            "request is translated to `/v1/decisions` and the answers translated back."
         ),
         "responses": {
             "200": json_response("The answers, one per question id.", ref("SystemOneResponse")),
+        },
+    },
+    ("/v1/decisions", "post"): {
+        "summary": "Answer typed questions about shared evidence",
+        "tags": ["decisions"],
+        "description": (
+            "Sends shared evidence (`input`) and typed `questions` to a decision model "
+            "and returns one typed answer per question. OpenAI serves this endpoint "
+            "natively; a model on a System One upstream (`typesafe`, `openrouter`, "
+            "`ollama`) is bridged: the request is translated to `/v1/systemone` and "
+            "the answers translated back."
+        ),
+        "responses": {
+            "200": json_response("The answers, one per question.", ref("DecisionsResponse")),
         },
     },
     ("/v1/images/generations", "post"): {

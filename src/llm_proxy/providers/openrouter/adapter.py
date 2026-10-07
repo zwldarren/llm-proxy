@@ -17,13 +17,17 @@ from typing import Any
 from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.core.request_type import RequestType
-from llm_proxy.models import InternalRequest, InternalResponse
+from llm_proxy.models import InternalRequest, InternalResponse, InternalSystemOneRequest
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.anthropic.client_headers import (
     get_client_headers as get_anthropic_client_headers,
 )
 from llm_proxy.providers.base import extract_rate_limit_headers
-from llm_proxy.providers.capabilities import SystemOneCapabilityMixin
+from llm_proxy.providers.capabilities import (
+    DecisionsOverSystemOneMixin,
+    SystemOneCapabilityMixin,
+)
+from llm_proxy.providers.capabilities.host import SystemOneSelf
 from llm_proxy.providers.headers import merge_passthrough_headers
 from llm_proxy.providers.openai.client_headers import get_openrouter_client_headers
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
@@ -42,7 +46,9 @@ DEFAULT_ATTRIBUTION_TITLE = "LLM Proxy"
 
 
 @register_adapter("openrouter")
-class OpenRouterAdapter(SystemOneCapabilityMixin, NativePassthroughChatBase):
+class OpenRouterAdapter(
+    DecisionsOverSystemOneMixin, SystemOneCapabilityMixin, NativePassthroughChatBase
+):
     """OpenRouter provider using direct HTTP calls to OpenAI-compatible API.
 
     OpenRouter provides unified access to multiple LLM providers through a
@@ -180,6 +186,23 @@ class OpenRouterAdapter(SystemOneCapabilityMixin, NativePassthroughChatBase):
         picking a model here has to be able to see them.
         """
         return {"output_modalities": "all"}
+
+    def _systemone_decisions_url(self: SystemOneSelf, request: InternalSystemOneRequest) -> str:
+        """Keep ``/v1/decisions`` on the System One route, under its own override key.
+
+        OpenRouter serves the same envelope on a second route, ``/api/alpha/decisions``
+        — beside ``/api/v1`` rather than under it, and still alpha — so it is not the
+        default while it is alpha. A deployment reaches it by pinning the full URL,
+        which is what resolving under the ``decisions`` key buys over inheriting
+        ``systemone``'s:
+
+            endpoint_base_urls:
+              decisions: "https://openrouter.ai/api/alpha/decisions"
+
+        When that route graduates, pointing this method at it is the whole change.
+        See ADR-0019.
+        """
+        return self._resolve_endpoint_url("decisions", self.SYSTEMONE_ENDPOINT, model=request.model)
 
     def _build_headers(
         self,

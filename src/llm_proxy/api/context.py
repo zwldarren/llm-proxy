@@ -242,15 +242,23 @@ async def _build_request_context(
     if model_config is None:
         raise ModelNotFoundError(model_name)
 
-    # System One is an evaluation endpoint, not chat: only models explicitly
-    # marked as System One models may serve it. Without this check a chat model
-    # would resolve to an adapter that does not implement ``systemone`` and fail
+    # System One and Decisions are evaluation endpoints, not chat: only models
+    # explicitly marked as decision models may serve them. One flag gates both —
+    # they are two envelopes over the same primitives — so a decision model on a
+    # System One upstream answers /v1/decisions and one on OpenAI answers
+    # /v1/systemone, each bridged by the provider (see
+    # ``llm_proxy.models.decisions_bridge``). Without this check a chat model
+    # would resolve to an adapter that does not implement the endpoint and fail
     # with an opaque 500 instead of a clear 400.
-    if request_type == RequestType.SYSTEMONE and not model_config.supports_systemone:
+    if (
+        request_type in (RequestType.SYSTEMONE, RequestType.DECISIONS)
+        and not model_config.supports_systemone
+    ):
         raise ValidationError(
             message=(
-                f"Model '{model_name}' is not marked as a System One model. "
-                "Enable 'System One' on the model to serve /v1/systemone."
+                f"Model '{model_name}' is not marked as a decision model "
+                "(supports_systemone). Mark it as a decision model in Models "
+                f"to serve /v1/{request_type.value}."
             ),
             code="invalid_request_error",
             status_code=400,
@@ -428,6 +436,16 @@ async def build_systemone_request_context(
     """Build RequestContext for System One evaluation request processing."""
     return await _build_request_context(
         request, req, request_type=RequestType.SYSTEMONE, protocol_name="systemone"
+    )
+
+
+async def build_decisions_request_context(
+    request: HasModel,
+    req: Request,
+) -> RequestContext:
+    """Build RequestContext for Decisions evaluation request processing."""
+    return await _build_request_context(
+        request, req, request_type=RequestType.DECISIONS, protocol_name="openai_decisions"
     )
 
 

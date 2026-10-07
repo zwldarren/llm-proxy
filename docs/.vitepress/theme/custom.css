@@ -261,6 +261,12 @@ text with a .kicker-<category> class in their frontmatter pageClass. */
   content: 'Evaluation';
 }
 
+/* System One and Decisions share the sidebar's "Evaluation" category, so
+   their kickers intentionally read the same label. */
+.kicker-decisions .vp-doc > div > h1:first-child::before {
+  content: 'Evaluation';
+}
+
 .kicker-models .vp-doc > div > h1:first-child::before {
   content: 'Models';
 }

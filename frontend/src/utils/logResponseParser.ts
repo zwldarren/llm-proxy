@@ -16,6 +16,7 @@
  *  - Images             (`created` + `data[]` with `b64_json`|`url`)
  *  - Embeddings         (`object:"list"`, `data[].embedding`)
  *  - System One         (`answers` map keyed by question id; type-specific values)
+ *  - Decisions          (`answers` array of named, typed answers)
  *  - Audio              (`{raw:true,size}` or `{text}`)
  */
 
@@ -46,6 +47,7 @@ function webSearchQuery(action: Record<string, unknown> | undefined): string {
 type ResponseProtocol =
   | "openai-chat"
   | "openai-responses"
+  | "openai-decisions"
   | "anthropic"
   | "stream-openai"
   | "stream-anthropic"
@@ -113,8 +115,14 @@ export type SystemOneKind = "noul" | "choice" | "score";
 /** Every kind, in the order their value fields are tried as a fallback. */
 const SYSTEMONE_KINDS: readonly SystemOneKind[] = ["noul", "choice", "score"];
 
-/** Normalize a raw upstream type onto the closed kind set. */
+/** Normalize a raw upstream type onto the closed kind set.
+ *
+ * Decisions answers the yes/no primitive as `predicate` where System One says
+ * `noul`; the two are the same probability, so they share one kind and one
+ * renderer.
+ */
 function normalizeSystemOneKind(type: string | undefined): SystemOneKind | undefined {
+  if (type === "predicate") return "noul";
   return SYSTEMONE_KINDS.find((kind) => kind === type);
 }
 
@@ -757,6 +765,123 @@ function parseSystemOne(body: Record<string, unknown>): ParsedResponse {
   };
 }
 
+/**
+ * Decisions answer fields the display models: the kind, the echoed question
+ * name, each kind's value field, and the shared distribution/confidence pair.
+ * Everything else is kept in `extra`.
+ */
+const DECISIONS_ANSWER_KEYS = new Set([
+  "type",
+  "name",
+  "probability",
+  "choice",
+  "score",
+  "confidence",
+  "probabilities",
+]);
+
+/**
+ * Per-kind value field of a Decisions answer. Decisions names its fields after
+ * the question kind rather than System One's, so each kind gets its own reader.
+ */
+const DECISIONS_VALUE_READERS: Record<
+  SystemOneKind,
+  (raw: Record<string, unknown>) => string | number | undefined
+> = {
+  // The predicate's probability renders through the noul branch.
+  noul: (raw) => (typeof raw.probability === "number" ? raw.probability : undefined),
+  // Choice values are typed: a boolean option renders as its word.
+  choice: (raw) => (typeof raw.choice === "boolean" ? String(raw.choice) : asString(raw.choice)),
+  score: (raw) => (typeof raw.score === "number" ? raw.score : undefined),
+};
+
+/**
+ * One typed Decisions answer, normalized onto the System One answer shape so one
+ * card renders both envelopes. Decisions says `predicate` where System One says
+ * `noul`, and carries its distribution as an array where System One keys a map
+ * with a separate legend; this is the display-time union of the two.
+ */
+function parseDecisionsAnswer(raw: unknown, index: number): SystemOneAnswerInfo {
+  if (!isRecord(raw)) {
+    return {
+      id: `#${index}`,
+      value: typeof raw === "number" || typeof raw === "string" ? raw : undefined,
+      probabilities: [],
+      extra: {},
+    };
+  }
+
+  const type = asString(raw.type);
+  const kind = normalizeSystemOneKind(type);
+  const value = readDecisionsValue(raw, kind);
+
+  const probabilities: { label: string; value: number }[] = [];
+  const legend: Record<string, string> = {};
+  if (Array.isArray(raw.probabilities)) {
+    for (const entry of raw.probabilities) {
+      if (!isRecord(entry) || typeof entry.probability !== "number") continue;
+      // A choice entry carries only its value; a score entry also carries the
+      // level label, which is what the legend would have held upstream.
+      const label = asString(entry.label) ?? String(entry.value ?? "");
+      probabilities.push({ label, value: entry.probability });
+      if (entry.value !== undefined) legend[String(entry.value)] = label;
+    }
+  }
+
+  const extra: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    if (!DECISIONS_ANSWER_KEYS.has(key)) extra[key] = entry;
+  }
+
+  return {
+    id: asString(raw.name) ?? `#${index}`,
+    type,
+    kind,
+    value,
+    confidence: typeof raw.confidence === "number" ? raw.confidence : undefined,
+    probabilities,
+    legend: Object.keys(legend).length > 0 ? legend : undefined,
+    extra,
+  };
+}
+
+/**
+ * Primary value of a Decisions answer: the reader for its kind, or — when the
+ * upstream reported no type or one we don't model — whichever documented value
+ * field is present, tried noul → score → choice.
+ */
+function readDecisionsValue(
+  raw: Record<string, unknown>,
+  kind: SystemOneKind | undefined
+): string | number | undefined {
+  if (kind) return DECISIONS_VALUE_READERS[kind](raw);
+  return (
+    DECISIONS_VALUE_READERS.noul(raw) ??
+    DECISIONS_VALUE_READERS.score(raw) ??
+    DECISIONS_VALUE_READERS.choice(raw)
+  );
+}
+
+function parseDecisions(body: Record<string, unknown>): ParsedResponse {
+  const rawAnswers = body.answers;
+  if (!Array.isArray(rawAnswers)) return empty({ protocol: "openai-decisions" });
+
+  const parsed = rawAnswers.map((raw, index) => parseDecisionsAnswer(raw, index));
+
+  return {
+    protocol: "openai-decisions",
+    content: "",
+    reasoning: "",
+    toolCalls: [],
+    toolResults: [],
+    items: [],
+    meta: { model: asString(body.model), id: asString(body.id) },
+    images: [],
+    systemOneAnswers: parsed,
+    hasData: parsed.length > 0,
+  };
+}
+
 function parseAudioText(body: Record<string, unknown>): ParsedResponse {
   const text = asString(body.text) ?? "";
   return {
@@ -1062,8 +1187,9 @@ function parseStream(body: string): ParsedResponse {
  * @param body        The raw `response_body` value (object, string, or other).
  * @param requestType Optional `log_metadata.request_type` ("chat" | "image_generation"
  *                    | "image_edit" | "embedding" | "speech" | "transcription"
- *                    | "translation" | "systemone" | ...) — used to disambiguate shapes that
- *                    share fields (e.g. audio vs chat both can have a `text`).
+ *                    | "translation" | "systemone" | "decisions" | ...) — used to
+ *                    disambiguate shapes that share fields (e.g. audio vs chat
+ *                    both can have a `text`).
  */
 export function parseLogResponse(body: unknown, requestType?: string): ParsedResponse {
   // Streaming responses are always stored as a raw SSE string.
@@ -1129,6 +1255,11 @@ export function parseLogResponse(body: unknown, requestType?: string): ParsedRes
     return parseSystemOne(body);
   }
 
+  // Decisions evaluation: an ordered array of named answers.
+  if (requestType === "decisions") {
+    return parseDecisions(body);
+  }
+
   // Protocol detection by shape.
   const object = asString(body.object);
 
@@ -1166,6 +1297,12 @@ export function parseLogResponse(body: unknown, requestType?: string): ParsedRes
   // System One fallback by shape when request_type is absent.
   if (isRecord(body.answers)) {
     return parseSystemOne(body);
+  }
+
+  // Decisions fallback by shape: the same envelope with an ordered answer array
+  // instead of a map.
+  if (Array.isArray(body.answers)) {
+    return parseDecisions(body);
   }
 
   // Audio text fallback (no request_type but has only a text field).

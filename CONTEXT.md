@@ -14,6 +14,37 @@ _Avoid_: format, frontend API
 An upstream LLM API the proxy forwards requests to (OpenAI, Anthropic, Gemini, Ollama, …).
 _Avoid_: backend, upstream service
 
+### Evaluation endpoints
+
+**Decision model**:
+A model that answers typed questions with calibrated probabilities instead of
+prose. The proxy reaches two families of them: System One (TypeSafe's Jev, also
+resold by OpenRouter and served locally by Ollama) and OpenAI's Decisions
+(`gpt-6-luna`). One capability flag, `supports_systemone`, marks a model as a
+decision model, which gates both evaluation endpoints and being selected as the
+routing judge. See ADR-0019.
+_Avoid_: classifier (that is routing signal B), judge (that is the router's
+consumer of one), decision endpoint (that is the route, not the model)
+
+**Envelope**:
+One of the two wire formats over the same three evaluation primitives. System One
+(`state` + `questions` map, kinds `noul`/`choice`/`score`) and Decisions (`input`
++ ordered `questions`, kinds `predicate`/`choice`/`score`). A request names one
+by its endpoint — `/v1/systemone` or `/v1/decisions`. See ADR-0019.
+_Avoid_: protocol, dialect, format (it is a payload shape, not a client-facing
+API)
+
+**Envelope bridge**:
+The provider-side conversion that lets an upstream speaking one envelope answer
+the other's endpoint: `llm_proxy.models.decisions_bridge`, applied by the
+`DecisionsOverSystemOneMixin` / `SystemOneOverDecisionsMixin` capability mixins.
+As lossless as the two envelopes allow; each dropped fact is marked in the
+module docstring and in `docs/api/decisions.md`. Each evaluation endpoint resolves
+under its own route, so `/v1/decisions` can reach an upstream route that
+`/v1/systemone` does not — one upstream route can serve both, or two can, without
+the code differing.
+_Avoid_: adapter translation, protocol conversion (that is the chat path)
+
 ### Smart routing
 
 **Virtual model**:

@@ -67,15 +67,20 @@ const parsedRequestBody = computed(() => {
 const requestSentinel = computed(() => bodySentinel(props.log?.request_body));
 const sentinelMessage = computed(() => bodySentinelMessage(requestSentinel.value, t));
 
+// Raw log request_type (undefined when the metadata omits it). parseLogRequest
+// uses it to disambiguate shapes that share fields, so the "chat" default below
+// must not be passed as an authoritative type.
+const rawRequestType = computed<string | undefined>(() => {
+  const rt = props.log?.log_metadata?.request_type;
+  return typeof rt === "string" ? rt : undefined;
+});
+
 const parsed = computed(() =>
-  requestSentinel.value ? null : parseLogRequest(parsedRequestBody.value)
+  requestSentinel.value ? null : parseLogRequest(parsedRequestBody.value, rawRequestType.value)
 );
 
 // Image request detection (guards base64 in raw request bodies).
-const requestType = computed<string>(() => {
-  const rt = props.log?.log_metadata?.request_type;
-  return typeof rt === "string" ? rt : "chat";
-});
+const requestType = computed<string>(() => rawRequestType.value ?? "chat");
 const isImageRequest = computed(
   () => requestType.value === "image_generation" || requestType.value === "image_edit"
 );
@@ -312,6 +317,15 @@ const oversizeRequestBodyText = computed((): string | null =>
                   </span>
                 </div>
               </div>
+
+              <!-- malformed criteria from a rejected request: show it verbatim
+                   rather than dropping the field the rejection was about -->
+              <JsonViewer
+                v-else-if="q.criteria !== undefined"
+                :data="q.criteria"
+                :deep="1"
+                max-height="max-h-40"
+              />
 
               <!-- fields we do not model, so nothing in the body is hidden -->
               <JsonViewer

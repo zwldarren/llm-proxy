@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from llm_proxy.api.context import (
+    build_decisions_request_context,
     build_embeddings_request_context,
     build_images_request_context,
     build_request_context,
@@ -61,6 +62,7 @@ _NON_CHAT_CONTEXT_BUILDERS: dict[str, Any] = {
     ),
     "speech": build_speech_request_context,
     "systemone": build_systemone_request_context,
+    "openai_decisions": build_decisions_request_context,
     "transcription": build_transcription_request_context,
     "translation": build_translation_request_context,
 }

@@ -14,7 +14,10 @@ from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models import InternalRequest, InternalResponse
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import BaseHttpProvider
-from llm_proxy.providers.capabilities import SystemOneCapabilityMixin
+from llm_proxy.providers.capabilities import (
+    DecisionsOverSystemOneMixin,
+    SystemOneCapabilityMixin,
+)
 
 logger = get_logger(__name__)
 
@@ -25,7 +28,7 @@ _UNSUPPORTED_MESSAGE = (
 
 
 @register_adapter("typesafe")
-class TypeSafeAdapter(SystemOneCapabilityMixin, BaseHttpProvider):
+class TypeSafeAdapter(DecisionsOverSystemOneMixin, SystemOneCapabilityMixin, BaseHttpProvider):
     """Provider adapter for TypeSafe's System One API (the Jev model).
 
     TypeSafe documents only ``model``/``state``/``questions``, so the optional
@@ -33,6 +36,10 @@ class TypeSafeAdapter(SystemOneCapabilityMixin, BaseHttpProvider):
     under the default ``ignore`` unknown-fields policy and are stripped before
     the request leaves the proxy: ``EXEMPT_EXTRA_KEYS`` is deliberately left at
     its base-class default, and the ``/systemone`` path at the mixin default.
+
+    ``/v1/decisions`` is served by bridging onto that same System One endpoint
+    (``DecisionsOverSystemOneMixin``), so a Decisions request reaches Jev
+    through the one upstream TypeSafe documents.
     """
 
     _DEFAULT_PROVIDER_NAME = "typesafe"

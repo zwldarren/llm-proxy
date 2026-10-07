@@ -9,6 +9,10 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from llm_proxy.models import ContentBlock, ConversionTier, InternalRequest, InternalResponse
+from llm_proxy.models.decisions import (
+    InternalDecisionRequest,
+    InternalDecisionResponse,
+)
 from llm_proxy.models.embedding import (
     EmbeddingData,
     InternalEmbeddingRequest,
@@ -23,7 +27,7 @@ from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.providers.field_utils import (
     extract_unknown_response_fields as _extract_unknown_fields,
 )
-from llm_proxy.serialization.providers.field_utils import reported_cost
+from llm_proxy.serialization.providers.field_utils import parse_decisions_usage, reported_cost
 from llm_proxy.streaming.transformer import StreamingTransformer
 
 
@@ -286,7 +290,7 @@ class ProviderSerializer(ABC):
             )
 
         return InternalEmbeddingResponse(
-            model=response.get("model", model),
+            model=response.get("model") or model,
             data=data_list,
             usage=usage,
         )
@@ -333,8 +337,56 @@ class ProviderSerializer(ABC):
                 provider_info["openrouter_cost"] = cost
 
         return InternalSystemOneResponse(
-            model=response.get("model", model),
+            model=response.get("model") or model,
             answers=response.get("answers", {}) or {},
+            usage=usage,
+            id=response.get("id"),
+            provider=response.get("provider"),
+            provider_info=provider_info,
+        )
+
+    def build_provider_decisions_request(self, request: InternalDecisionRequest) -> dict[str, Any]:
+        """Build a provider-specific Decisions request body.
+
+        Every upstream that serves Decisions natively shares the same wire
+        format, so the default is the whole body. An optional non-shared field
+        (``safety_identifier``) rides ``request.extra`` and is merged by the
+        adapter's field-policy chokepoint, not here. A provider that speaks the
+        System One envelope instead is bridged in
+        :mod:`llm_proxy.models.decisions_bridge`, not here.
+        """
+        return {
+            "model": request.model,
+            "input": request.input,
+            "questions": request.questions,
+        }
+
+    def parse_provider_decisions_response(
+        self, response: dict[str, Any], model: str = ""
+    ) -> InternalDecisionResponse:
+        """Parse a provider Decisions response into InternalDecisionResponse.
+
+        The upstream shape is ``{answers, model, usage}``; ``usage`` reports
+        cache and reasoning tokens as nested details, which are mapped onto the
+        canonical flat fields. The upstream ``usage`` object is preserved
+        verbatim so the protocol formatter can echo it losslessly.
+        """
+        raw_usage = response.get("usage")
+        usage = None
+        provider_info: dict[str, Any] = {}
+        if isinstance(raw_usage, dict):
+            usage = parse_decisions_usage(raw_usage)
+            provider_info["decisions_usage"] = raw_usage
+            cost = reported_cost(raw_usage)
+            if cost is not None:
+                # Provider-reported billed cost; the billing pipeline reads it
+                # in preference to a local estimate.
+                provider_info["openrouter_cost"] = cost
+
+        answers = response.get("answers")
+        return InternalDecisionResponse(
+            model=response.get("model") or model,
+            answers=answers if isinstance(answers, list) else [],
             usage=usage,
             id=response.get("id"),
             provider=response.get("provider"),

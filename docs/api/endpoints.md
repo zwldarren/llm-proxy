@@ -24,6 +24,7 @@ Every route the proxy serves. `X` in the auth column means "API key
 | POST | `/v1/messages/count_tokens` | X | Anthropic | Native upstream count when available, otherwise a local o200k_base estimate |
 | POST | `/v1/embeddings` | X | OpenAI | Embeddings |
 | POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models). The named model must carry the `supports_systemone` flag, otherwise `400 invalid_request_error` |
+| POST | `/v1/decisions` | X | Decisions | OpenAI's Decisions endpoint (`gpt-6-luna`), also served by System One models through the proxy's bridge. Gated by the same `supports_systemone` flag |
 | POST | `/v1/images/generations` | X | OpenAI | JSON body |
 | POST | `/v1/images/edits` | X | OpenAI | JSON or multipart (`image`, `image[]`, `mask`) |
 | POST | `/v1/audio/speech` | X | OpenAI | Binary audio response |
@@ -50,6 +51,7 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `openrouter` (STT) |
 | Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |
 | System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold), `ollama` (local models, v0.35+). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
+| Decisions (evaluation) | `openai` (native `/v1/decisions`), plus every System One provider above, which the proxy bridges onto a System One route. Only `openai` accepts inline images |
 
 The dedicated `anthropic` provider type is chat-only. The `typesafe` provider
 type is System One-only — assign it to models that serve `/v1/systemone`, and
@@ -63,11 +65,15 @@ OpenAI-compatible speech recognition (`qwen3-asr-flash`) is called through
 qwen model are rejected with a `400` `invalid_request_error` naming the
 limitation.
 
-Capability flags are additive: `supports_systemone` gates `/v1/systemone` and
+Capability flags are additive: `supports_systemone` marks a model as a decision
+model, which gates both `/v1/systemone` and `/v1/decisions` — they are two
+envelopes over the same evaluation primitives, and the provider translates
+between them (see [Decisions](decisions.md#one-endpoint-two-envelopes)). The flag
 does not restrict the model's chat service, so a model can serve both when its
-providers support both. A `/v1/systemone` request naming a model without the
-flag is rejected with a `400 invalid_request_error` before any provider is
-called.
+providers support both. A request to either evaluation endpoint naming a model
+without the flag is rejected with a `400 invalid_request_error` before any
+provider is called. The flag also gates being selected as the
+[Routing Judge](routing.md#routing-judge).
 
 ## WebSocket endpoints
 

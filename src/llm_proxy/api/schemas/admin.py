@@ -12,7 +12,11 @@ from pydantic import (
     model_validator,
 )
 
-from llm_proxy.config.types.model import ProviderSelectionStrategy, normalize_pricing_tiers
+from llm_proxy.config.types.model import (
+    SUPPORTS_SYSTEMONE_DESCRIPTION,
+    ProviderSelectionStrategy,
+    normalize_pricing_tiers,
+)
 from llm_proxy.config.types.provider import AppAttributionValidators
 from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
 from llm_proxy.core.exceptions import ValidationError
@@ -373,11 +377,7 @@ class ModelBase(BaseModel, ValidatorMixin):
     )
     supports_systemone: bool = Field(
         default=False,
-        description=(
-            "Whether this model serves System One evaluations (e.g. /v1/systemone); "
-            "gates that endpoint, and gates being selected as the routing judge. "
-            "Additive like the other capability flags"
-        ),
+        description=SUPPORTS_SYSTEMONE_DESCRIPTION,
     )
     # Display-only attributes, named after their models.dev counterparts so
     # operators familiar with models.dev can map entries 1:1. These do not
@@ -677,11 +677,7 @@ class ModelRead(BaseModel):
     )
     supports_systemone: bool = Field(
         default=False,
-        description=(
-            "Whether this model serves System One evaluations (e.g. /v1/systemone); "
-            "gates that endpoint, and gates being selected as the routing judge. "
-            "Additive like the other capability flags"
-        ),
+        description=SUPPORTS_SYSTEMONE_DESCRIPTION,
     )
     attachment: bool = Field(
         default=False,

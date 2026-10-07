@@ -77,7 +77,10 @@ const api = [
   },
   {
     text: 'Evaluation',
-    items: [{ text: 'System One evaluation', link: '/api/systemone' }],
+    items: [
+      { text: 'System One evaluation', link: '/api/systemone' },
+      { text: 'Decisions', link: '/api/decisions' },
+    ],
   },
   {
     text: 'Models',

@@ -23,10 +23,12 @@ if TYPE_CHECKING:
     from llm_proxy.core.exceptions import ProviderError
     from llm_proxy.http.client import AsyncSession
     from llm_proxy.models import (
+        InternalDecisionRequest,
         InternalEmbeddingRequest,
         InternalRequest,
         InternalSpeechRequest,
         InternalSystemOneRequest,
+        InternalSystemOneResponse,
         InternalTranscriptionRequest,
         InternalTranscriptionResponse,
         InternalTranslationRequest,
@@ -136,13 +138,43 @@ class EmbeddingSelf(CapabilityHost, Protocol):
 
 
 class SystemOneSelf(CapabilityHost, Protocol):
-    """Self-type for ``SystemOneCapabilityMixin``."""
+    """Self-type for ``SystemOneCapabilityMixin``.
+
+    ``DecisionsOverSystemOneMixin`` also annotates its ``self`` with this: the
+    decisions direction it adds asks the System One transport for its route and
+    posts through it.
+    """
 
     SYSTEMONE_ENDPOINT: str
 
     def _systemone_url(self, request: InternalSystemOneRequest) -> str: ...
 
+    def _systemone_decisions_url(self, request: InternalSystemOneRequest) -> str: ...
+
     def _systemone_headers(self) -> dict[str, str]: ...
+
+    async def _post_systemone(
+        self, url: str, request: InternalSystemOneRequest, **kwargs: Any
+    ) -> InternalSystemOneResponse: ...
+
+    async def systemone(self, request: InternalSystemOneRequest, **kwargs: Any) -> Any: ...
+
+
+class DecisionsSelf(CapabilityHost, Protocol):
+    """Self-type for ``DecisionsCapabilityMixin``.
+
+    ``SystemOneOverDecisionsMixin`` also annotates its ``self`` with this: the
+    ``systemone`` direction it adds borrows the decisions endpoint and headers
+    rather than declaring its own.
+    """
+
+    DECISIONS_ENDPOINT: str
+
+    def _decisions_url(self, request: InternalDecisionRequest) -> str: ...
+
+    def _decisions_headers(self) -> dict[str, str]: ...
+
+    async def decisions(self, request: InternalDecisionRequest, **kwargs: Any) -> Any: ...
 
 
 class ImageSelf(CapabilityHost, Protocol):
@@ -224,6 +256,7 @@ __all__ = [
     "AudioSelf",
     "CapabilityHost",
     "ChatSelf",
+    "DecisionsSelf",
     "EmbeddingSelf",
     "ImageSelf",
     "SystemOneSelf",

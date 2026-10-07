@@ -512,7 +512,7 @@ export default {
       stt: "STT",
       embedding: "向量嵌入",
       realtime: "实时语音",
-      systemone: "System One",
+      systemone: "System One / Decisions",
       reasoning: "推理",
       toolCall: "工具调用",
       structuredOutput: "结构化输出",
@@ -625,7 +625,7 @@ export default {
       embedding: "处理向量嵌入请求，控制 /v1/embeddings 端点。",
       realtime: "通过 Realtime WebSocket 中继提供服务（对应 models.dev 的实时语音类模型）。",
       systemone:
-        "处理 System One 评估请求（评估内容 + 类型化问题，逐题返回答案），控制 /v1/systemone 端点。",
+        "处理评估请求（证据 + 类型化问题，逐题返回答案）。一个开关同时控制两种报文：/v1/systemone（state + questions）与 /v1/decisions（input + questions），由 provider 桥接到上游实际支持的格式。该标记同时决定模型能否作为路由裁判。",
     },
     // 能力配置页：仅展示的 models.dev 属性
     capInfoHeader: "展示属性（models.dev）",

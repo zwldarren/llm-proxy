@@ -261,7 +261,7 @@ async def test_build_request_context_rejects_non_systemone_model():
 
     fastapi_request = _make_context_request(model_config)
 
-    with pytest.raises(ValidationError, match="not marked as a System One model"):
+    with pytest.raises(ValidationError, match="not marked as a decision model"):
         await _build_request_context(
             mock_request, fastapi_request, request_type=RequestType.SYSTEMONE
         )
@@ -288,6 +288,55 @@ async def test_build_request_context_allows_systemone_model():
     )
 
     assert result.request_type is RequestType.SYSTEMONE
+
+
+@pytest.mark.asyncio
+async def test_build_request_context_rejects_non_decision_model_for_decisions():
+    """A model not marked System One cannot serve /v1/decisions either.
+
+    One flag gates both evaluation endpoints, because they are two envelopes
+    over the same primitives: without the gate, a chat model would resolve to an
+    adapter that cannot answer and fail with an opaque 500.
+    """
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.core.request_type import RequestType
+
+    mock_request = MagicMock()
+    mock_request.model = "chat-only"
+
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.supports_systemone = False
+
+    fastapi_request = _make_context_request(model_config)
+
+    with pytest.raises(ValidationError, match="not marked as a decision model"):
+        await _build_request_context(
+            mock_request, fastapi_request, request_type=RequestType.DECISIONS
+        )
+
+
+@pytest.mark.asyncio
+async def test_build_request_context_allows_systemone_model_for_decisions():
+    """A model marked System One may also serve /v1/decisions."""
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.core.request_type import RequestType
+
+    mock_request = MagicMock()
+    mock_request.model = "jev-latest"
+
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.supports_systemone = True
+    model_config.max_retries = None
+
+    fastapi_request = _make_context_request(model_config)
+
+    result = await _build_request_context(
+        mock_request, fastapi_request, request_type=RequestType.DECISIONS
+    )
+
+    assert result.request_type is RequestType.DECISIONS
 
 
 @pytest.mark.asyncio

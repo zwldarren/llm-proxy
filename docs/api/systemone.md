@@ -9,6 +9,12 @@ Evaluate a state against a map of typed questions and get back one structured
 answer per question. This endpoint mirrors [TypeSafe's System One API](https://docs.typesafe.ai/api)
 and is also served by OpenRouter's `/systemone` endpoint.
 
+::: tip Sibling endpoint
+[Decisions](decisions.md) (`POST /v1/decisions`) answers the same three
+primitives under OpenAI's field names. Both endpoints work on every evaluation
+model: the proxy translates between the two envelopes at the provider.
+:::
+
 ::: endpoint POST /v1/systemone
 :::
 
@@ -153,10 +159,16 @@ a System One model on the request path without going through this endpoint.
 | Provider type | Base URL | Notes |
 | --- | --- | --- |
 | `typesafe` | `https://api.typesafe.ai/v1` | TypeSafe direct (the Jev model). Chat requests are rejected. An OpenRouter-namespaced `typesafe/…` model id is reduced to the bare id before the request is sent. |
-| `openrouter` | `https://openrouter.ai/api/v1` | TypeSafe's Jev resold through OpenRouter. OpenRouter itself maps bare `jev-*` model ids onto its `typesafe/` namespace. |
+| `openrouter` | `https://openrouter.ai/api/v1` | TypeSafe's Jev resold through OpenRouter. OpenRouter itself maps bare `jev-*` model ids onto its `typesafe/` namespace. This is their `/api/v1/systemone` route, the compatibility alias for clients already pointed at TypeSafe; they also serve the same envelope on a still-alpha `/api/alpha/decisions` route, which [`/v1/decisions`](decisions.md) can be pointed at. |
 | `ollama` | `http://localhost:11434` | Local System One models (`nimble`, `clef`, `tev`) on Ollama v0.35 or later. Chat and embeddings use the native `/api/*` surface; `/v1/systemone` is served from local models only — cloud models are rejected with a `400`. |
+| `openai` | `https://api.openai.com/v1` | Bridged: the `state` and typed `questions` are translated into a `POST /v1/decisions` request and the answers translated back. Rubrics have nowhere to live in a `predicate`, so a `noul` `criteria` map is folded into the question text, and Ollama-only fields are dropped. |
+
+Every provider above also serves [`/v1/decisions`](decisions.md) for the same
+models, on the same upstream route. OpenRouter's second route for that envelope
+is still alpha, so reaching it is a deployment choice rather than the default.
 
 ## Related
 
+- [Decisions](decisions.md) — the sibling envelope (OpenAI's `/v1/decisions`)
 - [Endpoint Index](endpoints.md)
 - [Errors & Rate Limits](errors.md)

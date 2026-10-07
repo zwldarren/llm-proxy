@@ -9,6 +9,7 @@ from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.conversion import plan_conversion
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_output
+from llm_proxy.core.request_type import RequestType
 from llm_proxy.models import (
     ConversionTier,
     InternalImageEditRequest,
@@ -26,8 +27,10 @@ from llm_proxy.providers.base import (
 from llm_proxy.providers.capabilities import (
     AudioCapabilityMixin,
     ChatCapabilityMixin,
+    DecisionsCapabilityMixin,
     EmbeddingCapabilityMixin,
     ImageCapabilityMixin,
+    SystemOneOverDecisionsMixin,
 )
 from llm_proxy.providers.openai.client_headers import get_client_headers
 from llm_proxy.providers.openai.sse_fallback import parse_json_or_sse
@@ -74,6 +77,8 @@ class OpenAIAdapter(
     EmbeddingCapabilityMixin,
     ImageCapabilityMixin,
     AudioCapabilityMixin,
+    DecisionsCapabilityMixin,
+    SystemOneOverDecisionsMixin,
     BaseHttpProvider,
 ):
     _DEFAULT_PROVIDER_NAME = "openai"
@@ -99,6 +104,18 @@ class OpenAIAdapter(
     SPEECH_ENDPOINT = "/audio/speech"
     TRANSCRIPTION_ENDPOINT = "/audio/transcriptions"
     TRANSLATION_ENDPOINT = "/audio/translations"
+    # OpenAI serves the Decisions endpoint natively; ``DEFAULT_BASE_URL`` ends at
+    # ``/v1``, so this resolves to ``https://api.openai.com/v1/decisions``. The
+    # same URL answers ``/v1/systemone`` for a Decisions model, because
+    # ``SystemOneOverDecisionsMixin`` bridges that envelope onto this one.
+    DECISIONS_ENDPOINT = "/decisions"
+
+    #: The upstream documents ``safety_identifier`` on this request type, so it
+    #: must survive the unknown-fields policy that would otherwise strip it as
+    #: an unrecognized extra (OpenAI's other request types document no extras).
+    EXEMPT_EXTRA_KEYS = {
+        RequestType.DECISIONS: frozenset({"safety_identifier"}),
+    }
 
     def _target_endpoint(self) -> str:
         """OpenAI adapter targets the Responses API endpoint."""

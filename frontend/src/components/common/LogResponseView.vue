@@ -389,7 +389,11 @@ const isToolResultOversized = (output: string): boolean => output.length > MAX_I
 
       <!-- System One evaluation: one typed answer per question id -->
       <div
-        v-else-if="parsedResponse.protocol === 'systemone' && parsedResponse.systemOneAnswers"
+        v-else-if="
+          (parsedResponse.protocol === 'systemone' ||
+            parsedResponse.protocol === 'openai-decisions') &&
+          parsedResponse.systemOneAnswers
+        "
         class="space-y-3"
       >
         <h4 class="text-xs uppercase font-bold text-muted-foreground flex items-center gap-2">

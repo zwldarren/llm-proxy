@@ -421,3 +421,102 @@ describe("parseLogResponse — System One", () => {
     expect(byId.c?.value).toBe("x");
   });
 });
+
+describe("parseLogResponse — Decisions", () => {
+  const body = {
+    model: "gpt-6-luna",
+    answers: [
+      { type: "predicate", name: "urgent", probability: 0.92 },
+      {
+        type: "choice",
+        name: "department",
+        choice: true,
+        confidence: 0.81,
+        probabilities: [
+          { value: true, probability: 0.88 },
+          { value: "billing", probability: 0.12 },
+        ],
+      },
+      {
+        type: "score",
+        name: "severity",
+        score: 1.05,
+        confidence: 0.92,
+        probabilities: [
+          { value: 0, label: "Cosmetic", probability: 0 },
+          { value: 1, label: "Workaround", probability: 0.95 },
+          { value: 2, label: "Blocked", probability: 0.05 },
+        ],
+      },
+    ],
+    usage: { input_tokens: 296, output_tokens: 0, total_tokens: 296 },
+  };
+
+  it("parses one answer per question for the decisions request type", () => {
+    const r = parseLogResponse(body, "decisions");
+    expect(r.protocol).toBe("openai-decisions");
+    expect(r.hasData).toBe(true);
+    expect(r.meta.model).toBe("gpt-6-luna");
+    expect(r.systemOneAnswers?.map((a) => a.id)).toEqual(["urgent", "department", "severity"]);
+  });
+
+  it("reads the primary value per kind", () => {
+    const r = parseLogResponse(body, "decisions");
+    const byId = Object.fromEntries((r.systemOneAnswers ?? []).map((a) => [a.id, a]));
+    expect(byId.urgent?.value).toBe(0.92);
+    expect(byId.department?.value).toBe("true");
+    expect(byId.severity?.value).toBe(1.05);
+  });
+
+  it("normalizes predicate onto the shared noul kind", () => {
+    const r = parseLogResponse(body, "decisions");
+    const byId = Object.fromEntries((r.systemOneAnswers ?? []).map((a) => [a.id, a]));
+    expect(byId.urgent?.kind).toBe("noul");
+    // The badge still shows what the upstream said.
+    expect(byId.urgent?.type).toBe("predicate");
+    expect(formatSystemOneAnswerValue(byId.urgent!)).toBe("92.0%");
+  });
+
+  it("turns the probability array into labeled entries and a legend", () => {
+    const r = parseLogResponse(body, "decisions");
+    const severity = r.systemOneAnswers?.find((a) => a.id === "severity");
+    expect(severity?.probabilities).toEqual([
+      { label: "Cosmetic", value: 0 },
+      { label: "Workaround", value: 0.95 },
+      { label: "Blocked", value: 0.05 },
+    ]);
+    expect(severity?.legend).toEqual({
+      "0": "Cosmetic",
+      "1": "Workaround",
+      "2": "Blocked",
+    });
+    expect(formatSystemOneAnswerValue(severity!)).toBe("1.05 · Workaround");
+  });
+
+  it("labels a boolean choice option by its value", () => {
+    const r = parseLogResponse(body, "decisions");
+    const department = r.systemOneAnswers?.find((a) => a.id === "department");
+    expect(department?.probabilities).toEqual([
+      { label: "true", value: 0.88 },
+      { label: "billing", value: 0.12 },
+    ]);
+    expect(department?.confidence).toBe(0.81);
+  });
+
+  it("identifies an unnamed answer by its position", () => {
+    const r = parseLogResponse({ answers: [{ type: "predicate", probability: 0.5 }] }, "decisions");
+    expect(r.systemOneAnswers?.[0]?.id).toBe("#0");
+  });
+
+  it("keeps unmodeled answer fields in extra", () => {
+    const r = parseLogResponse(
+      { answers: [{ type: "predicate", name: "a", probability: 0.5, note: "why" }] },
+      "decisions"
+    );
+    expect(r.systemOneAnswers?.[0]?.extra).toEqual({ note: "why" });
+  });
+
+  it("falls back to shape detection when request_type is absent", () => {
+    expect(parseLogResponse(body).protocol).toBe("openai-decisions");
+  });
+});

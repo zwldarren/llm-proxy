@@ -36,6 +36,10 @@ from llm_proxy.models.conversation import (
     Message,
     SystemMessage,
 )
+from llm_proxy.models.decisions import (
+    InternalDecisionRequest,
+    InternalDecisionResponse,
+)
 from llm_proxy.models.embedding import (
     EmbeddingData,
     InternalEmbeddingRequest,
@@ -134,6 +138,8 @@ __all__ = [
     "ImageEditSource",
     "ImageSize",
     "ImageSource",
+    "InternalDecisionRequest",
+    "InternalDecisionResponse",
     "InternalEmbeddingRequest",
     "InternalEmbeddingResponse",
     "InternalImageEditRequest",

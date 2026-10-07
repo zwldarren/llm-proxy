@@ -526,7 +526,7 @@ export default {
       stt: "STT",
       embedding: "Embedding",
       realtime: "Realtime",
-      systemone: "System One",
+      systemone: "System One / Decisions",
       reasoning: "Reasoning",
       toolCall: "Tool call",
       structuredOutput: "Structured output",
@@ -643,7 +643,7 @@ export default {
       realtime:
         "Served through the Realtime WebSocket relay (models.dev: realtime-capable models).",
       systemone:
-        "Serves System One evaluation requests — a state plus typed questions, one answer each. Gates the /v1/systemone endpoint.",
+        "Serves evaluation requests — evidence plus typed questions, one answer each. One flag for both envelopes: /v1/systemone (state + questions) and /v1/decisions (input + questions), which the provider bridges onto whichever its upstream speaks. Also gates being selected as the routing judge.",
     },
     // Capability tab: informational models.dev attributes (display-only)
     capInfoHeader: "Informational (models.dev)",

@@ -26,7 +26,8 @@ import { asString, isRecord, parseToolArgs, safeStringify } from "@/utils/logFor
 
 // --- Types -------------------------------------------------------------
 
-export type RequestProtocol = "openai-chat" | "anthropic" | "responses" | "systemone" | "unknown";
+export type RequestProtocol =
+  "openai-chat" | "openai-decisions" | "anthropic" | "responses" | "systemone" | "unknown";
 
 export type MessageBlock =
   | { kind: "text"; text: string }
@@ -97,18 +98,29 @@ export interface ParsedLogRequest {
   messages: ParsedLogMessage[];
   /** False when the body matched no known chat shape (non-standard payload) */
   isChatLike: boolean;
-  /** System One evaluation payload (state + typed questions), when present. */
+  /**
+   * Evaluation payload (evidence + typed questions), when present. System One
+   * and Decisions are two envelopes over the same shape, so both parse into
+   * this and render through the same cards.
+   */
   systemOne?: SystemOneRequestInfo;
 }
 
-/** One typed System One question, rendered as a card in the request view. */
+/**
+ * One typed evaluation question, rendered as a card in the request view.
+ *
+ * System One keys these by id and names its kinds noul/choice/score; Decisions
+ * names them in the question object and says predicate/choice/score. Both are
+ * normalized here, so the card is driven by the criteria shape rather than by
+ * the protocol.
+ */
 export interface SystemOneQuestionInfo {
-  /** Question id, echoed as the key of the matching answer. */
+  /** Question id: the System One key, or the Decisions `name` (position when unnamed). */
   id: string;
   /**
-   * Raw upstream type: noul | choice | score | .... Left as the raw string
-   * because the badge shows it verbatim and the card is driven by the criteria
-   * shape, not by the kind, so there is nothing to normalize it for.
+   * Raw upstream type: noul | predicate | choice | score | .... Left as the raw
+   * string because the badge shows it verbatim and the card is driven by the
+   * criteria shape, not by the kind, so there is nothing to normalize it for.
    */
   type?: string;
   /** Free-form instructions the model answers against, when sent as a string. */
@@ -119,9 +131,12 @@ export interface SystemOneQuestionInfo {
   extra: Record<string, unknown>;
 }
 
-/** System One request payload: the evaluated state plus its typed questions. */
+/** Evaluation request payload: the evidence plus its typed questions. */
 export interface SystemOneRequestInfo {
-  /** Content under evaluation: a string, or a JSON object/array of context. */
+  /**
+   * Content under evaluation: a string, JSON object/array of context (System
+   * One `state`), or a message array (Decisions `input`).
+   */
   state: unknown;
   questions: SystemOneQuestionInfo[];
 }
@@ -182,6 +197,20 @@ const SYSTEMONE_SECTION_KEYS = new Set(["state", "questions"]);
 
 /** Question keys the card renders explicitly; everything else is kept in `extra`. */
 const SYSTEMONE_QUESTION_KEYS = new Set(["type", "instructions", "criteria"]);
+
+/**
+ * Section keys only a Decisions payload carries. Decisions is the same
+ * evaluation shape as System One under different names, so it also has its own
+ * `questions`; scoping both keeps a `questions` field on any other body in the
+ * generic parameter grid instead of silently disappearing.
+ */
+const DECISIONS_SECTION_KEYS = new Set(["input", "questions"]);
+
+/** Question keys the card renders explicitly; everything else is kept in `extra`. */
+const DECISIONS_QUESTION_KEYS = new Set(["type", "name", "instructions", "choices", "levels"]);
+
+/** Question kinds a Decisions `type` can name. */
+const DECISIONS_QUESTION_TYPES = new Set(["predicate", "choice", "score"]);
 
 // --- Block-level normalization ------------------------------------------
 
@@ -715,13 +744,37 @@ function flattenMessageText(content: unknown): string {
   return "";
 }
 
+/**
+ * Decide whether a body is a Decisions payload: shared evidence in `input`
+ * plus an ordered `questions` array.
+ *
+ * A custom or rejected Responses-style body can carry both fields by accident,
+ * so the log's `request_type` is authoritative when it records one. Without
+ * it, the questions must look like Decisions questions — a genuine payload
+ * always has at least one (the schema requires `min_length=1`).
+ */
+function isDecisionsRequest(body: Record<string, unknown>, requestType?: string): boolean {
+  if (body.input === undefined || !Array.isArray(body.questions)) return false;
+  if (requestType !== undefined) return requestType === "decisions";
+  return body.questions.length > 0 && body.questions.every(looksLikeDecisionsQuestion);
+}
+
+function looksLikeDecisionsQuestion(question: unknown): boolean {
+  if (!isRecord(question)) return false;
+  return DECISIONS_QUESTION_TYPES.has(asString(question.type) ?? "");
+}
+
 // --- Public entry point ----------------------------------------------------
 
 /**
  * Parse a stored `request_body` into a protocol-agnostic structure.
  * Returns null when the body isn't a non-empty object.
+ *
+ * @param requestType Optional `log_metadata.request_type` — authoritative for
+ *                    shapes that share fields (a Decisions body and a custom
+ *                    Responses body both carry `input`).
  */
-export function parseLogRequest(body: unknown): ParsedLogRequest | null {
+export function parseLogRequest(body: unknown, requestType?: string): ParsedLogRequest | null {
   if (typeof body === "string") {
     try {
       body = JSON.parse(body);
@@ -760,6 +813,11 @@ export function parseLogRequest(body: unknown): ParsedLogRequest | null {
         messages = parsed;
       }
     }
+  } else if (isDecisionsRequest(body, requestType)) {
+    // Decisions evaluation: shared `input` plus an ordered questions array.
+    // Checked before the Responses branch below, which claims any body with an
+    // `input` field.
+    protocol = "openai-decisions";
   } else if (body.input !== undefined || typeof body.instructions === "string") {
     // OpenAI Responses API.
     protocol = "responses";
@@ -790,6 +848,7 @@ export function parseLogRequest(body: unknown): ParsedLogRequest | null {
     if (value === undefined) continue;
     if (SECTION_KEYS.has(key)) continue;
     if (protocol === "systemone" && SYSTEMONE_SECTION_KEYS.has(key)) continue;
+    if (protocol === "openai-decisions" && DECISIONS_SECTION_KEYS.has(key)) continue;
     if (isScalar(value)) {
       scalarParams.push({ key, value: formatScalar(value) });
     } else if (Array.isArray(value) && value.every(isScalar)) {
@@ -803,7 +862,12 @@ export function parseLogRequest(body: unknown): ParsedLogRequest | null {
   const tools = normalizeToolDefs(body);
   const toolChoice = formatToolChoice(body.tool_choice);
 
-  const systemOne = protocol === "systemone" ? parseSystemOneRequest(body) : undefined;
+  let systemOne: SystemOneRequestInfo | undefined;
+  if (protocol === "systemone") {
+    systemOne = parseSystemOneRequest(body);
+  } else if (protocol === "openai-decisions") {
+    systemOne = parseDecisionsRequest(body);
+  }
 
   return {
     protocol,
@@ -846,4 +910,107 @@ function parseSystemOneRequest(body: Record<string, unknown>): SystemOneRequestI
     }
   }
   return { state: body.state, questions };
+}
+
+/**
+ * Extract the Decisions evidence and its typed questions for display.
+ *
+ * Decisions is System One's evaluation shape under different names, so the
+ * questions are normalized onto `SystemOneQuestionInfo` and rendered by the
+ * same card: `name` becomes the card id and `choices`/`levels` are folded onto
+ * the `criteria` map/array the card already draws. An unnamed question is
+ * identified by its position (`#N`) — the only correlation the wire format
+ * offers, and the same convention the answer side uses for an unnamed answer.
+ * A bridged System One upstream keys it internally as `__unnamed_question_N`,
+ * but the bridge strips that back to a null name before the client sees it, so
+ * both columns still agree on `#N`.
+ */
+function parseDecisionsRequest(body: Record<string, unknown>): SystemOneRequestInfo {
+  const questions: SystemOneQuestionInfo[] = [];
+  const rawQuestions = body.questions;
+  if (Array.isArray(rawQuestions)) {
+    rawQuestions.forEach((question, index) => {
+      if (!isRecord(question)) return;
+      const instructions = asString(question.instructions);
+      const extra: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(question)) {
+        if (DECISIONS_QUESTION_KEYS.has(key)) continue;
+        extra[key] = value;
+      }
+      // The endpoint requires a string, but a log can hold a request that was
+      // rejected for sending something else — keep it visible in `extra` rather
+      // than dropping the field the rejection was about.
+      if (instructions === undefined && question.instructions !== undefined) {
+        extra.instructions = question.instructions;
+      }
+      questions.push({
+        id: asString(question.name) ?? `#${index}`,
+        type: asString(question.type),
+        instructions,
+        criteria: decisionsCriteria(question),
+        extra,
+      });
+    });
+  }
+  // The evidence is a string or a message array, kept as-is except that inline
+  // base64 images are reduced to a size placeholder so the JSON viewer cannot
+  // lay out megabytes of data-URL text.
+  return { state: normalizeDecisionsInput(body.input), questions };
+}
+
+/**
+ * Fold a Decisions question's options or levels onto the criteria shape the
+ * card renders: a score rubric becomes the ordered array of level strings the
+ * card numbers, and a choice becomes the option map it lists.
+ */
+function decisionsCriteria(question: Record<string, unknown>): unknown {
+  if (Array.isArray(question.levels)) {
+    return question.levels.map((level) => {
+      if (!isRecord(level)) return String(level);
+      const label = asString(level.label) ?? "";
+      const description = asString(level.description);
+      if (description && label) return `${label} \u2014 ${description}`;
+      return label || description || "";
+    });
+  }
+  if (Array.isArray(question.choices)) {
+    const criteria: Record<string, unknown> = {};
+    for (const choice of question.choices) {
+      // A choice without a value has no key to list it under; the schema
+      // requires one, so only a rejected request reaches this.
+      if (!isRecord(choice) || choice.value === undefined) continue;
+      criteria[String(choice.value)] = choice.description ?? "";
+    }
+    return criteria;
+  }
+  // Neither branch matched: choices/levels is malformed (often why the request
+  // was rejected), so return it raw rather than dropping the field the
+  // rejection was about. The card's criteria fallback renders it.
+  return question.levels ?? question.choices;
+}
+
+/**
+ * Reduce inline base64 payloads in a Decisions `input` message array to a size
+ * placeholder. Decisions accepts only inline base64 `image_url` data URLs (up
+ * to `MAX_IMAGE_PARTS` of them), and the state renders through a JSON viewer
+ * that does not truncate — a logged request with a few images would otherwise
+ * dump megabytes of base64 into the DOM and freeze the log view. Everything
+ * else in the messages is kept verbatim.
+ */
+function normalizeDecisionsInput(input: unknown): unknown {
+  if (!Array.isArray(input)) return input;
+  return input.map((message) => {
+    if (!isRecord(message) || !Array.isArray(message.content)) return message;
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        if (!isRecord(part) || part.type !== "input_image") return part;
+        const url = asString(part.image_url);
+        const dataUrl = url ? parseDataUrl(url) : null;
+        if (!dataUrl) return part;
+        const mediaType = dataUrl.mediaType ?? "image";
+        return { ...part, image_url: `[base64 ${mediaType}, ${dataUrl.bytes ?? 0} bytes]` };
+      }),
+    };
+  });
 }

@@ -20,6 +20,7 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import BaseHttpProvider
 from llm_proxy.providers.capabilities import (
     ChatCapabilityMixin,
+    DecisionsOverSystemOneMixin,
     EmbeddingCapabilityMixin,
     SystemOneCapabilityMixin,
 )
@@ -44,6 +45,7 @@ _serializer = get_provider_serializer("ollama")
 class OllamaAdapter(
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
+    DecisionsOverSystemOneMixin,
     SystemOneCapabilityMixin,
     BaseHttpProvider,
 ):
@@ -53,6 +55,11 @@ class OllamaAdapter(
     (Ollama v0.35+) is served from ``/v1/systemone`` -- the OpenAI-compatibility
     prefix, not the native one -- and shares TypeSafe's wire format, so it
     reuses the capability mixin's body builder, parser and endpoint plumbing.
+
+    ``/v1/decisions`` is served by bridging onto that same endpoint
+    (``DecisionsOverSystemOneMixin``); a Decisions request's inline images
+    become the local ``images`` field this upstream documents, and the other
+    two System One upstreams drop them instead.
     """
 
     #: Branding for the admin provider catalog (GET /api/config/provider-types).

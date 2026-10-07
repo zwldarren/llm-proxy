@@ -7,6 +7,17 @@ from pydantic import BaseModel, Field, field_validator
 
 from llm_proxy.core.exceptions import ValidationError
 
+#: Shared description for the ``supports_systemone`` capability flag. The config
+#: model and both admin schemas declare the same field, so the copy lives here
+#: once instead of drifting across three ``Field(description=...)`` sites.
+SUPPORTS_SYSTEMONE_DESCRIPTION = (
+    "Whether this model serves evaluation requests — System One "
+    "(/v1/systemone) and Decisions (/v1/decisions), which the provider bridges "
+    "onto whichever envelope its upstream speaks. Gates both endpoints, and "
+    "gates being selected as the routing judge. Additive like the other "
+    "capability flags"
+)
+
 
 class ProviderSelectionStrategy(StrEnum):
     """Strategy for picking among same-priority providers of a model.
@@ -312,11 +323,7 @@ class ModelConfig(BaseModel):
     )
     supports_systemone: bool = Field(
         default=False,
-        description=(
-            "Whether this model serves System One evaluations (e.g. /v1/systemone); "
-            "gates that endpoint, and gates being selected as the routing judge. "
-            "Additive like the other capability flags"
-        ),
+        description=SUPPORTS_SYSTEMONE_DESCRIPTION,
     )
     context_length: int | None = Field(
         default=None,

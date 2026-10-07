@@ -8,6 +8,8 @@ from typing import Any, ClassVar, TypeVar
 from llm_proxy.core.exceptions import AdapterNotFoundError, ValidationError
 from llm_proxy.core.registry_base import ThreadSafeRegistry
 from llm_proxy.models import (
+    InternalDecisionRequest,
+    InternalDecisionResponse,
     InternalEmbeddingRequest,
     InternalEmbeddingResponse,
     InternalImageRequest,
@@ -242,6 +244,14 @@ class BaseAdapter(ABC):
     ) -> InternalSystemOneResponse:
         """Evaluate a state against typed questions (TypeSafe System One)."""
         raise NotImplementedError(f"{self.provider_name} does not support System One requests.")
+
+    async def decisions(
+        self,
+        request: InternalDecisionRequest,
+        **kwargs: Any,
+    ) -> InternalDecisionResponse:
+        """Answer typed questions about shared evidence (OpenAI Decisions)."""
+        raise NotImplementedError(f"{self.provider_name} does not support Decisions requests.")
 
     def from_image_provider_format(self, response: dict[str, Any]) -> InternalImageResponse:
         """Convert image generation response from provider's native format to unified format.

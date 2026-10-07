@@ -572,6 +572,13 @@ class BaseHttpProvider(BaseAdapter, ABC):
             "or override _build_systemone_raw"
         )
 
+    def _build_decisions_raw(self, request: Any) -> dict[str, Any]:
+        """Build the raw Decisions body. Provided by ``DecisionsCapabilityMixin``."""
+        raise NotImplementedError(
+            f"{type(self).__name__}: include DecisionsCapabilityMixin "
+            "or override _build_decisions_raw"
+        )
+
     def _build_speech_raw(self, request: Any) -> dict[str, Any]:
         """Build the raw speech body. Provided by ``AudioCapabilityMixin``."""
         raise NotImplementedError(
@@ -670,6 +677,8 @@ class BaseHttpProvider(BaseAdapter, ABC):
             return OutboundBody(json_body=_finalize(self._build_embedding_raw(request)))
         if rt == RequestType.SYSTEMONE:
             return OutboundBody(json_body=_finalize(self._build_systemone_raw(request)))
+        if rt == RequestType.DECISIONS:
+            return OutboundBody(json_body=_finalize(self._build_decisions_raw(request)))
         if rt == RequestType.SPEECH:
             return OutboundBody(json_body=_finalize(self._build_speech_raw(request)))
         if rt == RequestType.IMAGE_GENERATION:
@@ -989,6 +998,13 @@ class BaseHttpProvider(BaseAdapter, ABC):
     def _resolve_endpoint_url(
         self, endpoint_type: str, default_path: str, model: str | None = None
     ) -> str:
+        """Resolve a provider endpoint URL, preferring an explicit override.
+
+        ``default_path`` is appended to the configured base URL. An
+        ``endpoint_base_urls`` override wins and is used as-is, which is how an
+        endpoint reached on another host — or outside the base URL's versioned
+        prefix — is configured.
+        """
         if self._endpoint_base_urls and endpoint_type in self._endpoint_base_urls:
             url = self._endpoint_base_urls[endpoint_type].rstrip("/")
         else:

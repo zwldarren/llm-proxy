@@ -28,6 +28,31 @@ class TestOpenRouterSystemOne:
     def test_endpoint_url(self, adapter):
         assert adapter._systemone_url(_request()) == "https://openrouter.ai/api/v1/systemone"
 
+    def test_decisions_endpoint_shares_the_systemone_route(self, adapter):
+        """Both evaluation endpoints use the stable System One alias.
+
+        OpenRouter's second route for this envelope, ``/api/alpha/decisions``, is
+        still alpha and so is not the default (ADR-0019).
+        """
+        assert adapter._systemone_decisions_url(_request()) == (
+            "https://openrouter.ai/api/v1/systemone"
+        )
+
+    def test_the_alpha_decisions_route_is_reachable_by_configuration(self):
+        """Opting into the alpha route is a deployment choice, not a code change.
+
+        The route sits beside ``/api/v1`` rather than under it, so the override is a
+        full URL. It moves ``/v1/decisions`` only.
+        """
+        adapter = OpenRouterAdapter(
+            api_key="sk-or-test",
+            endpoint_base_urls={"decisions": "https://openrouter.ai/api/alpha/decisions"},
+        )
+        assert adapter._systemone_decisions_url(_request()) == (
+            "https://openrouter.ai/api/alpha/decisions"
+        )
+        assert adapter._systemone_url(_request()) == "https://openrouter.ai/api/v1/systemone"
+
     def test_body_forwards_openrouter_only_fields(self, adapter):
         outbound = adapter._build_outbound_body(
             _request(

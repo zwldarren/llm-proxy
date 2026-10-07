@@ -750,4 +750,4 @@ class TestAllExport:
         """Test __all__ has expected number of exports."""
         from llm_proxy.models import __all__
 
-        assert len(__all__) == 76
+        assert len(__all__) == 78

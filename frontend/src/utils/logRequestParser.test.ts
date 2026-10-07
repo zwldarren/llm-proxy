@@ -389,3 +389,165 @@ describe("parseLogRequest — System One", () => {
     });
   });
 });
+
+describe("parseLogRequest — Decisions", () => {
+  const body = {
+    model: "gpt-6-luna",
+    input: "I was charged twice for my order.",
+    questions: [
+      { type: "predicate", name: "urgent", instructions: "Is it urgent?" },
+      {
+        type: "choice",
+        name: "department",
+        instructions: "Which department?",
+        choices: [
+          { value: "billing", description: "Payments." },
+          { value: true, description: "Flagged." },
+          { value: "other" },
+        ],
+      },
+      {
+        type: "score",
+        name: "severity",
+        instructions: "How severe?",
+        levels: [{ label: "Cosmetic", description: "Appearance only." }, { label: "Blocked" }],
+      },
+    ],
+  };
+
+  it("detects decisions rather than responses", () => {
+    // Both shapes carry `input`; only decisions has an ordered `questions`
+    // array, so the Responses branch must not win.
+    const r = parseLogRequest(body)!;
+    expect(r.protocol).toBe("openai-decisions");
+    expect(r.systemOne?.state).toBe("I was charged twice for my order.");
+    expect(r.systemOne?.questions.map((q) => q.id)).toEqual(["urgent", "department", "severity"]);
+  });
+
+  it("folds choices onto the option map the card renders", () => {
+    const r = parseLogRequest(body)!;
+    // Boolean option values render as their word, matching what the answer echoes.
+    expect(r.systemOne?.questions[1]?.criteria).toEqual({
+      billing: "Payments.",
+      true: "Flagged.",
+      other: "",
+    });
+  });
+
+  it("folds level labels and descriptions onto the ordered rubric", () => {
+    const r = parseLogRequest(body)!;
+    expect(r.systemOne?.questions[2]?.criteria).toEqual(["Cosmetic — Appearance only.", "Blocked"]);
+  });
+
+  it("identifies an unnamed question by its position", () => {
+    const r = parseLogRequest({
+      model: "m",
+      input: "x",
+      questions: [{ type: "predicate", instructions: "Is it urgent?" }],
+    })!;
+    expect(r.systemOne?.questions[0]?.id).toBe("#0");
+  });
+
+  it("keeps input/questions out of the generic parameter grid", () => {
+    const r = parseLogRequest(body)!;
+    const keys = [...r.scalarParams.map((p) => p.key), ...r.objectParams.map((p) => p.key)];
+    expect(keys).not.toContain("input");
+    expect(keys).not.toContain("questions");
+    expect(r.scalarParams.map((p) => p.key)).toContain("model");
+  });
+
+  it("keeps unmodeled question fields and structured instructions in extra", () => {
+    const r = parseLogRequest({
+      input: "x",
+      questions: [
+        {
+          type: "predicate",
+          name: "q1",
+          instructions: { prompt: "Is it urgent?" },
+          weight: 3,
+        },
+      ],
+    })!;
+    const question = r.systemOne!.questions[0]!;
+    expect(question.instructions).toBeUndefined();
+    expect(question.extra).toEqual({ weight: 3, instructions: { prompt: "Is it urgent?" } });
+  });
+
+  it("renders a message-array input without flattening it", () => {
+    const r = parseLogRequest({
+      input: [{ role: "user", content: [{ type: "input_text", text: "Inspect this photo." }] }],
+      questions: [{ type: "predicate", instructions: "Damaged?" }],
+    })!;
+    expect(r.protocol).toBe("openai-decisions");
+    expect(Array.isArray(r.systemOne?.state)).toBe(true);
+  });
+
+  it("trusts request_type when the shape alone would not qualify", () => {
+    // A question whose type is not a Decisions kind only classifies as
+    // decisions because the log records the request type.
+    const r = parseLogRequest(
+      { input: "x", questions: [{ type: "refusal", reason: "nope" }] },
+      "decisions"
+    )!;
+    expect(r.protocol).toBe("openai-decisions");
+    expect(r.systemOne?.questions).toHaveLength(1);
+  });
+
+  it("leaves an unrelated questions array on a Responses body alone", () => {
+    const r = parseLogRequest({ input: "hello", questions: [{ question: "why" }] })!;
+    expect(r.protocol).toBe("responses");
+    expect(r.systemOne).toBeUndefined();
+    expect(r.objectParams.map((p) => p.key)).toContain("questions");
+  });
+
+  it("skips a choice without a value instead of keying it 'undefined'", () => {
+    const r = parseLogRequest({
+      input: "x",
+      questions: [
+        {
+          type: "choice",
+          name: "q",
+          choices: [{ value: "a", description: "A" }, { description: "no value" }],
+        },
+      ],
+    })!;
+    expect(r.systemOne?.questions[0]?.criteria).toEqual({ a: "A" });
+  });
+
+  it("keeps a malformed choices/levels field visible", () => {
+    const r = parseLogRequest({
+      input: "x",
+      questions: [{ type: "choice", name: "q", choices: "not-an-array" }],
+    })!;
+    expect(r.systemOne?.questions[0]?.criteria).toBe("not-an-array");
+  });
+
+  it("omits the separator when a level has no label", () => {
+    const r = parseLogRequest({
+      input: "x",
+      questions: [{ type: "score", name: "q", levels: [{ description: "Only a description." }] }],
+    })!;
+    expect(r.systemOne?.questions[0]?.criteria).toEqual(["Only a description."]);
+  });
+
+  it("reduces inline base64 images in input to a size placeholder", () => {
+    const r = parseLogRequest({
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: "Inspect this photo." },
+            { type: "input_image", image_url: "data:image/png;base64," + "a".repeat(1000) },
+          ],
+        },
+      ],
+      questions: [{ type: "predicate", instructions: "Damaged?" }],
+    })!;
+    const state = r.systemOne?.state as Array<{ content: unknown[] }>;
+    expect(JSON.stringify(state)).not.toContain("a".repeat(100));
+    expect(state[0]?.content[1]).toMatchObject({
+      type: "input_image",
+      image_url: "[base64 image/png, 750 bytes]",
+    });
+  });
+});
