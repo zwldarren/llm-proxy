@@ -106,10 +106,7 @@ def _log_judge_call(
         return
 
     from llm_proxy.core.request_utils import get_client_ip
-    from llm_proxy.observability.internal_call_logging import (
-        InternalCallLogEntry,
-        get_internal_call_log_service,
-    )
+    from llm_proxy.observability.log_intake import InternalCallLogEntry, record_internal_call
 
     input_tokens = _optional_number(judge.get("input_tokens"))
     output_tokens = _optional_number(judge.get("output_tokens"))
@@ -149,7 +146,7 @@ def _log_judge_call(
         },
     )
     try:
-        get_internal_call_log_service().log_call_background(
+        record_internal_call(
             entry,
             user_id=identity.user_id,
             user_identity=identity.user,

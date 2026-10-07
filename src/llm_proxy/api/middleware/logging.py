@@ -19,20 +19,9 @@ from llm_proxy.api.middleware.asgi_utils import (
     merge_response_headers,
     set_request_state,
 )
-from llm_proxy.core.identity import get_request_identity
-from llm_proxy.core.request_utils import get_client_ip
-from llm_proxy.observability.audit_helpers import (
-    determine_action_category,
-    determine_event_type,
-    determine_outcome,
-    determine_resource_id,
-    determine_resource_type,
-    get_server_hostname,
-)
+from llm_proxy.observability.log_intake import record_admin_request
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.redaction import body_marker
 from llm_proxy.observability.sampling import should_exclude_from_logging
-from llm_proxy.observability.types import LogType
 from llm_proxy.security.passwords import SENSITIVE_KEYS, mask_headers, mask_sensitive
 
 logger = get_logger(__name__)
@@ -97,73 +86,6 @@ def _capture_and_mask_body(body_bytes: bytes) -> Any:
         return body_data
     except Exception:
         return body_bytes.decode("utf-8", errors="replace")
-
-
-def _write_audit_log(
-    request: Request,
-    request_id: str,
-    status_code: int,
-    response_time_ms: int,
-    error_message: str | None = None,
-) -> None:
-    """Write an audit log entry for an admin API request."""
-    try:
-        from llm_proxy.config.manager import resolve_logging_config
-        from llm_proxy.observability.service import RequestLogCreate, RequestLogService
-
-        config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-
-        path = request.url.path
-        method = request.method
-        identity = get_request_identity(request)
-        client_ip = get_client_ip(request)
-
-        request_body = getattr(request.state, "request_body", {})
-        response_body = getattr(request.state, "response_body", {})
-        request_headers = getattr(request.state, "request_headers", {})
-        response_headers = getattr(request.state, "response_headers", {})
-
-        resource_id = determine_resource_id(path, request_body)
-        if not config.log_input_output:
-            # log_input_output=false keeps the metadata row but scrubs bodies.
-            # resource_id is derived from the real body above, before scrubbing.
-            request_body = body_marker(bodies_enabled=False)
-            response_body = body_marker(bodies_enabled=False)
-
-        log_data = RequestLogCreate(
-            request_id=request_id,
-            timestamp=time.time(),
-            endpoint=path,
-            method=method,
-            status_code=status_code,
-            response_time_ms=response_time_ms,
-            log_type=LogType.AUDIT,
-            user_identity=identity.display_name or client_ip,
-            user_id=getattr(identity, "user_id", None),
-            session_id=getattr(request.state, "session_id", None),
-            api_key_name=identity.api_key_name,
-            client_ip=client_ip,
-            user_agent=request.headers.get("user-agent"),
-            auth_method=identity.auth_method,
-            error_message=error_message,
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
-            event_type=determine_event_type(path),
-            action_category=determine_action_category(method),
-            resource_type=determine_resource_type(path),
-            resource_id=resource_id,
-            outcome=determine_outcome(status_code, error_message),
-            log_metadata={"is_api_endpoint": True},
-            request_headers=request_headers,
-            request_body=request_body,
-            response_headers=response_headers,
-            response_body=response_body,
-        )
-
-        service = RequestLogService(config)
-        service.create_log_background(log_data)
-    except Exception:
-        logger.debug("Failed to write audit log to database", exc_info=True)
 
 
 class HttpLoggingMiddleware:
@@ -233,7 +155,7 @@ class HttpLoggingMiddleware:
 
         await self.app(scope, body, send_with_request_id)
 
-        if should_audit and not get_request_state(scope, "audit_log_written", False):
+        if should_audit:
             response_time_ms = int((time.perf_counter() - start_time) * 1000)
             set_request_state(scope, "response_headers", captured_headers)
             if method == "GET":
@@ -250,8 +172,8 @@ class HttpLoggingMiddleware:
                 )
 
             error_message = get_request_state(scope, "error_message")
-            _write_audit_log(
-                request=Request(scope, body),
+            record_admin_request(
+                Request(scope, body),
                 request_id=request_id,
                 status_code=status_code,
                 response_time_ms=response_time_ms,

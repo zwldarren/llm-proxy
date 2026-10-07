@@ -8,12 +8,11 @@ before; these tests pin enforcement at ``_request_log_from_create`` so a new
 writer is covered automatically.
 """
 
-from unittest.mock import MagicMock
-
 from llm_proxy.config.types import ProxyConfig
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.config.types.server import ServerParams
+from llm_proxy.observability import log_intake
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.redaction import (
     BODIES_DISABLED_MARKER,
@@ -26,7 +25,6 @@ from llm_proxy.observability.service import (
     _BackgroundLogWriter,
     _request_log_from_create,
 )
-from llm_proxy.observability.tracing.handlers.audit_log import AuditLogHandler
 from llm_proxy.observability.types import LogType
 
 
@@ -221,7 +219,6 @@ class TestHandlerMarkers:
         return EventContext(**fields)
 
     def test_master_switch_off_labels_bodies_disabled(self):
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(log_input_output=False))
         context = self._context(
             should_log_input_output=False,
             should_capture_full_body=False,
@@ -232,7 +229,7 @@ class TestHandlerMarkers:
             metadata={},
         )
 
-        log = handler._build_log_create(MagicMock(), MagicMock(), context)
+        log = log_intake._build_success_row(context, LoggingConfig(log_input_output=False))
 
         assert log.request_body == {"_bodies_disabled": True}
         assert log.response_body == {"_bodies_disabled": True}
@@ -241,7 +238,6 @@ class TestHandlerMarkers:
         assert log.response_headers == {"x-request-id": "abc"}
 
     def test_sampled_out_labels_sampled_out(self):
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(log_input_output=True))
         context = self._context(
             should_log_input_output=True,
             should_capture_full_body=False,
@@ -250,14 +246,13 @@ class TestHandlerMarkers:
             metadata={},
         )
 
-        log = handler._build_log_create(MagicMock(), MagicMock(), context)
+        log = log_intake._build_success_row(context, LoggingConfig(log_input_output=True))
 
         assert log.request_body == {"_sampled_out": True}
         assert log.response_body == {"_sampled_out": True}
 
     def test_streaming_sampled_out_labels_sampled_out(self):
         """A sampled-out stream stores the sentinel, not a bare streaming marker."""
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(log_input_output=True))
         context = self._context(
             should_log_input_output=True,
             should_capture_full_body=False,
@@ -266,13 +261,12 @@ class TestHandlerMarkers:
             metadata={},
         )
 
-        log = handler._build_streaming_log_create(MagicMock(), context)
+        log = log_intake._build_stream_row(context, LoggingConfig(log_input_output=True))
 
         assert log.request_body == {"_sampled_out": True}
         assert log.response_body == {"_sampled_out": True}
 
     def test_error_details_scrubbed_when_disabled(self):
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(log_input_output=False))
         context = self._context(
             should_log_input_output=False,
             should_capture_full_body=False,
@@ -284,7 +278,7 @@ class TestHandlerMarkers:
             "original_error": {"message": "UPSTREAM SECRET"},
         }
 
-        log = handler._build_error_log_create(MagicMock(), Exception("boom"), context)
+        log = log_intake._build_error_row(context, LoggingConfig(log_input_output=False))
 
         assert log.log_metadata["error_details"]["response_body"] == {"_bodies_disabled": True}
         assert log.log_metadata["error_details"]["original_error"] == {"_bodies_disabled": True}

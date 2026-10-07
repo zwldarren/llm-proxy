@@ -1,8 +1,6 @@
 """Global exception handlers for FastAPI application."""
 
 import logging
-import time
-import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,11 +27,8 @@ from llm_proxy.core.exceptions import (
     ValidationError,
     WebSearchError,
 )
-from llm_proxy.core.identity import get_request_identity
-from llm_proxy.core.request_utils import get_client_ip
+from llm_proxy.observability.log_intake import record_early_failure
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.redaction import body_marker
-from llm_proxy.observability.types import LogType
 from llm_proxy.protocols.openresponses.errors import (
     is_openresponses_path,
     openresponses_error_code,
@@ -194,205 +189,6 @@ EXCEPTION_HANDLER_REGISTRY: dict[type, HandlerMeta] = {
 }
 
 
-def _get_logging_config(request: Request):
-    """Resolve the effective logging config (DB-backed, refreshed on settings change)."""
-    from llm_proxy.config.manager import resolve_logging_config
-
-    return resolve_logging_config(getattr(request.app.state, "config_manager", None))
-
-
-def _is_audit_log_already_written(request: Request) -> bool:
-    """Check if an audit log has already been written for this request.
-
-    Uses request.state.audit_log_written as the single deduplication mechanism,
-    replacing the previous already_logged flag on exception objects.
-    """
-    return getattr(request.state, "audit_log_written", False)
-
-
-def _strip_bytes(value: Any) -> Any:
-    """Recursively replace bytes values with a size placeholder.
-
-    Multipart request wrappers (e.g. transcription/translation) include raw
-    uploaded file bytes in model_dump(). Those cannot be stored in a JSON log
-    column and would dump binary into logs, so replace each bytes value with a
-    short placeholder while preserving the rest of the payload (model, prompt,
-    language, etc.) for diagnostics.
-    """
-    if isinstance(value, bytes):
-        return f"<bytes:{len(value)} omitted>"
-    if isinstance(value, dict):
-        return {k: _strip_bytes(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_strip_bytes(v) for v in value]
-    if isinstance(value, tuple):
-        return [_strip_bytes(v) for v in value]
-    return value
-
-
-def _capture_early_failure_request_data(request: Request) -> tuple[dict[str, Any], Any]:
-    """Best-effort capture of request headers/body for early-failure logs.
-
-    The unified capture layer (AuditLogHandler) only runs inside
-    UnifiedProcessor.process(), so when an exception is raised before that
-    (e.g. model-not-found in build_request_context) request_headers and
-    request_body are never populated. This backfills them from the FastAPI
-    request and the parsed body stashed on request.state by the protocol
-    handler, so early failures still carry the diagnostic context needed to
-    reproduce them.
-
-    Returns (masked_headers, masked_body). Best-effort: never raises.
-    """
-    try:
-        from llm_proxy.security.passwords import SENSITIVE_KEYS, mask_headers, mask_sensitive
-
-        config = _get_logging_config(request)
-
-        # Use already-captured headers if available.
-        captured_headers = getattr(request.state, "request_headers", None)
-        if isinstance(captured_headers, dict) and captured_headers:
-            headers = captured_headers
-        else:
-            headers = mask_headers(dict(request.headers))
-
-        body: Any = {}
-        parsed_body = getattr(request.state, "parsed_request_body", None)
-        if parsed_body is not None:
-            # The protocol handlers stash the parsed pydantic model (not a
-            # dict) so the happy path avoids an extra model_dump — dump it
-            # here, on the failure path only.
-            if hasattr(parsed_body, "model_dump"):
-                parsed_body = parsed_body.model_dump()
-            # Multipart uploads stash raw file bytes (see protocol.py); strip them
-            # so the log stays JSON-safe and we never persist binary blobs.
-            parsed_body = _strip_bytes(parsed_body)
-            if config.mask_sensitive_data and isinstance(parsed_body, dict):
-                body = mask_sensitive(parsed_body, SENSITIVE_KEYS)
-            else:
-                body = parsed_body
-        else:
-            captured_body = getattr(request.state, "request_body", None)
-            if isinstance(captured_body, dict) and captured_body:
-                body = captured_body
-
-        return headers, body
-    except Exception:
-        return {}, {}
-
-
-def _write_error_log_to_db(
-    request: Request,
-    error: Exception,
-    error_message: str,
-    status_code: int,
-    error_type: str | None = None,
-) -> None:
-    """Write error log to database in background.
-
-    Args:
-        request: The FastAPI request object
-        error: The exception that occurred
-        error_message: The error message
-        status_code: HTTP status code
-        error_type: Optional error type
-    """
-    try:
-        from llm_proxy.observability.audit_helpers import (
-            determine_action_category,
-            determine_event_type,
-            determine_outcome,
-            determine_resource_id,
-            determine_resource_type,
-            get_server_hostname,
-        )
-        from llm_proxy.observability.service import (
-            RequestLogCreate,
-            RequestLogService,
-            UsageRecordCreate,
-            UsageService,
-        )
-
-        config = _get_logging_config(request)
-
-        request_id = getattr(request.state, "request_id", None)
-        provider = getattr(request.state, "provider", None)
-        model = getattr(request.state, "model", None)
-        identity = get_request_identity(request)
-
-        stack_trace = None
-        if error.__traceback__:
-            stack_trace = "".join(
-                traceback.format_exception(type(error), error, error.__traceback__)
-            )
-
-        path = request.url.path
-        log_type = LogType.AUDIT if path.startswith("/api/") else LogType.ENDPOINT
-
-        # Backfill request data for early failures.
-        request_headers, request_body = _capture_early_failure_request_data(request)
-        if not config.log_input_output:
-            # log_input_output=false keeps the metadata row but scrubs the body.
-            request_body = body_marker(bodies_enabled=False)
-
-        # Reuse the shared classifier so outcome semantics stay in one place.
-        log_data = RequestLogCreate(
-            request_id=request_id or "unknown",
-            timestamp=time.time(),
-            endpoint=path,
-            method=request.method,
-            status_code=status_code,
-            response_time_ms=0,
-            user_identity=identity.display_name,
-            user_id=identity.user_id,
-            model=model,
-            provider=provider,
-            log_type=log_type,
-            error_message=error_message,
-            error_stack_trace=stack_trace,
-            api_key_name=identity.api_key_name,
-            client_ip=get_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
-            auth_method=identity.auth_method,
-            session_id=getattr(request.state, "session_id", None),
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
-            event_type=determine_event_type(path),
-            action_category=determine_action_category(request.method),
-            resource_type=determine_resource_type(path),
-            resource_id=determine_resource_id(path, None),
-            log_metadata={
-                "is_api_endpoint": request.url.path.startswith("/v1/"),
-                "error_type": error_type,
-                "early_failure": True,
-            },
-            outcome=determine_outcome(status_code, error_message),
-            request_headers=request_headers,
-            request_body=request_body,
-        )
-
-        service = RequestLogService(config)
-        service.create_log_background(log_data)
-
-        # Also write to usage_records so that UsageRepository metrics
-        # (success_rate, etc.) are correct
-        usage_service = UsageService()
-        usage_data = UsageRecordCreate(
-            timestamp=time.time(),
-            request_id=request_id or "unknown",
-            model=model,
-            provider=provider,
-            status_code=status_code,
-            response_time_ms=0,
-            user_identity=identity.display_name,
-            user_id=identity.user_id,
-            api_key_name=identity.api_key_name,
-            log_type=log_type,
-        )
-        usage_service.create_usage_background(usage_data)
-    except Exception as e:
-        logger.warning(f"Failed to write error log to database: {e}", exc_info=True)
-
-
 async def recursion_error_handler(request: Request, exc: RecursionError) -> JSONResponse:
     """Handle RecursionError as a client error (400) instead of a 500.
 
@@ -406,11 +202,13 @@ async def recursion_error_handler(request: Request, exc: RecursionError) -> JSON
         f"Recursion limit exceeded [request_id={request_id}] [endpoint={request.url.path}]: {exc}"
     )
 
-    if not _is_audit_log_already_written(request):
-        _write_error_log_to_db(
-            request, exc, "maximum recursion depth exceeded", 400, "invalid_request_error"
-        )
-        request.state.audit_log_written = True
+    record_early_failure(
+        request,
+        exc,
+        status_code=400,
+        error_type="invalid_request_error",
+        error_message="maximum recursion depth exceeded",
+    )
 
     return ErrorResponseBuilder.create_json_response(
         message="Request payload is too deeply nested",
@@ -443,9 +241,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         error_type = "api_error"
         code = None
 
-    if not _is_audit_log_already_written(request):
-        _write_error_log_to_db(request, exc, message, exc.status_code, error_type)
-        request.state.audit_log_written = True
+    record_early_failure(
+        request, exc, status_code=exc.status_code, error_type=error_type, error_message=message
+    )
 
     return ErrorResponseBuilder.create_json_response(
         message=message,
@@ -494,9 +292,13 @@ def _create_handler(
 
         client_message = "Internal server error" if status_code >= 500 else internal_message
 
-        if not _is_audit_log_already_written(request):
-            _write_error_log_to_db(request, exc, internal_message, status_code, error_type)
-            request.state.audit_log_written = True
+        record_early_failure(
+            request,
+            exc,
+            status_code=status_code,
+            error_type=error_type,
+            error_message=internal_message,
+        )
 
         return ErrorResponseBuilder.create_json_response(
             message=client_message,

@@ -1,7 +1,5 @@
 """Tests for web search interceptor."""
 
-from unittest.mock import MagicMock
-
 import orjson
 import pytest
 
@@ -17,7 +15,7 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.content_blocks.anthropic_builtin import WebSearchToolResultBlock
 from llm_proxy.models.tools import UserLocation, WebSearchTool
-from llm_proxy.observability.tool_logging import WebSearchLogEntry
+from llm_proxy.observability.log_intake import WebSearchLogEntry
 from llm_proxy.web_search.interceptor import WebSearchInterceptor
 from llm_proxy.web_search.provider import (
     SearchResult,
@@ -312,12 +310,9 @@ class TestWebSearchInterceptor:
         provider defined ``name``, so the admin log always claimed SearXNG.
         """
         entries: list[WebSearchLogEntry] = []
-        log_service = MagicMock()
-        log_service.log_web_search_background.side_effect = lambda entry, **kwargs: entries.append(
-            entry
-        )
         monkeypatch.setattr(
-            "llm_proxy.web_search.interceptor.get_tool_log_service", lambda: log_service
+            "llm_proxy.web_search.interceptor.record_web_search",
+            lambda entry, **kwargs: entries.append(entry),
         )
         mock_provider.name = "ollama"
 

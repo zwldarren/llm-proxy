@@ -21,8 +21,8 @@ from llm_proxy.core.processing.stream_lifecycle import (
     iterate_chunks_with_comments,
 )
 from llm_proxy.models.content_blocks import TextBlock
+from llm_proxy.observability import log_intake
 from llm_proxy.observability.event_context import EventContext
-from llm_proxy.observability.tracing.handlers.audit_log import AuditLogHandler
 from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
@@ -760,7 +760,7 @@ class TestGenericStreamLifecycle:
 
         assert context.should_capture_raw_stream is True
         assert context.get_streaming_body() == b"data: frame-a\n\ndata: frame-b\n\n"
-        assert AuditLogHandler._logged_stream_body(context) == "data: frame-a\n\ndata: frame-b\n\n"
+        assert log_intake._logged_stream_body(context) == "data: frame-a\n\ndata: frame-b\n\n"
 
     async def test_untraced_chunks_are_not_buffered(self) -> None:
         """Speech/transcription streams never ask for per-chunk capture."""

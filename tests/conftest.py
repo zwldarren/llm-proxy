@@ -47,7 +47,7 @@ def _reset_rejection_log_dedupe():
     a reset, a test that triggers a 429 would suppress the rejection row a later
     test expects to see.
     """
-    from llm_proxy.observability.audit_helpers import reset_rejection_log_dedupe
+    from llm_proxy.observability.log_intake import reset_rejection_log_dedupe
 
     reset_rejection_log_dedupe()
     yield

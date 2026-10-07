@@ -6,7 +6,6 @@ to create the initial admin. Subsequent logins go through ``POST /api/auth/login
 which validates credentials against the database.
 """
 
-import time
 from functools import lru_cache
 
 from fastapi import APIRouter, Request
@@ -25,15 +24,9 @@ from llm_proxy.core.exceptions import AuthenticationFailedError, ConflictError, 
 from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database import UserRepository, UserSessionRepository
-from llm_proxy.observability.audit_helpers import get_server_hostname
+from llm_proxy.observability.log_intake import record_auth_event
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.types import (
-    ActionCategory,
-    EventType,
-    LogType,
-    Outcome,
-    ResourceType,
-)
+from llm_proxy.observability.types import Outcome
 from llm_proxy.security.jwt import JWTManager
 from llm_proxy.security.passwords import hash_password, verify_admin_password
 
@@ -52,84 +45,6 @@ def _dummy_password_hash() -> str:
     lazily on first use so importing this module never pays bcrypt's cost.
     """
     return hash_password("dummy-password-for-timing-equalization")
-
-
-async def _write_login_audit_log(
-    request: Request,
-    username: str,
-    client_ip: str,
-    outcome: str,
-    error_message: str | None = None,
-    *,
-    auth_method: str = "login",
-    log_metadata_extra: dict[str, bool] | None = None,
-) -> None:
-    """Write an audit log entry for an authentication event (login or logout).
-
-    Unlike the generic exception handler path, this produces a properly
-    classified audit entry with event_type=AUTHENTICATION, resource_type=USER,
-    and the correct outcome.
-    """
-    try:
-        from llm_proxy.config.manager import resolve_logging_config
-        from llm_proxy.observability.service import RequestLogCreate, RequestLogService
-
-        config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
-
-        request_id = getattr(request.state, "request_id", None) or "unknown"
-
-        is_failure = outcome == Outcome.FAILURE
-        log_metadata: dict[str, bool] = {"is_api_endpoint": True}
-        if is_failure:
-            log_metadata["auth_failure"] = True
-        if log_metadata_extra:
-            log_metadata.update(log_metadata_extra)
-
-        log_data = RequestLogCreate(
-            request_id=request_id,
-            timestamp=time.time(),
-            endpoint=request.url.path,
-            method=request.method,
-            status_code=401 if is_failure else 200,
-            response_time_ms=None,
-            log_type=LogType.AUDIT,
-            user_identity=username,
-            client_ip=client_ip,
-            user_agent=request.headers.get("user-agent"),
-            auth_method=auth_method,
-            error_message=error_message,
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
-            event_type=EventType.AUTHENTICATION,
-            action_category=ActionCategory.EXECUTE,
-            resource_type=ResourceType.USER,
-            resource_id=username,
-            outcome=outcome,
-            log_metadata=log_metadata,
-        )
-
-        service = RequestLogService(config)
-        service.create_log_background(log_data)
-        request.state.audit_log_written = True
-    except Exception:
-        logger.debug("Failed to write audit log to database", exc_info=True)
-
-
-async def _write_logout_audit_log(
-    request: Request,
-    username: str,
-    client_ip: str,
-    outcome: str,
-) -> None:
-    """Write an audit log entry for a logout event."""
-    await _write_login_audit_log(
-        request,
-        username,
-        client_ip,
-        outcome,
-        auth_method="jwt",
-        log_metadata_extra={"logout": True},
-    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -180,7 +95,7 @@ async def login(
         lockout_manager.record_failed_attempt(lockout_key)
         logger.warning(f"Failed login attempt for user: {credentials.username} from {client_ip}")
         # Write audit log with proper classification (before raising exception)
-        await _write_login_audit_log(
+        record_auth_event(
             request,
             username=credentials.username,
             client_ip=client_ip,
@@ -195,7 +110,7 @@ async def login(
     lockout_manager.clear_failed_attempts(lockout_key)
     logger.info(f"Successful login for user: {credentials.username} from {client_ip}")
     # Write audit log for successful login
-    await _write_login_audit_log(
+    record_auth_event(
         request,
         username=credentials.username,
         client_ip=client_ip,
@@ -277,11 +192,13 @@ async def logout(
     # Write audit log BEFORE clearing identity (so we know who logged out).
     # If user is identified, log with their username; otherwise log with client IP.
     if identity.user:
-        await _write_logout_audit_log(
+        record_auth_event(
             request,
             username=identity.user,
             client_ip=client_ip,
             outcome=Outcome.SUCCESS,
+            auth_method="jwt",
+            metadata_extra={"logout": True},
         )
     else:
         return {"success": True}

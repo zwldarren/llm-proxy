@@ -7,22 +7,14 @@ shows per-call tokens and cost. Observation is best-effort: failures are
 logged and never break the relay.
 """
 
-import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import orjson
 
 from llm_proxy.billing.cost import calculate_cost
-from llm_proxy.config.manager import load_logging_config
+from llm_proxy.observability.log_intake import record_realtime_turn
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.service import (
-    RequestLogCreate,
-    RequestLogService,
-    UsageRecordCreate,
-    UsageService,
-)
-from llm_proxy.observability.types import LogType
 from llm_proxy.realtime.relay import KIND_TEXT
 
 logger = get_logger(__name__)
@@ -71,8 +63,6 @@ class RealtimeUsageObserver:
     def __init__(self, *, context: RealtimeSessionContext, config_manager: Any = None):
         self._context = context
         self._config_manager = config_manager
-        self._log_service = RequestLogService(load_logging_config())
-        self._usage_service = UsageService()
         self._turns = 0
 
     @property
@@ -129,48 +119,13 @@ class RealtimeUsageObserver:
             config_manager=self._config_manager,
             provider_name=self._context.provider,
         )
-        log_metadata: dict[str, Any] = {
-            "realtime": True,
-            "response_id": response_id,
-            "response_status": response.get("status"),
-        }
-        if usage is None:
-            log_metadata["usage_missing"] = True
-        log_data = RequestLogCreate(
-            request_id=f"rt_{response_id or self._context.request_id}",
-            timestamp=time.time(),
-            endpoint="/v1/realtime",
-            method="WS",
-            status_code=200,
-            user_identity=self._context.api_key_name,
-            model=self._context.model,
-            provider=self._context.provider,
-            log_type=LogType.ENDPOINT,
-            prompt_tokens=breakdown.prompt_tokens,
-            completion_tokens=breakdown.completion_tokens,
-            total_tokens=breakdown.total_tokens,
-            cost_usd=breakdown.cost_usd,
-            cache_creation_input_tokens=breakdown.cache_creation_input_tokens,
-            cache_read_input_tokens=breakdown.cache_read_input_tokens,
-            cached_prompt_tokens=breakdown.cached_prompt_tokens,
-            cache_savings_usd=breakdown.cache_savings_usd,
-            audio_input_tokens=breakdown.audio_input_tokens,
-            audio_output_tokens=breakdown.audio_output_tokens,
-            api_key_name=self._context.api_key_name,
-            user_id=self._context.user_id,
-            client_ip=self._context.client_ip,
-            user_agent=self._context.user_agent,
-            session_id=self._context.session_id,
-            auth_method="api_key",
-            log_metadata=log_metadata,
+        record_realtime_turn(
+            self._context,
+            response_id=response_id,
+            response_status=response.get("status"),
+            breakdown=breakdown,
+            usage_missing=usage is None,
         )
-        self._log_service.create_log_background(log_data)
-
-        # Budgets and spend dashboards aggregate ``usage_records`` (the
-        # UsageRepository model), not request_logs: without this second write
-        # realtime spend would never count toward key/user budget caps. The
-        # record is derived from the log so both stay in lockstep.
-        self._usage_service.create_usage_background(UsageRecordCreate.from_request_log(log_data))
 
 
 __all__ = ["RealtimeSessionContext", "RealtimeUsageObserver"]

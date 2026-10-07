@@ -31,14 +31,8 @@ from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database import get_async_session_context
-from llm_proxy.observability.audit_helpers import enqueue_log_row, write_rejection_log
+from llm_proxy.observability.log_intake import record_failed_auth, record_rejection
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.types import (
-    ActionCategory,
-    EventType,
-    LogType,
-    ResourceType,
-)
 from llm_proxy.protocols.registry import protocol_name_for_path
 
 logger = get_logger(__name__)
@@ -52,26 +46,16 @@ def _write_auth_failure_audit_log(
 ) -> None:
     """Write an audit log entry for a failed authentication attempt.
 
-    Deliberately not routed through :func:`write_rejection_log`'s dedupe: failed
+    Deliberately not routed through :func:`record_rejection`'s dedupe: failed
     auth is a security signal, and collapsing repeats would hide a
     credential-stuffing attempt. The client IP stands in as the identity because
     no key was verified.
     """
-    enqueue_log_row(
+    record_failed_auth(
         request,
         status_code=status_code,
         error_message=error_message,
-        log_type=LogType.AUDIT,
-        event_type=EventType.AUTHENTICATION,
-        action_category=ActionCategory.EXECUTE,
-        resource_type=ResourceType.API_KEY,
-        resource_id=request.url.path,
-        user_identity=client_ip,
-        api_key_name=None,
-        user_id=None,
-        auth_method="api_key",
-        log_metadata={"is_api_endpoint": True, "auth_failure": True},
-        response_time_ms=0,
+        client_ip=client_ip,
     )
 
 
@@ -300,7 +284,7 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
             logger.info(f"Request rejected: rate limit exceeded for API key '{matched_key_name}'")
             # Rejections leave no endpoint row (the pipeline never runs), so
             # record a body-less one here or the key looks unlogged.
-            write_rejection_log(
+            record_rejection(
                 request,
                 status_code=429,
                 error_message=(
@@ -329,7 +313,7 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
         )
         if rejection is not None:
             logger.info(f"Request rejected: {rejection.log_message}")
-            write_rejection_log(
+            record_rejection(
                 request,
                 status_code=rejection.status_code,
                 error_message=rejection.log_message,

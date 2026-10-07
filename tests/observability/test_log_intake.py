@@ -1,22 +1,25 @@
-"""Tests for audit_log.py helper functions."""
+"""Internal-seam tests for the Log intake module (ADR-0020).
+
+Classification is a table the module owns, so the table itself is worth pinning
+here; the routing-metadata redaction, retry metadata and stored-stream-body
+choices are internal row-shape behavior of the same module. Behavior through the
+verb interface (endpoint end/error/stream rows, usage fan-out) is covered by
+tests/observability/test_log_intake_verbs.py.
+"""
 
 import socket
 from unittest.mock import MagicMock, patch
 
 from llm_proxy.config.types.logging_config import LoggingConfig
-from llm_proxy.observability.audit_helpers import (
+from llm_proxy.observability import log_intake
+from llm_proxy.observability.event_context import EventContext
+from llm_proxy.observability.log_intake import (
     determine_action_category,
     determine_event_type,
     determine_outcome,
     determine_resource_id,
     determine_resource_type,
     get_server_hostname,
-)
-from llm_proxy.observability.event_context import EventContext
-from llm_proxy.observability.tracing.handlers.audit_log import (
-    AuditLogHandler,
-    TokenMetadata,
-    _extract_token_metadata,
 )
 from llm_proxy.observability.types import ActionCategory, EventType, Outcome, ResourceType
 
@@ -33,77 +36,6 @@ class TestGetServerHostname:
         with patch.object(socket, "gethostname", side_effect=Exception("test")):
             result = get_server_hostname()
             assert result == "unknown"
-
-
-class TestTokenMetadata:
-    """Tests for TokenMetadata dataclass."""
-
-    def test_default_values(self):
-        meta = TokenMetadata()
-        assert meta.prompt_tokens is None
-        assert meta.completion_tokens is None
-        assert meta.total_tokens is None
-        assert meta.cost_usd is None
-
-    def test_custom_values(self):
-        meta = TokenMetadata(
-            prompt_tokens=100,
-            completion_tokens=50,
-            total_tokens=150,
-            cost_usd=0.01,
-        )
-        assert meta.prompt_tokens == 100
-        assert meta.completion_tokens == 50
-        assert meta.total_tokens == 150
-        assert meta.cost_usd == 0.01
-
-
-class TestExtractTokenMetadata:
-    """Tests for _extract_token_metadata helper."""
-
-    def test_extracts_all_fields(self):
-        context = MagicMock()
-        context.prompt_tokens = 100
-        context.completion_tokens = 50
-        context.total_tokens = 150
-        context.cost_usd = 0.01
-        context.cache_creation_input_tokens = 10
-        context.cache_read_input_tokens = 20
-        context.cached_prompt_tokens = 30
-        context.cache_savings_usd = 0.005
-        context.audio_input_tokens = 5
-        context.audio_output_tokens = 3
-
-        result = _extract_token_metadata(context)
-
-        assert result.prompt_tokens == 100
-        assert result.completion_tokens == 50
-        assert result.total_tokens == 150
-        assert result.cost_usd == 0.01
-        assert result.cache_creation_input_tokens == 10
-        assert result.cache_read_input_tokens == 20
-        assert result.cached_prompt_tokens == 30
-        assert result.cache_savings_usd == 0.005
-        assert result.audio_input_tokens == 5
-        assert result.audio_output_tokens == 3
-
-    def test_handles_none_values(self):
-        context = MagicMock()
-        context.prompt_tokens = None
-        context.completion_tokens = None
-        context.total_tokens = None
-        context.cost_usd = None
-        context.cache_creation_input_tokens = None
-        context.cache_read_input_tokens = None
-        context.cached_prompt_tokens = None
-        context.cache_savings_usd = None
-        context.audio_input_tokens = None
-        context.audio_output_tokens = None
-
-        result = _extract_token_metadata(context)
-
-        assert result.prompt_tokens is None
-        assert result.completion_tokens is None
 
 
 class TestDetermineEventType:
@@ -296,69 +228,38 @@ class TestDetermineResourceId:
 
 
 class TestDetermineOutcome:
-    """Tests for determine_outcome helper."""
-
-    def test_error_message_without_status(self):
-        """When status_code is None, error_message drives outcome."""
-        result = determine_outcome(None, "Something went wrong")
-        assert result == Outcome.ERROR
+    """The outcome is a function of the status code alone."""
 
     def test_none_status_code(self):
-        result = determine_outcome(None, None)
-        assert result == Outcome.ERROR
+        assert determine_outcome(None) == Outcome.ERROR
 
     def test_success_200(self):
-        result = determine_outcome(200, None)
-        assert result == Outcome.SUCCESS
-
-    def test_success_200_with_error_message(self):
-        """Status code takes precedence over error_message."""
-        result = determine_outcome(200, "Something went wrong")
-        assert result == Outcome.SUCCESS
+        assert determine_outcome(200) == Outcome.SUCCESS
 
     def test_success_299(self):
-        result = determine_outcome(299, None)
-        assert result == Outcome.SUCCESS
-
-    def test_failure_400(self):
-        result = determine_outcome(400, None)
-        assert result == Outcome.FAILURE
-
-    def test_failure_400_with_error_message(self):
-        """4xx with error_message is FAILURE, not ERROR."""
-        result = determine_outcome(400, "Bad request")
-        assert result == Outcome.FAILURE
-
-    def test_failure_499(self):
-        result = determine_outcome(499, None)
-        assert result == Outcome.FAILURE
-
-    def test_error_500(self):
-        result = determine_outcome(500, None)
-        assert result == Outcome.ERROR
-
-    def test_error_500_with_error_message(self):
-        """5xx with error_message is ERROR."""
-        result = determine_outcome(500, "Internal error")
-        assert result == Outcome.ERROR
+        assert determine_outcome(299) == Outcome.SUCCESS
 
     def test_redirect_300_is_success(self):
         """3xx redirects are not errors; they classify as SUCCESS."""
-        result = determine_outcome(300, None)
-        assert result == Outcome.SUCCESS
+        assert determine_outcome(300) == Outcome.SUCCESS
 
     def test_not_modified_304_is_success(self):
-        result = determine_outcome(304, None)
-        assert result == Outcome.SUCCESS
+        assert determine_outcome(304) == Outcome.SUCCESS
+
+    def test_failure_400(self):
+        assert determine_outcome(400) == Outcome.FAILURE
+
+    def test_failure_499(self):
+        assert determine_outcome(499) == Outcome.FAILURE
+
+    def test_error_500(self):
+        assert determine_outcome(500) == Outcome.ERROR
 
 
 class TestExtractRoutingMetadataVerbose:
     """Tests for _extract_routing_metadata with verbose_routing_logs toggle."""
 
     def test_includes_scorecards_when_toggle_enabled(self):
-        from llm_proxy.config.types.logging_config import LoggingConfig
-        from llm_proxy.observability.tracing.handlers.audit_log import AuditLogHandler
-
         context = MagicMock()
         context.metadata = {
             "routing": {
@@ -369,8 +270,7 @@ class TestExtractRoutingMetadataVerbose:
                 "signal_votes": {"metadata": {"tier_id": 1, "confidence": 0.8}},
             }
         }
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(verbose_routing_logs=True))
-        result = handler._extract_routing_metadata(context)
+        result = log_intake._extract_routing_metadata(context)
         # Flat verbose keys are no longer emitted; data lives in the nested routing dict.
         assert "routing_candidate_scores" not in result
         assert "routing_weights" not in result
@@ -380,9 +280,6 @@ class TestExtractRoutingMetadataVerbose:
         assert result["routing_complexity"] == 0.5
 
     def test_omits_scorecards_when_toggle_disabled(self):
-        from llm_proxy.config.types.logging_config import LoggingConfig
-        from llm_proxy.observability.tracing.handlers.audit_log import AuditLogHandler
-
         context = MagicMock()
         context.metadata = {
             "routing": {
@@ -390,8 +287,7 @@ class TestExtractRoutingMetadataVerbose:
                 "candidate_scorecards": [{"model": "m1", "total": 0.9}],
             }
         }
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(verbose_routing_logs=False))
-        result = handler._extract_routing_metadata(context)
+        result = log_intake._extract_routing_metadata(context)
         assert "routing_candidate_scores" not in result
         assert result["routing_complexity"] == 0.5
 
@@ -451,11 +347,10 @@ class TestVerboseRoutingNestedLogLeak:
         assert routing["tier"] == "MEDIUM"
 
     def test_build_log_create_strips_verbose_routing_when_config_is_none(self):
-        handler = AuditLogHandler(enabled=True, config=None)
         context = self._make_context()
         original_routing = dict(context.metadata["routing"])
 
-        log = handler._build_log_create(MagicMock(), MagicMock(), context)
+        log = log_intake._build_success_row(context, LoggingConfig())
 
         self._assert_compact_only(log.log_metadata)
         # The original context metadata must not be mutated.
@@ -463,11 +358,10 @@ class TestVerboseRoutingNestedLogLeak:
         assert "candidate_scorecards" in context.metadata["routing"]
 
     def test_build_log_create_strips_verbose_routing_when_disabled(self):
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(verbose_routing_logs=False))
         context = self._make_context()
         original_routing = dict(context.metadata["routing"])
 
-        log = handler._build_log_create(MagicMock(), MagicMock(), context)
+        log = log_intake._build_success_row(context, LoggingConfig(verbose_routing_logs=False))
 
         self._assert_compact_only(log.log_metadata)
         # The original context metadata must not be mutated.
@@ -475,19 +369,17 @@ class TestVerboseRoutingNestedLogLeak:
         assert "candidate_scorecards" in context.metadata["routing"]
 
     def test_build_streaming_log_create_strips_verbose_routing_when_disabled(self):
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(verbose_routing_logs=False))
         context = self._make_context()
 
-        log = handler._build_streaming_log_create(MagicMock(), context)
+        log = log_intake._build_stream_row(context, LoggingConfig(verbose_routing_logs=False))
 
         self._assert_compact_only(log.log_metadata)
         assert "candidate_scorecards" in context.metadata["routing"]
 
     def test_build_log_create_preserves_verbose_routing_when_enabled(self):
-        handler = AuditLogHandler(enabled=True, config=LoggingConfig(verbose_routing_logs=True))
         context = self._make_context()
 
-        log = handler._build_log_create(MagicMock(), MagicMock(), context)
+        log = log_intake._build_success_row(context, LoggingConfig(verbose_routing_logs=True))
 
         routing = log.log_metadata["routing"]
         # When enabled, nested verbose data is retained.
@@ -517,7 +409,6 @@ class TestRetryMetadata:
         return ctx
 
     def test_add_retry_metadata_records_attempts_and_count(self):
-        handler = AuditLogHandler(enabled=True)
         context = self._make_context(
             [
                 {
@@ -550,24 +441,24 @@ class TestRetryMetadata:
             ]
         )
 
-        log_metadata = handler._add_retry_metadata({}, context)
+        log_metadata = log_intake._build_log_metadata(context, LoggingConfig())
 
         assert len(log_metadata["retry_attempts"]) == 3
         # retry_count counts only retried attempts (the first two).
         assert log_metadata["retry_count"] == 2
 
     def test_add_retry_metadata_noop_without_attempts(self):
-        handler = AuditLogHandler(enabled=True)
         context = self._make_context([])
 
-        log_metadata = handler._add_retry_metadata({"existing": True}, context)
+        log_metadata = log_intake._build_log_metadata(
+            context, LoggingConfig(verbose_routing_logs=True)
+        )
 
         assert "retry_attempts" not in log_metadata
         assert "retry_count" not in log_metadata
-        assert log_metadata["existing"] is True
+        assert log_metadata["is_api_endpoint"] is False
 
     def test_build_log_metadata_includes_retry_attempts(self):
-        handler = AuditLogHandler(enabled=True)
         context = self._make_context(
             [
                 {
@@ -582,7 +473,7 @@ class TestRetryMetadata:
             ]
         )
 
-        log_metadata = handler._build_log_metadata(context)
+        log_metadata = log_intake._build_log_metadata(context, LoggingConfig())
 
         assert "retry_attempts" in log_metadata
         assert log_metadata["retry_count"] == 1
@@ -603,7 +494,7 @@ class TestLoggedStreamBody:
         context = self._make_context()
         context.assembled_response_body = {"object": "chat.completion", "choices": []}
 
-        assert AuditLogHandler._logged_stream_body(context) == {
+        assert log_intake._logged_stream_body(context) == {
             "object": "chat.completion",
             "choices": [],
         }
@@ -612,7 +503,7 @@ class TestLoggedStreamBody:
         """Generic binary streams cannot be reassembled; say so instead of {}."""
         context = self._make_context()
 
-        assert AuditLogHandler._logged_stream_body(context) == {
+        assert log_intake._logged_stream_body(context) == {
             "streaming": True,
             "_assembled": False,
         }
@@ -622,7 +513,7 @@ class TestLoggedStreamBody:
         context.should_capture_raw_stream = True
         context.capture_streaming_chunk('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n')
 
-        body = AuditLogHandler._logged_stream_body(context)
+        body = log_intake._logged_stream_body(context)
 
         assert isinstance(body, str)
         assert body.startswith("data: ")
@@ -631,14 +522,14 @@ class TestLoggedStreamBody:
         context = self._make_context()
         context.should_capture_raw_stream = True
 
-        assert AuditLogHandler._logged_stream_body(context) is None
+        assert log_intake._logged_stream_body(context) is None
 
     def test_non_utf8_raw_capture_falls_back_to_base64(self):
         context = self._make_context()
         context.should_capture_raw_stream = True
         context.capture_streaming_chunk(b"\xff\xfe\x00binary")
 
-        body = AuditLogHandler._logged_stream_body(context)
+        body = log_intake._logged_stream_body(context)
 
         assert body["encoding"] == "base64"
         assert body["data"]

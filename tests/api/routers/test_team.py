@@ -560,7 +560,7 @@ class TestMemberAuditLog:
 
     @pytest.fixture
     def audit_patch(self):
-        with patch("llm_proxy.api.routers.team.write_member_audit_log", new=AsyncMock()) as audit:
+        with patch("llm_proxy.api.routers.team.record_member_action") as audit:
             yield audit
 
     def test_create_member_writes_audit_log(self, team_client, audit_patch):
@@ -573,10 +573,10 @@ class TestMemberAuditLog:
         )
 
         assert response.status_code == 201, response.text
-        audit_patch.assert_awaited_once()
-        kwargs = audit_patch.await_args.kwargs
+        audit_patch.assert_called_once()
+        kwargs = audit_patch.call_args.kwargs
         assert kwargs["actor"] == "admin"
-        assert kwargs["action"] == ActionCategory.CREATE
+        assert kwargs["action_category"] == ActionCategory.CREATE
         assert kwargs["target_user"] == "newbie"
         assert kwargs["outcome"] == Outcome.SUCCESS
 
@@ -591,10 +591,10 @@ class TestMemberAuditLog:
             response = client.delete("/api/team/members/2")
 
         assert response.status_code == 200, response.text
-        audit_patch.assert_awaited_once()
-        kwargs = audit_patch.await_args.kwargs
+        audit_patch.assert_called_once()
+        kwargs = audit_patch.call_args.kwargs
         assert kwargs["actor"] == "admin"
-        assert kwargs["action"] == ActionCategory.DELETE
+        assert kwargs["action_category"] == ActionCategory.DELETE
         assert kwargs["target_user"] == "member"
 
     def test_role_change_writes_audit_log(self, team_client, audit_patch):
@@ -610,10 +610,10 @@ class TestMemberAuditLog:
             response = client.put("/api/team/members/2/role", json={"role": "admin"})
 
         assert response.status_code == 200, response.text
-        audit_patch.assert_awaited_once()
-        kwargs = audit_patch.await_args.kwargs
+        audit_patch.assert_called_once()
+        kwargs = audit_patch.call_args.kwargs
         assert kwargs["actor"] == "admin"
-        assert kwargs["action"] == ActionCategory.UPDATE
+        assert kwargs["action_category"] == ActionCategory.UPDATE
         assert kwargs["target_user"] == "member"
         assert kwargs["extra"] == {"operation": "role", "old_role": "viewer", "new_role": "admin"}
 
@@ -629,10 +629,10 @@ class TestMemberAuditLog:
             )
 
         assert response.status_code == 200, response.text
-        audit_patch.assert_awaited_once()
-        kwargs = audit_patch.await_args.kwargs
+        audit_patch.assert_called_once()
+        kwargs = audit_patch.call_args.kwargs
         assert kwargs["actor"] == "admin"
-        assert kwargs["action"] == ActionCategory.UPDATE
+        assert kwargs["action_category"] == ActionCategory.UPDATE
         assert kwargs["target_user"] == "member"
         assert kwargs["extra"] == {"operation": "password_reset"}
 
@@ -645,7 +645,7 @@ class TestMemberAuditLog:
         response = client.delete(f"/api/team/members/{admin.id}")
 
         assert response.status_code == 400
-        audit_patch.assert_not_awaited()
+        audit_patch.assert_not_called()
 
 
 class TestUpdateMemberBudget:

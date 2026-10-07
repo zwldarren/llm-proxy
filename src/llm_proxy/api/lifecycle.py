@@ -20,7 +20,6 @@ from llm_proxy.observability.service import (
     stop_background_log_writer,
     stop_background_usage_writer,
 )
-from llm_proxy.observability.tool_logging import get_tool_log_service
 from llm_proxy.security.encryption import init_encryption
 
 logger = get_logger(__name__)
@@ -92,6 +91,7 @@ async def startup_protocols(app: FastAPI, config_manager: DatabaseConfigManager)
 
 
 async def startup_tracing(app: FastAPI, config_manager: DatabaseConfigManager) -> None:
+    from llm_proxy.observability.log_intake import configure as configure_log_intake
     from llm_proxy.observability.tracing.handlers import (
         AuditLogHandler,
         LoggingHandler,
@@ -114,12 +114,10 @@ async def startup_tracing(app: FastAPI, config_manager: DatabaseConfigManager) -
     register_tracing_handler(logging_handler)
     logger.debug("LoggingHandler registered for console logging")
 
-    logging_config = (await config_manager.get_config()).server_params.logging
-    audit_handler = AuditLogHandler(
-        enabled=True,
-        config=logging_config,
-        config_manager=config_manager,
-    )
+    # Log intake owns log-row construction and resolves the live logging config
+    # from the manager on every write (body switch, masking, retention).
+    configure_log_intake(config_manager=config_manager)
+    audit_handler = AuditLogHandler(enabled=True)
     register_tracing_handler(audit_handler)
     logger.debug("AuditLogHandler registered for database logging")
 
@@ -311,9 +309,6 @@ async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManage
 
 
 async def startup_background_services(app: FastAPI) -> None:
-    from llm_proxy.observability.internal_call_logging import get_internal_call_log_service
-    from llm_proxy.observability.service import RequestLogService
-
     # Use the config manager's cached config so UI-managed logging settings
     # (retention, masking, sampling, the body switch) apply to the background
     # writers too. The writers keep the manager and re-resolve per batch, so
@@ -324,11 +319,6 @@ async def startup_background_services(app: FastAPI) -> None:
     start_background_log_writer(logging_config, config_manager)
     # Usage records follow the same UI-managed retention window as the logs.
     start_background_usage_writer(logging_config.retention_days, config_manager)
-
-    tool_log_service = RequestLogService(logging_config)
-    get_tool_log_service(tool_log_service)
-    # Judge rows share the same log store (and batch writers) as every other row.
-    get_internal_call_log_service(tool_log_service)
 
 
 async def _sync_circuit_breaker_config(app: FastAPI, config: ProxyConfig) -> None:

@@ -13,8 +13,8 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from llm_proxy.mcp.backend import BackendConnection, HTTPBackend, StdioBackend
 from llm_proxy.mcp.proxy import MCPServerProxy
 from llm_proxy.mcp.security.policy import McpSecurityPolicy
+from llm_proxy.observability.log_intake import McpLogEntry, record_mcp_call
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.tool_logging import McpLogEntry, get_tool_log_service
 from llm_proxy.observability.types import McpOperationType, McpResourceType
 
 if TYPE_CHECKING:
@@ -32,7 +32,6 @@ def _log_server_lifecycle(
     error_message: str | None = None,
 ) -> None:
     try:
-        log_service = get_tool_log_service()
         entry = McpLogEntry(
             server_name=server_name,
             operation=operation,
@@ -42,7 +41,7 @@ def _log_server_lifecycle(
             response_time_ms=int((time.time() - start_time) * 1000),
             error_message=error_message,
         )
-        log_service.log_mcp_background(entry)
+        record_mcp_call(entry)
     except Exception:
         logger.debug("Failed to log MCP server lifecycle", exc_info=True)
 

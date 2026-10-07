@@ -2,38 +2,35 @@
 
 The judge call is invisible to the request pipeline by construction, so this row
 is the only accounting a judge call gets (ADR-0018). These tests pin the fields
-that makes it comparable to a normal model call: its own model and provider, the
+that make it comparable to a normal model call: its own model and provider, the
 tokens and cost it actually billed, and the attribution of the request it served.
+
+Exercised through the ``record_internal_call`` intake verb (ADR-0020); the
+assertions are on the records handed to the background writers.
 """
 
-from llm_proxy.observability.internal_call_logging import (
+from unittest.mock import MagicMock, patch
+
+from llm_proxy.config.types.logging_config import LoggingConfig
+from llm_proxy.observability import log_intake
+from llm_proxy.observability.log_intake import (
     JUDGE_CALL_ENDPOINT,
     InternalCallLogEntry,
-    InternalCallLogService,
+    record_internal_call,
 )
 from llm_proxy.observability.types import LogType
 
 
-class _CapturingLogService:
-    def __init__(self) -> None:
-        self.logs: list[object] = []
-
-    def create_log_background(self, data: object) -> None:
-        self.logs.append(data)
-
-
-class _CapturingUsageService:
-    def __init__(self) -> None:
-        self.records: list[object] = []
-
-    def create_usage_background(self, data: object) -> None:
-        self.records.append(data)
-
-
-def _service() -> tuple[InternalCallLogService, _CapturingLogService, _CapturingUsageService]:
-    log_service = _CapturingLogService()
-    usage_service = _CapturingUsageService()
-    return InternalCallLogService(log_service, usage_service), log_service, usage_service
+def _record(entry: InternalCallLogEntry, **attribution) -> tuple[MagicMock, MagicMock]:
+    log_intake.configure(config=LoggingConfig())
+    log_service = MagicMock()
+    usage_service = MagicMock()
+    with (
+        patch("llm_proxy.observability.log_intake.RequestLogService", return_value=log_service),
+        patch("llm_proxy.observability.log_intake.UsageService", return_value=usage_service),
+    ):
+        record_internal_call(entry, **attribution)
+    return log_service, usage_service
 
 
 def _entry(**overrides) -> InternalCallLogEntry:
@@ -56,9 +53,7 @@ def _entry(**overrides) -> InternalCallLogEntry:
 
 
 def test_a_judge_call_is_written_as_a_judge_row_with_a_matching_usage_record():
-    service, log_service, usage_service = _service()
-
-    service.log_call_background(
+    log_service, usage_service = _record(
         _entry(),
         user_id=7,
         user_identity="alice",
@@ -69,7 +64,7 @@ def test_a_judge_call_is_written_as_a_judge_row_with_a_matching_usage_record():
         user_agent="curl/8",
     )
 
-    log = log_service.logs[0]
+    log = log_service.create_log_background.call_args.args[0]
     assert log.log_type is LogType.JUDGE
     assert log.log_type.value == "judge"
     assert log.endpoint == JUDGE_CALL_ENDPOINT
@@ -99,7 +94,7 @@ def test_a_judge_call_is_written_as_a_judge_row_with_a_matching_usage_record():
     assert log.log_metadata["judge"] == {"tier": "MEDIUM"}
     assert log.log_metadata["provider_model_name"] == "jev-1"
 
-    usage = usage_service.records[0]
+    usage = usage_service.create_usage_background.call_args.args[0]
     assert usage.log_type == "judge"
     assert usage.request_id == "req-1:judge"
     assert usage.model == "jev"
@@ -112,9 +107,7 @@ def test_a_judge_call_is_written_as_a_judge_row_with_a_matching_usage_record():
 
 def test_a_call_that_never_came_back_is_a_failure_without_a_status():
     """A deadline is an abstention, but the row must not claim a 200 either."""
-    service, log_service, _ = _service()
-
-    service.log_call_background(
+    log_service, _ = _record(
         _entry(
             status_code=None,
             prompt_tokens=None,
@@ -125,7 +118,7 @@ def test_a_call_that_never_came_back_is_a_failure_without_a_status():
         )
     )
 
-    log = log_service.logs[0]
+    log = log_service.create_log_background.call_args.args[0]
     assert log.status_code is None
     assert log.outcome == "failure"
     assert log.error_message == "TimeoutError: deadline exceeded (0.5s)"

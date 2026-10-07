@@ -4,6 +4,8 @@ import orjson
 import pytest
 
 from llm_proxy.billing.cost import CostBreakdown
+from llm_proxy.config.types.logging_config import LoggingConfig
+from llm_proxy.observability import log_intake
 from llm_proxy.realtime.usage import RealtimeSessionContext, RealtimeUsageObserver
 
 
@@ -24,8 +26,9 @@ def observer(monkeypatch):
         def create_usage_background(self, data):
             usage_recorded.append(data)
 
-    monkeypatch.setattr("llm_proxy.realtime.usage.RequestLogService", FakeLogService)
-    monkeypatch.setattr("llm_proxy.realtime.usage.UsageService", FakeUsageService)
+    monkeypatch.setattr("llm_proxy.observability.log_intake.RequestLogService", FakeLogService)
+    monkeypatch.setattr("llm_proxy.observability.log_intake.UsageService", FakeUsageService)
+    log_intake.configure(config=LoggingConfig())
 
     async def fake_calculate_cost(
         usage,

@@ -30,7 +30,7 @@ from llm_proxy.core.exceptions import ConflictError, NotFoundError, ValidationEr
 from llm_proxy.database import ApiKeyRepository, UserRepository, UserSessionRepository
 from llm_proxy.database.repositories.usage_repository import UsageRepository
 from llm_proxy.database.tables import UserRecord
-from llm_proxy.observability.audit_helpers import write_member_audit_log
+from llm_proxy.observability.log_intake import record_member_action
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import ActionCategory, Outcome
 from llm_proxy.security.jwt import JWTManager
@@ -99,10 +99,10 @@ async def _commit_member_operation(request: Request, op: MemberOperation) -> Non
         await publish_config_generation(request)
     if op.log_message:
         logger.info(op.log_message, **(op.log_fields or {}))
-    await write_member_audit_log(
+    record_member_action(
         request,
         actor=op.actor,
-        action=op.action,
+        action_category=op.action,
         target_user=op.target_user,
         outcome=op.outcome,
         extra=op.extra,

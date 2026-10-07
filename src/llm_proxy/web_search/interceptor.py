@@ -34,8 +34,8 @@ from llm_proxy.models.tools import (
     WebSearchTool,
     is_web_search_tool_name,
 )
+from llm_proxy.observability.log_intake import WebSearchLogEntry, record_web_search
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.tool_logging import WebSearchLogEntry, get_tool_log_service
 from llm_proxy.observability.types import WebSearchStatus
 
 from .provider import WebSearchExecutionResult, WebSearchProvider, WebSearchToolConfig
@@ -428,8 +428,6 @@ class WebSearchInterceptor:
             api_key_name = user_ctx.api_key_name if user_ctx else None
             auth_method = user_ctx.auth_method if user_ctx else None
 
-            log_service = get_tool_log_service()
-
             entry = WebSearchLogEntry(
                 query=query,
                 status=status,
@@ -442,7 +440,7 @@ class WebSearchInterceptor:
                 max_uses=max_uses,
                 current_use=current_use,
             )
-            log_service.log_web_search_background(
+            record_web_search(
                 entry,
                 user_id=user_id,
                 user_identity=user_identity,

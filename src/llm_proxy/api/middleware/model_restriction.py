@@ -18,7 +18,7 @@ from llm_proxy.api.middleware.asgi_utils import (
 from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
-from llm_proxy.observability.audit_helpers import write_rejection_log
+from llm_proxy.observability.log_intake import record_rejection
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import EventType, ResourceType
 from llm_proxy.protocols.registry import protocol_name_for_path
@@ -134,7 +134,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
 
         # Short-circuited here means no endpoint row is written later, so the
         # rejection itself is the only record the operator will see.
-        write_rejection_log(
+        record_rejection(
             request,
             status_code=403,
             error_message=error_msg or "Model not allowed for this API key",

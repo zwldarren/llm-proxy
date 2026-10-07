@@ -105,7 +105,7 @@ class TestPerKeyRateLimit:
             p1,
             p2,
             p3,
-            patch("llm_proxy.observability.service.RequestLogService", _CapturingService),
+            patch("llm_proxy.observability.log_intake.RequestLogService", _CapturingService),
         ):
             transport = ASGITransport(app=app, raise_app_exceptions=False)
             async with AsyncClient(transport=transport, base_url="http://test") as client:

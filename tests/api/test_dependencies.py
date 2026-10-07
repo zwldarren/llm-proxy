@@ -412,13 +412,12 @@ async def test_build_request_context_records_the_judge_call_as_its_own_row(
 
     calls: list = []
 
-    class _CapturingService:
-        def log_call_background(self, entry, **kwargs):
-            calls.append((entry, kwargs))
+    def _capture(entry, **kwargs):
+        calls.append((entry, kwargs))
 
     monkeypatch.setattr(
-        "llm_proxy.observability.internal_call_logging.get_internal_call_log_service",
-        lambda: _CapturingService(),
+        "llm_proxy.observability.log_intake.record_internal_call",
+        _capture,
     )
 
     await _build_request_context(mock_request, fastapi_request)

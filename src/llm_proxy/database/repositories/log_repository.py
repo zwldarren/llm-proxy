@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.database.repositories.base_usage import BaseUsageRepository
 from llm_proxy.database.tables import AuditSequence, RequestLog
-from llm_proxy.observability.audit_helpers import CONTENT_HASH_VERSION
+
+#: Content hash algorithm version stamped on audit rows (this repository owns
+#: the hash chain).
+CONTENT_HASH_VERSION: int = 1
 
 
 class _SchemaCache:

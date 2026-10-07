@@ -31,7 +31,7 @@ from llm_proxy.core.exceptions import (
 )
 from llm_proxy.core.identity import get_request_identity
 from llm_proxy.http.client import validate_server_url
-from llm_proxy.observability.audit_helpers import write_provider_key_reveal_audit_log
+from llm_proxy.observability.log_intake import record_key_reveal
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -212,7 +212,7 @@ async def reveal_provider_api_key(
         raise NotFoundError(message=f"Provider '{name}' not found")
 
     identity = get_request_identity(request)
-    await write_provider_key_reveal_audit_log(
+    record_key_reveal(
         request,
         actor=identity.display_name or "unknown",
         provider_name=name,

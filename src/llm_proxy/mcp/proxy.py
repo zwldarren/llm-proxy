@@ -20,8 +20,8 @@ from mcp.types import (
 )
 
 from llm_proxy.mcp.backend import BackendConnection
+from llm_proxy.observability.log_intake import McpLogEntry, record_mcp_call
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.tool_logging import McpLogEntry, get_tool_log_service
 from llm_proxy.observability.types import McpOperationType, McpResourceType
 
 logger = get_logger(__name__)
@@ -262,8 +262,6 @@ class MCPServerProxy:
         error_message: str | None = None,
     ) -> None:
         try:
-            log_service = get_tool_log_service()
-
             entry = McpLogEntry(
                 server_name=self._name,
                 operation=operation,
@@ -275,7 +273,7 @@ class MCPServerProxy:
                 status_code=status_code,
                 response_time_ms=int((time.time() - start_time) * 1000),
             )
-            log_service.log_mcp_background(entry)
+            record_mcp_call(entry)
         except Exception:
             logger.debug("Failed to log MCP operation", exc_info=True)
 

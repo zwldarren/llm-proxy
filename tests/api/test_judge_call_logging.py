@@ -43,7 +43,7 @@ class _CapturingService:
     def __init__(self) -> None:
         self.calls: list[tuple[Any, dict[str, Any]]] = []
 
-    def log_call_background(self, entry: Any, **kwargs: Any) -> None:
+    def __call__(self, entry: Any, **kwargs: Any) -> None:
         self.calls.append((entry, kwargs))
 
 
@@ -73,8 +73,8 @@ def _decision(**meta_overrides: Any) -> SimpleNamespace:
 def _patch_service(monkeypatch) -> _CapturingService:
     service = _CapturingService()
     monkeypatch.setattr(
-        "llm_proxy.observability.internal_call_logging.get_internal_call_log_service",
-        lambda: service,
+        "llm_proxy.observability.log_intake.record_internal_call",
+        service,
     )
     return service
 
@@ -190,7 +190,7 @@ def test_a_failing_log_service_never_breaks_the_request(monkeypatch):
         raise RuntimeError("log store unavailable")
 
     monkeypatch.setattr(
-        "llm_proxy.observability.internal_call_logging.get_internal_call_log_service",
+        "llm_proxy.observability.log_intake.record_internal_call",
         _raise,
     )
 

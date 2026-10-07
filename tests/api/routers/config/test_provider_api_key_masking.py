@@ -161,15 +161,14 @@ class TestProviderApiKeyReveal:
                 return_value=mock_repo,
             ),
             patch(
-                "llm_proxy.api.routers.config.providers.write_provider_key_reveal_audit_log",
-                new=AsyncMock(),
+                "llm_proxy.api.routers.config.providers.record_key_reveal",
             ) as audit,
         ):
             resp = client.post("/api/config/providers/p/api-key/reveal")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"name": "p", "api_key": PLAINTEXT_KEY}
-        audit.assert_awaited_once()
-        assert audit.await_args.kwargs["provider_name"] == "p"
+        audit.assert_called_once()
+        assert audit.call_args.kwargs["provider_name"] == "p"
 
     def test_reveal_missing_provider_404(self, client, mock_repo):
         with patch(
