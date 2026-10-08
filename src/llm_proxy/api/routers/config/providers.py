@@ -14,7 +14,7 @@ from llm_proxy.api.routers.config.helpers import (
     get_config_repository,
 )
 from llm_proxy.api.routers.config.models import model_record_to_read
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.providers import (
     ProviderCreate,
     ProviderDetails,
     ProviderKeyReveal,

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from llm_proxy.api.dependencies import get_async_session_dep, get_auth_config
 from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 from llm_proxy.api.middleware.security import get_lockout_manager
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.auth import (
     LoginRequest,
     LoginResponse,
     SetupRequest,

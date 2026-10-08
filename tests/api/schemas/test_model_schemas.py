@@ -1,64 +1,14 @@
-"""Tests for admin Pydantic schemas (API key MCP fields, model status)."""
-
-from datetime import UTC, datetime
+"""Tests for the model schemas: status vocabulary, capabilities, pricing tiers."""
 
 import pytest
 from pydantic import ValidationError
 
-from llm_proxy.api.schemas.admin import (
-    ApiKeyCreate,
-    ApiKeyRead,
-    ApiKeyResponse,
-    ApiKeyUpdate,
+from llm_proxy.api.schemas.models import (
     ModelCreate,
+    ModelProviderMapping,
     ModelRead,
     ModelUpdate,
 )
-
-# --- API key MCP field tests ---
-
-
-def test_api_key_create_accepts_mcp_fields() -> None:
-    key = ApiKeyCreate(
-        name="agent",
-        allowed_models=None,
-        allowed_mcp_servers=["github_mcp"],
-    )
-    assert key.allowed_mcp_servers == ["github_mcp"]
-
-
-def test_api_key_read_has_mcp_fields() -> None:
-    key = ApiKeyRead(
-        name="agent",
-        allowed_models=None,
-        allowed_mcp_servers=["github_mcp"],
-        user_id=1,
-        created_at=datetime.now(UTC),
-        last_used_at=None,
-        is_active=True,
-    )
-    assert key.allowed_mcp_servers == ["github_mcp"]
-
-
-def test_api_key_response_has_mcp_fields() -> None:
-    resp = ApiKeyResponse(
-        name="agent",
-        key="sk_abc",
-        allowed_models=None,
-        allowed_mcp_servers=["github_mcp"],
-        created_at=datetime.now(UTC),
-    )
-    assert resp.allowed_mcp_servers == ["github_mcp"]
-
-
-def test_api_key_update_accepts_mcp_fields() -> None:
-    update = ApiKeyUpdate(
-        allowed_mcp_servers=["github_mcp"],
-    )
-    assert update.allowed_mcp_servers == ["github_mcp"]
-
-
-# --- Model status vocabulary tests ---
 
 
 def test_model_update_rejects_unknown_status() -> None:
@@ -92,9 +42,6 @@ def test_model_read_derives_capabilities() -> None:
     assert read.capabilities == ["vision", "tts", "systemone", "reasoning", "experimental"]
 
 
-# --- Context-tier pricing tests ---
-
-
 def test_model_update_sorts_pricing_tiers_by_threshold() -> None:
     update = ModelUpdate(
         pricing_tiers=[
@@ -117,8 +64,6 @@ def test_model_update_rejects_duplicate_tier_thresholds() -> None:
 
 
 def test_model_provider_mapping_carries_pricing_tiers() -> None:
-    from llm_proxy.api.schemas.admin import ModelProviderMapping
-
     mapping = ModelProviderMapping(
         provider_name="openai",
         provider_model_name="gpt-5.4",

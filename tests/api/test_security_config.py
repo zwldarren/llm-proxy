@@ -51,7 +51,7 @@ class TestGetSecurityConfig:
         ):
             result = await get_security_config(request, session)
 
-        from llm_proxy.api.schemas.admin import SecurityConfig
+        from llm_proxy.api.schemas.server_config import SecurityConfig
 
         defaults = SecurityConfig().model_dump()
         for key, expected in defaults.items():

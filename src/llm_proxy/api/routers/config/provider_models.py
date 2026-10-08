@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import get_async_session_dep, get_http_client, require_admin_role
 from llm_proxy.api.routers.config.helpers import get_config_repository
-from llm_proxy.api.schemas.admin import ProviderModelsResponse
+from llm_proxy.api.schemas.providers import ProviderModelsResponse
 from llm_proxy.core.adapter import get_adapter
 from llm_proxy.core.exceptions import (
     AdapterNotFoundError,

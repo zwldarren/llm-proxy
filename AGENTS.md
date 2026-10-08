@@ -103,6 +103,16 @@ key_name = get_request_identity(request).api_key_name
 facts.model = requested_model
 ```
 
+### Admin API schemas
+
+Dashboard request/response models live in `llm_proxy.api.schemas`, one module
+per resource, mirroring `api/routers/` (ADR-0023): `models.py`, `providers.py`,
+`api_keys.py`, `mcp.py`, `auth.py`, `server_config.py`, and `common.py` for what
+more than one resource reuses (`ValidatorMixin`). Put a new schema in the
+module of the resource it belongs to; a resource may import a peer's read shape
+it embeds (`ProviderDetails.models` is `ModelRead`), never a peer's write
+schema. Small router-local response shapes may stay inline in the router.
+
 ### MCP Integration
 
 - `mcp/manager.py`: MCP server lifecycle management

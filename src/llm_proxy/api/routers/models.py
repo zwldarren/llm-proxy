@@ -8,7 +8,7 @@ from llm_proxy.api.dependencies import (
     get_request_identity,
     require_api_key_auth,
 )
-from llm_proxy.api.schemas.admin import OpenAIModel, OpenAIModelList
+from llm_proxy.api.schemas.models import OpenAIModel, OpenAIModelList
 from llm_proxy.core.request_facts import facts_for
 
 router = APIRouter(prefix="/v1", tags=["models"])

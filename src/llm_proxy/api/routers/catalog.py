@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import get_async_session_dep, require_authenticated
 from llm_proxy.api.routers.config.helpers import get_config_repository
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.models import (
     ModelCatalogEntry,
     derive_model_capabilities,
     normalize_model_status,

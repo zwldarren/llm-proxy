@@ -1,14 +1,15 @@
-"""Guard against drift between the admin settings schemas and the runtime config.
+"""Guard against drift between the server-config schemas and the runtime config.
 
-The Settings UI is driven by the admin schemas (``llm_proxy.api.schemas.admin``):
-it renders their fields and treats their defaults as the effective configuration.
+The Settings UI is driven by these schemas
+(``llm_proxy.api.schemas.server_config``): it renders their fields and treats
+their defaults as the effective configuration.
 The proxy itself runs on the config types (``llm_proxy.config.types``). When the
 two disagree, the panel reports a state that is not in effect — and saving an
 unrelated field in the same section can persist the wrong default. Response
 Keepalive shipped with exactly this bug (schema said off/30s, runtime was on/60s).
 """
 
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.server_config import (
     CircuitBreakerConfigSchema,
     KeepaliveConfig,
     ResilienceConfig,

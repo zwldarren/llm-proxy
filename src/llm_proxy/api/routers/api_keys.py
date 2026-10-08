@@ -11,7 +11,7 @@ from llm_proxy.api.dependencies import (
     require_authenticated,
 )
 from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.api_keys import (
     ApiKeyCreate,
     ApiKeyDeleteResponse,
     ApiKeyRead,

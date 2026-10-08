@@ -16,7 +16,7 @@ from llm_proxy.api.routers.config.helpers import (
     commit_and_reload,
     get_config_repository,
 )
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.models import (
     ModelCreate,
     ModelProviderMapping,
     ModelRead,

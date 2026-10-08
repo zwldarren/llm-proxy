@@ -12,7 +12,7 @@ from llm_proxy.api.dependencies import (
     require_admin_role,
     require_authenticated,
 )
-from llm_proxy.api.schemas.admin import (
+from llm_proxy.api.schemas.mcp import (
     McpServerCapabilities,
     McpServerCreate,
     McpServerRead,

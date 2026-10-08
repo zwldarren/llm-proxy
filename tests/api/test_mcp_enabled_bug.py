@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.routers.mcp import update_server
-from llm_proxy.api.schemas.admin import McpServerUpdate
+from llm_proxy.api.schemas.mcp import McpServerUpdate
 from llm_proxy.database.repositories.config import ConfigRepository
 from llm_proxy.database.repositories.config_mcp import McpServerRepository
 from llm_proxy.database.tables import McpServerRecord

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from llm_proxy.api.schemas.admin import SmartRoutingConfigUpdate
+from llm_proxy.api.schemas.server_config import SmartRoutingConfigUpdate
 
 
 def _repo_with(row_value: dict | None) -> MagicMock:
