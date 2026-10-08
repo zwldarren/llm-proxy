@@ -128,7 +128,10 @@ Two rules stay where they were, deliberately: a situation's *policy* (the
 rejection dedupe window, which records it fans out, its warning level) remains
 in the verb, and classification remains declared rather than derived — the
 four tool situations classify nothing, because a tool call is not a client
-endpoint.
+endpoint. The outcome rule is a third: the endpoint lifecycle is three-way on
+the status code, the tool situations are two-way on 2xx, the judge compares
+against 200, and realtime declares no outcome at all. The assembler unifies
+none of them; the contract test pins each situation's rule instead.
 
 One declared behavior change: the four tool situations now carry
 `server_hostname` and `service_name` like every other row. They were null

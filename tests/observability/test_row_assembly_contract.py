@@ -43,6 +43,7 @@ from llm_proxy.observability.types import (
     LogType,
     McpOperationType,
     McpResourceType,
+    Outcome,
     WebSearchStatus,
 )
 
@@ -157,11 +158,19 @@ def _run(situation: str) -> None:
     log_intake.configure(config=LoggingConfig(log_input_output=True))
     match situation:
         case "endpoint-success":
-            asyncio.run(record_request_end(MagicMock(), SimpleNamespace(usage=None), _context()))
+            asyncio.run(
+                record_request_end(
+                    MagicMock(), SimpleNamespace(usage=None), _context(response_status_code=200)
+                )
+            )
         case "endpoint-error":
             asyncio.run(record_request_error(MagicMock(), ValueError("boom"), _context()))
         case "endpoint-stream":
-            asyncio.run(record_stream_end(MagicMock(), _context(is_streaming=True), None))
+            asyncio.run(
+                record_stream_end(
+                    MagicMock(), _context(is_streaming=True, response_status_code=200), None
+                )
+            )
         case "admin-request":
             record_admin_request(
                 _request("/api/config/server/logging"),
@@ -226,29 +235,37 @@ def _drive(situation: str) -> list:
     return writers.logs
 
 
-#: situation id, the log type it must declare, whether it classifies the row
-SITUATIONS: list[tuple[str, LogType, bool]] = [
-    ("endpoint-success", LogType.ENDPOINT, True),
-    ("endpoint-error", LogType.ENDPOINT, True),
-    ("endpoint-stream", LogType.ENDPOINT, True),
-    ("admin-request", LogType.AUDIT, True),
-    ("early-failure", LogType.ENDPOINT, True),
-    ("member-action", LogType.AUDIT, True),
-    ("rejection", LogType.ENDPOINT, True),
-    ("mcp-call", LogType.MCP, False),
-    ("web-search", LogType.WEB_SEARCH, False),
-    ("internal-call", LogType.JUDGE, False),
-    ("realtime-turn", LogType.ENDPOINT, False),
+#: situation id, the log type it must declare, the outcome rule it follows,
+#: and whether it classifies the row. The four outcome rules are distinct on
+#: purpose: the endpoint lifecycle is three-way on the status code, the tool
+#: situations are two-way on 2xx, the judge compares against 200, and realtime
+#: declares none at all (its spend is accounted on the usage record).
+SITUATIONS: list[tuple[str, LogType, Outcome | None, bool]] = [
+    ("endpoint-success", LogType.ENDPOINT, Outcome.SUCCESS, True),
+    ("endpoint-error", LogType.ENDPOINT, Outcome.ERROR, True),
+    ("endpoint-stream", LogType.ENDPOINT, Outcome.SUCCESS, True),
+    ("admin-request", LogType.AUDIT, Outcome.SUCCESS, True),
+    ("early-failure", LogType.ENDPOINT, Outcome.ERROR, True),
+    ("member-action", LogType.AUDIT, Outcome.SUCCESS, True),
+    ("rejection", LogType.ENDPOINT, Outcome.FAILURE, True),
+    ("mcp-call", LogType.MCP, Outcome.SUCCESS, False),
+    ("web-search", LogType.WEB_SEARCH, Outcome.SUCCESS, False),
+    ("internal-call", LogType.JUDGE, Outcome.FAILURE, False),
+    ("realtime-turn", LogType.ENDPOINT, None, False),
 ]
 
 _SITUATION_PARAMS = [
-    pytest.param(situation, log_type, classifies, id=situation)
-    for situation, log_type, classifies in SITUATIONS
+    pytest.param(situation, log_type, outcome, classifies, id=situation)
+    for situation, log_type, outcome, classifies in SITUATIONS
 ]
 
 
-@pytest.mark.parametrize(("situation", "expected_log_type", "classifies"), _SITUATION_PARAMS)
-def test_every_situation_writes_an_attributed_row(situation, expected_log_type, classifies):
+@pytest.mark.parametrize(
+    ("situation", "expected_log_type", "expected_outcome", "classifies"), _SITUATION_PARAMS
+)
+def test_every_situation_writes_an_attributed_row(
+    situation, expected_log_type, expected_outcome, classifies
+):
     """Every situation produces one row with its log type and the deployment constants."""
     rows = _drive(situation)
 
@@ -262,8 +279,22 @@ def test_every_situation_writes_an_attributed_row(situation, expected_log_type, 
     assert row.service_name == "llm-proxy"
 
 
-@pytest.mark.parametrize(("situation", "expected_log_type", "classifies"), _SITUATION_PARAMS)
-def test_classification_is_declared_not_invented(situation, expected_log_type, classifies):
+@pytest.mark.parametrize(
+    ("situation", "expected_log_type", "expected_outcome", "classifies"), _SITUATION_PARAMS
+)
+def test_outcome_follows_the_situations_own_rule(
+    situation, expected_log_type, expected_outcome, classifies
+):
+    """Each situation keeps the outcome rule it had; the assembler unifies none of them."""
+    assert _drive(situation)[0].outcome == expected_outcome
+
+
+@pytest.mark.parametrize(
+    ("situation", "expected_log_type", "expected_outcome", "classifies"), _SITUATION_PARAMS
+)
+def test_classification_is_declared_not_invented(
+    situation, expected_log_type, expected_outcome, classifies
+):
     """A situation that has no classification declares none; the rest classify the row.
 
     The resource pair is only as specific as the path allows, so the contract is
