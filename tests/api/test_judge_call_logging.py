@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from llm_proxy.api.context import _log_judge_call
-from llm_proxy.core.identity import RequestIdentity
+from llm_proxy.core.request_facts import RequestIdentity, facts_for
 
 JUDGE_META: dict[str, Any] = {
     "gate": "gate:open",
@@ -48,18 +48,18 @@ class _CapturingService:
 
 
 def _req() -> SimpleNamespace:
-    return SimpleNamespace(
-        state=SimpleNamespace(
-            identity=RequestIdentity(
-                user="alice",
-                user_id=7,
-                api_key_name="key-1",
-                auth_method="api_key",
-            )
-        ),
+    request = SimpleNamespace(
+        state=SimpleNamespace(),
         headers={"user-agent": "curl/8"},
         client=SimpleNamespace(host="203.0.113.9"),
     )
+    facts_for(request).identity = RequestIdentity(
+        user="alice",
+        user_id=7,
+        api_key_name="key-1",
+        auth_method="api_key",
+    )
+    return request
 
 
 def _decision(**meta_overrides: Any) -> SimpleNamespace:

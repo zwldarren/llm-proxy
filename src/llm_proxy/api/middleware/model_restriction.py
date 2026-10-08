@@ -16,7 +16,7 @@ from llm_proxy.api.middleware.asgi_utils import (
     adapt_http_middleware,
 )
 from llm_proxy.api.middleware.security import get_api_key_lockout_manager
-from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.observability.log_intake import record_rejection
 from llm_proxy.observability.logger import get_logger
@@ -94,14 +94,14 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     if path.startswith("/servers/"):
         return None
 
-    allowed_models: list[str] | None = getattr(request.state, "allowed_models", None)
+    allowed_models: list[str] | None = facts_for(request).allowed_models
 
     # None means unrestricted; an empty list means deny-all and must still
     # be enforced below.
     if allowed_models is None:
         return None
 
-    api_key_name: str = getattr(request.state, "api_key_name", None) or "unknown"
+    api_key_name: str = get_request_identity(request).api_key_name or "unknown"
 
     # Extract model name from request body, handling both JSON and multipart/form-data.
     # The body is always buffered first so the downstream handler still sees it.

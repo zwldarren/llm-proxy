@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from llm_proxy.core.errors.utils import extract_error_details
 from llm_proxy.core.exceptions import ProviderError
-from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.core.utils import safe_int
 from llm_proxy.observability.cost import calculate_event_cost
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 
     from llm_proxy.config.manager import DatabaseConfigManager
     from llm_proxy.config.types.logging_config import LoggingConfig
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import InternalRequest, InternalResponse
     from llm_proxy.observability.event_context import EventContext
 
@@ -414,11 +414,11 @@ def reset_rejection_log_dedupe() -> None:
 
 
 def _already_logged(request: Any) -> bool:
-    return bool(getattr(request.state, "audit_log_written", False))
+    return facts_for(request).audit_log_written
 
 
 def _mark_logged(request: Any) -> None:
-    request.state.audit_log_written = True
+    facts_for(request).audit_log_written = True
 
 
 # ---------------------------------------------------------------------------
@@ -826,7 +826,7 @@ def record_early_failure(
     """Record a request that failed before the pipeline could capture it.
 
     The unified capture layer only runs inside ``UnifiedProcessor.process``, so
-    headers and body are backfilled here from ``request.state`` (stashed by the
+    headers and body are backfilled here from the request's facts (stashed by the
     protocol handler) and masked. Writes the log row *and* the usage record so
     usage metrics count the failure. Idempotent.
     """
@@ -836,9 +836,10 @@ def record_early_failure(
         config = _logging_config()
         identity = get_request_identity(request)
         path = request.url.path
-        request_id = getattr(request.state, "request_id", None) or "unknown"
-        provider = getattr(request.state, "provider", None)
-        model = getattr(request.state, "model", None)
+        facts = facts_for(request)
+        request_id = facts.request_id
+        provider = facts.provider
+        model = facts.model
 
         stack_trace = None
         if error.__traceback__:
@@ -867,7 +868,7 @@ def record_early_failure(
             client_ip=get_client_ip(request),
             user_agent=request.headers.get("user-agent"),
             auth_method=identity.auth_method,
-            session_id=getattr(request.state, "session_id", None),
+            session_id=facts.session_id,
             server_hostname=get_server_hostname(),
             service_name="llm-proxy",
             event_type=determine_event_type(path),
@@ -891,16 +892,13 @@ def record_early_failure(
 
 
 def _backfill_request_data(request: Request, config: LoggingConfig) -> tuple[dict[str, Any], Any]:
-    """Best-effort masked headers/body from ``request.state``. Never raises."""
+    """Best-effort masked headers/body from the request's facts. Never raises."""
     try:
-        captured_headers = getattr(request.state, "request_headers", None)
-        if isinstance(captured_headers, dict) and captured_headers:
-            headers = captured_headers
-        else:
-            headers = mask_headers(dict(request.headers))
+        facts = facts_for(request)
+        headers = facts.request_headers or mask_headers(dict(request.headers))
 
         body: Any = {}
-        parsed_body = getattr(request.state, "parsed_request_body", None)
+        parsed_body = facts.parsed_request_body
         if parsed_body is not None:
             if hasattr(parsed_body, "model_dump"):
                 parsed_body = parsed_body.model_dump()
@@ -912,7 +910,7 @@ def _backfill_request_data(request: Request, config: LoggingConfig) -> tuple[dic
             else:
                 body = parsed_body
         else:
-            captured_body = getattr(request.state, "request_body", None)
+            captured_body = facts.request_body
             if isinstance(captured_body, dict) and captured_body:
                 body = captured_body
         return headers, body
@@ -957,12 +955,11 @@ def record_admin_request(
     request_id: str,
     status_code: int,
     response_time_ms: int,
-    error_message: str | None = None,
 ) -> None:
     """Record an admin API request audited by the HTTP logging middleware.
 
-    The middleware's ASGI body-teeing captured and masked the bodies onto
-    ``request.state`` before calling this. The resource id is derived from the
+    The middleware's ASGI body-teeing captured and masked the bodies onto the
+    request's facts before calling this. The resource id is derived from the
     real body *before* the body switch scrubs it, so the row still identifies
     what was touched. Idempotent: it never writes a second row for a request
     some other situation already logged.
@@ -976,11 +973,12 @@ def record_admin_request(
         identity = get_request_identity(request)
         client_ip = get_client_ip(request)
 
-        request_body = getattr(request.state, "request_body", {})
+        facts = facts_for(request)
+        request_body = facts.request_body if facts.request_body is not None else {}
         resource_id = determine_resource_id(path, request_body)
-        response_body = getattr(request.state, "response_body", {})
-        request_headers = getattr(request.state, "request_headers", {})
-        response_headers = getattr(request.state, "response_headers", {})
+        response_body = facts.response_body if facts.response_body is not None else {}
+        request_headers = facts.request_headers
+        response_headers = facts.response_headers
         if not config.log_input_output:
             request_body = body_marker(bodies_enabled=False)
             response_body = body_marker(bodies_enabled=False)
@@ -995,12 +993,11 @@ def record_admin_request(
             log_type=LogType.AUDIT,
             user_identity=identity.display_name or client_ip,
             user_id=getattr(identity, "user_id", None),
-            session_id=getattr(request.state, "session_id", None),
+            session_id=facts.session_id,
             api_key_name=identity.api_key_name,
             client_ip=client_ip,
             user_agent=request.headers.get("user-agent"),
             auth_method=identity.auth_method,
-            error_message=error_message,
             server_hostname=get_server_hostname(),
             service_name="llm-proxy",
             event_type=determine_event_type(path),
@@ -1053,7 +1050,7 @@ def _record_audit_action(
         if log_metadata:
             metadata.update(log_metadata)
         log_data = RequestLogCreate(
-            request_id=getattr(request.state, "request_id", None) or "unknown",
+            request_id=facts_for(request).request_id,
             timestamp=time.time(),
             endpoint=request.url.path,
             method=request.method,
@@ -1237,7 +1234,7 @@ def record_rejection(
 
     try:
         log_data = RequestLogCreate(
-            request_id=getattr(request.state, "request_id", None) or "unknown",
+            request_id=facts_for(request).request_id,
             timestamp=time.time(),
             endpoint=request.url.path,
             method=request.method,

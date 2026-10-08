@@ -17,6 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from llm_proxy.api.dependencies import get_config_manager
 from llm_proxy.api.middleware.model_restriction import check_model_restriction
 from llm_proxy.core.provider_selector import create_provider_selector
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.core.ws_common import (
     WS_CLOSE_AUTH_FAILED,
     WS_CLOSE_FORBIDDEN,
@@ -286,15 +287,18 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         )
         return
 
+    # One id names the connection: it is the request id on every row the relay
+    # writes and the session id the usage observer groups turns under.
+    request_id = facts_for(request).request_id
     observer = RealtimeUsageObserver(
         context=RealtimeSessionContext(
             model=model_name,
             provider=selection.provider_name,
             api_key_name=identity.api_key_name or "",
-            request_id=request.state.request_id,
+            request_id=request_id,
             client_ip=websocket.client.host if websocket.client is not None else None,
             user_agent=websocket.headers.get("user-agent"),
-            session_id=request.state.request_id,
+            session_id=request_id,
             user_id=identity.user_id,
         ),
         config_manager=config_manager,
@@ -320,7 +324,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         logger.debug(
             "Realtime session closed",
             extra={
-                "request_id": request.state.request_id,
+                "request_id": request_id,
                 "session_id": observer.session_id,
                 "turns": observer.turns,
                 "duration_s": round(time.monotonic() - session_started_at, 3),

@@ -85,6 +85,24 @@ config = await services.config_manager().get_config()
 redis = services.redis_client()  # None when Redis is disabled
 ```
 
+### Request-scoped facts
+
+What a request accumulates as it travels (its id, identity, the resolved
+model/provider, the auditor's captured bodies, the disconnect/audit latches)
+lives in one typed record, `llm_proxy.core.request_facts` (ADR-0022). Read and
+write it with `facts_for(request)` — never with
+`getattr(request.state, "some_name", None)`, and never by setting a
+`request.state` attribute directly.
+
+```python
+from llm_proxy.core.request_facts import facts_for, get_request_identity
+
+facts = facts_for(request)
+request_id = facts.request_id  # minted once, by the first toucher
+key_name = get_request_identity(request).api_key_name
+facts.model = requested_model
+```
+
 ### MCP Integration
 
 - `mcp/manager.py`: MCP server lifecycle management

@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from fastapi import Request, Response
 
 from llm_proxy.config.manager import load_logging_config
-from llm_proxy.core.constants import CLIENT_DISCONNECTED_STATE_KEY
 from llm_proxy.core.context import RequestUserContext, set_request_user_context
 from llm_proxy.core.errors import get_error_handler
 from llm_proxy.core.errors.protocols import protocol_for_name
@@ -28,7 +27,6 @@ from llm_proxy.core.exceptions import (
     LLMProxyError,
     ValidationError,
 )
-from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.processing.base import RequestContext
 from llm_proxy.core.processing.stages import (
     ParameterOverrideService,
@@ -40,6 +38,7 @@ from llm_proxy.core.processing.stages import (
 from llm_proxy.core.processing.stages.composition import create_per_provider_stages
 from llm_proxy.core.processing.strategies import ProcessingStrategy, get_strategy
 from llm_proxy.core.processing.streaming_processor import StreamingProcessor
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.models import InternalRequest
@@ -110,9 +109,10 @@ class UnifiedProcessor:
 
     def _handle_unexpected_error(self, e: Exception, req: Request) -> NoReturn:
         """Handle unexpected errors."""
-        request_id = getattr(req.state, "request_id", None)
-        provider = getattr(req.state, "provider", None)
-        model = getattr(req.state, "model", None)
+        facts = facts_for(req)
+        request_id = facts.request_id
+        provider = facts.provider
+        model = facts.model
 
         logger.error(
             f"Unexpected error [request_id={request_id}] "
@@ -156,7 +156,7 @@ class UnifiedProcessor:
         identity = get_request_identity(request)
 
         event_context = EventContext(
-            request_id=getattr(request.state, "request_id", str(uuid.uuid4())),
+            request_id=facts_for(request).request_id,
             trace_id=trace_id,
             model=unified_request.model,
             internal_model=unified_request.model,
@@ -304,7 +304,7 @@ class UnifiedProcessor:
             # this is the "invisible 524" moment: the origin keeps generating
             # for a client that is already gone. Record the abandonment so it
             # shows up as a failed (499) request instead of vanishing.
-            if getattr(req.state, CLIENT_DISCONNECTED_STATE_KEY, False):
+            if facts_for(req).client_disconnected:
                 error = ClientDisconnectedError()
                 tracing_registry = context.tracing_registry or get_tracing_registry()
                 await asyncio.shield(
@@ -315,7 +315,7 @@ class UnifiedProcessor:
             tracing_registry = context.tracing_registry or get_tracing_registry()
             await tracing_registry.on_error(state.unified_request, e, event_context)
             event_context.error_message = str(e)
-            req.state.audit_log_written = True
+            facts_for(req).audit_log_written = True
             self._handle_unexpected_error(e, req)
         finally:
             await asyncio.shield(state.exit_stack.aclose())

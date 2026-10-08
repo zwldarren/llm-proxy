@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 from starlette.requests import Request
 
 from llm_proxy.config.types.logging_config import LoggingConfig
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.observability import log_intake
 from llm_proxy.observability.log_intake import record_early_failure
 
@@ -37,9 +38,12 @@ def _make_request(path: str, headers: list[tuple[bytes, bytes]] | None = None) -
         "scheme": "http",
         "server": ("testserver", 80),
         "app": app,
-        "state": {"request_id": "req-1"},
+        "state": {},
     }
-    return Request(scope, receive)
+    request = Request(scope, receive)
+    # Deterministic id so rows are comparable across runs.
+    facts_for(request).request_id = "req-1"
+    return request
 
 
 def _record(request: Request, mask: bool = True) -> MagicMock:
@@ -64,7 +68,7 @@ def test_uses_stashed_parsed_body_and_masks_headers():
         "/v1/chat/completions",
         headers=[(b"authorization", b"Bearer secret-token"), (b"x-custom", b"keep")],
     )
-    request.state.parsed_request_body = {
+    facts_for(request).parsed_request_body = {
         "model": "claude-haiku-4-5",
         "messages": [{"role": "user", "content": "hi"}],
         "api_key": "should-be-masked",
@@ -99,8 +103,9 @@ def test_falls_back_to_live_headers_when_nothing_captured():
 def test_prefers_admin_middleware_captured_data():
     """For /api/* paths the logging middleware has already captured data."""
     request = _make_request("/api/providers")
-    request.state.request_headers = {"x-foo": "bar"}
-    request.state.request_body = {"name": "new-provider"}
+    facts = facts_for(request)
+    facts.request_headers = {"x-foo": "bar"}
+    facts.request_body = {"name": "new-provider"}
 
     service = _record(request, mask=True)
     data = service.create_log_background.call_args.args[0]
@@ -108,6 +113,22 @@ def test_prefers_admin_middleware_captured_data():
     assert data.request_headers == {"x-foo": "bar"}
     assert data.request_body == {"name": "new-provider"}
     assert data.log_type.value == "audit"
+
+
+def test_records_the_session_id_the_pipeline_learned():
+    """The session id reaches an early-failure row.
+
+    The verb used to read a ``request.state`` key nothing ever wrote, so every
+    early-failure row carried a null session id even when the pipeline had
+    resolved one for a trusted-proxy client (ADR-0022).
+    """
+    request = _make_request("/v1/chat/completions")
+    facts_for(request).session_id = "session-abc"
+
+    service = _record(request)
+    data = service.create_log_background.call_args.args[0]
+
+    assert data.session_id == "session-abc"
 
 
 def test_never_raises_on_missing_state():
@@ -129,7 +150,7 @@ def test_strips_raw_bytes_from_multipart_body():
     fields (model, prompt, language) must survive for diagnostics.
     """
     request = _make_request("/v1/audio/transcriptions")
-    request.state.parsed_request_body = {
+    facts_for(request).parsed_request_body = {
         "model": "whisper-1",
         "language": "en",
         "prompt": "hello",
@@ -153,7 +174,7 @@ def test_strips_raw_bytes_from_multipart_body():
 def test_body_is_scrubbed_when_body_logging_is_off():
     """The master body switch scrubs the early-failure body too."""
     request = _make_request("/v1/chat/completions")
-    request.state.parsed_request_body = {"model": "m", "api_key": "secret"}
+    facts_for(request).parsed_request_body = {"model": "m", "api_key": "secret"}
 
     log_intake.configure(config=LoggingConfig(log_input_output=False))
     service = MagicMock()

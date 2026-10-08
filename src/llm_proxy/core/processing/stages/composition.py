@@ -32,6 +32,7 @@ from llm_proxy.core.processing.stages.previous_response import (
 from llm_proxy.core.processing.stages.role_normalization import normalize_developer_roles
 from llm_proxy.core.processing.stages.tool_search import ToolSearchStage
 from llm_proxy.core.processing.stages.web_search import WebSearchStage
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.observability.event_context import EventContext
 
 if TYPE_CHECKING:
@@ -89,7 +90,7 @@ async def rerun_per_provider_stages(
         # Direct-adapter/test paths may lack an EventContext; the stages
         # re-run here never read it, but PipelineState requires the field.
         event_context = EventContext(
-            request_id=getattr(req.state, "request_id", "") or "",
+            request_id=facts_for(req).request_id,
             trace_id="",
             model=None,
         )

@@ -28,7 +28,12 @@ from llm_proxy.api.middleware.asgi_utils import (
 )
 from llm_proxy.api.middleware.exceptions import protocol_for_request
 from llm_proxy.api.middleware.security import get_api_key_lockout_manager
-from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
+from llm_proxy.core.request_facts import (
+    RequestIdentity,
+    facts_for,
+    get_request_identity,
+    set_request_identity,
+)
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.log_intake import record_failed_auth, record_rejection
@@ -173,7 +178,7 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
     client_ip = get_client_ip(request)
     lockout_manager = get_api_key_lockout_manager()
 
-    request_id = getattr(request.state, "request_id", None) or "unknown"
+    request_id = facts_for(request).request_id
 
     if lockout_manager.is_locked_out(client_ip):
         remaining = lockout_manager.get_lockout_remaining(client_ip)
@@ -332,14 +337,18 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
 
     lockout_manager.clear_failed_attempts(client_ip)
 
-    # Store model restriction info for model_restriction middleware.
+    # Store the model restriction for the model-restriction middleware and the
+    # post-routing re-check. The key name is on the identity; the allowlist is
+    # its own fact (the gates and the router both read it).
     # Note: an empty list is a valid (deny-all) restriction and must be kept.
     if allowed_models is not None:
-        request.state.allowed_models = allowed_models
-    request.state.api_key_name = matched_key_name
+        facts_for(request).allowed_models = allowed_models
 
-    # Surface MCP permissions to request.state and the ASGI scope (sub-apps
-    # mounted via app.mount() share the same scope dict).
+    # Surface MCP permissions to the ASGI scope for the mounted sub-apps
+    # (``app.mount()`` shares the scope dict). The request's own facts carry the
+    # key identity and allowlist; this dict is the MCP-shaped carrier
+    # (``principal_type``, ``allowed_mcp_servers``) that ``api/routers/mcp.py``
+    # reads off the raw scope.
     scope_auth: dict = {
         "principal_type": "api_key",
         "principal_id": matched_key_name,

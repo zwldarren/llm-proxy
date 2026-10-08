@@ -20,6 +20,7 @@ from fastapi import Request
 
 from llm_proxy.core.exceptions import LLMProxyError, ProviderError
 from llm_proxy.core.processing.stages.composition import rerun_per_provider_stages
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 
@@ -227,7 +228,7 @@ async def _create_fallback_adapter(
         event_context.provider = selection.provider_name
         if selection.provider_model_name:
             event_context.provider_model_name = selection.provider_model_name
-    req.state.provider = selection.provider_name
+    facts_for(req).provider = selection.provider_name
     return adapter
 
 
@@ -249,7 +250,7 @@ def _rebuild_fallback_request(
         unified_request=unified_request,
         parameter_overrides=selection.parameter_overrides or {},
         provider_model_name=selection.provider_model_name,
-        request_id=getattr(req.state, "request_id", None),
+        request_id=facts_for(req).request_id,
     )
     if context.event_context is not None:
         context.event_context.request_body = new_raw_data

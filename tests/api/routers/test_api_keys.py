@@ -17,7 +17,7 @@ from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers import api_keys as api_keys_module
 from llm_proxy.api.routers.api_keys import router
 from llm_proxy.core.exceptions import ConflictError, NotFoundError
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 from llm_proxy.database.repositories.api_keys import _UNSET, ApiKeyRepository
 from llm_proxy.database.tables import ApiKeyRecord
 

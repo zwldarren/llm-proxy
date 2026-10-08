@@ -12,7 +12,7 @@ from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers.logs import _user_role_cache
 from llm_proxy.api.routers.team import router
 from llm_proxy.config.types.auth import ProxyAuthConfig
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 from llm_proxy.database import get_async_session
 from llm_proxy.observability.types import ActionCategory, Outcome
 

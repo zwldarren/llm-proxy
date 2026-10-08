@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from llm_proxy.core.processing.base import RequestContext, ServiceDependencies
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
 from llm_proxy.observability.tracing.handlers import TracingHandler
 from llm_proxy.protocols.openai.handler import openai_protocol
@@ -123,9 +124,8 @@ def _build_unified_request(stream: bool = False) -> InternalRequest:
 def _build_mock_request():
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-123"
-    req.state.provider = "openai"
-    req.state.db_session = None
+    facts_for(req).request_id = "req-123"
+    facts_for(req).provider = "openai"
     req.url = MagicMock()
     req.url.path = "/v1/chat/completions"
     req.headers = {}
@@ -508,7 +508,6 @@ async def test_provider_selection_stage_adds_routing_scorecards():
     state.unified_request.request_id = None
     state.req = MagicMock()
     state.req.state = MagicMock()
-    state.req.state.request_id = None
     state.exit_stack = MagicMock()
     state.exit_stack.enter_async_context = AsyncMock()
     state.event_context = EventContext(request_id="req-1", trace_id="t-1", model="auto")
@@ -558,7 +557,6 @@ async def test_provider_selection_stage_omits_routing_scorecards_when_verbose_di
     state.unified_request.request_id = None
     state.req = MagicMock()
     state.req.state = MagicMock()
-    state.req.state.request_id = None
     state.exit_stack = MagicMock()
     state.exit_stack.enter_async_context = AsyncMock()
     state.event_context = EventContext(request_id="req-1", trace_id="t-1", model="auto")

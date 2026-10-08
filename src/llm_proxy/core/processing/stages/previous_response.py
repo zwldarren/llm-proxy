@@ -1,13 +1,13 @@
 """Pipeline stage: resolve openresponses previous_response_id after overrides."""
 
 from llm_proxy.core import reasoning_cache
-from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.processing.base import RequestContext
 from llm_proxy.core.processing.stages.base import (
     PipelineStage,
     PipelineState,
     is_native_responses_upstream,
 )
+from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.models.content_blocks import TOOL_CALL_BLOCK_TYPES, ThinkingBlock
 from llm_proxy.observability.logger import get_logger
 

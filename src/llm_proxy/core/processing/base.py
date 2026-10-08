@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from llm_proxy.core.identity import RequestIdentity
+from llm_proxy.core.request_facts import RequestIdentity
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.logger import get_logger
 

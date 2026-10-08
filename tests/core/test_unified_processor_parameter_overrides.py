@@ -10,6 +10,7 @@ from llm_proxy.config.types.provider import ProviderConfig
 from llm_proxy.core.processing.base import RequestContext, ServiceDependencies
 from llm_proxy.core.processing.unified import UnifiedProcessor
 from llm_proxy.core.provider_selector import ProviderSelectionResult
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.models import InternalResponse, TextBlock
 from llm_proxy.protocols.openai.handler import openai_protocol
 from llm_proxy.protocols.openai.schemas import ChatCompletionRequest
@@ -75,11 +76,7 @@ async def test_event_context_request_body_reflects_applied_overrides(monkeypatch
 
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-123"
-    req.state.model = None
-    req.state.internal_model = None
-    req.state.provider = None
-    req.state.db_session = None
+    facts_for(req).request_id = "req-123"
     req.url = MagicMock(path="/v1/chat/completions")
     req.method = "POST"
     req.headers = {}
@@ -118,11 +115,7 @@ def _build_pipeline_mocks(selection, adapter):
 
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-123"
-    req.state.model = None
-    req.state.internal_model = None
-    req.state.provider = None
-    req.state.db_session = None
+    facts_for(req).request_id = "req-123"
     req.url = MagicMock(path="/v1/chat/completions")
     req.method = "POST"
     req.headers = {}

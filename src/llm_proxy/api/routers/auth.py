@@ -21,7 +21,7 @@ from llm_proxy.api.schemas.admin import (
     SetupStatusResponse,
 )
 from llm_proxy.core.exceptions import AuthenticationFailedError, ConflictError, ValidationError
-from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database import UserRepository, UserSessionRepository
 from llm_proxy.observability.log_intake import record_auth_event

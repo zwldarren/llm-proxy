@@ -29,7 +29,7 @@ from llm_proxy.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.http.client import validate_server_url
 from llm_proxy.observability.log_intake import record_key_reveal
 from llm_proxy.observability.logger import get_logger

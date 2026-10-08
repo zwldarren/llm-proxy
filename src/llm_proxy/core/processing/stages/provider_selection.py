@@ -5,6 +5,7 @@ from typing import Any
 from llm_proxy.core.exceptions import ConfigurationError
 from llm_proxy.core.processing.base import RequestContext
 from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
+from llm_proxy.core.request_facts import facts_for
 
 
 class ProviderSelectionStage(PipelineStage):
@@ -25,10 +26,11 @@ class ProviderSelectionStage(PipelineStage):
         if state.event_context is not None:
             adapter.set_retry_recorder(state.event_context.retry_attempts.append)
 
-        state.unified_request.request_id = getattr(state.req.state, "request_id", None)
+        facts = facts_for(state.req)
+        state.unified_request.request_id = facts.request_id
         internal_model = state.unified_request.model
-        state.req.state.model = state.unified_request.model
-        state.req.state.provider = selection.provider_name
+        facts.model = state.unified_request.model
+        facts.provider = selection.provider_name
 
         state.event_context.provider = selection.provider_name
 
@@ -37,7 +39,7 @@ class ProviderSelectionStage(PipelineStage):
             # Keep the original virtual model name (e.g. fast) in the log model column;
             # usage/cost tracking uses internal_model (the resolved real model) below.
             state.event_context.model = context.requested_model
-            state.req.state.model = context.requested_model
+            facts.model = context.requested_model
             state.event_context.provider_model_name = internal_model
         else:
             state.event_context.model = internal_model

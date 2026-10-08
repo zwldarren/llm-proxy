@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -44,7 +45,7 @@ def create_traced_handler(
         # (see exceptions._capture_early_failure_request_data) so the happy
         # path pays for a single model_dump — the one in
         # UnifiedProcessor.process.
-        fastapi_request.state.parsed_request_body = request
+        facts_for(fastapi_request).parsed_request_body = request
         return await handler_func(request, fastapi_request)
 
     traced_handler.__annotations__["request"] = request_model

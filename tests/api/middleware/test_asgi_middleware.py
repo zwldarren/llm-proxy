@@ -9,7 +9,7 @@ the ASGI plumbing itself: request-body buffering/replay and the
 """
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, Request
@@ -322,6 +322,46 @@ class TestLoggingRunsAsPureASGI:
         assert response.status_code == 200
         assert response.headers["X-Request-Id"]
 
+    def test_the_admin_audit_row_carries_what_the_middleware_captured(self) -> None:
+        """Capture (middleware, on the scope) and row assembly (intake, on the
+        request) meet in the request's facts — one id included (ADR-0022)."""
+        from llm_proxy.api.middleware.logging import HttpLoggingMiddleware
+        from llm_proxy.config.types.logging_config import LoggingConfig
+        from llm_proxy.observability import log_intake
+
+        log_intake.configure(config=LoggingConfig(mask_sensitive_data=True, log_input_output=True))
+        service = MagicMock()
+
+        app = FastAPI()
+        app.add_middleware(HttpLoggingMiddleware)
+
+        @app.post("/api/providers")
+        async def create_provider():
+            return {"name": "new-provider", "api_key": "sk-secret"}
+
+        with (
+            patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service),
+            patch("llm_proxy.observability.log_intake.UsageService"),
+        ):
+            response = TestClient(app).post(
+                "/api/providers",
+                json={"name": "new-provider", "api_key": "sk-secret"},
+                headers={"authorization": "Bearer secret-token"},
+            )
+
+        assert response.status_code == 200
+        row = service.create_log_background.call_args.args[0]
+        assert row.log_type.value == "audit"
+        assert row.endpoint == "/api/providers"
+        # The row is written against the id the client saw on the response.
+        assert row.request_id == response.headers["X-Request-Id"]
+        assert row.request_body["name"] == "new-provider"
+        # Masked before the row is assembled: body values keep a hint
+        # (``mask_sensitive``), header values do not (``mask_headers``).
+        assert row.request_body["api_key"] != "sk-secret"
+        assert row.response_body["api_key"] != "sk-secret"
+        assert row.request_headers["authorization"] == "***"
+
 
 class TestModelRestrictionRunsAsPureASGI:
     """Model restriction short-circuits from the ASGI path."""
@@ -329,16 +369,16 @@ class TestModelRestrictionRunsAsPureASGI:
     @staticmethod
     def _build_app() -> FastAPI:
         from llm_proxy.api.middleware.model_restriction import ModelRestrictionMiddleware
+        from llm_proxy.core.request_facts import RequestIdentity, facts_for, set_request_identity
 
         app = FastAPI()
         app.add_middleware(ModelRestrictionMiddleware)
 
-        # Runs outermost (registered last): seeds the state api_key_auth sets.
+        # Runs outermost (registered last): seeds the facts the auth gate sets.
         @app.middleware("http")
         async def seed_restrictions(request: Request, call_next):
-            request.scope.setdefault("state", {}).update(
-                {"allowed_models": ["gpt-4"], "api_key_name": "k"}
-            )
+            facts_for(request).allowed_models = ["gpt-4"]
+            set_request_identity(request, RequestIdentity(api_key_name="k", auth_method="api_key"))
             return await call_next(request)
 
         @app.post("/v1/chat/completions")

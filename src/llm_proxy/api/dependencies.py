@@ -17,9 +17,9 @@ from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
     ForbiddenError,
 )
-from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.internal_call import build_provider_adapter
 from llm_proxy.core.provider_selector import ProviderSelectionResult
+from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.database import UserRecord, UserRepository, get_async_session
 from llm_proxy.http.client import AsyncSession, ProviderHTTPClientManager
 from llm_proxy.services import runtime_services

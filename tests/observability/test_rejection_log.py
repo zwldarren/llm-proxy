@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from llm_proxy.config.types.logging_config import LoggingConfig
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, facts_for, set_request_identity
 from llm_proxy.observability import log_intake
 from llm_proxy.observability.log_intake import record_rejection
 
@@ -99,7 +99,7 @@ def test_writes_a_bodyless_endpoint_row():
     assert data.response_body == {}
     assert data.log_metadata["rejected"] is True
     assert data.log_metadata["error_type"] == "rate_limit_error"
-    assert request.state.audit_log_written is True
+    assert facts_for(request).audit_log_written is True
 
 
 def test_console_paths_stay_audit():

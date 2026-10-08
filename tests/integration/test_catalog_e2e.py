@@ -5,7 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 from llm_proxy.api.dependencies import require_authenticated
 from llm_proxy.api.routers.catalog import router as catalog_router
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 
 
 @pytest.fixture(autouse=True)

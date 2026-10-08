@@ -309,19 +309,21 @@ class TestVirtualModelsListing:
 class TestApiKeyModelRestriction:
     """Tests that /v1/models is filtered by the API key's allowed_models.
 
-    The auth middleware stores the allowlist on request.state.allowed_models;
-    None means unrestricted, a non-empty list restricts the listing, and an
-    empty list is a valid deny-all restriction.
+    The auth middleware stores the allowlist on the request's facts; None means
+    unrestricted, a non-empty list restricts the listing, and an empty list is a
+    valid deny-all restriction.
     """
 
     @staticmethod
     def _app_with_allowlist(app, allowed_models: list[str] | None):
-        """Set request.state.allowed_models like the real auth middleware does."""
+        """Stamp the allowlist like the real auth middleware does."""
         from starlette.middleware.base import BaseHTTPMiddleware
+
+        from llm_proxy.core.request_facts import facts_for
 
         async def set_allowlist(request, call_next):
             if allowed_models is not None:
-                request.state.allowed_models = allowed_models
+                facts_for(request).allowed_models = allowed_models
             return await call_next(request)
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=set_allowlist)

@@ -12,7 +12,6 @@ one-directionally to avoid import cycles.
 """
 
 import time
-import uuid
 from typing import Any, Protocol
 
 from fastapi import Request
@@ -32,8 +31,8 @@ from llm_proxy.core.exceptions import (
     ModelNotFoundError,
     ValidationError,
 )
-from llm_proxy.core.identity import get_request_identity
 from llm_proxy.core.processing import RequestContext
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.core.request_utils import peer_is_trusted_proxy
 from llm_proxy.observability.logger import get_logger
@@ -174,14 +173,14 @@ async def _build_request_context(
     services = runtime_services(req)
     redis = services.redis_client()
 
-    # Mint the request id before routing so a judge call made during routing can be
-    # logged as its own row and still name the request it belongs to. The pipeline
-    # reuses it from ``request.state`` when it builds the request's EventContext.
-    # ``isinstance`` rather than truthiness: a test double's state may answer with
-    # an arbitrary object where a real Starlette State raises AttributeError.
-    existing_id = getattr(req.state, "request_id", None)
-    request_id = existing_id if isinstance(existing_id, str) and existing_id else str(uuid.uuid4())
-    req.state.request_id = request_id
+    # The request id has to exist before routing: a judge call made during
+    # routing is logged as its own row and must name the request it belongs to.
+    # The record already has one — the logging middleware creates it outside
+    # every auth gate — so this is a read, and only a request that reached the
+    # pipeline without any middleware mints here.
+    facts = facts_for(req)
+    request_id = facts.request_id
+    facts.session_id = session_id
 
     # Intercept virtual models (auto/fast/best) and resolve to real models.
     routing_decision = None
@@ -215,9 +214,9 @@ async def _build_request_context(
         # Enforce per-API-key model restrictions against the resolved concrete
         # model. The middleware only validates the virtual model name requested
         # by the client, so we must re-check after smart routing resolves it.
-        allowed_models: list[str] | None = getattr(req.state, "allowed_models", None)
+        allowed_models: list[str] | None = facts.allowed_models
         if isinstance(allowed_models, list):
-            api_key_name: str = getattr(req.state, "api_key_name", None) or "unknown"
+            api_key_name: str = get_request_identity(req).api_key_name or "unknown"
             is_allowed, error_msg = check_model_restriction(
                 api_key_name,
                 allowed_models,
@@ -328,9 +327,9 @@ async def _build_request_context(
         )
     if requested_model is not None:
         ctx.requested_model = requested_model
-        # Preserve original virtual model on request state so early-failure
+        # Preserve original virtual model on the record so early-failure
         # error logs record the user-facing model even before ProviderSelectionStage.
-        req.state.model = requested_model
+        facts.model = requested_model
 
     # The interceptor is process-local, so resolve it from the runtime against
     # the snapshot fetched above instead of reading app state directly: a reload

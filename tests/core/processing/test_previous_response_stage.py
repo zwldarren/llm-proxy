@@ -9,6 +9,7 @@ from llm_proxy.core.processing.stages.base import PipelineState
 from llm_proxy.core.processing.stages.previous_response import (
     PreviousResponseResolutionStage,
 )
+from llm_proxy.core.request_facts import facts_for
 
 
 class FakeResponseStore:
@@ -94,7 +95,7 @@ async def test_stage_no_op_when_unified_request_has_no_extra():
 @pytest.mark.asyncio
 async def test_stage_skips_when_no_api_key():
     """Stage skips lookup when req has no api_key_name identity."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
 
     stage = PreviousResponseResolutionStage()
     fake_req = MagicMock()
@@ -103,7 +104,7 @@ async def test_stage_skips_when_no_api_key():
     # Create a req with state that has identity but no api_key_name
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name=None)
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name=None)
 
     state = PipelineState(
         raw_data={},
@@ -127,7 +128,7 @@ async def test_stage_skips_when_no_api_key():
 @pytest.mark.asyncio
 async def test_stage_prepends_previous_output():
     """Stage prepends previous response items to conversation when previous_response_id is valid."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
 
     stage = PreviousResponseResolutionStage()
@@ -156,7 +157,7 @@ async def test_stage_prepends_previous_output():
     # Create a req with state that has identity with api_key_name
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -195,7 +196,7 @@ async def test_stage_marks_previous_response_materialized():
     and none of the materialized items; BaseAdapter.allows_native_request
     reads this flag to fall back to the rebuilt body.
     """
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
 
     stage = PreviousResponseResolutionStage()
@@ -220,7 +221,7 @@ async def test_stage_marks_previous_response_materialized():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -244,7 +245,7 @@ async def test_stage_marks_previous_response_materialized():
 
 def _materialization_harness(adapter):
     """Run the stage against a stored response with the given adapter attached."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
 
     prev_response = {
@@ -268,7 +269,7 @@ def _materialization_harness(adapter):
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -323,7 +324,7 @@ async def test_stage_prepends_codex_item_types_from_prev_input():
     (local_shell_call, custom_tool_call/output, compaction, agent_message) from
     a stored previous input, and skip hosted tools with no Chat Completions
     equivalent."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
     from llm_proxy.models.content_blocks import ThinkingBlock, ToolResultBlock, ToolUseBlock
 
@@ -362,7 +363,7 @@ async def test_stage_prepends_codex_item_types_from_prev_input():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -400,7 +401,7 @@ async def test_stage_raises_when_retrieve_returns_none():
     the turn with an error whose code is previous_response_not_found.
     """
     from llm_proxy.core.exceptions import NotFoundError
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
 
     stage = PreviousResponseResolutionStage()
     fake_req = MagicMock()
@@ -411,7 +412,7 @@ async def test_stage_raises_when_retrieve_returns_none():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -439,7 +440,7 @@ async def test_stage_raises_when_retrieve_returns_none():
 async def test_stage_forwards_to_native_upstream_when_not_found():
     """A missing previous response is forwarded, not failed, when the selected
     upstream speaks the Responses API natively (it may hold the id server-side)."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
 
     stage = PreviousResponseResolutionStage()
     fake_req = MagicMock()
@@ -450,7 +451,7 @@ async def test_stage_forwards_to_native_upstream_when_not_found():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     native_adapter = MagicMock()
     native_adapter.is_native_responses_upstream = True
@@ -544,7 +545,7 @@ async def test_stage_forwards_when_store_disabled_and_native_upstream():
 async def test_stage_raises_for_chat_upstream_when_not_found():
     """A missing previous response still fails for non-native upstreams."""
     from llm_proxy.core.exceptions import NotFoundError
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
 
     stage = PreviousResponseResolutionStage()
     fake_req = MagicMock()
@@ -555,7 +556,7 @@ async def test_stage_raises_for_chat_upstream_when_not_found():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     chat_adapter = MagicMock()
     chat_adapter.is_native_responses_upstream = False
@@ -585,7 +586,7 @@ async def test_stage_resolves_item_references_against_previous_response():
     """item_reference entries pointing at items stored with the previous
     response are spliced into the materialized conversation at the position
     where the reference appeared in the new input."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
     from llm_proxy.models.content_blocks import ToolUseBlock
 
@@ -617,7 +618,7 @@ async def test_stage_resolves_item_references_against_previous_response():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -650,7 +651,7 @@ async def test_stage_strips_previous_response_id_after_prepend():
     The prior context is materialized in the conversation; forwarding the id to
     a native Responses provider would double-apply the previous turn.
     """
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
 
     stage = PreviousResponseResolutionStage()
@@ -678,7 +679,7 @@ async def test_stage_strips_previous_response_id_after_prepend():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -702,7 +703,7 @@ async def test_stage_strips_previous_response_id_after_prepend():
 @pytest.mark.asyncio
 async def test_stage_handles_retrieve_exception():
     """Stage handles exceptions from response store gracefully."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
 
     stage = PreviousResponseResolutionStage()
     fake_req = MagicMock()
@@ -713,7 +714,7 @@ async def test_stage_handles_retrieve_exception():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -736,7 +737,7 @@ async def test_stage_handles_retrieve_exception():
 @pytest.mark.asyncio
 async def test_stage_prepends_reasoning_from_prev_input():
     """Reasoning items in previous input should be reconstructed as ThinkingBlocks."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
     from llm_proxy.models.content_blocks import ThinkingBlock
 
@@ -767,7 +768,7 @@ async def test_stage_prepends_reasoning_from_prev_input():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -799,7 +800,7 @@ async def test_stage_prepends_reasoning_from_prev_input():
 @pytest.mark.asyncio
 async def test_stage_prepends_reasoning_from_prev_output():
     """Reasoning items in previous output should be reconstructed as ThinkingBlocks."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
     from llm_proxy.models.content_blocks import ThinkingBlock
 
@@ -832,7 +833,7 @@ async def test_stage_prepends_reasoning_from_prev_output():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -861,7 +862,7 @@ async def test_stage_prepends_reasoning_from_prev_output():
 @pytest.mark.asyncio
 async def test_repair_encrypted_reasoning_restores_from_cache():
     """Encrypted ThinkingBlocks in current conversation are repaired with cached reasoning."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message, TextBlock
     from llm_proxy.models.content_blocks import ThinkingBlock, ToolUseBlock
 
@@ -906,7 +907,7 @@ async def test_repair_encrypted_reasoning_restores_from_cache():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -936,7 +937,7 @@ async def test_repair_encrypted_reasoning_restores_from_cache():
 @pytest.mark.asyncio
 async def test_repair_encrypted_reasoning_falls_back_when_no_cache():
     """When no reasoning in cached response, encrypted blocks stay empty."""
-    from llm_proxy.core.identity import RequestIdentity
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.models import ConversationContext, InternalRequest, Message
     from llm_proxy.models.content_blocks import ThinkingBlock
 
@@ -958,7 +959,7 @@ async def test_repair_encrypted_reasoning_falls_back_when_no_cache():
 
     fake_state_req = MagicMock()
     fake_state_req.state = MagicMock()
-    fake_state_req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(fake_state_req).identity = RequestIdentity(api_key_name="test-key")
 
     state = PipelineState(
         raw_data={},
@@ -989,12 +990,12 @@ async def test_fallback_rerun_rematerializes_previous_response():
     from unittest.mock import AsyncMock
 
     from llm_proxy.config.types.provider import ProviderConfig
-    from llm_proxy.core.identity import RequestIdentity
     from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
     from llm_proxy.core.processing.stages.parameter_override import (
         ParameterOverrideService,
     )
     from llm_proxy.core.provider_selector import ProviderSelectionResult
+    from llm_proxy.core.request_facts import RequestIdentity
     from llm_proxy.protocols.registry import get_protocol_serializer
 
     prev_response = {
@@ -1021,8 +1022,8 @@ async def test_fallback_rerun_rematerializes_previous_response():
 
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-1"
-    req.state.identity = RequestIdentity(api_key_name="test-key")
+    facts_for(req).request_id = "req-1"
+    facts_for(req).identity = RequestIdentity(api_key_name="test-key")
 
     pristine_raw = {
         "model": "fast",

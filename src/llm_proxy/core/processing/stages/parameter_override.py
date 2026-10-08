@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from llm_proxy.core.parameter_override import apply_parameter_overrides, create_variables
 from llm_proxy.core.processing.base import RequestContext
 from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
+from llm_proxy.core.request_facts import facts_for
 
 if TYPE_CHECKING:
     from llm_proxy.protocols.serializer_base import ProtocolSerializer
@@ -134,6 +135,6 @@ class ParameterOverrideStage(PipelineStage):
             unified_request=state.unified_request,
             parameter_overrides=state.selection.parameter_overrides,
             provider_model_name=state.selection.provider_model_name,
-            request_id=getattr(state.req.state, "request_id", None),
+            request_id=facts_for(state.req).request_id,
         )
         state.event_context.request_body = state.raw_data

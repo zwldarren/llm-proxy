@@ -159,7 +159,7 @@ async def _try_native_compact_passthrough(request: Request) -> JSONResponse | No
     # upstream answer 400 previous_response_not_found; the local compaction
     # below can materialize it from the store, so skip the passthrough.
     prev_id = raw_body.get("previous_response_id")
-    api_key_name = getattr(request.state, "api_key_name", None)
+    api_key_name = get_request_identity(request).api_key_name
     if prev_id and api_key_name:
         redis_client = runtime_services(request).redis_client()
         if redis_client is not None:

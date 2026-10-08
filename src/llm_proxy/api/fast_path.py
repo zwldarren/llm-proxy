@@ -38,6 +38,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from llm_proxy.api.middleware.asgi_utils import BodyBuffer, get_scope_header
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -126,14 +127,13 @@ class ProtocolFastPath:
 
         request = Request(scope, body)
         # Mirrors create_traced_handler: early-failure logging reads the parsed
-        # body off request.state, so stash it here too.
-        request.state.parsed_request_body = protocol_request
+        # body off the request's facts, so stash it here too.
+        facts_for(request).parsed_request_body = protocol_request
 
         # The FastAPI route declares `Depends(require_any_auth)`; auth normally
         # already ran in ApiKeyAuthMiddleware, but re-checking here keeps the
         # fast path behaviour-identical for any path the middleware does not gate.
         from llm_proxy.api.dependencies import require_api_key_auth
-        from llm_proxy.core.identity import get_request_identity
 
         if not get_request_identity(request).is_authenticated:
             await require_api_key_auth(request)

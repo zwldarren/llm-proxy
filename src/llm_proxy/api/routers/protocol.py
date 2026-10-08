@@ -42,6 +42,7 @@ from llm_proxy.api.utils import (
 )
 from llm_proxy.config.manager import resolve_keepalive_params
 from llm_proxy.core.exceptions import ConfigurationError
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.base import ProtocolEndpoint
@@ -110,7 +111,7 @@ def _create_endpoint_fn(
         # bypass the stash in create_traced_handler). Dumped lazily on the
         # failure path; see exceptions._capture_early_failure_request_data.
         if request is not None and hasattr(request, "model_dump"):
-            fastapi_request.state.parsed_request_body = request
+            facts_for(fastapi_request).parsed_request_body = request
 
         for mw in middleware:
             await mw(request, fastapi_request)
@@ -193,7 +194,7 @@ async def _run_background_openresponses(
         request.stream = False
 
     redis_client = runtime_services(fastapi_request).redis_client()
-    api_key_name = getattr(fastapi_request.state, "api_key_name", None)
+    api_key_name = get_request_identity(fastapi_request).api_key_name
     store: ResponseStore | None = None
     if redis_client is not None and api_key_name:
         store = ResponseStore(redis_client=redis_client)

@@ -24,7 +24,7 @@ from llm_proxy.api.schemas.admin import (
     normalize_model_status,
 )
 from llm_proxy.core.exceptions import ConflictError, NotFoundError, ValidationError
-from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.database import UserRepository
 from llm_proxy.observability.logger import get_logger
 

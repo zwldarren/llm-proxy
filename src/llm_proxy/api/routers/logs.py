@@ -31,7 +31,7 @@ from llm_proxy.api.schemas.logs import (
 )
 from llm_proxy.config.manager import resolve_logging_config
 from llm_proxy.core.exceptions import AuthenticationFailedError, NotFoundError, ValidationError
-from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.core.utils import safe_float, safe_int
 from llm_proxy.database.connection import get_session_factory
 from llm_proxy.database.repositories import (

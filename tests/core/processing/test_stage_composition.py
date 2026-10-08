@@ -19,6 +19,7 @@ from llm_proxy.core.processing.stages.fallback import setup_fallback_provider
 from llm_proxy.core.processing.stages.parameter_override import ParameterOverrideService
 from llm_proxy.core.processing.unified import UnifiedProcessor
 from llm_proxy.core.provider_selector import ProviderSelectionResult
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.models import InternalRequest, Message
 from llm_proxy.models.content_blocks import TextBlock
 from llm_proxy.protocols.openai.handler import openai_protocol
@@ -68,7 +69,7 @@ def _build_context(role_transformed: bool | None = None) -> RequestContext:
 def _build_mock_request() -> MagicMock:
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-1"
+    facts_for(req).request_id = "req-1"
     return req
 
 

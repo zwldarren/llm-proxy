@@ -10,13 +10,16 @@ cannot drift apart.
 
 import asyncio
 import time
-import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from starlette.requests import Request as StarletteRequest
 
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import (
+    RequestIdentity,
+    facts_for,
+    mint_request_id,
+)
 
 # Connection age cap shared by both WebSocket transports (60 minutes).
 WS_MAX_CONNECTION_SECONDS = 60 * 60
@@ -104,17 +107,19 @@ def build_ws_request(websocket: Any, identity: RequestIdentity) -> StarletteRequ
 
     Config/dependency accessors expect an HTTP request; this fakes one from
     the websocket scope (a GET on the same path), stamps the authenticated
-    identity and a fresh connection request id so downstream code (budget
-    checks, model resolution, usage logging) works unchanged.
+    identity and mints a per-connection request id so downstream code (budget
+    checks, model resolution, usage logging) works unchanged. The state dict
+    is shared with the websocket's own scope, so the record stays reachable
+    for the connection's lifetime.
     """
     scope = dict(websocket.scope)
     scope["type"] = "http"
     scope["method"] = "GET"
     scope.setdefault("http_version", "1.1")
     request = StarletteRequest(scope)
-    set_request_identity(request, identity)
-    request.state.api_key_name = identity.api_key_name
-    request.state.request_id = f"ws_{uuid.uuid4().hex[:24]}"
+    facts = facts_for(request)
+    facts.identity = identity
+    facts.request_id = mint_request_id("ws_")
     return request
 
 

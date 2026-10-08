@@ -44,7 +44,7 @@ import orjson
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from llm_proxy.core.constants import CLIENT_DISCONNECTED_STATE_KEY
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -134,7 +134,7 @@ async def wait_for_either(
     if task in done:
         return task.result()
     if checks in done and checks.result():
-        setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
+        facts_for(request).client_disconnected = True
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
@@ -221,7 +221,7 @@ async def _disconnect_monitor(
     watcher = ClientDisconnectWatcher(request)
     try:
         await watcher.wait()
-        setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
+        facts_for(request).client_disconnected = True
         stop_event.set()
         if not task.done():
             task.cancel()
@@ -286,7 +286,7 @@ async def _heartbeat_body(
         # may come from the middleware's disconnect handling rather than our
         # own monitor; both must record, never a clean success).
         if request is not None:
-            setattr(request.state, CLIENT_DISCONNECTED_STATE_KEY, True)
+            facts_for(request).client_disconnected = True
         if not task.done():
             task.cancel()
         raise

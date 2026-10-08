@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from llm_proxy.api.dependencies import get_current_user
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers.feedback import router
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 from llm_proxy.database import get_async_session
 
 ROUTED_LOG = {

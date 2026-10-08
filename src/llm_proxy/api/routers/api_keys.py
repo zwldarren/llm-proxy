@@ -30,7 +30,7 @@ from llm_proxy.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
-from llm_proxy.core.identity import get_request_identity
+from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.database import ApiKeyRepository, UserRepository
 from llm_proxy.database.repositories.api_keys import _UNSET, ApiKeyRecord, _UnsetType
 from llm_proxy.database.repositories.usage_repository import (

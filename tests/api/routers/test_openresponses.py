@@ -44,13 +44,12 @@ def app(mock_redis):
     @app.middleware("http")
     async def set_test_identity_middleware(request, call_next):
         """Set a test API-key identity so storage is tenant-scoped."""
-        from llm_proxy.core.identity import RequestIdentity, set_request_identity
+        from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 
         set_request_identity(
             request,
             RequestIdentity(api_key_name="test-key", auth_method="api_key"),
         )
-        request.state.api_key_name = "test-key"
         return await call_next(request)
 
     from llm_proxy.api.middleware.form_encoded import form_encoded_middleware

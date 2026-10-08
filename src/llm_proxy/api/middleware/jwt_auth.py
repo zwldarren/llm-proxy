@@ -14,7 +14,7 @@ from llm_proxy.api.middleware.asgi_utils import (
     adapt_http_middleware,
 )
 from llm_proxy.core.exceptions import ConfigurationError
-from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.security.jwt import JWTManager
 from llm_proxy.services import runtime_services

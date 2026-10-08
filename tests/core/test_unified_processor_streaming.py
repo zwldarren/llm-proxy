@@ -13,6 +13,7 @@ from llm_proxy.core.processing.base import RequestContext, ServiceDependencies
 from llm_proxy.core.processing.strategies import StreamingResponseMarker
 from llm_proxy.core.processing.unified import UnifiedProcessor
 from llm_proxy.core.provider_selector import ProviderSelectionResult
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.models import (
     ConversationContext,
     FunctionTool,
@@ -91,8 +92,8 @@ def _build_unified_request() -> InternalRequest:
 def _build_mock_request() -> Any:
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-123"
-    req.state.provider = "openai"
+    facts_for(req).request_id = "req-123"
+    facts_for(req).provider = "openai"
     req.url = MagicMock(path="/v1/chat/completions")
     req.method = "POST"
     req.headers = {}
@@ -910,7 +911,7 @@ async def test_streaming_prefetch_retries_retryable_finish_reason_before_output(
     assert "data: [DONE]" in payload
     adapter_factory.assert_awaited_once()
     orchestrator.should_retry.assert_called_once()
-    assert req.state.provider == "fallback"
+    assert facts_for(req).provider == "fallback"
     assert primary_stream_closed is True
 
 

@@ -12,6 +12,7 @@ from llm_proxy.api.keepalive import (
     await_with_keepalive,
     supports_keepalive,
 )
+from llm_proxy.core.request_facts import facts_for
 
 
 def _json_response(payload: dict, status_code: int = 200) -> Response:
@@ -171,7 +172,7 @@ class TestHeartbeatMode:
                 break
             await asyncio.sleep(0.01)
         assert cancelled.is_set(), "provider task was not cancelled after disconnect"
-        assert request.state.client_disconnected is True
+        assert facts_for(request).client_disconnected is True
 
     async def test_cancellation_during_grace_cancels_processing_task(self):
         cancelled = asyncio.Event()
@@ -210,7 +211,7 @@ class TestDisconnectMonitor:
             from types import SimpleNamespace
 
             self.state = SimpleNamespace()
-            self.state.client_disconnected = False
+            facts_for(self).client_disconnected = False
             self._checks = 0
             self._disconnect_after = disconnect_after
 
@@ -249,7 +250,7 @@ class TestDisconnectMonitor:
         request = self._FakeRequest(disconnect_after=1)
         result = await await_with_disconnect_monitor(slow(), request, poll_interval=0.05)
         assert cancelled.is_set(), "pipeline task was not cancelled after disconnect"
-        assert request.state.client_disconnected is True
+        assert facts_for(request).client_disconnected is True
         assert result.status_code == 499
 
     async def test_grace_phase_detects_disconnect(self):
@@ -272,7 +273,7 @@ class TestDisconnectMonitor:
             request=request,
         )
         assert cancelled.is_set()
-        assert request.state.client_disconnected is True
+        assert facts_for(request).client_disconnected is True
         assert result.status_code == 499
 
     async def test_grace_phase_switches_to_heartbeat_when_slow(self):
@@ -310,7 +311,7 @@ class TestRecursionErrorHandler:
             "query_string": b"",
         }
         request = Request(scope)
-        request.state.request_id = "test-req-id"
+        facts_for(request).request_id = "test-req-id"
 
         response = await recursion_error_handler(request, RecursionError("too deep"))
         assert response.status_code == 400

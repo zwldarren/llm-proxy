@@ -7,7 +7,7 @@ import pytest
 from llm_proxy.api.dependencies import extract_session_id, extract_trace_id, extract_user_id
 from llm_proxy.config.settings import SecuritySettings, Settings, set_settings
 from llm_proxy.core.exceptions import ModelNotFoundError, ValidationError
-from llm_proxy.core.identity import RequestIdentity, set_request_identity
+from llm_proxy.core.request_facts import RequestIdentity, facts_for, set_request_identity
 
 
 @pytest.fixture
@@ -423,10 +423,11 @@ async def test_build_request_context_records_the_judge_call_as_its_own_row(
     await _build_request_context(mock_request, fastapi_request)
 
     entry, attribution = calls[0]
-    assert entry.request_id == f"{fastapi_request.state.request_id}:judge"
+    request_id = facts_for(fastapi_request).request_id
+    assert entry.request_id == f"{request_id}:judge"
     assert entry.model == "jev"
     assert entry.provider == "openrouter"
     assert entry.prompt_tokens == 12
     assert entry.cost_usd == 0.00004
-    assert entry.log_metadata["parent_request_id"] == fastapi_request.state.request_id
+    assert entry.log_metadata["parent_request_id"] == request_id
     assert attribution["api_key_name"] == "test-key"

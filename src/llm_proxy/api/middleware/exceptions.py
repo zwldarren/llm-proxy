@@ -27,6 +27,7 @@ from llm_proxy.core.exceptions import (
     ValidationError,
     WebSearchError,
 )
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.observability.log_intake import record_early_failure
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.openresponses.errors import (
@@ -197,7 +198,7 @@ async def recursion_error_handler(request: Request, exc: RecursionError) -> JSON
     client can send. Returning 500 both misattributes the cause and lets
     attackers flood error logs; a 400 correctly blames the request.
     """
-    request_id = getattr(request.state, "request_id", None)
+    request_id = facts_for(request).request_id
     logger.warning(
         f"Recursion limit exceeded [request_id={request_id}] [endpoint={request.url.path}]: {exc}"
     )
@@ -222,7 +223,7 @@ async def recursion_error_handler(request: Request, exc: RecursionError) -> JSON
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Handle HTTPException with unified error format."""
-    request_id = getattr(request.state, "request_id", None)
+    request_id = facts_for(request).request_id
     log_level = logging.ERROR if exc.status_code >= 500 else logging.WARNING
 
     logger.log(
@@ -263,9 +264,10 @@ def _create_handler(
     async def handler(request: Request, exc: Any) -> JSONResponse:
         logger = get_logger(__name__)
 
-        request_id = getattr(request.state, "request_id", None)
-        provider = getattr(request.state, "provider", None)
-        model = getattr(request.state, "model", None)
+        facts = facts_for(request)
+        request_id = facts.request_id
+        provider = facts.provider
+        model = facts.model
 
         ctx_parts = [f"endpoint={request.url.path}"]
         if provider:

@@ -387,7 +387,7 @@ class TestApiKeyAuthSessionKeys:
 
         @app.get("/v1/chat")
         async def handler(request: Request):
-            from llm_proxy.core.identity import get_request_identity
+            from llm_proxy.core.request_facts import get_request_identity
 
             identity = get_request_identity(request)
             return {
@@ -421,7 +421,7 @@ class TestApiKeyAuthSessionKeys:
         }
 
         async def set_identity(api_key: str, request: Request) -> str | None:
-            from llm_proxy.core.identity import RequestIdentity, set_request_identity
+            from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 
             set_request_identity(
                 request,

@@ -211,15 +211,6 @@ def adapt_http_middleware(
     return middleware
 
 
-def set_request_state(scope: Scope, key: str, value: object) -> None:
-    """Set a value on the ASGI scope state that ``request.state`` reads."""
-    scope.setdefault("state", {})[key] = value
-
-
-def get_request_state(scope: Scope, key: str, default: object = None) -> object:
-    return scope.setdefault("state", {}).get(key, default)
-
-
 def merge_response_headers(message: Message, headers: dict[str, str]) -> None:
     """Set response headers on an ``http.response.start`` message.
 

@@ -7,7 +7,6 @@ unified capture layer in UnifiedProcessor. Admin API audit logging
 
 import time
 from typing import Any
-from uuid import uuid4
 
 from fastapi import Request
 from starlette.datastructures import Headers
@@ -15,10 +14,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from llm_proxy.api.middleware.asgi_utils import (
     BodyBuffer,
-    get_request_state,
     merge_response_headers,
-    set_request_state,
 )
+from llm_proxy.core.request_facts import facts_from_scope
 from llm_proxy.observability.log_intake import record_admin_request
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.sampling import should_exclude_from_logging
@@ -112,9 +110,11 @@ class HttpLoggingMiddleware:
             await self.app(scope, receive, send)
             return
 
-        existing_request_id = get_request_state(scope, "request_id")
-        request_id = existing_request_id if isinstance(existing_request_id, str) else uuid4().hex
-        set_request_state(scope, "request_id", request_id)
+        # The record's first toucher mints the request id: this middleware is
+        # the outermost one that every HTTP request passes, so the auth gates
+        # below can already log the id of a request they reject.
+        facts = facts_from_scope(scope)
+        request_id = facts.request_id
 
         path = scope.get("path", "")
         method = scope.get("method", "")
@@ -127,10 +127,10 @@ class HttpLoggingMiddleware:
             request = Request(scope, body)
             try:
                 # Capture and mask request headers
-                set_request_state(scope, "request_headers", mask_headers(dict(request.headers)))
+                facts.request_headers = mask_headers(dict(request.headers))
 
                 # Capture and mask request body
-                set_request_state(scope, "request_body", _capture_and_mask_body(await body.read()))
+                facts.request_body = _capture_and_mask_body(await body.read())
             except Exception as e:
                 logger.debug(f"Failed to capture audit request data: {e}")
 
@@ -157,25 +157,19 @@ class HttpLoggingMiddleware:
 
         if should_audit:
             response_time_ms = int((time.perf_counter() - start_time) * 1000)
-            set_request_state(scope, "response_headers", captured_headers)
+            facts.response_headers = captured_headers
             if method == "GET":
                 # Read-only audits record the access event only. Do not persist
                 # the response body: list-valued responses (e.g. /api/api-keys)
                 # are not masked by _capture_and_mask_body and may contain
                 # secrets.
-                set_request_state(scope, "response_body", {"_read_audit": True})
+                facts.response_body = {"_read_audit": True}
             else:
-                set_request_state(
-                    scope,
-                    "response_body",
-                    _capture_and_mask_body(bytes(captured_body or b"")),
-                )
+                facts.response_body = _capture_and_mask_body(bytes(captured_body or b""))
 
-            error_message = get_request_state(scope, "error_message")
             record_admin_request(
                 Request(scope, body),
                 request_id=request_id,
                 status_code=status_code,
                 response_time_ms=response_time_ms,
-                error_message=error_message if isinstance(error_message, str) else None,
             )

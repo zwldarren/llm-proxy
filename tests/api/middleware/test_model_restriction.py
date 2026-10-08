@@ -11,7 +11,7 @@ from llm_proxy.api.middleware.model_restriction import (
     get_model_from_request_body,
     model_restriction_middleware,
 )
-from llm_proxy.core.identity import RequestIdentity
+from llm_proxy.core.request_facts import RequestIdentity, facts_for, set_request_identity
 
 
 def _make_request(path: str, body: bytes | None = None) -> Request:
@@ -101,12 +101,11 @@ class TestModelRestrictionMiddleware:
         request: Request,
         call_next,
         *,
-        auth_method: str = "api_key",
+        identity: RequestIdentity | None = None,
         lockout_manager: MagicMock | None = None,
     ):
-        request.state.identity = RequestIdentity(auth_method=auth_method)
+        set_request_identity(request, identity or RequestIdentity(auth_method="api_key"))
         with (
-            patch.object(mr, "get_request_identity", lambda r: request.state.identity),
             patch.object(mr, "get_client_ip", return_value="1.2.3.4"),
             patch.object(mr, "get_api_key_lockout_manager", lambda: lockout_manager or MagicMock()),
             patch.object(mr, "add_auth_failure_delay", AsyncMock()),
@@ -116,10 +115,13 @@ class TestModelRestrictionMiddleware:
     async def test_jwt_auth_bypasses_restriction(self, call_next, lockout_manager):
         """JWT-authenticated (admin) requests are never model-restricted."""
         request = _make_request("/v1/chat/completions", b'{"model": "claude-3"}')
-        request.state.allowed_models = ["gpt-4"]
+        facts_for(request).allowed_models = ["gpt-4"]
 
         result = await self._run(
-            request, call_next, auth_method="jwt", lockout_manager=lockout_manager
+            request,
+            call_next,
+            identity=RequestIdentity(auth_method="jwt"),
+            lockout_manager=lockout_manager,
         )
 
         assert result == "NEXT_RESPONSE"
@@ -129,7 +131,7 @@ class TestModelRestrictionMiddleware:
     async def test_non_api_path_bypasses(self, call_next, lockout_manager):
         """Paths outside /v1/ and /servers/ are not restricted."""
         request = _make_request("/api/config", b'{"model": "claude-3"}')
-        request.state.allowed_models = ["gpt-4"]
+        facts_for(request).allowed_models = ["gpt-4"]
 
         result = await self._run(request, call_next, lockout_manager=lockout_manager)
 
@@ -139,7 +141,7 @@ class TestModelRestrictionMiddleware:
     async def test_servers_path_bypasses_without_reading_body(self, call_next, lockout_manager):
         """MCP /servers/* JSON-RPC is bypassed without consuming the body."""
         request = _make_request("/servers/abc", b'{"model": "claude-3"}')
-        request.state.allowed_models = ["gpt-4"]
+        facts_for(request).allowed_models = ["gpt-4"]
 
         result = await self._run(request, call_next, lockout_manager=lockout_manager)
 
@@ -148,7 +150,7 @@ class TestModelRestrictionMiddleware:
 
     async def test_no_restrictions_bypasses(self, call_next, lockout_manager):
         request = _make_request("/v1/chat/completions", b'{"model": "claude-3"}')
-        request.state.allowed_models = None
+        facts_for(request).allowed_models = None
 
         result = await self._run(request, call_next, lockout_manager=lockout_manager)
 
@@ -157,7 +159,7 @@ class TestModelRestrictionMiddleware:
 
     async def test_allowed_model_passes(self, call_next, lockout_manager):
         request = _make_request("/v1/chat/completions", b'{"model": "gpt-4"}')
-        request.state.allowed_models = ["gpt-4", "claude-3"]
+        facts_for(request).allowed_models = ["gpt-4", "claude-3"]
 
         result = await self._run(request, call_next, lockout_manager=lockout_manager)
 
@@ -168,7 +170,7 @@ class TestModelRestrictionMiddleware:
     async def test_no_model_field_with_restrictions_allows(self, call_next, lockout_manager):
         """A missing model field is treated as 'no model specified' -> allow."""
         request = _make_request("/v1/chat/completions", b'{"messages": []}')
-        request.state.allowed_models = ["gpt-4"]
+        facts_for(request).allowed_models = ["gpt-4"]
 
         result = await self._run(request, call_next, lockout_manager=lockout_manager)
 
@@ -177,10 +179,12 @@ class TestModelRestrictionMiddleware:
 
     async def test_disallowed_model_rejected(self, call_next, lockout_manager):
         request = _make_request("/v1/chat/completions", b'{"model": "claude-3"}')
-        request.state.allowed_models = ["gpt-4"]
-        request.state.api_key_name = "my-key"
+        facts_for(request).allowed_models = ["gpt-4"]
+        identity = RequestIdentity(auth_method="api_key", api_key_name="my-key")
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(
+            request, call_next, identity=identity, lockout_manager=lockout_manager
+        )
 
         assert result.status_code == 403
         payload = result.body
@@ -202,10 +206,12 @@ class TestModelRestrictionMiddleware:
         """Alias paths carry no /v1 prefix but are API endpoints: a model
         outside the key's allowlist must still be rejected."""
         request = _make_request(path, b'{"model": "claude-3"}')
-        request.state.allowed_models = ["gpt-4"]
-        request.state.api_key_name = "my-key"
+        facts_for(request).allowed_models = ["gpt-4"]
+        identity = RequestIdentity(auth_method="api_key", api_key_name="my-key")
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(
+            request, call_next, identity=identity, lockout_manager=lockout_manager
+        )
 
         assert result.status_code == 403
         assert b"model_not_allowed" in result.body

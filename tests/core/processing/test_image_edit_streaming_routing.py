@@ -12,6 +12,7 @@ from llm_proxy.core.processing.stages import (
 )
 from llm_proxy.core.processing.strategies import StreamingResponseMarker
 from llm_proxy.core.processing.streaming_processor import StreamingProcessor
+from llm_proxy.core.request_facts import facts_for
 from llm_proxy.models.image import (
     ImageEditSource,
     InternalImageEditRequest,
@@ -45,8 +46,8 @@ def _create_execution_stage(protocol):
 def _build_mock_request():
     req = MagicMock()
     req.state = MagicMock()
-    req.state.request_id = "req-123"
-    req.state.provider = "openai"
+    facts_for(req).request_id = "req-123"
+    facts_for(req).provider = "openai"
     return req
 
 

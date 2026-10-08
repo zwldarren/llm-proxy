@@ -9,6 +9,7 @@ from llm_proxy.api.dependencies import (
     require_api_key_auth,
 )
 from llm_proxy.api.schemas.admin import OpenAIModel, OpenAIModelList
+from llm_proxy.core.request_facts import facts_for
 
 router = APIRouter(prefix="/v1", tags=["models"])
 
@@ -31,9 +32,9 @@ async def list_available_models(request: Request) -> OpenAIModelList:
     """
     config = await get_config_from_state(request)
 
-    # Per-API-key model allowlist set by the auth middleware.
+    # Per-API-key model allowlist stamped by the auth gate.
     # None means unrestricted; an empty list is a valid deny-all restriction.
-    allowed_models: list[str] | None = getattr(request.state, "allowed_models", None)
+    allowed_models: list[str] | None = facts_for(request).allowed_models
 
     def is_allowed(model_id: str) -> bool:
         return allowed_models is None or model_id in allowed_models

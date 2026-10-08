@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from llm_proxy.api.fast_path import FastPathEntry, ProtocolFastPath
-from llm_proxy.core.identity import RequestIdentity
+from llm_proxy.core.request_facts import RequestFacts, RequestIdentity, facts_for
 
 
 class _Body(BaseModel):
@@ -33,7 +33,7 @@ def _scope(
         "method": method,
         "path": path,
         "headers": headers,
-        "state": {"identity": RequestIdentity(api_key_name="test-key")},
+        "state": {"request_facts": RequestFacts(identity=RequestIdentity(api_key_name="test-key"))},
         "app": None,
     }
     return scope
@@ -103,7 +103,7 @@ async def test_matching_post_calls_handler_without_fastapi(monkeypatch):
 
     async def handler(parsed, request):
         calls.append(parsed)
-        assert request.state.parsed_request_body is parsed
+        assert facts_for(request).parsed_request_body is parsed
         return JSONResponse({"ok": True, "model": parsed.model})
 
     fallback = _Fallback()
