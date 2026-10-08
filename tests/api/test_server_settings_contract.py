@@ -239,6 +239,49 @@ def test_web_search_put_stores_only_sent_sub_configs(client, repo):
     assert res.json() == {"enabled": True, "provider": "searxng"}
 
 
+def test_web_search_put_dumps_provided_sub_config_in_full(client, repo):
+    """A provided sub-config keeps its null-valued keys (top-level-only exclusion)."""
+    payload = {
+        "enabled": True,
+        "provider": "searxng",
+        "searxng": {"url": "http://localhost:8080"},
+        "ollama": None,
+    }
+    res = client.put(f"{BASE}/web-search", json=payload)
+    assert res.status_code == 200
+    stored = repo.rows["web_search_config"]
+    assert stored["searxng"] == {
+        "url": "http://localhost:8080",
+        "api_key": None,
+        "basic_auth_username": None,
+        "basic_auth_password": None,
+        "engines": None,
+        "timeout": 30.0,
+        "max_results": 10,
+    }
+    # RAW_OR_DEFAULT echoes the stored row verbatim, nulls included.
+    assert client.get(f"{BASE}/web-search").json() == stored
+
+
+def test_load_server_settings_repairs_out_of_range_web_search_values(repo):
+    """Rows written before the bound tightening load with clamped values, not None."""
+    from llm_proxy.config.server_settings import load_server_settings
+
+    snapshot = load_server_settings(
+        {
+            "web_search_config": {
+                "enabled": True,
+                "provider": "searxng",
+                "searxng": {"url": "http://localhost:8080", "max_results": 15, "timeout": 400},
+            }
+        }
+    )
+    assert snapshot.web_search is not None
+    assert snapshot.web_search.searxng is not None
+    assert snapshot.web_search.searxng.max_results == 10
+    assert snapshot.web_search.searxng.timeout == 300.0
+
+
 def test_web_search_delete_removes_row(client, repo):
     repo.rows["web_search_config"] = {"enabled": True, "provider": "searxng"}
     res = client.delete(f"{BASE}/web-search")

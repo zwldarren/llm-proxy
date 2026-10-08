@@ -131,6 +131,13 @@ resource rule stands for every other resource.
 - Five keys that had no endpoint-level tests (keepalive, resilience,
   rate_limits, cors, web_search) are covered by the parametrized contract
   walk.
+- The web-search bounds tightening (`max_results <= 10`, bounded timeouts —
+  the API-facing rules, now canonical) has one deliberate read-path
+  consequence: a stored row written before the tightening with an
+  out-of-range value is clamped field-by-field on load (with a warning)
+  instead of failing the whole-config validate and silently disabling web
+  search. PUT-side rejection of out-of-range values is unchanged in effect —
+  the old API schema enforced the same bounds.
 - The read/write mode enums are deliberately closed: a key with genuinely new
   semantics is a new enum member with one implementation, reviewed in one
   place — not a fourth copy of the handler pair.

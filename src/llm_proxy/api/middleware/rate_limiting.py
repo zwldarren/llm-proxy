@@ -13,6 +13,7 @@ from fastapi import Request
 from slowapi.errors import RateLimitExceeded
 
 from llm_proxy.config.settings import get_settings
+from llm_proxy.config.types.rate_limits import DEFAULT_RATE_LIMITS, parse_limit_value
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database.redis_client import RedisClient, get_redis_client_async
 from llm_proxy.observability.logger import get_logger
@@ -54,14 +55,6 @@ class CustomRateLimitExceeded(RateLimitExceeded):
 
 
 logger = get_logger(__name__)
-
-# The rate-limit grammar (bucket names, code defaults, "N/period" parsing)
-# lives in the config package: it is shared with the admin server-settings
-# endpoint and the config manager's runtime read (ADR-0025).
-from llm_proxy.config.types.rate_limits import (  # noqa: E402
-    DEFAULT_RATE_LIMITS,
-    parse_limit_value,
-)
 
 
 def resolve_rate_limit_value(request: Request, bucket: str) -> str:

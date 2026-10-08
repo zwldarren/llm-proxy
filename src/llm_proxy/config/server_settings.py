@@ -312,7 +312,12 @@ def apply_write(setting: ServerSetting, payload: BaseModel, existing: Any) -> An
         case WriteMode.REPLACE:
             return payload.model_dump()
         case WriteMode.REPLACE_EXCLUDE_NONE:
-            return payload.model_dump(exclude_none=True)
+            # Only the top-level presence of sub-configs is conditional (a
+            # provided sub-config dumps in full, nulls included — matching the
+            # old handler's ``config_data.searxng.model_dump()``); pydantic's
+            # ``exclude_none`` would recurse into the sub-config and drop keys.
+            dumped = payload.model_dump()
+            return {k: v for k, v in dumped.items() if v is not None}
         case WriteMode.REPLACE_INNER:
             assert isinstance(payload, RateLimitsConfig)
             return dict(payload.limits)
@@ -504,6 +509,40 @@ class ServerSettingsRuntime:
     provider_selection: ProviderSelectionConfig
 
 
+def _repair_web_search_row(value: Any) -> tuple[Any, bool]:
+    """Clamp out-of-range numeric fields in a stored web_search row.
+
+    The canonical model's bounds were tightened to the API-facing rules
+    (``max_results <= 10``, ``1 <= timeout <= 300``); rows written before the
+    tightening (or edited directly in the database) would otherwise fail the
+    whole-config validate and silently disable web search. Field-level ranges
+    are repaired so the rest of the configuration keeps working.
+    """
+    if not isinstance(value, dict):
+        return value, False
+    repaired = dict(value)
+    changed = False
+    for sub in ("searxng", "ollama"):
+        block = repaired.get(sub)
+        if not isinstance(block, dict):
+            continue
+        fixed = dict(block)
+        max_results = fixed.get("max_results")
+        if isinstance(max_results, int) and not isinstance(max_results, bool) and max_results > 10:
+            fixed["max_results"] = 10
+            changed = True
+        timeout = fixed.get("timeout")
+        if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+            if timeout < 1:
+                fixed["timeout"] = 1.0
+                changed = True
+            elif timeout > 300:
+                fixed["timeout"] = 300.0
+                changed = True
+        repaired[sub] = fixed
+    return repaired, changed
+
+
 def load_server_settings(rows: Mapping[str, Any]) -> ServerSettingsRuntime:
     """Parse the server_config rows into the runtime snapshot.
 
@@ -519,8 +558,15 @@ def load_server_settings(rows: Mapping[str, Any]) -> ServerSettingsRuntime:
 
     web_search_config = None
     if "web_search_config" in rows:
+        stored = rows["web_search_config"]
+        stored, repaired = _repair_web_search_row(stored)
+        if repaired:
+            logger.warning(
+                "Adjusted out-of-range max_results/timeout in stored web_search_config; "
+                "re-save the setting in the admin UI to persist the clamped values"
+            )
         try:
-            web_search_config = WebSearchConfig.model_validate(rows["web_search_config"])
+            web_search_config = WebSearchConfig.model_validate(stored)
         except Exception as e:
             logger.warning(f"Failed to parse web_search_config: {e}")
 
