@@ -451,6 +451,12 @@ def _dispatch(
         return False
 
 
+#: Marker for "the situation did not pass this field at all", so the row keeps the
+#: record's own default. Distinct from passing ``None``, which is a value: the
+#: endpoint lifecycle stores ``None`` for a body it did not capture.
+_UNSET: Any = object()
+
+
 def _assemble_row(
     *,
     log_type: LogType,
@@ -487,11 +493,11 @@ def _assemble_row(
     ttft_ms: int | None = None,
     error_message: str | None = None,
     error_stack_trace: str | None = None,
-    log_metadata: dict[str, Any] | None = None,
-    request_headers: dict[str, Any] | None = None,
-    request_body: Any = None,
-    response_headers: dict[str, Any] | None = None,
-    response_body: Any = None,
+    log_metadata: Any = _UNSET,
+    request_headers: Any = _UNSET,
+    request_body: Any = _UNSET,
+    response_headers: Any = _UNSET,
+    response_body: Any = _UNSET,
 ) -> RequestLogCreate:
     """Assemble one audit row: the row's identity, constants and defaults in one place.
 
@@ -500,50 +506,59 @@ def _assemble_row(
     unset when the situation has none to declare; the deployment constants
     (``server_hostname``, ``service_name``) and the timestamp default are filled
     once instead of by each caller, and ``_dispatch`` is the only consumer.
+
+    The payload fields default to :data:`_UNSET` rather than ``None``: a situation
+    that passes nothing keeps the record's own default, while one that passes
+    ``None`` means it captured nothing — the two are distinct on the row.
     """
-    return RequestLogCreate(
-        request_id=request_id,
-        timestamp=time.time() if timestamp is None else timestamp,
-        endpoint=endpoint,
-        method=method,
-        log_type=log_type,
-        status_code=status_code,
-        response_time_ms=response_time_ms,
-        user_identity=user_identity,
-        user_id=user_id,
-        model=model,
-        provider=provider,
-        api_key_name=api_key_name,
-        auth_method=auth_method,
-        client_ip=client_ip,
-        user_agent=user_agent,
-        session_id=session_id,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        cache_creation_input_tokens=cache_creation_input_tokens,
-        cache_read_input_tokens=cache_read_input_tokens,
-        cached_prompt_tokens=cached_prompt_tokens,
-        audio_input_tokens=audio_input_tokens,
-        audio_output_tokens=audio_output_tokens,
-        cost_usd=cost_usd,
-        cache_savings_usd=cache_savings_usd,
-        ttft_ms=ttft_ms,
-        error_message=error_message,
-        error_stack_trace=error_stack_trace,
-        event_type=event_type,
-        action_category=action_category,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        outcome=outcome,
-        log_metadata={} if log_metadata is None else log_metadata,
-        request_headers={} if request_headers is None else request_headers,
-        request_body={} if request_body is None else request_body,
-        response_headers={} if response_headers is None else response_headers,
-        response_body={} if response_body is None else response_body,
-        server_hostname=get_server_hostname(),
-        service_name="llm-proxy",
-    )
+    fields: dict[str, Any] = {
+        "request_id": request_id,
+        "timestamp": time.time() if timestamp is None else timestamp,
+        "endpoint": endpoint,
+        "method": method,
+        "log_type": log_type,
+        "status_code": status_code,
+        "response_time_ms": response_time_ms,
+        "user_identity": user_identity,
+        "user_id": user_id,
+        "model": model,
+        "provider": provider,
+        "api_key_name": api_key_name,
+        "auth_method": auth_method,
+        "client_ip": client_ip,
+        "user_agent": user_agent,
+        "session_id": session_id,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "cache_creation_input_tokens": cache_creation_input_tokens,
+        "cache_read_input_tokens": cache_read_input_tokens,
+        "cached_prompt_tokens": cached_prompt_tokens,
+        "audio_input_tokens": audio_input_tokens,
+        "audio_output_tokens": audio_output_tokens,
+        "cost_usd": cost_usd,
+        "cache_savings_usd": cache_savings_usd,
+        "ttft_ms": ttft_ms,
+        "error_message": error_message,
+        "error_stack_trace": error_stack_trace,
+        "event_type": event_type,
+        "action_category": action_category,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "outcome": outcome,
+        "server_hostname": get_server_hostname(),
+        "service_name": "llm-proxy",
+    }
+    for name, payload in (
+        ("log_metadata", log_metadata),
+        ("request_headers", request_headers),
+        ("request_body", request_body),
+        ("response_headers", response_headers),
+        ("response_body", response_body),
+    ):
+        if payload is not _UNSET:
+            fields[name] = payload
+    return RequestLogCreate(**fields)
 
 
 def _request_facts(request: Request, *, client_ip: str | None = None) -> dict[str, Any]:
@@ -748,7 +763,12 @@ def _build_log_base(
     context: EventContext,
     default_status_code: int = 200,
 ) -> dict[str, Any]:
-    """Build the classified, attributed base fields for a row."""
+    """Build the classified, attributed base fields the assembler takes.
+
+    This is the endpoint lifecycle's adapter onto the shared row assembler: the
+    classification and attribution an ``EventContext`` carries, translated into
+    the assembler's vocabulary. The deployment constants are the assembler's.
+    """
     log_type = LogType(context.log_type) if isinstance(context.log_type, str) else context.log_type
     endpoint = context.metadata.get("endpoint", "")
     method = context.metadata.get("method", "POST")
@@ -781,8 +801,6 @@ def _build_log_base(
         "user_agent": context.user_agent,
         "session_id": context.session_id,
         "auth_method": context.auth_method,
-        "server_hostname": get_server_hostname(),
-        "service_name": "llm-proxy",
         "event_type": determine_event_type(endpoint),
         "action_category": determine_action_category(method),
         "resource_type": determine_resource_type(endpoint),
@@ -832,7 +850,7 @@ def _build_success_row(context: EventContext, config: LoggingConfig) -> RequestL
     request_headers, request_body = _mask_request_data(context, config)
     response_headers, response_body = _mask_response_data(context, config)
     log_metadata = _build_log_metadata(context, config, extra={"streaming": False})
-    return RequestLogCreate(
+    return _assemble_row(
         **_build_log_base(context),
         request_headers=request_headers,
         request_body=request_body,
@@ -851,7 +869,7 @@ def _build_error_row(context: EventContext, config: LoggingConfig) -> RequestLog
     if not context.should_log_input_output:
         # An upstream error body is content too; classification fields stay.
         log_metadata = scrub_log_metadata(log_metadata)
-    return RequestLogCreate(
+    return _assemble_row(
         **_build_log_base(context, default_status_code=500),
         request_headers=request_headers,
         request_body=request_body,
@@ -870,7 +888,7 @@ def _build_stream_row(context: EventContext, config: LoggingConfig) -> RequestLo
         config,
         extra={"streaming": True, "response_body_truncated": context.streaming_truncated},
     )
-    return RequestLogCreate(
+    return _assemble_row(
         **_build_log_base(context),
         request_headers=request_headers,
         request_body=request_body,
