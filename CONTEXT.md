@@ -151,6 +151,19 @@ _Avoid_: forced param, default field, global field policy
 The per-`(base_url, model)` learned cache of which assistant reasoning field the upstream expects (`reasoning` vs `reasoning_content`), held by `OpenAIRequestBuilder` with a TTL/LRU bound and a model-less fallback read. Every response path teaches the model before the client-facing rename — parsed non-stream (`OpenAIResponseParser`), verbatim wire-reuse, and streaming chunks (`_stream_transform_chunk`) — keyed by routed model plus upstream-reported model (aliasing), via the single shared write `record_reasoning_field_preference`. Request-side normalization and the reasoning-echo placeholder resolve the field per body model; never-seen models default to `reasoning_content`. See ADR-0013.
 _Avoid_: reasoning convention, per-base_url reasoning cache, detect reasoning field
 
+**Stream prefetch**:
+The leading items the proxy reads from a provider stream before the first byte
+reaches the client, parsed only far enough to see the first user-visible content
+and any in-band fallback signal (a context-length or retryable finish reason)
+that arrived before it. One loop owns the stop rule and the finish-reason policy
+(`prefetch_stream` in `core/processing/stream_prefetch.py`); a per-tier decoder
+owns what an item means — `ConvertedStreamDecoder` re-encodes chunks through the
+protocol transformer, `NATIVE_BLOCKS` replays raw SSE blocks verbatim. An item
+that carries a signal is neither replayed nor counted as content. Tiers the proxy
+does not read ahead (`PrefetchResult.without_prefetch`) report
+`stream_started=True`. See ADR-0024.
+_Avoid_: peek, sniff, read-ahead
+
 ### Conversion layer
 
 **Provider serializer**:

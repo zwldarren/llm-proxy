@@ -3,8 +3,7 @@
 import asyncio
 import inspect
 import uuid
-from contextlib import AsyncExitStack, suppress
-from dataclasses import dataclass
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -18,10 +17,6 @@ from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
 from llm_proxy.billing.transcription_stream_usage import TranscriptionStreamUsageTracker
 from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.conversion import NativePassthroughHandler, plan_conversion
-from llm_proxy.core.errors import (
-    is_context_length_finish_reason,
-    is_retryable_stream_finish_reason,
-)
 from llm_proxy.core.errors.handler import ErrorHandler
 from llm_proxy.core.exceptions import (
     ConfigurationError,
@@ -37,11 +32,18 @@ from llm_proxy.core.processing.stream_lifecycle import (
     SSE_KEEPALIVE_COMMENT,
     GenericStreamLifecycle,
     StreamLifecycle,
+    close_stream_quietly,
+)
+from llm_proxy.core.processing.stream_prefetch import (
+    NATIVE_BLOCKS,
+    ConvertedStreamDecoder,
+    PrefetchPolicy,
+    PrefetchResult,
+    prefetch_stream,
 )
 from llm_proxy.core.processing.web_search_streaming import (
     WebSearchStreamProcessor,
 )
-from llm_proxy.core.utils import quiet_aclose
 from llm_proxy.models import (
     ConversionTier,
     InternalImageEditRequest,
@@ -53,20 +55,8 @@ from llm_proxy.models import (
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.streaming.handler import StreamingHandler
-from llm_proxy.streaming.sse_parse import iter_sse_data_events
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class _PrefetchResult:
-    """Result of prefetching the first chunks from a stream."""
-
-    first_chunks: list[str]
-    stream_started: bool
-    context_exceeded: bool
-    context_exceeded_reason: str | None = None
-    retryable_stream_finish_reason: str | None = None
 
 
 # ------------------------------------------------------------------
@@ -93,6 +83,7 @@ class StreamingProcessor:
         self._error_handler = error_handler
         self._param_override_service = param_override_service
         self._chunk_parser = chunk_parser or OpenAIStreamChunkParser()
+        self._prefetch_policy = PrefetchPolicy(self._chunk_parser)
         self._web_search_processor = web_search_processor or WebSearchStreamProcessor()
         self._fallback_handler = FallbackHandler(error_handler, param_override_service)
         self._native_passthrough_handler = NativePassthroughHandler()
@@ -223,7 +214,7 @@ class StreamingProcessor:
                             unified_request, cancel_token=stream_cancel_token
                         )
                         if protocol_name == "openai":
-                            # Peek at the leading blocks (the role block and
+                            # Prefetch the leading blocks (the role block and
                             # the first content block) so upstream failures —
                             # HTTP errors raised when the generator starts,
                             # context-length/retryable finish reasons, empty
@@ -233,20 +224,24 @@ class StreamingProcessor:
                             # before any byte reaches the client. Only the
                             # leading blocks are parsed; the rest of the
                             # stream flows through verbatim.
-                            prefetch = await self._prefetch_native_blocks(stream)
+                            prefetch = await prefetch_stream(
+                                stream, decoder=NATIVE_BLOCKS, policy=self._prefetch_policy
+                            )
                         else:
                             # Anthropic/Responses native tiers keep their
-                            # established semantics: no pre-response sniffing
+                            # established semantics: no pre-response prefetch
                             # (their failures are framed in-band).
-                            prefetch = _PrefetchResult(
-                                first_chunks=[], stream_started=True, context_exceeded=False
-                            )
+                            prefetch = PrefetchResult.without_prefetch()
                     else:
                         stream = await current_adapter.stream_chat_completion(
                             unified_request, cancel_token=stream_cancel_token
                         )
 
-                        prefetch = await self._prefetch_stream_chunks(stream, transformer)
+                        prefetch = await prefetch_stream(
+                            stream,
+                            decoder=ConvertedStreamDecoder(self._chunk_parser, transformer),
+                            policy=self._prefetch_policy,
+                        )
 
                     first_chunks = prefetch.first_chunks
                     stream_started = prefetch.stream_started
@@ -255,7 +250,7 @@ class StreamingProcessor:
                     retryable_stream_finish_reason = prefetch.retryable_stream_finish_reason
 
                     if context_exceeded and context_exceeded_reason:
-                        await self._close_stream(stream)
+                        await close_stream_quietly(stream)
                         stream = None
                         should_continue = await self._fallback_handler.handle_context_exceeded(
                             context_exceeded_reason,
@@ -279,7 +274,7 @@ class StreamingProcessor:
                         break
 
                     if retryable_stream_finish_reason:
-                        await self._close_stream(stream)
+                        await close_stream_quietly(stream)
                         stream = None
                         should_continue = (
                             await self._fallback_handler.handle_retryable_finish_reason(
@@ -305,7 +300,7 @@ class StreamingProcessor:
                         break
 
                     if not stream_started:
-                        await self._close_stream(stream)
+                        await close_stream_quietly(stream)
                         stream = None
                         should_continue = await self._fallback_handler.handle_empty_stream(
                             current_adapter,
@@ -369,7 +364,7 @@ class StreamingProcessor:
                     )
 
                 except Exception as e:
-                    await self._close_stream(stream)
+                    await close_stream_quietly(stream)
                     stream = None
                     result = await self._fallback_handler.handle_stream_error(
                         e,
@@ -412,7 +407,7 @@ class StreamingProcessor:
 
             async def run_cleanup():
                 if should_clean_stream and stream is not None:
-                    await self._close_stream(stream)
+                    await close_stream_quietly(stream)
                 if should_clean_exit_stack and _exit_stack is not None:
                     await _exit_stack.aclose()
 
@@ -422,125 +417,6 @@ class StreamingProcessor:
         from llm_proxy.observability.tracing.handlers import get_tracing_registry
 
         return get_tracing_registry()
-
-    async def _close_stream(self, stream) -> None:
-        if stream is None:
-            return
-        with suppress(Exception, asyncio.CancelledError):
-            await asyncio.shield(quiet_aclose(stream))
-
-    async def _prefetch_stream_chunks(
-        self,
-        stream,
-        transformer,
-    ) -> _PrefetchResult:
-        first_chunks: list[str] = []
-        stream_started = False
-        context_exceeded = False
-        context_exceeded_reason: str | None = None
-        retryable_stream_finish_reason: str | None = None
-
-        try:
-            async for chunk in stream:
-                if not isinstance(chunk, (str, dict)):
-                    continue
-
-                parsed = self._chunk_parser.parse_chunk(chunk)
-
-                if parsed is not None:
-                    choices = parsed.get("choices", [])
-                    for choice in choices:
-                        if not isinstance(choice, dict):
-                            continue
-                        finish_reason = choice.get("finish_reason")
-                        if is_context_length_finish_reason(finish_reason):
-                            context_exceeded = True
-                            context_exceeded_reason = finish_reason
-                            break
-
-                        if is_retryable_stream_finish_reason(
-                            finish_reason
-                        ) and not self._chunk_parser.choice_has_non_role_output(choice):
-                            retryable_stream_finish_reason = finish_reason
-                            break
-
-                if context_exceeded:
-                    break
-                if retryable_stream_finish_reason:
-                    break
-
-                transformed = transformer.transform(chunk)
-                if transformed:
-                    first_chunks.append(transformed)
-                    if parsed is not None and self._chunk_parser.chunk_has_meaningful_content(
-                        parsed
-                    ):
-                        stream_started = True
-                        break
-        except Exception:
-            await self._close_stream(stream)
-            raise
-
-        return _PrefetchResult(
-            first_chunks=first_chunks,
-            stream_started=stream_started,
-            context_exceeded=context_exceeded,
-            context_exceeded_reason=context_exceeded_reason,
-            retryable_stream_finish_reason=retryable_stream_finish_reason,
-        )
-
-    async def _prefetch_native_blocks(self, stream) -> _PrefetchResult:
-        """Peek at the leading SSE blocks of a native passthrough stream.
-
-        Mirrors ``_prefetch_stream_chunks``' stop condition (first block with
-        meaningful content) and fallback signals, but keeps the blocks raw:
-        only the leading blocks — typically the role block plus the first
-        content block — are parsed, and everything after the peek flows
-        through verbatim. Only meaningful for Chat Completions-shaped
-        streams (the openai protocol native tier); callers gate on that.
-        """
-        first_chunks: list[str] = []
-        stream_started = False
-        context_exceeded = False
-        context_exceeded_reason: str | None = None
-        retryable_stream_finish_reason: str | None = None
-
-        try:
-            async for block in stream:
-                if not isinstance(block, str):
-                    continue
-                first_chunks.append(block)
-                for _event_type, parsed in iter_sse_data_events(block):
-                    if not isinstance(parsed, dict):
-                        continue
-                    for choice in parsed.get("choices", []):
-                        if not isinstance(choice, dict):
-                            continue
-                        finish_reason = choice.get("finish_reason")
-                        if is_context_length_finish_reason(finish_reason):
-                            context_exceeded = True
-                            context_exceeded_reason = finish_reason
-                            break
-                        if is_retryable_stream_finish_reason(
-                            finish_reason
-                        ) and not self._chunk_parser.choice_has_non_role_output(choice):
-                            retryable_stream_finish_reason = finish_reason
-                            break
-                    if self._chunk_parser.chunk_has_meaningful_content(parsed):
-                        stream_started = True
-                if context_exceeded or retryable_stream_finish_reason or stream_started:
-                    break
-        except Exception:
-            await self._close_stream(stream)
-            raise
-
-        return _PrefetchResult(
-            first_chunks=first_chunks,
-            stream_started=stream_started,
-            context_exceeded=context_exceeded,
-            context_exceeded_reason=context_exceeded_reason,
-            retryable_stream_finish_reason=retryable_stream_finish_reason,
-        )
 
     async def _process_image_streaming(
         self,

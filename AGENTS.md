@@ -113,6 +113,16 @@ module of the resource it belongs to; a resource may import a peer's read shape
 it embeds (`ProviderDetails.models` is `ModelRead`), never a peer's write
 schema. Small router-local response shapes may stay inline in the router.
 
+### Streaming prefetch
+
+The read-ahead both streaming tiers do before the first byte reaches the client
+(the first user-visible content, and the in-band fallback signals that arrived
+before it) is one loop, `core/processing/stream_prefetch.py` (ADR-0024). A tier
+supplies a decoder — `ConvertedStreamDecoder` (chunks re-encoded through the
+protocol transformer) or `NATIVE_BLOCKS` (raw SSE blocks replayed verbatim) —
+while the loop owns the stop rule and the finish-reason policy. Do not add a
+second read-ahead loop per tier; add a decoder.
+
 ### MCP Integration
 
 - `mcp/manager.py`: MCP server lifecycle management
