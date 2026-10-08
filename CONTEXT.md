@@ -217,7 +217,7 @@ The single UI-managed retention setting (`logging.retention_days`, Settings → 
 _Avoid_: usage retention, per-table retention
 
 **Log intake**:
-The single point where a request's facts become a stored log row: `llm_proxy.observability.log_intake`, one verb per situation (endpoint lifecycle from `EventContext`, early failure from the raw request, admin request, admin action, rejection, internal call, tool call, realtime turn). The verbs own classification, identity, masking, hostname, dispatch to the background writers, and which records a situation produces (an early failure writes a usage row too); they are idempotent, so the `audit_log_written` dedup latch is their private detail (a field of the request's facts, ADR-0022). `RequestLogCreate` is the module's assembly detail, never built at a call site. See ADR-0020.
+The single point where a request's facts become a stored log row: `llm_proxy.observability.log_intake`, one verb per situation (endpoint lifecycle from `EventContext`, early failure from the raw request, admin request, admin action, rejection, internal call, tool call, realtime turn). The verbs own classification, identity, masking, dispatch to the background writers, and which records a situation produces (an early failure writes a usage row too); they are idempotent, so the `audit_log_written` dedup latch is their private detail (a field of the request's facts, ADR-0022). `_assemble_row` is the module's single construction point: a situation declares what it knows and the assembler fills the deployment constants, the timestamp and the record's defaults, so `RequestLogCreate` is never built at a call site. See ADR-0020.
 _Avoid_: building a log row at a call site, writing `audit_log_written` outside the intake
 
 ### Billing

@@ -100,3 +100,39 @@ dependency direction one-way.
 - The module is configured at startup in `startup_tracing`; `RequestLogService` /
   `UsageService` remain the dispatch machinery (and the test adapter seam), no
   longer a call-site concern.
+
+## Amendment (2026-10): one assembler inside the module
+
+Moving the row construction into one module left the construction itself
+copied: eleven `RequestLogCreate(...)` sites lived in `log_intake.py` — the
+three endpoint-lifecycle builders plus eight verbs (early failure, admin
+request, the explicit-audit action shared by four callers, rejection, MCP,
+web search, the routing judge, realtime). Each site laid out the same
+twenty-odd fields by hand: the deployment constants (`server_hostname`,
+`service_name` — repeated at five sites), the attribution four-pack (at
+eleven), the request's endpoint/method/client-ip/user-agent (at four), and the
+`time.time()` timestamp default.
+
+`_assemble_row` is now the module's single construction point: a situation
+declares what it knows and the assembler fills the constants, the timestamp
+and the record's defaults. Two fact helpers own the mechanical derivations
+(`_request_facts` for the request mechanics, `_identity_fields` for the
+identity attribution), `_dispatch_request_row` owns the mark-on-success rule
+that makes the request-bound situations idempotent, and `_build_log_base` is
+the endpoint lifecycle's adapter onto the assembler rather than a second
+dialect. `RequestLogCreate` is constructed in exactly one place, asserted by
+`tests/observability/test_row_assembly_contract.py`, which walks all eleven
+situations and pins what they share.
+
+Two rules stay where they were, deliberately: a situation's *policy* (the
+rejection dedupe window, which records it fans out, its warning level) remains
+in the verb, and classification remains declared rather than derived — the
+four tool situations classify nothing, because a tool call is not a client
+endpoint.
+
+One declared behavior change: the four tool situations now carry
+`server_hostname` and `service_name` like every other row. They were null
+before, which the dashboard reads as missing dimensions on MCP, web-search,
+judge and realtime rows. Payload fields keep the distinction the old sites
+relied on — ``None`` for a body the lifecycle did not capture is not the
+record's empty default.
