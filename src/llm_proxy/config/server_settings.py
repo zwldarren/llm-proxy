@@ -22,11 +22,12 @@ today — no speculative extension points (ADR-0025).
 
 import logging
 from collections.abc import Callable, Mapping
+from copy import copy
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, create_model
 
 from llm_proxy.config.types.logging_config import (
     DEFAULT_MAX_LOGGED_BODY_BYTES,
@@ -265,12 +266,14 @@ def _derive_partial(
     for name in names:
         field_info = model.model_fields[name]
         annotation = field_info.annotation
-        if type(None) not in getattr(annotation, "__args__", ()):
+        if type(None) not in getattr(annotation, "__args__", ()):  # not already optional
             annotation = annotation | None
-        definitions[name] = (
-            annotation,
-            Field(default=None, description=field_info.description),
-        )
+        # Copy the canonical FieldInfo so validation constraints (ge/le, ...)
+        # and descriptions survive; only the default changes (omitted → None).
+        info = copy(field_info)
+        info.default = None
+        info.default_factory = None
+        definitions[name] = (annotation, info)
     return create_model(f"{model.__name__}Update", **definitions)
 
 
