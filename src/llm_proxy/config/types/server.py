@@ -7,6 +7,16 @@ from pydantic import BaseModel, Field
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.config.types.web_search import WebSearchConfig
+from llm_proxy.serialization.context import UnknownFieldsPolicy, UnsupportedBlockPolicy
+
+#: Global request-policy selection values. ``"default"`` means "not configured":
+#: the per-adapter default applies (e.g. vLLM/SGLang pass unknown fields
+#: through). Any other value is an explicit operator choice. The concrete values
+#: come from the serialization-layer policy Literals so the two layers cannot
+#: drift apart.
+UnknownFieldsPolicySelection = Literal["default", UnknownFieldsPolicy]
+
+UnsupportedBlockPolicySelection = Literal["default", UnsupportedBlockPolicy]
 
 
 class CircuitBreakerParams(BaseModel):
@@ -112,6 +122,73 @@ class KeepaliveParams(BaseModel):
         default=15.0,
         gt=0,
         description="Interval between heartbeat bytes once in heartbeat mode.",
+    )
+
+
+class CorsConfig(BaseModel):
+    """Allowed CORS origins (server_config ``cors_origins`` key).
+
+    An empty list disables CORS (same-origin deployment). Origins should be
+    full scheme+host(+port) values, e.g. "https://admin.example.com".
+    """
+
+    origins: list[str] = Field(
+        default_factory=list,
+        description="Allowed CORS origins; empty disables CORS",
+    )
+
+
+class RequestPolicyConfig(BaseModel):
+    """Global request policy (server_config ``request_policy`` key).
+
+    ``"default"`` is stored verbatim and resolves to "not configured" at
+    runtime, letting each provider apply its own default. Concrete values
+    override every provider.
+    """
+
+    unknown_fields_policy: UnknownFieldsPolicySelection = Field(
+        default="default",
+        description=(
+            "How to handle unknown request fields globally: "
+            "'default' (per-provider default), "
+            "'ignore' (strip fields silently), "
+            "'passthrough' (keep unknown fields in body), "
+            "'error' (reject request with validation error)"
+        ),
+    )
+    unsupported_block_policy: UnsupportedBlockPolicySelection = Field(
+        default="default",
+        description=(
+            "How to handle content blocks the provider cannot serialize: "
+            "'default' (per-provider default), "
+            "'drop' (remove unsupported blocks silently), "
+            "'degrade' (convert to a supported fallback representation), "
+            "'error' (reject request with validation error)"
+        ),
+    )
+
+
+class ResilienceConfig(BaseModel):
+    """Global resilience configuration (server_config ``resilience`` key)."""
+
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Same-provider retry attempts for transient errors (rate limit, "
+            "timeout, network) and server errors (5xx, 408). Client errors "
+            "(401/403/400/422) are not retried in place -- they fall back "
+            "directly. Overridable per-model via ModelConfig.max_retries"
+        ),
+    )
+    max_fallback_attempts: int = Field(
+        default=10,
+        ge=0,
+        description="Maximum number of fallback provider switches across all providers",
+    )
+    circuit_breaker: CircuitBreakerParams = Field(
+        default_factory=CircuitBreakerParams,
+        description="Circuit breaker configuration for provider fallback",
     )
 
 

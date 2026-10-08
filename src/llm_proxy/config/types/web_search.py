@@ -21,8 +21,8 @@ class SearXNGConfig(BaseModel):
     engines: list[str] | None = Field(
         None, description="List of search engines to use (e.g., ['google', 'bing'])"
     )
-    timeout: float = Field(30.0, description="Request timeout in seconds")
-    max_results: int = Field(10, ge=1, le=20, description="Maximum number of results to return")
+    timeout: float = Field(30.0, ge=1.0, le=300.0, description="Request timeout in seconds")
+    max_results: int = Field(10, ge=1, le=10, description="Maximum number of results to return")
 
 
 class OllamaConfig(BaseModel):
@@ -35,7 +35,7 @@ class OllamaConfig(BaseModel):
         DEFAULT_OLLAMA_BASE_URL,
         description="Ollama API base URL",
     )
-    timeout: float = Field(30.0, description="Request timeout in seconds")
+    timeout: float = Field(30.0, ge=1.0, le=300.0, description="Request timeout in seconds")
     max_results: int = Field(10, ge=1, le=10, description="Maximum number of results to return")
 
     @field_validator("base_url")

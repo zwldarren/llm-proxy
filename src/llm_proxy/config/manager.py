@@ -4,10 +4,13 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+# Re-exported: the implementation moved to the server settings registry
+# (ADR-0025), which owns both the admin endpoints and this runtime read.
+from llm_proxy.config.server_settings import load_logging_config
 from llm_proxy.core.constants import DEFAULT_MAX_FALLBACK_ATTEMPTS, DEFAULT_MAX_RETRIES
-from llm_proxy.core.exceptions import ConfigurationError, ProviderNotConfiguredError
+from llm_proxy.core.exceptions import ProviderNotConfiguredError
 from llm_proxy.observability.logger import get_logger
 
 if TYPE_CHECKING:
@@ -31,7 +34,6 @@ from .types import (
     SecurityParams,
     ServerParams,
 )
-from .types.logging_config import DEFAULT_MAX_LOGGED_BODY_BYTES, DEFAULT_RETENTION_DAYS
 
 logger = get_logger(__name__)
 
@@ -68,113 +70,6 @@ def load_auth_config() -> ProxyAuthConfig:
     from .secrets import get_jwt_secret
 
     return ProxyAuthConfig(jwt_secret=get_jwt_secret())
-
-
-def _parse_bool(value: Any) -> bool:
-    """Parse a value as boolean, supporting string and non-string types."""
-    return str(value).strip().lower() in {"true", "1", "yes", "on"}
-
-
-def _parse_optional_float(value: Any, name: str) -> float | None:
-    """Parse an optional float config value (None/empty string → None)."""
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid {name}: {exc}") from exc
-
-
-def _parse_optional_int(value: Any, name: str) -> int | None:
-    """Parse an optional int config value (None/empty string → None)."""
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid {name}: {exc}") from exc
-
-
-def load_logging_config(
-    overrides: dict[str, Any] | None = None,
-) -> LoggingConfig:
-    """Build the logging configuration from database overrides.
-
-    All behavioral fields (masking, sampling, retention, sensitive keys) are
-    UI-managed and stored in the ``logging`` server_config key; this function
-    merges those stored values with code defaults. The only remaining env var
-    is ``LOG_LEVEL`` (startup-time logging pipeline verbosity).
-    """
-    settings = get_settings().logging
-    overrides = overrides or {}
-
-    log_input_output = _parse_bool(overrides.get("log_input_output", False))
-    log_raw_stream = _parse_bool(overrides.get("log_raw_stream", False))
-
-    try:
-        retention_days = int(overrides.get("log_retention_days", DEFAULT_RETENTION_DAYS))
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid log_retention_days: {exc}") from exc
-
-    try:
-        max_logged_body_bytes = int(
-            overrides.get("max_logged_body_bytes", DEFAULT_MAX_LOGGED_BODY_BYTES)
-        )
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid max_logged_body_bytes: {exc}") from exc
-
-    verbose_routing_logs = _parse_bool(overrides.get("verbose_routing_logs", False))
-    mask_sensitive_data = _parse_bool(overrides.get("mask_sensitive_data", True))
-
-    try:
-        sampling_rate = float(overrides.get("sampling_rate", 1.0))
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid sampling_rate: {exc}") from exc
-
-    audit_sampling_rate = _parse_optional_float(
-        overrides.get("audit_sampling_rate"), "audit_sampling_rate"
-    )
-    audit_retention_days = _parse_optional_int(
-        overrides.get("audit_retention_days"), "audit_retention_days"
-    )
-
-    sensitive_keys = [
-        "authorization",
-        "api_key",
-        "apikey",
-        "password",
-        "passwd",
-        "token",
-        "access_token",
-        "refresh_token",
-        "jwt_secret",
-    ]
-    extra_keys_raw = overrides.get("sensitive_keys", "")
-    if isinstance(extra_keys_raw, str):
-        extra_keys = [k.strip().lower() for k in extra_keys_raw.split(",") if k.strip()]
-    elif isinstance(extra_keys_raw, list):
-        extra_keys = [str(k).strip().lower() for k in extra_keys_raw if str(k).strip()]
-    else:
-        extra_keys = []
-    if extra_keys:
-        sensitive_keys = [*dict.fromkeys(sensitive_keys + extra_keys)]
-
-    # Env-only value (startup-time logging pipeline verbosity):
-    log_level = settings.level.upper()
-
-    return LoggingConfig(
-        log_input_output=log_input_output,
-        log_raw_stream=log_raw_stream,
-        retention_days=retention_days,
-        max_logged_body_bytes=max_logged_body_bytes,
-        mask_sensitive_data=mask_sensitive_data,
-        log_level=log_level,
-        sampling_rate=sampling_rate,
-        audit_sampling_rate=audit_sampling_rate,
-        audit_retention_days=audit_retention_days,
-        sensitive_keys=sensitive_keys,
-        verbose_routing_logs=verbose_routing_logs,
-    )
 
 
 def load_redis_config() -> RedisConfig:

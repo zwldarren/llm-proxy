@@ -55,40 +55,13 @@ class CustomRateLimitExceeded(RateLimitExceeded):
 
 logger = get_logger(__name__)
 
-_PERIOD_MAP: dict[str, int] = {
-    "second": 1,
-    "minute": 60,
-    "hour": 3600,
-    "day": 86400,
-}
-
-# Named rate-limit buckets with their code defaults. Decorators reference
-# buckets by name (e.g. ``@limiter.limit("auth.login")``); the effective value
-# is resolved per request so UI-managed overrides (server_config
-# ``rate_limits`` key) are hot-reloaded.
-DEFAULT_RATE_LIMITS: dict[str, str] = {
-    "auth.login": "5/minute",
-    "auth.setup": "5/minute",
-    "auth.setup_status": "10/minute",
-}
-
-
-def _parse_limit_value(limit_value: str) -> tuple[int, int]:
-    """Parse a "N/period" rate-limit spec into (limit, window_size_seconds)."""
-    limit_str, period_str = limit_value.split("/", 1)
-    limit = int(limit_str)
-
-    window_size = _PERIOD_MAP.get(period_str)
-    if window_size is None:
-        if period_str.endswith("second"):
-            window_size = int(period_str[:-6])
-        elif period_str.endswith("minute"):
-            window_size = int(period_str[:-6]) * 60
-        elif period_str.endswith("hour"):
-            window_size = int(period_str[:-4]) * 3600
-        else:
-            raise ValueError(f"Invalid rate limit period: {period_str}")
-    return limit, window_size
+# The rate-limit grammar (bucket names, code defaults, "N/period" parsing)
+# lives in the config package: it is shared with the admin server-settings
+# endpoint and the config manager's runtime read (ADR-0025).
+from llm_proxy.config.types.rate_limits import (  # noqa: E402
+    DEFAULT_RATE_LIMITS,
+    parse_limit_value,
+)
 
 
 def resolve_rate_limit_value(request: Request, bucket: str) -> str:
@@ -110,7 +83,7 @@ def resolve_rate_limit_value(request: Request, bucket: str) -> str:
     if override is None:
         return default
     try:
-        _parse_limit_value(override)
+        parse_limit_value(override)
     except ValueError, AttributeError:
         logger.warning(
             f"Invalid rate limit override for bucket '{bucket}': {override!r}; "
@@ -335,7 +308,7 @@ class RateLimitManager:
         # UI-managed ``rate_limits`` server_config key are hot-reloaded).
         is_bucket = "/" not in limit_value
         if not is_bucket:
-            limit, window_size = _parse_limit_value(limit_value)
+            limit, window_size = parse_limit_value(limit_value)
         elif limit_value not in DEFAULT_RATE_LIMITS:
             raise ValueError(f"Unknown rate limit bucket: {limit_value}")
 
@@ -355,7 +328,7 @@ class RateLimitManager:
 
                 if is_bucket:
                     eff_value = resolve_rate_limit_value(request, limit_value)
-                    eff_limit, eff_window = _parse_limit_value(eff_value)
+                    eff_limit, eff_window = parse_limit_value(eff_value)
                 else:
                     eff_value, eff_limit, eff_window = limit_value, limit, window_size
 

@@ -529,7 +529,7 @@ async def update_rate_limits_config(
     """
     from fastapi import HTTPException
 
-    from llm_proxy.api.middleware.rate_limiting import DEFAULT_RATE_LIMITS, _parse_limit_value
+    from llm_proxy.config.types.rate_limits import DEFAULT_RATE_LIMITS, parse_limit_value
 
     unknown = sorted(set(config_data.limits) - set(DEFAULT_RATE_LIMITS))
     if unknown:
@@ -540,7 +540,7 @@ async def update_rate_limits_config(
         )
     for bucket, value in config_data.limits.items():
         try:
-            _parse_limit_value(value)
+            parse_limit_value(value)
         except (ValueError, AttributeError) as exc:
             raise HTTPException(
                 status_code=422,

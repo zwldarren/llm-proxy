@@ -5,13 +5,19 @@ import logging
 import socket
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
+
+from llm_proxy.config.types.mcp_security import McpSecurityPolicyConfig
 
 logger = logging.getLogger(__name__)
 
 
-class McpSecurityPolicy(BaseModel):
+class McpSecurityPolicy(McpSecurityPolicyConfig):
     """Central policy object for MCP hardening.
+
+    Subclasses the canonical server-settings model so the UI-managed policy
+    fields have exactly one source of defaults (ADR-0025); this class adds the
+    runtime-only fields (``allowed_url_schemes``) and the predicate verbs.
 
     Defaults implement a secure-by-default posture:
     - No stdio command is allowed until explicitly listed.
@@ -27,56 +33,8 @@ class McpSecurityPolicy(BaseModel):
       of the whole runner.
     """
 
-    # stdio
-    allowed_commands: list[str] = Field(default_factory=list)
-    blocked_commands: list[str] = Field(
-        default_factory=lambda: [
-            "bash",
-            "sh",
-            "zsh",
-            "cmd.exe",
-            "powershell.exe",
-            "python",
-            "python3",
-            "node",
-            "perl",
-            "ruby",
-        ]
-    )
-    allowed_env_keys: list[str] = Field(default_factory=list)
-    blocked_env_keys: list[str] = Field(
-        default_factory=lambda: [
-            "PATH",
-            "LD_PRELOAD",
-            "DYLD_INSERT_LIBRARIES",
-            "PYTHONPATH",
-            "NODE_OPTIONS",
-            "SHELL",
-            "HOME",
-            "USER",
-        ]
-    )
-
-    # streamableHttp
+    # Runtime-only additions on top of the UI-managed policy fields.
     allowed_url_schemes: list[str] = Field(default_factory=lambda: ["http", "https"])
-    blocked_url_hosts: list[str] = Field(default_factory=list)
-    blocked_url_ips: list[str] = Field(
-        default_factory=lambda: [
-            "127.0.0.0/8",
-            "10.0.0.0/8",
-            "172.16.0.0/12",
-            "192.168.0.0/16",
-            "169.254.169.254/32",
-            "100.64.0.0/10",
-            "::1/128",
-            "fc00::/7",
-            "fe80::/10",
-            "::ffff:0:0/96",
-        ]
-    )
-
-    # global switches
-    require_key_mcp_permissions: bool = True
 
     model_config = ConfigDict(extra="ignore")
 
@@ -210,17 +168,10 @@ class McpSecurityPolicy(BaseModel):
                 "Failed to validate stored MCP security policy, falling back to defaults"
             )
             return policy
-        # Override DB-managed fields from the stored record.
-        # NOTE: Keep this tuple in sync with all UI-managed fields in McpSecurityPolicy
-        for field_name in (
-            "allowed_commands",
-            "blocked_commands",
-            "allowed_env_keys",
-            "blocked_env_keys",
-            "blocked_url_hosts",
-            "blocked_url_ips",
-            "require_key_mcp_permissions",
-        ):
+        # Override DB-managed fields from the stored record. The field set is
+        # exactly the canonical server-settings model's fields (ADR-0025), so
+        # a new UI-managed field is picked up without editing this tuple.
+        for field_name in McpSecurityPolicyConfig.model_fields:
             setattr(policy, field_name, getattr(stored, field_name))
         return policy
 

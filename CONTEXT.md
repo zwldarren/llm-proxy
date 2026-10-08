@@ -204,6 +204,12 @@ _Avoid_: realtime usage format, audio usage
 The WebSocket close code a Realtime connection ends with, from the endpoint's own table (`api/routers/realtime.py`). Two codes follow the official OpenAI Realtime scheme (4000-4009 client errors, 4100-4108 server errors) where a semantic match exists (4004 invalid model, 4007 rate limited); the rest are proxy conventions in the RFC 6455 private-use range, matching the OpenResponses WebSocket transport (4401 auth failure, 4403 forbidden, 1011 upstream/provider failure) — the official 4005 invalid-authentication and 4100-4108 server-error codes are intentionally not used so both proxy WS transports share one close-code language. The reason always precedes the close as a Realtime `error` event.
 _Avoid_: reusing HTTP status codes as close codes
 
+### Server settings
+
+**Server settings**:
+One UI-managed `server_config` key — logging, web search, smart routing, provider selection, request policy, resilience, security, keepalive, rate limits, CORS origins, MCP security policy — declared once as a descriptor in the server settings registry (`llm_proxy.config.server_settings`). The descriptor carries the key's canonical model (the runtime truth, living in `llm_proxy.config.types`), its write merge mode, its response mode, and its runtime read. Three consumers are generated from the registry: the admin endpoints (`api/routers/config/server.py`), the config manager's typed snapshot (`load_server_settings`), and the contract test. Adding a setting is adding a descriptor row. See ADR-0025.
+_Avoid_: hand-written per-key config endpoints, a second schema module mirroring the runtime types (`api/schemas/server_config.py` is deleted)
+
 ### Request logging
 
 **Logged response body**:
