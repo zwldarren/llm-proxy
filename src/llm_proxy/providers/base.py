@@ -219,7 +219,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
         # upstream response, stashed so the API layer can forward them to
         # the client once the StreamingResponse is created (upstream response
         # headers pass through minus hop-by-hop headers).
-        self._last_stream_response_headers: dict[str, str] = {}
+        self._stream_response_headers: dict[str, str] = {}
 
         self._transport = HttpTransport(
             provider_name=self._provider_name,
@@ -419,9 +419,14 @@ class BaseHttpProvider(BaseAdapter, ABC):
         # Stash upstream response headers so the API layer can forward them
         # (request-id, ratelimit-*, ...) once the client StreamingResponse
         # is created.
-        self._last_stream_response_headers = extract_rate_limit_headers(
+        self._stream_response_headers = extract_rate_limit_headers(
             getattr(response, "headers", None)
         )
+
+    def pop_stream_response_headers(self) -> dict[str, str]:
+        """Take, and clear, the headers captured when the stream started."""
+        headers, self._stream_response_headers = self._stream_response_headers, {}
+        return headers
 
     def _stream_raw_sse(
         self,

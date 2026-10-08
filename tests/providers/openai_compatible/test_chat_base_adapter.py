@@ -749,6 +749,45 @@ class TestReasoningFieldAutoDetection:
             adapter._get_request_builder().clear_reasoning_field_preference(base_url)
 
 
+class TestSharedRequestBuilder:
+    """The request builder belongs to the serializer, not to each call.
+
+    ADR-0013's reasoning-field cache lives on that instance (the serializer
+    registry caches one per provider), so an adapter holding its own builder
+    would record every detected field into a throwaway.
+    """
+
+    def test_the_adapter_uses_the_serializers_own_builder(self):
+        from llm_proxy.serialization.providers import get_provider_serializer
+
+        adapter = OpenAICompatibleBase(api_key="test-key", base_url="https://x.example.com/v1")
+        expected = get_provider_serializer("openrouter").request_builder
+
+        assert adapter._get_request_builder() is expected
+        assert adapter._get_request_builder() is expected, "not built per call"
+
+    def test_every_family_member_shares_that_builder(self):
+        """Providers with their own serializer still build through this one."""
+        from llm_proxy.serialization.providers import get_provider_serializer
+
+        expected = get_provider_serializer("openrouter").request_builder
+
+        for name in ("chutes", "nanogpt", "mistral"):
+            adapter = get_adapter(name, api_key="test-key")
+            assert adapter._get_request_builder() is expected, name
+
+    def test_a_serializer_without_openai_bodies_answers_with_a_builder(self):
+        """The seam is total: no caller probes for the attribute."""
+        from llm_proxy.serialization.openai.components.request_builder import (
+            OpenAIRequestBuilder,
+        )
+        from llm_proxy.serialization.providers import get_provider_serializer
+
+        builder = get_provider_serializer("anthropic").request_builder
+
+        assert isinstance(builder, OpenAIRequestBuilder)
+
+
 class TestPromptCacheKeyGating:
     """prompt_cache_key is only forwarded to known-compatible upstreams
     (strict gateways reject unknown fields with HTTP 400)."""

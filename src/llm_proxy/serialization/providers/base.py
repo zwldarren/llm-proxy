@@ -24,6 +24,7 @@ from llm_proxy.models.systemone import (
 )
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.context import BuildContext
+from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
 from llm_proxy.serialization.providers.field_utils import (
     extract_unknown_response_fields as _extract_unknown_fields,
 )
@@ -99,11 +100,27 @@ class ProviderSerializer(ABC):
     def __init__(self) -> None:
         super().__init__()
         self._registered_provider_name: str = ""
+        self._request_builder: OpenAIRequestBuilder | None = None
 
     @property
     def provider_name(self) -> str:
         """Provider name as registered, falling back to the class default."""
         return self._registered_provider_name or self._DEFAULT_PROVIDER_NAME
+
+    @property
+    def request_builder(self) -> OpenAIRequestBuilder:
+        """The OpenAI request builder this serializer composes.
+
+        Adapters that speak the Chat Completions request shape read it from
+        here rather than reaching for a private attribute: the builder is the
+        one instance that carries the per-model reasoning-field preference
+        cache (ADR-0013), so a caller holding its own copy would never learn
+        the upstream's convention. Serializers that do not build OpenAI
+        request bodies never touch it.
+        """
+        if self._request_builder is None:
+            self._request_builder = OpenAIRequestBuilder()
+        return self._request_builder
 
     # ------------------------------------------------------------------
     # Content block support — subclasses override with the set of block

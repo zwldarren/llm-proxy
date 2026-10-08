@@ -53,7 +53,7 @@ ROUTED_MODEL = "deepseek-v4-pro"
 @pytest.fixture
 def adapter() -> DeepSeekAdapter:
     """Fresh adapter per test — streaming tests stash per-request state
-    (``_last_stream_response_headers``) on the instance."""
+    (``_stream_response_headers``) on the instance."""
     return DeepSeekAdapter(api_key="test-key")
 
 

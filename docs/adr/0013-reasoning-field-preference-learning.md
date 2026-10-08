@@ -80,3 +80,23 @@ detection site; the canonical detection lives in
   response — same as before this ADR, so no first-request behavior change.
 - Extends ADR-0012's response-side coverage: the wire-reuse tier records the
   convention as part of its load-bearing transforms.
+
+## Addendum: the request builder is the serializer's public instance (2026-10)
+
+The decision above puts the preference cache on `OpenAIRequestBuilder`, and it
+is — but `OpenAICompatibleBase` reached that instance through a private
+attribute: `_get_request_builder()` probed
+`hasattr(serializer, "_request_builder")` and, for any serializer that did not
+compose one, built a fresh `OpenAIRequestBuilder` per call. That fallback
+contradicts this ADR's premise: a per-call builder starts with an empty cache,
+so a `record_reasoning_field_preference` on it was a throwaway — every
+response path could learn a convention the next request never saw, silently,
+behind a log warning and no test.
+
+The builder is now part of the provider serializer's public interface:
+`ProviderSerializer.request_builder` (created on demand, one instance per
+serializer), composed by `ChatCompletionsProviderSerializer` and
+`NanoGPTProviderSerializer`, and `OpenAICompatibleBase._get_request_builder()`
+is a single attribute read — no probe, no fallback, no per-call instance.
+Because the serializer registry caches one serializer per provider name, the
+cache's lifetime is the process, which is what this ADR assumed all along.

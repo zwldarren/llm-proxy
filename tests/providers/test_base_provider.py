@@ -10,6 +10,7 @@ import pytest
 from pydantic import SecretStr
 
 from llm_proxy.config.types.provider import ProviderConfig
+from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.http.client import AsyncSession
 from llm_proxy.providers.base import BaseHttpProvider
@@ -92,6 +93,35 @@ def test_base_provider_initialization():
     assert provider._connect_timeout == 10.0
     assert provider._read_timeout == 60.0
     assert provider._max_retries == 3
+
+
+class TestStreamResponseHeaders:
+    """Upstream headers captured when a stream opens reach the client once."""
+
+    def test_the_headers_are_drained_once(self):
+        provider = ConcreteProvider(api_key="test-key")
+        provider._stash_stream_response_headers(
+            MagicMock(headers={"x-request-id": "req-1", "x-ratelimit-remaining": "9"})
+        )
+
+        assert provider.pop_stream_response_headers() == {
+            "x-request-id": "req-1",
+            "x-ratelimit-remaining": "9",
+        }
+        # A later stream that stashes nothing must not inherit the last one's.
+        assert provider.pop_stream_response_headers() == {}
+
+    def test_an_adapter_with_no_http_stream_has_nothing_to_forward(self):
+        """The verb is on the adapter seam, not only on the HTTP base."""
+
+        class _StreamlessAdapter(BaseAdapter):
+            async def chat_completion(self, request, **kwargs):
+                raise NotImplementedError
+
+            async def stream_chat_completion(self, request, cancel_token=None, **kwargs):
+                yield "[DONE]"
+
+        assert _StreamlessAdapter().pop_stream_response_headers() == {}
 
 
 @pytest.mark.asyncio

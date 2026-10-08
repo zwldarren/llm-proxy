@@ -11,9 +11,6 @@ from llm_proxy.models import InternalResponse
 from llm_proxy.models.types import Usage
 from llm_proxy.providers.nanogpt.pricing import extract_nanogpt_pricing
 from llm_proxy.serialization.context import BuildContext
-from llm_proxy.serialization.openai.components.request_builder import (
-    OpenAIRequestBuilder,
-)
 from llm_proxy.serialization.openai.components.response_parser import (
     OpenAIResponseParser,
 )
@@ -43,8 +40,7 @@ class NanoGPTProviderSerializer(ProviderSerializer):
 
     def __init__(self) -> None:
         super().__init__()
-        self._request_builder = OpenAIRequestBuilder()
-        self._response_parser = OpenAIResponseParser(self._request_builder)
+        self._response_parser = OpenAIResponseParser(self.request_builder)
 
     @property
     def compatible_protocols(self) -> frozenset[str]:
@@ -54,7 +50,7 @@ class NanoGPTProviderSerializer(ProviderSerializer):
         self, request: InternalRequest, context: BuildContext
     ) -> dict[str, Any]:
         """Build the NanoGPT request body."""
-        return self._request_builder.build(request, context)
+        return self.request_builder.build(request, context)
 
     def parse_provider_response(
         self, response: dict[str, Any], model: str | None = None, **kwargs: Any

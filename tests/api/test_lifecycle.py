@@ -294,7 +294,7 @@ class TestReconcileMcpServers:
         mcp_repo = MagicMock()
         mcp_repo.get_all_servers = AsyncMock(return_value=[self._server("fresh")])
         repo = MagicMock()
-        repo._mcp_servers = mcp_repo
+        repo.mcp_servers = mcp_repo
         session = MagicMock()
 
         with (
@@ -322,7 +322,7 @@ class TestReconcileMcpServers:
         mcp_repo = MagicMock()
         mcp_repo.get_all_servers = AsyncMock(return_value=[changed])
         repo = MagicMock()
-        repo._mcp_servers = mcp_repo
+        repo.mcp_servers = mcp_repo
         session = MagicMock()
 
         with (
@@ -351,7 +351,7 @@ class TestReconcileMcpServers:
         mcp_repo = MagicMock()
         mcp_repo.get_all_servers = AsyncMock(return_value=[server])
         repo = MagicMock()
-        repo._mcp_servers = mcp_repo
+        repo.mcp_servers = mcp_repo
         session = MagicMock()
 
         with (

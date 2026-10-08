@@ -38,6 +38,16 @@ class ConfigRepository(BaseRepository):
         self._server_config = ServerConfigRepository(session)
         self._mcp_servers = McpServerRepository(session)
 
+    @property
+    def mcp_servers(self) -> McpServerRepository:
+        """The MCP server sub-repository.
+
+        Exposed for callers that hand the sub-repository itself to a
+        collaborator — ``MCPProxyManager`` takes one to start/stop/restart
+        server processes — rather than reaching for the private attribute.
+        """
+        return self._mcp_servers
+
     def _prepare_provider_data(self, **kwargs: Any) -> dict[str, Any]:
         """Prepare provider data for database storage.
 

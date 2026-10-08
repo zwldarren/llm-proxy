@@ -196,6 +196,21 @@ class BaseAdapter(ABC):
         """
         return
 
+    def pop_stream_response_headers(self) -> dict[str, str]:
+        """Take the upstream headers captured when the last stream started.
+
+        The streaming counterpart of the response-side hooks: adapters that
+        stash informational upstream headers (``x-request-id``,
+        ``ratelimit-*``, provider version stamps) when the upstream stream
+        opens expose them here so the API layer can forward them on the
+        client's own ``StreamingResponse``. Draining, not reading: the
+        headers belong to exactly one response, so a later request that
+        stashes nothing must not inherit them.
+
+        Default: no headers to forward.
+        """
+        return {}
+
     def supports_native_streaming(self, protocol_name: str) -> bool:
         """Return True if this adapter can yield protocol-native SSE directly.
 

@@ -179,20 +179,14 @@ class OpenAICompatibleBase(
         return self._REASONING_FIELD
 
     def _get_request_builder(self) -> OpenAIRequestBuilder:
-        """Return the OpenAIRequestBuilder used by this adapter's serializer.
+        """The request builder this adapter's serializer composes.
 
-        Adapters that use a custom serializer (e.g. NanoGPT) can override this.
+        One instance, owned by the serializer: it carries the per-model
+        reasoning-field preference cache (ADR-0013), so an adapter that built
+        its own would record every learned convention into a throwaway and
+        normalize the next turn with an empty cache.
         """
-        serializer = self._get_serializer()
-        # Most OpenAI-compatible serializers compose OpenAIRequestBuilder.
-        if hasattr(serializer, "_request_builder"):
-            return serializer._request_builder
-        logger.warning(
-            "Serializer %s has no _request_builder; falling back to default "
-            "OpenAIRequestBuilder. Reasoning normalization may be inconsistent.",
-            serializer_name=type(serializer).__name__,
-        )
-        return OpenAIRequestBuilder()
+        return self._get_serializer().request_builder
 
     def _stream_body(self, request: InternalRequest) -> dict[str, Any]:
         return self._build_request_body(request)

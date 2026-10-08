@@ -261,7 +261,7 @@ async def _reconcile_mcp_servers(app: FastAPI) -> None:
 
     async with get_async_session_context() as session:
         repo = ConfigRepository(session)
-        mcp_repo = repo._mcp_servers
+        mcp_repo = repo.mcp_servers
         enabled = await mcp_repo.get_all_servers(enabled_only=True)
         desired = {server.name: MCPProxyManager.server_fingerprint(server) for server in enabled}
         active = await manager.list_server_fingerprints()
@@ -298,7 +298,7 @@ async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManage
 
     async with get_async_session_context() as session:
         repo = ConfigRepository(session)
-        mcp_repo = repo._mcp_servers
+        mcp_repo = repo.mcp_servers
         enabled_servers = await mcp_repo.get_all_servers(enabled_only=True)
         for server in enabled_servers:
             try:

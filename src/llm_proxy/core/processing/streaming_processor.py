@@ -780,7 +780,7 @@ class StreamingProcessor:
         # Forward upstream response headers captured by the adapter when the
         # stream started (x-request-id, openai-version, rate-limit headers).
         # setdefault so the proxy's own headers (Cache-Control, ...) win.
-        upstream_headers = getattr(current_adapter, "_last_stream_response_headers", None)
+        upstream_headers = current_adapter.pop_stream_response_headers()
         if upstream_headers:
             for key, value in upstream_headers.items():
                 response.headers.setdefault(key, value)

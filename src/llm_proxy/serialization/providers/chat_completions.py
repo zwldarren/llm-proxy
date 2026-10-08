@@ -16,9 +16,6 @@ from llm_proxy.models import (
     ToolUseBlock,
     VideoBlock,
 )
-from llm_proxy.serialization.openai.components.request_builder import (
-    OpenAIRequestBuilder,
-)
 from llm_proxy.serialization.openai.components.response_parser import (
     OpenAIResponseParser,
 )
@@ -57,15 +54,14 @@ class OpenAIProviderSerializer(ProviderSerializer):
 
     def __init__(self) -> None:
         super().__init__()
-        self._request_builder = OpenAIRequestBuilder()
-        self._response_parser = OpenAIResponseParser(self._request_builder)
+        self._response_parser = OpenAIResponseParser(self.request_builder)
 
     @property
     def compatible_protocols(self) -> frozenset[str]:
         return frozenset({"openai"})
 
     def _build_provider_request(self, request: Any, context: Any) -> dict[str, Any]:
-        return self._request_builder.build(request, context)
+        return self.request_builder.build(request, context)
 
     def parse_provider_response(
         self, response: dict[str, Any], model: str | None = None, **kwargs: Any
