@@ -37,6 +37,7 @@ from llm_proxy.realtime.upstream import (
     connect_upstream,
 )
 from llm_proxy.realtime.usage import RealtimeSessionContext, RealtimeUsageObserver
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -230,18 +231,18 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         )
         return
 
-    redis_wrapper = getattr(request.app.state, "redis_client", None)
-    redis = redis_wrapper.client if redis_wrapper is not None else None
+    services = runtime_services(request)
+    redis = services.redis_client()
     orchestrator = create_provider_selector(
         model_config=model_config,
         provider_configs=config.provider_configs,
         max_fallback_attempts=config.server_params.max_fallback_attempts,
         default_max_retries=config.server_params.max_retries,
-        circuit_breaker=getattr(request.app.state, "circuit_breaker", None),
+        circuit_breaker=services.circuit_breaker(),
         strategy=config.provider_selection.strategy,
         model_name=model_name,
         redis=redis,
-        stats_store=getattr(request.app.state, "provider_stats", None),
+        stats_store=services.provider_stats(),
     )
     await orchestrator.prepare()
     selection = orchestrator.select_next_provider()

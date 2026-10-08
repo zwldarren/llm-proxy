@@ -19,6 +19,7 @@ from llm_proxy.api.middleware.asgi_utils import (
     merge_response_headers,
 )
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -45,7 +46,7 @@ def _resolve_allowed_origins(request: Request) -> list[str]:
     """Read the current allowed origins from the cached ProxyConfig."""
     from llm_proxy.config.types import ProxyConfig
 
-    config_manager = getattr(request.app.state, "config_manager", None)
+    config_manager = runtime_services(request).config_manager_or_none()
     cached = config_manager.get_cached_config() if config_manager is not None else None
     if isinstance(cached, ProxyConfig):
         return cached.server_params.cors_origins

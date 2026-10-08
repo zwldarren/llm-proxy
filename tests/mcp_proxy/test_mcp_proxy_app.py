@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
 
 from llm_proxy.api.routers.mcp import MCPProxyApp
 from llm_proxy.mcp.security.policy import McpSecurityPolicy
@@ -76,7 +77,7 @@ async def test_allows_authorized_server() -> None:
             "principal_id": "agent",
             "allowed_mcp_servers": ["github_mcp", "other_mcp"],
         },
-        "app": MagicMock(),
+        "app": FastAPI(),
     }
     scope["app"].state.mcp_manager = MagicMock()
 
@@ -178,7 +179,7 @@ async def test_allows_when_permissions_disabled() -> None:
             "principal_id": "agent",
             "allowed_mcp_servers": ["other_mcp"],
         },
-        "app": MagicMock(),
+        "app": FastAPI(),
     }
     scope["app"].state.mcp_manager = MagicMock()
     mock_session_manager = MagicMock()
@@ -216,7 +217,7 @@ async def test_allows_null_allowlist() -> None:
             "principal_id": "agent",
             "allowed_mcp_servers": None,
         },
-        "app": MagicMock(),
+        "app": FastAPI(),
     }
     scope["app"].state.mcp_manager = MagicMock()
     mock_session_manager = MagicMock()

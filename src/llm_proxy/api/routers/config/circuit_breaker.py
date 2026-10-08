@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from llm_proxy.api.dependencies import require_admin_role
+from llm_proxy.services import runtime_services
 
 router = APIRouter(
     prefix="/circuit-breaker",
@@ -60,7 +61,7 @@ async def list_circuit_states(request: Request) -> CircuitBreakerListResponse:
     Returns the current state of each tracked provider circuit,
     including OPEN/HALF_OPEN/CLOSED status and failure counts.
     """
-    store = getattr(request.app.state, "circuit_breaker", None)
+    store = runtime_services(request).circuit_breaker()
     if store is None:
         return CircuitBreakerListResponse(
             enabled=False,
@@ -100,7 +101,7 @@ async def list_circuit_states(request: Request) -> CircuitBreakerListResponse:
 @router.post("/reset")
 async def reset_all_circuits(request: Request) -> dict:
     """Reset all circuit breakers to CLOSED state."""
-    store = getattr(request.app.state, "circuit_breaker", None)
+    store = runtime_services(request).circuit_breaker()
     if store is not None:
         store.reset()
     return {"reset": "all", "count": store.circuit_count if store else 0}
@@ -113,7 +114,7 @@ async def reset_one_circuit(provider_key: str, request: Request) -> dict:
     Args:
         provider_key: The provider key in format "provider:model:index"
     """
-    store = getattr(request.app.state, "circuit_breaker", None)
+    store = runtime_services(request).circuit_breaker()
     if store is not None:
         store.reset(provider_key)
         return {"reset": provider_key, "success": True}

@@ -14,6 +14,14 @@ _Avoid_: format, frontend API
 An upstream LLM API the proxy forwards requests to (OpenAI, Anthropic, Gemini, Ollama, …).
 _Avoid_: backend, upstream service
 
+**Service** (process-lifetime):
+A subsystem constructed once per worker by the lifespan and shared by every request —
+the config manager, the pooled HTTP client, Redis, the circuit-breaker and provider-stats
+stores, the MCP manager, the per-protocol processors, the web-search runtime. Reach it
+through `llm_proxy.services` (`runtime_services(request).config_manager()`); never by
+probing `app.state` for an attribute name. See ADR-0021.
+_Avoid_: app state, global, singleton, dependency (that is a FastAPI `Depends`)
+
 ### Evaluation endpoints
 
 **Decision model**:

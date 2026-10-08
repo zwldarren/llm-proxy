@@ -15,6 +15,7 @@ from llm_proxy.routing.model_experience import ModelExperienceStore
 from llm_proxy.routing.pool import build_candidate_pool
 from llm_proxy.routing.signals.embedding import get_embedding_signal
 from llm_proxy.routing.types import RoutingDecision, RoutingMode
+from llm_proxy.services import RuntimeServices
 
 logger = logging.getLogger("llm-proxy.routing.resolver")
 
@@ -26,7 +27,7 @@ async def resolve_virtual_model(
     request: Any,
     config: ProxyConfig,
     config_manager: Any,
-    app_state: Any,
+    services: RuntimeServices,
     session: Any | None = None,
     request_id: str | None = None,
     mode_weights: dict[str, float] | None = None,
@@ -42,7 +43,7 @@ async def resolve_virtual_model(
         )
 
     experience_store = ModelExperienceStore(session=session)
-    embedding_signal = await get_embedding_signal(app_state)  # None if unavailable -> A+B
+    embedding_signal = await get_embedding_signal()  # None if unavailable -> A+B
 
     # Classify once, then decide whether this turn is one the judge should settle
     # (ADR-0018). The gate reads the *same* confidence and complexity the decision
@@ -53,7 +54,7 @@ async def resolve_virtual_model(
         mode=mode,
         messages=messages,
         config=config,
-        app_state=app_state,
+        services=services,
         is_background=request_is_background(request),
         rng=rng,
     )
@@ -98,7 +99,7 @@ async def _consult_judge_if_gated(
     mode: RoutingMode,
     messages: list[dict],
     config: ProxyConfig,
-    app_state: Any,
+    services: RuntimeServices,
     is_background: bool = False,
     rng: random.Random | None = None,
 ) -> JudgeConsultation | None:
@@ -107,9 +108,9 @@ async def _consult_judge_if_gated(
     Returns ``None`` when the judge is not configured, is not enabled for this
     mode, is not looking at a first turn, is a background call, or the gate did
     not fire — the common case. Every input the call needs comes from ``config``
-    (the judge model and its providers) and ``app_state`` (the shared HTTP pool
-    and the circuit-breaker view), so the routing layer never reaches into the
-    request.
+    (the judge model and its providers) and the process-lifetime ``services``
+    (the shared HTTP pool and the circuit-breaker view), so the routing layer
+    never reaches into the request.
     """
     judge_config = config.smart_routing.judge
     plan = plan_judge_consult(
@@ -129,5 +130,5 @@ async def _consult_judge_if_gated(
         plan,
         messages=messages,
         judge=judge_config,
-        **judge_call_kwargs(config, app_state, judge=judge_config),
+        **judge_call_kwargs(config, services, judge=judge_config),
     )

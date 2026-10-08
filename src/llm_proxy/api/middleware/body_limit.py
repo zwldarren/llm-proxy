@@ -18,6 +18,7 @@ from llm_proxy.api.middleware.asgi_utils import (
     adapt_http_middleware,
 )
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -71,7 +72,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     from llm_proxy.config.manager import resolve_security_params
 
     max_size = resolve_security_params(
-        getattr(request.app.state, "config_manager", None)
+        runtime_services(request).config_manager_or_none()
     ).max_request_body_size_bytes
     if max_size <= 0:
         return None

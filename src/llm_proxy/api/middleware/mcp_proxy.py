@@ -672,7 +672,8 @@ class MCPProxyMiddleware:
             asyncio.create_task(_update_key_last_used(auth_info["principal_id"]))
 
         # Surface the main FastAPI app in the scope so the mounted MCP proxy can
-        # reach app.state.mcp_manager.
+        # reach the MCP manager through the app's process-lifetime services
+        # (``llm_proxy.services``, ADR-0021).
         scope["app"] = self.main_app
         scope["llm_proxy_auth"] = auth_info
 

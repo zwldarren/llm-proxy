@@ -775,3 +775,52 @@ class TestApiKeyAuthAliasPaths:
 
         assert response.status_code == 401, response.text
         assert response.json()["error"]["type"] == "authentication_error"
+
+
+class TestMissingConfigManagerRefusesToServe:
+    """A lifespan that never installed the config manager must not silently no-op.
+
+    Both gates used to return early when the config manager was missing, leaving
+    authentication to whatever dependency the route declared (the protocol routes'
+    ``require_any_auth``, the protocol fast path's re-check, the admin routers'
+    ``require_admin_role``). That holds today — nothing is served unauthenticated —
+    but it makes every route the load-bearing part of a decision no reviewer can see
+    at the gate. The gates now fail fast instead (ADR-0021).
+    """
+
+    def _app_without_a_config_manager(self, path: str, method: str) -> tuple[FastAPI, list]:
+        from llm_proxy.api.middleware.exceptions import register_exception_handlers
+
+        app = FastAPI()
+        reached: list = []
+
+        async def handler():
+            reached.append(True)
+            return {"ok": True}
+
+        getattr(app, method)(path)(handler)
+        register_exception_handlers(app)
+        # No app.state.config_manager: the lifespan did not run.
+        return app, reached
+
+    def test_api_key_gate_refuses_the_request(self) -> None:
+        from llm_proxy.api.middleware.api_key_auth import api_key_auth_middleware
+
+        app, reached = self._app_without_a_config_manager("/v1/chat/completions", "post")
+        app.middleware("http")(api_key_auth_middleware)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post("/v1/chat/completions", json={"model": "m"})
+
+        assert response.status_code == 500, response.text
+        assert not reached, "a request with no readable auth policy reached the handler"
+
+    def test_jwt_gate_refuses_the_request(self) -> None:
+        app, reached = self._app_without_a_config_manager("/api/me", "get")
+        app.middleware("http")(jwt_auth_middleware)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/api/me", headers={"Authorization": "Bearer nope"})
+
+        assert response.status_code == 500, response.text
+        assert not reached, "a request with no readable auth policy reached the handler"

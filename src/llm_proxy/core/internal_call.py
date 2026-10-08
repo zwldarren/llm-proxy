@@ -99,8 +99,8 @@ def build_provider_adapter(
     """Build a provider adapter from configuration alone, with no ``Request``.
 
     The API layer's ``create_adapter_for_provider`` is this function plus the
-    three ``request.app.state`` lookups it needs; nothing here reads request
-    state. With neither ``http_client`` nor ``http_client_manager`` the adapter
+    process-lifetime services it reads (:mod:`llm_proxy.services`); nothing here
+    reads request state. With neither ``http_client`` nor ``http_client_manager`` the adapter
     lazily opens its own client, which is correct but unpooled — pass the shared
     manager when one is available.
     """

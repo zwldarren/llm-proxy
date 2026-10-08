@@ -67,6 +67,24 @@ provider_serializer = get_provider_serializer("openai")
 provider_body = provider_serializer.build_provider_request(unified_request)
 ```
 
+### Process-lifetime services
+
+Subsystems that outlive a request (config manager, pooled HTTP client, Redis,
+circuit breaker, provider stats, MCP manager, per-protocol processors,
+web-search runtime) live behind one typed interface, `llm_proxy/services.py`
+(ADR-0021). Read them with `runtime_services(request).config_manager()` — never
+by probing `app.state` for an attribute name. The lifespan installs them through
+the same module's `install_*` methods; required services raise when absent,
+optional ones return `None`.
+
+```python
+from llm_proxy.services import runtime_services
+
+services = runtime_services(request)
+config = await services.config_manager().get_config()
+redis = services.redis_client()  # None when Redis is disabled
+```
+
 ### MCP Integration
 
 - `mcp/manager.py`: MCP server lifecycle management

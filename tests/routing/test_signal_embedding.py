@@ -74,4 +74,4 @@ async def test_get_embedding_signal_returns_none_when_unavailable(monkeypatch):
         lambda: (_ for _ in ()).throw(ImportError("no onnxruntime")),
     )
     monkeypatch.setattr(emb, "_cache", {})  # reset singleton
-    assert await emb.get_embedding_signal(None) is None
+    assert await emb.get_embedding_signal() is None

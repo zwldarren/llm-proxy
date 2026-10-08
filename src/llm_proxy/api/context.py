@@ -38,6 +38,7 @@ from llm_proxy.core.request_type import RequestType
 from llm_proxy.core.request_utils import peer_is_trusted_proxy
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.routing.orchestrator import orchestrate_smart_routing
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -61,13 +62,6 @@ def _get_model(request: Any) -> str:
     if isinstance(request, dict):
         return request.get("model", "")
     return getattr(request, "model", "")
-
-
-def _get_redis_client(redis_client_wrapper) -> Any | None:
-    """Extract the Redis client from the app state wrapper, or None."""
-    if redis_client_wrapper is not None and redis_client_wrapper.client is not None:
-        return redis_client_wrapper.client
-    return None
 
 
 def _optional_number(value: Any) -> float | None:
@@ -177,7 +171,8 @@ async def _build_request_context(
     # Fetch once at the top for reuse throughout
     peer_trusted = _peer_is_trusted_proxy(req)
     session_id = extract_session_id(req) if peer_trusted else None
-    redis = _get_redis_client(getattr(req.app.state, "redis_client", None))
+    services = runtime_services(req)
+    redis = services.redis_client()
 
     # Mint the request id before routing so a judge call made during routing can be
     # logged as its own row and still name the request it belongs to. The pipeline
@@ -197,7 +192,7 @@ async def _build_request_context(
         request_type=request_type,
         config=config,
         config_manager=config_manager,
-        app_state=req.app.state,
+        services=services,
         request_id=request_id,
         session_id=session_id,
         redis=redis,
@@ -266,7 +261,7 @@ async def _build_request_context(
     # configs and selection/retry settings below match the resolved model.
     config = await config_manager.get_config()
 
-    circuit_breaker = getattr(req.app.state, "circuit_breaker", None)
+    circuit_breaker = services.circuit_breaker()
 
     # Resolve per-request inputs for the provider-selection strategy. The
     # strategy itself is a single global setting (server_config:
@@ -290,7 +285,7 @@ async def _build_request_context(
         model_name=model_name,
         conversation_key=conv_key,
         redis=redis,
-        stats_store=getattr(req.app.state, "provider_stats", None),
+        stats_store=services.provider_stats(),
     )
     # Resolve async per-request selection inputs (the session_sticky provider
     # mapping) before the pipeline starts. No-op for other strategies.

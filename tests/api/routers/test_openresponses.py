@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from llm_proxy.api.dependencies import require_api_key_auth
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.protocols.openresponses.store import ResponseStore
+from llm_proxy.services import runtime_services
 
 
 @pytest.fixture
@@ -372,7 +373,7 @@ class TestBackgroundMode:
 
         processor = MagicMock()
         processor.process = fake_process
-        client.app.state.openresponses_processor = processor
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
 
         async def fake_build_context(request, req, protocol_name=None):
             return MagicMock()
@@ -381,8 +382,7 @@ class TestBackgroundMode:
 
         # Background mode requires response storage to be pollable.
         fake_redis = _FakeRedis()
-        client.app.state.redis_client = MagicMock()
-        client.app.state.redis_client.client = fake_redis
+        client.app.state.redis_client = MagicMock(client=fake_redis)
         client.app.dependency_overrides[get_response_store_required] = lambda: ResponseStore(
             redis_client=fake_redis
         )
@@ -415,7 +415,7 @@ class TestBackgroundMode:
 
         processor = MagicMock()
         processor.process = fake_process
-        client.app.state.openresponses_processor = processor
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
 
         async def fake_build_context(request, req, protocol_name=None):
             return MagicMock()
@@ -469,7 +469,7 @@ class TestBackgroundMode:
 
         processor = MagicMock()
         processor.process = fake_process
-        client.app.state.openresponses_processor = processor
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
 
         async def fake_build_context(request, req, protocol_name=None):
             return MagicMock()
@@ -477,8 +477,7 @@ class TestBackgroundMode:
         monkeypatch.setattr(protocol_module, "build_request_context", fake_build_context)
 
         fake_redis = _FakeRedis()
-        client.app.state.redis_client = MagicMock()
-        client.app.state.redis_client.client = fake_redis
+        client.app.state.redis_client = MagicMock(client=fake_redis)
         client.app.dependency_overrides[get_response_store_required] = lambda: ResponseStore(
             redis_client=fake_redis
         )
@@ -530,8 +529,7 @@ class TestCompactionEndpointHTTP:
         from llm_proxy.protocols.openresponses.store import ResponseStore
 
         fake_redis = _FakeRedis()
-        client.app.state.redis_client = MagicMock()
-        client.app.state.redis_client.client = fake_redis
+        client.app.state.redis_client = MagicMock(client=fake_redis)
         client.app.dependency_overrides[get_response_store_required] = lambda: ResponseStore(
             redis_client=fake_redis
         )
@@ -571,8 +569,7 @@ class TestCompactionEndpointHTTP:
     def test_compact_unknown_previous_response_returns_not_found(self, client):
         """Missing previous responses fail with previous_response_not_found."""
         fake_redis = _FakeRedis()
-        client.app.state.redis_client = MagicMock()
-        client.app.state.redis_client.client = fake_redis
+        client.app.state.redis_client = MagicMock(client=fake_redis)
 
         response = client.post(
             "/v1/responses/compact",
@@ -782,7 +779,7 @@ class TestFormEncodedBody:
 
         processor = MagicMock()
         processor.process = fake_process
-        client.app.state.openresponses_processor = processor
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
 
         async def fake_build_context(request, req, protocol_name=None):
             return MagicMock()
@@ -826,7 +823,7 @@ class TestFormEncodedBody:
 
         processor = MagicMock()
         processor.process = fake_process
-        client.app.state.openresponses_processor = processor
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
 
         async def fake_build_context(request, req, protocol_name=None):
             return MagicMock()

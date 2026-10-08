@@ -34,6 +34,7 @@ from llm_proxy.routing.judge.rubric import (
     build_judge_state,
     parse_judge_answers,
 )
+from llm_proxy.services import RuntimeServices
 
 logger = logging.getLogger("llm-proxy.routing.judge")
 
@@ -180,36 +181,37 @@ async def consult_judge(
 
 def judge_call_kwargs(
     config: ProxyConfig,
-    app_state: object,
+    services: RuntimeServices,
     *,
     judge: RoutingJudgeConfig | None = None,
 ) -> dict[str, Any]:
-    """Everything one judge call needs, read from the proxy config and app state.
+    """Everything one judge call needs, read from the proxy config and the services.
 
     Both callers — the request path and the background warm-up — assemble their
     call here, so "where does the judge get its provider" has one answer
     (ADR-0018). ``judge`` is the configuration the caller is about to consult and
     defaults to the one on the config, which is what both call sites pass: taking
     it as an argument is what keeps the model resolved here the same model the
-    plan was drawn for. ``app_state`` is the application's ad-hoc state object
-    and is read defensively: the warm-up also runs in contexts (and tests) where
-    the shared HTTP pool is not set up yet.
+    plan was drawn for. The shared services are read defensively
+    (:meth:`RuntimeServices.http_client_or_none`): the warm-up also runs in
+    contexts (and tests) where the HTTP pool is not set up yet, and a judge call
+    may open its own client rather than not happen at all.
     """
     judge = judge if judge is not None else config.smart_routing.judge
     return {
         "model_config": config.models.get(judge.model.strip()),
         "provider_configs": config.provider_configs,
-        "http_client_manager": getattr(app_state, "http_client", None),
+        "http_client_manager": services.http_client_or_none(),
         # Read-only: the seam never records breaker failures for an internal call,
         # so a judge timeout cannot mark a provider unhealthy for real traffic.
-        "circuit_breaker": getattr(app_state, "circuit_breaker", None),
-        "stats_store": getattr(app_state, "provider_stats", None),
+        "circuit_breaker": services.circuit_breaker(),
+        "stats_store": services.provider_stats(),
         "unknown_fields_policy": config.server_params.unknown_fields_policy,
         "unsupported_block_policy": config.server_params.unsupported_block_policy,
     }
 
 
-async def warm_judge(*, config: ProxyConfig, app_state: object) -> JudgeConsultation | None:
+async def warm_judge(*, config: ProxyConfig, services: RuntimeServices) -> JudgeConsultation | None:
     """Load the judge model before a real turn needs it. Returns None if inert.
 
     A judged turn is rare by construction — the gate exists to keep it that way —
@@ -233,7 +235,7 @@ async def warm_judge(*, config: ProxyConfig, app_state: object) -> JudgeConsulta
             messages=[{"role": "user", "content": "Warm-up request."}],
             judge=judge,
             deadline_s=JUDGE_WARMUP_DEADLINE_S,
-            **judge_call_kwargs(config, app_state, judge=judge),
+            **judge_call_kwargs(config, services, judge=judge),
         )
     except Exception:  # noqa: BLE001 - a warm-up must never break startup
         logger.warning("Routing judge warm-up failed", exc_info=True)

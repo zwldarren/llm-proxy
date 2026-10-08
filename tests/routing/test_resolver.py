@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from services_helpers import services_for
 
 from llm_proxy.routing.resolver import resolve_virtual_model
 from llm_proxy.routing.types import RoutingMode
@@ -73,7 +74,7 @@ async def test_resolve_returns_decision(monkeypatch):
         request=MagicMock(),
         config=fake_config,
         config_manager=cm,
-        app_state=MagicMock(),
+        services=services_for(),
         session=MagicMock(),
     )
     assert decision.model == "good"
@@ -95,7 +96,7 @@ async def test_resolve_raises_when_pool_empty():
             request=MagicMock(),
             config=fake_config,
             config_manager=cm,
-            app_state=MagicMock(),
+            services=services_for(),
             session=MagicMock(),
         )
 
@@ -168,7 +169,7 @@ async def _resolve(config, messages=None, rng=None, request=None):
         request=request if request is not None else MagicMock(),
         config=config,
         config_manager=MagicMock(),
-        app_state=MagicMock(),
+        services=services_for(),
         session=MagicMock(),
         rng=rng,
     )

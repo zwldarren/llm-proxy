@@ -65,7 +65,8 @@ class _Circuit:
 class CircuitBreakerStore:
     """Shared store for circuit breaker states across requests.
 
-    Designed as an application-level singleton (stored on ``app.state``).
+    Designed as an application-level singleton, installed on the app's
+    process-lifetime services (:mod:`llm_proxy.services`).
     Each provider is keyed by its unique mapping key (provider:model:index).
 
     Thread-safety: asyncio is cooperative single-threaded; this store

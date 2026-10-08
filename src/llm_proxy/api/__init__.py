@@ -74,6 +74,7 @@ from llm_proxy.core.errors import register_formatter_factory
 from llm_proxy.core.exceptions import NotFoundError
 from llm_proxy.core.utils import install_asyncgen_close_race_filter
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 from llm_proxy.version import get_display_version
 
 logger = get_logger(__name__)
@@ -119,11 +120,10 @@ async def lifespan(app: FastAPI):
         yield
         # Cancel any in-flight background OpenResponses tasks (e.g. background
         # mode responses) so they do not outlive the event loop.
-        background_tasks = getattr(app.state, "background_tasks", None)
-        if background_tasks:
-            for task in list(background_tasks):
-                task.cancel()
-            await asyncio.gather(*background_tasks, return_exceptions=True)
+        background_tasks = runtime_services(app).background_tasks()
+        for task in list(background_tasks):
+            task.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
         await shutdown_services(app)
     finally:
         restore_loop_handler()
@@ -198,6 +198,8 @@ def create_app() -> FastAPI:
     from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 
     limiter = get_rate_limiter()
+    # slowapi resolves the limiter by this exact ``app.state`` name; it is the
+    # library's contract, not one of llm_proxy.services' slots.
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 

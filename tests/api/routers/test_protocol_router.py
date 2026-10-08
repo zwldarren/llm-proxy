@@ -18,6 +18,7 @@ from llm_proxy.protocols.anthropic.handler import anthropic_protocol
 from llm_proxy.protocols.openai.audio_transcription_handler import transcription_protocol
 from llm_proxy.protocols.openai.handler import openai_protocol
 from llm_proxy.protocols.openai.images_handler import image_generations_protocol
+from llm_proxy.services import runtime_services
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def app():
 def _install_processor(app, name):
     processor = MagicMock()
     processor.process = AsyncMock(return_value={"ok": True})
-    setattr(app.state, f"{name}_processor", processor)
+    runtime_services(app).install_protocol_processor(name, processor)
     return processor
 
 

@@ -29,6 +29,7 @@ from llm_proxy.routing.config import routing_mode_from_model
 from llm_proxy.routing.message_extract import extract_messages_for_routing
 from llm_proxy.routing.resolver import resolve_virtual_model
 from llm_proxy.routing.types import RoutingDecision
+from llm_proxy.services import RuntimeServices
 
 logger = logging.getLogger("llm-proxy.routing.orchestrator")
 
@@ -54,7 +55,7 @@ async def orchestrate_smart_routing(
     request_type: RequestType | None,
     config: ProxyConfig,
     config_manager: DatabaseConfigManager,
-    app_state: Any,
+    services: RuntimeServices,
     request_id: str | None,
     session_id: str | None,
     redis: Any | None,
@@ -111,7 +112,7 @@ async def orchestrate_smart_routing(
             request=request,
             config=config,
             config_manager=config_manager,
-            app_state=app_state,
+            services=services,
             session=routing_session,
             request_id=request_id,
             mode_weights=smart_cfg.mode_weights,

@@ -118,7 +118,7 @@ def _default_embed_fn():
     return _embed
 
 
-async def get_embedding_signal(app_state) -> EmbeddingSignal | None:
+async def get_embedding_signal() -> EmbeddingSignal | None:
     """Lazy singleton; returns None if ML deps unavailable (graceful degradation).
 
     Model loading runs in a thread via ``asyncio.to_thread`` so the event loop

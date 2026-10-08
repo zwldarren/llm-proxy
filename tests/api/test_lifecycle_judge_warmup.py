@@ -55,7 +55,7 @@ async def test_warmup_is_scheduled_in_the_background_and_not_awaited(monkeypatch
     """Readiness must not wait on the judge: startup returns before the call does."""
     started = asyncio.Event()
 
-    async def warm_judge(*, config, app_state):  # noqa: ARG001 - test double
+    async def warm_judge(*, config, services):  # noqa: ARG001 - test double
         started.set()
         await asyncio.Event().wait()  # never finishes
 
@@ -109,7 +109,7 @@ async def test_a_reload_warms_the_judge_again(monkeypatch):
 async def test_an_in_flight_warmup_is_not_stacked(monkeypatch):
     started = asyncio.Event()
 
-    async def warm_judge(*, config, app_state):  # noqa: ARG001 - test double
+    async def warm_judge(*, config, services):  # noqa: ARG001 - test double
         started.set()
         await asyncio.Event().wait()
 
@@ -130,7 +130,7 @@ async def test_an_in_flight_warmup_is_not_stacked(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_failing_warmup_never_escapes(monkeypatch):
-    async def boom(*, config, app_state):  # noqa: ARG001 - test double
+    async def boom(*, config, services):  # noqa: ARG001 - test double
         raise RuntimeError("judge unreachable")
 
     monkeypatch.setattr("llm_proxy.routing.judge.consult.warm_judge", boom)

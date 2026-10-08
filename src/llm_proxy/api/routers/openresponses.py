@@ -40,6 +40,7 @@ from llm_proxy.protocols.openresponses.schemas import (
 )
 from llm_proxy.protocols.openresponses.store import ResponseStore
 from llm_proxy.providers.openai.client_headers import capture_client_headers
+from llm_proxy.services import runtime_services
 from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 logger = logging.getLogger(__name__)
@@ -83,14 +84,14 @@ def get_response_store_required(request: Request) -> ResponseStore:
     Raises:
         HTTPException: 503 if Redis is not available
     """
-    redis_client_wrapper = getattr(request.app.state, "redis_client", None)
-    if redis_client_wrapper is None or redis_client_wrapper.client is None:
+    redis_client = runtime_services(request).redis_client()
+    if redis_client is None:
         raise ConfigurationError(
             message="Response storage is not available. Redis must be enabled.",
             code="redis_not_available",
             status_code=503,
         )
-    return ResponseStore(redis_client=redis_client_wrapper.client)
+    return ResponseStore(redis_client=redis_client)
 
 
 ResponseStoreRequiredDep = Annotated[ResponseStore, Depends(get_response_store_required)]
@@ -160,11 +161,11 @@ async def _try_native_compact_passthrough(request: Request) -> JSONResponse | No
     prev_id = raw_body.get("previous_response_id")
     api_key_name = getattr(request.state, "api_key_name", None)
     if prev_id and api_key_name:
-        redis_wrapper = getattr(request.app.state, "redis_client", None)
-        if redis_wrapper is not None and redis_wrapper.client is not None:
+        redis_client = runtime_services(request).redis_client()
+        if redis_client is not None:
             from llm_proxy.protocols.openresponses.store import ResponseStore
 
-            store = ResponseStore(redis_client=redis_wrapper.client)
+            store = ResponseStore(redis_client=redis_client)
             try:
                 if await store.retrieve(api_key_name, prev_id) is not None:
                     return None
@@ -228,14 +229,14 @@ async def compact_response(
     items: list[dict[str, Any]] = []
 
     if body.previous_response_id:
-        redis_client_wrapper = getattr(request.app.state, "redis_client", None)
-        if redis_client_wrapper is None or redis_client_wrapper.client is None:
+        redis_client = runtime_services(request).redis_client()
+        if redis_client is None:
             raise ConfigurationError(
                 message="Response storage is not available. Redis must be enabled.",
                 code="redis_not_available",
                 status_code=503,
             )
-        store = ResponseStore(redis_client=redis_client_wrapper.client)
+        store = ResponseStore(redis_client=redis_client)
         prev = await store.retrieve(api_key_name, body.previous_response_id)
         if prev is None:
             # OpenAI parity: previous_response_not_found is an HTTP 400 error
@@ -583,9 +584,9 @@ async def _ws_resolve_previous_response(
     prev = local_state.get(prev_id)
     if prev is None:
         # store=true: MAY hydrate older response IDs from persisted state.
-        redis_wrapper = getattr(websocket.app.state, "redis_client", None)
-        if redis_wrapper is not None and redis_wrapper.client is not None:
-            store = ResponseStore(redis_client=redis_wrapper.client)
+        redis_client = runtime_services(websocket).redis_client()
+        if redis_client is not None:
+            store = ResponseStore(redis_client=redis_client)
             try:
                 prev = await store.retrieve(api_key_name, prev_id)
             except Exception:
@@ -722,7 +723,7 @@ async def responses_websocket(websocket: WebSocket) -> None:
     # context builder and pipeline stages work unchanged.
     request = build_ws_request(websocket, identity)
 
-    processor = getattr(websocket.app.state, "openresponses_processor", None)
+    processor = runtime_services(websocket).protocol_processor("openresponses")
     if processor is None:
         await _ws_send_error(
             websocket,

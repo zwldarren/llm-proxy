@@ -47,6 +47,7 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.base import ProtocolEndpoint
 from llm_proxy.protocols.openresponses.store import ResponseStore
 from llm_proxy.protocols.registry import get_protocols_info
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -114,7 +115,7 @@ def _create_endpoint_fn(
         for mw in middleware:
             await mw(request, fastapi_request)
 
-        processor = getattr(fastapi_request.app.state, f"{protocol_name}_processor", None)
+        processor = runtime_services(fastapi_request).protocol_processor(protocol_name)
         if processor is None:
             raise ConfigurationError(
                 f"{protocol_name}_processor not initialized. "
@@ -145,7 +146,7 @@ def _create_endpoint_fn(
         # ~100s. Slow non-streaming requests (long-reasoning models) opt
         # into whitespace heartbeats to survive that budget. See keepalive.py.
         keepalive = resolve_keepalive_params(
-            getattr(fastapi_request.app.state, "config_manager", None)
+            runtime_services(fastapi_request).config_manager_or_none()
         )
         is_stream = bool(getattr(request, "stream", False))
         if keepalive.enabled and supports_keepalive(protocol_name, is_stream):
@@ -191,11 +192,11 @@ async def _run_background_openresponses(
     if hasattr(request, "stream"):
         request.stream = False
 
-    redis_wrapper = getattr(fastapi_request.app.state, "redis_client", None)
+    redis_client = runtime_services(fastapi_request).redis_client()
     api_key_name = getattr(fastapi_request.state, "api_key_name", None)
     store: ResponseStore | None = None
-    if redis_wrapper is not None and redis_wrapper.client is not None and api_key_name:
-        store = ResponseStore(redis_client=redis_wrapper.client)
+    if redis_client is not None and api_key_name:
+        store = ResponseStore(redis_client=redis_client)
 
     if store is None:
         # Background responses must be pollable via GET /v1/responses/{id};
@@ -292,12 +293,7 @@ async def _run_background_openresponses(
     # references, so an unreferenced task may be garbage collected mid-run) and
     # retrieve its result so unexpected failures are logged instead of surfacing
     # as "Task exception was never retrieved".
-    background_tasks: set[asyncio.Task] | None = getattr(
-        fastapi_request.app.state, "background_tasks", None
-    )
-    if background_tasks is None:
-        background_tasks = set()
-        fastapi_request.app.state.background_tasks = background_tasks
+    background_tasks = runtime_services(fastapi_request).background_tasks()
     background_tasks.add(task)
     task.add_done_callback(background_tasks.discard)
     task.add_done_callback(_log_background_task_failure)

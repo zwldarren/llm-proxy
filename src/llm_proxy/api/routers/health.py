@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -27,7 +28,7 @@ async def health_check(request: Request) -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"Health check database error: {e}")
 
-    redis_client = getattr(request.app.state, "redis_client", None)
+    redis_client = runtime_services(request).redis()
     redis_status = "disabled"
     redis_healthy = None
 

@@ -48,6 +48,7 @@ from llm_proxy.database.repositories.users import UserRepository
 from llm_proxy.database.tables import RequestLog
 from llm_proxy.observability.service import RequestLogService
 from llm_proxy.observability.types import LogType
+from llm_proxy.services import runtime_services
 
 
 class UserRole(StrEnum):
@@ -656,7 +657,7 @@ async def delete_old_logs(
     Restricted to admins so that members cannot destroy their own usage and
     request evidence (e.g. to dispute billing or cover abuse).
     """
-    logging_config = resolve_logging_config(getattr(request.app.state, "config_manager", None))
+    logging_config = resolve_logging_config(runtime_services(request).config_manager_or_none())
     retention_days = (
         older_than_days if older_than_days is not None else logging_config.retention_days
     )

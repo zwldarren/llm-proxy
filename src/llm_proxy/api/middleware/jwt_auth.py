@@ -17,6 +17,7 @@ from llm_proxy.core.exceptions import ConfigurationError
 from llm_proxy.core.identity import RequestIdentity, get_request_identity, set_request_identity
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.security.jwt import JWTManager
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -56,9 +57,10 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
     if request.method == "OPTIONS":
         return None
 
-    config_manager = getattr(request.app.state, "config_manager", None)
-    if config_manager is None:
-        return None
+    # Required, not optional: without the config manager this layer cannot read the
+    # auth policy, and returning early would hand the decision to each route's own
+    # dependency instead of the gate that owns it.
+    config_manager = runtime_services(request).config_manager()
 
     config = await config_manager.get_config()
     auth_config = config.server_params.auth

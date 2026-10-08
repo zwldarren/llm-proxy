@@ -118,7 +118,7 @@ async def _load_embedding_signal(enabled: bool) -> Any:
         return None
     from llm_proxy.routing.signals.embedding import get_embedding_signal
 
-    signal = await get_embedding_signal(None)
+    signal = await get_embedding_signal()
     if signal is None:
         print("[routing-eval] embedding signal unavailable; measuring signals A+B only")
     return signal

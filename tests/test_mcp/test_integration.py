@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import orjson
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_proxy.api.routers.mcp import MCPProxyApp, _server_access_allowed
@@ -88,7 +89,7 @@ class TestServerLevelAccessControl:
                 "principal_id": "agent",
                 "allowed_mcp_servers": ["github_mcp", "other_mcp"],
             },
-            "app": MagicMock(),
+            "app": FastAPI(),
         }
         scope["app"].state.mcp_manager = MagicMock()
 
@@ -155,7 +156,7 @@ class TestServerLevelAccessControl:
                 "principal_id": "agent",
                 "allowed_mcp_servers": None,
             },
-            "app": MagicMock(),
+            "app": FastAPI(),
         }
         scope["app"].state.mcp_manager = MagicMock()
         mock_session_manager = MagicMock()
@@ -431,8 +432,6 @@ class TestMcpHttpEndToEnd:
     @staticmethod
     def _build_app(mock_mcp_manager):
         """Create a minimal FastAPI app with MCP router and proxy mounted."""
-        from fastapi import FastAPI
-
         from llm_proxy.api.dependencies import require_admin_role, require_authenticated
         from llm_proxy.api.middleware.exceptions import register_exception_handlers
         from llm_proxy.api.routers.mcp import mcp_proxy_app, router

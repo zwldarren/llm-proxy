@@ -55,7 +55,7 @@ async def test_warmup_runs_when_smart_routing_enabled(monkeypatch) -> None:
     app = _app(smart_routing_enabled=True)
     await startup_embedding_signal(app)
 
-    get_embedding_signal.assert_awaited_once_with(app.state)
+    get_embedding_signal.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from llm_proxy.api.dependencies import require_api_key_auth
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers.openresponses import _parse_sse_blocks
 from llm_proxy.protocols.openresponses.store import ResponseStore
+from llm_proxy.services import runtime_services
 
 
 @pytest.mark.parametrize(
@@ -104,9 +105,8 @@ def app(mock_redis, monkeypatch):
 
     processor = MagicMock()
     processor.process = fake_process
-    app.state.openresponses_processor = processor
-    app.state.redis_client = MagicMock()
-    app.state.redis_client.client = mock_redis
+    runtime_services(app).install_protocol_processor("openresponses", processor)
+    app.state.redis_client = MagicMock(client=mock_redis)
     return app
 
 
@@ -183,7 +183,7 @@ class TestOpenResponsesWebSocket:
 
         processor = MagicMock()
         processor.process = split_process
-        app.state.openresponses_processor = processor
+        runtime_services(app).install_protocol_processor("openresponses", processor)
 
         with _ws_connect(_client_for(app)) as ws:
             ws.send_json({"type": "response.create", "model": "gpt-5.2", "input": "hi"})
@@ -320,7 +320,7 @@ class TestOpenResponsesWebSocket:
                 ]
                 return StreamingResponse(iter(chunks), media_type="text/event-stream")
 
-            processor = client.app.state.openresponses_processor
+            processor = runtime_services(client.app).protocol_processor("openresponses")
             processor.process = fake_process_with_tool
             ws.send_json(
                 {

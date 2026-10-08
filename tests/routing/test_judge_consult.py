@@ -5,9 +5,8 @@ unglamorous ones: it never raises, it carries its own deadline, it is handed no
 retry budget, and its context budget comes from configuration.
 """
 
-from unittest.mock import MagicMock
-
 import pytest
+from services_helpers import services_for
 
 from llm_proxy.config.types.model import ModelConfig, ModelProviderConfig
 from llm_proxy.config.types.provider import ProviderConfig
@@ -223,7 +222,7 @@ async def test_warmup_calls_the_judge_with_a_deadline_that_can_finish_a_cold_loa
     captured: dict = {}
     _patch_seam(monkeypatch, _outcome(), captured)
 
-    consultation = await warm_judge(config=_warm_config(), app_state=MagicMock())
+    consultation = await warm_judge(config=_warm_config(), services=services_for())
 
     assert consultation is not None
     assert consultation.plan.reason == "warm-up"
@@ -247,7 +246,7 @@ async def test_an_inert_judge_is_not_warmed(monkeypatch, config):
 
     monkeypatch.setattr("llm_proxy.routing.judge.consult.call_systemone", fail)
 
-    assert await warm_judge(config=config, app_state=MagicMock()) is None
+    assert await warm_judge(config=config, services=services_for()) is None
 
 
 # ─── Accounting: judge spend is attributed, never double-counted ───
@@ -340,10 +339,10 @@ async def test_an_unreachable_judge_does_not_break_the_caller(monkeypatch):
 
     monkeypatch.setattr("llm_proxy.routing.judge.consult.call_systemone", boom)
 
-    assert await warm_judge(config=_warm_config(), app_state=MagicMock()) is None
+    assert await warm_judge(config=_warm_config(), services=services_for()) is None
 
 
-def test_call_kwargs_come_from_config_and_app_state():
+def test_call_kwargs_come_from_config_and_services():
     from types import SimpleNamespace
 
     from llm_proxy.config.types.server import ProxyAuthConfig, ServerParams
@@ -363,9 +362,9 @@ def test_call_kwargs_come_from_config_and_app_state():
             enabled=True, judge=RoutingJudgeConfig(enabled=True, model=" judge ")
         ),
     )
-    app_state = SimpleNamespace(http_client=manager, circuit_breaker=None, provider_stats=None)
+    services = services_for(http_client=manager, circuit_breaker=None, provider_stats=None)
 
-    kwargs = judge_call_kwargs(config, app_state)
+    kwargs = judge_call_kwargs(config, services)
 
     assert kwargs["model_config"] is config.models["judge"]  # whitespace tolerated
     assert kwargs["provider_configs"] is config.provider_configs
@@ -373,8 +372,8 @@ def test_call_kwargs_come_from_config_and_app_state():
     assert kwargs["unknown_fields_policy"] == "passthrough"
     assert kwargs["unsupported_block_policy"] == "error"
 
-    # An app state without a pool (tests, warm-up during startup) is tolerated.
-    bare = judge_call_kwargs(config, SimpleNamespace())
+    # A worker without a pool (tests, warm-up during startup) is tolerated.
+    bare = judge_call_kwargs(config, services_for())
     assert bare["http_client_manager"] is None
     assert bare["stats_store"] is None
 
@@ -383,7 +382,7 @@ def test_call_kwargs_come_from_config_and_app_state():
     config.models["other"] = _model_config()
     passed = judge_call_kwargs(
         config,
-        app_state,
+        services,
         judge=RoutingJudgeConfig(enabled=True, model="other"),
     )
     assert passed["model_config"] is config.models["other"]

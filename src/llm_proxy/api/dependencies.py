@@ -15,7 +15,6 @@ from llm_proxy.config.types.provider import ProviderConfig
 from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
-    ConfigurationError,
     ForbiddenError,
 )
 from llm_proxy.core.identity import get_request_identity
@@ -23,6 +22,7 @@ from llm_proxy.core.internal_call import build_provider_adapter
 from llm_proxy.core.provider_selector import ProviderSelectionResult
 from llm_proxy.database import UserRecord, UserRepository, get_async_session
 from llm_proxy.http.client import AsyncSession, ProviderHTTPClientManager
+from llm_proxy.services import runtime_services
 
 get_async_session_dep = Depends(get_async_session)
 
@@ -49,12 +49,7 @@ def extract_user_id(request: Request) -> str | None:
 
 
 def _get_http_manager(request: Request) -> ProviderHTTPClientManager:
-    manager = getattr(request.app.state, "http_client", None)
-    if manager is None:
-        raise ConfigurationError(
-            "HTTP client not initialized. Ensure lifespan is properly configured."
-        )
-    return manager
+    return runtime_services(request).http_client()
 
 
 async def get_http_client(request: Request) -> AsyncSession:
@@ -72,12 +67,7 @@ async def get_provider_http_client(request: Request, provider_name: str) -> Asyn
 
 
 def get_config_manager(request: Request) -> DatabaseConfigManager:
-    config_manager = getattr(request.app.state, "config_manager", None)
-    if config_manager is None:
-        raise ConfigurationError(
-            "Config manager not initialized. Ensure lifespan is properly configured."
-        )
-    return config_manager
+    return runtime_services(request).config_manager()
 
 
 async def get_config_from_state(request: Request) -> ProxyConfig:
@@ -96,7 +86,7 @@ async def publish_config_generation(request: Request) -> None:
     startup): the local invalidation already happened, and a mutation endpoint
     must not fail because the cross-worker signal cannot be sent.
     """
-    config_manager = getattr(request.app.state, "config_manager", None)
+    config_manager = runtime_services(request).config_manager_or_none()
     if config_manager is None:
         return
     await config_manager.publish_generation()
@@ -202,7 +192,7 @@ async def create_adapter_for_provider(
 
     Construction itself is request-free
     (:func:`llm_proxy.core.internal_call.build_provider_adapter`); this wrapper
-    exists for the three ``app.state`` lookups the API layer owns — the pooled
+    exists for the ``app.state`` services the API layer owns — the pooled
     HTTP client, its manager, and the global field policies.
     """
     manager = _get_http_manager(request)

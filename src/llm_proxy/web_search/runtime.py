@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from llm_proxy.config.types.web_search import WebSearchConfig
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -26,8 +27,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-#: app.state attributes owned by this module.
-_INTERCEPTOR_ATTR = "web_search_interceptor"
+#: app.state attribute owned by this module; the interceptor itself is
+#: installed through ``llm_proxy.services``.
 _SNAPSHOT_ATTR = "web_search_config_snapshot"
 
 
@@ -73,18 +74,19 @@ async def ensure_web_search_interceptor(
         The interceptor for ``config``, or ``None`` when web search is off,
         unconfigured, or the provider could not be built.
     """
+    services = runtime_services(app)
     snapshot = getattr(app.state, _SNAPSHOT_ATTR, _UNSET)
     if snapshot is not _UNSET and snapshot == config:
-        return getattr(app.state, _INTERCEPTOR_ATTR, None)
+        return services.web_search_interceptor()
 
     async with _get_rebuild_lock():
         # Re-check under the lock: a concurrent request may have rebuilt while
         # this one waited.
         snapshot = getattr(app.state, _SNAPSHOT_ATTR, _UNSET)
         if snapshot is not _UNSET and snapshot == config:
-            return getattr(app.state, _INTERCEPTOR_ATTR, None)
+            return services.web_search_interceptor()
 
-        existing = getattr(app.state, _INTERCEPTOR_ATTR, None)
+        existing = services.web_search_interceptor()
 
         interceptor: WebSearchInterceptor | None = None
         # ``isinstance`` also keeps a partially-mocked config (tests, bad
@@ -105,7 +107,7 @@ async def ensure_web_search_interceptor(
         # reader that raced ahead of the listeners never observes a closed
         # interceptor (the request path resolves through this function, but the
         # snapshot can swap while a request is in flight).
-        app.state.web_search_interceptor = interceptor
+        services.install_web_search_interceptor(interceptor)
         app.state.web_search_config_snapshot = config
 
         if existing is not None:

@@ -5,8 +5,9 @@ circuit breaker (``provider:model:index``). Fed by successful requests:
 streaming requests record time-to-first-token, non-streaming requests record
 total response time.
 
-Designed as an application-level singleton (stored on ``app.state``),
-mirroring :class:`llm_proxy.core.circuit_breaker.CircuitBreakerStore`. Stats
+Designed as an application-level singleton, installed on the app's
+process-lifetime services (:mod:`llm_proxy.services`), mirroring
+:class:`llm_proxy.core.circuit_breaker.CircuitBreakerStore`. Stats
 are process-local and lost on restart; the ``balanced`` provider strategy
 degrades gracefully to cost ordering while the store is cold.
 """

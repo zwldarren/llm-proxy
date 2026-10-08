@@ -21,6 +21,7 @@ from llm_proxy.observability.service import (
     stop_background_usage_writer,
 )
 from llm_proxy.security.encryption import init_encryption
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -36,7 +37,7 @@ async def startup_http_client(app: FastAPI) -> None:
         max_keepalive_connections=settings.http.max_keepalive,
         disable_http2=settings.http.disable_http2,
     )
-    app.state.http_client = http_client
+    runtime_services(app).install_http_client(http_client)
     logger.debug(
         f"HTTP client manager started: max_keepalive={settings.http.max_keepalive}, "
         f"max_connections={settings.http.max_connections}, "
@@ -54,7 +55,7 @@ async def startup_config(app: FastAPI) -> DatabaseConfigManager:
 
     config_manager = DatabaseConfigManager()
     await config_manager.load()
-    app.state.config_manager = config_manager
+    runtime_services(app).install_config_manager(config_manager)
 
     # Let the global lockout managers (created lazily outside request
     # context) resolve UI-managed security parameters from this manager.
@@ -69,6 +70,7 @@ async def startup_protocols(app: FastAPI, config_manager: DatabaseConfigManager)
     from llm_proxy.protocols.base import ProtocolEndpoint
     from llm_proxy.protocols.registry import get_protocol, list_protocols
 
+    services = runtime_services(app)
     for protocol_name in list_protocols():
         endpoint = get_protocol(protocol_name)
         if endpoint is None:
@@ -81,7 +83,7 @@ async def startup_protocols(app: FastAPI, config_manager: DatabaseConfigManager)
 
         try:
             processor = create_unified_processor(protocol_endpoint=endpoint)
-            setattr(app.state, f"{protocol_name}_processor", processor)
+            services.install_protocol_processor(protocol_name, processor)
             logger.debug(f"Initialized UnifiedProcessor for protocol '{protocol_name}'")
         except Exception as e:
             logger.error(
@@ -161,10 +163,11 @@ async def _migrate_global_tracing_to_admins() -> None:
 
 async def startup_redis(app: FastAPI, config_manager: DatabaseConfigManager) -> None:
     config = await config_manager.get_config()
+    services = runtime_services(app)
 
     if config.redis.enabled:
-        redis_client = await get_redis_client(config.redis)
-        app.state.redis_client = redis_client
+        connection = await get_redis_client(config.redis)
+        services.install_redis(connection)
 
         from llm_proxy.cache.redis_cache import RedisCache
 
@@ -172,7 +175,7 @@ async def startup_redis(app: FastAPI, config_manager: DatabaseConfigManager) -> 
         # (web search, circuit breaker, MCP processes, API-key/role caches), so
         # it is enabled whenever Redis is connected. Config caching additionally
         # turns on the provider/model cache and is opt-in via REDIS_CACHE_ENABLED.
-        generation_cache = RedisCache(redis_client=redis_client, config=config.redis.cache)
+        generation_cache = RedisCache(redis_client=connection, config=config.redis.cache)
         if config.redis.cache.enabled:
             config_manager.enable_cache(generation_cache)
         else:
@@ -182,15 +185,15 @@ async def startup_redis(app: FastAPI, config_manager: DatabaseConfigManager) -> 
         # process's first request.
         await config_manager.sync_generation()
     else:
-        app.state.redis_client = None
+        services.install_redis(None)
 
     # Give the per-user tracing manager a shared client so a personal tracing
     # config change made on one worker invalidates the cached registry on every
     # other worker (falls back to local-only invalidation without Redis).
     from llm_proxy.observability.user_tracing import get_user_tracing_manager
 
-    redis_client = getattr(app.state, "redis_client", None)
-    get_user_tracing_manager().set_redis_client(redis_client.client if redis_client else None)
+    redis_client = services.redis_client()
+    get_user_tracing_manager().set_redis_client(redis_client)
 
 
 async def startup_derived_caches(config_manager: DatabaseConfigManager) -> None:
@@ -252,7 +255,7 @@ async def _reconcile_mcp_servers(app: FastAPI) -> None:
     from llm_proxy.database import ConfigRepository, get_async_session_context
     from llm_proxy.mcp.manager import MCPProxyManager
 
-    manager = getattr(app.state, "mcp_manager", None)
+    manager = runtime_services(app).mcp_manager()
     if manager is None:
         return
 
@@ -291,7 +294,7 @@ async def startup_mcp_servers(app: FastAPI, config_manager: DatabaseConfigManage
     from llm_proxy.database import ConfigRepository, get_async_session_context
 
     mcp_manager = MCPProxyManager()
-    app.state.mcp_manager = mcp_manager
+    runtime_services(app).install_mcp_manager(mcp_manager)
 
     async with get_async_session_context() as session:
         repo = ConfigRepository(session)
@@ -313,7 +316,7 @@ async def startup_background_services(app: FastAPI) -> None:
     # (retention, masking, sampling, the body switch) apply to the background
     # writers too. The writers keep the manager and re-resolve per batch, so
     # later settings changes also apply without a restart.
-    config_manager = getattr(app.state, "config_manager", None)
+    config_manager = runtime_services(app).config_manager_or_none()
     logging_config = resolve_logging_config(config_manager)
 
     start_background_log_writer(logging_config, config_manager)
@@ -325,7 +328,7 @@ async def _sync_circuit_breaker_config(app: FastAPI, config: ProxyConfig) -> Non
     """Apply UI-managed circuit-breaker thresholds to this worker's store."""
     from llm_proxy.core.circuit_breaker import CircuitBreakerConfig
 
-    store = getattr(app.state, "circuit_breaker", None)
+    store = runtime_services(app).circuit_breaker()
     if store is None:
         return
 
@@ -343,31 +346,27 @@ async def startup_circuit_breaker(app: FastAPI) -> None:
     """Initialize the circuit breaker store on app state."""
     from llm_proxy.core.circuit_breaker import CircuitBreakerConfig, CircuitBreakerStore
 
-    # Get config manager to read circuit breaker settings
-    config_manager = getattr(app.state, "config_manager", None)
-    if config_manager is not None:
-        config = await config_manager.get_config()
-        cb = config.server_params.circuit_breaker
-        cb_config = CircuitBreakerConfig(
-            enabled=cb.enabled,
-            failure_threshold=cb.failure_threshold,
-            cooldown_seconds=cb.cooldown_seconds,
-        )
-    else:
-        # Fallback to defaults if config not available yet
-        cb_config = CircuitBreakerConfig()
+    # Startup order guarantees the config manager: this step runs after
+    # ``startup_config``, so the store gets the operator's thresholds rather than
+    # the defaults of a breaker built before the settings were read.
+    config_manager = runtime_services(app).config_manager()
+    config = await config_manager.get_config()
+    cb = config.server_params.circuit_breaker
+    cb_config = CircuitBreakerConfig(
+        enabled=cb.enabled,
+        failure_threshold=cb.failure_threshold,
+        cooldown_seconds=cb.cooldown_seconds,
+    )
 
-    app.state.circuit_breaker = CircuitBreakerStore(config=cb_config)
+    runtime_services(app).install_circuit_breaker(CircuitBreakerStore(config=cb_config))
     logger.debug("Circuit breaker store initialized")
 
-    if config_manager is not None:
+    async def _sync_circuit_breaker(config: ProxyConfig) -> None:
+        await _sync_circuit_breaker_config(app, config)
 
-        async def _sync_circuit_breaker(config: ProxyConfig) -> None:
-            await _sync_circuit_breaker_config(app, config)
-
-        # A peer's resilience edit must retune every worker, not just the one
-        # that served the admin request.
-        config_manager.add_reload_listener(_sync_circuit_breaker)
+    # A peer's resilience edit must retune every worker, not just the one
+    # that served the admin request.
+    config_manager.add_reload_listener(_sync_circuit_breaker)
 
 
 async def startup_provider_stats(app: FastAPI) -> None:
@@ -379,7 +378,7 @@ async def startup_provider_stats(app: FastAPI) -> None:
     """
     from llm_proxy.core.provider_stats import ProviderStatsStore
 
-    app.state.provider_stats = ProviderStatsStore()
+    runtime_services(app).install_provider_stats(ProviderStatsStore())
     logger.debug("Provider stats store initialized")
 
 
@@ -397,7 +396,7 @@ async def startup_embedding_signal(app: FastAPI) -> None:
     Loading runs in a thread so the event loop is not blocked.
     """
     try:
-        config_manager = getattr(app.state, "config_manager", None)
+        config_manager = runtime_services(app).config_manager_or_none()
         if config_manager is None:
             logger.debug("Embedding warm-up skipped: no config manager yet")
             return
@@ -408,7 +407,7 @@ async def startup_embedding_signal(app: FastAPI) -> None:
 
         from llm_proxy.routing.signals.embedding import get_embedding_signal
 
-        await get_embedding_signal(app.state)
+        await get_embedding_signal()
         logger.debug("Embedding signal eagerly initialized at startup")
     except Exception:
         logger.debug("Embedding signal warm-up skipped (deps may be unavailable)")
@@ -426,7 +425,7 @@ async def startup_judge_warmup(app: FastAPI) -> None:
     readiness must not depend on the judge being reachable. The reload listener covers
     the operator flow — turning the judge on in the UI must not mean "wait for traffic".
     """
-    config_manager = getattr(app.state, "config_manager", None)
+    config_manager = runtime_services(app).config_manager_or_none()
     if config_manager is None:
         logger.debug("Judge warm-up skipped: no config manager yet")
         return
@@ -443,29 +442,27 @@ def _schedule_judge_warmup(app: FastAPI, *, config: ProxyConfig | None = None) -
     """Run one judge warm-up in the background, at most one at a time."""
     from llm_proxy.routing.judge.consult import warm_judge
 
-    existing = getattr(app.state, "judge_warmup_task", None)
+    services = runtime_services(app)
+    existing = services.judge_warmup_task()
     if existing is not None and not existing.done():
         return
 
-    background_tasks: set[asyncio.Task] | None = getattr(app.state, "background_tasks", None)
-    if background_tasks is None:
-        background_tasks = set()
-        app.state.background_tasks = background_tasks
+    background_tasks = services.background_tasks()
 
     async def _warm() -> None:
         try:
             fresh = config
             if fresh is None:
-                config_manager = getattr(app.state, "config_manager", None)
+                config_manager = services.config_manager_or_none()
                 if config_manager is None:
                     return
                 fresh = await config_manager.get_config()
-            await warm_judge(config=fresh, app_state=app.state)
+            await warm_judge(config=fresh, services=services)
         except Exception:  # noqa: BLE001 - never let a warm-up escape into a task
             logger.debug("Routing judge warm-up skipped", exc_info=True)
 
     task = asyncio.create_task(_warm())
-    app.state.judge_warmup_task = task
+    services.set_judge_warmup_task(task)
     background_tasks.add(task)
     task.add_done_callback(background_tasks.discard)
 
@@ -485,15 +482,17 @@ async def shutdown_services(app: FastAPI) -> None:
     await stop_background_log_writer()
     await stop_background_usage_writer()
 
-    if http_client := getattr(app.state, "http_client", None):
+    services = runtime_services(app)
+
+    if http_client := services.http_client_or_none():
         await http_client.close()
 
-    if config_manager := getattr(app.state, "config_manager", None):
+    if config_manager := services.config_manager_or_none():
         config = await config_manager.get_config()
         if config.redis.enabled:
             await close_redis_client()
 
-    if web_search_interceptor := getattr(app.state, "web_search_interceptor", None):
+    if web_search_interceptor := services.web_search_interceptor():
         await web_search_interceptor.close()
         logger.info("Web search interceptor closed")
 
@@ -501,7 +500,7 @@ async def shutdown_services(app: FastAPI) -> None:
     # must run before the engine is disposed. close_db() stays last: any
     # component that lazily recreates the engine (get_session_factory) would
     # otherwise leak an undisposed engine.
-    if mcp_manager := getattr(app.state, "mcp_manager", None):
+    if mcp_manager := services.mcp_manager():
         await mcp_manager.shutdown_all(session_factory=get_async_session_context)
 
     await close_db()

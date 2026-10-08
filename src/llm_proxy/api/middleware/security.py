@@ -20,6 +20,7 @@ from llm_proxy.api.middleware.asgi_utils import merge_response_headers
 from llm_proxy.config.types.server import SecurityParams
 from llm_proxy.core.constants import LOCKOUT_CLEANUP_INTERVAL_SECONDS
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 
 if TYPE_CHECKING:
     from llm_proxy.config.manager import DatabaseConfigManager
@@ -289,7 +290,7 @@ class SecurityHeadersMiddleware:
             return
 
         app = scope.get("app")
-        config_manager = getattr(app.state, "config_manager", None) if app is not None else None
+        config_manager = runtime_services(app).config_manager_or_none() if app is not None else None
         headers = build_security_headers(config_manager)
 
         async def send_with_headers(message: Message) -> None:

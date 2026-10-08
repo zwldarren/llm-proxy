@@ -23,6 +23,7 @@ from llm_proxy.core.exceptions import ConflictError, MCPSecurityError, MCPServer
 from llm_proxy.database import ConfigRepository, get_async_session
 from llm_proxy.mcp.security.policy import McpSecurityPolicy
 from llm_proxy.mcp.security.validator import McpSecurityValidator
+from llm_proxy.services import runtime_services
 
 router = APIRouter(
     prefix="/api/mcp", tags=["MCP Servers"], dependencies=[Depends(require_admin_role)]
@@ -130,11 +131,11 @@ class MCPProxyApp:
         self._policy_ts: float = 0.0
 
     def _get_mcp_manager(self, scope: Scope):
-        """Get MCP manager from app state."""
+        """Get this app's MCP manager, cached after the first successful read."""
         if self._mcp_manager is None:
             app = scope.get("app")
-            if app and hasattr(app.state, "mcp_manager"):
-                self._mcp_manager = app.state.mcp_manager
+            if app is not None:
+                self._mcp_manager = runtime_services(app).mcp_manager()
         return self._mcp_manager
 
     async def _get_policy(self) -> McpSecurityPolicy:
@@ -237,8 +238,8 @@ def get_config_repository(session: AsyncSession) -> ConfigRepository:
 
 
 def get_mcp_manager(request: Request):
-    """Get MCP manager dependency from app state."""
-    return request.app.state.mcp_manager
+    """Get the MCP manager from the app's services (None when startup skipped it)."""
+    return runtime_services(request).mcp_manager()
 
 
 @router.get("/servers", response_model=list[McpServerRead])

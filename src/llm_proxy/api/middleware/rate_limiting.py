@@ -16,6 +16,7 @@ from llm_proxy.config.settings import get_settings
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database.redis_client import RedisClient, get_redis_client_async
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.services import runtime_services
 
 _signature_cache: dict[int, tuple[list[str], int | None]] = {}
 
@@ -100,7 +101,7 @@ def resolve_rate_limit_value(request: Request, bucket: str) -> str:
     from llm_proxy.config.types import ProxyConfig
 
     default = DEFAULT_RATE_LIMITS[bucket]
-    config_manager = getattr(request.app.state, "config_manager", None)
+    config_manager = runtime_services(request).config_manager_or_none()
     cached = config_manager.get_cached_config() if config_manager is not None else None
     if not isinstance(cached, ProxyConfig):
         return default

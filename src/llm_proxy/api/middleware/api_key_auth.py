@@ -34,6 +34,7 @@ from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.log_intake import record_failed_auth, record_rejection
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.registry import protocol_name_for_path
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -160,9 +161,11 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
     if request.method == "OPTIONS":
         return None
 
-    config_manager = getattr(request.app.state, "config_manager", None)
-    if config_manager is None:
-        return None
+    # Required, not optional: this gate used to return early when the config
+    # manager was missing, which silently handed the auth decision to whatever
+    # dependency the route happened to declare. Nothing below reads the manager
+    # (key verification resolves what it needs itself), so this call is the gate.
+    runtime_services(request).config_manager()
 
     # JWT is only for the /api/* admin panel — /v1/* and /servers/* always
     # require API key authentication, even when a valid JWT is present.
