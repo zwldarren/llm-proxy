@@ -110,3 +110,13 @@ module.
   instead of silently resolving.
 - New schemas have one default home, and the shared base is now visible by
   name rather than by memory of line 38.
+
+## Amendment (2026-10, ADR-0025)
+
+The server-config resource is the one exception: its schemas are not
+hand-written in `api/schemas/`. Each server setting's canonical model lives
+in `config/types/` (the runtime truth) and is generated into the admin API by
+the server settings registry (`llm_proxy.config.server_settings`), which also
+generates the endpoints and the runtime read. `api/schemas/server_config.py`
+is deleted. The one-module-per-resource rule stands for every other
+resource.
