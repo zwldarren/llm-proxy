@@ -157,7 +157,15 @@ class LogRepository(BaseUsageRepository):
 
     @staticmethod
     def _build_insert_values(log: RequestLog) -> dict[str, Any]:
-        """Build INSERT payload for request_logs from a RequestLog object."""
+        """Build INSERT payload for request_logs from a RequestLog object.
+
+        ``content_hash_version`` is stamped explicitly rather than left to the
+        column default: that default describes no algorithm this repository
+        writes (only :meth:`create_audit_log_with_integrity` computes hashes),
+        so a row inserted without it would record a version the hash chain
+        never used.
+        """
+        version = log.content_hash_version
 
         return {
             "request_id": log.request_id,
@@ -206,6 +214,7 @@ class LogRepository(BaseUsageRepository):
             "sequence_number": log.sequence_number,
             "content_hash": log.content_hash,
             "previous_hash": log.previous_hash,
+            "content_hash_version": CONTENT_HASH_VERSION if version is None else version,
         }
 
     async def _get_table_names(self) -> set[str]:

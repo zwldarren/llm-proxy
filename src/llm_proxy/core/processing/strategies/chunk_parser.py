@@ -49,7 +49,11 @@ class OpenAIStreamChunkParser:
                 return bool(value)
             return True
 
-        choices = parsed.get("choices", [])
+        choices = parsed.get("choices")
+        if not isinstance(choices, list):
+            # Provider JSON is unvalidated here: a malformed ``choices`` (absent,
+            # ``null``, not a list) simply carries no content.
+            choices = []
         for choice in choices:
             if not isinstance(choice, dict):
                 continue

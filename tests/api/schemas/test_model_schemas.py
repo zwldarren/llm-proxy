@@ -82,3 +82,35 @@ def test_model_create_accepts_pricing_tiers() -> None:
     )
     assert model.pricing_tiers is not None
     assert model.pricing_tiers[0].threshold == 200000
+
+
+def test_model_update_rejects_an_empty_provider_list() -> None:
+    """An update replaces the whole list, so empty would strip every provider."""
+    with pytest.raises(ValidationError, match="at least 1 item"):
+        ModelUpdate(providers=[])
+
+
+def test_model_update_accepts_leaving_providers_alone() -> None:
+    assert ModelUpdate(name="m").providers is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "input_cost_per_1m",
+        "output_cost_per_1m",
+        "cached_read_cost_per_1m",
+        "cached_write_cost_per_1m",
+        "audio_input_cost_per_1m",
+        "audio_output_cost_per_1m",
+        "image_input_cost_per_1m",
+        "cost_per_image",
+        "audio_cost_per_minute",
+        "tts_cost_per_1m_chars",
+        "web_search_cost_per_1k",
+    ],
+)
+def test_model_update_rejects_negative_costs(field: str) -> None:
+    """Every cost dimension is non-negative on update, as it is on create."""
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        ModelUpdate(**{field: -0.5})

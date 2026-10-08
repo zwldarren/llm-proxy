@@ -466,9 +466,24 @@ _VERBOSE_ROUTING_KEYS: frozenset[str] = frozenset(
 )
 
 
+#: Lowercased sensitive-key set memoised against the ``LoggingConfig`` object it
+#: was derived from. ``resolve_logging_config`` returns the cached config object,
+#: so identity is stable until settings change; a config refresh swaps in a new
+#: object and naturally invalidates the entry. Rebuilding this set twice per
+#: request (the request and the response body) is a measurable cost on the
+#: masking hot path.
+_sensitive_keys_cache: tuple[LoggingConfig, frozenset[str]] | None = None
+
+
 def _sensitive_keys(config: LoggingConfig) -> frozenset[str]:
-    """Lowercased sensitive-key set for the given config."""
-    return frozenset(k.lower() for k in config.sensitive_keys)
+    """Lowercased sensitive-key set for the given config, memoised by identity."""
+    global _sensitive_keys_cache
+    cached = _sensitive_keys_cache
+    if cached is not None and cached[0] is config:
+        return cached[1]
+    keys = frozenset(k.lower() for k in config.sensitive_keys)
+    _sensitive_keys_cache = (config, keys)
+    return keys
 
 
 def _mask_request_data(

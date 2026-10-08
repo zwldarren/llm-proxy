@@ -483,7 +483,10 @@ class RequestLog(Base):
     previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # Previous entry
     content_hash_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=2, server_default=text("'2'")
-    )  # Audit hash algorithm version
+    )  # Audit hash algorithm version. The default is an inert placeholder for
+    # rows written outside the chain; writers stamp
+    # `log_repository.CONTENT_HASH_VERSION`, which is the version the hash
+    # chain itself uses.
 
     def __repr__(self) -> str:
         return (

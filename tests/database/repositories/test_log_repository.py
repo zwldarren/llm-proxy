@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.database.repositories.log_repository import (
+    CONTENT_HASH_VERSION,
     LogRepository,
     _build_audit_content_hash_data,
     _schema_cache,
@@ -455,6 +456,22 @@ class TestLogRepository:
         assert result["endpoint"] == "/v1/chat"
         assert result["method"] == "POST"
         assert result["status_code"] == 200
+        assert result["content_hash_version"] == CONTENT_HASH_VERSION
+
+    def test_build_insert_values_keeps_an_explicit_hash_version(self):
+        """A row that already knows its version keeps it."""
+        log = RequestLog(
+            request_id="test-123",
+            timestamp=1234567890.0,
+            endpoint="/v1/chat",
+            method="POST",
+            status_code=200,
+            content_hash_version=CONTENT_HASH_VERSION,
+        )
+
+        assert LogRepository._build_insert_values(log)["content_hash_version"] == (
+            CONTENT_HASH_VERSION
+        )
 
     def test_build_audit_content_hash_data(self):
         """Test building canonical data for content hash."""

@@ -18,7 +18,6 @@ from llm_proxy.models import (
     InternalRequest,
     InternalResponse,
 )
-from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import BaseHttpProvider, extract_rate_limit_headers
 from llm_proxy.providers.capabilities import (
     AudioCapabilityMixin,
@@ -41,8 +40,6 @@ from llm_proxy.serialization.openai.components.response_parser import (
     fold_top_level_reasoning_tokens,
 )
 from llm_proxy.serialization.providers import get_provider_serializer
-
-logger = get_logger(__name__)
 
 
 @register_adapter("openai-compatible")

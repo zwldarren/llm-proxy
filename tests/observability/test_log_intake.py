@@ -535,6 +535,27 @@ class TestLoggedStreamBody:
         assert body["data"]
 
 
+class TestSensitiveKeysCache:
+    """The masking hot path lowers the key set once per config object."""
+
+    def test_memoises_per_config_object(self):
+        config = LoggingConfig(sensitive_keys=["Custom_Key"])
+
+        first = log_intake._sensitive_keys(config)
+
+        assert first == frozenset({"custom_key"})
+        assert log_intake._sensitive_keys(config) is first
+
+    def test_a_refreshed_config_object_is_picked_up(self):
+        stale = LoggingConfig(sensitive_keys=["a"])
+        assert log_intake._sensitive_keys(stale) == frozenset({"a"})
+        refreshed = LoggingConfig(sensitive_keys=["b"])
+
+        assert log_intake._sensitive_keys(refreshed) == frozenset({"b"})
+        # The entry the refresh displaced is rebuilt, never served stale.
+        assert log_intake._sensitive_keys(stale) == frozenset({"a"})
+
+
 class TestStreamingRawCaptureGate:
     """Default sampling must not buffer SSE bytes at all."""
 

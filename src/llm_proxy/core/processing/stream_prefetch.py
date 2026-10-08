@@ -113,7 +113,13 @@ class PrefetchPolicy:
         context_reason: str | None = None
         retryable_reason: str | None = None
         for payload in payloads:
-            for choice in payload.get("choices", []):
+            # Provider JSON is unvalidated here, so a malformed chunk (``null``
+            # choices, or a non-list) is skipped rather than raised: one bad
+            # payload must not fail the whole attempt.
+            choices = payload.get("choices")
+            if not isinstance(choices, list):
+                continue
+            for choice in choices:
                 if not isinstance(choice, dict):
                     continue
                 finish_reason = choice.get("finish_reason")

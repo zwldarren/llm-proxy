@@ -104,6 +104,11 @@ class TestPrefetchPolicy:
         assert policy.classify([]) is None
         assert policy.classify([{"id": "1", "model": "m"}]) is None
         assert policy.classify([{"choices": ["not-a-dict"]}]) is None
+        # Provider JSON is unvalidated: a malformed choices field is no signal,
+        # and must not raise through the prefetch loop's error path.
+        assert policy.classify([{"choices": None}]) is None
+        assert policy.classify([{"choices": "not-a-list"}]) is None
+        assert policy.is_meaningful([{"choices": None}]) is False
 
     def test_the_last_reason_of_each_kind_wins(self) -> None:
         """Several SSE events can share a block; both kinds stay recorded."""

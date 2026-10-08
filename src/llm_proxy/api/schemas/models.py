@@ -431,17 +431,19 @@ class ModelUpdate(BaseModel):
     """Schema for updating a model."""
 
     name: str | None = None
-    providers: list[ModelProviderMapping] | None = None
+    # An update replaces the whole provider list, so an empty one would strip
+    # every provider from the model; the create schema forbids that state.
+    providers: list[ModelProviderMapping] | None = Field(None, min_length=1)
     timeout: float | None = None
     max_retries: int | None = None
     model_metadata: dict[str, Any] | None = None
     parameter_overrides: dict[str, Any] | None = None
-    input_cost_per_1m: float | None = None
-    output_cost_per_1m: float | None = None
-    cached_read_cost_per_1m: float | None = None
-    cached_write_cost_per_1m: float | None = None
-    audio_input_cost_per_1m: float | None = None
-    audio_output_cost_per_1m: float | None = None
+    input_cost_per_1m: float | None = Field(None, ge=0)
+    output_cost_per_1m: float | None = Field(None, ge=0)
+    cached_read_cost_per_1m: float | None = Field(None, ge=0)
+    cached_write_cost_per_1m: float | None = Field(None, ge=0)
+    audio_input_cost_per_1m: float | None = Field(None, ge=0)
+    audio_output_cost_per_1m: float | None = Field(None, ge=0)
     image_input_cost_per_1m: float | None = Field(None, ge=0)
     cost_per_image: float | None = Field(None, ge=0)
     audio_cost_per_minute: float | None = Field(None, ge=0)
