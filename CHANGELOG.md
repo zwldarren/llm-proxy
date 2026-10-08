@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.1](https://github.com/zwldarren/llm-proxy/compare/v0.3.0...v0.3.1) (2026-10-08)
+
+
+### Features
+
+* **decisions:** serve /v1/decisions through a provider-side bridge ([bb313bf](https://github.com/zwldarren/llm-proxy/commit/bb313bf5371959bc9f97efcd5cc7b2cca0cae855))
+* **frontend:** add a sticky settings section index with anchor scrolling ([13d5b64](https://github.com/zwldarren/llm-proxy/commit/13d5b64ec0b7522f85c6080ae7c8625e7b769090))
+* **routing:** add a routing judge for the ambiguity band ([2aabea4](https://github.com/zwldarren/llm-proxy/commit/2aabea4ace951ca155726c5b234c03a1867e6489))
+
+
+### Bug Fixes
+
+* address the review findings on the seam refactor series ([85d61eb](https://github.com/zwldarren/llm-proxy/commit/85d61eb05f8e6073ba8c35ac1273c2f8840b7de0))
+* **chat:** surface failed generations and stop cutting long streams ([ee330c8](https://github.com/zwldarren/llm-proxy/commit/ee330c851fa29c3a344afd91f4dec7a9e656fd1f))
+* **frontend:** keep the kept-alive logs view out of other pages' ?tab= ([c67b5f3](https://github.com/zwldarren/llm-proxy/commit/c67b5f35847c20c4d229cd47399dcf798d742b44))
+* **frontend:** make the model pickers retryable and retire the run tray ([0c5698c](https://github.com/zwldarren/llm-proxy/commit/0c5698c8902ad7cca630b23b81e218aea4112367))
+* **observability:** stop losing Langfuse traces and double-counting tokens ([5ab1c53](https://github.com/zwldarren/llm-proxy/commit/5ab1c53cdf15ff7d32232c7cca445e485d5fed02))
+* **web-search:** default a blank Ollama base URL to the hosted endpoint ([baea5cc](https://github.com/zwldarren/llm-proxy/commit/baea5ccf90f26a0257c4fd6073adc272a9b7b746))
+* **web-search:** keep search results when a conversation is replayed ([6854d42](https://github.com/zwldarren/llm-proxy/commit/6854d425109306ee587973071edbeca61a36b845))
+
+
+### Documentation
+
+* **frontend:** sync DESIGN.md with the implemented nav rail ([665af13](https://github.com/zwldarren/llm-proxy/commit/665af134f7fa7acb5591af1a783ff6a0abae7fa8))
+
 ## [0.3.0](https://github.com/zwldarren/llm-proxy/compare/v0.2.9...v0.3.0) (2026-10-06)
 
 
