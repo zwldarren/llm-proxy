@@ -24,6 +24,79 @@ DEFAULT_RETENTION_DAYS = 30
 DEFAULT_MAX_LOGGED_BODY_BYTES = 1024 * 1024
 
 
+class LoggingWireConfig(BaseModel):
+    """Wire dialect of :class:`LoggingConfig` for the admin server-settings endpoint.
+
+    Stored rows and API payloads use these field names and types; the runtime
+    model is the truth the proxy runs on. Two fields differ deliberately:
+
+    - ``log_retention_days`` on the wire vs ``retention_days`` at runtime
+      (the wire name predates the UI-managed key).
+    - ``sensitive_keys`` is a comma-separated string on the wire; at runtime
+      it is ``list[str]``, where the built-in base keys are always kept and
+      wire extras are appended.
+
+    ``log_level`` is runtime-only (env-driven, startup-time logging pipeline).
+    Legacy stored rows may carry junk: reads merge them over these defaults
+    without validation and echo the raw dict, so the wire shape is preserved
+    exactly; the tolerant parse happens on the runtime read.
+    """
+
+    log_input_output: bool = Field(
+        default=False,
+        description=(
+            "Log request/response bodies; off by default so rows persist with bodies "
+            "scrubbed. Master switch: it cannot be overridden per request"
+        ),
+    )
+    log_raw_stream: bool = Field(
+        default=False,
+        description=(
+            "Store raw SSE text for streaming responses; when off, the reassembled "
+            "non-streaming response body is stored instead"
+        ),
+    )
+    log_retention_days: int = Field(
+        default=DEFAULT_RETENTION_DAYS,
+        ge=0,
+        description="Log retention days (0 = keep indefinitely)",
+    )
+    max_logged_body_bytes: int = Field(
+        default=DEFAULT_MAX_LOGGED_BODY_BYTES,
+        ge=0,
+        description=(
+            "Cap on the serialized size of a stored request/response body in bytes; "
+            "larger bodies are stored as a truncation marker (0 = no cap)"
+        ),
+    )
+    verbose_routing_logs: bool = Field(
+        default=False,
+        description="Include detailed per-candidate routing scorecards in request log metadata",
+    )
+    mask_sensitive_data: bool = Field(default=True, description="Mask sensitive fields in logs")
+    sampling_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Rate at which to log full request/response bodies",
+    )
+    audit_sampling_rate: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Sampling rate for audit logs (null = inherit sampling_rate)",
+    )
+    audit_retention_days: int | None = Field(
+        default=None,
+        ge=0,
+        description="Retention days for audit logs (null = inherit log_retention_days)",
+    )
+    sensitive_keys: str = Field(
+        default="",
+        description="Comma-separated extra key names to mask in logs",
+    )
+
+
 class LoggingConfig(BaseModel):
     log_input_output: bool = Field(
         default=False,

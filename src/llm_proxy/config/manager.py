@@ -4,10 +4,12 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from llm_proxy.core.constants import DEFAULT_MAX_FALLBACK_ATTEMPTS, DEFAULT_MAX_RETRIES
-from llm_proxy.core.exceptions import ConfigurationError, ProviderNotConfiguredError
+# Re-exported: the implementation moved to the server settings registry
+# (ADR-0025), which owns both the admin endpoints and this runtime read.
+from llm_proxy.config.server_settings import load_logging_config, load_server_settings
+from llm_proxy.core.exceptions import ProviderNotConfiguredError
 from llm_proxy.observability.logger import get_logger
 
 if TYPE_CHECKING:
@@ -17,7 +19,6 @@ if TYPE_CHECKING:
 from .mappers import map_model_record, map_provider_record
 from .settings import get_settings
 from .types import (
-    CircuitBreakerParams,
     KeepaliveParams,
     LoggingConfig,
     ModelConfig,
@@ -31,7 +32,6 @@ from .types import (
     SecurityParams,
     ServerParams,
 )
-from .types.logging_config import DEFAULT_MAX_LOGGED_BODY_BYTES, DEFAULT_RETENTION_DAYS
 
 logger = get_logger(__name__)
 
@@ -68,113 +68,6 @@ def load_auth_config() -> ProxyAuthConfig:
     from .secrets import get_jwt_secret
 
     return ProxyAuthConfig(jwt_secret=get_jwt_secret())
-
-
-def _parse_bool(value: Any) -> bool:
-    """Parse a value as boolean, supporting string and non-string types."""
-    return str(value).strip().lower() in {"true", "1", "yes", "on"}
-
-
-def _parse_optional_float(value: Any, name: str) -> float | None:
-    """Parse an optional float config value (None/empty string → None)."""
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid {name}: {exc}") from exc
-
-
-def _parse_optional_int(value: Any, name: str) -> int | None:
-    """Parse an optional int config value (None/empty string → None)."""
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid {name}: {exc}") from exc
-
-
-def load_logging_config(
-    overrides: dict[str, Any] | None = None,
-) -> LoggingConfig:
-    """Build the logging configuration from database overrides.
-
-    All behavioral fields (masking, sampling, retention, sensitive keys) are
-    UI-managed and stored in the ``logging`` server_config key; this function
-    merges those stored values with code defaults. The only remaining env var
-    is ``LOG_LEVEL`` (startup-time logging pipeline verbosity).
-    """
-    settings = get_settings().logging
-    overrides = overrides or {}
-
-    log_input_output = _parse_bool(overrides.get("log_input_output", False))
-    log_raw_stream = _parse_bool(overrides.get("log_raw_stream", False))
-
-    try:
-        retention_days = int(overrides.get("log_retention_days", DEFAULT_RETENTION_DAYS))
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid log_retention_days: {exc}") from exc
-
-    try:
-        max_logged_body_bytes = int(
-            overrides.get("max_logged_body_bytes", DEFAULT_MAX_LOGGED_BODY_BYTES)
-        )
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid max_logged_body_bytes: {exc}") from exc
-
-    verbose_routing_logs = _parse_bool(overrides.get("verbose_routing_logs", False))
-    mask_sensitive_data = _parse_bool(overrides.get("mask_sensitive_data", True))
-
-    try:
-        sampling_rate = float(overrides.get("sampling_rate", 1.0))
-    except (ValueError, TypeError) as exc:
-        raise ConfigurationError(f"Invalid sampling_rate: {exc}") from exc
-
-    audit_sampling_rate = _parse_optional_float(
-        overrides.get("audit_sampling_rate"), "audit_sampling_rate"
-    )
-    audit_retention_days = _parse_optional_int(
-        overrides.get("audit_retention_days"), "audit_retention_days"
-    )
-
-    sensitive_keys = [
-        "authorization",
-        "api_key",
-        "apikey",
-        "password",
-        "passwd",
-        "token",
-        "access_token",
-        "refresh_token",
-        "jwt_secret",
-    ]
-    extra_keys_raw = overrides.get("sensitive_keys", "")
-    if isinstance(extra_keys_raw, str):
-        extra_keys = [k.strip().lower() for k in extra_keys_raw.split(",") if k.strip()]
-    elif isinstance(extra_keys_raw, list):
-        extra_keys = [str(k).strip().lower() for k in extra_keys_raw if str(k).strip()]
-    else:
-        extra_keys = []
-    if extra_keys:
-        sensitive_keys = [*dict.fromkeys(sensitive_keys + extra_keys)]
-
-    # Env-only value (startup-time logging pipeline verbosity):
-    log_level = settings.level.upper()
-
-    return LoggingConfig(
-        log_input_output=log_input_output,
-        log_raw_stream=log_raw_stream,
-        retention_days=retention_days,
-        max_logged_body_bytes=max_logged_body_bytes,
-        mask_sensitive_data=mask_sensitive_data,
-        log_level=log_level,
-        sampling_rate=sampling_rate,
-        audit_sampling_rate=audit_sampling_rate,
-        audit_retention_days=audit_retention_days,
-        sensitive_keys=sensitive_keys,
-        verbose_routing_logs=verbose_routing_logs,
-    )
 
 
 def load_redis_config() -> RedisConfig:
@@ -318,167 +211,32 @@ class DatabaseConfigManager:
             for config in server_configs:
                 server_config_dict[config.key] = config.value
 
-            auth_config = load_auth_config()
-            logging_overrides = server_config_dict.get("logging")
-            logging_config = load_logging_config(
-                logging_overrides if isinstance(logging_overrides, dict) else None
-            )
-            redis_config = load_redis_config()
-
-            web_search_config = None
-            if "web_search_config" in server_config_dict:
-                try:
-                    from llm_proxy.config.types.web_search import WebSearchConfig
-
-                    web_search_config = WebSearchConfig.model_validate(
-                        server_config_dict["web_search_config"]
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to parse web_search_config: {e}")
-
-            # Read global request policies from the request_policy config key.
-            # "default"/absent means "not configured": the per-adapter default
-            # applies (see BaseHttpProvider.DEFAULT_UNKNOWN_FIELDS_POLICY). An invalid
-            # value is treated the same way after a warning, so a typo never
-            # silently overrides a provider's own default.
-            request_policy = server_config_dict.get("request_policy", {})
-            if not isinstance(request_policy, dict):
-                request_policy = {}
-
-            unknown_fields_policy = request_policy.get("unknown_fields_policy", "default")
-            if unknown_fields_policy == "default":
-                unknown_fields_policy = None
-            elif unknown_fields_policy not in {"ignore", "passthrough", "error"}:
-                logger.warning(
-                    f"Invalid unknown_fields_policy '{unknown_fields_policy}' in server config; "
-                    "treating it as unset (per-provider default applies)"
-                )
-                unknown_fields_policy = None
-
-            unsupported_block_policy = request_policy.get("unsupported_block_policy", "default")
-            if unsupported_block_policy == "default":
-                unsupported_block_policy = None
-            elif unsupported_block_policy not in {"drop", "degrade", "error"}:
-                logger.warning(
-                    f"Invalid unsupported_block_policy "
-                    f"'{unsupported_block_policy}' in server config; "
-                    "treating it as unset (per-provider default applies)"
-                )
-                unsupported_block_policy = None
-
-            # Read global resilience policies from the resilience config key
-            resilience = server_config_dict.get("resilience", {})
-            if not isinstance(resilience, dict):
-                resilience = {}
-
-            max_fallback_attempts = resilience.get(
-                "max_fallback_attempts", DEFAULT_MAX_FALLBACK_ATTEMPTS
-            )
-            if not isinstance(max_fallback_attempts, int) or max_fallback_attempts < 0:
-                logger.warning(
-                    "Invalid max_fallback_attempts in server config; falling back to default"
-                )
-                max_fallback_attempts = DEFAULT_MAX_FALLBACK_ATTEMPTS
-
-            global_max_retries = resilience.get("max_retries", DEFAULT_MAX_RETRIES)
-            if not isinstance(global_max_retries, int) or global_max_retries < 0:
-                logger.warning("Invalid max_retries in server config; falling back to default")
-                global_max_retries = DEFAULT_MAX_RETRIES
-
-            cb = resilience.get("circuit_breaker", {})
-            if not isinstance(cb, dict):
-                cb = {}
-            circuit_breaker_params = CircuitBreakerParams(
-                enabled=cb.get("enabled", True),
-                failure_threshold=cb.get("failure_threshold", 5),
-                cooldown_seconds=cb.get("cooldown_seconds", 60.0),
-            )
-
-            # Read global security / rate-limiting parameters from the
-            # ``security`` server_config key (UI-managed, hot-reloaded).
-            security_value = server_config_dict.get("security")
-            try:
-                security_params = SecurityParams.model_validate(
-                    security_value if isinstance(security_value, dict) else {}
-                )
-            except Exception as e:
-                logger.warning(f"Failed to parse security config: {e}")
-                security_params = SecurityParams()
-
-            # Non-streaming keepalive parameters (UI-managed, hot-reloaded).
-            keepalive_value = server_config_dict.get("keepalive")
-            try:
-                keepalive_params = KeepaliveParams.model_validate(
-                    keepalive_value if isinstance(keepalive_value, dict) else {}
-                )
-            except Exception as e:
-                logger.warning(f"Failed to parse keepalive config: {e}")
-                keepalive_params = KeepaliveParams()
-
-            # Per-bucket rate limit overrides (UI-managed, hot-reloaded).
-            rate_limits_value = server_config_dict.get("rate_limits")
-            rate_limits: dict[str, str] = {}
-            if isinstance(rate_limits_value, dict):
-                rate_limits = {str(k): str(v) for k, v in rate_limits_value.items()}
-
-            # Allowed CORS origins (UI-managed, hot-reloaded).
-            cors_origins_value = server_config_dict.get("cors_origins")
-            cors_origins: list[str] = []
-            if isinstance(cors_origins_value, list):
-                cors_origins = [str(o).strip() for o in cors_origins_value if str(o).strip()]
+            # UI-managed server settings: one tolerant typed parse over the
+            # same registry that drives the admin endpoints (ADR-0025).
+            settings = load_server_settings(server_config_dict)
 
             server_params = ServerParams(
-                auth=auth_config,
-                logging=logging_config,
-                web_search=web_search_config,
-                unknown_fields_policy=unknown_fields_policy,
-                unsupported_block_policy=unsupported_block_policy,
-                max_fallback_attempts=max_fallback_attempts,
-                max_retries=global_max_retries,
-                circuit_breaker=circuit_breaker_params,
-                security=security_params,
-                keepalive=keepalive_params,
-                rate_limits=rate_limits,
-                cors_origins=cors_origins,
+                auth=load_auth_config(),
+                logging=settings.logging,
+                web_search=settings.web_search,
+                unknown_fields_policy=settings.request_policy_unknown_fields,
+                unsupported_block_policy=settings.request_policy_unsupported_block,
+                max_fallback_attempts=settings.resilience.max_fallback_attempts,
+                max_retries=settings.resilience.max_retries,
+                circuit_breaker=settings.resilience.circuit_breaker,
+                security=settings.security,
+                keepalive=settings.keepalive,
+                rate_limits=settings.rate_limits,
+                cors_origins=settings.cors_origins,
             )
-
-            # Smart-routing global config, read from the same server_config
-            # batch as logging/web_search/request_policy/resilience so the
-            # hot path can read it from the cached ProxyConfig without a
-            # per-request DB session or the global config lock.
-            smart_routing_value = server_config_dict.get("smart_routing")
-            try:
-                from llm_proxy.config.types.smart_routing import SmartRoutingConfig
-
-                smart_routing_config = SmartRoutingConfig.from_row(
-                    smart_routing_value if isinstance(smart_routing_value, dict) else None
-                )
-            except Exception as e:
-                logger.warning(f"Failed to parse smart_routing config: {e}")
-                from llm_proxy.config.types.smart_routing import SmartRoutingConfig
-
-                smart_routing_config = SmartRoutingConfig()
-
-            # Global provider-selection strategy, loaded the same way so the
-            # hot path reads it from the cached ProxyConfig.
-            provider_selection_value = server_config_dict.get("provider_selection")
-            from llm_proxy.config.types.provider_selection import ProviderSelectionConfig
-
-            try:
-                provider_selection_config = ProviderSelectionConfig.from_row(
-                    provider_selection_value if isinstance(provider_selection_value, dict) else None
-                )
-            except Exception as e:
-                logger.warning(f"Failed to parse provider_selection config: {e}")
-                provider_selection_config = ProviderSelectionConfig()
 
             config = ProxyConfig(
                 server_params=server_params,
                 provider_configs=provider_configs,
                 models=models,
-                redis=redis_config,
-                smart_routing=smart_routing_config,
-                provider_selection=provider_selection_config,
+                redis=load_redis_config(),
+                smart_routing=settings.smart_routing,
+                provider_selection=settings.provider_selection,
             )
             self._config = config
             return config

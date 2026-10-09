@@ -7,12 +7,11 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from llm_proxy.api.middleware.rate_limiting import (
-    DEFAULT_RATE_LIMITS,
     RateLimitManager,
-    _parse_limit_value,
     resolve_rate_limit_value,
 )
 from llm_proxy.config.types import ProxyAuthConfig, ProxyConfig, ServerParams
+from llm_proxy.config.types.rate_limits import DEFAULT_RATE_LIMITS, parse_limit_value
 
 
 def _app_with_rate_limits(overrides: dict[str, str]) -> FastAPI:
@@ -30,19 +29,19 @@ def _app_with_rate_limits(overrides: dict[str, str]) -> FastAPI:
 
 class TestParseLimitValue:
     def test_standard_periods(self):
-        assert _parse_limit_value("5/minute") == (5, 60)
-        assert _parse_limit_value("100/hour") == (100, 3600)
-        assert _parse_limit_value("10/second") == (10, 1)
-        assert _parse_limit_value("50/day") == (50, 86400)
+        assert parse_limit_value("5/minute") == (5, 60)
+        assert parse_limit_value("100/hour") == (100, 3600)
+        assert parse_limit_value("10/second") == (10, 1)
+        assert parse_limit_value("50/day") == (50, 86400)
 
     def test_extended_periods(self):
-        assert _parse_limit_value("5/30second") == (5, 30)
-        assert _parse_limit_value("5/15minute") == (5, 900)
-        assert _parse_limit_value("5/2hour") == (5, 7200)
+        assert parse_limit_value("5/30second") == (5, 30)
+        assert parse_limit_value("5/15minute") == (5, 900)
+        assert parse_limit_value("5/2hour") == (5, 7200)
 
     def test_invalid_period_raises(self):
         with pytest.raises(ValueError, match="Invalid rate limit period"):
-            _parse_limit_value("5/fortnight")
+            parse_limit_value("5/fortnight")
 
 
 class TestResolveRateLimitValue:
