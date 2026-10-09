@@ -5,7 +5,7 @@ UI-managed list-based policy fields (allowed/blocked commands, env keys, URL
 rules) plus the permission switch. The runtime policy object
 (``llm_proxy.mcp.security.policy.McpSecurityPolicy``) subclasses this model to
 add runtime-only fields (e.g. ``allowed_url_schemes``), so the shared fields
-have exactly one source of defaults (see ADR-0025).
+have exactly one source of defaults (see ADR-0026).
 """
 
 from pydantic import BaseModel, Field

@@ -4,7 +4,7 @@ The grammar â€” bucket names, their code defaults, and "N/period" spec parsing â
 is the single source shared by the rate-limiting middleware, the admin
 server-settings endpoint, and the config manager's runtime read. It lives in
 the config package so neither the API layer nor the middleware owns another
-module's data (see ADR-0025).
+module's data (see ADR-0026).
 """
 
 from pydantic import BaseModel, Field

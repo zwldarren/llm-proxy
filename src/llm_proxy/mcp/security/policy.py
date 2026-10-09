@@ -16,7 +16,7 @@ class McpSecurityPolicy(McpSecurityPolicyConfig):
     """Central policy object for MCP hardening.
 
     Subclasses the canonical server-settings model so the UI-managed policy
-    fields have exactly one source of defaults (ADR-0025); this class adds the
+    fields have exactly one source of defaults (ADR-0026); this class adds the
     runtime-only fields (``allowed_url_schemes``) and the predicate verbs.
 
     Defaults implement a secure-by-default posture:
@@ -169,7 +169,7 @@ class McpSecurityPolicy(McpSecurityPolicyConfig):
             )
             return policy
         # Override DB-managed fields from the stored record. The field set is
-        # exactly the canonical server-settings model's fields (ADR-0025), so
+        # exactly the canonical server-settings model's fields (ADR-0026), so
         # a new UI-managed field is picked up without editing this tuple.
         for field_name in McpSecurityPolicyConfig.model_fields:
             setattr(policy, field_name, getattr(stored, field_name))

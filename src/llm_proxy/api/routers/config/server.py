@@ -5,7 +5,7 @@ Every route is generated from the server settings registry
 ``server_config`` key declares its path, verbs, request model, write merge
 mode, and response shape, so the handler logic exists once instead of being
 copied per key. Paths, verbs, and payloads are byte-identical to the
-hand-written endpoints this replaces (ADR-0025).
+hand-written endpoints this replaces (ADR-0026).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request

@@ -17,7 +17,7 @@ Adding a UI-managed setting is adding a row here; the endpoint, the runtime
 read, and its test coverage come with it.
 
 The write and read modes are deliberately limited to the variance that exists
-today — no speculative extension points (ADR-0025).
+today — no speculative extension points (ADR-0026).
 """
 
 import logging

@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 # Re-exported: the implementation moved to the server settings registry
-# (ADR-0025), which owns both the admin endpoints and this runtime read.
+# (ADR-0026), which owns both the admin endpoints and this runtime read.
 from llm_proxy.config.server_settings import load_logging_config, load_server_settings
 from llm_proxy.core.exceptions import ProviderNotConfiguredError
 from llm_proxy.observability.logger import get_logger
@@ -212,7 +212,7 @@ class DatabaseConfigManager:
                 server_config_dict[config.key] = config.value
 
             # UI-managed server settings: one tolerant typed parse over the
-            # same registry that drives the admin endpoints (ADR-0025).
+            # same registry that drives the admin endpoints (ADR-0026).
             settings = load_server_settings(server_config_dict)
 
             server_params = ServerParams(
