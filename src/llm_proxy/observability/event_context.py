@@ -216,12 +216,16 @@ class EventContext:
         ):
             self.provider_reported_cost = provider_cost
 
-        # Extract web search request count from server_tool_use (Anthropic)
+        # Extract web search request count from server_tool_use (Anthropic).
+        # Same fact as the record's ``web_search_requests`` (which may also carry
+        # the searches the proxy executed, added on top): a later observation can
+        # only raise it, so a provider-info block that repeats a smaller count
+        # cannot withdraw what the turn already reported.
         server_tool_use = provider_info.get("server_tool_use")
         if isinstance(server_tool_use, dict):
             ws_count = server_tool_use.get("web_search_requests")
             if isinstance(ws_count, int) and ws_count is not None:
-                self.web_search_requests = ws_count
+                self.web_search_requests = _monotonic(self.web_search_requests, ws_count)
 
     @property
     def latency_ms(self) -> float:
