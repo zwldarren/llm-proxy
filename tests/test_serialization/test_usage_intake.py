@@ -381,6 +381,52 @@ class TestRealtimeDialect:
         assert usage.completion_tokens_details.audio_tokens == 25
 
 
+class TestOllamaDialect:
+    """Ollama's counters, and the cache count that is a subset of the input one."""
+
+    def test_absent_counters_make_no_record(self) -> None:
+        assert parse_usage("ollama", {"model": "llama3", "done": True}) is None
+
+    def test_either_counter_alone_is_a_report(self) -> None:
+        only_prompt = parse_usage("ollama", {"prompt_eval_count": 11})
+        assert only_prompt is not None
+        assert (only_prompt.input_tokens, only_prompt.output_tokens) == (11, 0)
+
+        only_output = parse_usage("ollama", {"eval_count": 7})
+        assert only_output is not None
+        assert (only_output.input_tokens, only_output.output_tokens) == (0, 7)
+
+    def test_a_reported_zero_is_a_count_not_a_missing_field(self) -> None:
+        usage = parse_usage("ollama", {"prompt_eval_count": 0, "eval_count": 50})
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (0, 50)
+
+    def test_the_cache_count_is_clamped_into_the_input_total(self) -> None:
+        """A provider breaking "cache is a subset of input" yields a sane count.
+
+        ``prompt_eval_cached_count`` is a subset of ``prompt_eval_count``; a count
+        outside ``[0, input]`` would otherwise be priced as tokens that were never
+        part of the prompt.
+        """
+        oversized = parse_usage("ollama", {"prompt_eval_count": 5, "prompt_eval_cached_count": 99})
+        assert oversized is not None
+        assert oversized.cache_read_input_tokens == 5
+
+        negative = parse_usage("ollama", {"prompt_eval_count": 5, "prompt_eval_cached_count": -3})
+        assert negative is not None
+        assert negative.cache_read_input_tokens == 0
+
+    def test_absent_cache_count_is_not_a_reported_zero(self) -> None:
+        usage = parse_usage("ollama", {"prompt_eval_count": 11, "eval_count": 2})
+        assert usage is not None
+        assert usage.cache_read_input_tokens is None
+
+    def test_the_total_is_the_two_counters_summed(self) -> None:
+        usage = parse_usage("ollama", {"prompt_eval_count": 11, "eval_count": 2})
+        assert usage is not None
+        assert usage.total_tokens == 13
+
+
 # ---------------------------------------------------------------------------
 # The accumulator
 # ---------------------------------------------------------------------------

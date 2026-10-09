@@ -27,7 +27,7 @@ from llm_proxy.serialization.usage.folds import (
     fold_deepseek_cache_hits,
 )
 
-type UsageDialect = Literal["chat", "responses", "anthropic", "realtime"]
+type UsageDialect = Literal["chat", "responses", "anthropic", "realtime", "ollama"]
 
 __all__ = ["UsageDialect", "parse_usage"]
 
@@ -362,6 +362,59 @@ def _parse_realtime(payload: Mapping[str, Any]) -> Usage | None:
 
 
 # ---------------------------------------------------------------------------
+# Ollama
+# ---------------------------------------------------------------------------
+
+
+def _ollama_counts(payload: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Ollama's ``(input, output)`` counts.
+
+    Ollama reports ``prompt_eval_count`` and ``eval_count`` on the terminal
+    response or chunk, and a reported ``0`` is a real value (the prompt was
+    served from cache, or no output was generated), so the guard must not treat
+    it as "missing". Either counter may be absent while the other is present;
+    ``None`` means neither was there, and the caller builds no record at all.
+    """
+    input_tokens = _int(payload.get("prompt_eval_count"))
+    output_tokens = _int(payload.get("eval_count"))
+    if input_tokens is None and output_tokens is None:
+        return None
+    return input_tokens or 0, output_tokens or 0
+
+
+def _ollama_cached_tokens(payload: Mapping[str, Any], input_tokens: int) -> int | None:
+    """``prompt_eval_cached_count`` — how much of the prompt the cache served.
+
+    A *subset* of ``prompt_eval_count``, which Ollama keeps as the logical input
+    total — the same contract as the canonical record, whose ``input_tokens``
+    includes its cache counters — so the value is clamped into
+    ``[0, input_tokens]``: a provider breaking that invariant yields a sane count
+    instead of a negative or oversized one. The field is a nullable pointer
+    upstream and only exists on newer servers, so absent means ``None``
+    ("reported nothing"), which is not the same as a reported zero.
+    """
+    cached = _int(payload.get("prompt_eval_cached_count"))
+    if cached is None:
+        return None
+    return max(0, min(cached, input_tokens))
+
+
+def _parse_ollama(payload: Mapping[str, Any]) -> Usage | None:
+    counts = _ollama_counts(payload)
+    if counts is None:
+        return None
+    input_tokens, output_tokens = counts
+    return Usage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        # Ollama reports no total; the canonical record derives one from the two
+        # counters it does report (``Usage.__post_init__``).
+        total_tokens=input_tokens + output_tokens,
+        cache_read_input_tokens=_ollama_cached_tokens(payload, input_tokens),
+    )
+
+
+# ---------------------------------------------------------------------------
 # The seam
 # ---------------------------------------------------------------------------
 
@@ -381,6 +434,7 @@ _ADAPTERS: dict[str, DialectAdapter] = {
     "responses": DialectAdapter(_parse_responses, _count_responses_events),
     "anthropic": DialectAdapter(_parse_anthropic),
     "realtime": DialectAdapter(_parse_realtime),
+    "ollama": DialectAdapter(_parse_ollama),
 }
 
 

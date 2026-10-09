@@ -158,11 +158,17 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   caller testing truthiness, and downstream emission would have read it as "has
   nested facts".
 - The dialect set starts with the four that carry the most copies — chat,
-  responses, anthropic, realtime. The other wire shapes that still parse usage
-  locally (gemini `usageMetadata`, gemini interactions, ollama
-  `prompt_eval_count`/`eval_count`, the SystemOne/Decisions evaluation wires,
-  and the audio/transcription/image stream trackers) register adapters as they
-  migrate; the registry grows, the interface does not.
+  responses, anthropic, realtime — and gains one per slice after that (ollama,
+  which parses `prompt_eval_count`/`eval_count` and clamps the
+  `prompt_eval_cached_count` subset into the input total). The wire shapes that
+  still parse usage locally (gemini `usageMetadata`, the Interactions vocabulary,
+  the SystemOne/Decisions evaluation wires, and the audio/transcription/image
+  stream trackers) register adapters as they migrate; the registry grows, the
+  interface does not. Ollama also shows the split between extraction and
+  emission holding up in the small: its chunk converter still builds the client's
+  OpenAI-dialect usage object, including the native `ollama_metrics` block that is
+  observability rather than billing, but the amounts now come from the seam
+  instead of a second pair of counter readers.
 - The accumulator's merge rule — accounting counters never decrease, every
   other field takes the later non-``None`` value — supersedes the three rules it
   replaces. It matches the monotonic requirement the Anthropic path already
@@ -192,12 +198,13 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   cache read in the same field. The amount is unchanged either way, which is why the
   ratchet passes on both sides of the swap and only the placement pins had to be
   rewritten.
-- `StreamingUsage.from_usage` is the one projection of the canonical record onto the
-  wire-shaped record the streaming tiers still speak. Every migrated `get_usage()`
-  returns it, so the bridge has a single implementation and disappears in one place
-  when the record does. Its only non-mechanical step moves the canonical flat
-  `reasoning_tokens` into the nested completion detail, which is the only expression
-  the old record has.
+- `StreamingUsage.from_usage` was the one projection of the canonical record onto
+  the wire-shaped record the streaming tiers then spoke. Every migrated
+  `get_usage()` returned it, so when the record itself was retired the bridge had a
+  single implementation and disappeared from one place. Its only non-mechanical step
+  moved the canonical flat `reasoning_tokens` into the nested completion detail,
+  which was the only expression the old record had; the record now keeps the flat
+  field, and client emission folds it back.
 - `EventContext.update_usage` derives `total_tokens` from its merged counters when
   both are known, keeps a total-only record's own total, and lets a partial record
   leave the total alone: an adapter synthesizes a per-event total from whatever one

@@ -48,6 +48,8 @@ from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
 from llm_proxy.serialization.anthropic.serializer import parse_usage_and_provider_extras
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
+from llm_proxy.serialization.ollama.serializer import OllamaProviderSerializer
+from llm_proxy.serialization.ollama.streaming import OllamaChunkConverter
 from llm_proxy.serialization.openai.serializer import parse_usage_from_response
 from llm_proxy.serialization.openai.streaming_converter import OpenAIResponsesChunkConverter
 from llm_proxy.serialization.usage import UsageAccumulator, parse_usage
@@ -252,6 +254,24 @@ def _realtime_billing_read_model(frames: Sequence[dict[str, Any]]) -> TokenUsage
     return token_usage_from(parse_usage("realtime", frames[0]))
 
 
+def _ollama_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/ollama/response_parser.py`` — a native body → usage."""
+    return OllamaProviderSerializer().parse_provider_response(frames[0], model="llama3.1").usage
+
+
+def _ollama_embeddings_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """The same module's ``/api/embed`` path — prompt counters, no output ones."""
+    return OllamaProviderSerializer().parse_provider_embedding_response(frames[0]).usage
+
+
+def _ollama_streaming_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization ollama/streaming.py`` — the terminal ``done`` chunk → usage."""
+    converter = OllamaChunkConverter(model="llama3.1", request_id="req_parity")
+    for frame in frames:
+        converter.convert_chunk(frame)
+    return converter.get_usage()
+
+
 # ---------------------------------------------------------------------------
 # Rows
 # ---------------------------------------------------------------------------
@@ -434,6 +454,32 @@ REALTIME_DONE: dict[str, Any] = {
             "output_token_details": {"audio_tokens": 25},
         },
     },
+}
+
+OLLAMA_BODY: dict[str, Any] = {
+    "model": "llama3.1",
+    "message": {"role": "assistant", "content": "Hello"},
+    "done": True,
+    "done_reason": "stop",
+    "prompt_eval_count": 1000,
+    "eval_count": 50,
+    "prompt_eval_cached_count": 400,
+}
+
+OLLAMA_TERMINAL_CHUNK: dict[str, Any] = {
+    "model": "llama3.1",
+    "done": True,
+    "done_reason": "stop",
+    "prompt_eval_count": 1000,
+    "eval_count": 50,
+    "prompt_eval_cached_count": 400,
+    "total_duration": 1234567890,
+}
+
+OLLAMA_EMBED: dict[str, Any] = {
+    "model": "nomic-embed-text",
+    "embeddings": [[0.1, 0.2]],
+    "prompt_eval_count": 12,
 }
 
 _ROWS: tuple[Row, ...] = (
@@ -743,6 +789,58 @@ _ROWS: tuple[Row, ...] = (
         },
     ),
     Row(
+        id="ollama-body-parser",
+        dialect="ollama",
+        frames=(OLLAMA_BODY,),
+        legacy=_ollama_body_parser,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="ollama-embeddings-parser",
+        dialect="ollama",
+        # An embeddings body has no ``usage`` block at all: the counters sit at the
+        # top level of the response, and only the prompt one is reported.
+        frames=(OLLAMA_EMBED,),
+        legacy=_ollama_embeddings_parser,
+        recorded={
+            "input": 12,
+            "output": 0,
+            "total": 12,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="ollama-streaming-converter",
+        dialect="ollama",
+        # The terminal ``done`` chunk, whose usage the converter both emits to the
+        # client (OpenAI dialect) and serves to billing.
+        frames=(OLLAMA_TERMINAL_CHUNK,),
+        legacy=_ollama_streaming_converter,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
         id="realtime-usage-dict-to-billing",
         dialect="realtime",
         frames=(REALTIME_DONE,),
@@ -881,4 +979,10 @@ def test_every_still_unmigrated_dialect_has_a_row() -> None:
     call sites; a dialect with no row would be deleted without ever having been
     compared.
     """
-    assert {row.dialect for row in _ROWS} == {"chat", "anthropic", "responses", "realtime"}
+    assert {row.dialect for row in _ROWS} == {
+        "chat",
+        "anthropic",
+        "responses",
+        "realtime",
+        "ollama",
+    }
