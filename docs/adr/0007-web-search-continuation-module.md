@@ -72,9 +72,9 @@ the capture verbs (``capture_stop_reason`` / ``capture_stop_sequence`` /
 
 - ``merge_continuation_usage`` stays in this module as the continuation-side
   call, but delegates to ``merge_terminal_state``; the merge rule (sum, per
-  the amendment above) is unchanged. ``sum_usage_dicts`` moved next to its
-  only consumer into ``streaming/transformer.py`` and is re-exported from
-  here.
+  the amendment above) is unchanged. ``sum_usage_dicts`` lives next to its
+  only consumer in ``streaming/transformer.py``; the re-export from this
+  module was dropped once it had no importers.
 - ``_absolute_block_cursor`` reads the public ``block_cursor()`` verb; the
   protocol-specific cursor semantics (Anthropic: next free block index, so
   ``cursor + result_count``; OpenResponses: cursor rests on the last emitted
@@ -83,3 +83,22 @@ the capture verbs (``capture_stop_reason`` / ``capture_stop_sequence`` /
 - Each inheriting transformer keeps its own flush, because the terminal wire
   shape is protocol-side or provider-side knowledge (ADR-0003); the mixin is
   a transformer-internal seam, not a new family module.
+
+## Amendment: the canonical usage record is absorbed where the hop is consumed
+
+The sum rule above was only ever applied to the client wire's pending usage
+(`_pending_usage`, summed by ``merge_terminal_state`` / ``sum_usage_dicts`` at
+finalize, so the terminal event a client sees covers both calls). Billing reads
+a different object — the transformer the stream lifecycle pinned to the request
+(``event_context.transformer``) — while the continuation's transformer is
+discarded as the loop advances, so a continued turn's *record* covered the first
+call only: the client saw the second call's tokens, the bill did not.
+
+``StreamingTransformer`` now exposes ``absorb_usage_record(other)``, and the
+continuation loop folds each hop's record into the pinned transformer as it
+consumes the hop (the turns are independent billed calls, so the facts add via
+the intake seam's ``add_usage``, ADR-0025). ``merge_terminal_state`` keeps owning
+the wire copy, and ``merge_continuation_usage`` does not touch the record —
+summing it in both places would double-count. ``get_usage()`` became the base
+class's verb: a subclass reports its own upstream call through ``_own_usage()``
+and the base folds the absorbed calls in.

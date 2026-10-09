@@ -3,6 +3,7 @@
 from llm_proxy.billing.cost import CostBreakdown, PricingRates, calculate_cost
 from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
 from llm_proxy.billing.tokens import (
+    ProxyBillableDimensions,
     TokenUsage,
     count_embedding_input_tokens,
     count_messages_tokens,
@@ -12,7 +13,7 @@ from llm_proxy.billing.tokens import (
     count_tools_tokens_async,
     estimate_embedding_usage,
     estimate_usage_from_request,
-    extract_tokens_from_usage,
+    token_usage_from,
 )
 from llm_proxy.billing.transcription_stream_usage import TranscriptionStreamUsageTracker
 
@@ -22,6 +23,7 @@ __all__ = [
     "PricingRates",
     "calculate_cost",
     # Tokens
+    "ProxyBillableDimensions",
     "TokenUsage",
     "count_embedding_input_tokens",
     "count_messages_tokens",
@@ -31,7 +33,7 @@ __all__ = [
     "count_tools_tokens_async",
     "estimate_embedding_usage",
     "estimate_usage_from_request",
-    "extract_tokens_from_usage",
+    "token_usage_from",
     # Stream usage trackers
     "ImageStreamUsageTracker",
     "TranscriptionStreamUsageTracker",

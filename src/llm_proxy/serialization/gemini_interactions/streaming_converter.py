@@ -26,6 +26,7 @@ import orjson
 from orjson import JSONDecodeError
 
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.gemini_interactions.annotations import (
     content_annotations_to_openai,
 )
@@ -39,7 +40,7 @@ from llm_proxy.serialization.gemini_interactions.usage import (
     interactions_normalize_usage,
     interactions_web_search_requests,
 )
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 
 class InteractionsStreamingTransformer(StreamingTransformer):
@@ -63,7 +64,7 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         self._tool_calls: dict[int, dict[str, Any]] = {}
         # web search requests seen as google_search_call steps
         self._web_search_requests: int = 0
-        self._usage: StreamingUsage | None = None
+        self._usage: Usage | None = None
         self._finished = False
 
     def transform(self, chunk: str | dict[str, Any]) -> str | None:
@@ -440,8 +441,8 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         self._finalize_accumulation()
         return chunk
 
-    def _usage_to_streaming(self, usage: dict[str, Any]) -> StreamingUsage:
-        """Map an Interactions usage dict onto the canonical StreamingUsage."""
+    def _usage_to_streaming(self, usage: dict[str, Any]) -> Usage:
+        """Map an Interactions usage dict onto the canonical usage record."""
         search_requests = interactions_web_search_requests(usage)
         prompt_tokens, completion_tokens = interactions_billable_token_counts(
             usage, has_search_grounding=search_requests > 0
@@ -451,7 +452,7 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         # Cached tokens go ONLY into cache_read_input_tokens: setting
         # prompt_tokens_details too would make billing apply the
         # cache-rate adjustment twice for the same tokens.
-        return StreamingUsage(
+        return Usage(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             total_tokens=total if total is not None else prompt_tokens + completion_tokens,
@@ -552,10 +553,10 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             self._finalize_accumulation()
         return "data: [DONE]\n\n"
 
-    def get_usage(self) -> StreamingUsage | None:
+    def _own_usage(self) -> Usage | None:
         """Return accumulated usage from the interactions stream."""
         if self._usage is not None:
             return self._usage
         if self._web_search_requests > 0:
-            return StreamingUsage(web_search_requests=self._web_search_requests)
+            return Usage(web_search_requests=self._web_search_requests)
         return None

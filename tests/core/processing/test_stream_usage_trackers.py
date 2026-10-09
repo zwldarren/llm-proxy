@@ -6,7 +6,7 @@ token usage, audio duration) that is not available through the normal streaming
 transformer path.
 """
 
-from unittest.mock import MagicMock
+from typing import Any
 
 import orjson
 
@@ -20,6 +20,12 @@ from llm_proxy.observability.event_context import EventContext
 def _sse(payload: dict) -> str:
     """Build a single ``data:`` SSE line for the given payload."""
     return f"data: {orjson.dumps(payload).decode()}\n\n"
+
+
+def _record(ctx: Any) -> Any:
+    """The usage record the tracker wrote; a tracker that wrote none is a bug."""
+    assert ctx.usage is not None, "the tracker wrote no usage record"
+    return ctx.usage
 
 
 class TestImageStreamUsageTrackerOpenAI:
@@ -85,10 +91,10 @@ class TestImageStreamUsageTrackerOpenAI:
         tracker.apply_to(ctx)
 
         assert ctx.images_generated == 1
-        assert ctx.prompt_tokens == 1000
-        assert ctx.completion_tokens == 500
-        assert ctx.total_tokens == 1500
-        assert ctx.image_input_tokens == 400
+        assert _record(ctx).input_tokens == 1000
+        assert _record(ctx).output_tokens == 500
+        assert _record(ctx).total_tokens == 1500
+        assert _record(ctx).prompt_tokens_details.image_tokens == 400
 
     def test_done_marker_ignored(self):
         """The [DONE] marker is not parsed as JSON."""
@@ -167,9 +173,9 @@ class TestImageStreamUsageTrackerGemini:
         tracker.apply_to(ctx)
 
         assert ctx.images_generated == 1
-        assert ctx.prompt_tokens == 100
-        assert ctx.completion_tokens == 50
-        assert ctx.total_tokens == 150
+        assert _record(ctx).input_tokens == 100
+        assert _record(ctx).output_tokens == 50
+        assert _record(ctx).total_tokens == 150
 
     def test_apply_to_gemini_without_total_token_count(self):
         """When totalTokenCount is absent, total is derived from prompt + completion."""
@@ -192,7 +198,7 @@ class TestImageStreamUsageTrackerGemini:
         ctx = EventContext(request_id="req", trace_id="trace", model="imagen-3.0")
         tracker.apply_to(ctx)
 
-        assert ctx.total_tokens == 150
+        assert _record(ctx).total_tokens == 150
 
     def test_non_image_inline_data_not_counted(self):
         """inlineData with a non-image mimeType is not counted as a generated image."""
@@ -298,9 +304,9 @@ class TestImageStreamUsageTrackerGeminiInteractions:
 
         assert ctx.images_generated == 1
         # tool use folds into input; thoughts fold into output
-        assert ctx.prompt_tokens == 13
-        assert ctx.completion_tokens == 7
-        assert ctx.total_tokens == 15
+        assert _record(ctx).input_tokens == 13
+        assert _record(ctx).output_tokens == 7
+        assert _record(ctx).total_tokens == 15
 
     def test_apply_to_search_grounding_excludes_tool_use(self):
         """grounding_tool_count flips has_search_grounding like the chat path."""
@@ -329,8 +335,8 @@ class TestImageStreamUsageTrackerGeminiInteractions:
         tracker.apply_to(ctx)
 
         # search-grounded tool-use tokens are NOT billed at the input rate
-        assert ctx.prompt_tokens == 100
-        assert ctx.completion_tokens == 25
+        assert _record(ctx).input_tokens == 100
+        assert _record(ctx).output_tokens == 25
 
     def test_apply_to_openai_style_usage_aliases(self):
         """The migration guide streams OpenAI-style usage on completed events."""
@@ -351,9 +357,9 @@ class TestImageStreamUsageTrackerGeminiInteractions:
         ctx = EventContext(request_id="req", trace_id="trace", model="gemini-3.1-flash-image")
         tracker.apply_to(ctx)
 
-        assert ctx.prompt_tokens == 256
-        assert ctx.completion_tokens == 128
-        assert ctx.total_tokens == 384
+        assert _record(ctx).input_tokens == 256
+        assert _record(ctx).output_tokens == 128
+        assert _record(ctx).total_tokens == 384
 
 
 class TestTranscriptionStreamUsageTracker:
@@ -382,43 +388,32 @@ class TestTranscriptionStreamUsageTracker:
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 60}}))
         assert tracker.captured_usage == {"type": "duration", "seconds": 60}
 
-    def test_apply_to_uses_adapter_parse_usage(self):
-        """apply_to delegates to adapter._parse_usage and updates the context."""
+    def test_apply_to_parses_duration_through_the_seam(self):
+        """apply_to builds the record from the captured event via the audio dialect."""
         tracker = TranscriptionStreamUsageTracker()
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 90}}))
 
-        adapter = MagicMock()
-        # Simulate the BaseHttpProvider._parse_usage duration handling
-        from llm_proxy.models.types import Usage
-
-        adapter._parse_usage.return_value = Usage(audio_duration_seconds=90)
-
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
-        tracker.apply_to(ctx, adapter)
+        tracker.apply_to(ctx)
 
-        adapter._parse_usage.assert_called_once_with({"type": "duration", "seconds": 90})
-        assert ctx.audio_duration_seconds == 90
+        assert _record(ctx).audio_duration_seconds == 90
 
     def test_apply_to_no_usage_is_noop(self):
-        """apply_to with no captured usage does not call the adapter."""
+        """apply_to without a captured usage block writes nothing."""
         tracker = TranscriptionStreamUsageTracker()
-        adapter = MagicMock()
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
-        tracker.apply_to(ctx, adapter)
-        adapter._parse_usage.assert_not_called()
+        tracker.apply_to(ctx)
+        assert ctx.usage is None
 
-    def test_apply_to_parse_returns_none(self):
-        """apply_to is a no-op when _parse_usage returns None."""
+    def test_apply_to_a_sparse_event_writes_nothing(self):
+        """An event whose usage block the adapter cannot read is a no-op."""
         tracker = TranscriptionStreamUsageTracker()
-        tracker.observe(_sse({"usage": {"type": "duration", "seconds": 90}}))
-
-        adapter = MagicMock()
-        adapter._parse_usage.return_value = None
+        tracker.observe(_sse({"type": "transcript.text.done", "usage": {}}))
 
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
-        tracker.apply_to(ctx, adapter)
+        tracker.apply_to(ctx)
 
-        assert ctx.audio_duration_seconds is None
+        assert ctx.usage is None
 
     def test_done_marker_ignored(self):
         tracker = TranscriptionStreamUsageTracker()

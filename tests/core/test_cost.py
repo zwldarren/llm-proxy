@@ -18,8 +18,10 @@ from llm_proxy.billing.cost import (
     _select_tier_rates,
     calculate_cost,
 )
-from llm_proxy.billing.tokens import TokenUsage
+from llm_proxy.billing.tokens import ProxyBillableDimensions, TokenUsage
 from llm_proxy.config.types.model import ModelConfig, ModelProviderConfig, PricingTierConfig
+from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
+from llm_proxy.serialization.usage import parse_usage
 
 
 class TestGetProviderPricing:
@@ -514,11 +516,7 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_with_usage(self):
         """Basic cost calculation with usage dict."""
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500,
-        }
+        usage = Usage(input_tokens=1000, output_tokens=500, total_tokens=1500)
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -561,7 +559,7 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_no_model_name(self):
         """Returns None cost when model_name is None."""
-        usage = {"prompt_tokens": 1000, "completion_tokens": 500}
+        usage = Usage(input_tokens=1000, output_tokens=500)
 
         result = await calculate_cost(
             usage=usage,
@@ -574,7 +572,7 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_model_not_found(self):
         """Returns None cost when model config not found."""
-        usage = {"prompt_tokens": 1000, "completion_tokens": 500}
+        usage = Usage(input_tokens=1000, output_tokens=500)
 
         mock_config_manager = MagicMock()
         mock_config_manager.get_model_config = AsyncMock(return_value=None)
@@ -590,7 +588,7 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_model_without_pricing(self):
         """Returns None cost when a resolved model has no pricing at any level."""
-        usage = {"prompt_tokens": 1000, "completion_tokens": 500}
+        usage = Usage(input_tokens=1000, output_tokens=500)
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -617,12 +615,9 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_with_cache_tokens(self):
         """Cost calculation with cache tokens includes savings."""
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500,
-            "cache_read_input_tokens": 400,
-        }
+        usage = Usage(
+            input_tokens=1000, output_tokens=500, total_tokens=1500, cache_read_input_tokens=400
+        )
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -659,12 +654,12 @@ class TestCalculateCostPublicAPI:
         style). They are subtracted from effective_prompt_tokens so they are
         charged at the audio rate only, not double-charged.
         """
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "prompt_tokens_details": {"audio_tokens": 600},
-            "completion_tokens_details": {"audio_tokens": 300},
-        }
+        usage = Usage(
+            input_tokens=1000,
+            output_tokens=500,
+            prompt_tokens_details=PromptTokensDetails(audio_tokens=600),
+            completion_tokens_details=CompletionTokensDetails(audio_tokens=300),
+        )
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -710,18 +705,27 @@ class TestCalculateCostPublicAPI:
         tokens; each component must be charged at its own rate, with no
         double charge at the base rate for the audio and cached portions.
         """
-        usage = {
-            "total_tokens": 1000,
-            "input_tokens": 500,
-            "output_tokens": 500,
-            "input_token_details": {
-                "cached_tokens": 100,
-                "text_tokens": 300,
-                "audio_tokens": 100,
-                "image_tokens": 0,
+        # The dialect is the seam's business (ADR-0025); what this test prices is
+        # the record it produces.
+        usage = parse_usage(
+            "realtime",
+            {
+                "response": {
+                    "usage": {
+                        "total_tokens": 1000,
+                        "input_tokens": 500,
+                        "output_tokens": 500,
+                        "input_token_details": {
+                            "cached_tokens": 100,
+                            "text_tokens": 300,
+                            "audio_tokens": 100,
+                            "image_tokens": 0,
+                        },
+                        "output_token_details": {"text_tokens": 200, "audio_tokens": 300},
+                    }
+                }
             },
-            "output_token_details": {"text_tokens": 200, "audio_tokens": 300},
-        }
+        )
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[ModelProviderConfig(provider="openai", priority=0)],
@@ -753,7 +757,7 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_exception_returns_none(self):
         """Exception in config lookup returns None cost, not raises."""
-        usage = {"prompt_tokens": 1000, "completion_tokens": 500}
+        usage = Usage(input_tokens=1000, output_tokens=500)
 
         mock_config_manager = MagicMock()
         mock_config_manager.get_model_config = AsyncMock(side_effect=RuntimeError("DB error"))
@@ -809,12 +813,12 @@ class TestCalculateCostPublicAPI:
         assumes cached tokens are already in prompt_tokens and subtracts the full
         input cost that was never charged.
         """
-        usage = {
-            "prompt_tokens": 2527,
-            "completion_tokens": 64,
-            "total_tokens": 129144,
-            "prompt_tokens_details": {"cached_tokens": 126553},
-        }
+        usage = Usage(
+            input_tokens=2527,
+            output_tokens=64,
+            total_tokens=129144,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=126553),
+        )
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -856,12 +860,12 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_cached_tokens_included_in_prompt(self):
         """OpenAI-style: cached_tokens are included in prompt_tokens — unchanged."""
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "total_tokens": 1500,
-            "prompt_tokens_details": {"cached_tokens": 400},
-        }
+        usage = Usage(
+            input_tokens=1000,
+            output_tokens=500,
+            total_tokens=1500,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=400),
+        )
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -897,7 +901,7 @@ class TestCalculateCostPublicAPI:
     @pytest.mark.asyncio
     async def test_calculate_cost_provider_fallback(self):
         """Provider-specific pricing overrides model-level pricing."""
-        usage = {"prompt_tokens": 1000, "completion_tokens": 500}
+        usage = Usage(input_tokens=1000, output_tokens=500)
 
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
@@ -1062,7 +1066,7 @@ class TestCalculateCostUnitBased:
     @pytest.mark.asyncio
     async def test_image_generation_per_image_only(self):
         """gpt-image billed per image with no token pricing configured."""
-        usage = {"images_generated": 3}
+        usage = Usage()
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1081,6 +1085,7 @@ class TestCalculateCostUnitBased:
             model_name="gpt-image-1",
             config_manager=mock_config_manager,
             provider_name="openai",
+            dimensions=ProxyBillableDimensions(images_generated=3),
         )
 
         assert result.cost_usd is not None
@@ -1096,12 +1101,11 @@ class TestCalculateCostUnitBased:
         at the full image rate. The total is the same as before (delta approach)
         when both input and image rates are configured.
         """
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "input_tokens_details": {"image_tokens": 500},
-            "images_generated": 2,
-        }
+        usage = Usage(
+            input_tokens=1000,
+            output_tokens=500,
+            prompt_tokens_details=PromptTokensDetails(image_tokens=500),
+        )
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1123,6 +1127,7 @@ class TestCalculateCostUnitBased:
             model_name="gpt-image-1",
             config_manager=mock_config_manager,
             provider_name="openai",
+            dimensions=ProxyBillableDimensions(images_generated=2),
         )
 
         assert result.cost_usd is not None
@@ -1140,7 +1145,7 @@ class TestCalculateCostUnitBased:
     @pytest.mark.asyncio
     async def test_tts_per_character_billing(self):
         """TTS billed per 1M characters, no token usage."""
-        usage = {"tts_characters": 500_000}
+        usage = Usage()
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1159,6 +1164,7 @@ class TestCalculateCostUnitBased:
             model_name="tts-1",
             config_manager=mock_config_manager,
             provider_name="openai",
+            dimensions=ProxyBillableDimensions(tts_characters=500000),
         )
 
         assert result.cost_usd is not None
@@ -1168,7 +1174,7 @@ class TestCalculateCostUnitBased:
     @pytest.mark.asyncio
     async def test_stt_duration_billing(self):
         """Whisper-style STT billed per audio minute (duration-based usage)."""
-        usage = {"audio_duration_seconds": 90}
+        usage = Usage(audio_duration_seconds=90)
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1196,7 +1202,7 @@ class TestCalculateCostUnitBased:
     @pytest.mark.asyncio
     async def test_web_search_per_request_billing(self):
         """Native web search billed per 1k requests, no token usage."""
-        usage = {"web_search_requests": 10}
+        usage = Usage()
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1215,6 +1221,7 @@ class TestCalculateCostUnitBased:
             model_name="claude-3",
             config_manager=mock_config_manager,
             provider_name="anthropic",
+            dimensions=ProxyBillableDimensions(web_search_requests=10),
         )
 
         assert result.cost_usd is not None
@@ -1224,7 +1231,7 @@ class TestCalculateCostUnitBased:
     @pytest.mark.asyncio
     async def test_tokens_plus_web_search_billing(self):
         """Token cost and web search cost both apply."""
-        usage = {"prompt_tokens": 1000, "completion_tokens": 500, "web_search_requests": 4}
+        usage = Usage(input_tokens=1000, output_tokens=500)
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1245,6 +1252,7 @@ class TestCalculateCostUnitBased:
             model_name="claude-3",
             config_manager=mock_config_manager,
             provider_name="anthropic",
+            dimensions=ProxyBillableDimensions(web_search_requests=4),
         )
 
         assert result.cost_usd is not None
@@ -1313,11 +1321,11 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_image_tokens_without_input_rate(self):
         """Image tokens charged at full image rate when no base input rate."""
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "input_tokens_details": {"image_tokens": 500},
-        }
+        usage = Usage(
+            input_tokens=1000,
+            output_tokens=500,
+            prompt_tokens_details=PromptTokensDetails(image_tokens=500),
+        )
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1352,11 +1360,11 @@ class TestEdgeCases:
         When prompt_tokens < audio_tokens, audio tokens are NOT subtracted from
         effective_prompt_tokens, and audio_cost adds the full audio rate.
         """
-        usage = {
-            "prompt_tokens": 400,
-            "completion_tokens": 200,
-            "prompt_tokens_details": {"audio_tokens": 600},
-        }
+        usage = Usage(
+            input_tokens=400,
+            output_tokens=200,
+            prompt_tokens_details=PromptTokensDetails(audio_tokens=600),
+        )
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1390,12 +1398,12 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_cache_tokens_without_input_rate_end_to_end(self):
         """Cache tokens charged at cache rates when no base input rate (end-to-end)."""
-        usage = {
-            "prompt_tokens": 1000,
-            "completion_tokens": 500,
-            "cache_read_input_tokens": 400,
-            "cache_creation_input_tokens": 200,
-        }
+        usage = Usage(
+            input_tokens=1000,
+            output_tokens=500,
+            cache_read_input_tokens=400,
+            cache_creation_input_tokens=200,
+        )
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[
@@ -1598,7 +1606,7 @@ class TestCalculateCostTiered:
         )
 
         result = await calculate_cost(
-            usage={"prompt_tokens": 100000, "completion_tokens": 1000},
+            usage=Usage(input_tokens=100000, output_tokens=1000),
             model_name="gpt-5.4",
             config_manager=self._manager(model_config),
             provider_name="openai",
@@ -1623,7 +1631,7 @@ class TestCalculateCostTiered:
         )
 
         result = await calculate_cost(
-            usage={"prompt_tokens": 300000, "completion_tokens": 1000},
+            usage=Usage(input_tokens=300000, output_tokens=1000),
             model_name="gpt-5.4",
             config_manager=self._manager(model_config),
             provider_name="openai",
@@ -1645,11 +1653,11 @@ class TestCalculateCostTiered:
         )
 
         result = await calculate_cost(
-            usage={
-                "prompt_tokens": 300000,
-                "completion_tokens": 0,
-                "prompt_tokens_details": {"cached_tokens": 100000},
-            },
+            usage=Usage(
+                input_tokens=300000,
+                output_tokens=0,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=100000),
+            ),
             model_name="gpt-5.4",
             config_manager=self._manager(model_config),
             provider_name="openai",
@@ -1668,7 +1676,7 @@ class TestCalculateCostTiered:
         )
 
         result = await calculate_cost(
-            usage={"prompt_tokens": 500, "completion_tokens": 10},
+            usage=Usage(input_tokens=500, output_tokens=10),
             model_name="gpt-5.4",
             config_manager=self._manager(model_config),
             provider_name="openai",
@@ -1685,7 +1693,7 @@ class TestCalculateCostTiered:
         )
 
         result = await calculate_cost(
-            usage={"prompt_tokens": 2000, "completion_tokens": 0},
+            usage=Usage(input_tokens=2000, output_tokens=0),
             model_name="gpt-5.4",
             config_manager=self._manager(model_config),
             provider_name="openai",

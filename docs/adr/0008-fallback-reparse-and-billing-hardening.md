@@ -1,5 +1,9 @@
 # Fallback re-parse hardening and billing fixes
 
+> The Ollama and Gemini usage capture described here now builds the canonical
+> usage record rather than `StreamingUsage`, which ADR-0025 retired; the
+> behavior recorded below is unchanged.
+
 ADR-0005/0006/0007 moved three subsystems (native body preparation, canonical usage record, web-search continuation). The same change set also carried a cluster of smaller behavior changes that no ADR asked for: the fallback chain was hardened to re-parse from the pristine client body per provider attempt, cost calculation gained a token-estimation fallback, Gemini billing gained new rules, and several providers got usage-reporting fixes. This ADR records those decisions so the change set is fully documented.
 
 ## Fallback re-parse hardening

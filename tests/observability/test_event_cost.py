@@ -3,6 +3,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from llm_proxy.billing.cost import CostBreakdown
+from llm_proxy.billing.tokens import token_usage_from
+from llm_proxy.models.types import PromptTokensDetails, Usage
 from llm_proxy.observability.cost import (
     calculate_event_cost,
     extract_streaming_usage,
@@ -17,20 +19,22 @@ def _context(**kwargs):
 
 class TestCalculateEventCost:
     async def test_skips_when_cost_already_set(self):
-        context = _context(cost_usd=0.5, prompt_tokens=10, completion_tokens=5)
+        context = _context(cost_usd=0.5, usage=Usage(input_tokens=10, output_tokens=5))
         await calculate_event_cost(context, config_manager=MagicMock())
         # Unchanged — no re-calculation.
         assert context.cost_usd == 0.5
 
     async def test_provider_reported_cost_takes_precedence(self):
-        context = _context(provider_reported_cost=0.42, prompt_tokens=10, completion_tokens=5)
+        context = _context(
+            provider_reported_cost=0.42, usage=Usage(input_tokens=10, output_tokens=5)
+        )
         with patch("llm_proxy.observability.cost.calculate_cost", new=AsyncMock()) as mock_calc:
             await calculate_event_cost(context, config_manager=MagicMock())
             mock_calc.assert_not_called()
         assert context.cost_usd == 0.42
 
     async def test_calculates_from_pricing_db(self):
-        context = _context(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        context = _context(usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15))
         config_manager = MagicMock()
         with patch(
             "llm_proxy.observability.cost.calculate_cost",
@@ -49,7 +53,7 @@ class TestCalculateEventCost:
         assert context.cost_usd is None
 
     async def test_no_config_manager_skips_calculation(self):
-        context = _context(prompt_tokens=10, completion_tokens=5)
+        context = _context(usage=Usage(input_tokens=10, output_tokens=5))
         with patch("llm_proxy.observability.cost.calculate_cost", new=AsyncMock()) as mock_calc:
             await calculate_event_cost(context, config_manager=None)
             mock_calc.assert_not_called()
@@ -60,41 +64,40 @@ class TestExtractStreamingUsage:
     async def test_noop_without_transformer(self):
         context = _context()
         await extract_streaming_usage(context)
-        assert context.prompt_tokens is None
+        assert context.usage is None
 
     async def test_pulls_usage_from_transformer(self):
-        usage = MagicMock()
-        usage.input_tokens = 7
-        usage.output_tokens = 3
-        usage.total_tokens = 10
-        usage.cache_read_input_tokens = None
-        usage.cache_creation_input_tokens = None
-
+        usage = Usage(input_tokens=7, output_tokens=3, total_tokens=10)
         transformer = MagicMock()
         transformer.get_usage.return_value = usage
 
         context = _context()
         context.transformer = transformer
         await extract_streaming_usage(context)
-        assert context.prompt_tokens == 7
-        assert context.completion_tokens == 3
+        assert context.usage is not None
+        assert context.usage.input_tokens == 7
+        assert context.usage.output_tokens == 3
+
+    async def test_a_non_record_is_ignored(self):
+        """A transformer that hands back something else is not a usage record."""
+        transformer = MagicMock()
+        transformer.get_usage.return_value = {"input_tokens": 7}
+
+        context = _context()
+        context.transformer = transformer
+        await extract_streaming_usage(context)
+        assert context.usage is None
 
     async def test_ignores_transformer_without_get_usage(self):
         context = _context()
         context.transformer = MagicMock(spec=[])  # no get_usage attribute
         await extract_streaming_usage(context)
-        assert context.prompt_tokens is None
+        assert context.usage is None
 
 
 class TestFinalizeEventCost:
     async def test_extracts_usage_then_calculates_cost(self):
-        usage = MagicMock()
-        usage.input_tokens = 7
-        usage.output_tokens = 3
-        usage.total_tokens = 10
-        usage.cache_read_input_tokens = None
-        usage.cache_creation_input_tokens = None
-
+        usage = Usage(input_tokens=7, output_tokens=3, total_tokens=10)
         transformer = MagicMock()
         transformer.get_usage.return_value = usage
 
@@ -107,20 +110,21 @@ class TestFinalizeEventCost:
         ):
             await finalize_event_cost(context, config_manager=MagicMock())
 
-        assert context.prompt_tokens == 7
+        assert context.usage is not None
+        assert context.usage.input_tokens == 7
         assert context.cost_usd == 0.02
 
 
-class TestUpdateUsageNormalizesCacheDialects:
-    def test_cache_write_tokens_map_to_cache_creation(self):
-        """OpenAI-style prompt_tokens_details.cache_write_tokens is billed at
-        the cache-write rate, same as Anthropic cache_creation_input_tokens.
-        update_usage normalizes the dialect into the canonical field at capture
-        time (CONTEXT.md "Canonical usage record"); the billing seam's
-        flat-wins guard (ADR-0006) stays as defense, not the primary mapping."""
-        from llm_proxy.billing.tokens import extract_tokens_from_usage
-        from llm_proxy.models.types import PromptTokensDetails, Usage
+class TestUpdateUsageKeepsOneFactPerField:
+    """The record carries each fact once, in the field its dialect used.
 
+    ``update_usage`` no longer rewrites a dialect's nested detail into the flat
+    field: whether a nested expression stands in for the flat one is billing's
+    read-model question (``token_usage_from``), not the record's, and the record
+    keeps what the provider said (ADR-0025).
+    """
+
+    def test_nested_cache_write_detail_is_kept(self):
         context = _context()
         context.update_usage(
             Usage(
@@ -129,19 +133,13 @@ class TestUpdateUsageNormalizesCacheDialects:
                 prompt_tokens_details=PromptTokensDetails(cache_write_tokens=40),
             )
         )
-        # Canonical field populated at capture; dialect field still carried for
-        # the billing seam's nested expression.
-        assert context.cache_write_tokens == 40
-        assert context.cache_creation_input_tokens == 40
-        assert extract_tokens_from_usage(context.to_usage_dict()).cache_creation_input_tokens == 40
+        assert context.usage is not None
+        assert context.usage.prompt_tokens_details is not None
+        assert context.usage.prompt_tokens_details.cache_write_tokens == 40
+        # Billing reads it as the cache-write dimension.
+        assert token_usage_from(context.usage).cache_creation_input_tokens == 40
 
-    def test_cached_tokens_map_to_cache_read(self):
-        """OpenAI prompt_tokens_details.cached_tokens is the same fact as the
-        Anthropic flat cache_read_input_tokens: update_usage populates the
-        canonical field so tracing and billing read one authoritative field."""
-        from llm_proxy.billing.tokens import extract_tokens_from_usage
-        from llm_proxy.models.types import PromptTokensDetails, Usage
-
+    def test_nested_cached_tokens_detail_is_kept(self):
         context = _context()
         context.update_usage(
             Usage(
@@ -150,16 +148,12 @@ class TestUpdateUsageNormalizesCacheDialects:
                 prompt_tokens_details=PromptTokensDetails(cached_tokens=30),
             )
         )
-        assert context.cached_prompt_tokens == 30
-        assert context.cache_read_input_tokens == 30
-        assert extract_tokens_from_usage(context.to_usage_dict()).cache_read_input_tokens == 30
+        assert context.usage is not None
+        assert context.usage.prompt_tokens_details is not None
+        assert context.usage.prompt_tokens_details.cached_tokens == 30
+        assert token_usage_from(context.usage).cached_prompt_tokens == 30
 
-    def test_flat_cache_creation_wins_over_details(self):
-        """Anthropic flat cache_creation_input_tokens takes precedence over
-        the details-level fallback."""
-        from llm_proxy.billing.tokens import extract_tokens_from_usage
-        from llm_proxy.models.types import PromptTokensDetails, Usage
-
+    def test_flat_cache_write_wins_at_the_read_model(self):
         context = _context()
         context.update_usage(
             Usage(
@@ -169,8 +163,26 @@ class TestUpdateUsageNormalizesCacheDialects:
                 prompt_tokens_details=PromptTokensDetails(cache_write_tokens=40),
             )
         )
-        token_usage = extract_tokens_from_usage(context.to_usage_dict())
-        assert token_usage.cache_creation_input_tokens == 7
+        assert token_usage_from(context.usage).cache_creation_input_tokens == 7
+
+    def test_a_later_observation_cannot_shrink_the_record(self):
+        """Usage arrives cumulatively: a sparse frame adds facts, never removes."""
+        context = _context()
+        context.update_usage(Usage(input_tokens=100, output_tokens=10, cache_read_input_tokens=40))
+        context.update_usage(Usage(input_tokens=5))
+        assert context.usage is not None
+        assert context.usage.input_tokens == 100
+        assert context.usage.cache_read_input_tokens == 40
+
+    def test_the_callers_record_is_not_mutated(self):
+        """A caller may still hold (and log) the record it observed."""
+        observed = Usage(input_tokens=100, output_tokens=10)
+        context = _context()
+        context.update_usage(observed)
+        context.update_usage(Usage(input_tokens=500, output_tokens=50))
+        assert observed.input_tokens == 100
+        assert context.usage is not None
+        assert context.usage.input_tokens == 500
 
 
 class TestCalculateEventCostEstimation:

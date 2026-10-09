@@ -209,20 +209,11 @@ def assemble_stream_response_body(
 
 
 def _usage_from_context(context: EventContext) -> Any:
-    """Build a canonical ``Usage`` from the context's accumulated token fields.
+    """The usage record a reassembled body should carry.
 
     Returns ``None`` when the stream reported no token data, so the reassembled
     body omits ``usage`` rather than inventing zeroes.
     """
     if not context.has_token_data():
         return None
-    from llm_proxy.models.types import Usage
-
-    return Usage(
-        input_tokens=context.prompt_tokens or 0,
-        output_tokens=context.completion_tokens or 0,
-        total_tokens=context.total_tokens,
-        cache_read_input_tokens=context.cache_read_input_tokens,
-        cache_creation_input_tokens=context.cache_creation_input_tokens,
-        reasoning_tokens=context.reasoning_tokens,
-    )
+    return context.usage

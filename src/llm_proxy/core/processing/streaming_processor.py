@@ -514,7 +514,7 @@ class StreamingProcessor:
         def _stt_observer(chunk: Any) -> None:
             tracker.observe(chunk)
             if ctx is not None:
-                tracker.apply_to(ctx, adapter)
+                tracker.apply_to(ctx)
 
         return await self._run_generic_stream(
             adapter,

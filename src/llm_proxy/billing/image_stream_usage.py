@@ -21,7 +21,9 @@ from typing import Any
 import orjson
 from orjson import JSONDecodeError
 
+from llm_proxy.models.types import PromptTokensDetails, Usage
 from llm_proxy.observability.event_context import EventContext
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 
 class ImageStreamUsageTracker:
@@ -30,7 +32,10 @@ class ImageStreamUsageTracker:
     def __init__(self) -> None:
         self._images_completed = 0
         self._usage: dict[str, Any] | None = None
-        self._gemini_usage: dict[str, Any] | None = None
+        # The whole Gemini payload, not just its usageMetadata block: the intake
+        # seam reads the candidates beside it for the grounding fact, which decides
+        # whether tool-use prompt tokens are billed as input (ADR-0025).
+        self._gemini_payload: dict[str, Any] | None = None
         # Interactions-API usage (new vocabulary: total_input_tokens, …)
         self._interactions_usage: dict[str, Any] | None = None
 
@@ -44,7 +49,10 @@ class ImageStreamUsageTracker:
 
     @property
     def gemini_usage(self) -> dict[str, Any] | None:
-        return self._gemini_usage
+        if self._gemini_payload is None:
+            return None
+        usage = self._gemini_payload.get("usageMetadata")
+        return usage if isinstance(usage, dict) else None
 
     @property
     def interactions_usage(self) -> dict[str, Any] | None:
@@ -97,7 +105,7 @@ class ImageStreamUsageTracker:
         # Gemini (generateContent): usageMetadata + candidates with inlineData images
         gemini_usage = data.get("usageMetadata")
         if isinstance(gemini_usage, dict):
-            self._gemini_usage = gemini_usage
+            self._gemini_payload = data
         candidates = data.get("candidates")
         if isinstance(candidates, list):
             for c in candidates:
@@ -115,7 +123,13 @@ class ImageStreamUsageTracker:
                                     self._images_completed += 1
 
     def apply_to(self, ctx: EventContext) -> None:
-        """Write captured billing data into an EventContext."""
+        """Write captured billing data into an EventContext.
+
+        Each dialect is turned into a canonical record rather than into flat
+        fields, so the merge rule that reconciles a turn's observations applies
+        here too (ADR-0025). ``images_generated`` is the proxy's own count, not a
+        provider fact, so it stays a dimension on the context.
+        """
         if self._images_completed > 0:
             # Overwrite request-side n-based fallback with actual count.
             ctx.images_generated = self._images_completed
@@ -124,15 +138,18 @@ class ImageStreamUsageTracker:
         if isinstance(usage, dict):
             # OpenAI gpt-image usage: input_tokens, output_tokens,
             # input_tokens_details.image_tokens
-            if usage.get("input_tokens") is not None:
-                ctx.prompt_tokens = usage["input_tokens"]
-            if usage.get("output_tokens") is not None:
-                ctx.completion_tokens = usage["output_tokens"]
-            if usage.get("total_tokens") is not None:
-                ctx.total_tokens = usage["total_tokens"]
-            itd = usage.get("input_tokens_details")
-            if isinstance(itd, dict) and itd.get("image_tokens") is not None:
-                ctx.image_input_tokens = itd["image_tokens"]
+            image_details = usage.get("input_tokens_details")
+            image_tokens = (
+                image_details.get("image_tokens") if isinstance(image_details, dict) else None
+            )
+            ctx.update_usage(
+                Usage(
+                    input_tokens=usage.get("input_tokens") or 0,
+                    output_tokens=usage.get("output_tokens") or 0,
+                    total_tokens=usage.get("total_tokens"),
+                    prompt_tokens_details=PromptTokensDetails(image_tokens=image_tokens),
+                )
+            )
         elif self._interactions_usage is not None:
             # Gemini Interactions usage: total_input_tokens, total_output_tokens,
             # total_thought_tokens, total_tool_use_tokens, total_tokens.
@@ -146,18 +163,16 @@ class ImageStreamUsageTracker:
             input_tokens, output_tokens = interactions_billable_token_counts(
                 iu, has_search_grounding=has_search
             )
-            ctx.prompt_tokens = input_tokens
-            ctx.completion_tokens = output_tokens
-            if "total_tokens" in iu:
-                ctx.total_tokens = iu["total_tokens"]
-            else:
-                ctx.total_tokens = (input_tokens + output_tokens) or None
-        elif self._gemini_usage is not None:
-            # Gemini usageMetadata: promptTokenCount, candidatesTokenCount, etc.
-            gu = self._gemini_usage
-            ctx.prompt_tokens = gu.get("promptTokenCount", 0) or 0
-            ctx.completion_tokens = gu.get("candidatesTokenCount", 0) or 0
-            if "totalTokenCount" in gu:
-                ctx.total_tokens = gu["totalTokenCount"]
-            else:
-                ctx.total_tokens = (ctx.prompt_tokens or 0) + (ctx.completion_tokens or 0) or None
+            ctx.update_usage(
+                Usage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=iu.get("total_tokens"),
+                )
+            )
+        elif self._gemini_payload is not None:
+            # The gemini dialect, through the same seam the response parsers use, so
+            # an image stream and a JSON body bill the same wire shape the same way:
+            # tool-use prompt tokens, thoughts and cached content are the seam's
+            # mapping, not this tracker's (ADR-0025).
+            ctx.update_usage(parse_wire_usage("gemini", self._gemini_payload))

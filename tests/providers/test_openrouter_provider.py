@@ -535,26 +535,35 @@ class TestOpenRouterSTTUsageAndFormats:
     def test_bare_seconds_usage_is_duration_based(self):
         provider = OpenRouterAdapter(api_key="test-key")
 
-        usage = provider._parse_usage({"seconds": 6.4, "cost": 0.000178})
+        response = provider._parse_transcription_response(
+            {"text": "", "usage": {"seconds": 6.4, "cost": 0.000178}}, "json"
+        )
 
-        assert usage.audio_duration_seconds == 6.4
-        assert usage.input_tokens == 0
+        assert response.usage is not None
+        assert response.usage.audio_duration_seconds == 6.4
+        assert response.usage.input_tokens == 0
 
     def test_whisper_duration_usage_still_parsed(self):
         provider = OpenRouterAdapter(api_key="test-key")
 
-        usage = provider._parse_usage({"type": "duration", "seconds": 12.5})
+        response = provider._parse_transcription_response(
+            {"text": "", "usage": {"type": "duration", "seconds": 12.5}}, "json"
+        )
 
-        assert usage.audio_duration_seconds == 12.5
+        assert response.usage is not None
+        assert response.usage.audio_duration_seconds == 12.5
 
     def test_token_usage_still_parsed(self):
         provider = OpenRouterAdapter(api_key="test-key")
 
-        usage = provider._parse_usage({"input_tokens": 11, "output_tokens": 4})
+        response = provider._parse_transcription_response(
+            {"text": "", "usage": {"input_tokens": 11, "output_tokens": 4}}, "json"
+        )
 
-        assert usage.input_tokens == 11
-        assert usage.total_tokens == 15
-        assert usage.audio_duration_seconds is None
+        assert response.usage is not None
+        assert response.usage.input_tokens == 11
+        assert response.usage.total_tokens == 15
+        assert response.usage.audio_duration_seconds is None
 
     def test_unsupported_response_format_fails_at_the_proxy_boundary(self):
         from llm_proxy.core.exceptions import ValidationError

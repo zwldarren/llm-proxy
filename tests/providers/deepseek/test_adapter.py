@@ -879,14 +879,14 @@ class TestDeepSeekResponseParsing:
         assert result.usage.output_tokens == 10
         assert result.usage.total_tokens == 110
         # DeepSeek reports cache hits as top-level prompt_cache_hit_tokens;
-        # the generic OpenAI parser folds them into
-        # prompt_tokens_details.cached_tokens (see fold_deepseek_cache_hits),
-        # which the billing layer maps to cached_prompt_tokens so the
-        # cache-read rate applies instead of the full input rate.
-        assert result.usage.prompt_tokens_details is not None
-        assert result.usage.prompt_tokens_details.cached_tokens == 80
-        assert result.usage.completion_tokens_details is not None
-        assert result.usage.completion_tokens_details.reasoning_tokens == 50
+        # usage intake folds them onto the canonical cache-read field (see
+        # fold_deepseek_cache_hits), which the billing layer maps to the
+        # cache-read rate instead of the full input rate.
+        assert result.usage.cache_read_input_tokens == 80
+        # Thinking is the canonical flat field; the dialect alias it arrived in is
+        # cleared by the adapter (ADR-0025).
+        assert result.usage.reasoning_tokens == 50
+        assert result.usage.completion_tokens_details is None
 
     def test_system_fingerprint_in_response(self, adapter):
         """System fingerprint from DeepSeek is captured in provider_info."""

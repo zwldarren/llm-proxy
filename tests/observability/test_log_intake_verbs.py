@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from llm_proxy.config.types.logging_config import LoggingConfig
+from llm_proxy.models.types import Usage
 from llm_proxy.observability import log_intake
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.log_intake import (
@@ -29,9 +30,7 @@ def _context(**overrides) -> EventContext:
         "log_type": "endpoint",
         "is_api_endpoint": True,
         "metadata": {"endpoint": "/v1/chat/completions", "method": "POST"},
-        "prompt_tokens": 100,
-        "completion_tokens": 20,
-        "total_tokens": 120,
+        "usage": Usage(input_tokens=100, output_tokens=20, total_tokens=120),
         "cost_usd": 0.002,
     }
     fields.update(overrides)

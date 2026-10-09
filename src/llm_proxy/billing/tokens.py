@@ -10,6 +10,7 @@ from typing import Any
 import tiktoken
 
 from llm_proxy.core.constants import TOKEN_ENCODING_CACHE_SIZE
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,117 +64,89 @@ class TokenUsage:
     web_search_requests: int = 0  # number of web search requests
 
 
-def extract_tokens_from_usage(
-    usage: dict[str, Any] | None,
+@dataclass(frozen=True)
+class ProxyBillableDimensions:
+    """Billable quantities the proxy itself produced for a request.
+
+    Not provider facts, so they are not part of the usage record (ADR-0025):
+    images the proxy generated, characters it synthesized, and searches it
+    executed on the provider's behalf through the web-search continuation. Billing
+    prices them beside the record, which is why they live in its read model rather
+    than in the canonical usage record.
+    """
+
+    images_generated: int | None = None
+    tts_characters: int | None = None
+    web_search_requests: int | None = None
+
+
+def token_usage_from(
+    usage: Usage | None,
+    dimensions: ProxyBillableDimensions | None = None,
 ) -> TokenUsage:
-    """Extract token counts from usage dict, handling OpenAI and Anthropic formats.
+    """Build billing's read model from the canonical usage record.
 
-    OpenAI format uses: prompt_tokens, completion_tokens, total_tokens
-    Anthropic format uses: input_tokens, output_tokens
+    The record already holds one field per billable fact and its input count
+    already includes the cache counters (the canonical invariant, CONTEXT.md ->
+    Canonical usage record), so this projection maps fields rather than
+    interpreting dialects: no dialect sniffing, no "is the cache inside the input
+    count?" guesswork, and no way for the same tokens to be read twice.
 
-    Cache tokens:
-    - Anthropic: cache_creation_input_tokens, cache_read_input_tokens
-    - OpenAI: prompt_tokens_details.cached_tokens
-
-    Audio tokens:
-    - OpenAI: prompt_tokens_details.audio_tokens, completion_tokens_details.audio_tokens
-
-    Image tokens:
-    - gpt-image: input_tokens_details.image_tokens (or prompt_tokens_details.image_tokens)
-
-    Non-token dimensions (top-level keys, usually proxy-computed):
-    - images_generated, audio_duration_seconds, tts_characters, web_search_requests
+    A nested dialect detail (``prompt_tokens_details.cached_tokens``) still maps to
+    its own column, because that is the expression a provider-side wire uses and
+    the column is what operators read; the flat cache-read field wins when a record
+    somehow carries both, since they would be the same tokens.
 
     Args:
-        usage: Usage dictionary, may be None
+        usage: The turn's canonical usage record, or None when none was reported.
+        dimensions: What the proxy itself produced, priced beside the record.
 
     Returns:
-        TokenUsage dataclass with all token counts.
+        TokenUsage read model with every billable dimension.
     """
     result = TokenUsage()
 
-    if not usage:
-        return result
+    if usage is not None:
+        result.prompt_tokens = usage.input_tokens
+        result.completion_tokens = usage.output_tokens
+        result.total_tokens = usage.total_tokens or 0
+        result.cache_read_input_tokens = usage.cache_read_input_tokens or 0
+        result.cache_creation_input_tokens = usage.cache_creation_input_tokens or 0
+        result.audio_duration_seconds = usage.audio_duration_seconds or 0.0
 
-    # Basic token extraction (OpenAI and Anthropic formats)
-    raw_input = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
-    result.completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-    result.total_tokens = usage.get("total_tokens") or 0
+        prompt_details = usage.prompt_tokens_details
+        if prompt_details is not None:
+            result.cached_prompt_tokens = prompt_details.cached_tokens or 0
+            result.audio_input_tokens = prompt_details.audio_tokens or 0
+            result.image_input_tokens = prompt_details.image_tokens or 0
+            # The nested expression of the cache-write fact is a fallback for the
+            # flat field: one fact, one billable amount.
+            if not result.cache_creation_input_tokens and prompt_details.cache_write_tokens:
+                result.cache_creation_input_tokens = prompt_details.cache_write_tokens
 
-    # Extract cache tokens from Anthropic format
-    result.cache_creation_input_tokens = usage.get("cache_creation_input_tokens") or 0
-    result.cache_read_input_tokens = usage.get("cache_read_input_tokens") or 0
+        completion_details = usage.completion_tokens_details
+        if completion_details is not None:
+            result.audio_output_tokens = completion_details.audio_tokens or 0
 
-    if "prompt_tokens" not in usage and (
-        result.cache_read_input_tokens or result.cache_creation_input_tokens
-    ):
-        raw_input += result.cache_read_input_tokens + result.cache_creation_input_tokens
-
-    result.prompt_tokens = raw_input
-
-    # Extract cache and audio tokens from OpenAI format
-    prompt_tokens_details = usage.get("prompt_tokens_details", {})
-    if isinstance(prompt_tokens_details, dict):
-        result.cached_prompt_tokens = prompt_tokens_details.get("cached_tokens") or 0
-        result.audio_input_tokens = prompt_tokens_details.get("audio_tokens") or 0
-
-    # Cache tokens are one billable fact per kind with two dialect
-    # expressions (flat Anthropic fields vs nested OpenAI
-    # prompt_tokens_details). The flat field wins; the nested expression is
-    # only a fallback — expressing the same tokens twice would apply the
-    # cache-rate adjustment twice.
     if result.cache_read_input_tokens and result.cached_prompt_tokens:
         result.cached_prompt_tokens = 0
-    if not result.cache_creation_input_tokens and isinstance(prompt_tokens_details, dict):
-        result.cache_creation_input_tokens = prompt_tokens_details.get("cache_write_tokens") or 0
 
-    completion_tokens_details = usage.get("completion_tokens_details", {})
-    if isinstance(completion_tokens_details, dict):
-        result.audio_output_tokens = completion_tokens_details.get("audio_tokens") or 0
+    if dimensions is not None:
+        result.images_generated = dimensions.images_generated or 0
+        result.tts_characters = dimensions.tts_characters or 0
 
-    # Image tokens: gpt-image uses input_tokens_details, chat uses prompt_tokens_details
-    input_tokens_details = usage.get("input_tokens_details", {})
-    if isinstance(input_tokens_details, dict):
-        result.image_input_tokens = input_tokens_details.get("image_tokens") or 0
-    if not result.image_input_tokens and isinstance(prompt_tokens_details, dict):
-        result.image_input_tokens = prompt_tokens_details.get("image_tokens") or 0
+    # The search count has two routes — the provider's own count (in the record)
+    # and the searches the proxy executed (in the dimensions, which already add to
+    # the record's value) — so the dimensions win when the caller has them, and the
+    # record answers for a caller that has only a record (the Realtime observer).
+    if dimensions is not None and dimensions.web_search_requests is not None:
+        result.web_search_requests = dimensions.web_search_requests
+    elif usage is not None and usage.web_search_requests is not None:
+        result.web_search_requests = usage.web_search_requests or 0
 
-    # Realtime API dialect (response.done usage): input_token_details /
-    # output_token_details (singular "token"). Same facts as the chat and
-    # Responses dialects, different nesting — used only as a fallback so the
-    # same tokens are never counted twice.
-    input_token_details = usage.get("input_token_details", {})
-    if isinstance(input_token_details, dict):
-        if not result.cached_prompt_tokens:
-            result.cached_prompt_tokens = input_token_details.get("cached_tokens") or 0
-        if not result.audio_input_tokens:
-            result.audio_input_tokens = input_token_details.get("audio_tokens") or 0
-        if not result.image_input_tokens:
-            result.image_input_tokens = input_token_details.get("image_tokens") or 0
-
-    output_token_details = usage.get("output_token_details", {})
-    if isinstance(output_token_details, dict) and not result.audio_output_tokens:
-        result.audio_output_tokens = output_token_details.get("audio_tokens") or 0
-
-    # Non-token billable dimensions (flat keys)
-    result.images_generated = usage.get("images_generated") or 0
-    result.audio_duration_seconds = usage.get("audio_duration_seconds") or 0.0
-    result.tts_characters = usage.get("tts_characters") or 0
-    result.web_search_requests = usage.get("web_search_requests") or 0
-
-    # Calculate total if not provided
+    # A record that reports no total still bills its counters.
     if not result.total_tokens and (result.prompt_tokens or result.completion_tokens):
         result.total_tokens = result.prompt_tokens + result.completion_tokens
-
-    # Validate total_tokens against sum (warning only, don't modify)
-    # Some providers report total_tokens that includes cache tokens, others don't
-    if result.total_tokens and result.prompt_tokens and result.completion_tokens:
-        calculated = result.prompt_tokens + result.completion_tokens
-        if calculated != result.total_tokens and not result.cache_read_input_tokens:
-            logger.debug(
-                f"Token usage mismatch: reported total={result.total_tokens}, "
-                f"calculated={calculated}. Provider may include cache in total."
-            )
 
     return result
 

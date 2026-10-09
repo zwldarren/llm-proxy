@@ -33,12 +33,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from llm_proxy.billing.tokens import token_usage_from
 from llm_proxy.core.errors.utils import extract_error_details
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.core.utils import safe_int
-from llm_proxy.observability.cost import calculate_event_cost
+from llm_proxy.observability.cost import calculate_event_cost, proxy_dimensions
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.redaction import body_marker, scrub_log_metadata
 from llm_proxy.observability.service import (
@@ -451,6 +452,159 @@ def _dispatch(
         return False
 
 
+#: Marker for "the situation did not pass this field at all", so the row keeps the
+#: record's own default. Distinct from passing ``None``, which is a value: the
+#: endpoint lifecycle stores ``None`` for a body it did not capture.
+_UNSET: Any = object()
+
+
+def _assemble_row(
+    *,
+    log_type: LogType,
+    request_id: str,
+    endpoint: str,
+    method: str,
+    status_code: int | None = None,
+    response_time_ms: int | None = None,
+    event_type: str | None = None,
+    action_category: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    outcome: str | None = None,
+    timestamp: float | None = None,
+    user_identity: str | None = None,
+    user_id: int | None = None,
+    api_key_name: str | None = None,
+    auth_method: str | None = None,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
+    session_id: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+    cache_creation_input_tokens: int | None = None,
+    cache_read_input_tokens: int | None = None,
+    cached_prompt_tokens: int | None = None,
+    audio_input_tokens: int | None = None,
+    audio_output_tokens: int | None = None,
+    cost_usd: float | None = None,
+    cache_savings_usd: float | None = None,
+    ttft_ms: int | None = None,
+    error_message: str | None = None,
+    error_stack_trace: str | None = None,
+    log_metadata: Any = _UNSET,
+    request_headers: Any = _UNSET,
+    request_body: Any = _UNSET,
+    response_headers: Any = _UNSET,
+    response_body: Any = _UNSET,
+) -> RequestLogCreate:
+    """Assemble one audit row: the row's identity, constants and defaults in one place.
+
+    Every situation — the endpoint lifecycle and the standalone verbs alike —
+    builds its row here and declares only what it knows. Classification stays
+    unset when the situation has none to declare; the deployment constants
+    (``server_hostname``, ``service_name``) and the timestamp default are filled
+    once instead of by each caller, and ``_dispatch`` is the only consumer.
+
+    The payload fields default to :data:`_UNSET` rather than ``None``: a situation
+    that passes nothing keeps the record's own default, while one that passes
+    ``None`` means it captured nothing — the two are distinct on the row.
+    """
+    fields: dict[str, Any] = {
+        "request_id": request_id,
+        "timestamp": time.time() if timestamp is None else timestamp,
+        "endpoint": endpoint,
+        "method": method,
+        "log_type": log_type,
+        "status_code": status_code,
+        "response_time_ms": response_time_ms,
+        "user_identity": user_identity,
+        "user_id": user_id,
+        "model": model,
+        "provider": provider,
+        "api_key_name": api_key_name,
+        "auth_method": auth_method,
+        "client_ip": client_ip,
+        "user_agent": user_agent,
+        "session_id": session_id,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "cache_creation_input_tokens": cache_creation_input_tokens,
+        "cache_read_input_tokens": cache_read_input_tokens,
+        "cached_prompt_tokens": cached_prompt_tokens,
+        "audio_input_tokens": audio_input_tokens,
+        "audio_output_tokens": audio_output_tokens,
+        "cost_usd": cost_usd,
+        "cache_savings_usd": cache_savings_usd,
+        "ttft_ms": ttft_ms,
+        "error_message": error_message,
+        "error_stack_trace": error_stack_trace,
+        "event_type": event_type,
+        "action_category": action_category,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "outcome": outcome,
+        "server_hostname": get_server_hostname(),
+        "service_name": "llm-proxy",
+    }
+    for name, payload in (
+        ("log_metadata", log_metadata),
+        ("request_headers", request_headers),
+        ("request_body", request_body),
+        ("response_headers", response_headers),
+        ("response_body", response_body),
+    ):
+        if payload is not _UNSET:
+            fields[name] = payload
+    return RequestLogCreate(**fields)
+
+
+def _request_facts(request: Request, *, client_ip: str | None = None) -> dict[str, Any]:
+    """Mechanical request facts shared by every request-bound row.
+
+    ``client_ip`` overrides the peer-address derivation when the situation
+    carries a more specific one. The row id stays with the caller: it has three
+    provenances (a caller-supplied id, the request's minted id, a generated tool
+    id), and each situation knows which one it has.
+    """
+    return {
+        "endpoint": request.url.path,
+        "method": request.method,
+        "client_ip": client_ip or get_client_ip(request),
+        "user_agent": request.headers.get("user-agent"),
+    }
+
+
+def _identity_fields(request: Request) -> dict[str, Any]:
+    """Attribution fields derived from the request's identity."""
+    identity = get_request_identity(request)
+    return {
+        "user_identity": identity.display_name,
+        "user_id": identity.user_id,
+        "api_key_name": identity.api_key_name,
+        "auth_method": identity.auth_method,
+    }
+
+
+def _dispatch_request_row(
+    request: Request,
+    log_data: RequestLogCreate,
+    usage_record: UsageRecordCreate | None = None,
+) -> bool:
+    """Dispatch a request-bound row, marking the request logged when it lands.
+
+    The mark is what makes the request-bound situations idempotent: whichever
+    one gets there first owns the row, and later ones are dropped.
+    """
+    written = _dispatch(log_data, usage_record)
+    if written:
+        _mark_logged(request)
+    return written
+
+
 # ---------------------------------------------------------------------------
 # EventContext row assembly (the endpoint lifecycle)
 # ---------------------------------------------------------------------------
@@ -610,10 +764,16 @@ def _build_log_base(
     context: EventContext,
     default_status_code: int = 200,
 ) -> dict[str, Any]:
-    """Build the classified, attributed base fields for a row."""
+    """Build the classified, attributed base fields the assembler takes.
+
+    This is the endpoint lifecycle's adapter onto the shared row assembler: the
+    classification and attribution an ``EventContext`` carries, translated into
+    the assembler's vocabulary. The deployment constants are the assembler's.
+    """
     log_type = LogType(context.log_type) if isinstance(context.log_type, str) else context.log_type
     endpoint = context.metadata.get("endpoint", "")
     method = context.metadata.get("method", "POST")
+    tokens = token_usage_from(context.usage, proxy_dimensions(context))
 
     return {
         "request_id": context.request_id,
@@ -629,12 +789,12 @@ def _build_log_base(
         "provider": context.provider,
         "error_message": context.error_message,
         "error_stack_trace": context.error_stack_trace,
-        "prompt_tokens": context.prompt_tokens,
-        "completion_tokens": context.completion_tokens,
-        "total_tokens": context.total_tokens,
-        "cache_creation_input_tokens": context.cache_creation_input_tokens,
-        "cache_read_input_tokens": context.cache_read_input_tokens,
-        "cached_prompt_tokens": context.cached_prompt_tokens,
+        "prompt_tokens": tokens.prompt_tokens or None,
+        "completion_tokens": tokens.completion_tokens or None,
+        "total_tokens": tokens.total_tokens or None,
+        "cache_creation_input_tokens": tokens.cache_creation_input_tokens or None,
+        "cache_read_input_tokens": tokens.cache_read_input_tokens or None,
+        "cached_prompt_tokens": tokens.cached_prompt_tokens or None,
         "cost_usd": context.cost_usd,
         "cache_savings_usd": context.cache_savings_usd,
         "ttft_ms": safe_int(context.ttft_ms) if context.ttft_ms is not None else None,
@@ -643,8 +803,6 @@ def _build_log_base(
         "user_agent": context.user_agent,
         "session_id": context.session_id,
         "auth_method": context.auth_method,
-        "server_hostname": get_server_hostname(),
-        "service_name": "llm-proxy",
         "event_type": determine_event_type(endpoint),
         "action_category": determine_action_category(method),
         "resource_type": determine_resource_type(endpoint),
@@ -654,23 +812,29 @@ def _build_log_base(
 
 
 def _build_usage_record(context: EventContext) -> UsageRecordCreate:
-    """Build the usage record for a situation. Always written, sampling or not."""
+    """Build the usage record for a situation. Always written, sampling or not.
+
+    The row's token columns come from the same read model billing prices
+    (``token_usage_from`` over the canonical record), so what the dashboard shows
+    and what was charged cannot drift apart.
+    """
+    tokens = token_usage_from(context.usage, proxy_dimensions(context))
     return UsageRecordCreate(
         timestamp=context.start_timestamp,
         request_id=context.request_id,
         model=context.internal_model or context.model,
         provider=context.provider,
         user_id=context.auth_user_id,
-        prompt_tokens=context.prompt_tokens,
-        completion_tokens=context.completion_tokens,
-        total_tokens=context.total_tokens,
+        prompt_tokens=tokens.prompt_tokens or None,
+        completion_tokens=tokens.completion_tokens or None,
+        total_tokens=tokens.total_tokens or None,
         cost_usd=context.cost_usd,
-        cache_creation_input_tokens=context.cache_creation_input_tokens,
-        cache_read_input_tokens=context.cache_read_input_tokens,
-        cached_prompt_tokens=context.cached_prompt_tokens,
+        cache_creation_input_tokens=tokens.cache_creation_input_tokens or None,
+        cache_read_input_tokens=tokens.cache_read_input_tokens or None,
+        cached_prompt_tokens=tokens.cached_prompt_tokens or None,
         cache_savings_usd=context.cache_savings_usd,
-        audio_input_tokens=context.audio_input_tokens,
-        audio_output_tokens=context.audio_output_tokens,
+        audio_input_tokens=tokens.audio_input_tokens or None,
+        audio_output_tokens=tokens.audio_output_tokens or None,
         response_time_ms=safe_int(context.latency_ms),
         status_code=context.response_status_code,
         user_identity=context.user_id,
@@ -694,7 +858,7 @@ def _build_success_row(context: EventContext, config: LoggingConfig) -> RequestL
     request_headers, request_body = _mask_request_data(context, config)
     response_headers, response_body = _mask_response_data(context, config)
     log_metadata = _build_log_metadata(context, config, extra={"streaming": False})
-    return RequestLogCreate(
+    return _assemble_row(
         **_build_log_base(context),
         request_headers=request_headers,
         request_body=request_body,
@@ -713,7 +877,7 @@ def _build_error_row(context: EventContext, config: LoggingConfig) -> RequestLog
     if not context.should_log_input_output:
         # An upstream error body is content too; classification fields stay.
         log_metadata = scrub_log_metadata(log_metadata)
-    return RequestLogCreate(
+    return _assemble_row(
         **_build_log_base(context, default_status_code=500),
         request_headers=request_headers,
         request_body=request_body,
@@ -732,7 +896,7 @@ def _build_stream_row(context: EventContext, config: LoggingConfig) -> RequestLo
         config,
         extra={"streaming": True, "response_body_truncated": context.streaming_truncated},
     )
-    return RequestLogCreate(
+    return _assemble_row(
         **_build_log_base(context),
         request_headers=request_headers,
         request_body=request_body,
@@ -865,27 +1029,18 @@ def record_early_failure(
             request_body = body_marker(bodies_enabled=False)
         message = error_message if error_message is not None else str(error)
 
-        log_data = RequestLogCreate(
+        log_data = _assemble_row(
             request_id=request_id,
-            timestamp=time.time(),
-            endpoint=path,
-            method=request.method,
+            **_request_facts(request),
+            **_identity_fields(request),
+            log_type=LogType.AUDIT if path.startswith("/api/") else LogType.ENDPOINT,
             status_code=status_code,
             response_time_ms=0,
-            user_identity=identity.display_name,
-            user_id=identity.user_id,
             model=model,
             provider=provider,
-            log_type=LogType.AUDIT if path.startswith("/api/") else LogType.ENDPOINT,
+            session_id=facts.session_id,
             error_message=message,
             error_stack_trace=stack_trace,
-            api_key_name=identity.api_key_name,
-            client_ip=get_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
-            auth_method=identity.auth_method,
-            session_id=facts.session_id,
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
             event_type=determine_event_type(path),
             action_category=determine_action_category(request.method),
             resource_type=determine_resource_type(path),
@@ -900,8 +1055,7 @@ def record_early_failure(
             request_body=request_body,
         )
 
-        if _dispatch(log_data, _build_early_failure_usage(log_data, identity)):
-            _mark_logged(request)
+        _dispatch_request_row(request, log_data, _build_early_failure_usage(log_data, identity))
     except Exception:
         logger.warning("Failed to write early-failure log", exc_info=True)
 
@@ -998,23 +1152,17 @@ def record_admin_request(
             request_body = body_marker(bodies_enabled=False)
             response_body = body_marker(bodies_enabled=False)
 
-        log_data = RequestLogCreate(
+        log_data = _assemble_row(
             request_id=request_id,
-            timestamp=time.time(),
-            endpoint=path,
-            method=method,
+            **_request_facts(request),
+            log_type=LogType.AUDIT,
             status_code=status_code,
             response_time_ms=response_time_ms,
-            log_type=LogType.AUDIT,
             user_identity=identity.display_name or client_ip,
             user_id=getattr(identity, "user_id", None),
             session_id=facts.session_id,
             api_key_name=identity.api_key_name,
-            client_ip=client_ip,
-            user_agent=request.headers.get("user-agent"),
             auth_method=identity.auth_method,
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
             event_type=determine_event_type(path),
             action_category=determine_action_category(method),
             resource_type=determine_resource_type(path),
@@ -1027,8 +1175,7 @@ def record_admin_request(
             response_body=response_body,
         )
 
-        if _dispatch(log_data, None):
-            _mark_logged(request)
+        _dispatch_request_row(request, log_data)
     except Exception:
         logger.debug("Failed to write admin audit log", exc_info=True)
 
@@ -1064,23 +1211,17 @@ def _record_audit_action(
         metadata: dict[str, Any] = {"is_api_endpoint": True}
         if log_metadata:
             metadata.update(log_metadata)
-        log_data = RequestLogCreate(
+        log_data = _assemble_row(
             request_id=facts_for(request).request_id,
-            timestamp=time.time(),
-            endpoint=request.url.path,
-            method=request.method,
+            **_request_facts(request, client_ip=client_ip),
+            log_type=LogType.AUDIT,
             status_code=status_code,
             response_time_ms=response_time_ms,
-            log_type=LogType.AUDIT,
             user_identity=actor,
             user_id=user_id,
             api_key_name=api_key_name,
-            client_ip=client_ip or get_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
             auth_method=auth_method,
             error_message=error_message,
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
             event_type=event_type,
             action_category=action_category,
             resource_type=resource_type,
@@ -1088,8 +1229,7 @@ def _record_audit_action(
             outcome=outcome,
             log_metadata=metadata,
         )
-        if _dispatch(log_data, None):
-            _mark_logged(request)
+        _dispatch_request_row(request, log_data)
     except Exception:
         logger.warning(warning, exc_info=True)
 
@@ -1248,23 +1388,13 @@ def record_rejection(
         metadata["suppressed_since_last"] = suppressed
 
     try:
-        log_data = RequestLogCreate(
+        log_data = _assemble_row(
             request_id=facts_for(request).request_id,
-            timestamp=time.time(),
-            endpoint=request.url.path,
-            method=request.method,
-            status_code=status_code,
-            response_time_ms=None,
+            **_request_facts(request),
+            **_identity_fields(request),
             log_type=LogType.ENDPOINT if is_api_endpoint else LogType.AUDIT,
-            user_identity=identity.display_name,
-            user_id=identity.user_id,
-            api_key_name=identity.api_key_name,
-            client_ip=get_client_ip(request),
-            user_agent=request.headers.get("user-agent"),
-            auth_method=identity.auth_method,
+            status_code=status_code,
             error_message=error_message,
-            server_hostname=get_server_hostname(),
-            service_name="llm-proxy",
             event_type=event_type,
             action_category=ActionCategory.EXECUTE,
             resource_type=resource_type,
@@ -1272,7 +1402,7 @@ def record_rejection(
             outcome=determine_outcome(status_code),
             log_metadata=metadata,
         )
-        written = _dispatch(log_data, None)
+        written = _dispatch_request_row(request, log_data)
     except Exception:
         logger.warning("Failed to write rejection log", exc_info=True)
         written = False
@@ -1313,22 +1443,21 @@ def record_mcp_call(
         "mcp_arguments": mask_sensitive(entry.arguments, SENSITIVE_KEYS),
         "mcp_result_summary": entry.result_summary,
     }
-    log_data = RequestLogCreate(
+    log_data = _assemble_row(
         request_id=request_id,
-        timestamp=time.time(),
         endpoint=f"/mcp/{entry.server_name}/{entry.operation.value}",
         method="POST",
         log_type=LogType.MCP,
         status_code=entry.status_code,
         response_time_ms=entry.response_time_ms,
-        error_message=entry.error_message,
-        log_metadata=metadata,
         model=entry.server_name,
+        error_message=entry.error_message,
         outcome=_tool_outcome(entry.status_code),
         user_id=user_id,
         user_identity=user_identity,
         api_key_name=api_key_name,
         auth_method=auth_method,
+        log_metadata=metadata,
     )
     _dispatch(log_data, None)
     return request_id
@@ -1353,22 +1482,21 @@ def record_web_search(
         "web_search_max_uses": entry.max_uses,
         "web_search_current_use": entry.current_use,
     }
-    log_data = RequestLogCreate(
+    log_data = _assemble_row(
         request_id=request_id,
-        timestamp=time.time(),
         endpoint="/tools/web_search",
         method="POST",
         log_type=LogType.WEB_SEARCH,
         status_code=entry.status_code,
         response_time_ms=entry.response_time_ms,
-        error_message=entry.error_message,
-        log_metadata=metadata,
         provider=entry.provider,
+        error_message=entry.error_message,
         outcome=_tool_outcome(entry.status_code),
         user_id=user_id,
         user_identity=user_identity,
         api_key_name=api_key_name,
         auth_method=auth_method,
+        log_metadata=metadata,
     )
     _dispatch(log_data, None)
     return request_id
@@ -1394,7 +1522,7 @@ def record_internal_call(
     if entry.provider_model_name:
         metadata.setdefault("provider_model_name", entry.provider_model_name)
 
-    log_data = RequestLogCreate(
+    log_data = _assemble_row(
         request_id=entry.request_id,
         timestamp=entry.timestamp,
         endpoint=entry.endpoint,
@@ -1409,7 +1537,6 @@ def record_internal_call(
         total_tokens=entry.total_tokens,
         cost_usd=entry.cost_usd,
         error_message=entry.error_message,
-        log_metadata=metadata,
         user_id=user_id,
         user_identity=user_identity,
         api_key_name=api_key_name,
@@ -1418,6 +1545,7 @@ def record_internal_call(
         client_ip=client_ip,
         user_agent=user_agent,
         outcome=Outcome.SUCCESS if entry.status_code == 200 else Outcome.FAILURE,
+        log_metadata=metadata,
     )
     _dispatch(log_data, None, usage_from_log=True)
 
@@ -1443,16 +1571,15 @@ def record_realtime_turn(
     }
     if usage_missing:
         metadata["usage_missing"] = True
-    log_data = RequestLogCreate(
+    log_data = _assemble_row(
         request_id=f"rt_{response_id or context.request_id}",
-        timestamp=time.time(),
         endpoint="/v1/realtime",
         method="WS",
+        log_type=LogType.ENDPOINT,
         status_code=200,
         user_identity=context.api_key_name,
         model=context.model,
         provider=context.provider,
-        log_type=LogType.ENDPOINT,
         prompt_tokens=breakdown.prompt_tokens,
         completion_tokens=breakdown.completion_tokens,
         total_tokens=breakdown.total_tokens,

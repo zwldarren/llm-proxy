@@ -9,21 +9,33 @@ logging middleware and tracing handlers.
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from llm_proxy.models.types import Usage
+from typing import Any
 
 from llm_proxy.core.request_type import RequestType
+from llm_proxy.models.types import Usage
+from llm_proxy.serialization.usage import copy_usage, merge_latest
 
 
-def _get_attr_or_item(obj: Any, key: str) -> Any:
-    """Get attribute or dict key from an object that may be either."""
-    if hasattr(obj, key):
-        return getattr(obj, key)
-    if isinstance(obj, dict):
-        return obj.get(key)
-    return None
+def _is_count(value: Any) -> bool:
+    """Whether a value is a count: an ``int``, and not a ``bool`` (which is one)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _monotonic(current: Any, incoming: Any) -> int | None:
+    """The larger of two counts, with a non-count meaning "not reported".
+
+    Usage within one turn is cumulative, so an observation can add to a counter
+    but never take away from it (``PendingTerminalState.fold_usage`` states the
+    same rule for the converted tier). Details arrive as untyped provider dicts,
+    so a value that is not a count is dropped rather than compared: the accounting
+    path must never raise on a malformed one, and billing ignored such a value
+    anyway.
+    """
+    if not _is_count(incoming):
+        return current if _is_count(current) else None
+    if not _is_count(current):
+        return incoming
+    return max(current, incoming)
 
 
 @dataclass
@@ -78,30 +90,27 @@ class EventContext:
     start_timestamp: float = field(default_factory=time.time)
     first_chunk_time: datetime | None = None  # For TTFT calculation
 
-    # === Accumulated token/cost data (populated during processing) ===
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    total_tokens: int | None = None
-    cache_creation_input_tokens: int | None = None
-    cache_read_input_tokens: int | None = None
-    cached_prompt_tokens: int | None = None
-    # OpenAI-dialect cache-write tokens (prompt_tokens_details.cache_write_tokens),
-    # carried to the billing seam as-is — not a DB column. The flat-vs-nested
-    # tolerance lives in extract_tokens_from_usage, not here (ADR-0006).
-    cache_write_tokens: int | None = None
+    # === Accumulated usage (populated during processing) ===
+    # One record for every fact a provider reported about the turn (ADR-0025):
+    # counters, cache read/write, reasoning, the audio and image details, the
+    # provider's own cost, the search calls it announced. ``update_usage`` is its
+    # only writer, so each fact keeps the intake seam's merge rule instead of a
+    # second, hand-maintained copy of the same number.
+    usage: Usage | None = None
+    # Two billable dimensions reach billing through more than one route, so they
+    # stay one field here rather than moving into the record wholesale:
+    # ``provider_reported_cost`` also arrives as a provider-info extra
+    # (nanogpt_cost / openrouter_cost), and ``web_search_requests`` also counts the
+    # searches the proxy executed itself (the web-search continuation).
+    provider_reported_cost: float | None = None
+    web_search_requests: int | None = None
+    # === Proxy-computed billable dimensions ===
+    # What the proxy itself did or derived — not provider facts, so not the
+    # record's business; billing prices them beside it.
+    images_generated: int | None = None
+    tts_characters: int | None = None
     cache_savings_usd: float | None = None
     cost_usd: float | None = None
-    # Cost reported by provider (e.g., NanoGPT x_nanogpt_pricing.cost)
-    provider_reported_cost: float | None = None
-    audio_input_tokens: int | None = None
-    audio_output_tokens: int | None = None
-    reasoning_tokens: int | None = None
-    image_input_tokens: int | None = None
-    # === Non-token billable dimensions ===
-    images_generated: int | None = None
-    audio_duration_seconds: float | None = None
-    tts_characters: int | None = None
-    web_search_requests: int | None = None
 
     # === HTTP layer data (for audit logging) ===
     request_headers: dict[str, Any] = field(default_factory=dict)
@@ -149,82 +158,43 @@ class EventContext:
     retry_attempts: list[dict[str, Any]] = field(default_factory=list)
 
     def update_usage(self, usage: Usage | None) -> None:
-        """Update token counts from Usage object.
+        """Fold one observation of a turn's usage into the record.
+
+        Usage arrives cumulatively: the native passthrough tier captures one
+        streaming frame at a time, so a frame that reports only some facts must
+        not withdraw the ones already seen, and a provider that repeats its
+        terminal frame with fewer fields must not shrink the turn. The rule is
+        :func:`~llm_proxy.serialization.usage.merge_latest` — the same one
+        ``PendingTerminalState.fold_usage`` applies on the converted tier — so a
+        later zero never clobbers an earlier non-zero, and a dialect with no wire
+        total keeps the total its merged counters imply.
+
+        The record is copied in: the caller may still hold (and log) the one it
+        passed, and both merge rules write into the nested details blocks.
+
+        The two billable dimensions that have a second route (the provider-info
+        cost extra, the proxy-executed search count) are mirrored onto their
+        fields, which stay billing's single home for them.
 
         Args:
             usage: Usage object from InternalResponse or streaming transformer
         """
-        if usage is None:
+        if not isinstance(usage, Usage):
+            # ``None``, and anything that is not a record at all: the accounting
+            # path never raises on a value it cannot read, and a caller that hands
+            # it something else is a type error the checker catches, not a reason to
+            # fail a request.
             return
 
-        self.prompt_tokens = usage.input_tokens
-        self.completion_tokens = usage.output_tokens
-        self.total_tokens = usage.total_tokens
+        if self.usage is None:
+            self.usage = copy_usage(usage)
+        else:
+            merge_latest(self.usage, usage)
 
-        # Anthropic-style cache tokens (flat on Usage)
-        if usage.cache_read_input_tokens is not None:
-            self.cache_read_input_tokens = usage.cache_read_input_tokens
-        self.cache_creation_input_tokens = usage.cache_creation_input_tokens
-
-        if hasattr(usage, "reasoning_tokens"):
-            self.reasoning_tokens = usage.reasoning_tokens
-
-        # Handle prompt tokens details (supports both dataclass and dict formats)
-        ptd = getattr(usage, "prompt_tokens_details", None)
-        if ptd:
-            cached = _get_attr_or_item(ptd, "cached_tokens")
-            audio_in = _get_attr_or_item(ptd, "audio_tokens")
-            image_in = _get_attr_or_item(ptd, "image_tokens")
-            cache_write = _get_attr_or_item(ptd, "cache_write_tokens")
-            if cached is not None:
-                self.cached_prompt_tokens = cached
-                # Same fact as the canonical cache-read field in another dialect
-                # (CONTEXT.md "Canonical usage record"): populate the canonical
-                # field so downstream readers see one authoritative field. The
-                # dialect field stays for the billing seam's nested expression.
-                if self.cache_read_input_tokens is None:
-                    self.cache_read_input_tokens = cached
-            if audio_in is not None:
-                self.audio_input_tokens = audio_in
-            if image_in is not None:
-                self.image_input_tokens = image_in
-            # Kept in the dialect field; mapped at the billing seam (ADR-0006).
-            if cache_write is not None:
-                self.cache_write_tokens = cache_write
-                if self.cache_creation_input_tokens is None:
-                    self.cache_creation_input_tokens = cache_write
-
-        # Handle gpt-image style input_tokens_details (image tokens in prompt)
-        # Only fall back to input_tokens_details if prompt_tokens_details
-        # didn't provide image tokens
-        if self.image_input_tokens is None:
-            itd = getattr(usage, "input_tokens_details", None)
-            if itd:
-                image_in = _get_attr_or_item(itd, "image_tokens")
-                if image_in is not None:
-                    self.image_input_tokens = image_in
-
-        # Non-token billable dimensions reported by providers (e.g. STT duration)
-        duration = getattr(usage, "audio_duration_seconds", None)
-        if duration is not None:
-            self.audio_duration_seconds = duration
-
-        # Web search request count (from StreamingUsage or Usage)
-        ws = getattr(usage, "web_search_requests", None)
-        if ws is not None:
-            self.web_search_requests = ws
-
-        # Handle completion tokens details (supports both dataclass and dict formats)
-        ctd = getattr(usage, "completion_tokens_details", None)
-        if ctd:
-            audio_out = _get_attr_or_item(ctd, "audio_tokens")
-            if audio_out is not None:
-                self.audio_output_tokens = audio_out
-
-        # Handle provider-reported cost (from StreamingUsage)
-        cost = getattr(usage, "provider_reported_cost", None)
+        cost = usage.provider_reported_cost
         if cost is not None and isinstance(cost, int | float) and cost > 0:
             self.provider_reported_cost = cost
+        self.web_search_requests = _monotonic(self.web_search_requests, usage.web_search_requests)
 
     def update_provider_info(self, provider_info: dict[str, Any] | None) -> None:
         """Update provider-reported metadata from provider_info.
@@ -246,12 +216,16 @@ class EventContext:
         ):
             self.provider_reported_cost = provider_cost
 
-        # Extract web search request count from server_tool_use (Anthropic)
+        # Extract web search request count from server_tool_use (Anthropic).
+        # Same fact as the record's ``web_search_requests`` (which may also carry
+        # the searches the proxy executed, added on top): a later observation can
+        # only raise it, so a provider-info block that repeats a smaller count
+        # cannot withdraw what the turn already reported.
         server_tool_use = provider_info.get("server_tool_use")
         if isinstance(server_tool_use, dict):
             ws_count = server_tool_use.get("web_search_requests")
             if isinstance(ws_count, int) and ws_count is not None:
-                self.web_search_requests = ws_count
+                self.web_search_requests = _monotonic(self.web_search_requests, ws_count)
 
     @property
     def latency_ms(self) -> float:
@@ -325,17 +299,13 @@ class EventContext:
     def has_token_data(self) -> bool:
         """Check if we have any token data.
 
+        True once any observation reached the record, matching what the flat
+        mirrors meant: an adapter reports the counters it saw, zeros included.
+
         Returns:
             True if any token counts are available
         """
-        return any(
-            v is not None
-            for v in [
-                self.prompt_tokens,
-                self.completion_tokens,
-                self.total_tokens,
-            ]
-        )
+        return self.usage is not None
 
     def has_billable_data(self) -> bool:
         """Check if any billable usage dimension has data.
@@ -346,69 +316,15 @@ class EventContext:
         Returns:
             True if any billable quantity is available
         """
-        return self.has_token_data() or any(
-            v is not None
-            for v in [
-                self.images_generated,
-                self.audio_duration_seconds,
-                self.tts_characters,
-                self.web_search_requests,
-            ]
+        return (
+            self.has_token_data()
+            or (self.usage is not None and self.usage.audio_duration_seconds is not None)
+            or any(
+                v is not None
+                for v in [
+                    self.images_generated,
+                    self.tts_characters,
+                    self.web_search_requests,
+                ]
+            )
         )
-
-    def to_usage_dict(self) -> dict[str, Any]:
-        """Convert to a dictionary suitable for cost calculation.
-
-        Produces the nested format required by extract_tokens_from_usage():
-        - cache_creation_input_tokens / cache_read_input_tokens (flat, Anthropic)
-        - prompt_tokens_details.cached_tokens (OpenAI cached tokens)
-        - prompt_tokens_details.audio_tokens / completion_tokens_details.audio_tokens
-
-        Returns:
-            Dictionary with token counts
-        """
-        result: dict[str, Any] = {}
-
-        if self.prompt_tokens is not None:
-            result["prompt_tokens"] = self.prompt_tokens
-        if self.completion_tokens is not None:
-            result["completion_tokens"] = self.completion_tokens
-        if self.total_tokens is not None:
-            result["total_tokens"] = self.total_tokens
-
-        # Anthropic-style cache fields (flat keys)
-        if self.cache_creation_input_tokens is not None:
-            result["cache_creation_input_tokens"] = self.cache_creation_input_tokens
-        if self.cache_read_input_tokens is not None:
-            result["cache_read_input_tokens"] = self.cache_read_input_tokens
-
-        # OpenAI-style details (nested for extract_tokens_from_usage compatibility)
-        prompt_details: dict[str, Any] = {}
-        if self.cached_prompt_tokens is not None:
-            prompt_details["cached_tokens"] = self.cached_prompt_tokens
-        if self.cache_write_tokens is not None:
-            prompt_details["cache_write_tokens"] = self.cache_write_tokens
-        if self.audio_input_tokens is not None:
-            prompt_details["audio_tokens"] = self.audio_input_tokens
-        if self.image_input_tokens is not None:
-            prompt_details["image_tokens"] = self.image_input_tokens
-        if prompt_details:
-            result["prompt_tokens_details"] = prompt_details
-
-        completion_details: dict[str, Any] = {}
-        if self.audio_output_tokens is not None:
-            completion_details["audio_tokens"] = self.audio_output_tokens
-        if completion_details:
-            result["completion_tokens_details"] = completion_details
-
-        # Non-token billable dimensions (flat keys)
-        if self.images_generated is not None:
-            result["images_generated"] = self.images_generated
-        if self.audio_duration_seconds is not None:
-            result["audio_duration_seconds"] = self.audio_duration_seconds
-        if self.tts_characters is not None:
-            result["tts_characters"] = self.tts_characters
-        if self.web_search_requests is not None:
-            result["web_search_requests"] = self.web_search_requests
-
-        return result

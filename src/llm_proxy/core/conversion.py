@@ -69,6 +69,7 @@ from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_ou
 from llm_proxy.models import ConversionTier, InternalRequest
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 from llm_proxy.streaming.sse_parse import iter_sse_data_events, split_sse_field
 
 if TYPE_CHECKING:
@@ -369,9 +370,7 @@ class NativePassthroughHandler:
                     state = getattr(transformer, "state", None)
                     if state is not None and hasattr(state, "final_response_payload"):
                         state.final_response_payload = payload
-                    NativePassthroughHandler._apply_openresponses_usage(
-                        payload.get("usage"), event_context
-                    )
+                    NativePassthroughHandler._apply_openresponses_usage(parsed, event_context)
                     # Reasoning cache: native streams bypass the
                     # transformer (whose accumulation feeds the cache on
                     # converted streams), so write it from the terminal
@@ -406,69 +405,34 @@ class NativePassthroughHandler:
         return frame
 
     @staticmethod
-    def _apply_openresponses_usage(usage: Any, event_context: EventContext | None) -> None:
-        """Write a Responses API usage dict into the EventContext."""
-        if event_context is None or not isinstance(usage, dict):
+    def _apply_openresponses_usage(event_data: Any, event_context: EventContext | None) -> None:
+        """Write a Responses API stream event's usage into the EventContext.
+
+        The event (not just its usage block) is what the intake seam is handed,
+        because the terminal snapshot restates the turn's output items and a
+        provider-executed ``web_search_call`` among them is billable — the same
+        count the non-streaming body parser takes from the body's items. This
+        tier never runs the web-search continuation (it skips the converted
+        tier's finalize), so the provider's own calls have no other counter.
+        """
+        if event_context is None:
             return
-        input_tokens = usage.get("input_tokens")
-        output_tokens = usage.get("output_tokens")
-        if input_tokens is not None:
-            event_context.prompt_tokens = input_tokens
-        if output_tokens is not None:
-            event_context.completion_tokens = output_tokens
-        total = usage.get("total_tokens")
-        if total is not None:
-            event_context.total_tokens = total
-        elif input_tokens is not None and output_tokens is not None:
-            event_context.total_tokens = input_tokens + output_tokens
-        input_details = usage.get("input_tokens_details")
-        if isinstance(input_details, dict) and input_details.get("cached_tokens") is not None:
-            event_context.cache_read_input_tokens = input_details.get("cached_tokens")
-        output_details = usage.get("output_tokens_details")
-        if isinstance(output_details, dict) and output_details.get("reasoning_tokens") is not None:
-            event_context.reasoning_tokens = output_details.get("reasoning_tokens")
+        event_context.update_usage(parse_wire_usage("responses", event_data))
 
     @staticmethod
     def process_anthropic_usage_event(
         event_type: str, data: dict[str, Any], event_context: EventContext
     ) -> None:
-        """Update EventContext token counts from a single Anthropic usage event."""
-        usage: dict[str, Any] | None = None
-        if event_type == "message_start":
-            message = data.get("message", {})
-            usage = message.get("usage")
-        elif event_type == "message_delta":
-            usage = data.get("usage")
+        """Update EventContext token counts from a single Anthropic usage event.
 
-        if not usage:
-            return
-
-        input_tokens = usage.get("input_tokens")
-        output_tokens = usage.get("output_tokens")
-        cache_read = usage.get("cache_read_input_tokens")
-        cache_create = usage.get("cache_creation_input_tokens")
-
-        if input_tokens is not None:
-            event_context.prompt_tokens = input_tokens + (cache_read or 0) + (cache_create or 0)
-        if output_tokens is not None:
-            event_context.completion_tokens = output_tokens
-        if cache_read is not None:
-            event_context.cache_read_input_tokens = cache_read
-        if cache_create is not None:
-            event_context.cache_creation_input_tokens = cache_create
-
-        # Web search request count for billing (server_tool_use.web_search_requests)
-        server_tool_use = usage.get("server_tool_use")
-        if isinstance(server_tool_use, dict):
-            ws_count = server_tool_use.get("web_search_requests")
-            if isinstance(ws_count, int) and ws_count > 0:
-                event_context.web_search_requests = ws_count
-
-        # Keep total_tokens in sync only when both values are known.
-        if event_context.prompt_tokens is not None and event_context.completion_tokens is not None:
-            event_context.total_tokens = (
-                event_context.prompt_tokens + event_context.completion_tokens
-            )
+        Native Anthropic frames bypass the streaming converter, so this is the only
+        route by which a streamed turn's accounting reaches the billing pipeline for
+        this tier. Extraction goes through the anthropic dialect adapter (ADR-0025):
+        ``message_start`` nests its usage under ``message`` and ``message_delta``
+        carries it flat, which is the adapter's business, not this handler's. The
+        EventContext merges the two events into one cumulative record.
+        """
+        event_context.update_usage(parse_wire_usage("anthropic", data))
 
     @staticmethod
     def handle_native_openai_chunk(
@@ -585,46 +549,17 @@ class NativePassthroughHandler:
         ``usage.server_tool_use.web_search_requests`` are read. Without them
         here, a streamed request is billed from the local price table instead
         of the provider-reported cost the router actually charged.
+
+        Extraction goes through the chat dialect adapter (ADR-0025), so the native
+        tier reads the same facts through the same code as the converted tiers,
+        and the EventContext accumulates them monotonically.
         """
         if event_context is None:
             return
         for _event_type, parsed in iter_sse_data_events(chunk):
             if not isinstance(parsed, dict):
                 continue
-            usage = parsed.get("usage")
-            if not isinstance(usage, dict):
-                continue
-            prompt_tokens = usage.get("prompt_tokens")
-            completion_tokens = usage.get("completion_tokens")
-            if prompt_tokens is not None:
-                event_context.prompt_tokens = prompt_tokens
-            if completion_tokens is not None:
-                event_context.completion_tokens = completion_tokens
-            total = usage.get("total_tokens")
-            if total is not None:
-                event_context.total_tokens = total
-            elif prompt_tokens is not None and completion_tokens is not None:
-                event_context.total_tokens = prompt_tokens + completion_tokens
-            prompt_details = usage.get("prompt_tokens_details")
-            if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens") is not None:
-                event_context.cache_read_input_tokens = prompt_details["cached_tokens"]
-            completion_details = usage.get("completion_tokens_details")
-            if (
-                isinstance(completion_details, dict)
-                and completion_details.get("reasoning_tokens") is not None
-            ):
-                event_context.reasoning_tokens = completion_details["reasoning_tokens"]
-            # Provider-reported cost (OpenRouter's ``usage.cost``) takes
-            # precedence over local price estimation in
-            # ``observability.cost.calculate_event_cost``.
-            cost = usage.get("cost")
-            if isinstance(cost, int | float) and cost > 0:
-                event_context.provider_reported_cost = cost
-            server_tool_use = usage.get("server_tool_use")
-            if isinstance(server_tool_use, dict):
-                ws_count = server_tool_use.get("web_search_requests")
-                if isinstance(ws_count, int) and ws_count > 0:
-                    event_context.web_search_requests = ws_count
+            event_context.update_usage(parse_wire_usage("chat", parsed))
 
     @staticmethod
     def maybe_capture_native_streaming_usage(

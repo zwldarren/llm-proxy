@@ -125,8 +125,10 @@ class TestNativeCompletion:
         assert result.output == []
         assert result.usage.input_tokens == 11
         assert result.usage.total_tokens == 15
-        assert result.usage.prompt_tokens_details.cached_tokens == 6
-        assert result.usage.completion_tokens_details.reasoning_tokens == 2
+        # The lifted cache read, in the canonical flat field (ADR-0025).
+        assert result.usage.cache_read_input_tokens == 6
+        assert result.usage.prompt_tokens_details is None
+        assert result.usage.reasoning_tokens == 2
 
     @pytest.mark.asyncio
     async def test_vetoed_request_falls_back_to_chat_completions(self, adapter, mock_response_cls):

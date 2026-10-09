@@ -43,6 +43,9 @@ class _FakeTransformer:
         self._output: list[Any] = []
         self._current_block_index = start_index
         self.result_indices: list[int] = []
+        # Transformers whose usage record was folded into this one (the
+        # web-search continuation's independent billed calls).
+        self.absorbed: list[Any] = []
         _FakeTransformer.created.append(self)
 
     @classmethod
@@ -57,6 +60,9 @@ class _FakeTransformer:
 
     def get_accumulated_output(self) -> list[Any]:
         return self._output
+
+    def absorb_usage_record(self, other: Any) -> None:
+        self.absorbed.append(other)
 
     def transform(self, chunk: Any) -> str | None:
         # A content chunk: append text and emit one frame.
@@ -254,6 +260,71 @@ async def test_generate_continuation_multi_turn_keeps_absolute_indices() -> None
     # result block (index 1).
     assert created[1].result_indices == [4]
     assert created[2].result_indices == []
+
+
+@pytest.mark.asyncio
+async def test_generate_continuation_absorbs_every_hop_into_the_billing_transformer() -> None:
+    """Each continuation hop's canonical record is folded into the transformer
+    the lifecycle reads for usage.
+
+    The hop transformers are discarded as the loop advances, and the client's
+    usage block (the summed pending dict) is not what billing reads. Without
+    the absorb, a continued turn was billed for its first call only.
+    """
+    _FakeTransformer.created.clear()
+    processor = WebSearchStreamProcessor()
+    transformer = _FakeTransformer()
+    transformer._output.append(ToolUseBlock(id="tu_1", name="web_search", input={"query": "news"}))
+    transformer._current_block_index = 1
+    state = ContinuationState(transformer=transformer, stream_request=_request())
+
+    streams = [
+        [
+            {"choices": [{"delta": {"content": "here is what I found"}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "id": "tu_2",
+                                    "function": {"name": "web_search", "arguments": ""},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        ],
+        [{"choices": [{"delta": {"content": "final answer"}}]}],
+    ]
+
+    async def _stream(_request: Any, cancel_token: Any = None):
+        for chunk in streams.pop(0):
+            yield chunk
+
+    adapter = MagicMock()
+    adapter.stream_chat_completion = AsyncMock(side_effect=_stream)
+    tracing = MagicMock()
+    tracing.on_stream_chunk = AsyncMock()
+
+    _ = [
+        chunk
+        async for chunk in processor.generate_continuation(
+            state,
+            web_search_interceptor=_fake_interceptor(),
+            web_search_tool_config=None,
+            current_adapter=adapter,
+            tracing_registry=tracing,
+            event_context=None,
+            cancel_token=None,
+        )
+    ]
+
+    assert state.depth == 2
+    # Both hops were folded into the transformer the caller keeps reading; no
+    # hop's record is lost with its discarded transformer.
+    assert transformer.absorbed == _FakeTransformer.created[1:]
 
 
 # ── Non-streaming continuation (RetryExecutor._continue_web_search) ──────

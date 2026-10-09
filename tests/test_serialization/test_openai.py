@@ -15,6 +15,7 @@ from llm_proxy.models import (
     ThinkingBlock,
     ToolUseBlock,
 )
+from llm_proxy.models.types import Usage
 from llm_proxy.protocols.openai.serializer import OpenAIProtocolSerializer
 from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
 
@@ -80,6 +81,41 @@ def test_format_response(protocol_serializer):
     assert result["object"] == "chat.completion"
     assert len(result["choices"]) == 1
     assert result["choices"][0]["message"]["content"] == "Hello!"
+
+
+def test_format_response_folds_thinking_into_the_dialect_object(protocol_serializer):
+    """Thinking tokens are canonical flat on the record; the OpenAI client reads
+    them nested, so the formatter folds them back (ADR-0025)."""
+    response = InternalResponse(
+        id="test-id",
+        model="gpt-4",
+        output=[TextBlock(text="Hello!")],
+        usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15, reasoning_tokens=4),
+    )
+
+    result = protocol_serializer.format_response(response)
+
+    assert result["usage"]["completion_tokens_details"] == {"reasoning_tokens": 4}
+
+
+def test_format_response_folds_cache_read_into_the_dialect_object(protocol_serializer):
+    """Same fold for the cache read: the record keeps it flat, the OpenAI client
+    reads ``prompt_tokens_details.cached_tokens``."""
+    response = InternalResponse(
+        id="test-id",
+        model="gpt-4",
+        output=[TextBlock(text="Hello!")],
+        usage=Usage(
+            input_tokens=150,
+            output_tokens=5,
+            total_tokens=155,
+            cache_read_input_tokens=40,
+        ),
+    )
+
+    result = protocol_serializer.format_response(response)
+
+    assert result["usage"]["prompt_tokens_details"] == {"cached_tokens": 40}
 
 
 def test_build_provider_request(provider_serializer):
@@ -697,12 +733,21 @@ class TestOpenAIResponseParserDetails:
         }
         result = parser.parse(response, model="gpt-4")
         assert result.usage is not None
+        # One fact, one field (ADR-0025): the nested OpenAI cache aliases are
+        # lifted onto the canonical flat fields, not duplicated beside them.
+        assert result.usage.cache_read_input_tokens == 3
+        assert result.usage.cache_creation_input_tokens == 2
         ptd = result.usage.prompt_tokens_details
         assert ptd is not None
-        assert ptd.cache_write_tokens == 2
+        assert ptd.cached_tokens is None
+        assert ptd.cache_write_tokens is None
         assert ptd.video_tokens == 7
+        # Thinking is the canonical flat field too; only details with no canonical
+        # field of their own stay in the block.
+        assert result.usage.reasoning_tokens == 4
         ctd = result.usage.completion_tokens_details
         assert ctd is not None
+        assert ctd.reasoning_tokens is None
         assert ctd.image_tokens == 2
 
     def test_native_finish_reason_from_choices(self):
@@ -924,8 +969,8 @@ def test_tool_call_arguments_are_canonicalized(provider_serializer):
 
 
 def test_parse_provider_response_maps_deepseek_cache_fields(provider_serializer):
-    """DeepSeek top-level prompt_cache_hit_tokens folds into
-    prompt_tokens_details.cached_tokens so cache pricing applies."""
+    """DeepSeek top-level prompt_cache_hit_tokens folds into the canonical
+    cache-read field so cache pricing applies."""
     response = {
         "id": "chatcmpl-x",
         "model": "deepseek-chat",
@@ -949,5 +994,4 @@ def test_parse_provider_response_maps_deepseek_cache_fields(provider_serializer)
 
     assert result.usage is not None
     assert result.usage.input_tokens == 100
-    assert result.usage.prompt_tokens_details is not None
-    assert result.usage.prompt_tokens_details.cached_tokens == 64
+    assert result.usage.cache_read_input_tokens == 64

@@ -13,12 +13,14 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.serialization.responses_toolkit import (
     extract_summary_text,
     generate_item_id,
 )
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.serialization.usage import UsageAccumulator
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 logger = get_logger(__name__)
 
@@ -82,8 +84,10 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         self._cached_tokens: int = 0
         self._audio_input_tokens: int = 0
         self._audio_output_tokens: int = 0
-        # Native server-side web search call count (billed per request)
-        self._web_search_call_count: int = 0
+        # What the proxy bills from: the canonical parse of the same events
+        # (ADR-0025). The counters below stay — they are this converter's state
+        # for the canonical chunk it emits to the client.
+        self._usage = UsageAccumulator("responses")
         # Per-reasoning-item state keyed by item id: the item's
         # ``encrypted_content`` and whether its summary text / encrypted
         # payload have already been emitted. Interleaved multi-item streams
@@ -118,6 +122,11 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         if not event_type:
             return None
 
+        # Every event is observed, before the dispatch: an event carries usage
+        # even when it produces no client-visible chunk, and the accounting is
+        # the provider's, not the client's.
+        self._usage.observe(chunk)
+
         handler = _RESPONSES_EVENT_HANDLERS.get(event_type)
         if handler is not None:
             return handler(self, chunk)
@@ -150,23 +159,15 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
                 completion_details["reasoning_tokens"] = self._reasoning_tokens
         return prompt_details, completion_details
 
-    def get_usage(self) -> StreamingUsage | None:
-        """Return accumulated usage information."""
-        web_search_requests = self._web_search_call_count or None
-        if not self._input_tokens and not self._output_tokens:
-            if web_search_requests is None:
-                return None
-            # No token usage, but native web search calls are still billable.
-            return StreamingUsage(web_search_requests=web_search_requests)
-        prompt_details, completion_details = self._build_usage_details()
-        return StreamingUsage(
-            input_tokens=self._input_tokens,
-            output_tokens=self._output_tokens,
-            total_tokens=self._input_tokens + self._output_tokens,
-            prompt_tokens_details=prompt_details,
-            completion_tokens_details=completion_details,
-            web_search_requests=web_search_requests,
-        )
+    def _own_usage(self) -> Usage | None:
+        """Return accumulated usage information.
+
+        The events' usage is extracted by the responses dialect adapter
+        (ADR-0025), which also counts the ``web_search_call`` items the stream
+        announces — a native search is billable even on a turn that reports no
+        tokens.
+        """
+        return self._usage.result()
 
     # ------------------------------------------------------------------
     # StreamingTransformer protocol (for completeness)
@@ -250,10 +251,9 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
             encrypted = item.get("encrypted_content")
             if isinstance(encrypted, str) and encrypted:
                 state.encrypted = encrypted
-        elif self._current_item_type == "web_search_call":
-            # Web search call metadata is tracked only via _current_item_id;
-            # no client-visible chunk is emitted for it.
-            self._web_search_call_count += 1
+        # A ``web_search_call`` item needs no tracking here: it emits no
+        # client-visible chunk, and the billable count belongs to the intake seam
+        # (ADR-0025) rather than a second counter in this converter.
         return None
 
     def _handle_text_delta(self, data: dict[str, Any]) -> dict[str, Any] | None:

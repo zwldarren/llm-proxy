@@ -3,13 +3,12 @@
 import time
 from typing import Any
 
-from llm_proxy.serialization.ollama.metrics import (
-    extract_ollama_cached_tokens,
-    extract_ollama_metrics,
-    extract_ollama_token_counts,
-)
+from llm_proxy.models.types import Usage
+from llm_proxy.serialization.ollama.metrics import extract_ollama_metrics
 from llm_proxy.serialization.ollama.tool_utils import convert_logprobs, normalize_tool_calls
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.serialization.usage import UsageAccumulator
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 _DONE_REASON_MAP: dict[str, str] = {
     "length": "length",
@@ -61,6 +60,13 @@ class OllamaStreamingMixin:
         finish_reason = None
         if chunk.get("done"):
             finish_reason = _DONE_REASON_MAP.get(chunk.get("done_reason"), "stop")
+        # Ollama ends a function-call turn with done_reason "stop"; promote to
+        # the OpenAI convention when this chunk itself carries the tool calls.
+        # When the calls arrived in an earlier chunk (the usual Ollama shape,
+        # with ``done: true`` in a separate terminal chunk) the stateful
+        # OllamaChunkConverter promotes after the fact.
+        if finish_reason == "stop" and delta.get("tool_calls"):
+            finish_reason = "tool_calls"
 
         openai_chunk: dict[str, Any] = {
             # Stable per-stream id: ``created_at`` is an ISO timestamp (with
@@ -80,20 +86,23 @@ class OllamaStreamingMixin:
         }
 
         if chunk.get("done"):
-            counts = extract_ollama_token_counts(chunk)
-            if counts is not None:
-                input_tokens, output_tokens = counts
+            # Emit the chunk's usage in the OpenAI dialect the client reads; the
+            # amounts come from the intake seam (`ollama` dialect), which owns the
+            # counter defaults and the cache clamp (ADR-0025). Emission itself
+            # stays with this serializer (ADR-0009).
+            parsed = parse_wire_usage("ollama", chunk)
+            if parsed is not None:
                 usage: dict[str, Any] = {
-                    "prompt_tokens": input_tokens,
-                    "completion_tokens": output_tokens,
-                    "total_tokens": input_tokens + output_tokens,
+                    "prompt_tokens": parsed.input_tokens,
+                    "completion_tokens": parsed.output_tokens,
+                    "total_tokens": parsed.total_tokens,
                 }
                 # Cache-read tokens are a subset of prompt_tokens, so they are
                 # never added to it. Emit them in both dialects, mirroring the
                 # Anthropic provider converter: the flat canonical key feeds
                 # billing, the OpenAI-dialect details object is what protocol
                 # transformers (e.g. OpenResponses) fold into client usage.
-                cached_tokens = extract_ollama_cached_tokens(chunk, input_tokens)
+                cached_tokens = parsed.cache_read_input_tokens
                 if cached_tokens is not None:
                     usage["cache_read_input_tokens"] = cached_tokens
                     if cached_tokens:
@@ -136,6 +145,10 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         )
         # Tool call index tracking (was in the adapter, now in the converter).
         self._tool_call_index: int = 0
+        # Ollama streams tool calls in an earlier chunk and ``done: true``
+        # (with ``done_reason: "stop"``) in a separate terminal chunk, so the
+        # terminal reason cannot be decided from the terminal chunk alone.
+        self._saw_tool_calls: bool = False
         # Fixed per-stream timestamp so all chunks share the same ``created``.
         self._created_at: int = int(time.time())
         # OpenAI convention: only the first delta carries ``role``. Ollama
@@ -143,8 +156,10 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         # first delta has been emitted and strip it afterwards.
         self._role_sent: bool = False
         # Usage captured from the terminal ``done`` chunk (Ollama reports
-        # prompt_eval_count/eval_count only there).
-        self._usage: StreamingUsage | None = None
+        # prompt_eval_count/eval_count only there), through the intake seam so
+        # billing does not depend on the protocol transformer having seen the
+        # final usage chunk.
+        self._usage = UsageAccumulator("ollama")
 
     # ------------------------------------------------------------------
     # Provider-side API  (called by adapter)
@@ -166,21 +181,10 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         """
         openai_chunk = self.convert_native_chunk(chunk)
 
-        # Capture usage from the terminal done chunk so get_usage() can serve
-        # billing even when the protocol-side transformer did not observe the
-        # final usage chunk.
-        if chunk.get("done"):
-            counts = extract_ollama_token_counts(chunk)
-            if counts is not None:
-                input_tokens, output_tokens = counts
-                self._usage = StreamingUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
-                    # Canonical flat field only: the internal record carries the
-                    # cache count once, in the field billing reads.
-                    cache_read_input_tokens=extract_ollama_cached_tokens(chunk, input_tokens),
-                )
+        # Observe the provider's own payload: the seam parses the terminal done
+        # chunk's counters and merges them cumulatively, so a chunk that reports
+        # nothing (every chunk but the last) cannot withdraw what a later one adds.
+        self._usage.observe(chunk)
 
         # Override tool call indices with sequential values (Ollama can emit
         # duplicate indices across chunks, which breaks the protocol transformer).
@@ -198,15 +202,24 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
 
             tool_calls = delta.get("tool_calls")
             if tool_calls:
+                self._saw_tool_calls = True
                 for call in tool_calls:
                     call["index"] = self._tool_call_index
                     self._tool_call_index += 1
 
+        # Promote the terminal reason once any tool call was seen: a
+        # spec-strict agent client (Zed, Claude Code, …) keys its loop on
+        # finish_reason and would otherwise stop without executing the call.
+        if choices and self._saw_tool_calls:
+            choice = choices[0]
+            if choice.get("finish_reason") == "stop":
+                choice["finish_reason"] = "tool_calls"
+
         return openai_chunk
 
-    def get_usage(self) -> StreamingUsage | None:
-        """Return the usage captured from the terminal done chunk."""
-        return self._usage
+    def _own_usage(self) -> Usage | None:
+        """Return the accumulated usage record for the turn."""
+        return self._usage.result()
 
     # ------------------------------------------------------------------
     # StreamingTransformer protocol

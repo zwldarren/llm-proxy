@@ -28,7 +28,8 @@ from llm_proxy.serialization.openai.components.request_builder import OpenAIRequ
 from llm_proxy.serialization.providers.field_utils import (
     extract_unknown_response_fields as _extract_unknown_fields,
 )
-from llm_proxy.serialization.providers.field_utils import parse_decisions_usage, reported_cost
+from llm_proxy.serialization.providers.field_utils import reported_cost
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 from llm_proxy.streaming.transformer import StreamingTransformer
 
 
@@ -389,10 +390,13 @@ class ProviderSerializer(ABC):
         verbatim so the protocol formatter can echo it losslessly.
         """
         raw_usage = response.get("usage")
-        usage = None
+        # Decisions' usage object is the Responses dialect's: ``input_tokens`` /
+        # ``output_tokens`` with the cache and thinking counts nested under
+        # ``input_tokens_details`` / ``output_tokens_details``. It declares that
+        # dialect rather than growing a second adapter for one shape (ADR-0025).
+        usage = parse_wire_usage("responses", response)
         provider_info: dict[str, Any] = {}
         if isinstance(raw_usage, dict):
-            usage = parse_decisions_usage(raw_usage)
             provider_info["decisions_usage"] = raw_usage
             cost = reported_cost(raw_usage)
             if cost is not None:

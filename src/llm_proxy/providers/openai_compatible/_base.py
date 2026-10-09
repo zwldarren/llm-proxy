@@ -35,11 +35,9 @@ from llm_proxy.providers.reasoning import (
 )
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
-from llm_proxy.serialization.openai.components.response_parser import (
-    OpenAIResponseParser,
-    fold_top_level_reasoning_tokens,
-)
+from llm_proxy.serialization.openai.components.response_parser import OpenAIResponseParser
 from llm_proxy.serialization.providers import get_provider_serializer
+from llm_proxy.serialization.usage.folds import fold_top_level_reasoning_tokens
 
 
 @register_adapter("openai-compatible")
@@ -314,10 +312,12 @@ class OpenAICompatibleBase(
         chunk = normalize_reasoning_in_stream_chunk(chunk)
         usage = chunk.get("usage")
         if isinstance(usage, dict):
-            # Streaming counterpart of the parse_usage fold (SGLang): fold
-            # provider-side so every client protocol transformer (OpenAI,
-            # Anthropic, OpenResponses) reads the nested OpenAI details for
-            # billing and usage records.
+            # SGLang reports the count top-level; fold it into the OpenAI-dialect
+            # block the client-visible chunk carries, so every protocol transformer
+            # (OpenAI, Anthropic, OpenResponses) sees the shape its own wire expects.
+            # Billing does not depend on this fold: the canonical record keeps
+            # thinking tokens flat and the intake adapter lifts either expression
+            # (ADR-0025).
             chunk["usage"] = fold_top_level_reasoning_tokens(usage)
         return chunk
 

@@ -13,9 +13,11 @@ from typing import Any, Literal
 import orjson
 
 from llm_proxy.billing.cost import calculate_cost
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.log_intake import record_realtime_turn
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.realtime.relay import KIND_TEXT
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 logger = get_logger(__name__)
 
@@ -99,12 +101,11 @@ class RealtimeUsageObserver:
         response = event.get("response")
         if not isinstance(response, dict):
             return
-        usage = response.get("usage")
-        if not isinstance(usage, dict):
-            usage = None
-        await self._record_turn(response, usage)
+        # The turn's usage is the realtime dialect's (``response.usage``, nested
+        # singular ``*_token_details``); the intake seam owns that shape (ADR-0025).
+        await self._record_turn(response, parse_wire_usage("realtime", event))
 
-    async def _record_turn(self, response: dict[str, Any], usage: dict[str, Any] | None) -> None:
+    async def _record_turn(self, response: dict[str, Any], usage: Usage | None) -> None:
         """Calculate cost and write the background request log for one turn.
 
         A ``response.done`` without usage (e.g. failed/cancelled turns that

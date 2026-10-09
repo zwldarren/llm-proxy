@@ -16,6 +16,7 @@ served by the OpenAI Responses provider:
 """
 
 import types
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,6 +33,12 @@ from llm_proxy.observability.event_context import EventContext
 from llm_proxy.providers.openai.adapter import OpenAIAdapter, _strip_input_item_id
 
 adapter = OpenAIAdapter(api_key="test-key")
+
+
+def _record(ctx: Any) -> Any:
+    """The usage record the capture path wrote."""
+    assert ctx.usage is not None, "no usage record was captured"
+    return ctx.usage
 
 
 def _request(raw: dict, **kw) -> InternalRequest:
@@ -283,8 +290,12 @@ class TestResponseSidePassthrough:
         assert result.usage.input_tokens == 10
         assert result.usage.output_tokens == 20
         assert result.usage.total_tokens == 30
-        assert result.usage.prompt_tokens_details.cached_tokens == 5
-        assert result.usage.completion_tokens_details.reasoning_tokens == 8
+        # A cache read has one billable amount and two dialect expressions; the
+        # canonical record keeps it in the flat field (ADR-0025), the same shape
+        # the non-streaming responses parser records for every tier.
+        assert result.usage.cache_read_input_tokens == 5
+        assert result.usage.prompt_tokens_details is None
+        assert result.usage.reasoning_tokens == 8
 
     def test_no_usage_ok(self):
         req = _request({"model": "gpt-5.6-luna"})
@@ -343,11 +354,11 @@ class TestStreamingUsageCapture:
         )
         NativePassthroughHandler.maybe_capture_native_openresponses(chunk, transformer, ctx)
 
-        assert ctx.prompt_tokens == 100
-        assert ctx.completion_tokens == 50
-        assert ctx.total_tokens == 150
-        assert ctx.cache_read_input_tokens == 40
-        assert ctx.reasoning_tokens == 30
+        assert _record(ctx).input_tokens == 100
+        assert _record(ctx).output_tokens == 50
+        assert _record(ctx).total_tokens == 150
+        assert _record(ctx).cache_read_input_tokens == 40
+        assert _record(ctx).reasoning_tokens == 30
         # The terminal snapshot is captured for store=true persistence.
         assert transformer.state.final_response_payload["usage"]["input_tokens"] == 100
 
@@ -361,8 +372,8 @@ class TestStreamingUsageCapture:
             'data: {"type":"response.output_text.delta","delta":"hi"}\n\n'
         )
         NativePassthroughHandler.maybe_capture_native_openresponses(chunk, transformer, ctx)
-        assert ctx.prompt_tokens is None
-        assert ctx.completion_tokens is None
+        assert ctx.usage is None
+        assert ctx.usage is None
         assert transformer.state.final_response_payload is None
 
     def test_data_only_frames_without_event_line_captured(self):
@@ -377,9 +388,9 @@ class TestStreamingUsageCapture:
             '"response":{"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}}\n\n'
         )
         NativePassthroughHandler.maybe_capture_native_openresponses(chunk, transformer, ctx)
-        assert ctx.prompt_tokens == 7
-        assert ctx.completion_tokens == 3
-        assert ctx.total_tokens == 10
+        assert _record(ctx).input_tokens == 7
+        assert _record(ctx).output_tokens == 3
+        assert _record(ctx).total_tokens == 10
         assert transformer.state.final_response_payload["usage"]["input_tokens"] == 7
 
     def test_no_space_sse_delimiters_captured(self):
@@ -393,9 +404,9 @@ class TestStreamingUsageCapture:
             '"response":{"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}}\n\n'
         )
         NativePassthroughHandler.maybe_capture_native_openresponses(chunk, transformer, ctx)
-        assert ctx.prompt_tokens == 7
-        assert ctx.completion_tokens == 3
-        assert ctx.total_tokens == 10
+        assert _record(ctx).input_tokens == 7
+        assert _record(ctx).output_tokens == 3
+        assert _record(ctx).total_tokens == 10
         assert transformer.state.final_response_payload["usage"]["input_tokens"] == 7
 
     def _transformer(self) -> types.SimpleNamespace:

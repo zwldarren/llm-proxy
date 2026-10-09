@@ -151,8 +151,8 @@ class BaseOpenAIAudioSerializer(ProtocolSerializer):
             if details:
                 result["input_token_details"] = details
 
-        if usage.completion_tokens_details is not None:
-            ctd = usage.completion_tokens_details
+        ctd = usage.completion_tokens_details
+        if ctd is not None or usage.reasoning_tokens is not None:
             details = {}
             for key in (
                 "accepted_prediction_tokens",
@@ -161,9 +161,13 @@ class BaseOpenAIAudioSerializer(ProtocolSerializer):
                 "rejected_prediction_tokens",
                 "image_tokens",
             ):
-                value = getattr(ctd, key, None)
+                value = getattr(ctd, key, None) if ctd is not None else None
                 if value is not None:
                     details[key] = value
+            # Thinking tokens are the canonical flat field on the record; the client
+            # reads them under the Realtime dialect's own key (ADR-0025).
+            if usage.reasoning_tokens is not None:
+                details["reasoning_tokens"] = usage.reasoning_tokens
             if details:
                 result["output_token_details"] = details
 

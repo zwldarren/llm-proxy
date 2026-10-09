@@ -11,6 +11,7 @@ from llm_proxy.core.processing.stream_assembly import (
     terminal_provider_info,
 )
 from llm_proxy.models.content_blocks import TextBlock
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.event_context import EventContext
 
 
@@ -19,6 +20,15 @@ def _context(**tokens) -> EventContext:
     for key, value in tokens.items():
         setattr(ctx, key, value)
     return ctx
+
+
+def _with_usage(input_tokens: int, output_tokens: int, total_tokens: int) -> EventContext:
+    """A context whose record reports the given counters."""
+    context = _context()
+    context.update_usage(
+        Usage(input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=total_tokens)
+    )
+    return context
 
 
 class TestCollectAccumulatedOutput:
@@ -129,7 +139,7 @@ class TestAssembleStreamResponseBody:
             transformer.transform(chunk)
 
         body = assemble_stream_response_body(
-            _context(prompt_tokens=5, completion_tokens=2, total_tokens=7),
+            _with_usage(5, 2, 7),
             protocol_name="openai",
             response_id="chatcmpl-1",
             model="gpt-4o",

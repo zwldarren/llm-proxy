@@ -25,6 +25,7 @@ from llm_proxy.models import (
 )
 from llm_proxy.providers.base import extract_rate_limit_headers
 from llm_proxy.providers.capabilities.host import AudioSelf
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 
 class AudioCapabilityMixin:
@@ -142,72 +143,6 @@ class AudioCapabilityMixin:
         files = {"file": (request.filename, request.file)}
         return data, files
 
-    def _parse_usage(self: AudioSelf, raw_usage: Any) -> Any:
-        """Parse usage dict from provider response into a Usage object.
-
-        Handles token-based usage (chat, gpt-4o-transcribe) and duration-based
-        usage (whisper transcription/translation: {"type": "duration", "seconds": N}).
-
-        A bare ``seconds`` key is duration-based too: OpenRouter's
-        ``/audio/transcriptions`` reports ``{"seconds": N, "cost": ...}`` with no
-        ``type`` discriminator, and reading it as a token usage would bill a
-        per-second endpoint from token estimation.
-        """
-        from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
-
-        if not raw_usage or not isinstance(raw_usage, dict):
-            return None
-
-        def _prompt_details_from_input(input_details: dict[str, Any]) -> PromptTokensDetails | None:
-            audio_in = input_details.get("audio_tokens")
-            cached = input_details.get("cached_tokens")
-            text_tokens = input_details.get("text_tokens")
-            if audio_in is not None or cached is not None or text_tokens is not None:
-                return PromptTokensDetails(
-                    audio_tokens=audio_in,
-                    cached_tokens=cached,
-                    text_tokens=text_tokens,
-                )
-            return None
-
-        # Duration-based usage (whisper transcription/translation)
-        seconds = raw_usage.get("seconds")
-        duration_seconds = seconds if isinstance(seconds, int | float) else None
-        if raw_usage.get("type") == "duration" or duration_seconds is not None:
-            usage = Usage(audio_duration_seconds=duration_seconds)
-            # Duration-based responses may still carry input token details
-            # (e.g. gpt-4o-transcribe with audio/text token breakdown).
-            input_details = raw_usage.get("input_token_details") or raw_usage.get(
-                "prompt_tokens_details"
-            )
-            if isinstance(input_details, dict):
-                usage.prompt_tokens_details = _prompt_details_from_input(input_details)
-            return usage
-
-        # Token-based usage; audio token details may be nested under
-        # input_token_details (gpt-4o-transcribe) or prompt_tokens_details (chat)
-        prompt_details = None
-        input_details = raw_usage.get("input_token_details")
-        if input_details is None:
-            input_details = raw_usage.get("prompt_tokens_details")
-        if isinstance(input_details, dict):
-            prompt_details = _prompt_details_from_input(input_details)
-
-        completion_details = None
-        output_details = raw_usage.get("completion_tokens_details")
-        if isinstance(output_details, dict):
-            audio_out = output_details.get("audio_tokens")
-            if audio_out is not None:
-                completion_details = CompletionTokensDetails(audio_tokens=audio_out)
-
-        return Usage(
-            input_tokens=raw_usage.get("input_tokens", 0),
-            output_tokens=raw_usage.get("output_tokens", 0),
-            total_tokens=raw_usage.get("total_tokens"),
-            prompt_tokens_details=prompt_details,
-            completion_tokens_details=completion_details,
-        )
-
     def _parse_transcription_response(
         self: AudioSelf, data: dict[str, Any], format_type: str
     ) -> InternalTranscriptionResponse:
@@ -219,7 +154,10 @@ class AudioCapabilityMixin:
             segments=data.get("segments"),
             words=data.get("words"),
             logprobs=data.get("logprobs"),
-            usage=self._parse_usage(data.get("usage")),
+            # The audio dialect's usage block, through the same seam every other
+            # tier reads (ADR-0025): token-based and duration-based shapes, and
+            # the audio/text input split, are the adapter's business.
+            usage=parse_wire_usage("audio", data),
         )
         response._response_format = format_type
         return response
@@ -232,7 +170,7 @@ class AudioCapabilityMixin:
             language=data.get("language", "english"),
             duration=data.get("duration"),
             segments=data.get("segments"),
-            usage=self._parse_usage(data.get("usage")),
+            usage=parse_wire_usage("audio", data),
         )
         response._response_format = format_type
         return response

@@ -17,12 +17,13 @@ from typing import Any
 
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models.finish_reasons import ANTHROPIC_TO_OPENAI
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
+from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
-    StreamingUsage,
 )
 
 
@@ -99,6 +100,11 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
         # ``_pending_usage`` is intentionally kept afterwards so that
         # ``get_usage()`` still works when called after the stream ends.
         self._final_chunk_emitted: bool = False
+        # The canonical parse of the Anthropic events this converter is handed
+        # (ADR-0025). ``_pending_usage`` above is the canonical *chunk* usage it
+        # emits to the client; this is the same turn read through the anthropic
+        # dialect adapter, which is what ``get_usage()`` reports.
+        self._usage = UsageAccumulator("anthropic")
         self._input_tokens: int = 0
         self._output_tokens: int = 0
         self._cache_read_input_tokens: int = 0
@@ -128,31 +134,24 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
             accumulation-only events).
         """
         event_type = chunk.get("type", "")
+        # Every event is observed, before the dispatch: an event that carries usage
+        # may produce no client-visible chunk (or none this late in the turn), and
+        # the accounting is the provider's, not the client's.
+        self._usage.observe(chunk)
         handler = _EVENT_HANDLERS.get(event_type)
         if handler is not None:
             return handler(self, chunk)
         return None  # unknown event → skip
 
-    def get_usage(self) -> StreamingUsage | None:
-        """Return accumulated usage information from the streaming response."""
-        if self._pending_usage is not None:
-            # Web search request count (server_tool_use.web_search_requests)
-            web_search_requests: int | None = None
-            server_tool_use = self._pending_usage.get("server_tool_use")
-            if isinstance(server_tool_use, dict):
-                ws_count = server_tool_use.get("web_search_requests")
-                if isinstance(ws_count, int) and ws_count > 0:
-                    web_search_requests = ws_count
+    def _own_usage(self) -> Usage | None:
+        """Return accumulated usage information from the streaming response.
 
-            return StreamingUsage(
-                input_tokens=self._pending_usage.get("prompt_tokens", 0),
-                output_tokens=self._pending_usage.get("completion_tokens", 0),
-                total_tokens=self._pending_usage.get("total_tokens", 0),
-                cache_read_input_tokens=self._pending_usage.get("cache_read_input_tokens"),
-                cache_creation_input_tokens=self._pending_usage.get("cache_creation_input_tokens"),
-                web_search_requests=web_search_requests,
-            )
-        return None
+        Extracted by the anthropic dialect adapter (ADR-0025), so the input count
+        that includes the cache counters, the web-search count, and Anthropic's
+        ``output_tokens_details.thinking_tokens`` all arrive through the one code
+        path every other tier uses.
+        """
+        return self._usage.result()
 
     # ------------------------------------------------------------------
     # Event handlers  (one method per Anthropic event type)

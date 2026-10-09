@@ -67,6 +67,7 @@ from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunk
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.providers.registry import register_provider_serializer
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 _TOOL_CHOICE_MODE_TO_ANTHROPIC = {
     "auto": "auto",
@@ -349,33 +350,18 @@ def parse_usage_and_provider_extras(
 
     Anthropic's ``input_tokens`` only counts tokens after the last cache
     breakpoint; ``cache_read_input_tokens``/``cache_creation_input_tokens``
-    are separate. Total input = input_tokens + cache_read + cache_creation.
-    The extras dict collects usage-level keys (``cache_creation``,
-    ``inference_geo``, ``server_tool_use``) that downstream billing reads
-    from ``provider_info`` (e.g. web search request counts).
+    are separate. Total input = input_tokens + cache_read + cache_creation, which
+    is the canonical record's own invariant, so the counts come from the anthropic
+    dialect adapter (ADR-0025).
+
+    The extras dict is *not* usage: it collects usage-level keys
+    (``cache_creation``, ``inference_geo``, ``server_tool_use``) that downstream
+    billing reads from ``provider_info`` (e.g. web search request counts).
     """
-    usage = None
+    usage = parse_wire_usage("anthropic", response)
     extras: dict[str, Any] = {}
     usage_data = response.get("usage")
     if isinstance(usage_data, dict):
-        prompt_tokens = (
-            usage_data.get("input_tokens", 0)
-            + (usage_data.get("cache_read_input_tokens") or 0)
-            + (usage_data.get("cache_creation_input_tokens") or 0)
-        )
-        output_details = usage_data.get("output_tokens_details")
-        thinking_tokens = (
-            output_details.get("thinking_tokens") if isinstance(output_details, dict) else None
-        )
-        usage = Usage(
-            input_tokens=prompt_tokens,
-            output_tokens=usage_data.get("output_tokens", 0),
-            total_tokens=prompt_tokens + (usage_data.get("output_tokens", 0)),
-            cache_read_input_tokens=usage_data.get("cache_read_input_tokens"),
-            cache_creation_input_tokens=usage_data.get("cache_creation_input_tokens"),
-            reasoning_tokens=thinking_tokens,
-        )
-
         # Beta extensions (fast-mode "speed", compaction/fallback
         # "iterations", plus the full-Usage keys) ride extras verbatim so
         # anthropic clients keep the full Usage shape on converted paths.

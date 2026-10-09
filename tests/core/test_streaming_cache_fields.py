@@ -71,8 +71,11 @@ def test_openai_streaming_fields_include_cache_tokens():
 
 
 def test_openai_streaming_usage_folds_deepseek_cache_hits():
-    """DeepSeek top-level cache fields pass through usage normalization and
-    fold into prompt_tokens_details.cached_tokens for billing."""
+    """DeepSeek's top-level cache fields fold into the canonical cache-read field.
+
+    The fold is the one the chat intake adapter applies (ADR-0025), so a streamed
+    DeepSeek turn and a non-streamed one record the same fact in the same place.
+    """
     transformer = OpenAIStreamingTransformer(model="deepseek-chat", request_id="test")
     chunk = {
         "id": "chatcmpl-x",
@@ -91,8 +94,8 @@ def test_openai_streaming_usage_folds_deepseek_cache_hits():
     transformer.transform(chunk)
     usage = transformer.get_usage()
     assert usage is not None
-    assert usage.prompt_tokens_details is not None
-    assert usage.prompt_tokens_details["cached_tokens"] == 64
+    assert usage.cache_read_input_tokens == 64
+    assert usage.prompt_tokens_details is None
     # The raw fields stay in the pending usage for client echo fidelity.
     assert transformer._pending_usage["prompt_cache_hit_tokens"] == 64
 
@@ -100,7 +103,7 @@ def test_openai_streaming_usage_folds_deepseek_cache_hits():
 def test_openai_streaming_usage_dedups_cache_read_dialect_copy():
     """Provider converters copy the flat cache-read count into
     prompt_tokens_details.cached_tokens for wire-dialect consumers. The
-    canonical StreamingUsage must carry the fact once (flat field), or the
+    canonical record must carry the fact once (flat field), or the
     same tokens land in both usage_records cache columns and the cache hit
     rate double-counts (>100%)."""
     transformer = OpenAIStreamingTransformer(model="claude-3", request_id="test")
@@ -126,16 +129,21 @@ def test_openai_streaming_usage_dedups_cache_read_dialect_copy():
     assert usage.cache_creation_input_tokens == 200
     # The dialect duplicate is dropped; unrelated details survive.
     assert usage.prompt_tokens_details is not None
-    assert "cached_tokens" not in usage.prompt_tokens_details
-    assert usage.prompt_tokens_details["audio_tokens"] == 25
+    assert usage.prompt_tokens_details.cached_tokens is None
+    assert usage.prompt_tokens_details.audio_tokens == 25
     # The client-facing pending usage keeps the dialect copy verbatim.
     assert transformer._pending_usage["prompt_tokens_details"]["cached_tokens"] == 300
 
 
-def test_openai_streaming_usage_keeps_openai_dialect_cached_tokens():
+def test_openai_streaming_usage_lifts_openai_dialect_cached_tokens():
     """OpenAI-family providers report cache reads ONLY via
-    prompt_tokens_details.cached_tokens; that expression must survive when no
-    flat cache_read_input_tokens is present."""
+    prompt_tokens_details.cached_tokens; with no flat field present the nested
+    expression is lifted into the canonical one (ADR-0025).
+
+    The fact used to survive *as nested* with a flat zero beside it, which made a
+    streamed turn record a different cache-read field than a non-streamed one.
+    One fact, one field.
+    """
     transformer = OpenAIStreamingTransformer(model="gpt-4o", request_id="test")
     chunk = {
         "id": "chatcmpl-x",
@@ -153,9 +161,10 @@ def test_openai_streaming_usage_keeps_openai_dialect_cached_tokens():
     transformer.transform(chunk)
     usage = transformer.get_usage()
     assert usage is not None
-    assert usage.cache_read_input_tokens == 0
-    assert usage.prompt_tokens_details is not None
-    assert usage.prompt_tokens_details["cached_tokens"] == 400
+    assert usage.cache_read_input_tokens == 400
+    assert usage.prompt_tokens_details is None
+    # The client-facing pending usage keeps the dialect copy verbatim.
+    assert transformer._pending_usage["prompt_tokens_details"]["cached_tokens"] == 400
 
 
 def test_anthropic_streaming_usage_dedups_cache_read_dialect_copy():
@@ -189,9 +198,10 @@ def test_anthropic_streaming_usage_dedups_cache_read_dialect_copy():
     assert transformer._pending_usage["prompt_tokens_details"]["cached_tokens"] == 300
 
 
-def test_anthropic_streaming_usage_keeps_openai_dialect_cached_tokens():
+def test_anthropic_streaming_usage_lifts_openai_dialect_cached_tokens():
     """Anthropic protocol transformer serving an OpenAI-family provider: the
-    nested dialect expression is the only one and must survive."""
+    nested dialect expression is the only one, so it is lifted into the canonical
+    flat field (ADR-0025), exactly as the OpenAI transformer does it."""
     from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 
     transformer = AnthropicStreamingTransformer(model="gpt-4o", request_id="test")
@@ -211,6 +221,5 @@ def test_anthropic_streaming_usage_keeps_openai_dialect_cached_tokens():
     transformer.transform(chunk)
     usage = transformer.get_usage()
     assert usage is not None
-    assert usage.cache_read_input_tokens is None
-    assert usage.prompt_tokens_details is not None
-    assert usage.prompt_tokens_details["cached_tokens"] == 400
+    assert usage.cache_read_input_tokens == 400
+    assert usage.prompt_tokens_details is None

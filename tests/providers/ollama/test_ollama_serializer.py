@@ -651,6 +651,40 @@ class TestResponseDoneReason:
         assert result.finish_reason == "length"
         assert result.provider_info.get("done_reason") == "length"
 
+    def test_stop_with_tool_calls_is_promoted(self, serializer):
+        """Ollama ends a tool-call turn with done_reason "stop"; the wire
+        reason must follow the OpenAI convention ("tool_calls") or spec-strict
+        agent clients never execute the call."""
+        response = {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"location": "Berlin"}',
+                        }
+                    }
+                ],
+            },
+            "done": True,
+            "done_reason": "stop",
+        }
+        result = serializer.parse_provider_response(response, model="llama3.2")
+        assert result.finish_reason == "tool_calls"
+        # The raw provider reason stays visible for observability.
+        assert result.provider_info.get("done_reason") == "stop"
+
+    def test_stop_without_tool_calls_stays_stop(self, serializer):
+        response = {
+            "message": {"role": "assistant", "content": "hi"},
+            "done": True,
+            "done_reason": "stop",
+        }
+        result = serializer.parse_provider_response(response, model="llama3.2")
+        assert result.finish_reason == "stop"
+
 
 class TestResponseLogprobs:
     """Non-streaming logprobs are parsed into InternalResponse.logprobs."""

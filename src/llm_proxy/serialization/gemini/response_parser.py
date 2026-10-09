@@ -14,10 +14,10 @@ from llm_proxy.models import (
     VideoBlock,
 )
 from llm_proxy.models.finish_reasons import map_finish_reason
-from llm_proxy.models.types import AudioSource, ImageSource, Usage, VideoSource
+from llm_proxy.models.types import AudioSource, ImageSource, VideoSource
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
 from llm_proxy.serialization.gemini.code_execution import extract_code_execution_text
-from llm_proxy.serialization.gemini.usage import billable_token_counts
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 
 def _part_field(part_data: Any, camel: str, snake: str) -> str:
@@ -184,36 +184,11 @@ class GeminiResponseParserMixin:
         if "modelVersion" in response:
             provider_info["modelVersion"] = response["modelVersion"]
 
-        usage = None
-        # Native Google Search grounding is billed per search request;
-        # webSearchQueries lists the queries the model actually issued.
-        # Computed before usage construction because search-grounded tool-use
-        # prompt tokens are excluded from input billing (Google charges the
-        # per-request search fee instead).
-        web_search_requests = 0
-        grounding = provider_info.get("groundingMetadata")
-        if isinstance(grounding, dict):
-            queries = grounding.get("webSearchQueries")
-            if isinstance(queries, list):
-                web_search_requests = len(queries)
-
-        if "usageMetadata" in response:
-            meta = response["usageMetadata"]
-            input_tokens, output_tokens = billable_token_counts(
-                meta, has_search_grounding=web_search_requests > 0
-            )
-            usage = Usage(
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=meta.get("totalTokenCount", 0),
-                cache_read_input_tokens=meta.get("cachedContentTokenCount"),
-                reasoning_tokens=meta.get("thoughtsTokenCount"),
-            )
-
-        if web_search_requests > 0:
-            if usage is None:
-                usage = Usage()
-            usage.web_search_requests = web_search_requests
+        # One parse of the whole GenerateContentResponse through the intake seam
+        # (ADR-0025): it reads ``usageMetadata`` for the counters and the
+        # candidates for the native-search grounding, which changes how the
+        # tool-use prompt tokens are billed.
+        usage = parse_wire_usage("gemini", response)
 
         return InternalResponse(
             # GenerateContentResponse carries the correlation id as

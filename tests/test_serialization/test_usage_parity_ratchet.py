@@ -1,0 +1,1404 @@
+"""Parity ratchet: the usage intake seam must agree with the call sites it replaces.
+
+ADR-0025 moves usage extraction behind one seam (``serialization/usage``) and
+deletes the per-tier copies one dialect at a time. Deleting a copy is only safe
+if the seam and the copy have been compared over the same wire frames first —
+that comparison is this module's whole job.
+
+A row pairs a wire dialect with a call site that still parses it locally:
+
+* ``legacy`` drives the *shipped* code path and returns whatever that path
+  produces — the canonical record, an ``EventContext``, or billing's read model
+  (``TokenUsage``);
+* the canonical side runs ``UsageAccumulator(dialect)`` over the same frames.
+
+Both sides are then projected onto the billable **amounts**, not the field
+placement: amounts are what billing multiplies. Field placement is pinned
+separately by the module's own tests (``tests/test_serialization/test_usage_intake.py``),
+which is why a row can pass while the canonical record expresses a fact in a
+flatter field than the legacy one did.
+
+When a migration slice lands, its driver stops being an independent parser and
+becomes a projection onto the record the seam already fills, so comparing the two
+only proves the projection is faithful. Such a row therefore keeps its driver *and*
+gains ``recorded``: the amounts the shipped parser produced, measured from it
+before the swap, which still fail if the seam or the projection moves an amount. A
+row whose call site is deleted outright drops the driver and keeps ``recorded``
+alone.
+
+``declared`` names the facts a row is allowed to disagree on, with the reason.
+The set is checked for exactness in both directions — a declaration without a
+real difference fails, and a new difference fails — so a divergence cannot
+quietly hide behind a stale declaration.
+"""
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+import orjson
+import pytest
+
+from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
+from llm_proxy.billing.tokens import TokenUsage, token_usage_from
+from llm_proxy.billing.transcription_stream_usage import TranscriptionStreamUsageTracker
+from llm_proxy.core.conversion import NativePassthroughHandler
+from llm_proxy.models.types import Usage
+from llm_proxy.observability.event_context import EventContext
+from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
+from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
+from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
+from llm_proxy.providers.capabilities.audio import AudioCapabilityMixin
+from llm_proxy.providers.gemini.adapter import GeminiAdapter
+from llm_proxy.serialization.anthropic.serializer import parse_usage_and_provider_extras
+from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
+from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
+from llm_proxy.serialization.ollama.serializer import OllamaProviderSerializer
+from llm_proxy.serialization.ollama.streaming import OllamaChunkConverter
+from llm_proxy.serialization.openai.serializer import parse_usage_from_response
+from llm_proxy.serialization.openai.streaming_converter import OpenAIResponsesChunkConverter
+from llm_proxy.serialization.providers.base import ProviderSerializer
+from llm_proxy.serialization.usage import UsageAccumulator, parse_usage
+
+#: The billable facts both sides are projected onto. ``cost`` is included
+#: because a provider-reported cost outranks the local price table
+#: (``observability/cost.py``), so dropping it changes a bill.
+FACTS: tuple[str, ...] = (
+    "input",
+    "output",
+    "total",
+    "cache_read",
+    "cache_write",
+    "reasoning",
+    "web_search",
+    "cost",
+)
+
+Facts = dict[str, int | float]
+
+#: The audio endpoints bill dimensions the token dialects do not: the
+#: transcribed seconds (a unit price) and the audio-token split of the prompt
+#: and completion. A row that compares them declares them in its ``facts``; every
+#: other row filters them out.
+AUDIO_FACTS: frozenset[str] = frozenset(FACTS) | {
+    "audio_duration",
+    "audio_input",
+    "audio_output",
+}
+
+
+def _amount(flat: Any, nested: Any) -> int:
+    """One cache fact's billable amount, from whichever dialect field carries it.
+
+    A cache fact has two expressions (flat Anthropic field vs nested OpenAI
+    detail) and the same amount in both; billing multiplies the amount, so the
+    ratchet compares there. Which field the canonical record *keeps* it in is
+    the module's own contract, pinned by its own tests.
+    """
+    return int(flat or nested or 0)
+
+
+def _facts_of_usage(usage: Usage | None) -> Facts:
+    """Canonical record → billable facts."""
+    if usage is None:
+        return dict.fromkeys(FACTS, 0)
+    prompt_details = usage.prompt_tokens_details
+    completion_details = usage.completion_tokens_details
+    return {
+        "input": usage.input_tokens,
+        "output": usage.output_tokens,
+        "total": usage.total_tokens or usage.input_tokens + usage.output_tokens,
+        "cache_read": _amount(
+            usage.cache_read_input_tokens, getattr(prompt_details, "cached_tokens", None)
+        ),
+        "cache_write": _amount(
+            usage.cache_creation_input_tokens, getattr(prompt_details, "cache_write_tokens", None)
+        ),
+        "reasoning": int(
+            usage.reasoning_tokens or getattr(completion_details, "reasoning_tokens", None) or 0
+        ),
+        "web_search": int(usage.web_search_requests or 0),
+        "cost": float(usage.provider_reported_cost or 0),
+        "audio_duration": float(usage.audio_duration_seconds or 0.0),
+        "audio_input": int(getattr(prompt_details, "audio_tokens", None) or 0),
+        "audio_output": int(getattr(completion_details, "audio_tokens", None) or 0),
+    }
+
+
+def _facts_of_event_context(context: EventContext) -> Facts:
+    """Observability capture object → billable facts (the passthrough tier's view).
+
+    The context holds the record plus the two billable dimensions that have a
+    second route: the search count (which its own field accumulates) and the cost
+    the record may carry.
+    """
+    facts = _facts_of_usage(context.usage)
+    facts["web_search"] = int(context.web_search_requests or facts["web_search"])
+    facts["cost"] = float(context.provider_reported_cost or facts["cost"])
+    return facts
+
+
+def _facts_of_token_usage(usage: TokenUsage) -> Facts:
+    """Billing's own read model → billable facts.
+
+    The read model has no reasoning dimension: billing prices reasoning inside
+    the output count, so a row comparing against it restricts ``facts``.
+    """
+    return {
+        "input": usage.prompt_tokens,
+        "output": usage.completion_tokens,
+        "total": usage.total_tokens or usage.prompt_tokens + usage.completion_tokens,
+        "cache_read": _amount(usage.cache_read_input_tokens, usage.cached_prompt_tokens),
+        "cache_write": usage.cache_creation_input_tokens,
+        "reasoning": 0,
+        "web_search": usage.web_search_requests,
+        "cost": 0.0,
+        "audio_duration": float(usage.audio_duration_seconds or 0.0),
+        "audio_input": int(usage.audio_input_tokens or 0),
+        "audio_output": int(usage.audio_output_tokens or 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The wire frames and the legacy drivers
+# ---------------------------------------------------------------------------
+
+_TERMINAL_USAGE: dict[str, Any] = {
+    "input_tokens": 1000,
+    "output_tokens": 50,
+    "total_tokens": 1050,
+    "input_tokens_details": {"cached_tokens": 400},
+    "output_tokens_details": {"reasoning_tokens": 20},
+}
+
+_ANTHROPIC_FRAMES: tuple[dict[str, Any], ...] = (
+    {
+        "type": "message_start",
+        "message": {
+            "id": "msg_1",
+            "usage": {"input_tokens": 100, "output_tokens": 1, "cache_read_input_tokens": 50},
+        },
+    },
+    {
+        "type": "message_delta",
+        "usage": {
+            "output_tokens": 40,
+            "output_tokens_details": {"thinking_tokens": 7},
+            "server_tool_use": {"web_search_requests": 2},
+        },
+    },
+)
+
+
+def _new_context() -> EventContext:
+    return EventContext(request_id="req_parity", trace_id="trace_parity", model="test-model")
+
+
+def _chat_transformer(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``protocols/openai/streaming.py`` — the client-facing chat tier's own parser."""
+    transformer = OpenAIStreamingTransformer(model="gpt-4o", request_id="req_parity")
+    for frame in frames:
+        transformer.transform(frame)
+    return transformer.get_usage()
+
+
+def _anthropic_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/anthropic/streaming_converter.py`` — provider frames → canonical usage."""
+    converter = AnthropicChunkConverter(model="claude-3", request_id="msg_1")
+    for frame in frames:
+        converter.convert_chunk(frame)
+    return converter.get_usage()
+
+
+def _anthropic_protocol_transformer(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``protocols/anthropic/streaming.py`` — canonical chunks → the client's wire."""
+    transformer = AnthropicStreamingTransformer(model="claude-3", request_id="msg_1")
+    for frame in frames:
+        transformer.transform(frame)
+    return transformer.get_usage()
+
+
+def _anthropic_passthrough(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``core/conversion.py::process_anthropic_usage_event`` — the native tier's handler."""
+    context = _new_context()
+    for frame in frames:
+        NativePassthroughHandler.process_anthropic_usage_event(frame["type"], frame, context)
+    return context
+
+
+def _anthropic_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/anthropic/serializer.py`` — a non-streaming body → usage."""
+    usage, _extras = parse_usage_and_provider_extras(frames[0])
+    return usage
+
+
+def _openresponses_protocol_transformer(
+    frames: Sequence[dict[str, Any]],
+) -> Usage | None:
+    """``protocols/openresponses/streaming.py`` — canonical or native events → usage."""
+    transformer = OpenResponsesStreamingTransformer(model="gpt-4", request_id="resp_1")
+    for frame in frames:
+        transformer.transform(frame)
+    return transformer.get_usage()
+
+
+def _responses_terminal_passthrough(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``core/conversion.py::_apply_openresponses_usage`` — the native tier's handler."""
+    context = _new_context()
+    for frame in frames:
+        NativePassthroughHandler._apply_openresponses_usage(frame, context)
+    return context
+
+
+def _responses_provider_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/openai/streaming_converter.py`` — Responses wire events → usage."""
+    converter = OpenAIResponsesChunkConverter(model="gpt-4o", request_id="resp_1")
+    for frame in frames:
+        converter.convert_chunk(frame)
+    return converter.get_usage()
+
+
+def _native_chat_frame(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``core/conversion.py::_capture_openai_stream_usage`` — the native tier's handler."""
+    context = _new_context()
+    for frame in frames:
+        sse = "data: " + orjson.dumps(frame).decode() + "\n\n"
+        NativePassthroughHandler._capture_openai_stream_usage(sse, context)
+    return context
+
+
+def _realtime_billing_read_model(frames: Sequence[dict[str, Any]]) -> TokenUsage:
+    """``realtime/usage.py`` parses the turn's event, and billing prices the record.
+
+    The seam parses (the realtime dialect nests under singular ``*_token_details``)
+    and the read model projects the record onto billing's columns.
+    """
+    return token_usage_from(parse_usage("realtime", frames[0]))
+
+
+def _ollama_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/ollama/response_parser.py`` — a native body → usage."""
+    return OllamaProviderSerializer().parse_provider_response(frames[0], model="llama3.1").usage
+
+
+def _ollama_embeddings_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """The same module's ``/api/embed`` path — prompt counters, no output ones."""
+    return OllamaProviderSerializer().parse_provider_embedding_response(frames[0]).usage
+
+
+def _ollama_streaming_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization ollama/streaming.py`` — the terminal ``done`` chunk → usage."""
+    converter = OllamaChunkConverter(model="llama3.1", request_id="req_parity")
+    for frame in frames:
+        converter.convert_chunk(frame)
+    return converter.get_usage()
+
+
+class _DecisionsProviderSerializer(ProviderSerializer):
+    """The provider-serializer base, whose Decisions path owns its own body parse.
+
+    Only ``parse_provider_decisions_response`` is exercised here; the abstract
+    members of the base are never called by the ratchet.
+    """
+
+    def _build_provider_request(self, request: Any, context: Any) -> dict[str, Any]:
+        raise AssertionError("the ratchet only parses responses")
+
+    def parse_provider_response(
+        self, response: dict[str, Any], model: str | None = None, **kwargs: Any
+    ) -> Any:
+        raise AssertionError("the ratchet only parses decisions responses")
+
+    def get_chunk_converter(self, model: str = "", request_id: str = "") -> Any:
+        raise AssertionError("the ratchet only parses responses")
+
+
+def _decisions_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/providers/base.py`` — a Decisions body → usage."""
+    return _DecisionsProviderSerializer().parse_provider_decisions_response(frames[0]).usage
+
+
+def _gemini_streaming_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/gemini/streaming_converter.py`` — SSE chunks → usage."""
+    transformer = GeminiStreamingTransformer(model="gemini-2.5-flash", request_id="gem_1")
+    for frame in frames:
+        # ``transform`` is handed the parsed JSON payload of the SSE event, not the
+        # ``data: `` line the client receives.
+        transformer.transform(orjson.dumps(frame).decode())
+    return transformer.get_usage()
+
+
+def _gemini_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/gemini/response_parser.py`` — a generateContent body → usage."""
+    from llm_proxy.serialization.gemini.response_parser import GeminiResponseParserMixin
+
+    class _Parser(GeminiResponseParserMixin):
+        pass
+
+    return _Parser().parse_provider_response(frames[0], model="gemini-2.5-flash").usage
+
+
+def _gemini_image_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``providers/gemini/adapter.py`` — an image-generation body → usage."""
+    return GeminiAdapter(api_key="test-key")._parse_image_usage(frames[0])
+
+
+def _gemini_image_stream_tracker(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``billing/image_stream_usage.py`` — the image SSE stream → the context."""
+    tracker = ImageStreamUsageTracker()
+    for frame in frames:
+        tracker.observe("data: " + orjson.dumps(frame).decode() + "\n\n")
+    context = _new_context()
+    tracker.apply_to(context)
+    return context
+
+
+class _AudioBodyParser(AudioCapabilityMixin):
+    """The mixin's own transcription parser, crossing the real call site."""
+
+
+def _audio_transcription_stream(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``billing/transcription_stream_usage.py`` — an STT SSE event → the context."""
+    tracker = TranscriptionStreamUsageTracker()
+    for frame in frames:
+        tracker.observe("data: " + orjson.dumps(frame).decode() + "\n\n")
+    context = _new_context()
+    tracker.apply_to(context)
+    return context
+
+
+def _audio_body_parser(frames: Sequence[dict[str, Any]]) -> Any:
+    """``providers/capabilities/audio.py`` — a transcription body → its response."""
+    return _AudioBodyParser()._parse_transcription_response(dict(frames[0]), "json")
+
+
+def _facts_of_audio_response(response: Any) -> Facts:
+    return _facts_of_usage(response.usage)
+
+
+# ---------------------------------------------------------------------------
+# Rows
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Row:
+    """One (dialect, call site) pair the ratchet holds in agreement."""
+
+    id: str
+    dialect: str
+    frames: tuple[dict[str, Any], ...]
+    legacy: Callable[[Sequence[dict[str, Any]]], Any] | None = None
+    facts_of: Callable[[Any], Facts] = _facts_of_usage
+    #: Facts this row compares. A legacy view that cannot express a fact (the
+    #: billing read model has no reasoning dimension) restricts the set here
+    #: rather than declaring a permanent divergence.
+    facts: frozenset[str] = frozenset(FACTS)
+    #: fact → why the two sides may legitimately differ. Usually this is the
+    #: legacy side losing a fact the seam now keeps; the message names which.
+    declared: Mapping[str, str] = field(default_factory=dict)
+    #: Fact → why the migration deliberately moved it. The pre-swap call site did
+    #: not report the fact (the reason a ``declared`` entry once carried) and the
+    #: slice closed the gap; ``recorded`` then carries the amount the repair
+    #: produces. Naming it keeps the change visible in the diff instead of leaving
+    #: an amount that silently moved.
+    closed: Mapping[str, str] = field(default_factory=dict)
+    #: Turn-level facts the dialect's adapter needs but the payload cannot carry,
+    #: as the caller that saw the whole turn would state them (gemini's
+    #: ``search_grounded``). The seam side of the comparison is handed them too —
+    #: otherwise it would be judged on less information than the call site has.
+    turn: Mapping[str, Any] = field(default_factory=dict)
+    #: The row's contract for every fact it compares: the amount the shipped parser
+    #: produced before the swap, or — for a fact in ``closed`` — the amount the
+    #: repair produces. Frozen amounts, not a projection of the seam, because the
+    #: shipped driver and the accumulator share the seam once a slice lands.
+    recorded: Facts | None = None
+
+
+def _thinking_tokens_are_unread(fact: str) -> str:
+    return (
+        f"the shipped site reads only the input/output/cache counters, so "
+        f"``{fact}`` (Anthropic's ``output_tokens_details.thinking_tokens``) never reaches the "
+        "recorded usage; the seam keeps it. Observability only — reasoning tokens are priced "
+        "inside the output count."
+    )
+
+
+_COST_WAS_UNREAD = (
+    "the shipped transformer reported no provider cost, so a streamed turn was billed from "
+    "the local price table even when the provider sent its own (``usage.cost`` / "
+    "``nanogpt_cost``)."
+)
+
+_SEARCH_COUNT_WAS_UNREAD = (
+    "the shipped transformer read ``server_tool_use`` for client emission only "
+    "(``_message_delta_usage``), so the record the proxy bills from lost the search count."
+)
+
+_FLAT_CACHE_COUNTERS_WERE_UNREAD = (
+    "the shipped transformer read the usage block's nested details only, so a canonical "
+    "chunk's flat cache counters never reached the record."
+)
+
+_NATIVE_SEARCHES_WERE_UNREAD = (
+    "the shipped transformer's Responses branch read the token counters only, so a "
+    "provider-executed search in the terminal snapshot was never counted — while the "
+    "non-streaming body parser counted the same items."
+)
+
+_GEMINI_THINKING_WAS_UNREAD = (
+    "the shipped converter read the counters and the cache count off `usageMetadata` "
+    "but not `thoughtsTokenCount`, so the record lost the fact that part of its output "
+    "was thinking. The amount billed is unchanged: the heuristic already counts those "
+    "tokens in the output side."
+)
+
+_GEMINI_IMAGE_COUNTERS_WERE_RAW = (
+    "the shipped image paths read `promptTokenCount`/`candidatesTokenCount` straight "
+    "off `usageMetadata`, so the tool-use prompt tokens, the thinking tokens and the "
+    "cached content the block reports beside them never reached the record; the seam "
+    "applies the gemini mapping to every caller of the shape."
+)
+
+_CHAT_SEARCHES_WERE_UNREAD = (
+    "the shipped transformer never read the usage block's own search count; its "
+    "emitter-side counter covers provider tool calls, not a count the provider "
+    "reported in ``server_tool_use``."
+)
+
+
+CHAT_FLAT_AND_NESTED_COPY: dict[str, Any] = {
+    "choices": [],
+    "usage": {
+        "prompt_tokens": 1500,
+        "completion_tokens": 500,
+        "total_tokens": 2000,
+        "cache_read_input_tokens": 300,
+        "cache_creation_input_tokens": 200,
+        "prompt_tokens_details": {"cached_tokens": 300, "audio_tokens": 25},
+    },
+}
+
+CHAT_NESTED_ONLY: dict[str, Any] = {
+    "choices": [],
+    "usage": {
+        "prompt_tokens": 1000,
+        "completion_tokens": 50,
+        "total_tokens": 1050,
+        "prompt_tokens_details": {"cached_tokens": 400},
+    },
+}
+
+CHAT_DEEPSEEK_CACHE_HITS: dict[str, Any] = {
+    "choices": [],
+    "usage": {
+        "prompt_tokens": 100,
+        "completion_tokens": 10,
+        "total_tokens": 110,
+        "prompt_cache_hit_tokens": 64,
+        "prompt_cache_miss_tokens": 36,
+    },
+}
+
+CHAT_COST_AND_SEARCH: dict[str, Any] = {
+    "choices": [],
+    "usage": {
+        "prompt_tokens": 1000,
+        "completion_tokens": 50,
+        "total_tokens": 1050,
+        "completion_tokens_details": {"reasoning_tokens": 20},
+        "cost": 0.25,
+        "server_tool_use": {"web_search_requests": 3},
+    },
+}
+
+CHAT_OPENROUTER_FRAME: dict[str, Any] = {
+    "choices": [],
+    "usage": {
+        "prompt_tokens": 1000,
+        "completion_tokens": 50,
+        "total_tokens": 1050,
+        "prompt_tokens_details": {"cached_tokens": 300},
+        "cost": 0.5,
+        "server_tool_use": {"web_search_requests": 3},
+    },
+}
+
+ANTHROPIC_BODY: dict[str, Any] = {
+    "id": "msg_1",
+    "usage": {
+        "input_tokens": 100,
+        "output_tokens": 40,
+        "cache_read_input_tokens": 50,
+        "output_tokens_details": {"thinking_tokens": 7},
+        "server_tool_use": {"web_search_requests": 2},
+    },
+}
+
+RESPONSES_BODY: dict[str, Any] = {
+    "id": "resp_1",
+    "usage": _TERMINAL_USAGE,
+    "output": [{"type": "web_search_call"}, {"type": "message"}],
+}
+
+RESPONSES_TERMINAL_EVENT: dict[str, Any] = {
+    "type": "response.completed",
+    "response": {
+        "id": "resp_1",
+        "usage": _TERMINAL_USAGE,
+        "output": [{"type": "web_search_call", "id": "ws_1"}, {"type": "message"}],
+    },
+}
+
+# The same turn as it arrives at the provider-side converter, which is handed the
+# SSE event type separately from its data (see ``convert_chunk``); the payload's own
+# ``type`` field rides along, as it does on the wire.
+RESPONSES_PROVIDER_EVENTS: tuple[dict[str, Any], ...] = (
+    {
+        "event_type": "response.output_item.added",
+        "type": "response.output_item.added",
+        "item": {"id": "ws_1", "type": "web_search_call"},
+    },
+    {
+        "event_type": "response.completed",
+        "type": "response.completed",
+        "response": {"id": "resp_1", "status": "completed", "usage": _TERMINAL_USAGE},
+    },
+)
+
+REALTIME_DONE: dict[str, Any] = {
+    "type": "response.done",
+    "response": {
+        "id": "resp_1",
+        "usage": {
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "input_token_details": {"cached_tokens": 20, "audio_tokens": 10},
+            "output_token_details": {"audio_tokens": 25},
+        },
+    },
+}
+
+OLLAMA_BODY: dict[str, Any] = {
+    "model": "llama3.1",
+    "message": {"role": "assistant", "content": "Hello"},
+    "done": True,
+    "done_reason": "stop",
+    "prompt_eval_count": 1000,
+    "eval_count": 50,
+    "prompt_eval_cached_count": 400,
+}
+
+OLLAMA_TERMINAL_CHUNK: dict[str, Any] = {
+    "model": "llama3.1",
+    "done": True,
+    "done_reason": "stop",
+    "prompt_eval_count": 1000,
+    "eval_count": 50,
+    "prompt_eval_cached_count": 400,
+    "total_duration": 1234567890,
+}
+
+OLLAMA_EMBED: dict[str, Any] = {
+    "model": "nomic-embed-text",
+    "embeddings": [[0.1, 0.2]],
+    "prompt_eval_count": 12,
+}
+
+DECISIONS_BODY: dict[str, Any] = {
+    "model": "gpt-6-luna",
+    "answers": [{"type": "predicate", "name": "urgent", "probability": 0.92}],
+    "usage": {
+        "input_tokens": 296,
+        "input_tokens_details": {"cached_tokens": 128, "cache_write_tokens": 32},
+        "output_tokens": 0,
+        "output_tokens_details": {"reasoning_tokens": 12},
+        "total_tokens": 296,
+        "cost": 0.25,
+    },
+}
+
+#: One Gemini ``usageMetadata`` block, as all three of its call sites see it: the
+#: tool-use prompt tokens reported beside the prompt count, thoughts, cached
+#: content, and a total that says candidates exclude the thoughts
+#: (100 + 20 + 5 + 7 == 132).
+_GEMINI_META: dict[str, Any] = {
+    "promptTokenCount": 100,
+    "candidatesTokenCount": 20,
+    "toolUsePromptTokenCount": 5,
+    "thoughtsTokenCount": 7,
+    "totalTokenCount": 132,
+    "cachedContentTokenCount": 30,
+}
+
+GEMINI_BODY: dict[str, Any] = {
+    "responseId": "gem_1",
+    "usageMetadata": _GEMINI_META,
+    "candidates": [{"content": {"parts": [{"text": "Hello"}]}}],
+}
+
+GEMINI_GROUNDED_BODY: dict[str, Any] = {
+    "responseId": "gem_2",
+    "usageMetadata": _GEMINI_META,
+    "candidates": [
+        {
+            "content": {"parts": [{"text": "Hello"}]},
+            "groundingMetadata": {"webSearchQueries": ["weather", "news"]},
+        }
+    ],
+}
+
+#: A usage-only stream chunk: Gemini reports the counters in a chunk of their own,
+#: which carries no candidate and therefore says nothing about grounding.
+GEMINI_USAGE_CHUNK: dict[str, Any] = {"usageMetadata": _GEMINI_META}
+
+#: A content chunk whose candidate carries the native-search grounding. It arrives
+#: before the usage chunk, so the turn — not the chunk — is what knows the fact.
+GEMINI_GROUNDING_CHUNK: dict[str, Any] = {
+    "candidates": [
+        {
+            "content": {"parts": [{"text": "Hello"}]},
+            "groundingMetadata": {"webSearchQueries": ["weather", "news"]},
+        }
+    ]
+}
+
+GEMINI_IMAGE_BODY: dict[str, Any] = {
+    "responseId": "gem_3",
+    "usageMetadata": _GEMINI_META,
+    "candidates": [
+        {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1n"}}]}}
+    ],
+}
+
+#: A streaming STT ``transcript.text.done`` event: duration-based usage that still
+#: carries the audio/text split of the prompt.
+AUDIO_STREAM_EVENT: dict[str, Any] = {
+    "type": "transcript.text.done",
+    "usage": {
+        "type": "duration",
+        "seconds": 90,
+        "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+    },
+}
+
+#: A transcription response body: token-based usage with the audio split of both
+#: sides nested.
+AUDIO_TRANSCRIPTION_BODY: dict[str, Any] = {
+    "text": "hello",
+    "usage": {
+        "input_tokens": 11,
+        "output_tokens": 4,
+        "total_tokens": 15,
+        "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+        "completion_tokens_details": {"audio_tokens": 25},
+    },
+}
+
+_ROWS: tuple[Row, ...] = (
+    Row(
+        id="chat-protocol-transformer-flat-and-nested-copy",
+        dialect="chat",
+        # Slice 2 landed here (see the ``chat-passthrough-usage-frame`` row), so the
+        # shipped driver now runs the migrated transformer: this row checks its
+        # projection of the canonical record, and ``recorded`` anchors it to the
+        # amounts the transformer's own parser produced before the swap.
+        frames=(CHAT_FLAT_AND_NESTED_COPY,),
+        legacy=_chat_transformer,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 1500,
+            "output": 500,
+            "total": 2000,
+            "cache_read": 300,
+            "cache_write": 200,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="chat-protocol-transformer-nested-only",
+        dialect="chat",
+        frames=(CHAT_NESTED_ONLY,),
+        legacy=_chat_transformer,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="chat-protocol-transformer-deepseek-cache-hits",
+        dialect="chat",
+        frames=(CHAT_DEEPSEEK_CACHE_HITS,),
+        legacy=_chat_transformer,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 100,
+            "output": 10,
+            "total": 110,
+            "cache_read": 64,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="chat-protocol-transformer-cost-and-search",
+        dialect="chat",
+        frames=(CHAT_COST_AND_SEARCH,),
+        legacy=_chat_transformer,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 3,
+            "cost": 0.25,
+        },
+    ),
+    Row(
+        id="anthropic-provider-converter",
+        dialect="anthropic",
+        frames=_ANTHROPIC_FRAMES,
+        legacy=_anthropic_converter,
+        facts_of=_facts_of_usage,
+        closed={"reasoning": _thinking_tokens_are_unread("reasoning")},
+        recorded={
+            "input": 150,
+            "output": 40,
+            "total": 190,
+            "cache_read": 50,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="anthropic-passthrough-event-context",
+        dialect="anthropic",
+        frames=_ANTHROPIC_FRAMES,
+        legacy=_anthropic_passthrough,
+        facts_of=_facts_of_event_context,
+        closed={"reasoning": _thinking_tokens_are_unread("reasoning")},
+        recorded={
+            "input": 150,
+            "output": 40,
+            "total": 190,
+            "cache_read": 50,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="anthropic-protocol-transformer-cost-and-search",
+        dialect="chat",
+        # The canonical chunk shape an OpenAI-family provider converter hands the
+        # Anthropic-dialect client's transformer. Its old parser dropped the two
+        # facts the provider reported beside the tokens, so both are ``closed``.
+        frames=(CHAT_COST_AND_SEARCH,),
+        legacy=_anthropic_protocol_transformer,
+        facts_of=_facts_of_usage,
+        closed={"cost": _COST_WAS_UNREAD, "web_search": _SEARCH_COUNT_WAS_UNREAD},
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 3,
+            "cost": 0.25,
+        },
+    ),
+    Row(
+        id="anthropic-protocol-transformer-flat-and-nested-copy",
+        dialect="chat",
+        frames=(CHAT_FLAT_AND_NESTED_COPY,),
+        legacy=_anthropic_protocol_transformer,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 1500,
+            "output": 500,
+            "total": 2000,
+            "cache_read": 300,
+            "cache_write": 200,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="anthropic-body-parser",
+        dialect="anthropic",
+        frames=(ANTHROPIC_BODY,),
+        legacy=_anthropic_body_parser,
+        # The shipped parser put the search count in the ``provider_info`` extras
+        # rather than the record; the fact was not lost (``update_provider_info``
+        # reads the same block), but the record now carries it too.
+        closed={
+            "web_search": "the shipped parser returned the count through provider_info extras."
+        },
+        recorded={
+            "input": 150,
+            "output": 40,
+            "total": 190,
+            "cache_read": 50,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="responses-body-parser",
+        dialect="responses",
+        frames=(RESPONSES_BODY,),
+        legacy=lambda frames: parse_usage_from_response(frames[0]),
+        # The shipped parser read the search count from the caller
+        # (``web_search_call_count``); the adapter counts the body's own output
+        # items, which is the same number for the same body.
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 1,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="responses-passthrough-terminal-event",
+        dialect="responses",
+        frames=(RESPONSES_TERMINAL_EVENT,),
+        legacy=_responses_terminal_passthrough,
+        facts_of=_facts_of_event_context,
+        closed={
+            "web_search": (
+                "the shipped handler read only the usage block, so a "
+                "provider-executed search in the terminal snapshot was never "
+                "counted on this tier; the non-streaming body parser already "
+                "counted the same items."
+            )
+        },
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 1,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="responses-provider-streaming-converter",
+        dialect="responses",
+        frames=RESPONSES_PROVIDER_EVENTS,
+        legacy=_responses_provider_converter,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 1,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="openresponses-protocol-transformer-flat-and-nested-copy",
+        dialect="chat",
+        frames=(CHAT_FLAT_AND_NESTED_COPY,),
+        legacy=_openresponses_protocol_transformer,
+        facts_of=_facts_of_usage,
+        closed={"cache_write": _FLAT_CACHE_COUNTERS_WERE_UNREAD},
+        recorded={
+            "input": 1500,
+            "output": 500,
+            "total": 2000,
+            "cache_read": 300,
+            "cache_write": 200,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="openresponses-protocol-transformer-cost-and-search",
+        dialect="chat",
+        frames=(CHAT_COST_AND_SEARCH,),
+        legacy=_openresponses_protocol_transformer,
+        facts_of=_facts_of_usage,
+        closed={"cost": _COST_WAS_UNREAD, "web_search": _CHAT_SEARCHES_WERE_UNREAD},
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 3,
+            "cost": 0.25,
+        },
+    ),
+    Row(
+        id="openresponses-protocol-transformer-native-terminal-event",
+        dialect="responses",
+        frames=(RESPONSES_TERMINAL_EVENT,),
+        legacy=_openresponses_protocol_transformer,
+        facts_of=_facts_of_usage,
+        closed={"web_search": _NATIVE_SEARCHES_WERE_UNREAD},
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 1,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="chat-passthrough-usage-frame",
+        dialect="chat",
+        # The shape a native OpenAI-dialect tier actually forwards: an aggregator
+        # that reports its own cost and its cache read through the nested detail.
+        # Slice 1 of the migration (ADR-0025) landed here, so the shipped driver
+        # is now the seam-backed handler: this row checks the projection into the
+        # EventContext, and ``recorded`` anchors it to the pre-swap amounts.
+        frames=(CHAT_OPENROUTER_FRAME,),
+        legacy=_native_chat_frame,
+        facts_of=_facts_of_event_context,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 300,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 3,
+            "cost": 0.5,
+        },
+    ),
+    Row(
+        id="gemini-streaming-converter",
+        dialect="gemini",
+        frames=(GEMINI_USAGE_CHUNK,),
+        legacy=_gemini_streaming_converter,
+        closed={"reasoning": _GEMINI_THINKING_WAS_UNREAD},
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-streaming-converter-latched-grounding",
+        dialect="gemini",
+        # Grounding arrives in an earlier chunk, so the usage chunk alone cannot know
+        # it: the turn-level fact is what excludes the tool-use prompt tokens, and it
+        # reaches the adapter through ``turn`` on every observation.
+        frames=(GEMINI_GROUNDING_CHUNK, GEMINI_USAGE_CHUNK),
+        legacy=_gemini_streaming_converter,
+        turn={"search_grounded": True},
+        closed={"reasoning": _GEMINI_THINKING_WAS_UNREAD},
+        # The turn's *count* stays the caller's own counter (the converter ratchets it
+        # and folds it in on read, as the OpenResponses transformer does for the
+        # searches a provider announced as tool calls), so the seam side — a bare
+        # accumulator — cannot see it. The tokens are what this row compares.
+        declared={
+            "web_search": (
+                "the turn's search count is the caller's counter, folded in by the "
+                "converter's get_usage(); the adapter reads the counts a payload states."
+            )
+        },
+        recorded={
+            "input": 100,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-body-parser",
+        dialect="gemini",
+        frames=(GEMINI_BODY,),
+        legacy=_gemini_body_parser,
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-body-parser-search-grounded",
+        dialect="gemini",
+        # The same counters with grounding on the candidate: the tool-use prompt
+        # tokens are excluded from the input count and the searches are billed
+        # per request instead.
+        frames=(GEMINI_GROUNDED_BODY,),
+        legacy=_gemini_body_parser,
+        recorded={
+            "input": 100,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-image-body-parser",
+        dialect="gemini",
+        # This call site read the raw counters: no tool-use tokens, no thoughts, no
+        # cached content. The seam's mapping is the repair.
+        frames=(GEMINI_IMAGE_BODY,),
+        legacy=_gemini_image_body_parser,
+        facts_of=_facts_of_usage,
+        closed=dict.fromkeys(
+            ("input", "output", "cache_read", "reasoning"), _GEMINI_IMAGE_COUNTERS_WERE_RAW
+        ),
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-image-stream-tracker",
+        dialect="gemini",
+        # The streaming image tracker hand-built the same record from the same block,
+        # with the same omissions as the body parser above.
+        frames=(GEMINI_IMAGE_BODY,),
+        legacy=_gemini_image_stream_tracker,
+        facts_of=_facts_of_event_context,
+        closed=dict.fromkeys(
+            ("input", "output", "cache_read", "reasoning"), _GEMINI_IMAGE_COUNTERS_WERE_RAW
+        ),
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="decisions-body-parser",
+        dialect="responses",
+        # The Decisions usage object is the Responses dialect's (same counters, same
+        # nested detail names), so it declares that dialect instead of growing a
+        # second adapter for one shape.
+        frames=(DECISIONS_BODY,),
+        legacy=_decisions_body_parser,
+        facts_of=_facts_of_usage,
+        # The shipped parser routed the provider's own cost to ``provider_info``
+        # (``openrouter_cost``) rather than the record, so the fact reached billing
+        # through the other route; the record carries it now.
+        closed={
+            "cost": (
+                "the shipped parser returned the provider's cost through provider_info extras."
+            )
+        },
+        recorded={
+            "input": 296,
+            "output": 0,
+            "total": 296,
+            "cache_read": 128,
+            "cache_write": 32,
+            "reasoning": 12,
+            "web_search": 0,
+            "cost": 0.25,
+        },
+    ),
+    Row(
+        id="ollama-body-parser",
+        dialect="ollama",
+        frames=(OLLAMA_BODY,),
+        legacy=_ollama_body_parser,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="ollama-embeddings-parser",
+        dialect="ollama",
+        # An embeddings body has no ``usage`` block at all: the counters sit at the
+        # top level of the response, and only the prompt one is reported.
+        frames=(OLLAMA_EMBED,),
+        legacy=_ollama_embeddings_parser,
+        recorded={
+            "input": 12,
+            "output": 0,
+            "total": 12,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="ollama-streaming-converter",
+        dialect="ollama",
+        # The terminal ``done`` chunk, whose usage the converter both emits to the
+        # client (OpenAI dialect) and serves to billing.
+        frames=(OLLAMA_TERMINAL_CHUNK,),
+        legacy=_ollama_streaming_converter,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="realtime-usage-dict-to-billing",
+        dialect="realtime",
+        frames=(REALTIME_DONE,),
+        legacy=_realtime_billing_read_model,
+        facts_of=_facts_of_token_usage,
+        # Billing's read model has no reasoning dimension: billing prices reasoning
+        # inside the output count, so this row compares every fact the two can
+        # express.
+        facts=frozenset(FACTS) - {"reasoning", "cost"},
+        # The observer used to hand the raw usage dict to billing; it parses through
+        # the seam now. The amounts are unchanged — the cache read only changes
+        # *column*: the adapter lifts the dialect detail to the canonical flat field
+        # (ADR-0025), which is the column the 1d85a77da088 dedup migration already
+        # declares authoritative.
+        recorded={
+            "input": 120,
+            "output": 30,
+            "total": 150,
+            "cache_read": 20,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="audio-transcription-stream",
+        dialect="audio",
+        # The tracker's own parse was deleted by the audio slice; the driver now
+        # runs the migrated call site, and ``recorded`` anchors it to the amounts
+        # the shipped tracker produced before the swap.
+        frames=(AUDIO_STREAM_EVENT,),
+        legacy=_audio_transcription_stream,
+        facts_of=_facts_of_event_context,
+        facts=AUDIO_FACTS,
+        recorded={
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+            "audio_duration": 90.0,
+            "audio_input": 100,
+            "audio_output": 0,
+        },
+    ),
+    Row(
+        id="audio-transcription-body",
+        dialect="audio",
+        # The shipped ``_parse_usage`` was deleted; the driver runs the migrated
+        # call site it backed, anchored to the amounts it produced.
+        frames=(AUDIO_TRANSCRIPTION_BODY,),
+        legacy=_audio_body_parser,
+        facts_of=_facts_of_audio_response,
+        facts=AUDIO_FACTS,
+        recorded={
+            "input": 11,
+            "output": 4,
+            "total": 15,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+            "audio_duration": 0.0,
+            "audio_input": 100,
+            "audio_output": 25,
+        },
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# The comparison
+# ---------------------------------------------------------------------------
+
+
+def _seam_facts(row: Row) -> Facts:
+    accumulator = UsageAccumulator(row.dialect)
+    for frame in row.frames:
+        accumulator.observe(frame, turn=row.turn or None)
+    return {k: v for k, v in _facts_of_usage(accumulator.result()).items() if k in row.facts}
+
+
+def _shipped_facts(row: Row) -> Facts:
+    if row.legacy is None:
+        assert row.recorded is not None, f"{row.id}: no legacy driver and no recorded facts"
+        return {k: v for k, v in row.recorded.items() if k in row.facts}
+    return {k: v for k, v in row.facts_of(row.legacy(row.frames)).items() if k in row.facts}
+
+
+def _disagreements(seam: Facts, shipped: Facts) -> set[str]:
+    return {
+        fact
+        for fact in seam
+        if seam[fact] != shipped[fact]
+        and not (
+            isinstance(seam[fact], float)
+            and isinstance(shipped[fact], float)
+            and abs(seam[fact] - shipped[fact]) < 1e-9
+        )
+    }
+
+
+@pytest.mark.parametrize("row", _ROWS, ids=lambda row: row.id)
+def test_seam_agrees_with_the_call_site_it_replaces(row: Row) -> None:
+    seam = _seam_facts(row)
+    shipped = _shipped_facts(row)
+    differing = _disagreements(seam, shipped)
+
+    assert differing == set(row.declared), (
+        f"{row.id}: the usage intake seam and its shipped call site disagree on "
+        f"{sorted(differing)} (declared: {sorted(row.declared)}).\n"
+        f"  seam:   {seam}\n"
+        f"  shipped:{shipped}\n"
+        + (
+            "  declared reasons:\n"
+            + "".join(f"    {fact}: {row.declared[fact]}\n" for fact in sorted(row.declared))
+            if row.declared
+            else ""
+        )
+        + "An undeclared fact is a divergence to fix on one side (or, when the "
+        "shipped side is the one losing it, to record in ADR-0025), not to declare."
+    )
+
+
+def test_every_declared_divergence_carries_a_reason() -> None:
+    for row in _ROWS:
+        for fact, reason in row.declared.items():
+            assert fact in FACTS, f"{row.id}: declared fact {fact!r} is not a billable fact"
+            assert reason.strip(), f"{row.id}: declared {fact} without a reason"
+
+
+def test_every_closed_gap_carries_a_reason() -> None:
+    """A repaired fact states why it moved, and how it moved."""
+    for row in _ROWS:
+        for fact, reason in row.closed.items():
+            assert fact in FACTS, f"{row.id}: closed fact {fact!r} is not a billable fact"
+            assert reason.strip(), f"{row.id}: closed {fact} without a reason"
+            assert fact in row.recorded, f"{row.id}: closed {fact} with no recorded amount"
+
+
+def test_recorded_expectations_cover_the_facts_the_row_compares() -> None:
+    """A partial ``recorded`` dict would anchor only the facts it happens to name."""
+    for row in _ROWS:
+        if row.recorded is None:
+            continue
+        missing = set(row.facts) - set(row.recorded)
+        assert not missing, f"{row.id}: recorded facts do not cover {sorted(missing)}"
+
+
+def test_row_ids_are_unique() -> None:
+    ids = [row.id for row in _ROWS]
+    assert len(ids) == len(set(ids))
+
+
+def test_a_recorded_expectation_anchors_the_migrated_call_site() -> None:
+    """A migrated row keeps comparing live code — against a frozen expectation.
+
+    Once a slice lands, the shipped driver and the accumulator share the seam, so
+    comparing them only proves the projection is self-consistent: a change to the
+    seam moves both sides together. The recorded amounts are the contract as it
+    stood *before* the swap, so they still fail when an amount moves.
+    """
+    anchored = [row for row in _ROWS if row.recorded is not None and row.legacy is not None]
+    assert anchored, "no row anchors a recorded expectation: every migrated row is free to drift"
+    for row in anchored:
+        actual = {k: v for k, v in row.facts_of(row.legacy(row.frames)).items() if k in row.facts}
+        expected = {k: v for k, v in row.recorded.items() if k in row.facts}
+        assert actual == expected, (
+            f"{row.id}: the migrated call site no longer produces the amounts this row "
+            f"pins.\n  now:      {actual}\n  recorded: {expected}"
+        )
+
+
+def test_every_still_unmigrated_dialect_has_a_row() -> None:
+    """The ratchet is only worth its weight while it covers the remaining slices.
+
+    ADR-0025's landing order migrates one dialect at a time; a dialect with no
+    row would be deleted without ever having been compared.
+    """
+    assert {row.dialect for row in _ROWS} == {
+        "chat",
+        "anthropic",
+        "responses",
+        "realtime",
+        "ollama",
+        "gemini",
+        "audio",
+    }

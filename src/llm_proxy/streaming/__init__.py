@@ -8,7 +8,6 @@ __all__ = [
     "StreamingHandler",
     "StreamingResponseConfig",
     "StreamingTransformer",
-    "StreamingUsage",
     "create_sse_error",
 ]
 
@@ -19,7 +18,6 @@ _SUBMODULES = {
     "StreamingHandler": ".handler",
     "StreamingResponseConfig": ".handler",
     "StreamingTransformer": ".transformer",
-    "StreamingUsage": ".transformer",
     "create_sse_error": ".sse_builder",
 }
 

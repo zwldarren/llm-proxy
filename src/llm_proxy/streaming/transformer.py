@@ -2,12 +2,13 @@
 """Base class for streaming transformers."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import orjson
 
 from llm_proxy.models.content_blocks import ContentBlock
+from llm_proxy.models.types import Usage
+from llm_proxy.serialization.usage import add_usage, copy_usage
 
 if TYPE_CHECKING:
     from llm_proxy.models import InternalRequest
@@ -133,33 +134,6 @@ class PendingTerminalState:
                 self._pending_usage[key] = value
 
 
-@dataclass
-class StreamingUsage:
-    """Standard usage information for streaming responses.
-
-    Provides a unified interface for token usage data across different
-    protocol implementations (OpenAI, Anthropic, OpenResponses).
-
-    All streaming transformers should implement get_usage() to return
-    this dataclass with all available fields populated. Cache token
-    fields are optional as not all providers support them.
-    """
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    # Cache tokens (optional - not all providers support these)
-    cache_read_input_tokens: int | None = None
-    cache_creation_input_tokens: int | None = None
-    # Optional detailed token breakdowns
-    prompt_tokens_details: dict[str, int] | None = None
-    completion_tokens_details: dict[str, int] | None = None
-    # Provider-reported cost (e.g., NanoGPT's x_nanogpt_pricing.cost, OpenRouter's cost)
-    provider_reported_cost: float | None = None
-    # Web search request count (server_tool_use.web_search_requests)
-    web_search_requests: int | None = None
-
-
 class StreamingTransformer(ABC):
     """Base class for streaming response transformers.
 
@@ -180,6 +154,10 @@ class StreamingTransformer(ABC):
     The provider-side role uses ``convert_chunk()`` which returns dicts.
     Both roles share ``get_accumulated_output()``, ``get_usage()``, and
     ``finalize()`` for downstream consumers like web search continuation.
+    ``get_usage()`` is the base class's verb: a subclass reports its own
+    upstream call through ``_own_usage()``, and the base folds in any
+    independent calls absorbed with ``absorb_usage_record()`` (the web-search
+    continuation's hops).
 
     Example (protocol-side):
         transformer = OpenAIStreamingTransformer(response_id="resp_123", model="gpt-4")
@@ -224,6 +202,10 @@ class StreamingTransformer(ABC):
         self.response_id = request_id or ""
         self.model = model
         self._accumulated_output: list[ContentBlock] = []
+        # Usage from independent upstream calls billed with this turn but held by
+        # a transformer that is gone (the web-search continuation's hops).
+        # ``get_usage()`` folds it into whatever the subclass accumulated.
+        self._absorbed_usage: Usage | None = None
 
     @abstractmethod
     def transform(self, chunk: str | dict[str, Any]) -> str | None:
@@ -316,7 +298,10 @@ class StreamingTransformer(ABC):
         continuation transformer adopts the original turn's pending
         stop_reason (only when it has none of its own) and usage. The two
         turns are INDEPENDENT upstream calls, so usage dicts are summed via
-        ``sum_usage_dicts`` — never maxed.
+        ``sum_usage_dicts`` — never maxed. This is the *client wire*'s pending
+        usage (the continuation emits the terminal event); the canonical
+        record is folded into the billing transformer by the loop that
+        consumes each hop, not here.
 
         Implemented generically over whatever pending terminal state the
         concrete transformer tracks: transformers without any (e.g. duck-typed
@@ -435,13 +420,55 @@ class StreamingTransformer(ABC):
         """
         return self._accumulated_output
 
-    def get_usage(self) -> StreamingUsage | None:
-        """Get accumulated usage information from the streaming response.
+    def get_usage(self) -> Usage | None:
+        """The turn's canonical usage record, with every absorbed call folded in.
 
-        Subclasses should override this method to provide protocol-specific
-        usage data extraction. The base implementation returns None.
+        A subclass reports its own upstream call through ``_own_usage()``
+        (usually its intake accumulator's ``result()``, ADR-0025); this verb
+        adds the independent calls ``absorb_usage_record()`` took in, so a
+        caller reads one record for the whole billed turn.
 
         Returns:
-            StreamingUsage object if usage data is available, None otherwise.
+            The canonical usage record, or None when nothing was reported.
+        """
+        own = self._own_usage()
+        if self._absorbed_usage is None:
+            return own
+        if own is None:
+            return copy_usage(self._absorbed_usage)
+        merged = copy_usage(own)
+        add_usage(merged, self._absorbed_usage)
+        return merged
+
+    def _own_usage(self) -> Usage | None:
+        """The record this transformer's own upstream call accumulated.
+
+        Subclasses that hold an intake accumulator (ADR-0025) return its
+        ``result()``; the base implementation reports nothing.
         """
         return None
+
+    def absorb_usage_record(self, other: Any) -> None:
+        """Fold another transformer's usage record into this one.
+
+        Public verb for the web-search continuation (ADR-0007): the
+        continuation's hops are INDEPENDENT upstream calls, billed together
+        with the turn the lifecycle reads this transformer for, so their facts
+        add (``add_usage``) rather than merge as one call's restatements. The
+        loop that consumes a hop absorbs it here, which is what makes
+        ``get_usage()`` answer for every call the turn was billed for.
+
+        Transformers without the verb (duck-typed fakes with no usage) are
+        skipped by the caller; a ``None`` record (a hop that reported nothing)
+        contributes no facts.
+        """
+        get_usage = getattr(other, "get_usage", None)
+        if not callable(get_usage):
+            return
+        other_usage = get_usage()
+        if other_usage is None:
+            return
+        if self._absorbed_usage is None:
+            self._absorbed_usage = copy_usage(other_usage)
+        else:
+            add_usage(self._absorbed_usage, other_usage)

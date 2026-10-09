@@ -263,28 +263,33 @@ def build_usage_details(context: EventContext) -> dict[str, int] | None:
     Image tokens stay inside ``input``: Langfuse's image usage key varies by
     model definition, so carving them out could silently price them at zero.
     """
-    if not context.has_token_data():
+    usage = context.usage
+    if not context.has_token_data() or usage is None:
         return None
 
-    # Canonical fields only (CONTEXT.md "Canonical usage record"): dialect
-    # aliases are normalized into these at capture time.
-    cache_read = context.cache_read_input_tokens
-    cache_write = context.cache_creation_input_tokens
-    audio_in = context.audio_input_tokens
-    audio_out = context.audio_output_tokens
-    reasoning = context.reasoning_tokens
+    # Canonical fields only (CONTEXT.md "Canonical usage record"): the record holds
+    # one field per fact, and its own counters already include the detail tokens.
+    prompt_details = usage.prompt_tokens_details
+    completion_details = usage.completion_tokens_details
+    cache_read = usage.cache_read_input_tokens or (
+        prompt_details.cached_tokens if prompt_details is not None else None
+    )
+    cache_write = usage.cache_creation_input_tokens
+    audio_in = prompt_details.audio_tokens if prompt_details is not None else None
+    audio_out = completion_details.audio_tokens if completion_details is not None else None
+    reasoning = usage.reasoning_tokens
 
     details: dict[str, int] = {}
-    if context.prompt_tokens is not None:
-        exclusive_input = context.prompt_tokens - (
+    if usage.input_tokens is not None:
+        exclusive_input = usage.input_tokens - (
             (cache_read or 0) + (cache_write or 0) + (audio_in or 0)
         )
         details["input"] = max(exclusive_input, 0)
-    if context.completion_tokens is not None:
-        exclusive_output = context.completion_tokens - ((audio_out or 0) + (reasoning or 0))
+    if usage.output_tokens is not None:
+        exclusive_output = usage.output_tokens - ((audio_out or 0) + (reasoning or 0))
         details["output"] = max(exclusive_output, 0)
-    if context.total_tokens is not None:
-        details["total"] = context.total_tokens
+    if usage.total_tokens is not None:
+        details["total"] = usage.total_tokens
 
     if cache_read:
         details["cache_read_input_tokens"] = cache_read
@@ -344,8 +349,14 @@ def build_metadata(context: EventContext) -> dict[str, Any]:
 
     # Token/usage facts that are not emitted as ``usage_details`` buckets (see
     # ``build_usage_details``) stay visible here.
-    if context.image_input_tokens is not None:
-        metadata["image_input_tokens"] = context.image_input_tokens
+    usage = context.usage
+    image_input = (
+        usage.prompt_tokens_details.image_tokens
+        if usage is not None and usage.prompt_tokens_details is not None
+        else None
+    )
+    if image_input is not None:
+        metadata["image_input_tokens"] = image_input
     if context.cache_savings_usd is not None:
         metadata["cache_savings_usd"] = context.cache_savings_usd
     if context.provider_reported_cost is not None:

@@ -175,8 +175,40 @@ The per-provider upstream dialect switch `metadata.api_variant` — `generate_co
 _Avoid_: dialect, flavor, api_version
 
 **Canonical usage record**:
-`Usage` / `StreamingUsage` express each billable fact in exactly one field — cache read → `cache_read_input_tokens`, cache write → `cache_creation_input_tokens`, thinking → `reasoning_tokens`. Provider serializers normalize dialect aliases at parse time; the alias fields do not exist on the canonical record. Billing reads canonical fields only (`extract_tokens_from_usage` tolerates the OpenAI-dialect nested expression as a fallback, never alongside the flat field).
-_Avoid_: cached_content_tokens, thoughts_tokens (deleted provider-flavored aliases)
+`Usage` expresses each billable fact in exactly one field — cache read → `cache_read_input_tokens`, cache write → `cache_creation_input_tokens`, thinking → `reasoning_tokens`. Dialect aliases are normalized at parse time; the alias fields do not exist on the canonical record. It holds wire-reported facts only: token counts, `web_search_requests`, `audio_duration_seconds`, `provider_reported_cost`. Proxy-computed dimensions (`images_generated`, `tts_characters`, cost) belong to billing, not to the record.
+The request's capture object holds one such record (`EventContext.usage`) rather than a field per fact, so a number cannot be stored twice and read from whichever copy a caller happens to know about; it is written only through `update_usage`, which folds each observation with the record's own merge rule. Two billable dimensions keep a field of their own there because they have a second route: the provider-reported cost (also a provider-info extra) and the web-search count (the searches the proxy executed itself add to the provider's own).
+_Avoid_: cached_content_tokens, thoughts_tokens (deleted provider-flavored aliases), usage mirrors on the capture object
+
+**Usage intake**:
+The single point where a provider's wire payload becomes the canonical usage record:
+`parse_usage(dialect, payload)` plus a per-dialect accumulator, in
+`llm_proxy.serialization.usage` — one dialect adapter per wire shape
+(chat-completions, responses, anthropic, realtime, ollama, gemini
+`usageMetadata`, audio transcription/translation), keyed by shape and not
+by provider, because one dialect serves many providers and the native-passthrough
+tier has no provider serializer in play. Every tier reads usage through it:
+provider serializers, streaming converters, protocol transformers and the
+passthrough bookkeeping, which hold an accumulator and expose its `result()`
+behind their existing `get_usage()` verb. Extraction only — canonical → client
+wire stays with the protocol serializer. An adapter may also need a fact about the
+turn that the payload cannot carry (gemini's `search_grounded`: grounding sits on the
+candidate, and a usage-only stream chunk carries none) — the caller that saw the turn
+states it in `turn`, a fact the payload states itself wins, and a running total is a
+merge the accumulator already owns rather than a turn fact. Until a dialect's copies are deleted,
+`tests/test_serialization/test_usage_parity_ratchet.py` holds the seam and each
+still-live call site in agreement on the billable *amounts* (not the field
+placement), one row per dialect and call site; a row that declares a divergence
+must name the fact and the reason, and a fact a slice deliberately repaired keeps
+its name in a `closed` entry beside the amount the repair produces. The dialects
+above are the migrated ones — the wire shapes that still parse usage by hand (the
+Gemini Interactions vocabulary, the gpt-image branch of the image stream tracker)
+follow the same landing order; a provider whose usage block *is*
+an existing dialect declares that dialect rather than adding a provider-named key
+(Decisions speaks the responses shape). An emission site may read the
+record instead of re-deriving the amounts (Ollama's chunk converter builds the
+client's OpenAI-dialect usage object that way), but it still owns the shape it
+emits. See ADR-0025.
+_Avoid_: usage parser, token counter, per-tier usage extraction, provider-registry usage adapter
 
 **Web-search continuation**:
 The loop that injects proxy-executed search results and re-calls the provider when a streamed turn ends waiting on `web_search` results. Owned by `WebSearchStreamProcessor` (`core/processing/web_search_streaming.py`): result processing, continuation request building, the loop itself (`generate_continuation`), state hand-off (`ContinuationState`), and usage merge (`merge_continuation_usage`, delegating to the transformer's public `merge_terminal_state` verb).
@@ -197,7 +229,7 @@ One model response within a Realtime session, delimited by the upstream `respons
 _Avoid_: realtime request, realtime message
 
 **Realtime usage dialect**:
-The usage shape carried by `response.done` — top-level `input_tokens`/`output_tokens` plus nested `input_token_details`/`output_token_details` (singular "token"). `extract_tokens_from_usage` treats it as a fallback dialect alongside the chat (`prompt_tokens_details`) and Responses (`input_tokens_details`) shapes; the same token fact is never counted twice.
+The usage shape carried by `response.done` — top-level `input_tokens`/`output_tokens` plus nested `input_token_details`/`output_token_details` (singular "token"). One of the wire shapes Usage intake parses; the same token fact is never counted twice.
 _Avoid_: realtime usage format, audio usage
 
 **Realtime close code**:
@@ -217,10 +249,14 @@ The single UI-managed retention setting (`logging.retention_days`, Settings → 
 _Avoid_: usage retention, per-table retention
 
 **Log intake**:
-The single point where a request's facts become a stored log row: `llm_proxy.observability.log_intake`, one verb per situation (endpoint lifecycle from `EventContext`, early failure from the raw request, admin request, admin action, rejection, internal call, tool call, realtime turn). The verbs own classification, identity, masking, hostname, dispatch to the background writers, and which records a situation produces (an early failure writes a usage row too); they are idempotent, so the `audit_log_written` dedup latch is their private detail (a field of the request's facts, ADR-0022). `RequestLogCreate` is the module's assembly detail, never built at a call site. See ADR-0020.
+The single point where a request's facts become a stored log row: `llm_proxy.observability.log_intake`, one verb per situation (endpoint lifecycle from `EventContext`, early failure from the raw request, admin request, admin action, rejection, internal call, tool call, realtime turn). The verbs own classification, identity, masking, dispatch to the background writers, and which records a situation produces (an early failure writes a usage row too); they are idempotent, so the `audit_log_written` dedup latch is their private detail (a field of the request's facts, ADR-0022). `_assemble_row` is the module's single construction point: a situation declares what it knows and the assembler fills the deployment constants, the timestamp and the record's defaults, so `RequestLogCreate` is never built at a call site. See ADR-0020.
 _Avoid_: building a log row at a call site, writing `audit_log_written` outside the intake
 
 ### Billing
+
+**Billing read model**:
+What billing prices from: `token_usage_from(usage, dimensions)` in `llm_proxy.billing.tokens` projects the turn's canonical record onto billing's columns (`TokenUsage`), and `ProxyBillableDimensions` carries the quantities the proxy itself produced — generated images, synthesized characters, executed searches — which are not provider facts and so not the record's. One projection serves both the cost calculation and the `usage_records` row, so what the dashboard shows and what was charged cannot drift apart. `TokenUsage` is the row/pricing shape, not a second record of the wire facts.
+_Avoid_: usage dict, dialect tolerance in billing (that lives in the intake adapters), pricing from `EventContext` fields
 
 **Context pricing tier**:
 A price band that applies once a request's input token count reaches its threshold: the whole request is billed at the band's rates, and any dimension the band leaves unset inherits the base rate. Stored per model and per provider mapping (`pricing_tiers` JSON), edited in the model form, and synced from models.dev `cost.tiers`; thresholds are inclusive and must be unique. See ADR-0014.
