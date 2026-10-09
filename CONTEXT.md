@@ -176,7 +176,8 @@ _Avoid_: dialect, flavor, api_version
 
 **Canonical usage record**:
 `Usage` expresses each billable fact in exactly one field — cache read → `cache_read_input_tokens`, cache write → `cache_creation_input_tokens`, thinking → `reasoning_tokens`. Dialect aliases are normalized at parse time; the alias fields do not exist on the canonical record. It holds wire-reported facts only: token counts, `web_search_requests`, `audio_duration_seconds`, `provider_reported_cost`. Proxy-computed dimensions (`images_generated`, `tts_characters`, cost) belong to billing, not to the record.
-_Avoid_: cached_content_tokens, thoughts_tokens (deleted provider-flavored aliases)
+The request's capture object holds one such record (`EventContext.usage`) rather than a field per fact, so a number cannot be stored twice and read from whichever copy a caller happens to know about; it is written only through `update_usage`, which folds each observation with the record's own merge rule. Two billable dimensions keep a field of their own there because they have a second route: the provider-reported cost (also a provider-info extra) and the web-search count (the searches the proxy executed itself add to the provider's own).
+_Avoid_: cached_content_tokens, thoughts_tokens (deleted provider-flavored aliases), usage mirrors on the capture object
 
 **Usage intake**:
 The single point where a provider's wire payload becomes the canonical usage record:
@@ -242,6 +243,10 @@ The single point where a request's facts become a stored log row: `llm_proxy.obs
 _Avoid_: building a log row at a call site, writing `audit_log_written` outside the intake
 
 ### Billing
+
+**Billing read model**:
+What billing prices from: `token_usage_from(usage, dimensions)` in `llm_proxy.billing.tokens` projects the turn's canonical record onto billing's columns (`TokenUsage`), and `ProxyBillableDimensions` carries the quantities the proxy itself produced — generated images, synthesized characters, executed searches — which are not provider facts and so not the record's. One projection serves both the cost calculation and the `usage_records` row, so what the dashboard shows and what was charged cannot drift apart. `TokenUsage` is the row/pricing shape, not a second record of the wire facts.
+_Avoid_: usage dict, dialect tolerance in billing (that lives in the intake adapters), pricing from `EventContext` fields
 
 **Context pricing tier**:
 A price band that applies once a request's input token count reaches its threshold: the whole request is billed at the band's rates, and any dimension the band leaves unset inherits the base rate. Stored per model and per provider mapping (`pricing_tiers` JSON), edited in the model form, and synced from models.dev `cost.tiers`; thresholds are inclusive and must be unique. See ADR-0014.

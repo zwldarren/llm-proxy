@@ -17,13 +17,13 @@ from typing import Any
 
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models.finish_reasons import ANTHROPIC_TO_OPENAI
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import ANTHROPIC_USAGE_EXTENSION_KEYS
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
-    StreamingUsage,
 )
 
 
@@ -143,7 +143,7 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
             return handler(self, chunk)
         return None  # unknown event → skip
 
-    def get_usage(self) -> StreamingUsage | None:
+    def get_usage(self) -> Usage | None:
         """Return accumulated usage information from the streaming response.
 
         Extracted by the anthropic dialect adapter (ADR-0025), so the input count
@@ -151,10 +151,7 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
         ``output_tokens_details.thinking_tokens`` all arrive through the one code
         path every other tier uses.
         """
-        usage = self._usage.result()
-        if usage is None:
-            return None
-        return StreamingUsage.from_usage(usage)
+        return self._usage.result()
 
     # ------------------------------------------------------------------
     # Event handlers  (one method per Anthropic event type)

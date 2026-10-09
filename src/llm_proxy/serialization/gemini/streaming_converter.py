@@ -7,10 +7,11 @@ import orjson
 from orjson import JSONDecodeError
 
 from llm_proxy.models.finish_reasons import map_finish_reason
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
 from llm_proxy.serialization.gemini.code_execution import extract_code_execution_text
 from llm_proxy.serialization.gemini.usage import billable_token_counts
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 
 class GeminiStreamingTransformer(StreamingTransformer):
@@ -44,7 +45,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
         self._reasoning_buffer: str = ""
         self._reasoning_signature_buffer: str = ""
         self._reasoning_signature_emitted: bool = False
-        self._usage: StreamingUsage | None = None
+        self._usage: Usage | None = None
         # Native Google Search grounding query count (billed per search)
         self._web_search_requests: int = 0
         # Accumulated base64 audio (TTS) output and its MIME type
@@ -310,7 +311,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
             # cache_read_input_tokens: setting prompt_tokens_details too would
             # make billing apply the cache-rate adjustment twice for the same
             # tokens (the canonical Usage record expresses each fact once).
-            self._usage = StreamingUsage(
+            self._usage = Usage(
                 input_tokens=prompt_tokens,
                 output_tokens=completion_tokens,
                 total_tokens=usage_metadata.get("totalTokenCount", 0),
@@ -396,11 +397,11 @@ class GeminiStreamingTransformer(StreamingTransformer):
             self._finalize_accumulation()
         return "data: [DONE]\n\n"
 
-    def get_usage(self) -> StreamingUsage | None:
+    def get_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.
 
         Returns:
-            StreamingUsage object if usage data is available from Gemini.
+            The canonical usage record, or None when the stream reported none.
         """
         if self._usage is not None:
             # groundingMetadata may arrive after usageMetadata was captured.
@@ -409,5 +410,5 @@ class GeminiStreamingTransformer(StreamingTransformer):
             return self._usage
         if self._web_search_requests > 0:
             # No token usage, but native search grounding is still billable.
-            return StreamingUsage(web_search_requests=self._web_search_requests)
+            return Usage(web_search_requests=self._web_search_requests)
         return None

@@ -15,6 +15,7 @@ from llm_proxy.models import (
     ThinkingBlock,
     ToolUseBlock,
 )
+from llm_proxy.models.types import Usage
 from llm_proxy.protocols.openai.serializer import OpenAIProtocolSerializer
 from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
 
@@ -80,6 +81,41 @@ def test_format_response(protocol_serializer):
     assert result["object"] == "chat.completion"
     assert len(result["choices"]) == 1
     assert result["choices"][0]["message"]["content"] == "Hello!"
+
+
+def test_format_response_folds_thinking_into_the_dialect_object(protocol_serializer):
+    """Thinking tokens are canonical flat on the record; the OpenAI client reads
+    them nested, so the formatter folds them back (ADR-0025)."""
+    response = InternalResponse(
+        id="test-id",
+        model="gpt-4",
+        output=[TextBlock(text="Hello!")],
+        usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15, reasoning_tokens=4),
+    )
+
+    result = protocol_serializer.format_response(response)
+
+    assert result["usage"]["completion_tokens_details"] == {"reasoning_tokens": 4}
+
+
+def test_format_response_folds_cache_read_into_the_dialect_object(protocol_serializer):
+    """Same fold for the cache read: the record keeps it flat, the OpenAI client
+    reads ``prompt_tokens_details.cached_tokens``."""
+    response = InternalResponse(
+        id="test-id",
+        model="gpt-4",
+        output=[TextBlock(text="Hello!")],
+        usage=Usage(
+            input_tokens=150,
+            output_tokens=5,
+            total_tokens=155,
+            cache_read_input_tokens=40,
+        ),
+    )
+
+    result = protocol_serializer.format_response(response)
+
+    assert result["usage"]["prompt_tokens_details"] == {"cached_tokens": 40}
 
 
 def test_build_provider_request(provider_serializer):
@@ -706,8 +742,12 @@ class TestOpenAIResponseParserDetails:
         assert ptd.cached_tokens is None
         assert ptd.cache_write_tokens is None
         assert ptd.video_tokens == 7
+        # Thinking is the canonical flat field too; only details with no canonical
+        # field of their own stay in the block.
+        assert result.usage.reasoning_tokens == 4
         ctd = result.usage.completion_tokens_details
         assert ctd is not None
+        assert ctd.reasoning_tokens is None
         assert ctd.image_tokens == 2
 
     def test_native_finish_reason_from_choices(self):

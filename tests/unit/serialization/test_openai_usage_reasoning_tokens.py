@@ -3,11 +3,10 @@
 SGLang reports reasoning tokens as a top-level usage field instead of
 OpenAI's nested ``completion_tokens_details.reasoning_tokens`` on both the
 non-streaming response and the streaming terminal usage chunk (see
-https://docs.sglang.io/docs/basic_usage/openai_api_completions). The shared
-Chat Completions parser folds it into ``CompletionTokensDetails`` for the
-non-streaming path, and the adapter's streaming chunk transform folds it for
-the streaming path, so billing and usage records see the same reasoning split
-on every tier.
+https://docs.sglang.io/docs/basic_usage/openai_api_completions). Either
+expression is thinking tokens, so the intake adapter puts both in the record's
+canonical flat ``reasoning_tokens`` field (ADR-0025); the remaining fold here
+serves the client-facing usage *dict* the streaming tiers forward verbatim.
 """
 
 from llm_proxy.serialization.openai.components.response_parser import OpenAIResponseParser
@@ -15,7 +14,7 @@ from llm_proxy.serialization.usage.folds import fold_top_level_reasoning_tokens
 
 
 class TestTopLevelReasoningTokens:
-    def test_top_level_reasoning_tokens_folded(self):
+    def test_top_level_reasoning_tokens_become_the_canonical_field(self):
         usage = OpenAIResponseParser.parse_usage(
             {
                 "usage": {
@@ -27,8 +26,8 @@ class TestTopLevelReasoningTokens:
             }
         )
         assert usage is not None
-        assert usage.completion_tokens_details is not None
-        assert usage.completion_tokens_details.reasoning_tokens == 5
+        assert usage.reasoning_tokens == 5
+        assert usage.completion_tokens_details is None
 
     def test_nested_details_win_over_top_level(self):
         """The OpenAI-nested shape stays authoritative when both exist."""
@@ -44,18 +43,20 @@ class TestTopLevelReasoningTokens:
             }
         )
         assert usage is not None
-        assert usage.completion_tokens_details.reasoning_tokens == 3
+        assert usage.reasoning_tokens == 3
+        assert usage.completion_tokens_details is None
 
     def test_no_reasoning_tokens_anywhere(self):
         usage = OpenAIResponseParser.parse_usage(
             {"usage": {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}}
         )
         assert usage is not None
+        assert usage.reasoning_tokens is None
         assert usage.completion_tokens_details is None
 
     def test_zero_top_level_reasoning_tokens_ignored(self):
-        """SGLang reports ``reasoning_tokens: 0`` by default; an absent details
-        block already means "no reasoning tokens"."""
+        """SGLang reports ``reasoning_tokens: 0`` by default; a zero on the alias
+        is not a report, and the canonical field stays unset."""
         usage = OpenAIResponseParser.parse_usage(
             {
                 "usage": {
@@ -67,6 +68,7 @@ class TestTopLevelReasoningTokens:
             }
         )
         assert usage is not None
+        assert usage.reasoning_tokens is None
         assert usage.completion_tokens_details is None
 
 

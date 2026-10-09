@@ -9,6 +9,7 @@ bookkeeping in ``NativePassthroughHandler.handle_native_openai_chunk``.
 """
 
 import copy
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,6 +25,12 @@ from llm_proxy.models import (
 from llm_proxy.models.types import StreamOptions
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
+
+
+def _record(ctx: Any) -> Any:
+    """The usage record the capture path wrote."""
+    assert ctx.usage is not None, "no usage record was captured"
+    return ctx.usage
 
 
 def _context() -> EventContext:
@@ -226,11 +233,11 @@ class TestHandleNativeOpenAIChunk:
             frame, self._request("glm-5", "glm-5"), ctx
         )
         assert out == frame
-        assert ctx.prompt_tokens == 3
-        assert ctx.completion_tokens == 5
-        assert ctx.total_tokens == 8
-        assert ctx.cache_read_input_tokens == 2
-        assert ctx.reasoning_tokens == 1
+        assert _record(ctx).input_tokens == 3
+        assert _record(ctx).output_tokens == 5
+        assert _record(ctx).total_tokens == 8
+        assert _record(ctx).cache_read_input_tokens == 2
+        assert _record(ctx).reasoning_tokens == 1
 
     def test_usage_sniff_does_not_break_regular_frames(self) -> None:
         # A content string containing the word usage still triggers the cheap
@@ -241,7 +248,7 @@ class TestHandleNativeOpenAIChunk:
         NativePassthroughHandler.handle_native_openai_chunk(
             frame, self._request("glm-5", "glm-5"), ctx
         )
-        assert ctx.prompt_tokens is None
+        assert ctx.usage is None
 
     def test_done_frame_forwarded_verbatim(self) -> None:
         frame = "data: [DONE]\n\n"
@@ -351,7 +358,7 @@ class TestNativeUsageFrameBilling:
         )
 
         assert out == frame
-        assert ctx.prompt_tokens == 10
+        assert _record(ctx).input_tokens == 10
         assert ctx.provider_reported_cost == 0.0123
         assert ctx.web_search_requests == 2
 
@@ -387,6 +394,10 @@ class TestNativeUsageFrameBilling:
                 frame, self._request("glm-5", "glm-5"), ctx
             )
 
-        assert (ctx.prompt_tokens, ctx.completion_tokens, ctx.total_tokens) == (10, 5, 15)
+        assert (
+            _record(ctx).input_tokens,
+            _record(ctx).output_tokens,
+            _record(ctx).total_tokens,
+        ) == (10, 5, 15)
         # A cost is not cumulative: the later report replaces the earlier one.
         assert ctx.provider_reported_cost == 0.02

@@ -101,7 +101,7 @@ class TestReasoningContent:
 
         raw = result.provider_info["_raw_response_body"]
         assert raw["choices"][0]["message"]["reasoning_content"] == "thinking hard"
-        assert result.usage.completion_tokens_details.reasoning_tokens == 5
+        assert result.usage.reasoning_tokens == 5
 
     def test_stream_chunk_reasoning_content_passthrough(self, adapter):
         """``delta.reasoning_content`` is already canonical — unchanged."""

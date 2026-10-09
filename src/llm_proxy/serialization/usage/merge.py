@@ -18,7 +18,7 @@ contract, not of whichever transformer happens to hold the accumulator.
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
 
@@ -117,6 +117,24 @@ def _merge_details[DetailsT: PromptTokensDetails | CompletionTokensDetails](
         if value is not None:
             setattr(target, name, value)
     return target
+
+
+def copy_usage(usage: Usage) -> Usage:
+    """A copy safe to keep: the record *and* its nested details blocks.
+
+    ``dataclasses.replace`` alone would share the details objects, and both
+    merge rules write into them, so a kept record would move under whichever
+    caller still held it.
+    """
+    return replace(
+        usage,
+        prompt_tokens_details=(
+            replace(usage.prompt_tokens_details) if usage.prompt_tokens_details else None
+        ),
+        completion_tokens_details=(
+            replace(usage.completion_tokens_details) if usage.completion_tokens_details else None
+        ),
+    )
 
 
 def add_usage(target: Usage, source: Usage) -> None:

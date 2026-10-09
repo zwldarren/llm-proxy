@@ -103,7 +103,7 @@ def test_openai_streaming_usage_folds_deepseek_cache_hits():
 def test_openai_streaming_usage_dedups_cache_read_dialect_copy():
     """Provider converters copy the flat cache-read count into
     prompt_tokens_details.cached_tokens for wire-dialect consumers. The
-    canonical StreamingUsage must carry the fact once (flat field), or the
+    canonical record must carry the fact once (flat field), or the
     same tokens land in both usage_records cache columns and the cache hit
     rate double-counts (>100%)."""
     transformer = OpenAIStreamingTransformer(model="claude-3", request_id="test")
@@ -129,8 +129,8 @@ def test_openai_streaming_usage_dedups_cache_read_dialect_copy():
     assert usage.cache_creation_input_tokens == 200
     # The dialect duplicate is dropped; unrelated details survive.
     assert usage.prompt_tokens_details is not None
-    assert "cached_tokens" not in usage.prompt_tokens_details
-    assert usage.prompt_tokens_details["audio_tokens"] == 25
+    assert usage.prompt_tokens_details.cached_tokens is None
+    assert usage.prompt_tokens_details.audio_tokens == 25
     # The client-facing pending usage keeps the dialect copy verbatim.
     assert transformer._pending_usage["prompt_tokens_details"]["cached_tokens"] == 300
 

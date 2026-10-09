@@ -30,6 +30,12 @@ from llm_proxy.protocols.registry import get_protocol_serializer
 from llm_proxy.serialization import get_provider_serializer
 
 
+def _record(ctx: Any) -> Any:
+    """The usage record the capture path wrote."""
+    assert ctx.usage is not None, "no usage record was captured"
+    return ctx.usage
+
+
 def _non_streaming_anthropic_body(content: list, usage: dict) -> dict[str, Any]:
     """Format a non-streaming Anthropic call through the same provider→client path.
 
@@ -569,9 +575,9 @@ class TestStreamLifecycleNativePassthrough:
         frames = await _collect(lifecycle.events())
 
         assert usage_frame in frames
-        assert ctx.prompt_tokens == 3
-        assert ctx.completion_tokens == 5
-        assert ctx.total_tokens == 8
+        assert _record(ctx).input_tokens == 3
+        assert _record(ctx).output_tokens == 5
+        assert _record(ctx).total_tokens == 8
 
     async def test_native_openai_replayed_first_chunks_get_shaped(self) -> None:
         """Blocks buffered by the streaming processor's native peek are

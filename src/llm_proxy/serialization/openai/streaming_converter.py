@@ -13,13 +13,14 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.serialization.responses_toolkit import (
     extract_summary_text,
     generate_item_id,
 )
 from llm_proxy.serialization.usage import UsageAccumulator
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 logger = get_logger(__name__)
 
@@ -158,7 +159,7 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
                 completion_details["reasoning_tokens"] = self._reasoning_tokens
         return prompt_details, completion_details
 
-    def get_usage(self) -> StreamingUsage | None:
+    def get_usage(self) -> Usage | None:
         """Return accumulated usage information.
 
         The events' usage is extracted by the responses dialect adapter
@@ -166,10 +167,7 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
         announces — a native search is billable even on a turn that reports no
         tokens.
         """
-        usage = self._usage.result()
-        if usage is None:
-            return None
-        return StreamingUsage.from_usage(usage)
+        return self._usage.result()
 
     # ------------------------------------------------------------------
     # StreamingTransformer protocol (for completeness)

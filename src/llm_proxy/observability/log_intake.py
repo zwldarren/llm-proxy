@@ -33,12 +33,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from llm_proxy.billing.tokens import token_usage_from
 from llm_proxy.core.errors.utils import extract_error_details
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.core.utils import safe_int
-from llm_proxy.observability.cost import calculate_event_cost
+from llm_proxy.observability.cost import calculate_event_cost, proxy_dimensions
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.redaction import body_marker, scrub_log_metadata
 from llm_proxy.observability.service import (
@@ -772,6 +773,7 @@ def _build_log_base(
     log_type = LogType(context.log_type) if isinstance(context.log_type, str) else context.log_type
     endpoint = context.metadata.get("endpoint", "")
     method = context.metadata.get("method", "POST")
+    tokens = token_usage_from(context.usage, proxy_dimensions(context))
 
     return {
         "request_id": context.request_id,
@@ -787,12 +789,12 @@ def _build_log_base(
         "provider": context.provider,
         "error_message": context.error_message,
         "error_stack_trace": context.error_stack_trace,
-        "prompt_tokens": context.prompt_tokens,
-        "completion_tokens": context.completion_tokens,
-        "total_tokens": context.total_tokens,
-        "cache_creation_input_tokens": context.cache_creation_input_tokens,
-        "cache_read_input_tokens": context.cache_read_input_tokens,
-        "cached_prompt_tokens": context.cached_prompt_tokens,
+        "prompt_tokens": tokens.prompt_tokens or None,
+        "completion_tokens": tokens.completion_tokens or None,
+        "total_tokens": tokens.total_tokens or None,
+        "cache_creation_input_tokens": tokens.cache_creation_input_tokens or None,
+        "cache_read_input_tokens": tokens.cache_read_input_tokens or None,
+        "cached_prompt_tokens": tokens.cached_prompt_tokens or None,
         "cost_usd": context.cost_usd,
         "cache_savings_usd": context.cache_savings_usd,
         "ttft_ms": safe_int(context.ttft_ms) if context.ttft_ms is not None else None,
@@ -810,23 +812,29 @@ def _build_log_base(
 
 
 def _build_usage_record(context: EventContext) -> UsageRecordCreate:
-    """Build the usage record for a situation. Always written, sampling or not."""
+    """Build the usage record for a situation. Always written, sampling or not.
+
+    The row's token columns come from the same read model billing prices
+    (``token_usage_from`` over the canonical record), so what the dashboard shows
+    and what was charged cannot drift apart.
+    """
+    tokens = token_usage_from(context.usage, proxy_dimensions(context))
     return UsageRecordCreate(
         timestamp=context.start_timestamp,
         request_id=context.request_id,
         model=context.internal_model or context.model,
         provider=context.provider,
         user_id=context.auth_user_id,
-        prompt_tokens=context.prompt_tokens,
-        completion_tokens=context.completion_tokens,
-        total_tokens=context.total_tokens,
+        prompt_tokens=tokens.prompt_tokens or None,
+        completion_tokens=tokens.completion_tokens or None,
+        total_tokens=tokens.total_tokens or None,
         cost_usd=context.cost_usd,
-        cache_creation_input_tokens=context.cache_creation_input_tokens,
-        cache_read_input_tokens=context.cache_read_input_tokens,
-        cached_prompt_tokens=context.cached_prompt_tokens,
+        cache_creation_input_tokens=tokens.cache_creation_input_tokens or None,
+        cache_read_input_tokens=tokens.cache_read_input_tokens or None,
+        cached_prompt_tokens=tokens.cached_prompt_tokens or None,
         cache_savings_usd=context.cache_savings_usd,
-        audio_input_tokens=context.audio_input_tokens,
-        audio_output_tokens=context.audio_output_tokens,
+        audio_input_tokens=tokens.audio_input_tokens or None,
+        audio_output_tokens=tokens.audio_output_tokens or None,
         response_time_ms=safe_int(context.latency_ms),
         status_code=context.response_status_code,
         user_identity=context.user_id,

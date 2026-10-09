@@ -20,7 +20,6 @@ from llm_proxy.models import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
-    Usage,
 )
 from llm_proxy.models.conversation import ConversationContext
 from llm_proxy.observability.event_context import EventContext
@@ -473,27 +472,6 @@ class ContinuationState:
     transformer: Any
     stream_request: Any
     depth: int = 0
-
-
-def sum_usage(target: Usage, source: Usage) -> None:
-    """Sum source into target in place (independent billed calls).
-
-    Counterpart of ``sum_usage_dicts`` for the canonical ``Usage`` record;
-    None-valued fields are left untouched (unknown on one side of the sum).
-    """
-    target.input_tokens += source.input_tokens
-    target.output_tokens += source.output_tokens
-    for field in (
-        "total_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-        "reasoning_tokens",
-        "web_search_requests",
-    ):
-        target_value = getattr(target, field)
-        source_value = getattr(source, field)
-        if target_value is not None and source_value is not None:
-            setattr(target, field, target_value + source_value)
 
 
 def merge_continuation_usage(original: Any, continuation: Any) -> None:

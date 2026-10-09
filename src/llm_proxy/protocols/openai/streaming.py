@@ -23,10 +23,10 @@ from llm_proxy.models.content_blocks import (
     ThinkingBlock,
     ToolUseBlock,
 )
-from llm_proxy.models.types import AudioSource
+from llm_proxy.models.types import AudioSource, Usage
 from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 # Keys prefixed with ``_`` are proxy-internal and are stripped at every level
 # the transformer traverses (chunk, choice, delta, tool call, usage). Unknown
@@ -716,22 +716,14 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         chunks.append("data: [DONE]\n\n")
         return "".join(chunks)
 
-    def get_usage(self) -> StreamingUsage | None:
-        """Get accumulated usage information from streaming response.
+    def get_usage(self) -> Usage | None:
+        """The turn's canonical usage record, from the shared intake accumulator.
 
-        The provider's frames are parsed by the shared intake (ADR-0025), so the
-        dialect decisions — the cache-alias lift, the DeepSeek fold, the cost
-        precedence — live once, in the chat adapter, instead of here. What remains
-        is a mechanical projection onto ``StreamingUsage``, the wire-shaped record
-        the streaming tiers still speak; it goes away with that record.
-
-        Returns:
-            StreamingUsage object if usage data is available from provider.
+        The provider's frames are parsed by the seam (ADR-0025), so the dialect
+        decisions — the cache-alias lift, the DeepSeek fold, the cost precedence —
+        live once, in the chat adapter, instead of here.
         """
-        usage = self._usage.result()
-        if usage is None:
-            return None
-        return StreamingUsage.from_usage(usage)
+        return self._usage.result()
 
     def _web_search_result_block(
         self,

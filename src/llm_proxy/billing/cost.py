@@ -3,8 +3,9 @@
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from llm_proxy.billing.tokens import TokenUsage, extract_tokens_from_usage
+from llm_proxy.billing.tokens import ProxyBillableDimensions, TokenUsage, token_usage_from
 from llm_proxy.core.utils import coerce_float
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 
 if TYPE_CHECKING:
@@ -379,23 +380,25 @@ def _breakdown_from_usage(token_usage: TokenUsage, cost_usd: float | None) -> Co
 
 
 async def calculate_cost(
-    usage: dict[str, Any] | None,
+    usage: Usage | None,
     model_name: str | None,
     config_manager: DatabaseConfigManager | None = None,
     messages: list[dict[str, Any]] | None = None,
     completion_text: str | None = None,
     provider_name: str | None = None,
+    dimensions: ProxyBillableDimensions | None = None,
 ) -> CostBreakdown:
-    """Calculate cost based on usage and model pricing.
+    """Calculate cost from a turn's canonical usage record and model pricing.
 
     Supports token-based billing (text/cache/audio/image tokens) and
     unit-based billing (per image, per audio minute, per 1M TTS characters,
-    per 1k web searches).
+    per 1k web searches). ``dimensions`` carries the quantities the proxy
+    itself produced, which the record does not hold (ADR-0025).
 
     Returns a CostBreakdown; ``cost_usd`` is None when the cost cannot be
     determined.
     """
-    token_usage = extract_tokens_from_usage(usage)
+    token_usage = token_usage_from(usage, dimensions)
 
     if (
         token_usage.prompt_tokens == 0

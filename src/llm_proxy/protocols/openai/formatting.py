@@ -138,15 +138,35 @@ class OpenAIFormattingMixin:
                 "completion_tokens": response.usage.output_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
-            if response.usage.completion_tokens_details:
-                details = response.usage.completion_tokens_details
+            completion_details = response.usage.completion_tokens_details
+            # Thinking tokens live in the canonical flat field (the dialect alias is
+            # cleared at parse time, ADR-0025); fold it back into the OpenAI-dialect
+            # object so OpenAI clients read ``completion_tokens_details`` regardless
+            # of provider, mirroring the cache-read fold below.
+            reasoning_tokens = (
+                completion_details.reasoning_tokens if completion_details else None
+            ) or response.usage.reasoning_tokens
+            if completion_details is not None or reasoning_tokens:
                 usage_dict["completion_tokens_details"] = {
                     k: v
                     for k, v in [
-                        ("accepted_prediction_tokens", details.accepted_prediction_tokens),
-                        ("audio_tokens", details.audio_tokens),
-                        ("reasoning_tokens", details.reasoning_tokens),
-                        ("rejected_prediction_tokens", details.rejected_prediction_tokens),
+                        (
+                            "accepted_prediction_tokens",
+                            completion_details.accepted_prediction_tokens
+                            if completion_details
+                            else None,
+                        ),
+                        (
+                            "audio_tokens",
+                            completion_details.audio_tokens if completion_details else None,
+                        ),
+                        ("reasoning_tokens", reasoning_tokens),
+                        (
+                            "rejected_prediction_tokens",
+                            completion_details.rejected_prediction_tokens
+                            if completion_details
+                            else None,
+                        ),
                     ]
                     if v is not None
                 }

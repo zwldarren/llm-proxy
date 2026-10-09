@@ -1,10 +1,18 @@
 """Regression tests for Anthropic native streaming usage extraction."""
 
+from typing import Any
+
 from llm_proxy.core.conversion import NativePassthroughHandler
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.event_context import EventContext
 
 handler = NativePassthroughHandler()
+
+
+def _record(ctx: Any) -> Any:
+    """The usage record the capture path wrote."""
+    assert ctx.usage is not None, "no usage record was captured"
+    return ctx.usage
 
 
 def test_anthropic_message_start_usage_extraction():
@@ -24,11 +32,11 @@ def test_anthropic_message_start_usage_extraction():
         request_type=RequestType.CHAT,
     )
     handler.maybe_capture_native_streaming_usage(frame, ctx)
-    assert ctx.prompt_tokens == 1500  # 1000 + 300 + 200
-    assert ctx.cache_read_input_tokens == 300
-    assert ctx.cache_creation_input_tokens == 200
+    assert _record(ctx).input_tokens == 1500  # 1000 + 300 + 200
+    assert _record(ctx).cache_read_input_tokens == 300
+    assert _record(ctx).cache_creation_input_tokens == 200
     # Both prompt and completion are known (completion is explicitly 0).
-    assert ctx.total_tokens == 1500
+    assert _record(ctx).total_tokens == 1500
 
 
 def test_anthropic_message_delta_output_usage_extraction():
@@ -45,14 +53,14 @@ def test_anthropic_message_delta_output_usage_extraction():
         request_type=RequestType.CHAT,
     )
     handler.maybe_capture_native_streaming_usage(frame, ctx)
-    assert ctx.completion_tokens == 500
+    assert _record(ctx).output_tokens == 500
     # The recorded total is derived from the counters whenever both are known, so a
     # lone delta that reports the output only records that output. Nothing on the
     # wire is lost by this: Anthropic's ``message_start`` always reports the prompt,
     # so a delta is never the first event of a real turn (see
     # ``test_anthropic_combined_start_and_delta_usage``), and the canonical record
     # has no "not reported" state for a counter to preserve here.
-    assert ctx.total_tokens == 500
+    assert _record(ctx).total_tokens == 500
 
 
 def test_anthropic_combined_start_and_delta_usage():
@@ -79,11 +87,11 @@ def test_anthropic_combined_start_and_delta_usage():
     handler.maybe_capture_native_streaming_usage(start_frame, ctx)
     handler.maybe_capture_native_streaming_usage(delta_frame, ctx)
     # True prompt tokens = input_tokens + cache_read + cache_creation
-    assert ctx.prompt_tokens == 1500  # 1000 + 300 + 200
-    assert ctx.completion_tokens == 500
-    assert ctx.cache_read_input_tokens == 300
-    assert ctx.cache_creation_input_tokens == 200
-    assert ctx.total_tokens == 2000  # 1500 + 500
+    assert _record(ctx).input_tokens == 1500  # 1000 + 300 + 200
+    assert _record(ctx).output_tokens == 500
+    assert _record(ctx).cache_read_input_tokens == 300
+    assert _record(ctx).cache_creation_input_tokens == 200
+    assert _record(ctx).total_tokens == 2000  # 1500 + 500
 
 
 def test_anthropic_no_space_sse_delimiters_usage_extraction():
@@ -105,11 +113,11 @@ def test_anthropic_no_space_sse_delimiters_usage_extraction():
         request_type=RequestType.CHAT,
     )
     handler.maybe_capture_native_streaming_usage(frame, ctx)
-    assert ctx.prompt_tokens == 96806
-    assert ctx.completion_tokens == 63
-    assert ctx.total_tokens == 96869
-    assert ctx.cache_read_input_tokens == 96512
-    assert ctx.cache_creation_input_tokens == 0
+    assert _record(ctx).input_tokens == 96806
+    assert _record(ctx).output_tokens == 63
+    assert _record(ctx).total_tokens == 96869
+    assert _record(ctx).cache_read_input_tokens == 96512
+    assert _record(ctx).cache_creation_input_tokens == 0
 
 
 def test_anthropic_no_space_message_start_usage_extraction():
@@ -128,5 +136,5 @@ def test_anthropic_no_space_message_start_usage_extraction():
         request_type=RequestType.CHAT,
     )
     handler.maybe_capture_native_streaming_usage(frame, ctx)
-    assert ctx.prompt_tokens == 1500
-    assert ctx.total_tokens == 1500
+    assert _record(ctx).input_tokens == 1500
+    assert _record(ctx).total_tokens == 1500

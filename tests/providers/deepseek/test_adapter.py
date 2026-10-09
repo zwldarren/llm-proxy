@@ -883,8 +883,10 @@ class TestDeepSeekResponseParsing:
         # fold_deepseek_cache_hits), which the billing layer maps to the
         # cache-read rate instead of the full input rate.
         assert result.usage.cache_read_input_tokens == 80
-        assert result.usage.completion_tokens_details is not None
-        assert result.usage.completion_tokens_details.reasoning_tokens == 50
+        # Thinking is the canonical flat field; the dialect alias it arrived in is
+        # cleared by the adapter (ADR-0025).
+        assert result.usage.reasoning_tokens == 50
+        assert result.usage.completion_tokens_details is None
 
     def test_system_fingerprint_in_response(self, adapter):
         """System fingerprint from DeepSeek is captured in provider_info."""

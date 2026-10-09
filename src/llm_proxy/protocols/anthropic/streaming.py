@@ -19,6 +19,7 @@ from llm_proxy.models import (
     ToolUseBlock,
 )
 from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import (
     ANTHROPIC_USAGE_EXTENSION_KEYS,
     parse_usage_and_provider_extras,
@@ -30,7 +31,6 @@ from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
-    StreamingUsage,
 )
 
 
@@ -1065,7 +1065,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         }
         return [f"event: error\ndata: {orjson.dumps(error_data).decode()}\n\n"]
 
-    def get_usage(self) -> StreamingUsage | None:
+    def get_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.
 
         The canonical chunks this transformer is fed carry their usage in the chat
@@ -1074,9 +1074,6 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         Anthropic ``usage`` blocks, not the billing record.
 
         Returns:
-            StreamingUsage object if usage data is available from provider.
+            The canonical usage record, or None when the stream reported none.
         """
-        usage = self._usage.result()
-        if usage is None:
-            return None
-        return StreamingUsage.from_usage(usage)
+        return self._usage.result()

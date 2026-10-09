@@ -29,7 +29,6 @@ from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
     StreamingTransformer,
-    StreamingUsage,
 )
 
 logger = get_logger(__name__)
@@ -960,7 +959,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
 
         return output
 
-    def get_usage(self) -> StreamingUsage | None:
+    def get_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.
 
         The counters on ``state`` above are emission state for the client's own
@@ -988,9 +987,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             else:
                 usage.web_search_requests = max(usage.web_search_requests or 0, announced)
 
-        if usage is None:
-            return None
-        return StreamingUsage.from_usage(usage)
+        return usage
 
     def _emit_web_search_call(
         self,

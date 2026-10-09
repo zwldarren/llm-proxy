@@ -381,7 +381,7 @@ class TestChatCompletionPassthrough:
         # canonical record keeps it flat (ADR-0025).
         assert result.usage.cache_read_input_tokens == 6
         assert result.usage.prompt_tokens_details is None
-        assert result.usage.completion_tokens_details.reasoning_tokens == 2
+        assert result.usage.reasoning_tokens == 2
 
     @pytest.mark.asyncio
     async def test_vetoed_request_falls_back_to_chat_completions(self, adapter, mock_response_cls):

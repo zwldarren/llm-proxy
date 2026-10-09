@@ -14,6 +14,7 @@ simply skips re-calculation when the cost is already set.
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.billing.cost import calculate_cost
+from llm_proxy.billing.tokens import ProxyBillableDimensions
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.logger import get_logger
 
@@ -47,6 +48,21 @@ async def extract_streaming_usage(context: EventContext) -> None:
         return
     if usage is not None:
         context.update_usage(usage)
+
+
+def proxy_dimensions(context: EventContext) -> ProxyBillableDimensions:
+    """What the proxy itself produced, for billing to price beside the record.
+
+    The record holds the provider's facts; these are the proxy's own (generated
+    images, synthesized characters, executed searches). Assembled here rather than
+    asked of the context so observability's capture object stays free of billing's
+    read-model types.
+    """
+    return ProxyBillableDimensions(
+        images_generated=context.images_generated,
+        tts_characters=context.tts_characters,
+        web_search_requests=context.web_search_requests,
+    )
 
 
 async def calculate_event_cost(
@@ -93,14 +109,14 @@ async def calculate_event_cost(
             return
 
     try:
-        usage_dict = context.to_usage_dict()
         breakdown = await calculate_cost(
-            usage=usage_dict,
+            usage=context.usage,
             model_name=context.internal_model or context.model,
             config_manager=config_manager,
             provider_name=context.provider,
             messages=messages,
             completion_text=completion_text,
+            dimensions=proxy_dimensions(context),
         )
         context.cost_usd = breakdown.cost_usd
         context.cache_savings_usd = breakdown.cache_savings_usd

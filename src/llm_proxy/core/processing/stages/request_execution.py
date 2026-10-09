@@ -26,7 +26,6 @@ from llm_proxy.core.processing.streaming_processor import StreamingProcessor
 from llm_proxy.core.processing.web_search_streaming import (
     MAX_CONTINUATION_DEPTH,
     WebSearchStreamProcessor,
-    sum_usage,
 )
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.models import InternalResponse
@@ -34,6 +33,7 @@ from llm_proxy.observability.cost import calculate_event_cost
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.tracing.handlers import get_tracing_registry
+from llm_proxy.serialization.usage import add_usage
 
 if TYPE_CHECKING:
     from llm_proxy.protocols.base import ProtocolEndpoint
@@ -231,7 +231,10 @@ class RetryExecutor:
             # Sum usage across the independent upstream calls.
             if response.usage is not None:
                 if total_usage is not None:
-                    sum_usage(response.usage, total_usage)
+                    # Fold the calls so far into the response that will be returned
+                    # (``sum_usage``'s direction: the record that survives is the
+                    # final call's).
+                    add_usage(response.usage, total_usage)
                 total_usage = response.usage
             elif total_usage is not None:
                 response.usage = total_usage

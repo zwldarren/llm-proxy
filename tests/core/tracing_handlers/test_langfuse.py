@@ -5,6 +5,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm_proxy.core.request_type import RequestType
+from llm_proxy.models.types import (
+    CompletionTokensDetails,
+    PromptTokensDetails,
+    Usage,
+)
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.tracing.handlers.providers.langfuse import LangfuseTracingHandler
 from llm_proxy.observability.tracing.handlers.providers.langfuse.attributes import (
@@ -334,9 +339,11 @@ class TestLangfuseTracingHandler:
             request_id="req-1",
             trace_id="trace-1",
             model="gpt-4",
-            prompt_tokens=5,
-            completion_tokens=10,
-            total_tokens=15,
+            usage=Usage(
+                input_tokens=5,
+                output_tokens=10,
+                total_tokens=15,
+            ),
             cost_usd=0.002,
             metadata={"endpoint": "/v1/chat/completions"},
         )
@@ -378,9 +385,11 @@ class TestLangfuseTracingHandler:
             request_id="req-1",
             trace_id="trace-1",
             model="gpt-4",
-            prompt_tokens=5,
-            completion_tokens=10,
-            total_tokens=15,
+            usage=Usage(
+                input_tokens=5,
+                output_tokens=10,
+                total_tokens=15,
+            ),
             metadata={"endpoint": "/v1/chat/completions"},
         )
 
@@ -478,9 +487,11 @@ class TestLangfuseSDKDataBuilders:
             request_id="req-1",
             trace_id="trace-1",
             model="gpt-4",
-            prompt_tokens=5,
-            completion_tokens=10,
-            total_tokens=15,
+            usage=Usage(
+                input_tokens=5,
+                output_tokens=10,
+                total_tokens=15,
+            ),
         )
         details = build_usage_details(context)
         assert details == {"input": 5, "output": 10, "total": 15}
@@ -496,14 +507,16 @@ class TestLangfuseSDKDataBuilders:
             request_id="req-1",
             trace_id="trace-1",
             model="gpt-4",
-            prompt_tokens=100,
-            completion_tokens=50,
-            total_tokens=150,
-            cache_read_input_tokens=30,
-            cache_creation_input_tokens=10,
-            audio_input_tokens=5,
-            audio_output_tokens=4,
-            reasoning_tokens=20,
+            usage=Usage(
+                input_tokens=100,
+                output_tokens=50,
+                total_tokens=150,
+                cache_read_input_tokens=30,
+                cache_creation_input_tokens=10,
+                reasoning_tokens=20,
+                prompt_tokens_details=PromptTokensDetails(audio_tokens=5),
+                completion_tokens_details=CompletionTokensDetails(audio_tokens=4),
+            ),
         )
         details = build_usage_details(context)
         assert details["input"] == 55  # 100 - 30 - 10 - 5
@@ -522,10 +535,12 @@ class TestLangfuseSDKDataBuilders:
             request_id="req-1",
             trace_id="trace-1",
             model="gpt-4",
-            prompt_tokens=100,
-            completion_tokens=10,
-            total_tokens=110,
-            cache_read_input_tokens=25,
+            usage=Usage(
+                input_tokens=100,
+                output_tokens=10,
+                total_tokens=110,
+                cache_read_input_tokens=25,
+            ),
         )
         details = build_usage_details(context)
         assert details["cache_read_input_tokens"] == 25

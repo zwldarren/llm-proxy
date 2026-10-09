@@ -31,12 +31,13 @@ from llm_proxy.serialization.usage.adapters import (
     is_known_dialect,
     parse_usage,
 )
-from llm_proxy.serialization.usage.merge import add_usage, merge_latest
+from llm_proxy.serialization.usage.merge import add_usage, copy_usage, merge_latest
 
 __all__ = [
     "UsageAccumulator",
     "UsageDialect",
     "add_usage",
+    "copy_usage",
     "count_billable_events",
     "is_known_dialect",
     "merge_latest",

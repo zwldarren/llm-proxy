@@ -14,7 +14,6 @@ latest observation rather than summing observations.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import Any
 
 from llm_proxy.models.types import Usage
@@ -23,7 +22,7 @@ from llm_proxy.serialization.usage.adapters import (
     count_billable_events,
     parse_usage,
 )
-from llm_proxy.serialization.usage.merge import merge_latest
+from llm_proxy.serialization.usage.merge import copy_usage, merge_latest
 
 __all__ = ["UsageAccumulator"]
 
@@ -83,11 +82,7 @@ class UsageAccumulator:
         """
         if self._usage is None and not self._billable_events:
             return None
-        usage = replace(self._usage) if self._usage is not None else Usage()
-        if usage.prompt_tokens_details is not None:
-            usage.prompt_tokens_details = replace(usage.prompt_tokens_details)
-        if usage.completion_tokens_details is not None:
-            usage.completion_tokens_details = replace(usage.completion_tokens_details)
+        usage = copy_usage(self._usage) if self._usage is not None else Usage()
         if self._billable_events:
             # A provider-reported count wins; the counted events are the
             # proxy's own tally of the same fact.

@@ -377,6 +377,25 @@ class TestAudioUsageFormatting:
         assert result["usage"]["type"] == "tokens"
         assert result["usage"]["input_tokens"] == 10
 
+    def test_format_transcription_folds_flat_thinking_into_output_details(self):
+        """Thinking tokens are canonical flat on the record; the Realtime-dialect
+        output details object is where a client reads them (ADR-0025)."""
+        from llm_proxy.protocols.openai.audio_serializer import OpenAIAudioSerializer
+
+        serializer = OpenAIAudioSerializer()
+        response = InternalTranscriptionResponse(
+            text="Hello world",
+            usage=Usage(
+                input_tokens=10,
+                output_tokens=5,
+                total_tokens=15,
+                reasoning_tokens=3,
+            ),
+        )
+        response._response_format = "json"
+        result = serializer.format_transcription_response(response, "json")
+        assert result["usage"]["output_token_details"] == {"reasoning_tokens": 3}
+
     @pytest.mark.asyncio
     async def test_transcription_verbose_json_with_duration_usage(self, responses_adapter):
         mock_response = MockResponse(

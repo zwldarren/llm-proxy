@@ -3,13 +3,14 @@
 import time
 from typing import Any
 
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.ollama.metrics import (
     extract_ollama_cached_tokens,
     extract_ollama_metrics,
     extract_ollama_token_counts,
 )
 from llm_proxy.serialization.ollama.tool_utils import convert_logprobs, normalize_tool_calls
-from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
+from llm_proxy.streaming.transformer import StreamingTransformer
 
 _DONE_REASON_MAP: dict[str, str] = {
     "length": "length",
@@ -155,7 +156,7 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         self._role_sent: bool = False
         # Usage captured from the terminal ``done`` chunk (Ollama reports
         # prompt_eval_count/eval_count only there).
-        self._usage: StreamingUsage | None = None
+        self._usage: Usage | None = None
 
     # ------------------------------------------------------------------
     # Provider-side API  (called by adapter)
@@ -184,7 +185,7 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
             counts = extract_ollama_token_counts(chunk)
             if counts is not None:
                 input_tokens, output_tokens = counts
-                self._usage = StreamingUsage(
+                self._usage = Usage(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     total_tokens=input_tokens + output_tokens,
@@ -224,7 +225,7 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
 
         return openai_chunk
 
-    def get_usage(self) -> StreamingUsage | None:
+    def get_usage(self) -> Usage | None:
         """Return the usage captured from the terminal done chunk."""
         return self._usage
 

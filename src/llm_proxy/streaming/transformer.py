@@ -2,34 +2,15 @@
 """Base class for streaming transformers."""
 
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import orjson
 
 from llm_proxy.models.content_blocks import ContentBlock
-from llm_proxy.models.types import (
-    CompletionTokensDetails,
-    PromptTokensDetails,
-    Usage,
-)
+from llm_proxy.models.types import Usage
 
 if TYPE_CHECKING:
     from llm_proxy.models import InternalRequest
-
-
-def _details_dict(
-    details: PromptTokensDetails | CompletionTokensDetails | None,
-) -> dict[str, int] | None:
-    """A details block in the flat mapping ``StreamingUsage`` carries.
-
-    ``None`` members are dropped, and an all-``None`` block becomes ``None``, which
-    is the shape the canonical record's own writers produce.
-    """
-    if details is None:
-        return None
-    block = {key: value for key, value in asdict(details).items() if value is not None}
-    return block or None
 
 
 def sum_usage_dicts(target: dict[str, Any], source: dict[str, Any]) -> None:
@@ -150,64 +131,6 @@ class PendingTerminalState:
         for key, value in usage.items():
             if value or key not in self._pending_usage:
                 self._pending_usage[key] = value
-
-
-@dataclass
-class StreamingUsage:
-    """Standard usage information for streaming responses.
-
-    Provides a unified interface for token usage data across different
-    protocol implementations (OpenAI, Anthropic, OpenResponses).
-
-    All streaming transformers should implement get_usage() to return
-    this dataclass with all available fields populated. Cache token
-    fields are optional as not all providers support them.
-    """
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    # Cache tokens (optional - not all providers support these)
-    cache_read_input_tokens: int | None = None
-    cache_creation_input_tokens: int | None = None
-    # Optional detailed token breakdowns
-    prompt_tokens_details: dict[str, int] | None = None
-    completion_tokens_details: dict[str, int] | None = None
-    # Provider-reported cost (e.g., NanoGPT's x_nanogpt_pricing.cost, OpenRouter's cost)
-    provider_reported_cost: float | None = None
-    # Web search request count (server_tool_use.web_search_requests)
-    web_search_requests: int | None = None
-
-    @classmethod
-    def from_usage(cls, usage: Usage) -> StreamingUsage:
-        """Project the canonical usage record onto this wire-shaped one.
-
-        A bridge, and deliberately a mechanical one: the dialect decisions live in
-        the intake adapters (ADR-0025), so this carries no parsing. It exists
-        because the streaming tiers still hand their usage to their consumers in
-        this shape, and it goes away with this record.
-
-        The one non-mechanical step is ``reasoning_tokens``: the canonical record
-        carries it flat (it is one fact, expressed once) while this record has no
-        such field, so it lands in the nested completion detail its consumers read.
-        """
-        completion_details = _details_dict(usage.completion_tokens_details)
-        if usage.reasoning_tokens is not None:
-            completion_details = {
-                **(completion_details or {}),
-                "reasoning_tokens": usage.reasoning_tokens,
-            }
-        return cls(
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            total_tokens=usage.total_tokens or 0,
-            cache_read_input_tokens=usage.cache_read_input_tokens,
-            cache_creation_input_tokens=usage.cache_creation_input_tokens,
-            prompt_tokens_details=_details_dict(usage.prompt_tokens_details),
-            completion_tokens_details=completion_details,
-            provider_reported_cost=usage.provider_reported_cost,
-            web_search_requests=usage.web_search_requests,
-        )
 
 
 class StreamingTransformer(ABC):
@@ -485,13 +408,13 @@ class StreamingTransformer(ABC):
         """
         return self._accumulated_output
 
-    def get_usage(self) -> StreamingUsage | None:
-        """Get accumulated usage information from the streaming response.
+    def get_usage(self) -> Usage | None:
+        """Get the accumulated usage record for the streaming response.
 
-        Subclasses should override this method to provide protocol-specific
-        usage data extraction. The base implementation returns None.
+        Subclasses that hold an intake accumulator (ADR-0025) return its
+        ``result()``; the base implementation reports nothing.
 
         Returns:
-            StreamingUsage object if usage data is available, None otherwise.
+            The canonical usage record, or None when the stream reported no usage.
         """
         return None

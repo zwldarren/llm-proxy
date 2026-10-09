@@ -205,6 +205,44 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   whose prompt the provider never reports records the output as its total rather
   than no total. Unreachable on the Anthropic wire, whose `message_start` always
   reports the prompt.
+- The request's capture object holds the record. `EventContext.usage` is the single
+  home for every fact a provider reported, written only by `update_usage`, which
+  copies the observation in and folds it with `merge_latest`; the thirteen flat
+  mirrors and `to_usage_dict()` are gone, so a fact can no longer be stored twice
+  and read from whichever copy a caller happened to know about. Two billable
+  dimensions keep a field of their own on the context because they have a second
+  route: `provider_reported_cost` also arrives as a provider-info extra, and
+  `web_search_requests` also counts the searches the proxy executed itself (which
+  add to the provider's own count in the record).
+- Billing's read model is built from the record. `token_usage_from(usage,
+  dimensions)` replaced `extract_tokens_from_usage`, which read one dict holding
+  four dialects at once; the "is the cache inside the input count?" guesswork went
+  with it, because the record's input count already includes the cache counters by
+  the canonical invariant. The two cache columns survive, one dialect expression
+  each, with the flat field winning — the rule the `1d85a77da088` dedup migration
+  already encodes for stored rows. `ProxyBillableDimensions` carries what the proxy
+  itself produced (generated images, synthesized characters, executed searches).
+- `StreamingUsage` is retired: every `get_usage()` returns the record. The
+  projection bridge (`from_usage`) and the inverse projection the context would
+  otherwise have needed both disappeared with it. The three converters whose
+  dialects have not had their slice (gemini, ollama, gemini_interactions) build the
+  record directly and still parse by hand; their slices move that parse behind the
+  seam and add their ratchet rows.
+- Thinking tokens are the canonical flat field in every dialect. The chat and
+  responses adapters lift the nested `completion_tokens_details.reasoning_tokens`
+  (and SGLang's top-level alias for the same fact) into `reasoning_tokens` and clear
+  the alias, as CONTEXT.md's canonical record requires — before this, two migrated
+  dialects were still expressing one fact twice. Client emission folds it back into
+  the dialect's own object (the OpenAI chat formatter and the Realtime audio
+  serializer; OpenResponses already merged both), so no client wire changed.
+- `sum_usage`, a hand-rolled duplicate of `add_usage`, is gone; the non-streaming
+  web-search continuation calls the seam's rule. The streaming continuation's token
+  sum still lives only in the client-wire pending usage, which is a pre-existing gap
+  this slice does not close.
+- A migrated row's live side now compares the record with itself, so its `recorded`
+  anchor carries the comparison; the ratchet's docstring says so, and every row
+  without an anchor was given one.
+
 - Landing order: seam and adapters first, then one dialect migrated at a time,
   each commit deleting the copies it replaces. No release leaves two live parse
   paths for a fact the parity tests cannot see. Slice 1 (the native
@@ -224,4 +262,8 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   `_apply_openresponses_usage`, and the OpenResponses protocol transformer), the
   body parser losing its caller-supplied `web_search_call_count` parameter — the
   count is now the adapter's own reading of the body's items, so no caller can
-  hand the seam a different number.
+  hand the seam a different number. The record slice has landed with it: the
+  capture object holds the record, billing reads it, and `StreamingUsage` is gone,
+  so the remaining provider-native dialects (gemini, ollama, the Interactions
+  vocabulary, the audio/image stream trackers, the Decisions shape) have only their
+  own parse left to move.

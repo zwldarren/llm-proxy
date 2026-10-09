@@ -66,7 +66,8 @@ class TestOpenAIAccumulation:
         assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (10, 2, 12)
         assert usage.provider_reported_cost == 0.25
         assert usage.web_search_requests == 3
-        assert usage.prompt_tokens_details == {"audio_tokens": 7}
+        assert usage.prompt_tokens_details is not None
+        assert usage.prompt_tokens_details.audio_tokens == 7
 
     def test_accumulate_tool_calls(self):
         """Should accumulate tool calls during streaming."""

@@ -8,8 +8,8 @@ that comparison is this module's whole job.
 A row pairs a wire dialect with a call site that still parses it locally:
 
 * ``legacy`` drives the *shipped* code path and returns whatever that path
-  produces — a ``StreamingUsage``, an ``EventContext`` or billing's
-  ``TokenUsage``;
+  produces — the canonical record, an ``EventContext``, or billing's read model
+  (``TokenUsage``);
 * the canonical side runs ``UsageAccumulator(dialect)`` over the same frames.
 
 Both sides are then projected onto the billable **amounts**, not the field
@@ -39,7 +39,7 @@ from typing import Any
 import orjson
 import pytest
 
-from llm_proxy.billing.tokens import TokenUsage, extract_tokens_from_usage
+from llm_proxy.billing.tokens import TokenUsage, token_usage_from
 from llm_proxy.core.conversion import NativePassthroughHandler
 from llm_proxy.models.types import Usage
 from llm_proxy.observability.event_context import EventContext
@@ -50,8 +50,7 @@ from llm_proxy.serialization.anthropic.serializer import parse_usage_and_provide
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
 from llm_proxy.serialization.openai.serializer import parse_usage_from_response
 from llm_proxy.serialization.openai.streaming_converter import OpenAIResponsesChunkConverter
-from llm_proxy.serialization.usage import UsageAccumulator
-from llm_proxy.streaming.transformer import StreamingUsage
+from llm_proxy.serialization.usage import UsageAccumulator, parse_usage
 
 #: The billable facts both sides are projected onto. ``cost`` is included
 #: because a provider-reported cost outranks the local price table
@@ -105,40 +104,17 @@ def _facts_of_usage(usage: Usage | None) -> Facts:
     }
 
 
-def _facts_of_streaming_usage(usage: StreamingUsage | None) -> Facts:
-    """Legacy ``StreamingUsage`` → billable facts."""
-    if usage is None:
-        return dict.fromkeys(FACTS, 0)
-    prompt_details = usage.prompt_tokens_details or {}
-    completion_details = usage.completion_tokens_details or {}
-    return {
-        "input": usage.input_tokens,
-        "output": usage.output_tokens,
-        "total": usage.total_tokens or usage.input_tokens + usage.output_tokens,
-        "cache_read": _amount(usage.cache_read_input_tokens, prompt_details.get("cached_tokens")),
-        "cache_write": _amount(
-            usage.cache_creation_input_tokens, prompt_details.get("cache_write_tokens")
-        ),
-        "reasoning": int(completion_details.get("reasoning_tokens") or 0),
-        "web_search": int(usage.web_search_requests or 0),
-        "cost": float(usage.provider_reported_cost or 0),
-    }
-
-
 def _facts_of_event_context(context: EventContext) -> Facts:
-    """Observability capture object → billable facts (the passthrough tier's view)."""
-    return {
-        "input": int(context.prompt_tokens or 0),
-        "output": int(context.completion_tokens or 0),
-        "total": int(
-            context.total_tokens or (context.prompt_tokens or 0) + (context.completion_tokens or 0)
-        ),
-        "cache_read": _amount(context.cache_read_input_tokens, context.cached_prompt_tokens),
-        "cache_write": _amount(context.cache_creation_input_tokens, context.cache_write_tokens),
-        "reasoning": int(context.reasoning_tokens or 0),
-        "web_search": int(context.web_search_requests or 0),
-        "cost": float(context.provider_reported_cost or 0),
-    }
+    """Observability capture object → billable facts (the passthrough tier's view).
+
+    The context holds the record plus the two billable dimensions that have a
+    second route: the search count (which its own field accumulates) and the cost
+    the record may carry.
+    """
+    facts = _facts_of_usage(context.usage)
+    facts["web_search"] = int(context.web_search_requests or facts["web_search"])
+    facts["cost"] = float(context.provider_reported_cost or facts["cost"])
+    return facts
 
 
 def _facts_of_token_usage(usage: TokenUsage) -> Facts:
@@ -194,7 +170,7 @@ def _new_context() -> EventContext:
     return EventContext(request_id="req_parity", trace_id="trace_parity", model="test-model")
 
 
-def _chat_transformer(frames: Sequence[dict[str, Any]]) -> StreamingUsage | None:
+def _chat_transformer(frames: Sequence[dict[str, Any]]) -> Usage | None:
     """``protocols/openai/streaming.py`` — the client-facing chat tier's own parser."""
     transformer = OpenAIStreamingTransformer(model="gpt-4o", request_id="req_parity")
     for frame in frames:
@@ -202,7 +178,7 @@ def _chat_transformer(frames: Sequence[dict[str, Any]]) -> StreamingUsage | None
     return transformer.get_usage()
 
 
-def _anthropic_converter(frames: Sequence[dict[str, Any]]) -> StreamingUsage | None:
+def _anthropic_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
     """``serialization/anthropic/streaming_converter.py`` — provider frames → canonical usage."""
     converter = AnthropicChunkConverter(model="claude-3", request_id="msg_1")
     for frame in frames:
@@ -210,7 +186,7 @@ def _anthropic_converter(frames: Sequence[dict[str, Any]]) -> StreamingUsage | N
     return converter.get_usage()
 
 
-def _anthropic_protocol_transformer(frames: Sequence[dict[str, Any]]) -> StreamingUsage | None:
+def _anthropic_protocol_transformer(frames: Sequence[dict[str, Any]]) -> Usage | None:
     """``protocols/anthropic/streaming.py`` — canonical chunks → the client's wire."""
     transformer = AnthropicStreamingTransformer(model="claude-3", request_id="msg_1")
     for frame in frames:
@@ -234,7 +210,7 @@ def _anthropic_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
 
 def _openresponses_protocol_transformer(
     frames: Sequence[dict[str, Any]],
-) -> StreamingUsage | None:
+) -> Usage | None:
     """``protocols/openresponses/streaming.py`` — canonical or native events → usage."""
     transformer = OpenResponsesStreamingTransformer(model="gpt-4", request_id="resp_1")
     for frame in frames:
@@ -250,7 +226,7 @@ def _responses_terminal_passthrough(frames: Sequence[dict[str, Any]]) -> EventCo
     return context
 
 
-def _responses_provider_converter(frames: Sequence[dict[str, Any]]) -> StreamingUsage | None:
+def _responses_provider_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
     """``serialization/openai/streaming_converter.py`` — Responses wire events → usage."""
     converter = OpenAIResponsesChunkConverter(model="gpt-4o", request_id="resp_1")
     for frame in frames:
@@ -268,8 +244,12 @@ def _native_chat_frame(frames: Sequence[dict[str, Any]]) -> EventContext:
 
 
 def _realtime_billing_read_model(frames: Sequence[dict[str, Any]]) -> TokenUsage:
-    """``realtime/usage.py`` hands the raw usage dict straight to cost calculation."""
-    return extract_tokens_from_usage(frames[0]["response"]["usage"])
+    """``realtime/usage.py`` parses the turn's event, and billing prices the record.
+
+    The seam parses (the realtime dialect nests under singular ``*_token_details``)
+    and the read model projects the record onto billing's columns.
+    """
+    return token_usage_from(parse_usage("realtime", frames[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +446,7 @@ _ROWS: tuple[Row, ...] = (
         # amounts the transformer's own parser produced before the swap.
         frames=(CHAT_FLAT_AND_NESTED_COPY,),
         legacy=_chat_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         recorded={
             "input": 1500,
             "output": 500,
@@ -483,7 +463,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="chat",
         frames=(CHAT_NESTED_ONLY,),
         legacy=_chat_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         recorded={
             "input": 1000,
             "output": 50,
@@ -500,7 +480,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="chat",
         frames=(CHAT_DEEPSEEK_CACHE_HITS,),
         legacy=_chat_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         recorded={
             "input": 100,
             "output": 10,
@@ -517,7 +497,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="chat",
         frames=(CHAT_COST_AND_SEARCH,),
         legacy=_chat_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         recorded={
             "input": 1000,
             "output": 50,
@@ -534,7 +514,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="anthropic",
         frames=_ANTHROPIC_FRAMES,
         legacy=_anthropic_converter,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         closed={"reasoning": _thinking_tokens_are_unread("reasoning")},
         recorded={
             "input": 150,
@@ -573,7 +553,7 @@ _ROWS: tuple[Row, ...] = (
         # facts the provider reported beside the tokens, so both are ``closed``.
         frames=(CHAT_COST_AND_SEARCH,),
         legacy=_anthropic_protocol_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         closed={"cost": _COST_WAS_UNREAD, "web_search": _SEARCH_COUNT_WAS_UNREAD},
         recorded={
             "input": 1000,
@@ -591,7 +571,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="chat",
         frames=(CHAT_FLAT_AND_NESTED_COPY,),
         legacy=_anthropic_protocol_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         recorded={
             "input": 1500,
             "output": 500,
@@ -674,14 +654,24 @@ _ROWS: tuple[Row, ...] = (
         dialect="responses",
         frames=RESPONSES_PROVIDER_EVENTS,
         legacy=_responses_provider_converter,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
+        recorded={
+            "input": 1000,
+            "output": 50,
+            "total": 1050,
+            "cache_read": 400,
+            "cache_write": 0,
+            "reasoning": 20,
+            "web_search": 1,
+            "cost": 0.0,
+        },
     ),
     Row(
         id="openresponses-protocol-transformer-flat-and-nested-copy",
         dialect="chat",
         frames=(CHAT_FLAT_AND_NESTED_COPY,),
         legacy=_openresponses_protocol_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         closed={"cache_write": _FLAT_CACHE_COUNTERS_WERE_UNREAD},
         recorded={
             "input": 1500,
@@ -699,7 +689,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="chat",
         frames=(CHAT_COST_AND_SEARCH,),
         legacy=_openresponses_protocol_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         closed={"cost": _COST_WAS_UNREAD, "web_search": _CHAT_SEARCHES_WERE_UNREAD},
         recorded={
             "input": 1000,
@@ -717,7 +707,7 @@ _ROWS: tuple[Row, ...] = (
         dialect="responses",
         frames=(RESPONSES_TERMINAL_EVENT,),
         legacy=_openresponses_protocol_transformer,
-        facts_of=_facts_of_streaming_usage,
+        facts_of=_facts_of_usage,
         closed={"web_search": _NATIVE_SEARCHES_WERE_UNREAD},
         recorded={
             "input": 1000,
@@ -758,11 +748,25 @@ _ROWS: tuple[Row, ...] = (
         frames=(REALTIME_DONE,),
         legacy=_realtime_billing_read_model,
         facts_of=_facts_of_token_usage,
-        # Billing's read model has no reasoning dimension, and the Realtime
-        # dialect's cache read reaches it as ``cached_prompt_tokens``, which its
-        # input-total heuristic does not add in — so this row compares every
-        # fact the two can express, and agrees on all of them.
+        # Billing's read model has no reasoning dimension: billing prices reasoning
+        # inside the output count, so this row compares every fact the two can
+        # express.
         facts=frozenset(FACTS) - {"reasoning", "cost"},
+        # The observer used to hand the raw usage dict to billing; it parses through
+        # the seam now. The amounts are unchanged — the cache read only changes
+        # *column*: the adapter lifts the dialect detail to the canonical flat field
+        # (ADR-0025), which is the column the 1d85a77da088 dedup migration already
+        # declares authoritative.
+        recorded={
+            "input": 120,
+            "output": 30,
+            "total": 150,
+            "cache_read": 20,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+        },
     ),
 )
 

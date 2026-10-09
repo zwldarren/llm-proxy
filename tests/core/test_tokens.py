@@ -3,6 +3,7 @@
 import hashlib
 
 from llm_proxy.billing.tokens import (
+    ProxyBillableDimensions,
     TokenUsage,
     _batch_encode_texts,
     _compute_messages_hash,
@@ -36,8 +37,9 @@ from llm_proxy.billing.tokens import (
     count_tools_tokens,
     estimate_embedding_usage,
     estimate_usage_from_request,
-    extract_tokens_from_usage,
+    token_usage_from,
 )
+from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
 
 
 class TestTokenUsage:
@@ -77,154 +79,99 @@ class TestTokenUsage:
         assert usage.audio_output_tokens == 3
 
 
-class TestExtractTokensFromUsage:
-    """Tests for extract_tokens_from_usage function."""
+class TestTokenUsageFromRecord:
+    """Billing's read model, projected from the canonical usage record.
 
-    def test_none_usage(self):
-        """Test with None usage returns default TokenUsage."""
-        result = extract_tokens_from_usage(None)
+    The dialect handling these tests used to pin lives in the intake adapters
+    now (ADR-0025, ``tests/test_serialization/test_usage_intake.py``); what
+    remains here is the one mapping every dialect shares: record field ->
+    billing column.
+    """
+
+    def test_no_record(self):
+        """No usage reported at all: every column stays at its default."""
+        result = token_usage_from(None)
         assert result.prompt_tokens == 0
         assert result.completion_tokens == 0
         assert result.total_tokens == 0
 
-    def test_empty_dict(self):
-        """Test with empty dict returns default TokenUsage."""
-        result = extract_tokens_from_usage({})
-        assert result.prompt_tokens == 0
-        assert result.completion_tokens == 0
-
-    def test_openai_format(self):
-        """Test OpenAI format token extraction."""
-        usage = {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "total_tokens": 150,
-        }
-        result = extract_tokens_from_usage(usage)
+    def test_counters(self):
+        result = token_usage_from(Usage(input_tokens=100, output_tokens=50, total_tokens=150))
         assert result.prompt_tokens == 100
         assert result.completion_tokens == 50
         assert result.total_tokens == 150
 
-    def test_anthropic_format(self):
-        """Test Anthropic format token extraction."""
-        usage = {
-            "input_tokens": 100,
-            "output_tokens": 50,
-        }
-        result = extract_tokens_from_usage(usage)
-        assert result.prompt_tokens == 100
-        assert result.completion_tokens == 50
-        assert result.total_tokens == 150  # Calculated
+    def test_total_falls_back_to_the_counters(self):
+        """A record whose total is zero still bills the counters it reports."""
+        result = token_usage_from(Usage(input_tokens=100, output_tokens=50, total_tokens=0))
+        assert result.total_tokens == 150
 
-    def test_anthropic_cache_tokens(self):
-        """Test Anthropic cache token extraction."""
-        usage = {
-            "input_tokens": 100,
-            "output_tokens": 50,
-            "cache_creation_input_tokens": 30,
-            "cache_read_input_tokens": 20,
-        }
-        result = extract_tokens_from_usage(usage)
+    def test_flat_cache_counters(self):
+        """Anthropic-dialect record: cache read/write are the record's own fields."""
+        result = token_usage_from(
+            Usage(
+                input_tokens=150,
+                output_tokens=50,
+                cache_read_input_tokens=20,
+                cache_creation_input_tokens=30,
+            )
+        )
         assert result.cache_creation_input_tokens == 30
         assert result.cache_read_input_tokens == 20
+        # One fact, one column: the flat field is not repeated as the nested alias.
+        assert result.cached_prompt_tokens == 0
 
-    def test_openai_cache_tokens(self):
-        """Test OpenAI cache token extraction from prompt_tokens_details."""
-        usage = {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "total_tokens": 150,
-            "prompt_tokens_details": {
-                "cached_tokens": 40,
-                "audio_tokens": 10,
-            },
-        }
-        result = extract_tokens_from_usage(usage)
-        assert result.cached_prompt_tokens == 40
-        assert result.audio_input_tokens == 10
-
-    def test_openai_audio_tokens(self):
-        """Test OpenAI audio token extraction."""
-        usage = {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "total_tokens": 150,
-            "completion_tokens_details": {
-                "audio_tokens": 15,
-            },
-        }
-        result = extract_tokens_from_usage(usage)
-        assert result.audio_output_tokens == 15
-
-    def test_realtime_usage_dialect(self):
-        """Test Realtime API usage extraction (response.done shape).
-
-        The Realtime API reports usage with ``input_token_details`` /
-        ``output_token_details`` (singular "token") plus top-level
-        ``input_tokens``/``output_tokens``.
-        """
-        usage = {
-            "total_tokens": 1000,
-            "input_tokens": 500,
-            "output_tokens": 500,
-            "input_token_details": {
-                "cached_tokens": 100,
-                "text_tokens": 300,
-                "audio_tokens": 100,
-                "image_tokens": 0,
-            },
-            "output_token_details": {
-                "text_tokens": 200,
-                "audio_tokens": 300,
-            },
-        }
-        result = extract_tokens_from_usage(usage)
-        assert result.prompt_tokens == 500
-        assert result.completion_tokens == 500
-        assert result.total_tokens == 1000
-        assert result.cached_prompt_tokens == 100
-        assert result.audio_input_tokens == 100
-        assert result.audio_output_tokens == 300
-        assert result.image_input_tokens == 0
-
-    def test_realtime_dialect_is_fallback_only(self):
-        """Test the Realtime dialect never overrides the chat dialect."""
-        usage = {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "total_tokens": 150,
-            "prompt_tokens_details": {"cached_tokens": 40, "audio_tokens": 10},
-            "completion_tokens_details": {"audio_tokens": 15},
-            "input_token_details": {
-                "cached_tokens": 999,
-                "audio_tokens": 999,
-            },
-            "output_token_details": {"audio_tokens": 999},
-        }
-        result = extract_tokens_from_usage(usage)
+    def test_nested_detail_columns(self):
+        """A record carrying dialect details keeps them in their own columns."""
+        result = token_usage_from(
+            Usage(
+                input_tokens=100,
+                output_tokens=50,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=40, audio_tokens=10),
+                completion_tokens_details=CompletionTokensDetails(audio_tokens=15),
+            )
+        )
         assert result.cached_prompt_tokens == 40
         assert result.audio_input_tokens == 10
         assert result.audio_output_tokens == 15
 
-    def test_calculate_total_if_missing(self):
-        """Test total is calculated when not provided."""
-        usage = {
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-        }
-        result = extract_tokens_from_usage(usage)
-        assert result.total_tokens == 150
+    def test_cache_write_nested_fallback(self):
+        """The nested cache-write detail answers when the flat field is absent."""
+        result = token_usage_from(
+            Usage(
+                input_tokens=100,
+                output_tokens=10,
+                prompt_tokens_details=PromptTokensDetails(cache_write_tokens=25),
+            )
+        )
+        assert result.cache_creation_input_tokens == 25
 
-    def test_zero_values_treated_as_missing(self):
-        """Test zero values are treated as missing."""
-        usage = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
-        result = extract_tokens_from_usage(usage)
-        assert result.prompt_tokens == 0
-        assert result.completion_tokens == 0
+    def test_duration_dimension(self):
+        """STT reports its duration in the record, not as a proxy dimension."""
+        result = token_usage_from(Usage(audio_duration_seconds=12.5))
+        assert result.audio_duration_seconds == 12.5
+
+    def test_proxy_dimensions(self):
+        """What the proxy produced is priced beside the record."""
+        result = token_usage_from(
+            None,
+            ProxyBillableDimensions(images_generated=3, tts_characters=120),
+        )
+        assert result.images_generated == 3
+        assert result.tts_characters == 120
+
+    def test_proxy_search_count_wins_over_the_records_own(self):
+        """The dimensions carry the total: the record's count plus the proxy's own."""
+        result = token_usage_from(
+            Usage(web_search_requests=2),
+            ProxyBillableDimensions(web_search_requests=5),
+        )
+        assert result.web_search_requests == 5
+
+    def test_record_search_count_answers_without_dimensions(self):
+        """A caller holding only a record (the Realtime observer) still bills its calls."""
+        result = token_usage_from(Usage(web_search_requests=2))
+        assert result.web_search_requests == 2
 
 
 class TestCountTokens:
@@ -908,36 +855,32 @@ class TestCacheReadDedup:
     both reach TokenUsage (the cache-rate adjustment would apply twice)."""
 
     def test_flat_and_nested_cache_read_deduped(self):
-        result = extract_tokens_from_usage(
-            {
-                "prompt_tokens": 1300,
-                "completion_tokens": 50,
-                "cache_read_input_tokens": 1000,
-                "prompt_tokens_details": {"cached_tokens": 1000},
-            }
+        result = token_usage_from(
+            Usage(
+                input_tokens=1300,
+                output_tokens=50,
+                cache_read_input_tokens=1000,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=1000),
+            )
         )
         assert result.cache_read_input_tokens == 1000
         # The duplicate nested expression is dropped — flat field wins.
         assert result.cached_prompt_tokens == 0
 
     def test_nested_only_still_maps(self):
-        result = extract_tokens_from_usage(
-            {
-                "prompt_tokens": 1300,
-                "completion_tokens": 50,
-                "prompt_tokens_details": {"cached_tokens": 1000},
-            }
+        result = token_usage_from(
+            Usage(
+                input_tokens=1300,
+                output_tokens=50,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=1000),
+            )
         )
         assert result.cache_read_input_tokens == 0
         assert result.cached_prompt_tokens == 1000
 
     def test_flat_only_unchanged(self):
-        result = extract_tokens_from_usage(
-            {
-                "input_tokens": 300,
-                "output_tokens": 50,
-                "cache_read_input_tokens": 1000,
-            }
+        result = token_usage_from(
+            Usage(input_tokens=300, output_tokens=50, cache_read_input_tokens=1000)
         )
         assert result.cache_read_input_tokens == 1000
         assert result.cached_prompt_tokens == 0
@@ -956,12 +899,12 @@ class TestCacheDoubleCountEndToEnd:
         mock_config_manager = MagicMock()
         mock_config_manager.get_model_config = AsyncMock(return_value=mock_model_config)
 
-        usage = {
-            "prompt_tokens": 1300,
-            "completion_tokens": 50,
-            "cache_read_input_tokens": 1000,
-            "prompt_tokens_details": {"cached_tokens": 1000},
-        }
+        usage = Usage(
+            input_tokens=1300,
+            output_tokens=50,
+            cache_read_input_tokens=1000,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=1000),
+        )
         rates = PricingRates(
             input_cost_per_1m=10.0,
             output_cost_per_1m=30.0,

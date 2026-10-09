@@ -94,15 +94,52 @@ class TestChatDialect:
         assert usage is not None
         assert usage.cache_read_input_tokens == 60
 
-    def test_sglang_top_level_reasoning_folds_into_the_nested_shape(self) -> None:
+    def test_sglang_top_level_reasoning_lands_in_the_canonical_field(self) -> None:
+        """Thinking tokens are one fact with one home: the flat field."""
         usage = parse_usage(
             "chat",
             {"usage": {"prompt_tokens": 10, "completion_tokens": 7, "reasoning_tokens": 5}},
         )
 
         assert usage is not None
+        assert usage.reasoning_tokens == 5
+        # The dialect alias is cleared, not left as a second expression.
+        assert usage.completion_tokens_details is None
+
+    def test_nested_reasoning_lands_in_the_canonical_field(self) -> None:
+        usage = parse_usage(
+            "chat",
+            {
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 7,
+                    "completion_tokens_details": {"reasoning_tokens": 5, "audio_tokens": 2},
+                }
+            },
+        )
+
+        assert usage is not None
+        assert usage.reasoning_tokens == 5
+        # A detail with no canonical field of its own survives the lift.
         assert usage.completion_tokens_details is not None
-        assert usage.completion_tokens_details.reasoning_tokens == 5
+        assert usage.completion_tokens_details.audio_tokens == 2
+        assert usage.completion_tokens_details.reasoning_tokens is None
+
+    def test_an_explicit_nested_count_wins_over_the_top_level_one(self) -> None:
+        usage = parse_usage(
+            "chat",
+            {
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 7,
+                    "reasoning_tokens": 5,
+                    "completion_tokens_details": {"reasoning_tokens": 9},
+                }
+            },
+        )
+
+        assert usage is not None
+        assert usage.reasoning_tokens == 9
 
     def test_provider_reported_cost_and_web_search(self) -> None:
         usage = parse_usage(
@@ -244,8 +281,10 @@ class TestResponsesDialect:
         assert usage.cache_read_input_tokens == 30
         assert usage.prompt_tokens_details is not None
         assert usage.prompt_tokens_details.image_tokens == 2
-        assert usage.completion_tokens_details is not None
-        assert usage.completion_tokens_details.reasoning_tokens == 4
+        # Thinking is the canonical flat field; the rest of the details block went
+        # with the alias.
+        assert usage.reasoning_tokens == 4
+        assert usage.completion_tokens_details is None
 
     def test_stream_terminal_event_nests_usage_under_response(self) -> None:
         usage = parse_usage(

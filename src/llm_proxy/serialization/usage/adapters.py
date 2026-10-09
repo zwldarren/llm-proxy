@@ -25,7 +25,6 @@ from typing import Any, Literal
 from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
 from llm_proxy.serialization.usage.folds import (
     fold_deepseek_cache_hits,
-    fold_top_level_reasoning_tokens,
 )
 
 type UsageDialect = Literal["chat", "responses", "anthropic", "realtime"]
@@ -126,6 +125,36 @@ def _lift_cache_facts(
     return cache_read, cache_write, prompt_details
 
 
+def _lift_reasoning(
+    usage: dict[str, Any],
+    completion_details: CompletionTokensDetails | None,
+) -> tuple[int | None, CompletionTokensDetails | None]:
+    """Fold the thinking aliases into the canonical flat ``reasoning_tokens``.
+
+    Thinking tokens are one fact, and the canonical record keeps it flat
+    (CONTEXT.md -> Canonical usage record). Dialects express it nested (OpenAI's
+    and the Responses API's ``completion_tokens_details.reasoning_tokens``) or
+    top-level (SGLang), so both are read and the alias is cleared — the same
+    treatment the cache facts get, for the same reason: an alias left in place is
+    a second expression of one fact that a reader may pick up twice.
+
+    Returns ``(reasoning, completion_details)``: the details block keeps the
+    details that have no canonical field of their own, and is dropped when nothing
+    is left.
+    """
+    nested = completion_details.reasoning_tokens if completion_details is not None else None
+    reasoning = _int(nested)
+    if reasoning is None:
+        # SGLang reports the count top-level, and reports it as zero by default, so
+        # only a positive one is a report; an explicit nested value wins.
+        reasoning = _positive_int(usage.get("reasoning_tokens"))
+    if reasoning is not None and completion_details is not None:
+        completion_details.reasoning_tokens = None
+        if all(value is None for value in vars(completion_details).values()):
+            completion_details = None
+    return reasoning, completion_details
+
+
 def _provider_reported_cost(usage: dict[str, Any]) -> float | None:
     """Cost the provider itself reported (NanoGPT's ``nanogpt_cost``, OpenRouter's ``cost``)."""
     for key in ("nanogpt_cost", "cost"):
@@ -157,11 +186,12 @@ def _parse_chat(payload: Mapping[str, Any]) -> Usage | None:
     block = _as_dict(payload.get("usage"))
     if block is None:
         return None
-    # SGLang reports reasoning tokens top-level; every consumer reads the
-    # nested OpenAI shape, so the split folds there while the wire keeps it.
-    usage = fold_top_level_reasoning_tokens(dict(block))
+    usage = dict(block)
     prompt_details = _prompt_details(usage.get("prompt_tokens_details"))
     cache_read, cache_write, prompt_details = _lift_cache_facts(usage, prompt_details)
+    reasoning, completion_details = _lift_reasoning(
+        usage, _completion_details(usage.get("completion_tokens_details"))
+    )
 
     input_tokens = _int(usage.get("prompt_tokens")) or 0
     output_tokens = _int(usage.get("completion_tokens")) or 0
@@ -171,8 +201,9 @@ def _parse_chat(payload: Mapping[str, Any]) -> Usage | None:
         total_tokens=_int(usage.get("total_tokens")) or (input_tokens + output_tokens),
         cache_read_input_tokens=cache_read,
         cache_creation_input_tokens=cache_write,
+        reasoning_tokens=reasoning,
         prompt_tokens_details=prompt_details,
-        completion_tokens_details=_completion_details(usage.get("completion_tokens_details")),
+        completion_tokens_details=completion_details,
         provider_reported_cost=_provider_reported_cost(usage),
         web_search_requests=_web_search_requests(usage.get("server_tool_use")),
     )
@@ -253,6 +284,7 @@ def _parse_responses(payload: Mapping[str, Any]) -> Usage | None:
     )
     prompt_details = _prompt_details(input_details)
     cache_read, cache_write, prompt_details = _lift_cache_facts(usage, prompt_details)
+    reasoning, completion_details = _lift_reasoning(usage, _completion_details(output_details))
     input_tokens = _int(usage.get("input_tokens")) or 0
     output_tokens = _int(usage.get("output_tokens")) or 0
 
@@ -262,8 +294,9 @@ def _parse_responses(payload: Mapping[str, Any]) -> Usage | None:
         total_tokens=_int(usage.get("total_tokens")) or (input_tokens + output_tokens),
         cache_read_input_tokens=cache_read,
         cache_creation_input_tokens=cache_write,
+        reasoning_tokens=reasoning,
         prompt_tokens_details=prompt_details,
-        completion_tokens_details=_completion_details(output_details),
+        completion_tokens_details=completion_details,
         provider_reported_cost=_provider_reported_cost(usage),
         web_search_requests=_positive_int(usage.get("web_search_requests")) or counted or None,
     )
@@ -311,6 +344,7 @@ def _parse_realtime(payload: Mapping[str, Any]) -> Usage | None:
     )
     prompt_details = _prompt_details(input_details)
     cache_read, cache_write, prompt_details = _lift_cache_facts(usage, prompt_details)
+    reasoning, completion_details = _lift_reasoning(usage, _completion_details(output_details))
     input_tokens = _int(usage.get("input_tokens")) or 0
     output_tokens = _int(usage.get("output_tokens")) or 0
 

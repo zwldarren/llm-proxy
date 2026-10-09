@@ -861,7 +861,7 @@ def test_stream_input_tokens_exclude_cache_counters():
         + delta_usage["output_tokens"]
         == 181684
     )
-    # The canonical StreamingUsage total must not add the cache read twice.
+    # The canonical record's total must not add the cache read twice.
     usage = transformer.get_usage()
     assert usage is not None
     assert usage.total_tokens == 181684
