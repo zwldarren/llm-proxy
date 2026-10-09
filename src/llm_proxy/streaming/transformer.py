@@ -427,6 +427,17 @@ class StreamingTransformer(ABC):
         """
         raise NotImplementedError(f"{cls.__name__} does not implement continuation()")
 
+    def adopt_continuation_state(self, previous: Any) -> None:
+        """Take over the previous hop's cross-turn state for a continuation.
+
+        Public verb for the web-search continuation loop (ADR-0007): the
+        continuation transformer is a fresh object, so whatever the previous
+        hop carries *across* the hop boundary has to be handed over explicitly —
+        for the protocols that carry any. Protocols whose continuation state is
+        entirely per-hop, or that track none, inherit this no-op.
+        """
+        return
+
     def get_finish_reason(self) -> str | None:
         """Terminal finish/stop reason observed while streaming, if tracked.
 

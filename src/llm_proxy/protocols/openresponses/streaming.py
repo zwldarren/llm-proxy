@@ -413,6 +413,26 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             instance.state.web_search_tool_indices = set(web_search_tool_indices)
         return instance
 
+    def adopt_continuation_state(self, previous: Any) -> None:
+        """Take over the previous hop's reasoning decision and open search items.
+
+        The continuation is a second upstream call whose client-visible
+        response is the same one, so the encrypted-reasoning decision (which
+        depends on include/store, not on the continuation kwargs) must survive
+        the hop, and the web_search_call items the first hop opened but did not
+        close have to be carried over rather than re-opened.
+        """
+        previous_state = getattr(previous, "state", None)
+        if previous_state is None:
+            return
+        self.state.include_reasoning_encrypted = getattr(
+            previous_state, "include_reasoning_encrypted", False
+        )
+        for idx, item in previous_state.pending_items.items():
+            if item.get("type") == "web_search_call":
+                self.state.pending_items[idx] = dict(item)
+                self.state.closed_items.add(idx)
+
     def block_cursor(self) -> int:
         """Absolute output-item cursor.
 

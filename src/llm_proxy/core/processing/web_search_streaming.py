@@ -404,20 +404,10 @@ class WebSearchStreamProcessor:
                 # web search on exactly the same terms as the original hop.
                 intercept_web_search=proxy_web_search_active,
             )
-            src_state = getattr(state.transformer, "state", None)
             cont_transformer = cont_cls.continuation(**cont_kwargs)
-
-            if src_state is not None:
-                # Preserve the encrypted-reasoning decision across the
-                # continuation: it depends on include/store, which the
-                # continuation kwargs do not carry.
-                cont_transformer.state.include_reasoning_encrypted = getattr(
-                    src_state, "include_reasoning_encrypted", False
-                )
-                for idx, item in src_state.pending_items.items():
-                    if item.get("type") == "web_search_call":
-                        cont_transformer.state.pending_items[idx] = dict(item)
-                        cont_transformer.state.closed_items.add(idx)
+            # The hops are separate objects: hand the previous one's cross-turn
+            # state over explicitly (protocols that carry none inherit a no-op).
+            cont_transformer.adopt_continuation_state(state.transformer)
 
             try:
                 async for chunk in continuation_stream:

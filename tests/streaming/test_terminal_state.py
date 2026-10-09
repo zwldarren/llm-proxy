@@ -194,3 +194,47 @@ class TestBlockCursorVerbs:
         transformer = AnthropicChunkConverter(model="m")
         assert transformer.block_cursor() is None
         assert transformer.continuation_start_index(2, fallback=7) == 7
+
+
+class TestContinuationStateAdoption:
+    """The hop-to-hop hand-over is a verb, not an outside reach into ``state``."""
+
+    def test_openresponses_carries_open_search_items_and_reasoning_decision(self):
+        original = OpenResponsesStreamingTransformer(model="m", request_id="r")
+        original.state.include_reasoning_encrypted = True
+        original.state.pending_items[7] = {"type": "web_search_call", "id": "ws_1"}
+        original.state.pending_items[8] = {"type": "message", "id": "msg_1"}
+
+        continuation = OpenResponsesStreamingTransformer.continuation(
+            model="m", request_id="r", start_index=3
+        )
+        continuation.adopt_continuation_state(original)
+
+        # Only the search item travels, and it travels closed: the first hop
+        # opened it, so the continuation must not re-open it.
+        assert continuation.state.pending_items == {7: {"type": "web_search_call", "id": "ws_1"}}
+        assert continuation.state.closed_items == {7}
+        # The encrypted-reasoning decision depends on include/store, which the
+        # continuation kwargs do not carry, so it has to survive the hop.
+        assert continuation.state.include_reasoning_encrypted is True
+
+    def test_a_copied_item_is_not_shared_with_the_previous_hop(self):
+        original = OpenResponsesStreamingTransformer(model="m", request_id="r")
+        original.state.pending_items[7] = {"type": "web_search_call", "id": "ws_1"}
+
+        continuation = OpenResponsesStreamingTransformer.continuation(
+            model="m", request_id="r", start_index=3
+        )
+        continuation.adopt_continuation_state(original)
+        continuation.state.pending_items[7]["id"] = "ws_1_mutated"
+
+        assert original.state.pending_items[7]["id"] == "ws_1"
+
+    def test_a_transformer_without_state_adopts_nothing(self):
+        continuation = AnthropicStreamingTransformer.continuation(
+            model="m", request_id="r", start_index=1
+        )
+
+        # The base default is a no-op: the provider-side converter carries no
+        # continuation state, and adopting from it must not raise.
+        continuation.adopt_continuation_state(AnthropicChunkConverter(model="m"))

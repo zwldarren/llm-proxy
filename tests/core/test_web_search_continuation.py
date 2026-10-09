@@ -81,6 +81,9 @@ class _FakeTransformer:
         """Declared for the seam; this fake's tests do not assert usage frames."""
         return ""
 
+    def adopt_continuation_state(self, previous: Any) -> None:  # noqa: ARG002
+        """Declared for the seam; this fake tracks no cross-hop state."""
+
 
 def _fake_interceptor() -> MagicMock:
     result_block = MagicMock()
