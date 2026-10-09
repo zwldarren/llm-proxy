@@ -83,3 +83,50 @@ the capture verbs (``capture_stop_reason`` / ``capture_stop_sequence`` /
 - Each inheriting transformer keeps its own flush, because the terminal wire
   shape is protocol-side or provider-side knowledge (ADR-0003); the mixin is
   a transformer-internal seam, not a new family module.
+
+## Amendment (2026-10): the rest of the seam is declared too
+
+The amendment above listed the seam's public verbs but left three of them
+unenforced: the continuation loop still reached the transformers through two
+``hasattr`` probes for private members (``_web_search_result_block``,
+``_message_delta_with_usage``), a third probe plus a ``TypeError`` for the
+``continuation`` factory, and — for the OpenResponses hop — a direct reach into
+a ``.state`` bag from outside the class. The set of protocols that participate
+was knowable only by reading the loop, and the three ways of *not* supporting
+the continuation (warn and skip the search, silently skip the usage frame, die
+with ``TypeError``) were historical residue rather than decisions.
+
+``StreamingTransformer`` now declares the whole seam:
+
+- Capability as data (ADR-0015's ``native_frame_accumulation`` precedent):
+  ``supports_web_search_continuation`` says whether a protocol can be
+  continued at all. The loop reads it for the operator warning and then calls
+  the verbs; a protocol that cannot be continued is not merely probed for.
+- ``web_search_result_block(...)`` and ``usage_delta(...)`` are public verbs
+  with ``""`` (render nothing) defaults. Chat Completions overrides both with
+  ``""`` on purpose — its results reach the client through the continuation
+  request and its terminal event already reports the usage — which is now a
+  documented answer instead of an accident of ``hasattr``.
+- ``continuation(...)`` is a classmethod on the base with the seam's widest
+  signature, defaulting to ``NotImplementedError`` (the ``convert_chunk``
+  convention) rather than an ad-hoc ``TypeError``.
+- ``adopt_continuation_state(previous)`` hands the previous hop's cross-turn
+  state over: a no-op on the base, implemented by the OpenResponses
+  transformer, which owns the knowledge of what has to travel (the pending
+  ``web_search_call`` items, closed so the continuation does not re-open them,
+  and the encrypted-reasoning decision, which depends on include/store rather
+  than on the continuation kwargs).
+
+Four behavior changes, all declared: an unsupported ``continuation`` now
+raises ``NotImplementedError`` instead of ``TypeError`` (same timing, no test
+asserted the type); a transformer that declares the capability but implements
+no emitter emits nothing rather than being silently skipped; the interception
+flag is passed to every hop unconditionally, and the Anthropic hop now
+forwards it to its constructor — the flag decides whether a ``websearch`` tool
+call is proxy-intercepted, so a continuation hop no longer disagrees with the
+hop it continues; and the OpenResponses state hand-over is a verb.
+
+Not changed: the ``.state`` read in ``core/conversion.py`` (a different
+concern, its own seam) and the tolerant ``getattr`` reads of already-declared
+verbs (``block_cursor``, ``merge_terminal_state``), which keep hand-rolled
+duck-typed transformers working.
