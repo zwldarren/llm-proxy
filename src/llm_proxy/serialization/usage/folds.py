@@ -20,10 +20,11 @@ def fold_top_level_reasoning_tokens(usage: dict[str, Any]) -> dict[str, Any]:
     SGLang reports reasoning tokens as a top-level ``usage.reasoning_tokens``
     field — on both the non-streaming response and the streaming terminal
     usage chunk — instead of OpenAI's nested
-    ``usage.completion_tokens_details.reasoning_tokens``. Every consumer
-    (billing, usage records, the Anthropic protocol transformer) reads the
-    nested OpenAI shape, so the split is folded there while the provider's own
-    top-level field stays on the wire verbatim.
+    ``usage.completion_tokens_details.reasoning_tokens``. The canonical record
+    keeps thinking tokens flat, so the intake adapter lifts both expressions
+    there (:func:`_lift_reasoning`); this fold serves the *dict* a streaming tier
+    forwards to the client verbatim, where the OpenAI-dialect shape is what the
+    client reads.
 
     A zero or negative report adds nothing (an absent details block already
     means "no reasoning tokens"), and an existing nested ``reasoning_tokens``

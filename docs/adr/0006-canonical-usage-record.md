@@ -1,5 +1,9 @@
 # Canonical usage record: one field per billable fact
 
+> Superseded in part by ADR-0025, which retired the `EventContext` flat fields
+> this ADR kept and replaced `extract_tokens_from_usage` with the record-based
+> projection `token_usage_from`. The record's own decisions here still stand.
+
 Billable usage flowed through five representations — raw provider dict, `Usage`/`StreamingUsage`, `EventContext` flat fields, `to_usage_dict()`, `TokenUsage` — and the "canonical" `Usage` model itself carried provider-flavored aliases: `cached_content_tokens` (Gemini) duplicated `cache_read_input_tokens`, `thoughts_tokens` (Gemini) duplicated `reasoning_tokens`, and cache-read could be expressed simultaneously as flat `cache_read_input_tokens` and nested `prompt_tokens_details.cached_tokens`. Every hop re-mapped the bag, and the cost calculation charged both expressions when a parser set both. We made the record canonical: provider serializers normalize dialect aliases at parse time (the alias fields are deleted from `Usage`), and `extract_tokens_from_usage` treats cache-read as one fact — the nested OpenAI-dialect expression is dropped when the flat field is present.
 
 ## Considered Options
