@@ -217,7 +217,7 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
 
         return openai_chunk
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Return the accumulated usage record for the turn."""
         return self._usage.result()
 

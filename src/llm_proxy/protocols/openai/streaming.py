@@ -716,7 +716,7 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         chunks.append("data: [DONE]\n\n")
         return "".join(chunks)
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """The turn's canonical usage record, from the shared intake accumulator.
 
         The provider's frames are parsed by the seam (ADR-0025), so the dialect

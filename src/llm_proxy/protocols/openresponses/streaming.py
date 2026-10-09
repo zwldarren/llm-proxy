@@ -959,7 +959,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
 
         return output
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.
 
         The counters on ``state`` above are emission state for the client's own

@@ -553,7 +553,7 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             self._finalize_accumulation()
         return "data: [DONE]\n\n"
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Return accumulated usage from the interactions stream."""
         if self._usage is not None:
             return self._usage

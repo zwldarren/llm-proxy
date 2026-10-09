@@ -25,11 +25,6 @@ from llm_proxy.models.conversation import ConversationContext
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
 
-# The usage-sum rule lives next to ``PendingTerminalState.merge_terminal_state``
-# (its only consumer, in ``streaming/transformer.py``); re-exported here for
-# the non-streaming continuation path and existing importers (ADR-0007).
-from llm_proxy.streaming.transformer import sum_usage_dicts  # noqa: F401
-
 logger = get_logger(__name__)
 
 MAX_CONTINUATION_DEPTH = 5
@@ -345,6 +340,11 @@ class WebSearchStreamProcessor:
         Mutates *state* in-place so the caller can use the updated
         transformer, depth, and stream_request for finalize/usage-merge.
         """
+        # The transformer the caller reads usage from after the stream ends
+        # (``event_context.transformer``): every continuation hop's canonical
+        # record is folded into it, because the hop's own transformer is
+        # discarded when the next one takes over.
+        billing_transformer = state.transformer
         (
             ws_events,
             ws_results,
@@ -452,6 +452,14 @@ class WebSearchStreamProcessor:
                     current_count = event_context.web_search_requests or 0
                     event_context.web_search_requests = current_count + ws_search_count
 
+                # The hop is an independent billed upstream call (ADR-0007), so
+                # its usage adds to the turn's record; the transformer the
+                # lifecycle reads is the one that started the stream, not this
+                # hop's (which is discarded below).
+                absorb = getattr(billing_transformer, "absorb_usage_record", None)
+                if callable(absorb):
+                    absorb(cont_transformer)
+
                 state.transformer = cont_transformer
                 state.depth += 1
             finally:
@@ -483,6 +491,12 @@ def merge_continuation_usage(original: Any, continuation: Any) -> None:
     billed calls — lives with the pending terminal state it operates on.
     Transformers without the verb (duck-typed fakes with no terminal state)
     are skipped.
+
+    The canonical usage record is *not* merged here: each hop's record is
+    folded into the billing transformer where the hop is consumed
+    (``absorb_usage_record``), so summing it again would double-count the
+    independent calls. This verb carries the client wire's pending usage and
+    the stop_reason only.
     """
     merge = getattr(continuation, "merge_terminal_state", None)
     if callable(merge):

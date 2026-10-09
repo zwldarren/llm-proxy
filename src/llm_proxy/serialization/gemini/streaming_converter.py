@@ -393,7 +393,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
             self._finalize_accumulation()
         return "data: [DONE]\n\n"
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.
 
         Returns:

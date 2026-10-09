@@ -143,7 +143,7 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
             return handler(self, chunk)
         return None  # unknown event → skip
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Return accumulated usage information from the streaming response.
 
         Extracted by the anthropic dialect adapter (ADR-0025), so the input count

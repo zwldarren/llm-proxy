@@ -1065,7 +1065,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         }
         return [f"event: error\ndata: {orjson.dumps(error_data).decode()}\n\n"]
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.
 
         The canonical chunks this transformer is fed carry their usage in the chat

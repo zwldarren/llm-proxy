@@ -22,6 +22,25 @@ def _sse(event: dict) -> dict:
     return event
 
 
+def _canonical_usage_chunk(*, prompt: int, completion: int, cached: int | None = None) -> dict:
+    """One canonical (chat-dialect) chunk carrying usage, as a converted
+    provider stream or the protocol side would see it."""
+    details = {"cached_tokens": cached} if cached is not None else None
+    return {
+        "id": "chatcmpl-1",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "m",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+        "usage": {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "prompt_tokens_details": details,
+        },
+    }
+
+
 def _drive_original_stream(
     *, complete: bool = True
 ) -> tuple[AnthropicChunkConverter, AnthropicStreamingTransformer]:
@@ -194,3 +213,58 @@ class TestBlockCursorVerbs:
         transformer = AnthropicChunkConverter(model="m")
         assert transformer.block_cursor() is None
         assert transformer.continuation_start_index(2, fallback=7) == 7
+
+
+class TestUsageRecordAbsorption:
+    """The canonical record across independent billed calls (web-search hops).
+
+    Billing reads the transformer the lifecycle pinned to the request; the
+    continuation's transformers are discarded as the loop advances, so each
+    hop's record is absorbed into the pinned one and ``get_usage()`` answers
+    for every call the turn was billed for.
+    """
+
+    def test_no_observation_reports_nothing(self):
+        assert AnthropicStreamingTransformer(model="m").get_usage() is None
+
+    def test_absorbed_calls_sum_into_the_read_record(self):
+        original = AnthropicStreamingTransformer(model="m", request_id="r")
+        original.transform(_canonical_usage_chunk(prompt=100, completion=20, cached=50))
+        continuation = AnthropicStreamingTransformer(model="m", request_id="r")
+        continuation.transform(_canonical_usage_chunk(prompt=150, completion=30, cached=10))
+
+        original.absorb_usage_record(continuation)
+
+        usage = original.get_usage()
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (250, 50)
+        assert usage.cache_read_input_tokens == 60
+        assert usage.total_tokens == 300
+
+    def test_a_hop_with_no_record_contributes_nothing(self):
+        original = AnthropicStreamingTransformer(model="m", request_id="r")
+        original.transform(_canonical_usage_chunk(prompt=100, completion=20))
+
+        original.absorb_usage_record(AnthropicStreamingTransformer(model="m", request_id="r"))
+
+        usage = original.get_usage()
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (100, 20)
+        assert usage.cache_read_input_tokens is None
+
+    def test_the_read_record_is_a_snapshot(self):
+        original = AnthropicStreamingTransformer(model="m", request_id="r")
+        original.transform(_canonical_usage_chunk(prompt=100, completion=20))
+        continuation = AnthropicStreamingTransformer(model="m", request_id="r")
+        continuation.transform(_canonical_usage_chunk(prompt=7, completion=3))
+        original.absorb_usage_record(continuation)
+
+        record = original.get_usage()
+        assert record is not None
+        record.input_tokens = 999
+        record.total_tokens = 999
+
+        again = original.get_usage()
+        assert again is not None
+        assert again.input_tokens == 107
+        assert again.total_tokens == 130

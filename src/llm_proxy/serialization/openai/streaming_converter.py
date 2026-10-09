@@ -159,7 +159,7 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
                 completion_details["reasoning_tokens"] = self._reasoning_tokens
         return prompt_details, completion_details
 
-    def get_usage(self) -> Usage | None:
+    def _own_usage(self) -> Usage | None:
         """Return accumulated usage information.
 
         The events' usage is extracted by the responses dialect adapter
