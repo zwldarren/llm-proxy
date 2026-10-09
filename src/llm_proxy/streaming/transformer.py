@@ -2,16 +2,30 @@
 """Base class for streaming transformers."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import orjson
 
 from llm_proxy.models.content_blocks import ContentBlock
 from llm_proxy.models.types import Usage
-from llm_proxy.serialization.usage import add_usage, copy_usage
 
 if TYPE_CHECKING:
     from llm_proxy.models import InternalRequest
+
+
+def _usage_merge_verbs() -> tuple[Callable[[Usage, Usage], None], Callable[[Usage], Usage]]:
+    """The usage seam's two merge verbs, imported on demand.
+
+    ``llm_proxy.serialization`` (the seam's package) imports the provider
+    serializers, which import this module for ``StreamingTransformer``, so a
+    module-scope import here would close that cycle before the class exists and
+    make ``import llm_proxy.streaming.transformer`` fail on its own. Deferring it
+    to the cold paths that need the verbs keeps the seam where ADR-0025 put it.
+    """
+    from llm_proxy.serialization.usage import add_usage, copy_usage
+
+    return add_usage, copy_usage
 
 
 def sum_usage_dicts(target: dict[str, Any], source: dict[str, Any]) -> None:
@@ -512,6 +526,7 @@ class StreamingTransformer(ABC):
         own = self._own_usage()
         if self._absorbed_usage is None:
             return own
+        add_usage, copy_usage = _usage_merge_verbs()
         if own is None:
             return copy_usage(self._absorbed_usage)
         merged = copy_usage(own)
@@ -546,6 +561,7 @@ class StreamingTransformer(ABC):
         other_usage = get_usage()
         if other_usage is None:
             return
+        add_usage, copy_usage = _usage_merge_verbs()
         if self._absorbed_usage is None:
             self._absorbed_usage = copy_usage(other_usage)
         else:
