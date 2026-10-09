@@ -326,13 +326,18 @@ class TestAudioUsageFormatting:
     """Regression tests for STT usage preservation and formatting."""
 
     def test_parse_usage_preserves_duration_and_input_details(self, responses_adapter):
-        usage = responses_adapter._parse_usage(
+        response = responses_adapter._parse_transcription_response(
             {
-                "type": "duration",
-                "seconds": 120.5,
-                "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
-            }
+                "text": "hi",
+                "usage": {
+                    "type": "duration",
+                    "seconds": 120.5,
+                    "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+                },
+            },
+            "json",
         )
+        usage = response.usage
         assert usage is not None
         assert usage.audio_duration_seconds == 120.5
         assert usage.prompt_tokens_details is not None

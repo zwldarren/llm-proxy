@@ -31,7 +31,9 @@ from llm_proxy.serialization.usage.folds import (
     fold_deepseek_cache_hits,
 )
 
-type UsageDialect = Literal["chat", "responses", "anthropic", "realtime", "ollama", "gemini"]
+type UsageDialect = Literal[
+    "chat", "responses", "anthropic", "realtime", "ollama", "gemini", "audio"
+]
 
 __all__ = ["UsageDialect", "parse_usage"]
 
@@ -427,6 +429,67 @@ def _parse_ollama(
 
 
 # ---------------------------------------------------------------------------
+# Audio (transcription / translation)
+# ---------------------------------------------------------------------------
+
+
+def _audio_prompt_details(usage: Mapping[str, Any]) -> PromptTokensDetails | None:
+    """The audio dialect nests its input split under either key name.
+
+    ``gpt-4o-transcribe`` reports ``input_token_details``; a chat-shaped audio
+    wire reports ``prompt_tokens_details``. A block with no audio/cache/text
+    fact is ``None`` rather than an all-``None`` object, matching the rest of the
+    seam.
+    """
+    raw = _as_dict(usage.get("input_token_details")) or _as_dict(usage.get("prompt_tokens_details"))
+    details = _prompt_details(raw)
+    if details is not None and all(value is None for value in vars(details).values()):
+        return None
+    return details
+
+
+def _audio_completion_details(usage: Mapping[str, Any]) -> CompletionTokensDetails | None:
+    """The audio wire carries only the audio split of the output tokens."""
+    raw = _as_dict(usage.get("completion_tokens_details"))
+    audio = _int(raw.get("audio_tokens")) if raw is not None else None
+    return CompletionTokensDetails(audio_tokens=audio) if audio is not None else None
+
+
+def _parse_audio(payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None) -> Usage | None:
+    """The audio endpoints' usage block: token-based or duration-based.
+
+    The block sits under ``usage`` on the response body and on every streaming
+    ``transcript.text.done`` event. A token-based block (gpt-4o-transcribe)
+    reports ``input_tokens``/``output_tokens`` with the audio/text split nested;
+    a duration-based one (whisper) reports ``{"type": "duration", "seconds":
+    N}``. OpenRouter reports a bare ``{"seconds": N, "cost": ...}`` with no
+    type discriminator — reading that as token usage would bill a per-second
+    endpoint from token estimation.
+    """
+    usage = _as_dict(payload.get("usage"))
+    if not usage:
+        return None
+
+    seconds = usage.get("seconds")
+    duration_seconds = seconds if isinstance(seconds, int | float) else None
+    if usage.get("type") == "duration" or duration_seconds is not None:
+        # Duration-based responses may still carry the input token split
+        # (gpt-4o-transcribe with ``include[]=usage``).
+        return Usage(
+            audio_duration_seconds=duration_seconds,
+            prompt_tokens_details=_audio_prompt_details(usage),
+        )
+
+    return Usage(
+        input_tokens=_int(usage.get("input_tokens")) or 0,
+        output_tokens=_int(usage.get("output_tokens")) or 0,
+        total_tokens=_int(usage.get("total_tokens")),
+        prompt_tokens_details=_audio_prompt_details(usage),
+        completion_tokens_details=_audio_completion_details(usage),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Gemini generateContent
 # ---------------------------------------------------------------------------
 
@@ -543,6 +606,7 @@ _ADAPTERS: dict[str, DialectAdapter] = {
     "realtime": DialectAdapter(_parse_realtime),
     "ollama": DialectAdapter(_parse_ollama),
     "gemini": DialectAdapter(_parse_gemini),
+    "audio": DialectAdapter(_parse_audio),
 }
 
 

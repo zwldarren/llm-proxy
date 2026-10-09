@@ -269,10 +269,10 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   itself produced (generated images, synthesized characters, executed searches).
 - `StreamingUsage` is retired: every `get_usage()` returns the record. The
   projection bridge (`from_usage`) and the inverse projection the context would
-  otherwise have needed both disappeared with it. The three converters whose
-  dialects have not had their slice (gemini, ollama, gemini_interactions) build the
-  record directly and still parse by hand; their slices move that parse behind the
-  seam and add their ratchet rows.
+  otherwise have needed both disappeared with it. The dialects that still parse
+  usage by hand — the Interactions vocabulary, the gpt-image branch of the
+  image stream tracker — register adapters as they migrate; the registry grows,
+  the interface does not.
 - Thinking tokens are the canonical flat field in every dialect. The chat and
   responses adapters lift the nested `completion_tokens_details.reasoning_tokens`
   (and SGLang's top-level alias for the same fact) into `reasoning_tokens` and clear
@@ -281,9 +281,12 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   the dialect's own object (the OpenAI chat formatter and the Realtime audio
   serializer; OpenResponses already merged both), so no client wire changed.
 - `sum_usage`, a hand-rolled duplicate of `add_usage`, is gone; the non-streaming
-  web-search continuation calls the seam's rule. The streaming continuation's token
-  sum still lives only in the client-wire pending usage, which is a pre-existing gap
-  this slice does not close.
+  web-search continuation calls the seam's rule. The streaming continuation's
+  record sum is the continuation loop's own job now: each hop's record is folded
+  into the transformer the lifecycle reads as the hop is consumed
+  (`absorb_usage_record` + `add_usage`), so the record billing reads covers every
+  call the client's summed wire usage block covers (ADR-0007). The wire copy stays
+  the terminal-merge's business.
 - A migrated row's live side now compares the record with itself, so its `recorded`
   anchor carries the comparison; the ratchet's docstring says so, and every row
   without an anchor was given one.
@@ -308,7 +311,14 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   body parser losing its caller-supplied `web_search_call_count` parameter — the
   count is now the adapter's own reading of the body's items, so no caller can
   hand the seam a different number. The record slice has landed with it: the
-  capture object holds the record, billing reads it, and `StreamingUsage` is gone,
-  so the remaining provider-native dialects (gemini, ollama, the Interactions
-  vocabulary, the audio/image stream trackers, the Decisions shape) have only their
-  own parse left to move.
+  capture object holds the record, billing reads it, and `StreamingUsage` is gone.
+  The provider-native follow-ups have landed too: the ollama dialect (the
+  `prompt_eval_count`/`eval_count` pair, with the cached subset clamped into the
+  input total), the gemini `usageMetadata` heuristic (its body parser, streaming
+  converter and both image paths now share one reader, and the seam gained the
+  `turn` channel for the grounding fact a usage chunk cannot carry), the
+  Decisions shape (declared as `responses`, not a provider-named key) and the
+  audio endpoints (token-based and duration-based transcription/translation
+  usage; the transcription stream tracker no longer reaches into a provider
+  adapter's private `_parse_usage`). The remaining shapes are the Interactions
+  vocabulary and the gpt-image branch of the image stream tracker.

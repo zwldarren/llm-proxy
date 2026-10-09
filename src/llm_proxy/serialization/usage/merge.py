@@ -40,6 +40,9 @@ _SUMMED_FIELDS: tuple[str, ...] = (
     "cache_creation_input_tokens",
     "reasoning_tokens",
     "web_search_requests",
+    # An audio endpoint billed per second: two independent calls transcribed two
+    # durations, and their sum is what the provider charged.
+    "audio_duration_seconds",
     # Two billed calls each reported their own cost: their sum is what the two
     # calls cost. Dropping it would leave a record whose tokens cover both
     # calls while its cost covers one, and cost.py treats a reported cost as

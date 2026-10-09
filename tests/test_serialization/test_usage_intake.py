@@ -517,6 +517,96 @@ class TestGeminiDialect:
         assert usage.web_search_requests == 1
 
 
+class TestAudioDialect:
+    """The transcription/translation usage block: tokens or duration."""
+
+    def test_a_body_without_usage_makes_no_record(self) -> None:
+        assert parse_usage("audio", {"text": "hi"}) is None
+        assert parse_usage("audio", {"text": "hi", "usage": {}}) is None
+
+    def test_token_usage_reads_the_nested_input_split(self) -> None:
+        usage = parse_usage(
+            "audio",
+            {
+                "text": "hi",
+                "usage": {
+                    "input_tokens": 11,
+                    "output_tokens": 4,
+                    "total_tokens": 15,
+                    "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+                    "completion_tokens_details": {"audio_tokens": 25},
+                },
+            },
+        )
+
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (11, 4, 15)
+        assert usage.prompt_tokens_details is not None
+        assert usage.prompt_tokens_details.audio_tokens == 100
+        assert usage.prompt_tokens_details.text_tokens == 10
+        assert usage.completion_tokens_details is not None
+        assert usage.completion_tokens_details.audio_tokens == 25
+
+    def test_a_chat_shaped_block_is_tolerated(self) -> None:
+        usage = parse_usage(
+            "audio",
+            {
+                "usage": {
+                    "input_tokens": 5,
+                    "output_tokens": 2,
+                    "prompt_tokens_details": {"audio_tokens": 5},
+                }
+            },
+        )
+
+        assert usage is not None
+        assert usage.prompt_tokens_details is not None
+        assert usage.prompt_tokens_details.audio_tokens == 5
+        # The record derives the total the wire did not report.
+        assert usage.total_tokens == 7
+
+    def test_a_whisper_duration_is_the_billable_dimension(self) -> None:
+        usage = parse_usage("audio", {"usage": {"type": "duration", "seconds": 60}})
+
+        assert usage is not None
+        assert usage.audio_duration_seconds == 60
+        assert (usage.input_tokens, usage.output_tokens) == (0, 0)
+
+    def test_a_bare_seconds_key_is_duration_based_too(self) -> None:
+        """OpenRouter reports no ``type`` discriminator; token estimation would
+        bill a per-second endpoint as if it had token usage."""
+        usage = parse_usage("audio", {"usage": {"seconds": 6.4, "cost": 0.000178}})
+
+        assert usage is not None
+        assert usage.audio_duration_seconds == 6.4
+        assert usage.input_tokens == 0
+
+    def test_a_duration_block_keeps_its_input_split(self) -> None:
+        usage = parse_usage(
+            "audio",
+            {
+                "usage": {
+                    "type": "duration",
+                    "seconds": 120.5,
+                    "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+                }
+            },
+        )
+
+        assert usage is not None
+        assert usage.audio_duration_seconds == 120.5
+        assert usage.prompt_tokens_details is not None
+        assert usage.prompt_tokens_details.audio_tokens == 100
+
+    def test_a_details_block_with_no_fact_is_not_an_empty_object(self) -> None:
+        usage = parse_usage(
+            "audio", {"usage": {"input_tokens": 1, "input_token_details": {"unknown": 3}}}
+        )
+
+        assert usage is not None
+        assert usage.prompt_tokens_details is None
+
+
 # ---------------------------------------------------------------------------
 # The accumulator
 # ---------------------------------------------------------------------------
@@ -713,3 +803,12 @@ class TestMergeRules:
         add_usage(target, source)
 
         assert target.provider_reported_cost == pytest.approx(0.03)
+
+    def test_add_usage_sums_two_transcribed_durations(self) -> None:
+        """A per-second audio endpoint billed both calls; their sum is the bill."""
+        target = Usage(audio_duration_seconds=30.5)
+        source = Usage(audio_duration_seconds=12.25)
+
+        add_usage(target, source)
+
+        assert target.audio_duration_seconds == pytest.approx(42.75)

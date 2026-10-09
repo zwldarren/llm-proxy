@@ -7,7 +7,6 @@ transformer path.
 """
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import orjson
 
@@ -389,41 +388,30 @@ class TestTranscriptionStreamUsageTracker:
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 60}}))
         assert tracker.captured_usage == {"type": "duration", "seconds": 60}
 
-    def test_apply_to_uses_adapter_parse_usage(self):
-        """apply_to delegates to adapter._parse_usage and updates the context."""
+    def test_apply_to_parses_duration_through_the_seam(self):
+        """apply_to builds the record from the captured event via the audio dialect."""
         tracker = TranscriptionStreamUsageTracker()
         tracker.observe(_sse({"usage": {"type": "duration", "seconds": 90}}))
 
-        adapter = MagicMock()
-        # Simulate the BaseHttpProvider._parse_usage duration handling
-        from llm_proxy.models.types import Usage
-
-        adapter._parse_usage.return_value = Usage(audio_duration_seconds=90)
-
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
-        tracker.apply_to(ctx, adapter)
+        tracker.apply_to(ctx)
 
-        adapter._parse_usage.assert_called_once_with({"type": "duration", "seconds": 90})
         assert _record(ctx).audio_duration_seconds == 90
 
     def test_apply_to_no_usage_is_noop(self):
-        """apply_to with no captured usage does not call the adapter."""
+        """apply_to without a captured usage block writes nothing."""
         tracker = TranscriptionStreamUsageTracker()
-        adapter = MagicMock()
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
-        tracker.apply_to(ctx, adapter)
-        adapter._parse_usage.assert_not_called()
+        tracker.apply_to(ctx)
+        assert ctx.usage is None
 
-    def test_apply_to_parse_returns_none(self):
-        """apply_to is a no-op when _parse_usage returns None."""
+    def test_apply_to_a_sparse_event_writes_nothing(self):
+        """An event whose usage block the adapter cannot read is a no-op."""
         tracker = TranscriptionStreamUsageTracker()
-        tracker.observe(_sse({"usage": {"type": "duration", "seconds": 90}}))
-
-        adapter = MagicMock()
-        adapter._parse_usage.return_value = None
+        tracker.observe(_sse({"type": "transcript.text.done", "usage": {}}))
 
         ctx = EventContext(request_id="req", trace_id="trace", model="whisper-1")
-        tracker.apply_to(ctx, adapter)
+        tracker.apply_to(ctx)
 
         assert ctx.usage is None
 

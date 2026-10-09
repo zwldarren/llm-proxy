@@ -12,6 +12,7 @@ import orjson
 from orjson import JSONDecodeError
 
 from llm_proxy.observability.event_context import EventContext
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 
 class TranscriptionStreamUsageTracker:
@@ -24,11 +25,17 @@ class TranscriptionStreamUsageTracker:
     """
 
     def __init__(self) -> None:
-        self._usage: dict[str, Any] | None = None
+        # The whole event, not just its usage block: the intake seam reads the
+        # envelope (ADR-0025), and the audio dialect adapter owns where the
+        # block sits inside it.
+        self._payload: dict[str, Any] | None = None
 
     @property
     def captured_usage(self) -> dict[str, Any] | None:
-        return self._usage
+        if self._payload is None:
+            return None
+        usage = self._payload.get("usage")
+        return usage if isinstance(usage, dict) else None
 
     def observe(self, chunk: Any) -> None:
         if not isinstance(chunk, str):
@@ -44,15 +51,17 @@ class TranscriptionStreamUsageTracker:
                 data: dict[str, Any] = orjson.loads(payload)
             except JSONDecodeError:
                 continue
-            usage = data.get("usage")
-            if isinstance(usage, dict):
-                self._usage = usage
+            if isinstance(data.get("usage"), dict):
+                self._payload = data
 
-    def apply_to(self, ctx: EventContext, adapter: Any) -> None:
-        """Write captured billing data into an EventContext using the adapter's
-        ``_parse_usage`` for proper Usage object construction."""
-        if self._usage is None:
+    def apply_to(self, ctx: EventContext) -> None:
+        """Write the captured usage into an ``EventContext`` through the seam.
+
+        The audio dialect adapter is the single parser of the shape (ADR-0025),
+        so a streamed transcription and a non-streaming one bill the same way.
+        """
+        if self._payload is None:
             return
-        parsed = adapter._parse_usage(self._usage)
+        parsed = parse_wire_usage("audio", self._payload)
         if parsed is not None:
             ctx.update_usage(parsed)

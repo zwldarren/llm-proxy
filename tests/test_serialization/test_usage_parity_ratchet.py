@@ -41,12 +41,14 @@ import pytest
 
 from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
 from llm_proxy.billing.tokens import TokenUsage, token_usage_from
+from llm_proxy.billing.transcription_stream_usage import TranscriptionStreamUsageTracker
 from llm_proxy.core.conversion import NativePassthroughHandler
 from llm_proxy.models.types import Usage
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
+from llm_proxy.providers.capabilities.audio import AudioCapabilityMixin
 from llm_proxy.providers.gemini.adapter import GeminiAdapter
 from llm_proxy.serialization.anthropic.serializer import parse_usage_and_provider_extras
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
@@ -73,6 +75,16 @@ FACTS: tuple[str, ...] = (
 )
 
 Facts = dict[str, int | float]
+
+#: The audio endpoints bill dimensions the token dialects do not: the
+#: transcribed seconds (a unit price) and the audio-token split of the prompt
+#: and completion. A row that compares them declares them in its ``facts``; every
+#: other row filters them out.
+AUDIO_FACTS: frozenset[str] = frozenset(FACTS) | {
+    "audio_duration",
+    "audio_input",
+    "audio_output",
+}
 
 
 def _amount(flat: Any, nested: Any) -> int:
@@ -107,6 +119,9 @@ def _facts_of_usage(usage: Usage | None) -> Facts:
         ),
         "web_search": int(usage.web_search_requests or 0),
         "cost": float(usage.provider_reported_cost or 0),
+        "audio_duration": float(usage.audio_duration_seconds or 0.0),
+        "audio_input": int(getattr(prompt_details, "audio_tokens", None) or 0),
+        "audio_output": int(getattr(completion_details, "audio_tokens", None) or 0),
     }
 
 
@@ -138,6 +153,9 @@ def _facts_of_token_usage(usage: TokenUsage) -> Facts:
         "reasoning": 0,
         "web_search": usage.web_search_requests,
         "cost": 0.0,
+        "audio_duration": float(usage.audio_duration_seconds or 0.0),
+        "audio_input": int(usage.audio_input_tokens or 0),
+        "audio_output": int(usage.audio_output_tokens or 0),
     }
 
 
@@ -333,6 +351,29 @@ def _gemini_image_stream_tracker(frames: Sequence[dict[str, Any]]) -> EventConte
     context = _new_context()
     tracker.apply_to(context)
     return context
+
+
+class _AudioBodyParser(AudioCapabilityMixin):
+    """The mixin's own transcription parser, crossing the real call site."""
+
+
+def _audio_transcription_stream(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``billing/transcription_stream_usage.py`` — an STT SSE event → the context."""
+    tracker = TranscriptionStreamUsageTracker()
+    for frame in frames:
+        tracker.observe("data: " + orjson.dumps(frame).decode() + "\n\n")
+    context = _new_context()
+    tracker.apply_to(context)
+    return context
+
+
+def _audio_body_parser(frames: Sequence[dict[str, Any]]) -> Any:
+    """``providers/capabilities/audio.py`` — a transcription body → its response."""
+    return _AudioBodyParser()._parse_transcription_response(dict(frames[0]), "json")
+
+
+def _facts_of_audio_response(response: Any) -> Facts:
+    return _facts_of_usage(response.usage)
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +669,30 @@ GEMINI_IMAGE_BODY: dict[str, Any] = {
     "candidates": [
         {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1n"}}]}}
     ],
+}
+
+#: A streaming STT ``transcript.text.done`` event: duration-based usage that still
+#: carries the audio/text split of the prompt.
+AUDIO_STREAM_EVENT: dict[str, Any] = {
+    "type": "transcript.text.done",
+    "usage": {
+        "type": "duration",
+        "seconds": 90,
+        "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+    },
+}
+
+#: A transcription response body: token-based usage with the audio split of both
+#: sides nested.
+AUDIO_TRANSCRIPTION_BODY: dict[str, Any] = {
+    "text": "hello",
+    "usage": {
+        "input_tokens": 11,
+        "output_tokens": 4,
+        "total_tokens": 15,
+        "input_token_details": {"audio_tokens": 100, "text_tokens": 10},
+        "completion_tokens_details": {"audio_tokens": 25},
+    },
 }
 
 _ROWS: tuple[Row, ...] = (
@@ -1169,6 +1234,53 @@ _ROWS: tuple[Row, ...] = (
             "cost": 0.0,
         },
     ),
+    Row(
+        id="audio-transcription-stream",
+        dialect="audio",
+        # The tracker's own parse was deleted by the audio slice; the driver now
+        # runs the migrated call site, and ``recorded`` anchors it to the amounts
+        # the shipped tracker produced before the swap.
+        frames=(AUDIO_STREAM_EVENT,),
+        legacy=_audio_transcription_stream,
+        facts_of=_facts_of_event_context,
+        facts=AUDIO_FACTS,
+        recorded={
+            "input": 0,
+            "output": 0,
+            "total": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+            "audio_duration": 90.0,
+            "audio_input": 100,
+            "audio_output": 0,
+        },
+    ),
+    Row(
+        id="audio-transcription-body",
+        dialect="audio",
+        # The shipped ``_parse_usage`` was deleted; the driver runs the migrated
+        # call site it backed, anchored to the amounts it produced.
+        frames=(AUDIO_TRANSCRIPTION_BODY,),
+        legacy=_audio_body_parser,
+        facts_of=_facts_of_audio_response,
+        facts=AUDIO_FACTS,
+        recorded={
+            "input": 11,
+            "output": 4,
+            "total": 15,
+            "cache_read": 0,
+            "cache_write": 0,
+            "reasoning": 0,
+            "web_search": 0,
+            "cost": 0.0,
+            "audio_duration": 0.0,
+            "audio_input": 100,
+            "audio_output": 25,
+        },
+    ),
 )
 
 
@@ -1278,9 +1390,8 @@ def test_a_recorded_expectation_anchors_the_migrated_call_site() -> None:
 def test_every_still_unmigrated_dialect_has_a_row() -> None:
     """The ratchet is only worth its weight while it covers the remaining slices.
 
-    ADR-0025's landing order migrates chat, anthropic, responses and realtime
-    call sites; a dialect with no row would be deleted without ever having been
-    compared.
+    ADR-0025's landing order migrates one dialect at a time; a dialect with no
+    row would be deleted without ever having been compared.
     """
     assert {row.dialect for row in _ROWS} == {
         "chat",
@@ -1289,4 +1400,5 @@ def test_every_still_unmigrated_dialect_has_a_row() -> None:
         "realtime",
         "ollama",
         "gemini",
+        "audio",
     }
