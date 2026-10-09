@@ -304,11 +304,13 @@ class TestDeclaration:
         """Chat Completions is never natively served by these providers.
 
         The native tier covers the Anthropic/Responses wire formats; the
-        Chat Completions request side always goes through the serializer (the
-        stream side may pass through verbatim on the engines' own servers,
-        which is why this asserts the request side only).
+        Chat Completions request side always goes through the serializer. Its
+        *stream* side does pass through verbatim — the upstream speaks that
+        wire format by definition of this adapter family, and the frame
+        handler applies the reasoning-field repair on the way out.
         """
         assert adapter.supports_native_request("openai") is False
+        assert adapter.supports_native_streaming("openai") is True
 
     def test_kill_switch_disables_every_native_protocol(self, row: Declared):
         gated = row.adapter_cls(api_key="k", native_passthrough=False)
@@ -316,6 +318,7 @@ class TestDeclaration:
         for protocol in row.native_protocols:
             assert gated.supports_native_request(protocol) is False
             assert gated.supports_native_streaming(protocol) is False
+        assert gated.supports_native_streaming("openai") is False
 
 
 @pytest.mark.parametrize("row", ROWS, ids=_IDS)
@@ -328,6 +331,13 @@ class TestHeaders:
             assert headers["x-api-key"] == "test-key"
         else:
             assert "x-api-key" not in headers
+
+    def test_no_key_means_no_auth_headers(self, row: Declared):
+        unauthenticated = row.adapter_cls(api_key="")
+        headers = unauthenticated._build_headers()
+
+        assert "Authorization" not in headers
+        assert "x-api-key" not in headers
 
 
 @pytest.mark.parametrize("row", _NATIVE_ROWS, ids=[r.type for r in _NATIVE_ROWS])
@@ -419,6 +429,9 @@ class TestAnthropicNativeCompletion:
         assert call.kwargs["json"] == {**raw, "model": ROUTED_MODEL}
         # The stashed raw body is shared with other tiers and is never rewritten.
         assert raw["model"] == "claude-alias"
+        if row.sends_x_api_key:
+            # The dual-auth quirk reaches the upstream request, not just the helper.
+            assert call.kwargs["headers"]["x-api-key"] == "test-key"
 
         assert result.provider_info["_raw_response_body"] is upstream
         assert result.usage.input_tokens == 12  # 7 + 5 cache read fold
@@ -473,6 +486,41 @@ class TestResponsesNativeCompletion:
         assert call.args[0] == row.responses_url
         assert call.kwargs["json"] == {**raw, "model": ROUTED_MODEL}
         assert raw["model"] == "client-alias"
+        if row.sends_x_api_key:
+            assert call.kwargs["headers"]["x-api-key"] == "test-key"
 
         assert result.provider_info["_raw_response_body"] is upstream
         assert result.usage.total_tokens == 22
+
+    @pytest.mark.asyncio
+    async def test_responses_native_stream_forwards_raw_sse(self, row: Declared, adapter):
+        sse_events = make_sse_events(
+            [
+                (
+                    "response.created",
+                    '{"type":"response.created","response":{"id":"resp_s","status":"in_progress"}}',
+                ),
+                (
+                    "response.completed",
+                    '{"type":"response.completed","response":{"id":"resp_s",'
+                    '"status":"completed","usage":{"input_tokens":3,"output_tokens":2,'
+                    '"total_tokens":5}}}',
+                ),
+            ]
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=MockStreamResponse(sse_events))
+
+        raw = raw_responses()
+        request = _native_request(row, raw, "openresponses")
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            stream = await adapter.stream_chat_completion_native(request)
+            frames = [frame async for frame in stream]
+
+        call = mock_client.post.call_args
+        assert call.args[0] == row.responses_url
+        assert call.kwargs["json"]["stream"] is True
+        assert call.kwargs["json"]["model"] == ROUTED_MODEL
+        assert raw["stream"] is False  # raw stash untouched
+        assert any("response.created" in frame for frame in frames)
+        assert any("response.completed" in frame for frame in frames)
