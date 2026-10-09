@@ -8,6 +8,7 @@ in, and the committed artifact must equal a fresh regeneration.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Any
 
@@ -122,3 +123,26 @@ def test_committed_spec_is_up_to_date():
     assert committed == serialize_spec(build_v1_spec()), (
         "docs/public/v1-openapi.json is stale; run `uv run llm-proxy-openapi` and commit it."
     )
+
+
+def test_release_flow_bumps_the_published_version():
+    """The release PR must carry the spec's version bump with it.
+
+    release-please bumps ``pyproject.toml`` and, through it, the version baked
+    into this document (``test_spec_version_is_git_independent``). A release
+    that lands without regenerating the artifact turns main red on the very
+    commit that publishes the version (it happened at 0.3.1 and had to be
+    repaired by hand), so the release config updates ``$.info.version`` too.
+    This pins the entry that keeps the two in sync.
+    """
+    config_path = DEFAULT_SPEC_PATH.parents[2] / "release-please-config.json"
+    config = json.loads(config_path.read_text())
+
+    spec_entries = [
+        entry
+        for entry in config["packages"]["."]["extra-files"]
+        if entry.get("path") == "docs/public/v1-openapi.json"
+    ]
+    assert spec_entries == [
+        {"path": "docs/public/v1-openapi.json", "type": "json", "jsonpath": "$.info.version"}
+    ]

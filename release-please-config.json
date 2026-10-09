@@ -10,6 +10,11 @@
           "path": "uv.lock",
           "type": "toml",
           "jsonpath": "$.package[?(@.name.value=='llm-proxy')].version"
+        },
+        {
+          "path": "docs/public/v1-openapi.json",
+          "type": "json",
+          "jsonpath": "$.info.version"
         }
       ]
     }
