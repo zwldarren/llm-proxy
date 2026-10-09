@@ -697,9 +697,14 @@ class TestOpenAIResponseParserDetails:
         }
         result = parser.parse(response, model="gpt-4")
         assert result.usage is not None
+        # One fact, one field (ADR-0025): the nested OpenAI cache aliases are
+        # lifted onto the canonical flat fields, not duplicated beside them.
+        assert result.usage.cache_read_input_tokens == 3
+        assert result.usage.cache_creation_input_tokens == 2
         ptd = result.usage.prompt_tokens_details
         assert ptd is not None
-        assert ptd.cache_write_tokens == 2
+        assert ptd.cached_tokens is None
+        assert ptd.cache_write_tokens is None
         assert ptd.video_tokens == 7
         ctd = result.usage.completion_tokens_details
         assert ctd is not None
@@ -924,8 +929,8 @@ def test_tool_call_arguments_are_canonicalized(provider_serializer):
 
 
 def test_parse_provider_response_maps_deepseek_cache_fields(provider_serializer):
-    """DeepSeek top-level prompt_cache_hit_tokens folds into
-    prompt_tokens_details.cached_tokens so cache pricing applies."""
+    """DeepSeek top-level prompt_cache_hit_tokens folds into the canonical
+    cache-read field so cache pricing applies."""
     response = {
         "id": "chatcmpl-x",
         "model": "deepseek-chat",
@@ -949,5 +954,4 @@ def test_parse_provider_response_maps_deepseek_cache_fields(provider_serializer)
 
     assert result.usage is not None
     assert result.usage.input_tokens == 100
-    assert result.usage.prompt_tokens_details is not None
-    assert result.usage.prompt_tokens_details.cached_tokens == 64
+    assert result.usage.cache_read_input_tokens == 64

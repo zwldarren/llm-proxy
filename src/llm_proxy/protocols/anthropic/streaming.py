@@ -24,9 +24,8 @@ from llm_proxy.serialization.anthropic import (
     parse_usage_and_provider_extras,
 )
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
-from llm_proxy.serialization.openai.components.response_parser import (
-    fold_deepseek_cache_hits,
-)
+from llm_proxy.serialization.usage import UsageAccumulator
+from llm_proxy.serialization.usage.folds import fold_deepseek_cache_hits
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
@@ -111,8 +110,13 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
     ):
         super().__init__(model, request_id)
         self._intercept_web_search = intercept_web_search
+        # Emission state: what the client's message_start/message_delta carry.
         self._input_tokens = estimated_input_tokens
         self._output_tokens = 0
+        # What the proxy bills from: the canonical parse of the same usage blocks
+        # (ADR-0025). This transformer is fed canonical chunks, so its dialect is
+        # the chat one.
+        self._usage = UsageAccumulator("chat")
         self._sent_message_start = False
         self._current_block_index = 0
         self._in_text_block = False
@@ -431,6 +435,9 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 self._input_tokens = input_tokens
             if output_tokens > 0 or self._output_tokens == 0:
                 self._output_tokens = output_tokens
+            # Billing reads the canonical record; the counters above are emission
+            # state for the client's own Anthropic usage blocks.
+            self._usage.observe(chunk)
             # Fold usage before emitting message_start so its ``usage`` block
             # can carry the full Anthropic shape (cache keys, server_tool_use).
             self.fold_usage(self._normalize_usage(usage))
@@ -1061,62 +1068,15 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
     def get_usage(self) -> StreamingUsage | None:
         """Get accumulated usage information from streaming response.
 
+        The canonical chunks this transformer is fed carry their usage in the chat
+        dialect, which the intake adapter parses (ADR-0025); the ``_input_tokens`` /
+        ``_output_tokens`` counters below are emission state for the client's
+        Anthropic ``usage`` blocks, not the billing record.
+
         Returns:
             StreamingUsage object if usage data is available from provider.
         """
-        # Fallback to _pending_usage if instance variables weren't set.
-        # This handles cases where usage is provided but with zero values
-        # (which wouldn't trigger the > 0 check in _transform_openai_chunk).
-        if (
-            not self._input_tokens
-            and not self._output_tokens
-            and self._pending_usage
-            and isinstance(self._pending_usage, dict)
-        ):
-            self._input_tokens = self._pending_usage.get("input_tokens", 0)
-            self._output_tokens = self._pending_usage.get("output_tokens", 0)
-
-        if self._input_tokens or self._output_tokens:
-            pending_usage = self._pending_usage
-            cache_read = (
-                pending_usage.get("cache_read_input_tokens") if pending_usage else None
-            ) or 0
-            cache_create = (
-                pending_usage.get("cache_creation_input_tokens") if pending_usage else None
-            ) or 0
-            # Extract nested details (OpenAI-style cached_tokens, audio_tokens)
-            prompt_details = None
-            if pending_usage:
-                ptd = pending_usage.get("prompt_tokens_details")
-                if isinstance(ptd, dict) and any(v is not None for v in ptd.values()):
-                    prompt_details = {k: v for k, v in ptd.items() if v is not None}
-                # One fact, one field: provider converters copy the flat
-                # cache-read count into cached_tokens for wire-dialect
-                # consumers; that duplicate must not reach the canonical
-                # StreamingUsage or the same tokens persist twice.
-                if cache_read and prompt_details and "cached_tokens" in prompt_details:
-                    prompt_details = {
-                        k: v for k, v in prompt_details.items() if k != "cached_tokens"
-                    }
-                    if not prompt_details:
-                        prompt_details = None
-                ctd = pending_usage.get("completion_tokens_details")
-                completion_details = (
-                    {k: v for k, v in ctd.items() if v is not None}
-                    if isinstance(ctd, dict) and any(v is not None for v in ctd.values())
-                    else None
-                )
-
-            return StreamingUsage(
-                input_tokens=self._input_tokens,
-                output_tokens=self._output_tokens,
-                # Canonical ``input_tokens`` already INCLUDES the cache counters
-                # (the internal invariant); adding them again would double-count
-                # the cached prompt in the log/langfuse totals.
-                total_tokens=self._input_tokens + self._output_tokens,
-                cache_read_input_tokens=cache_read if cache_read else None,
-                cache_creation_input_tokens=cache_create if cache_create else None,
-                prompt_tokens_details=prompt_details,
-                completion_tokens_details=completion_details,
-            )
-        return None
+        usage = self._usage.result()
+        if usage is None:
+            return None
+        return StreamingUsage.from_usage(usage)

@@ -32,6 +32,42 @@ class TestOpenAIAccumulation:
         assert isinstance(accumulated[0], TextBlock)
         assert accumulated[0].text == "Hello world!"
 
+    def test_usage_projection_carries_provider_cost_and_search_count(self):
+        """The usage read off the wire is projected whole, not just the tokens.
+
+        ``get_usage`` no longer parses the frame (the chat intake adapter does,
+        ADR-0025), so this pins that the facts the old parse extracted still reach
+        the record the log and billing read: the provider's own cost with
+        ``nanogpt_cost`` beating ``cost``, the web-search count, and a nested
+        detail that is not one of the canonical flat fields.
+        """
+        transformer = OpenAIStreamingTransformer(model="gpt-4", request_id="test-usage")
+        transformer.transform(
+            {
+                "id": "chatcmpl-1",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "gpt-4",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "total_tokens": 12,
+                    "nanogpt_cost": 0.25,
+                    "cost": 0.5,
+                    "server_tool_use": {"web_search_requests": 3},
+                    "prompt_tokens_details": {"audio_tokens": 7},
+                },
+            }
+        )
+
+        usage = transformer.get_usage()
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (10, 2, 12)
+        assert usage.provider_reported_cost == 0.25
+        assert usage.web_search_requests == 3
+        assert usage.prompt_tokens_details == {"audio_tokens": 7}
+
     def test_accumulate_tool_calls(self):
         """Should accumulate tool calls during streaming."""
         from llm_proxy.models.content_blocks import ToolUseBlock

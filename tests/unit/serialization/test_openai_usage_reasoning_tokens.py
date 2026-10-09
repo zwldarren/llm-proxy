@@ -10,10 +10,8 @@ the streaming path, so billing and usage records see the same reasoning split
 on every tier.
 """
 
-from llm_proxy.serialization.openai.components.response_parser import (
-    OpenAIResponseParser,
-    fold_top_level_reasoning_tokens,
-)
+from llm_proxy.serialization.openai.components.response_parser import OpenAIResponseParser
+from llm_proxy.serialization.usage.folds import fold_top_level_reasoning_tokens
 
 
 class TestTopLevelReasoningTokens:

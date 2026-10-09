@@ -1096,10 +1096,11 @@ class TestAnthropicProtocolWithOpenAI:
             assert anthropic_response["usage"]["input_tokens"] == 40
             assert anthropic_response["usage"]["cache_read_input_tokens"] == 60
             assert anthropic_response["usage"]["output_tokens"] == 5
-            # OpenAI's cached_tokens is in prompt_tokens_details
+            # One fact, one field (ADR-0025): OpenAI's cached_tokens is lifted
+            # onto the canonical cache-read field; the Anthropic wire field is
+            # emitted from there.
             assert response.usage is not None
-            assert response.usage.prompt_tokens_details is not None
-            assert response.usage.prompt_tokens_details.cached_tokens == 60
+            assert response.usage.cache_read_input_tokens == 60
 
 
 class TestAnthropicProtocolWithGemini:

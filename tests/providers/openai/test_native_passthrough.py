@@ -283,7 +283,11 @@ class TestResponseSidePassthrough:
         assert result.usage.input_tokens == 10
         assert result.usage.output_tokens == 20
         assert result.usage.total_tokens == 30
-        assert result.usage.prompt_tokens_details.cached_tokens == 5
+        # A cache read has one billable amount and two dialect expressions; the
+        # canonical record keeps it in the flat field (ADR-0025), the same shape
+        # the non-streaming responses parser records for every tier.
+        assert result.usage.cache_read_input_tokens == 5
+        assert result.usage.prompt_tokens_details is None
         assert result.usage.completion_tokens_details.reasoning_tokens == 8
 
     def test_no_usage_ok(self):

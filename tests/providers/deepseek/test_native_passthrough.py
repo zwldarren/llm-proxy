@@ -377,7 +377,10 @@ class TestChatCompletionPassthrough:
         assert result.usage.input_tokens == 11
         assert result.usage.output_tokens == 4
         assert result.usage.total_tokens == 15
-        assert result.usage.prompt_tokens_details.cached_tokens == 6
+        # A cache read has one billable amount and two dialect expressions; the
+        # canonical record keeps it flat (ADR-0025).
+        assert result.usage.cache_read_input_tokens == 6
+        assert result.usage.prompt_tokens_details is None
         assert result.usage.completion_tokens_details.reasoning_tokens == 2
 
     @pytest.mark.asyncio
@@ -497,7 +500,9 @@ class TestBuildPassthroughResponse:
             upstream, _request(raw_responses(), protocol_name="openresponses")
         )
         assert result.usage.input_tokens == 11
-        assert result.usage.prompt_tokens_details.cached_tokens == 6
+        # The lifted cache read, in the canonical flat field (ADR-0025).
+        assert result.usage.cache_read_input_tokens == 6
+        assert result.usage.prompt_tokens_details is None
 
     def test_no_usage_ok(self, adapter):
         result = adapter._build_passthrough_response({"id": "msg_1"}, _request(raw_anthropic()))

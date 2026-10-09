@@ -35,11 +35,9 @@ from llm_proxy.providers.reasoning import (
 )
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
-from llm_proxy.serialization.openai.components.response_parser import (
-    OpenAIResponseParser,
-    fold_top_level_reasoning_tokens,
-)
+from llm_proxy.serialization.openai.components.response_parser import OpenAIResponseParser
 from llm_proxy.serialization.providers import get_provider_serializer
+from llm_proxy.serialization.usage.folds import fold_top_level_reasoning_tokens
 
 
 @register_adapter("openai-compatible")

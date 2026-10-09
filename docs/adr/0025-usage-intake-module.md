@@ -1,0 +1,227 @@
+# One usage intake owns every provider wire dialect
+
+## Status
+
+Accepted (2026-10).
+
+## Context
+
+Every billable fact the proxy records starts as a provider wire payload, and
+each tier parses it on its own. Usage is extracted at roughly a dozen sites
+across four layers:
+
+- **provider serializers** — `serialization/openai/components/response_parser.py`
+  (`parse_usage`), `serialization/openai/serializer.py`
+  (`parse_usage_from_response`), the anthropic, gemini and ollama serializers;
+- **streaming converters** — `serialization/openai/streaming_converter.py`
+  (`_handle_response_finished`), `serialization/anthropic/streaming_converter.py`;
+- **protocol transformers** — `protocols/openai/streaming.py` (`get_usage`),
+  `protocols/anthropic/streaming.py`, `protocols/openresponses/serializer.py`
+  (`_convert_usage`);
+- **the native-passthrough bookkeeping** — `core/conversion.py` hand-parses three
+  dialects (`_apply_openresponses_usage`, `process_anthropic_usage_event`,
+  `_capture_openai_stream_usage`), including the Anthropic input-token + cache
+  addition rule.
+
+Three records keep the same facts in lockstep by hand — `Usage`
+(`models/types.py`), `StreamingUsage` (`streaming/transformer.py`, a
+near-duplicate carrying a dict-shaped details field and `provider_reported_cost`),
+and billing's `TokenUsage` (`billing/tokens.py`), which `extract_tokens_from_usage`
+fills from a raw dict by tolerating dialects. `EventContext` mirrors ~13 further
+flat usage fields, and the cost path runs
+`EventContext.to_usage_dict()` → `extract_tokens_from_usage()` → `TokenUsage` →
+cost (`observability/cost.py:96`, `billing/tokens.py:66`, `billing/cost.py:398`) —
+a dict-shaped detour between two records of identical facts.
+
+The copies have drifted into shipped billing bugs: ADR-0008 and ADR-0017 record
+"usage lost on one tier" fixes; `0acd0b4ea` fixed the Anthropic
+input-tokens-exclusive-of-cache contract a second time; `5ab1c53cd` stopped
+double-counted tokens; `8999150cf` deduped cache-read tokens across dialect
+columns. The merge rule — how a later chunk's usage combines with an earlier one —
+is implemented four times (`sum_usage_dicts`, `merge_terminal_state`,
+`sum_usage`, `merge_continuation_usage`).
+
+## Decision
+
+**One canonical record.** `Usage` holds wire-reported facts only: token counts,
+cache read/write, reasoning tokens, `web_search_requests`,
+`audio_duration_seconds`, and the absorbed `provider_reported_cost`.
+Proxy-computed dimensions (`images_generated`, `tts_characters`, computed cost)
+stay in billing, which derives its read model from a `Usage`. Canonical → client
+wire stays with the protocol serializer that owns that wire (ADR-0009) — the
+Anthropic exclusive-of-cache emission rule included.
+
+**One module.** `llm_proxy.serialization.usage` is keyed by wire shape
+(chat-completions, responses, anthropic, realtime), not by provider: one dialect
+serves many providers, and the native-passthrough tier has no provider serializer
+in play. Its interface is `parse_usage(dialect, payload) -> Usage` and
+`UsageAccumulator(dialect)` with `observe(raw_chunk)` and `result()`. The
+accumulator owns both the per-chunk parse and the merge; transformers hold one
+and expose its result behind their existing `get_usage()` verb.
+
+**Extraction only.** The module never emits a client-facing shape, and it never
+estimates: `count_tokens` and the other estimation helpers answer a different
+question from request text and stay where they are.
+
+**`result()` returns provider semantics.** Dialect aliases are folded into
+canonical field names — one field per fact, ADR-0006's contract — but values are
+as the provider reported them. `input_tokens` stays inclusive of the cache
+counters; making it exclusive is an emission rule.
+
+**The dialect is declared once per conversion path**: provider serializers expose
+it as a capability, protocol transformers declare it for the native tier. No call
+site re-decides it.
+
+**EventContext carries the record**, `usage: Usage | None`, instead of the ~13
+flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
+
+## Considered Options
+
+- **Record constructors** (`Usage.from_anthropic(payload)`) instead of dialect
+  adapters: rejected — it welds wire-dialect knowledge onto the canonical record
+  and makes every new dialect an edit to the record.
+- **A capability on the provider-serializer registry** instead of a dialect-keyed
+  module: rejected — a dialect is a wire shape, not a provider capability, and the
+  native tier has no serializer to ask.
+- **Sniffing the payload shape** when no dialect is given: rejected — chat and
+  responses payloads overlap, so a wrong guess silently mis-bills.
+- **A bidirectional module** owning client emission too: rejected — it duplicates
+  the protocol serializers' job and blurs the two registries of ADR-0009.
+- **Absorbing token counting and estimation**: rejected — estimation has no wire
+  payload and would double the interface for a second audience.
+- **Converging the parse but keeping the three records**: rejected — the lockstep
+  copies are the bug source, not the parsing alone.
+
+## Consequences
+
+- Adding one billable fact means teaching one dialect adapter, not twelve sites.
+  `TestTierIndependentStreamUsage` and `TestTierFieldParity`
+  (`tests/core/test_conversion_tiers.py`) keep the tiers' *request* bodies aligned;
+  `tests/test_serialization/test_usage_parity_ratchet.py` is the ratchet for the
+  migration itself: one row per (dialect, still-live call site), comparing the
+  seam and the shipped path on the billable **amounts** rather than the field
+  placement, so a fact expressed in a flatter field still passes while a changed
+  amount fails. A row that declares a divergence must name the fact and the
+  reason, and the declaration is checked for exactness in both directions. The
+  ratchet earned its keep before the first slice landed: it caught the Responses
+  body parser billing zero searches whenever a usage block accompanied the
+  web-search items, because the adapter looked for a usage-level count the
+  Responses wire never sends. A migrated row keeps its driver, so it still
+  compares live code, *and* carries the amounts the shipped parser produced before
+  the swap (`recorded`): without that anchor the two sides share the seam and move
+  together, and the row would only prove the projection self-consistent.
+- The ratchet distinguishes two ways a migration can move a fact. ``declared`` is a
+  *live* difference between the seam and a call site (checked for exactness in both
+  directions, so it cannot outlive the gap it describes). ``closed`` records a gap a
+  landed slice has already repaired: the fact stays pinned by the live comparison,
+  and ``recorded`` carries the amount the repair produces rather than the lossy
+  pre-swap one — a repaired amount is a deliberate change, so it should be visible
+  in the row instead of silently moving.
+- Two shipped gaps the ratchet declared were closed by the anthropic slice:
+  `AnthropicChunkConverter.get_usage` and `process_anthropic_usage_event` read only
+  the input/output/cache counters, so Anthropic's
+  `output_tokens_details.thinking_tokens` never reached the recorded usage
+  (observability only — reasoning is priced inside the output count).
+- The anthropic slice also repaired three facts the Anthropic *protocol*
+  transformer's parser dropped when it served a converted OpenAI-family provider,
+  each a billing difference: the provider's own cost, the web-search count (the
+  transformer read `server_tool_use` for client emission only), and DeepSeek's
+  `prompt_cache_hit_tokens` (priced at the full input rate instead of the cache
+  rate). The same slice migrated the non-streaming Anthropic body parser, the
+  fourth anthropic call site; it was already reporting the counts correctly, but
+  where it had returned the search count through the `provider_info` extras the
+  record now carries it too. That transformer reads canonical chat-dialect chunks,
+  so it uses the chat adapter — a slice is a set of call sites, not a naming
+  coincidence.
+- The responses slice closed two more search-count gaps, both on native paths that
+  read only a usage block: the passthrough handler now receives the whole terminal
+  event, so a provider-executed `web_search_call` in the snapshot's output items is
+  billed exactly as the non-streaming body parser already billed it, and the
+  OpenResponses protocol transformer's Responses branch does the same. Neither
+  tier runs the converted tier's web-search continuation, so those calls had no
+  other counter.
+- One count deliberately stays outside the seam: a provider-executed search that
+  an upstream announces as a *tool call* in the chunk stream. The intake module
+  reads usage payloads and a chunk's tool call says nothing about usage, so the
+  OpenResponses transformer keeps its own counter and folds it into the record
+  with the monotonic rule (the larger wins — an upstream that reports both the
+  tool call and a usage-level count describes the same calls). This is the same
+  split ADR-0006 draws elsewhere: proxy-computed dimensions stay with billing.
+- The OpenResponses protocol transformer is the one call site whose dialect is not
+  fixed: it is handed a converted upstream's canonical chat chunks or a
+  Responses-shaped event, depending on the chunk. It holds one accumulator per
+  dialect and merges the two on read, rather than sniffing the payload — a
+  transformer instance sees one upstream shape in practice, and the merge (not a
+  guess) is what makes the impossible case harmless.
+- The seam normalizes an emptied nested block to `None`: once the cache fact is
+  lifted into the flat field, a details object with nothing left is not `None` to a
+  caller testing truthiness, and downstream emission would have read it as "has
+  nested facts".
+- The dialect set starts with the four that carry the most copies — chat,
+  responses, anthropic, realtime. The other wire shapes that still parse usage
+  locally (gemini `usageMetadata`, gemini interactions, ollama
+  `prompt_eval_count`/`eval_count`, the SystemOne/Decisions evaluation wires,
+  and the audio/transcription/image stream trackers) register adapters as they
+  migrate; the registry grows, the interface does not.
+- The accumulator's merge rule — accounting counters never decrease, every
+  other field takes the later non-``None`` value — supersedes the three rules it
+  replaces. It matches the monotonic requirement the Anthropic path already
+  encoded; it differs from `PendingTerminalState.fold_usage` only where a later
+  event reports a *smaller* non-zero counter, which no supported wire does.
+  `total_tokens` is the one exception to the monotonic rule: it is recomputed
+  from the merged counters, because a dialect with no wire total (Anthropic)
+  reports a per-event total that is only that event's partial sum, and
+  max-merging those leaves a total the merged counters contradict.
+  `tests/core/test_streaming_cache_fields.py` pins the cache-placement behaviour
+  the streaming tiers must keep as they migrate. The same monotonic rule governs
+  the EventContext projection, which is the native tier's route into the record:
+  a sparse or repeated streaming frame adds facts but can never withdraw one.
+- Billing's dict-shaped input disappears: cost reads a `Usage` directly and the
+  `to_usage_dict()` detour goes with it.
+- `StreamingUsage` and the dialect tolerance inside `extract_tokens_from_usage`
+  are retired, so their importers migrate; the accumulator becomes the one place
+  the streaming merge rule lives.
+- The module sits under `serialization/`, so it may not import provider or
+  protocol packages. Dialects are data, not registry entries.
+- One placement change came with the chat slice: the OpenAI protocol transformer's
+  streaming usage used to keep a cache read that only the nested
+  `prompt_tokens_details.cached_tokens` expressed *as nested*, beside a flat zero,
+  while the non-streaming parser lifted the same fact into
+  `cache_read_input_tokens`. The streaming path now lifts it too — in the Anthropic
+  protocol transformer as well — so a streamed and a non-streamed turn record the
+  cache read in the same field. The amount is unchanged either way, which is why the
+  ratchet passes on both sides of the swap and only the placement pins had to be
+  rewritten.
+- `StreamingUsage.from_usage` is the one projection of the canonical record onto the
+  wire-shaped record the streaming tiers still speak. Every migrated `get_usage()`
+  returns it, so the bridge has a single implementation and disappears in one place
+  when the record does. Its only non-mechanical step moves the canonical flat
+  `reasoning_tokens` into the nested completion detail, which is the only expression
+  the old record has.
+- `EventContext.update_usage` derives `total_tokens` from its merged counters when
+  both are known, keeps a total-only record's own total, and lets a partial record
+  leave the total alone: an adapter synthesizes a per-event total from whatever one
+  event carried (Anthropic's `message_delta` reports the output only), so a turn
+  whose prompt the provider never reports records the output as its total rather
+  than no total. Unreachable on the Anthropic wire, whose `message_start` always
+  reports the prompt.
+- Landing order: seam and adapters first, then one dialect migrated at a time,
+  each commit deleting the copies it replaces. No release leaves two live parse
+  paths for a fact the parity tests cannot see. Slice 1 (the native
+  chat-completions usage capture in `core/conversion.py`) has landed: it parses
+  through the chat adapter and projects through `EventContext.update_usage`.
+  Slice 2 has landed: the OpenAI protocol transformer's `get_usage` no longer
+  parses the frame — a `UsageAccumulator("chat")` observes the chunks and the
+  method projects the canonical record. The verbatim wire copy the client is served
+  (`_pending_usage`) is untouched, since client emission stays with the protocol
+  serializer (ADR-0009). Slice 3 has landed: the anthropic dialect's four call
+  sites (`AnthropicChunkConverter.get_usage`, `parse_usage_and_provider_extras`,
+  `process_anthropic_usage_event`, and the native passthrough's
+  `maybe_capture_native_streaming_usage`) plus the Anthropic protocol transformer
+  (`UsageAccumulator("chat")`), with both `reasoning` gaps closed. Slice 4 has
+  landed: the responses dialect's four call sites
+  (`parse_usage_from_response`, `OpenAIResponsesChunkConverter.get_usage`,
+  `_apply_openresponses_usage`, and the OpenResponses protocol transformer), the
+  body parser losing its caller-supplied `web_search_call_count` parameter — the
+  count is now the adapter's own reading of the body's items, so no caller can
+  hand the seam a different number.

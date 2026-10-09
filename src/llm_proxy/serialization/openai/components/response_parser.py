@@ -25,8 +25,6 @@ from llm_proxy.models.types import (
     AudioSource,
     ChoiceLogprobs,
     ChoiceMetadata,
-    CompletionTokensDetails,
-    PromptTokensDetails,
     TokenLogprob,
     Usage,
 )
@@ -34,55 +32,9 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.serialization.openai.components.request_builder import (
     OpenAIRequestBuilder,
 )
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 logger = get_logger(__name__)
-
-
-def fold_top_level_reasoning_tokens(usage: dict[str, Any]) -> dict[str, Any]:
-    """Fold SGLang-style top-level ``reasoning_tokens`` into the nested OpenAI details.
-
-    SGLang reports reasoning tokens as a top-level ``usage.reasoning_tokens``
-    field — on both the non-streaming response and the streaming terminal
-    usage chunk — instead of OpenAI's nested
-    ``usage.completion_tokens_details.reasoning_tokens``. Every consumer
-    (billing, usage records, the Anthropic protocol transformer) reads the
-    nested OpenAI shape, so the split is folded there while the provider's own
-    top-level field stays on the wire verbatim.
-
-    A zero or negative report adds nothing (an absent details block already
-    means "no reasoning tokens"), and an existing nested ``reasoning_tokens``
-    wins. The input dict is never mutated — a new dict is returned when a fold
-    applies, so callers may fold a response body without editing it.
-    """
-    reasoning_tokens = usage.get("reasoning_tokens")
-    if not isinstance(reasoning_tokens, int) or reasoning_tokens <= 0:
-        return usage
-
-    details = usage.get("completion_tokens_details")
-    if not isinstance(details, dict):
-        details = {}
-    if details.get("reasoning_tokens") is not None:
-        return usage
-    return {
-        **usage,
-        "completion_tokens_details": {**details, "reasoning_tokens": reasoning_tokens},
-    }
-
-
-def fold_deepseek_cache_hits(cached_tokens: int | None, cache_hits: Any) -> int | None:
-    """Fold DeepSeek-style top-level ``prompt_cache_hit_tokens`` into ``cached_tokens``.
-
-    DeepSeek reports ``prompt_tokens = hit + miss``, so hits are already
-    included in ``prompt_tokens``; folding them into ``cached_tokens`` makes
-    cache pricing apply instead of silently billing them at the full input
-    rate. An explicit ``cached_tokens`` value wins — hits fold in only when
-    the details carry no cached value.
-    """
-    if cached_tokens is not None:
-        return cached_tokens
-    if isinstance(cache_hits, int) and cache_hits > 0:
-        return cache_hits
-    return None
 
 
 class OpenAIResponseParser:
@@ -373,64 +325,12 @@ class OpenAIResponseParser:
 
         Public because the wire-reuse response tier reuses this routine for
         billing parity (``OpenAICompatibleBase._parse_passthrough_usage``).
+
+        Delegates to usage intake, which owns the chat wire dialect: the
+        envelope, the SGLang reasoning fold, the DeepSeek cache fold, the
+        nested-to-flat cache lift and the provider-reported cost (ADR-0025).
         """
-        if "usage" not in response:
-            return None
-
-        # Fold SGLang's top-level reasoning_tokens (pure — the body stays
-        # untouched).
-        usage_data = fold_top_level_reasoning_tokens(response["usage"])
-
-        completion_details = None
-        ctd = usage_data.get("completion_tokens_details")
-        if ctd is not None:
-            completion_details = CompletionTokensDetails(
-                accepted_prediction_tokens=ctd.get("accepted_prediction_tokens"),
-                audio_tokens=ctd.get("audio_tokens"),
-                reasoning_tokens=ctd.get("reasoning_tokens"),
-                rejected_prediction_tokens=ctd.get("rejected_prediction_tokens"),
-                image_tokens=ctd.get("image_tokens"),
-            )
-
-        prompt_details = None
-        ptd = usage_data.get("prompt_tokens_details")
-        if ptd is not None:
-            prompt_details = PromptTokensDetails(
-                audio_tokens=ptd.get("audio_tokens"),
-                cached_tokens=ptd.get("cached_tokens"),
-                image_tokens=ptd.get("image_tokens"),
-                cache_write_tokens=ptd.get("cache_write_tokens"),
-                video_tokens=ptd.get("video_tokens"),
-            )
-
-        # Fold DeepSeek-style top-level cache hits into cached_tokens
-        # (see fold_deepseek_cache_hits).
-        folded = fold_deepseek_cache_hits(
-            prompt_details.cached_tokens if prompt_details is not None else None,
-            usage_data.get("prompt_cache_hit_tokens"),
-        )
-        if folded is not None:
-            if prompt_details is None:
-                prompt_details = PromptTokensDetails()
-            prompt_details.cached_tokens = folded
-
-        # Web search request count (e.g. OpenRouter proxying Anthropic models
-        # passes through server_tool_use.web_search_requests)
-        web_search_requests: int | None = None
-        server_tool_use = usage_data.get("server_tool_use")
-        if isinstance(server_tool_use, dict):
-            ws_count = server_tool_use.get("web_search_requests")
-            if isinstance(ws_count, int) and ws_count > 0:
-                web_search_requests = ws_count
-
-        return Usage(
-            input_tokens=usage_data.get("prompt_tokens", 0),
-            output_tokens=usage_data.get("completion_tokens", 0),
-            total_tokens=usage_data.get("total_tokens", 0),
-            completion_tokens_details=completion_details,
-            prompt_tokens_details=prompt_details,
-            web_search_requests=web_search_requests,
-        )
+        return parse_wire_usage("chat", response)
 
     @staticmethod
     def known_response_fields() -> set[str]:

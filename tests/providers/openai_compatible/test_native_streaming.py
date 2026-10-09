@@ -22,7 +22,18 @@ from llm_proxy.models import (
     TextBlock,
 )
 from llm_proxy.models.types import StreamOptions
+from llm_proxy.observability.event_context import EventContext
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
+
+
+def _context() -> EventContext:
+    """A real capture object for the usage bookkeeping.
+
+    A ``MagicMock`` accepted the old unconditional attribute assignments and
+    would swallow a projection rule change; the real object distinguishes
+    ``None`` (not reported) from a reported zero.
+    """
+    return EventContext(request_id="req_native", trace_id="trace_native", model="test-model")
 
 
 def _adapter(**kwargs) -> OpenAICompatibleBase:
@@ -210,7 +221,7 @@ class TestHandleNativeOpenAIChunk:
             '"prompt_tokens_details":{"cached_tokens":2},'
             '"completion_tokens_details":{"reasoning_tokens":1}}}\n\n'
         )
-        ctx = MagicMock()
+        ctx = _context()
         out = NativePassthroughHandler.handle_native_openai_chunk(
             frame, self._request("glm-5", "glm-5"), ctx
         )
@@ -226,13 +237,11 @@ class TestHandleNativeOpenAIChunk:
         # substring sniff, but the frame carries no usage dict, so nothing
         # is written.
         frame = 'data: {"id":"1","model":"glm-5","choices":[{"delta":{"content":"usage"}}]}\n\n'
-        ctx = MagicMock()
+        ctx = _context()
         NativePassthroughHandler.handle_native_openai_chunk(
             frame, self._request("glm-5", "glm-5"), ctx
         )
-        # prompt_tokens is a MagicMock attribute (truthy) but the handler
-        # must not have written it: no usage dict in this frame.
-        assert not isinstance(ctx.prompt_tokens, int)
+        assert ctx.prompt_tokens is None
 
     def test_done_frame_forwarded_verbatim(self) -> None:
         frame = "data: [DONE]\n\n"
@@ -348,9 +357,7 @@ class TestNativeUsageFrameBilling:
 
     def test_zero_cost_is_not_treated_as_reported(self) -> None:
         """A 0.0 cost must not replace local estimation with a fake zero."""
-        from llm_proxy.observability.event_context import EventContext
-
-        ctx = EventContext(request_id="r", trace_id="t", model="glm-5")
+        ctx = _context()
         frame = 'data: {"id":"1","choices":[],"usage":{"prompt_tokens":5,"cost":0.0}}\n\n'
 
         NativePassthroughHandler.handle_native_openai_chunk(
@@ -358,3 +365,28 @@ class TestNativeUsageFrameBilling:
         )
 
         assert ctx.provider_reported_cost is None
+
+    def test_a_later_frame_cannot_withdraw_earlier_facts(self) -> None:
+        """Usage is cumulative within a turn, so a sparse frame only adds.
+
+        Upstreams repeat the terminal frame, and some repeat it with fewer
+        fields. The converted tier's ``PendingTerminalState.fold_usage`` already
+        states the rule (a later zero never clobbers an earlier non-zero); the
+        native capture now follows it through the EventContext projection, so a
+        repeated frame cannot zero the turn's tokens.
+        """
+        ctx = _context()
+        first = (
+            'data: {"id":"1","choices":[],"usage":{"prompt_tokens":10,'
+            '"completion_tokens":5,"total_tokens":15,"cost":0.01}}\n\n'
+        )
+        repeated = 'data: {"id":"1","choices":[],"usage":{"cost":0.02}}\n\n'
+
+        for frame in (first, repeated):
+            NativePassthroughHandler.handle_native_openai_chunk(
+                frame, self._request("glm-5", "glm-5"), ctx
+            )
+
+        assert (ctx.prompt_tokens, ctx.completion_tokens, ctx.total_tokens) == (10, 5, 15)
+        # A cost is not cumulative: the later report replaces the earlier one.
+        assert ctx.provider_reported_cost == 0.02

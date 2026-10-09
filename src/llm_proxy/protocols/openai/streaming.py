@@ -24,9 +24,7 @@ from llm_proxy.models.content_blocks import (
     ToolUseBlock,
 )
 from llm_proxy.models.types import AudioSource
-from llm_proxy.serialization.openai.components.response_parser import (
-    fold_deepseek_cache_hits,
-)
+from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import StreamingTransformer, StreamingUsage
 
@@ -88,6 +86,10 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             request_id=request_id,
         )
         self._pending_usage: dict[str, Any] | None = None
+        # The canonical parse of the provider's usage frames (ADR-0025), kept
+        # beside the verbatim copy above: that one is served to the client and
+        # stays byte-faithful, this one is what the proxy bills from.
+        self._usage = UsageAccumulator("chat")
         self._emitted_usage_chunk: bool = False
         self._text_buffer: str = ""
         self._reasoning_buffer: str = ""
@@ -258,6 +260,9 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             normalized_usage = self._normalize_usage(chunk["usage"])
             if normalized_usage:
                 self._pending_usage = normalized_usage
+                # Read the ORIGINAL chunk, like the accumulation below: the wire
+                # copy above is normalized for the client, not for billing.
+                self._usage.observe(chunk)
                 if not has_choices:
                     result["usage"] = normalized_usage
                     self._emitted_usage_chunk = True
@@ -714,72 +719,19 @@ class OpenAIStreamingTransformer(StreamingTransformer):
     def get_usage(self) -> StreamingUsage | None:
         """Get accumulated usage information from streaming response.
 
+        The provider's frames are parsed by the shared intake (ADR-0025), so the
+        dialect decisions — the cache-alias lift, the DeepSeek fold, the cost
+        precedence — live once, in the chat adapter, instead of here. What remains
+        is a mechanical projection onto ``StreamingUsage``, the wire-shaped record
+        the streaming tiers still speak; it goes away with that record.
+
         Returns:
             StreamingUsage object if usage data is available from provider.
         """
-        if self._pending_usage and isinstance(self._pending_usage, dict):
-            # Extract provider-reported cost (NanoGPT's nanogpt_cost, OpenRouter's cost)
-            provider_cost = self._pending_usage.get("nanogpt_cost")
-            if provider_cost is None:
-                provider_cost = self._pending_usage.get("cost")
-            if provider_cost is not None and not isinstance(provider_cost, int | float):
-                provider_cost = None
-
-            # Canonical cache-read fact (flat field). Provider converters may
-            # ALSO copy it into prompt_tokens_details.cached_tokens for
-            # wire-dialect consumers; that duplicate must not reach the
-            # canonical StreamingUsage or the same tokens land in both
-            # cache_read_input_tokens and cached_prompt_tokens downstream.
-            cache_read = self._pending_usage.get("cache_read_input_tokens") or 0
-            cache_create = self._pending_usage.get("cache_creation_input_tokens") or 0
-
-            # Extract nested details (OpenAI-style cached_tokens, audio_tokens)
-            prompt_details: dict[str, int] | None = None
-            ptd = self._pending_usage.get("prompt_tokens_details")
-            if isinstance(ptd, dict) and any(v is not None for v in ptd.values()):
-                prompt_details = {k: v for k, v in ptd.items() if v is not None}
-
-            # Fold DeepSeek-style top-level cache hits into cached_tokens
-            # (see fold_deepseek_cache_hits); matches the non-streaming parser.
-            folded = fold_deepseek_cache_hits(
-                (prompt_details or {}).get("cached_tokens"),
-                self._pending_usage.get("prompt_cache_hit_tokens"),
-            )
-            if folded is not None:
-                prompt_details = {**(prompt_details or {}), "cached_tokens": folded}
-
-            # One fact, one field: the flat cache-read wins; the nested
-            # dialect copy is dropped so it cannot be persisted twice.
-            if cache_read and prompt_details and "cached_tokens" in prompt_details:
-                prompt_details = {k: v for k, v in prompt_details.items() if k != "cached_tokens"}
-                if not prompt_details:
-                    prompt_details = None
-
-            completion_details: dict[str, int] | None = None
-            ctd = self._pending_usage.get("completion_tokens_details")
-            if isinstance(ctd, dict) and any(v is not None for v in ctd.values()):
-                completion_details = {k: v for k, v in ctd.items() if v is not None}
-
-            # Web search request count (server_tool_use.web_search_requests)
-            web_search_requests: int | None = None
-            server_tool_use = self._pending_usage.get("server_tool_use")
-            if isinstance(server_tool_use, dict):
-                ws_count = server_tool_use.get("web_search_requests")
-                if isinstance(ws_count, int) and ws_count > 0:
-                    web_search_requests = ws_count
-
-            return StreamingUsage(
-                input_tokens=self._pending_usage.get("prompt_tokens", 0),
-                output_tokens=self._pending_usage.get("completion_tokens", 0),
-                total_tokens=self._pending_usage.get("total_tokens", 0),
-                cache_read_input_tokens=cache_read,
-                cache_creation_input_tokens=cache_create,
-                prompt_tokens_details=prompt_details,
-                completion_tokens_details=completion_details,
-                provider_reported_cost=provider_cost,
-                web_search_requests=web_search_requests,
-            )
-        return None
+        usage = self._usage.result()
+        if usage is None:
+            return None
+        return StreamingUsage.from_usage(usage)
 
     def _web_search_result_block(
         self,

@@ -12,6 +12,7 @@ from orjson import JSONDecodeError
 
 from llm_proxy.models import ServerToolUseBlock, TextBlock, ThinkingBlock, ToolUseBlock
 from llm_proxy.models.tools import is_web_search_tool_name
+from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.openresponses.handler import get_format_context
 from llm_proxy.protocols.openresponses.serializer import (
@@ -23,6 +24,7 @@ from llm_proxy.protocols.openresponses.serializer import (
 from llm_proxy.protocols.openresponses.streaming_emitter import StreamingContentEmitter
 from llm_proxy.protocols.openresponses.streaming_events import StreamingEventFactory
 from llm_proxy.serialization.responses_toolkit import generate_item_id
+from llm_proxy.serialization.usage import UsageAccumulator, merge_latest
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
@@ -307,6 +309,13 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # only writer is ``_message_delta_with_usage`` (web-search usage
         # updates), and the continuation merge reaches it through the public
         # ``merge_terminal_state`` verb instead of poking private fields.
+        #
+        # What the proxy bills from (ADR-0025): two dialects reach this
+        # transformer — a converted upstream's canonical chat chunks and a
+        # Responses-shaped event — so each accumulates separately and
+        # ``get_usage`` merges the two.
+        self._usage_chat = UsageAccumulator("chat")
+        self._usage_responses = UsageAccumulator("responses")
 
     def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
         """Accumulate one native Responses frame for the request log.
@@ -579,6 +588,11 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         """
         chunk_type = data.get("type", "")
 
+        # The event's own usage, before the dispatch: the terminal snapshot
+        # carries it, and the snapshot's output items carry the billable
+        # web-search calls this branch never counted.
+        self._usage_responses.observe(data)
+
         # Track response lifecycle from the upstream events (avoids duplicate
         # response.created / response.in_progress that the Chat Completions
         # path emits).
@@ -663,6 +677,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         usage = data.get("usage")
         if usage:
             self._update_usage(usage)
+            self._usage_chat.observe(data)
 
         if not self.state.response_created:
             events += self._factory._create_response_created_event()
@@ -948,40 +963,34 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
     def get_usage(self) -> StreamingUsage | None:
         """Get accumulated usage information from streaming response.
 
-        Returns:
-            StreamingUsage object with token counts from the streaming state.
+        The counters on ``state`` above are emission state for the client's own
+        ``response.completed`` usage block; what the proxy bills from is the
+        canonical record the intake adapter produced (ADR-0025).
         """
-        web_search_requests = self.state.native_web_search_call_count or None
-        if not self.state.input_tokens and not self.state.output_tokens:
-            if web_search_requests is None:
-                return None
-            # No token usage, but native web search calls are still billable.
-            return StreamingUsage(web_search_requests=web_search_requests)
-        if self.state.input_tokens or self.state.output_tokens:
-            prompt_details = None
-            if self.state.cached_tokens or self.state.audio_input_tokens:
-                prompt_details = {}
-                if self.state.cached_tokens:
-                    prompt_details["cached_tokens"] = self.state.cached_tokens
-                if self.state.audio_input_tokens:
-                    prompt_details["audio_tokens"] = self.state.audio_input_tokens
-            completion_details = None
-            if self.state.audio_output_tokens or self.state.reasoning_tokens:
-                completion_details = {}
-                if self.state.audio_output_tokens:
-                    completion_details["audio_tokens"] = self.state.audio_output_tokens
-                if self.state.reasoning_tokens:
-                    completion_details["reasoning_tokens"] = self.state.reasoning_tokens
+        usage = self._usage_responses.result()
+        chat_usage = self._usage_chat.result()
+        if usage is None:
+            usage = chat_usage
+        elif chat_usage is not None:
+            # Both shapes of one turn (a continuation that changed shape): the
+            # later observation adds facts without withdrawing any.
+            merge_latest(usage, chat_usage)
 
-            return StreamingUsage(
-                input_tokens=self.state.input_tokens,
-                output_tokens=self.state.output_tokens,
-                total_tokens=self.state.input_tokens + self.state.output_tokens,
-                prompt_tokens_details=prompt_details,
-                completion_tokens_details=completion_details,
-                web_search_requests=web_search_requests,
-            )
-        return None
+        # A provider-executed search the upstream announced as a tool call is a
+        # conversion-level fact, not a usage-block one, so it does not come from
+        # the seam. An upstream that reports both signals describes the same
+        # calls, so the larger wins — the monotonic rule the EventContext applies
+        # across usage writes.
+        announced = self.state.native_web_search_call_count
+        if announced:
+            if usage is None:
+                usage = Usage(web_search_requests=announced)
+            else:
+                usage.web_search_requests = max(usage.web_search_requests or 0, announced)
+
+        if usage is None:
+            return None
+        return StreamingUsage.from_usage(usage)
 
     def _emit_web_search_call(
         self,

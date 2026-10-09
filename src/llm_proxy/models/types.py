@@ -121,6 +121,10 @@ class Usage:
     audio_duration_seconds: float | None = None
     # Web search request count (server_tool_use.web_search_requests)
     web_search_requests: int | None = None
+    # Cost the provider itself reported (NanoGPT's nanogpt_cost, OpenRouter's
+    # cost). Wire-reported, so it belongs on the canonical record; the proxy's
+    # own computed cost does not (see Usage intake, ADR-0025).
+    provider_reported_cost: float | None = None
 
     def __post_init__(self) -> None:
         """Compute total_tokens from input and output tokens."""

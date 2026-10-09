@@ -26,6 +26,28 @@ def _get_attr_or_item(obj: Any, key: str) -> Any:
     return None
 
 
+def _is_count(value: Any) -> bool:
+    """Whether a value is a count: an ``int``, and not a ``bool`` (which is one)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _monotonic(current: Any, incoming: Any) -> int | None:
+    """The larger of two counts, with a non-count meaning "not reported".
+
+    Usage within one turn is cumulative, so an observation can add to a counter
+    but never take away from it (``PendingTerminalState.fold_usage`` states the
+    same rule for the converted tier). Details arrive as untyped provider dicts,
+    so a value that is not a count is dropped rather than compared: the accounting
+    path must never raise on a malformed one, and billing ignored such a value
+    anyway.
+    """
+    if not _is_count(incoming):
+        return current if _is_count(current) else None
+    if not _is_count(current):
+        return incoming
+    return max(current, incoming)
+
+
 @dataclass
 class EventContext:
     """Unified context for event capture across logging and tracing.
@@ -149,7 +171,15 @@ class EventContext:
     retry_attempts: list[dict[str, Any]] = field(default_factory=list)
 
     def update_usage(self, usage: Usage | None) -> None:
-        """Update token counts from Usage object.
+        """Update token counts from a Usage object.
+
+        Usage arrives cumulatively: the native passthrough tier captures one
+        streaming frame at a time, so a frame that reports only some facts must
+        not withdraw the ones already seen, and a provider that repeats its
+        terminal frame with fewer fields must not shrink the turn. The same rule
+        ``PendingTerminalState.fold_usage`` states for the converted tier — a
+        later zero never clobbers an earlier non-zero — applies here to every
+        counter.
 
         Args:
             usage: Usage object from InternalResponse or streaming transformer
@@ -157,17 +187,36 @@ class EventContext:
         if usage is None:
             return
 
-        self.prompt_tokens = usage.input_tokens
-        self.completion_tokens = usage.output_tokens
-        self.total_tokens = usage.total_tokens
+        self.prompt_tokens = _monotonic(self.prompt_tokens, usage.input_tokens)
+        self.completion_tokens = _monotonic(self.completion_tokens, usage.output_tokens)
+
+        # ``total_tokens`` follows ``merge_latest``: it is derived from the merged
+        # counters rather than max-merged, because an adapter synthesizes a total
+        # from whatever counters one event carried (Anthropic's ``message_delta``
+        # reports the output only), and that partial sum would otherwise win the max
+        # and contradict the counters. Three cases:
+        #   - both counters known: their sum is the only consistent total;
+        #   - no counters at all: a record that carries only a total (STT, image
+        #     generation) keeps it;
+        #   - one counter still unknown: the sum would be a partial total, so the
+        #     existing total stands.
+        if self.prompt_tokens is not None and self.completion_tokens is not None:
+            self.total_tokens = self.prompt_tokens + self.completion_tokens
+        elif not usage.input_tokens and not usage.output_tokens:
+            self.total_tokens = _monotonic(self.total_tokens, usage.total_tokens)
 
         # Anthropic-style cache tokens (flat on Usage)
-        if usage.cache_read_input_tokens is not None:
-            self.cache_read_input_tokens = usage.cache_read_input_tokens
-        self.cache_creation_input_tokens = usage.cache_creation_input_tokens
+        self.cache_read_input_tokens = _monotonic(
+            self.cache_read_input_tokens, usage.cache_read_input_tokens
+        )
+        self.cache_creation_input_tokens = _monotonic(
+            self.cache_creation_input_tokens, usage.cache_creation_input_tokens
+        )
 
-        if hasattr(usage, "reasoning_tokens"):
-            self.reasoning_tokens = usage.reasoning_tokens
+        # Reasoning rides the flat field when a dialect reports it there, and the
+        # nested OpenAI detail otherwise (the chat dialect keeps it nested).
+        reasoning = getattr(usage, "reasoning_tokens", None)
+        self.reasoning_tokens = _monotonic(self.reasoning_tokens, reasoning)
 
         # Handle prompt tokens details (supports both dataclass and dict formats)
         ptd = getattr(usage, "prompt_tokens_details", None)
@@ -211,12 +260,13 @@ class EventContext:
 
         # Web search request count (from StreamingUsage or Usage)
         ws = getattr(usage, "web_search_requests", None)
-        if ws is not None:
-            self.web_search_requests = ws
+        self.web_search_requests = _monotonic(self.web_search_requests, ws)
 
         # Handle completion tokens details (supports both dataclass and dict formats)
         ctd = getattr(usage, "completion_tokens_details", None)
         if ctd:
+            nested_reasoning = _get_attr_or_item(ctd, "reasoning_tokens")
+            self.reasoning_tokens = _monotonic(self.reasoning_tokens, nested_reasoning)
             audio_out = _get_attr_or_item(ctd, "audio_tokens")
             if audio_out is not None:
                 self.audio_output_tokens = audio_out

@@ -452,6 +452,57 @@ class TestOpenResponsesToolCallStreaming:
         }
         assert added["action"] == expected_action
 
+    def test_native_web_search_call_is_counted_for_billing(self):
+        """A provider-executed search announced as a tool call is billable.
+
+        The intake seam (ADR-0025) reads the usage block, which says nothing
+        about a search the upstream announced in the delta stream, so this count
+        is the transformer's own and must survive the migration.
+        """
+        from llm_proxy.protocols.openresponses.handler import (
+            clear_format_context,
+            set_format_context,
+        )
+
+        set_format_context({"tools": [{"type": "web_search"}]})
+        try:
+            transformer = OpenResponsesStreamingTransformer(
+                model="deepseek-v4-flash",
+                request_id="test-ws-billing",
+                intercept_web_search=False,
+            )
+            for chunk in (
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_ws_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "web_search",
+                                            "arguments": '{"query":"hermes agent"}',
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            ):
+                transformer.transform(chunk)
+        finally:
+            clear_format_context()
+
+        usage = transformer.get_usage()
+        assert usage is not None
+        assert usage.web_search_requests == 1
+
     def test_web_search_call_intercept_mode_not_emitted(self):
         """Server-side interception (intercept_web_search=True) must not emit
         the web_search tool call to the client at all — the proxy executes it.

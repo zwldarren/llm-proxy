@@ -46,9 +46,13 @@ def test_anthropic_message_delta_output_usage_extraction():
     )
     handler.maybe_capture_native_streaming_usage(frame, ctx)
     assert ctx.completion_tokens == 500
-    # total_tokens is only computed once both prompt and completion are known;
-    # prompt_tokens is still missing in this isolated test.
-    assert ctx.total_tokens is None
+    # The recorded total is derived from the counters whenever both are known, so a
+    # lone delta that reports the output only records that output. Nothing on the
+    # wire is lost by this: Anthropic's ``message_start`` always reports the prompt,
+    # so a delta is never the first event of a real turn (see
+    # ``test_anthropic_combined_start_and_delta_usage``), and the canonical record
+    # has no "not reported" state for a counter to preserve here.
+    assert ctx.total_tokens == 500
 
 
 def test_anthropic_combined_start_and_delta_usage():

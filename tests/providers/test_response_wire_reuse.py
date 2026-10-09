@@ -182,7 +182,7 @@ class TestChatWireReuseResponse:
         )
 
         assert wire_usage == parsed.usage
-        assert wire_usage.prompt_tokens_details.cached_tokens == 64
+        assert wire_usage.cache_read_input_tokens == 64
         assert wire_usage.web_search_requests == 2
 
 

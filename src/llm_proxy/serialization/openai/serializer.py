@@ -59,61 +59,21 @@ from llm_proxy.serialization.responses_toolkit import (
     extract_summary_text,
     write_tool_controls,
 )
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 logger = get_logger(__name__)
 
 
-def parse_usage_from_response(
-    response: dict[str, Any], web_search_call_count: int = 0
-) -> Usage | None:
+def parse_usage_from_response(response: dict[str, Any]) -> Usage | None:
     """Extract a ``Usage`` object from an OpenAI Responses API response body.
 
     Shared by the full response parser and the native passthrough path (which
-    only needs usage for billing).
+    only needs usage for billing). The facts are the responses dialect's, so the
+    extraction belongs to the intake adapter (ADR-0025) — including the web-search
+    calls the body reports as output items, which are billable even when the body
+    carries no usage block.
     """
-    usage_data = response.get("usage")
-    if not isinstance(usage_data, dict):
-        # Native web search calls are billed per request even when the
-        # response carries no usage object.
-        if web_search_call_count > 0:
-            return Usage(web_search_requests=web_search_call_count)
-        return None
-
-    prompt_details = None
-    input_details = usage_data.get("input_tokens_details") or usage_data.get(
-        "prompt_tokens_details"
-    )
-    if isinstance(input_details, dict):
-        from llm_proxy.models.types import PromptTokensDetails
-
-        prompt_details = PromptTokensDetails(
-            cached_tokens=input_details.get("cached_tokens"),
-            audio_tokens=input_details.get("audio_tokens"),
-            image_tokens=input_details.get("image_tokens"),
-        )
-
-    completion_details = None
-    output_details = usage_data.get("output_tokens_details") or usage_data.get(
-        "completion_tokens_details"
-    )
-    if isinstance(output_details, dict):
-        from llm_proxy.models.types import CompletionTokensDetails
-
-        completion_details = CompletionTokensDetails(
-            reasoning_tokens=output_details.get("reasoning_tokens"),
-            audio_tokens=output_details.get("audio_tokens"),
-            accepted_prediction_tokens=output_details.get("accepted_prediction_tokens"),
-            rejected_prediction_tokens=output_details.get("rejected_prediction_tokens"),
-        )
-
-    return Usage(
-        input_tokens=usage_data.get("input_tokens", 0),
-        output_tokens=usage_data.get("output_tokens", 0),
-        total_tokens=usage_data.get("total_tokens", 0),
-        prompt_tokens_details=prompt_details,
-        completion_tokens_details=completion_details,
-        web_search_requests=web_search_call_count or None,
-    )
+    return parse_wire_usage("responses", response)
 
 
 def _audio_placeholder(part: dict[str, Any]) -> str:
@@ -793,7 +753,6 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
     ) -> InternalResponse:
         output: list[Any] = []
         finish_reason = None
-        web_search_call_count = 0
         provider_info: dict[str, Any] = {"provider": "openai"}
         # Items with no internal ContentBlock equivalent, recorded as
         # (position, item) so formatters can re-insert them verbatim and the
@@ -902,7 +861,6 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                     )
                 )
             elif item_type == "web_search_call":
-                web_search_call_count += 1
                 action = item.get("action", {})
                 if isinstance(action, dict):
                     query = action.get("query", "") or ""
@@ -1006,7 +964,7 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                     parse_token_logprob(entry) for entry in part_logprobs if isinstance(entry, dict)
                 )
 
-        usage = parse_usage_from_response(response, web_search_call_count=web_search_call_count)
+        usage = parse_usage_from_response(response)
 
         return InternalResponse(
             id=response.get("id") or generate_response_id(),
