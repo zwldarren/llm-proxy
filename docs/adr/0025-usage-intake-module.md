@@ -157,6 +157,16 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   lifted into the flat field, a details object with nothing left is not `None` to a
   caller testing truthiness, and downstream emission would have read it as "has
   nested facts".
+- One call site turned out to speak a dialect that already existed. Decisions
+  reports its usage as the Responses block: ``input_tokens`` / ``output_tokens``
+  with the cache and thinking counts nested under ``input_tokens_details`` /
+  ``output_tokens_details``, and no ``output`` items for the adapter's search count
+  to find. Its parser therefore declares ``responses`` rather than registering a
+  ``decisions`` alias, because the registry is keyed by wire *shape*: a
+  provider-named key would make the key mean "provider flavour" and leave two
+  implementations of one mapping to drift apart. The one fact this moved is the
+  provider's own cost, which the shipped parser routed to ``provider_info``
+  (``openrouter_cost``) instead of the record; the amount billed is unchanged.
 - The dialect set starts with the four that carry the most copies — chat,
   responses, anthropic, realtime — and gains one per slice after that (ollama,
   which parses `prompt_eval_count`/`eval_count` and clamps the

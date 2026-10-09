@@ -196,8 +196,10 @@ placement), one row per dialect and call site; a row that declares a divergence
 must name the fact and the reason, and a fact a slice deliberately repaired keeps
 its name in a `closed` entry beside the amount the repair produces. The four
 dialects above are the migrated ones — the provider-native shapes that still parse
-usage by hand (gemini, the Gemini Interactions vocabulary, Decisions, the media
-stream trackers) follow the same landing order. An emission site may read the
+usage by hand (gemini, the Gemini Interactions vocabulary, the media stream
+trackers) follow the same landing order; a provider whose usage block *is*
+an existing dialect declares that dialect rather than adding a provider-named key
+(Decisions speaks the responses shape). An emission site may read the
 record instead of re-deriving the amounts (Ollama's chunk converter builds the
 client's OpenAI-dialect usage object that way), but it still owns the shape it
 emits. See ADR-0025.

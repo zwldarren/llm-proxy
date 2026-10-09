@@ -52,6 +52,7 @@ from llm_proxy.serialization.ollama.serializer import OllamaProviderSerializer
 from llm_proxy.serialization.ollama.streaming import OllamaChunkConverter
 from llm_proxy.serialization.openai.serializer import parse_usage_from_response
 from llm_proxy.serialization.openai.streaming_converter import OpenAIResponsesChunkConverter
+from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.usage import UsageAccumulator, parse_usage
 
 #: The billable facts both sides are projected onto. ``cost`` is included
@@ -272,6 +273,30 @@ def _ollama_streaming_converter(frames: Sequence[dict[str, Any]]) -> Usage | Non
     return converter.get_usage()
 
 
+class _DecisionsProviderSerializer(ProviderSerializer):
+    """The provider-serializer base, whose Decisions path owns its own body parse.
+
+    Only ``parse_provider_decisions_response`` is exercised here; the abstract
+    members of the base are never called by the ratchet.
+    """
+
+    def _build_provider_request(self, request: Any, context: Any) -> dict[str, Any]:
+        raise AssertionError("the ratchet only parses responses")
+
+    def parse_provider_response(
+        self, response: dict[str, Any], model: str | None = None, **kwargs: Any
+    ) -> Any:
+        raise AssertionError("the ratchet only parses decisions responses")
+
+    def get_chunk_converter(self, model: str = "", request_id: str = "") -> Any:
+        raise AssertionError("the ratchet only parses responses")
+
+
+def _decisions_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/providers/base.py`` — a Decisions body → usage."""
+    return _DecisionsProviderSerializer().parse_provider_decisions_response(frames[0]).usage
+
+
 # ---------------------------------------------------------------------------
 # Rows
 # ---------------------------------------------------------------------------
@@ -480,6 +505,19 @@ OLLAMA_EMBED: dict[str, Any] = {
     "model": "nomic-embed-text",
     "embeddings": [[0.1, 0.2]],
     "prompt_eval_count": 12,
+}
+
+DECISIONS_BODY: dict[str, Any] = {
+    "model": "gpt-6-luna",
+    "answers": [{"type": "predicate", "name": "urgent", "probability": 0.92}],
+    "usage": {
+        "input_tokens": 296,
+        "input_tokens_details": {"cached_tokens": 128, "cache_write_tokens": 32},
+        "output_tokens": 0,
+        "output_tokens_details": {"reasoning_tokens": 12},
+        "total_tokens": 296,
+        "cost": 0.25,
+    },
 }
 
 _ROWS: tuple[Row, ...] = (
@@ -786,6 +824,34 @@ _ROWS: tuple[Row, ...] = (
             "reasoning": 0,
             "web_search": 3,
             "cost": 0.5,
+        },
+    ),
+    Row(
+        id="decisions-body-parser",
+        dialect="responses",
+        # The Decisions usage object is the Responses dialect's (same counters, same
+        # nested detail names), so it declares that dialect instead of growing a
+        # second adapter for one shape.
+        frames=(DECISIONS_BODY,),
+        legacy=_decisions_body_parser,
+        facts_of=_facts_of_usage,
+        # The shipped parser routed the provider's own cost to ``provider_info``
+        # (``openrouter_cost``) rather than the record, so the fact reached billing
+        # through the other route; the record carries it now.
+        closed={
+            "cost": (
+                "the shipped parser returned the provider's cost through provider_info extras."
+            )
+        },
+        recorded={
+            "input": 296,
+            "output": 0,
+            "total": 296,
+            "cache_read": 128,
+            "cache_write": 32,
+            "reasoning": 12,
+            "web_search": 0,
+            "cost": 0.25,
         },
     ),
     Row(
