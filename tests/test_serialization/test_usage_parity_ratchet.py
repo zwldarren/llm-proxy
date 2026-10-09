@@ -39,6 +39,7 @@ from typing import Any
 import orjson
 import pytest
 
+from llm_proxy.billing.image_stream_usage import ImageStreamUsageTracker
 from llm_proxy.billing.tokens import TokenUsage, token_usage_from
 from llm_proxy.core.conversion import NativePassthroughHandler
 from llm_proxy.models.types import Usage
@@ -46,6 +47,7 @@ from llm_proxy.observability.event_context import EventContext
 from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
+from llm_proxy.providers.gemini.adapter import GeminiAdapter
 from llm_proxy.serialization.anthropic.serializer import parse_usage_and_provider_extras
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
 from llm_proxy.serialization.ollama.serializer import OllamaProviderSerializer
@@ -297,6 +299,31 @@ def _decisions_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
     return _DecisionsProviderSerializer().parse_provider_decisions_response(frames[0]).usage
 
 
+def _gemini_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/gemini/response_parser.py`` — a generateContent body → usage."""
+    from llm_proxy.serialization.gemini.response_parser import GeminiResponseParserMixin
+
+    class _Parser(GeminiResponseParserMixin):
+        pass
+
+    return _Parser().parse_provider_response(frames[0], model="gemini-2.5-flash").usage
+
+
+def _gemini_image_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``providers/gemini/adapter.py`` — an image-generation body → usage."""
+    return GeminiAdapter(api_key="test-key")._parse_image_usage(frames[0])
+
+
+def _gemini_image_stream_tracker(frames: Sequence[dict[str, Any]]) -> EventContext:
+    """``billing/image_stream_usage.py`` — the image SSE stream → the context."""
+    tracker = ImageStreamUsageTracker()
+    for frame in frames:
+        tracker.observe("data: " + orjson.dumps(frame).decode() + "\n\n")
+    context = _new_context()
+    tracker.apply_to(context)
+    return context
+
+
 # ---------------------------------------------------------------------------
 # Rows
 # ---------------------------------------------------------------------------
@@ -360,6 +387,13 @@ _NATIVE_SEARCHES_WERE_UNREAD = (
     "the shipped transformer's Responses branch read the token counters only, so a "
     "provider-executed search in the terminal snapshot was never counted — while the "
     "non-streaming body parser counted the same items."
+)
+
+_GEMINI_IMAGE_COUNTERS_WERE_RAW = (
+    "the shipped image paths read `promptTokenCount`/`candidatesTokenCount` straight "
+    "off `usageMetadata`, so the tool-use prompt tokens, the thinking tokens and the "
+    "cached content the block reports beside them never reached the record; the seam "
+    "applies the gemini mapping to every caller of the shape."
 )
 
 _CHAT_SEARCHES_WERE_UNREAD = (
@@ -518,6 +552,44 @@ DECISIONS_BODY: dict[str, Any] = {
         "total_tokens": 296,
         "cost": 0.25,
     },
+}
+
+#: One Gemini ``usageMetadata`` block, as all three of its call sites see it: the
+#: tool-use prompt tokens reported beside the prompt count, thoughts, cached
+#: content, and a total that says candidates exclude the thoughts
+#: (100 + 20 + 5 + 7 == 132).
+_GEMINI_META: dict[str, Any] = {
+    "promptTokenCount": 100,
+    "candidatesTokenCount": 20,
+    "toolUsePromptTokenCount": 5,
+    "thoughtsTokenCount": 7,
+    "totalTokenCount": 132,
+    "cachedContentTokenCount": 30,
+}
+
+GEMINI_BODY: dict[str, Any] = {
+    "responseId": "gem_1",
+    "usageMetadata": _GEMINI_META,
+    "candidates": [{"content": {"parts": [{"text": "Hello"}]}}],
+}
+
+GEMINI_GROUNDED_BODY: dict[str, Any] = {
+    "responseId": "gem_2",
+    "usageMetadata": _GEMINI_META,
+    "candidates": [
+        {
+            "content": {"parts": [{"text": "Hello"}]},
+            "groundingMetadata": {"webSearchQueries": ["weather", "news"]},
+        }
+    ],
+}
+
+GEMINI_IMAGE_BODY: dict[str, Any] = {
+    "responseId": "gem_3",
+    "usageMetadata": _GEMINI_META,
+    "candidates": [
+        {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": "aW1n"}}]}}
+    ],
 }
 
 _ROWS: tuple[Row, ...] = (
@@ -827,6 +899,85 @@ _ROWS: tuple[Row, ...] = (
         },
     ),
     Row(
+        id="gemini-body-parser",
+        dialect="gemini",
+        frames=(GEMINI_BODY,),
+        legacy=_gemini_body_parser,
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-body-parser-search-grounded",
+        dialect="gemini",
+        # The same counters with grounding on the candidate: the tool-use prompt
+        # tokens are excluded from the input count and the searches are billed
+        # per request instead.
+        frames=(GEMINI_GROUNDED_BODY,),
+        legacy=_gemini_body_parser,
+        recorded={
+            "input": 100,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-image-body-parser",
+        dialect="gemini",
+        # This call site read the raw counters: no tool-use tokens, no thoughts, no
+        # cached content. The seam's mapping is the repair.
+        frames=(GEMINI_IMAGE_BODY,),
+        legacy=_gemini_image_body_parser,
+        facts_of=_facts_of_usage,
+        closed=dict.fromkeys(
+            ("input", "output", "cache_read", "reasoning"), _GEMINI_IMAGE_COUNTERS_WERE_RAW
+        ),
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-image-stream-tracker",
+        dialect="gemini",
+        # The streaming image tracker hand-built the same record from the same block,
+        # with the same omissions as the body parser above.
+        frames=(GEMINI_IMAGE_BODY,),
+        legacy=_gemini_image_stream_tracker,
+        facts_of=_facts_of_event_context,
+        closed=dict.fromkeys(
+            ("input", "output", "cache_read", "reasoning"), _GEMINI_IMAGE_COUNTERS_WERE_RAW
+        ),
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
         id="decisions-body-parser",
         dialect="responses",
         # The Decisions usage object is the Responses dialect's (same counters, same
@@ -1051,4 +1202,5 @@ def test_every_still_unmigrated_dialect_has_a_row() -> None:
         "responses",
         "realtime",
         "ollama",
+        "gemini",
     }

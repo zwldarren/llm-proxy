@@ -157,6 +157,27 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   lifted into the flat field, a details object with nothing left is not `None` to a
   caller testing truthiness, and downstream emission would have read it as "has
   nested facts".
+- The gemini `usageMetadata` dialect is the one whose mapping is a *heuristic* rather
+  than a rename: `toolUsePromptTokenCount` is billed as input except when the turn
+  used Google Search grounding (the search fee covers it), and `thoughtsTokenCount`
+  is added to the output count only when the block's own total proves
+  `candidatesTokenCount` excludes it. Two of the three call sites that read the block
+  skipped both rules and took the raw counters — the image-generation body parser
+  and the streaming image tracker — so the same response billed one way through the
+  chat path and another through the image paths. The seam is now the single reader of
+  the shape, and the two are repaired: on a block reporting 100 prompt + 5 tool-use +
+  20 candidates + 7 thoughts + 30 cached, the image paths used to record 100/20 with
+  no cache or thinking fact, and now record 105/27 with both.
+- That heuristic needs a *turn-level* fact: whether the turn used search grounding
+  lives on the candidate, not in `usageMetadata`. The adapter reads it from the
+  payload the caller hands in, which is exact for a response body and for a stream
+  chunk that carries its own candidates. The gemini streaming converter, however,
+  latches the turn's grounding across chunks and applies it to a later usage-only
+  chunk, and the seam has no channel for a fact that arrives beside the payload — the
+  same limitation the OpenResponses tool-call counter works around with a counter of
+  its own. Until the interface grows a turn-facts channel (or pricing learns to apply
+  the exclusion from the record), that one call site keeps its own latch and its own
+  parse.
 - One call site turned out to speak a dialect that already existed. Decisions
   reports its usage as the Responses block: ``input_tokens`` / ``output_tokens``
   with the cache and thinking counts nested under ``input_tokens_details`` /

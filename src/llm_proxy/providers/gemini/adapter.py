@@ -1153,6 +1153,7 @@ class GeminiAdapter(
         usage.
         """
         from llm_proxy.models.types import Usage
+        from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
         if self._is_interactions_variant():
             raw_usage = response.get("usage")
@@ -1173,12 +1174,10 @@ class GeminiAdapter(
 
         if "usageMetadata" not in response:
             return None
-        meta = response["usageMetadata"]
-        return Usage(
-            input_tokens=meta.get("promptTokenCount", 0),
-            output_tokens=meta.get("candidatesTokenCount", 0),
-            total_tokens=meta.get("totalTokenCount", 0),
-        )
+        # One parse for the gemini dialect (ADR-0025): the same mapping the chat body
+        # parser applies, so an image response bills tool-use prompt tokens, thoughts
+        # and cached content exactly like a text one.
+        return parse_wire_usage("gemini", response)
 
     async def image_generation(
         self,

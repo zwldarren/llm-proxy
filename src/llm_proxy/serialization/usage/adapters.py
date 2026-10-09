@@ -27,7 +27,7 @@ from llm_proxy.serialization.usage.folds import (
     fold_deepseek_cache_hits,
 )
 
-type UsageDialect = Literal["chat", "responses", "anthropic", "realtime", "ollama"]
+type UsageDialect = Literal["chat", "responses", "anthropic", "realtime", "ollama", "gemini"]
 
 __all__ = ["UsageDialect", "parse_usage"]
 
@@ -415,6 +415,99 @@ def _parse_ollama(payload: Mapping[str, Any]) -> Usage | None:
 
 
 # ---------------------------------------------------------------------------
+# Gemini generateContent
+# ---------------------------------------------------------------------------
+
+
+def _gemini_search_queries(payload: Mapping[str, Any]) -> int:
+    """Native Google Search grounding: how many queries the model issued.
+
+    ``groundingMetadata.webSearchQueries`` lives on the candidate, not in
+    ``usageMetadata``, and lists the queries the model actually issued; Google
+    bills each as a per-request search fee.
+    """
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        return 0
+    for candidate in candidates:
+        grounding = _as_dict(candidate.get("groundingMetadata")) if _as_dict(candidate) else None
+        if grounding is None:
+            continue
+        queries = grounding.get("webSearchQueries")
+        if isinstance(queries, list) and queries:
+            return len(queries)
+    return 0
+
+
+def _gemini_billable_counts(
+    meta: Mapping[str, Any], *, has_search_grounding: bool
+) -> tuple[int, int]:
+    """``(input, output)`` from a Gemini ``usageMetadata``, as Google bills it.
+
+    ``usageMetadata`` carries more dimensions than the OpenAI-shaped usage the
+    proxy prices:
+
+    - ``toolUsePromptTokenCount`` — tool-use prompt tokens, reported SEPARATELY
+      from ``promptTokenCount``. They are billed at the input rate, EXCEPT when
+      they came from Google Search grounding (Google bills those via the
+      per-request search fee instead), so search-grounded calls exclude them. The
+      API only exposes the aggregate across ALL tools, so when a request mixes
+      search grounding with function calling, the function-call tool tokens are
+      excluded too and input is undercounted — a documented limitation (no
+      per-tool breakdown is available).
+    - ``thoughtsTokenCount`` — thinking tokens. Depending on model/version,
+      ``candidatesTokenCount`` may or may not include them. Detected via the
+      total: ``prompt + candidates + toolUse + thoughts == total`` means
+      candidates exclude thoughts, so they are added to the output side.
+      Requiring the exact match (rather than "sum != total") keeps the heuristic
+      from misfiring when ``totalTokenCount`` carries additional dimensions.
+      ``cachedContentTokenCount`` is NOT one of them: per the Gemini docs,
+      ``promptTokenCount`` already includes the cached content tokens, so they are
+      inside the sum above.
+    """
+    prompt = _int(meta.get("promptTokenCount")) or 0
+    candidates = _int(meta.get("candidatesTokenCount")) or 0
+    tool_use = _int(meta.get("toolUsePromptTokenCount")) or 0
+    thoughts = _int(meta.get("thoughtsTokenCount")) or 0
+    total = _int(meta.get("totalTokenCount")) or 0
+
+    input_tokens = prompt if has_search_grounding else prompt + tool_use
+    output_tokens = candidates
+    if thoughts and total and prompt + candidates + tool_use + thoughts == total:
+        output_tokens = candidates + thoughts
+    return input_tokens, output_tokens
+
+
+def _parse_gemini(payload: Mapping[str, Any]) -> Usage | None:
+    meta = _as_dict(payload.get("usageMetadata"))
+    if meta is None:
+        return None
+    # The input count depends on whether the turn used search grounding: Google
+    # charges the per-request search fee instead of the tool-use prompt tokens it
+    # reports separately, so a grounded turn excludes them. That makes the fact
+    # turn-level — it lives beside the usage block, on the candidate — so it is
+    # read from the payload the caller hands in.
+    search_requests = _gemini_search_queries(payload)
+    input_tokens, output_tokens = _gemini_billable_counts(
+        meta, has_search_grounding=search_requests > 0
+    )
+    return Usage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=_int(meta.get("totalTokenCount")) or (input_tokens + output_tokens),
+        # ``cachedContentTokenCount`` is inside ``promptTokenCount`` (Gemini
+        # documents the prompt count as the logical input total), which is the
+        # canonical invariant, so it goes in the flat field only.
+        cache_read_input_tokens=_int(meta.get("cachedContentTokenCount")),
+        # Thoughts are billed as output; ``reasoning_tokens`` documents how many of
+        # those output tokens they were, the same subset relationship the OpenAI
+        # dialects express.
+        reasoning_tokens=_int(meta.get("thoughtsTokenCount")),
+        web_search_requests=search_requests or None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # The seam
 # ---------------------------------------------------------------------------
 
@@ -435,6 +528,7 @@ _ADAPTERS: dict[str, DialectAdapter] = {
     "anthropic": DialectAdapter(_parse_anthropic),
     "realtime": DialectAdapter(_parse_realtime),
     "ollama": DialectAdapter(_parse_ollama),
+    "gemini": DialectAdapter(_parse_gemini),
 }
 
 

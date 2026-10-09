@@ -583,8 +583,10 @@ class TestUsageAccumulator:
         assert usage.total_tokens == 190
 
     def test_dialect_is_declared_not_guessed(self) -> None:
+        # The Interactions vocabulary is a wire shape with no adapter yet: a caller
+        # that declares it gets a loud error rather than a best-effort guess.
         with pytest.raises(ValueError, match="unknown usage dialect"):
-            parse_usage("gemini", {"usage": {}})  # type: ignore[arg-type]
+            parse_usage("gemini_interactions", {"usage": {}})  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

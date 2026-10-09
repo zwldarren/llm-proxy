@@ -23,6 +23,7 @@ from orjson import JSONDecodeError
 
 from llm_proxy.models.types import PromptTokensDetails, Usage
 from llm_proxy.observability.event_context import EventContext
+from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
 
 class ImageStreamUsageTracker:
@@ -31,7 +32,10 @@ class ImageStreamUsageTracker:
     def __init__(self) -> None:
         self._images_completed = 0
         self._usage: dict[str, Any] | None = None
-        self._gemini_usage: dict[str, Any] | None = None
+        # The whole Gemini payload, not just its usageMetadata block: the intake
+        # seam reads the candidates beside it for the grounding fact, which decides
+        # whether tool-use prompt tokens are billed as input (ADR-0025).
+        self._gemini_payload: dict[str, Any] | None = None
         # Interactions-API usage (new vocabulary: total_input_tokens, …)
         self._interactions_usage: dict[str, Any] | None = None
 
@@ -45,7 +49,10 @@ class ImageStreamUsageTracker:
 
     @property
     def gemini_usage(self) -> dict[str, Any] | None:
-        return self._gemini_usage
+        if self._gemini_payload is None:
+            return None
+        usage = self._gemini_payload.get("usageMetadata")
+        return usage if isinstance(usage, dict) else None
 
     @property
     def interactions_usage(self) -> dict[str, Any] | None:
@@ -98,7 +105,7 @@ class ImageStreamUsageTracker:
         # Gemini (generateContent): usageMetadata + candidates with inlineData images
         gemini_usage = data.get("usageMetadata")
         if isinstance(gemini_usage, dict):
-            self._gemini_usage = gemini_usage
+            self._gemini_payload = data
         candidates = data.get("candidates")
         if isinstance(candidates, list):
             for c in candidates:
@@ -163,13 +170,9 @@ class ImageStreamUsageTracker:
                     total_tokens=iu.get("total_tokens"),
                 )
             )
-        elif self._gemini_usage is not None:
-            # Gemini usageMetadata: promptTokenCount, candidatesTokenCount, etc.
-            gu = self._gemini_usage
-            ctx.update_usage(
-                Usage(
-                    input_tokens=gu.get("promptTokenCount") or 0,
-                    output_tokens=gu.get("candidatesTokenCount") or 0,
-                    total_tokens=gu.get("totalTokenCount"),
-                )
-            )
+        elif self._gemini_payload is not None:
+            # The gemini dialect, through the same seam the response parsers use, so
+            # an image stream and a JSON body bill the same wire shape the same way:
+            # tool-use prompt tokens, thoughts and cached content are the seam's
+            # mapping, not this tracker's (ADR-0025).
+            ctx.update_usage(parse_wire_usage("gemini", self._gemini_payload))

@@ -183,7 +183,8 @@ _Avoid_: cached_content_tokens, thoughts_tokens (deleted provider-flavored alias
 The single point where a provider's wire payload becomes the canonical usage record:
 `parse_usage(dialect, payload)` plus a per-dialect accumulator, in
 `llm_proxy.serialization.usage` — one dialect adapter per wire shape
-(chat-completions, responses, anthropic, realtime, ollama), keyed by shape and not
+(chat-completions, responses, anthropic, realtime, ollama, gemini
+`usageMetadata`), keyed by shape and not
 by provider, because one dialect serves many providers and the native-passthrough
 tier has no provider serializer in play. Every tier reads usage through it:
 provider serializers, streaming converters, protocol transformers and the
@@ -196,8 +197,8 @@ placement), one row per dialect and call site; a row that declares a divergence
 must name the fact and the reason, and a fact a slice deliberately repaired keeps
 its name in a `closed` entry beside the amount the repair produces. The four
 dialects above are the migrated ones — the provider-native shapes that still parse
-usage by hand (gemini, the Gemini Interactions vocabulary, the media stream
-trackers) follow the same landing order; a provider whose usage block *is*
+usage by hand (the Gemini Interactions vocabulary, the media stream trackers)
+follow the same landing order; a provider whose usage block *is*
 an existing dialect declares that dialect rather than adding a provider-named key
 (Decisions speaks the responses shape). An emission site may read the
 record instead of re-deriving the amounts (Ollama's chunk converter builds the
