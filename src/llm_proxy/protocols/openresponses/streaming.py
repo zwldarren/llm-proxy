@@ -381,6 +381,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         model: str,
         request_id: str,
         start_index: int,
+        *,
         include: list[str] | None = None,
         web_search_tool_indices: set[int] | None = None,
         intercept_web_search: bool = True,
@@ -396,6 +397,8 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             start_index: Starting output item index
             include: Optional include fields from the original request
             web_search_tool_indices: Optional set of web_search tool indices to propagate
+            intercept_web_search: Whether the proxy is still executing searches for
+                this request (the continuation hop matches the original transformer)
         """
         instance = cls(
             model=model,

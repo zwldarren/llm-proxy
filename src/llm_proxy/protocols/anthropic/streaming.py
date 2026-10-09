@@ -370,14 +370,24 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
 
     @classmethod
     def continuation(
-        cls, model: str, request_id: str, start_index: int
+        cls,
+        model: str,
+        request_id: str,
+        start_index: int,
+        *,
+        intercept_web_search: bool = True,
     ) -> AnthropicStreamingTransformer:
         """Create a transformer that continues an existing stream.
 
         Skips the message_start event (already emitted) and starts
-        content block indices from start_index.
+        content block indices from start_index. ``intercept_web_search`` is
+        forwarded so the continuation hop agrees with the original transformer
+        about whether the proxy is executing searches (the flag decides how a
+        ``websearch`` tool call is handled).
         """
-        instance = cls(model=model, request_id=request_id)
+        instance = cls(
+            model=model, request_id=request_id, intercept_web_search=intercept_web_search
+        )
         instance._sent_message_start = True
         instance._current_block_index = start_index
         return instance

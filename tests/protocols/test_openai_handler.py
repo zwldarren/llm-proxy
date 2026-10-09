@@ -392,8 +392,7 @@ class TestOpenAIStreamingTransformerContinuation:
         """continuation() must return a usable transformer instance so the
         web-search continuation loop can pump the follow-up stream through it
         (previously missing — the loop raised
-        "Transformer OpenAIStreamingTransformer does not implement
-        'continuation'")."""
+        "OpenAIStreamingTransformer does not implement continuation()")."""
         cont = OpenAIStreamingTransformer.continuation(
             model="gemini-3.1-flash-lite", request_id="resp_1", start_index=3
         )

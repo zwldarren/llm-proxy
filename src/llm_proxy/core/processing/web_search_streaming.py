@@ -393,10 +393,6 @@ class WebSearchStreamProcessor:
                 len(ws_results), fallback=len(accumulated) + len(ws_results)
             )
             cont_cls = type(state.transformer)
-            if not hasattr(cont_cls, "continuation"):
-                raise TypeError(
-                    f"Transformer {cont_cls.__name__} does not implement 'continuation'"
-                )
             cont_kwargs = dict(
                 # Echo the client-requested alias (see InternalRequest.echo_model)
                 # so continuation chunks agree with the main stream; the upstream
@@ -404,10 +400,11 @@ class WebSearchStreamProcessor:
                 model=state.stream_request.echo_model,
                 request_id=state.transformer.response_id,
                 start_index=next_index,
+                # The continuation is the same logical request: it intercepts
+                # web search on exactly the same terms as the original hop.
+                intercept_web_search=proxy_web_search_active,
             )
             src_state = getattr(state.transformer, "state", None)
-            if src_state is not None:
-                cont_kwargs["intercept_web_search"] = proxy_web_search_active
             cont_transformer = cont_cls.continuation(**cont_kwargs)
 
             if src_state is not None:

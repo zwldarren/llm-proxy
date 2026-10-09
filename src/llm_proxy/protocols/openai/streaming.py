@@ -167,7 +167,12 @@ class OpenAIStreamingTransformer(StreamingTransformer):
 
     @classmethod
     def continuation(
-        cls, model: str, request_id: str, start_index: int
+        cls,
+        model: str,
+        request_id: str,
+        start_index: int,
+        *,
+        intercept_web_search: bool = True,
     ) -> OpenAIStreamingTransformer:
         """Create a transformer that continues an existing stream.
 
@@ -175,7 +180,9 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         own id/object/created/model), so a fresh transformer instance is
         sufficient for the web-search continuation loop; ``start_index`` is
         accepted for interface compatibility with the continuation seam
-        (Anthropic uses it for content-block indices, OpenAI has none).
+        (Anthropic uses it for content-block indices, OpenAI has none), and so
+        is ``intercept_web_search`` (Chat Completions has no proxy-side search
+        interception to carry).
         """
         return cls(model=model, request_id=request_id)
 

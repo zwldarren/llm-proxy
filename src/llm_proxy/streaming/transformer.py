@@ -401,6 +401,32 @@ class StreamingTransformer(ABC):
         """
         return ""
 
+    @classmethod
+    def continuation(
+        cls,
+        model: str,
+        request_id: str,
+        start_index: int,
+        *,
+        intercept_web_search: bool = True,
+    ) -> StreamingTransformer:
+        """Build the transformer for the next hop of a web-search continuation.
+
+        Public verb for the web-search continuation loop (ADR-0007 amendment):
+        the continuation is one logical response split across several upstream
+        calls, so the loop builds each hop's transformer from the *same* class
+        and hands it the previous hop's state (``adopt_continuation_state``).
+        ``start_index`` is the absolute block/item index to continue from and
+        ``intercept_web_search`` carries whether the proxy is still executing
+        searches for this request, matching the original transformer's flag.
+
+        Protocols that cannot continue a stream do not override this; asking
+        them for one is an implementation error, so the default fails loudly
+        (cf. ``convert_chunk``) rather than yielding a transformer that cannot
+        emit the continuation.
+        """
+        raise NotImplementedError(f"{cls.__name__} does not implement continuation()")
+
     def get_finish_reason(self) -> str | None:
         """Terminal finish/stop reason observed while streaming, if tracked.
 
