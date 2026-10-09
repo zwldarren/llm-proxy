@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from llm_proxy.core.adapter import get_adapter, list_provider_types, list_providers
+from llm_proxy.core.conversion import plan_conversion
 from llm_proxy.models import ConversionTier, InternalRequest
 from llm_proxy.providers.base import BaseHttpProvider
 from llm_proxy.providers.kimi_code import KimiCodeAdapter
@@ -39,6 +40,7 @@ from llm_proxy.providers.zai import ZAIAdapter
 from llm_proxy.providers.zai_coding import ZAICodingAdapter
 from llm_proxy.providers.zhipu import ZhipuAdapter
 from llm_proxy.providers.zhipu_coding import ZhipuCodingAdapter
+from llm_proxy.serialization.context import BuildContext
 from providers.helpers import (
     MockStreamResponse,
     chat_request,
@@ -86,6 +88,13 @@ class Declared:
     #: Anthropic-compatible endpoints accept ``x-api-key`` alongside the
     #: default Bearer header (GLM platform and Kimi Code quirks).
     sends_x_api_key: bool = False
+    #: A request-scoped flag that disables the native tier for
+    #: ``veto_protocol``: the proxy rewrote the request (or the operator turned
+    #: passthrough off), so the upstream must not receive it verbatim. The
+    #: predicate itself is tested with the provider that declares it;
+    #: the fallback consequence is shared and tested from the row.
+    veto_flag: str | None = None
+    veto_protocol: str | None = None
 
 
 ROWS: tuple[Declared, ...] = (
@@ -172,6 +181,8 @@ ROWS: tuple[Declared, ...] = (
         responses_url="https://api.x.ai/v1/responses",
         responses_follows_base=True,
         relay_responses_url=f"{RELAY_BASE_URL}/responses",
+        veto_flag="previous_response_materialized",
+        veto_protocol="openresponses",
     ),
     Declared(
         type="zai",
@@ -196,6 +207,8 @@ ROWS: tuple[Declared, ...] = (
         anthropic_url="https://api.z.ai/api/anthropic/v1/messages",
         responses_url="https://api.z.ai/api/v1/responses",
         sends_x_api_key=True,
+        veto_flag="native_request_disabled",
+        veto_protocol="anthropic",
     ),
     Declared(
         type="zhipu",
@@ -228,6 +241,7 @@ _IDS = [row.type for row in ROWS]
 _NATIVE_ROWS = [row for row in ROWS if row.native_protocols]
 _ANTHROPIC_ROWS = [row for row in ROWS if "anthropic" in row.native_protocols]
 _OPENRESPONSES_ROWS = [row for row in ROWS if "openresponses" in row.native_protocols]
+_VETO_ROWS = [row for row in ROWS if row.veto_flag]
 
 
 @pytest.fixture
@@ -259,9 +273,21 @@ def _responses_upstream() -> dict:
         "object": "response",
         "model": ROUTED_MODEL,
         "status": "completed",
-        "output": [],
-        "usage": {"input_tokens": 8, "output_tokens": 14, "total_tokens": 22},
-        "store": False,
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hello"}],
+            }
+        ],
+        "usage": {
+            "input_tokens": 11,
+            "output_tokens": 4,
+            "total_tokens": 15,
+            "input_tokens_details": {"cached_tokens": 6},
+            "output_tokens_details": {"reasoning_tokens": 2},
+            "num_sources_used": 0,
+        },
     }
 
 
@@ -405,6 +431,10 @@ class TestTranslatedChatCompletion:
         assert call.kwargs["json"]["model"] == "Qwen/Qwen3-8B"
         assert result.usage.total_tokens == 7
         assert request.response_tier == ConversionTier.WIRE_REUSE
+        # The wire-reuse tier hands the upstream body to the formatter verbatim
+        # (plus the load-bearing transforms), which is what the client sees.
+        assert result.provider_info["_raw_response_body"] is upstream
+        assert upstream["choices"][0]["message"]["content"] == "hello"
 
 
 @pytest.mark.parametrize("row", _ANTHROPIC_ROWS, ids=[r.type for r in _ANTHROPIC_ROWS])
@@ -432,6 +462,7 @@ class TestAnthropicNativeCompletion:
         if row.sends_x_api_key:
             # The dual-auth quirk reaches the upstream request, not just the helper.
             assert call.kwargs["headers"]["x-api-key"] == "test-key"
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-key"
 
         assert result.provider_info["_raw_response_body"] is upstream
         assert result.usage.input_tokens == 12  # 7 + 5 cache read fold
@@ -474,7 +505,7 @@ class TestResponsesNativeCompletion:
     @pytest.mark.asyncio
     async def test_responses_native_completion(self, row: Declared, adapter, mock_response_cls):
         upstream = _responses_upstream()
-        raw = raw_responses()
+        raw = raw_responses(future_field={"keep": "me"})
         request = _native_request(row, raw, "openresponses")
 
         mock_client = AsyncMock()
@@ -488,9 +519,17 @@ class TestResponsesNativeCompletion:
         assert raw["model"] == "client-alias"
         if row.sends_x_api_key:
             assert call.kwargs["headers"]["x-api-key"] == "test-key"
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-key"
 
+        assert result.provider_info["provider"] == row.type
         assert result.provider_info["_raw_response_body"] is upstream
-        assert result.usage.total_tokens == 22
+        # Native passthrough does not convert: the parsed output stays empty and
+        # the client receives the upstream body the formatter was handed.
+        assert result.output == []
+        assert result.usage.input_tokens == 11
+        assert result.usage.total_tokens == 15
+        assert result.usage.prompt_tokens_details.cached_tokens == 6
+        assert result.usage.completion_tokens_details.reasoning_tokens == 2
 
     @pytest.mark.asyncio
     async def test_responses_native_stream_forwards_raw_sse(self, row: Declared, adapter):
@@ -524,3 +563,57 @@ class TestResponsesNativeCompletion:
         assert raw["stream"] is False  # raw stash untouched
         assert any("response.created" in frame for frame in frames)
         assert any("response.completed" in frame for frame in frames)
+
+
+@pytest.mark.parametrize("row", _VETO_ROWS, ids=[r.type for r in _VETO_ROWS])
+class TestNativeVetoFallsBackToTranslation:
+    """A disabled native tier means the translated path answers the request.
+
+    Why the tier is disabled is provider knowledge, and its predicate is tested
+    with the provider that declares it (xAI's materialized continuation, in
+    ``tests/providers/xai/``). The consequence is the same shape for every row,
+    and it is the one clients feel: the native body is *not* forwarded, the
+    upstream is called on the Chat Completions endpoint with a rebuilt body,
+    and the response comes back parsed instead of verbatim.
+    """
+
+    @pytest.mark.asyncio
+    async def test_vetoed_native_request_is_translated(
+        self, row: Declared, adapter, mock_response_cls
+    ):
+        assert row.veto_flag is not None and row.veto_protocol is not None
+        protocol = row.veto_protocol
+        raw = (
+            raw_anthropic(future_field={"drop": "me"})
+            if protocol == "anthropic"
+            else raw_responses(future_field={"drop": "me"})
+        )
+        request = _native_request(row, raw, protocol)
+        setattr(request, row.veto_flag, True)
+
+        # The conversion plan is what decides the tier, whichever way the
+        # provider spells the reason: a flagged request is not a candidate for
+        # the verbatim tier.
+        context = BuildContext.from_request(request, provider_name=row.type, base_url=row.base_url)
+        plan = plan_conversion(adapter, request, context=context)
+        assert plan.request_tier == ConversionTier.FULL_CONVERSION
+
+        upstream = {
+            "id": "chatcmpl-1",
+            "choices": [
+                {"message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+        }
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response_cls(json_data=upstream))
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            result = await adapter.chat_completion(request)
+
+        call = mock_client.post.call_args
+        assert call.args[0] == f"{row.base_url}/chat/completions"
+        # Rebuilt, not forwarded: nothing the proxy did not translate survives,
+        # and the response is parsed rather than passed through.
+        assert "future_field" not in call.kwargs["json"]
+        assert "_raw_response_body" not in result.provider_info
+        assert len(result.output) == 1
