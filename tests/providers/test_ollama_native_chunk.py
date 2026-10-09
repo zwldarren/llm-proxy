@@ -170,6 +170,57 @@ def test_chunk_converter_role_only_on_first_delta():
     assert "role" not in deltas[2]
 
 
+def test_chunk_converter_promotes_stop_after_earlier_tool_call():
+    """Ollama streams the tool call and the terminal ``done`` chunk separately.
+
+    The terminal chunk carries done_reason "stop" with no tool calls, so a
+    stateless conversion would report finish_reason "stop" and spec-strict
+    agent clients would never execute the streamed call.
+    """
+    converter = OllamaChunkConverter(model="qwen3", request_id="req-1")
+
+    tool_chunk = {
+        "model": "qwen3",
+        "created_at": "2024-01-01T00:00:00Z",
+        "done": False,
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": '{"location": "Berlin"}',
+                    }
+                }
+            ],
+        },
+    }
+    done_chunk = {
+        "model": "qwen3",
+        "created_at": "2024-01-01T00:00:00Z",
+        "done": True,
+        "done_reason": "stop",
+        "message": {"role": "assistant", "content": ""},
+    }
+
+    assert converter.convert_chunk(tool_chunk)["choices"][0]["finish_reason"] is None
+    assert converter.convert_chunk(done_chunk)["choices"][0]["finish_reason"] == "tool_calls"
+
+
+def test_chunk_converter_stop_without_tool_calls_stays_stop():
+    converter = OllamaChunkConverter(model="qwen3", request_id="req-1")
+    done_chunk = {
+        "model": "qwen3",
+        "created_at": "2024-01-01T00:00:00Z",
+        "done": True,
+        "done_reason": "stop",
+        "message": {"role": "assistant", "content": "Hello!"},
+    }
+
+    assert converter.convert_chunk(done_chunk)["choices"][0]["finish_reason"] == "stop"
+
+
 def test_chunk_converter_role_state_is_per_stream():
     """A fresh converter (used on stream retry) re-emits the role delta."""
     chunk = {

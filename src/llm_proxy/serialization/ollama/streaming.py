@@ -61,6 +61,13 @@ class OllamaStreamingMixin:
         finish_reason = None
         if chunk.get("done"):
             finish_reason = _DONE_REASON_MAP.get(chunk.get("done_reason"), "stop")
+        # Ollama ends a function-call turn with done_reason "stop"; promote to
+        # the OpenAI convention when this chunk itself carries the tool calls.
+        # When the calls arrived in an earlier chunk (the usual Ollama shape,
+        # with ``done: true`` in a separate terminal chunk) the stateful
+        # OllamaChunkConverter promotes after the fact.
+        if finish_reason == "stop" and delta.get("tool_calls"):
+            finish_reason = "tool_calls"
 
         openai_chunk: dict[str, Any] = {
             # Stable per-stream id: ``created_at`` is an ISO timestamp (with
@@ -136,6 +143,10 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
         )
         # Tool call index tracking (was in the adapter, now in the converter).
         self._tool_call_index: int = 0
+        # Ollama streams tool calls in an earlier chunk and ``done: true``
+        # (with ``done_reason: "stop"``) in a separate terminal chunk, so the
+        # terminal reason cannot be decided from the terminal chunk alone.
+        self._saw_tool_calls: bool = False
         # Fixed per-stream timestamp so all chunks share the same ``created``.
         self._created_at: int = int(time.time())
         # OpenAI convention: only the first delta carries ``role``. Ollama
@@ -198,9 +209,18 @@ class OllamaChunkConverter(OllamaStreamingMixin, StreamingTransformer):
 
             tool_calls = delta.get("tool_calls")
             if tool_calls:
+                self._saw_tool_calls = True
                 for call in tool_calls:
                     call["index"] = self._tool_call_index
                     self._tool_call_index += 1
+
+        # Promote the terminal reason once any tool call was seen: a
+        # spec-strict agent client (Zed, Claude Code, …) keys its loop on
+        # finish_reason and would otherwise stop without executing the call.
+        if choices and self._saw_tool_calls:
+            choice = choices[0]
+            if choice.get("finish_reason") == "stop":
+                choice["finish_reason"] = "tool_calls"
 
         return openai_chunk
 

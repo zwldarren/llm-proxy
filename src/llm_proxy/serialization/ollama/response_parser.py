@@ -83,6 +83,13 @@ class OllamaResponseParserMixin:
         done_reason = response.get("done_reason", "stop")
         valid_reasons = ("stop", "length", "tool_calls")
         finish_reason = done_reason if done_reason in valid_reasons else "stop"
+        # Ollama ends a function-call turn with done_reason "stop" (it has no
+        # distinct tool-call reason), which makes spec-strict agent clients
+        # treat the turn as finished and never execute the tool. Promote to the
+        # OpenAI convention when the message carried tool calls, mirroring the
+        # Gemini parsers and the streaming converter.
+        if finish_reason == "stop" and any(isinstance(b, ToolUseBlock) for b in output):
+            finish_reason = "tool_calls"
 
         # Ollama also reports "load" (empty messages load the model) and
         # "unload" (keep_alive=0) as done_reason; neither maps to an OpenAI
