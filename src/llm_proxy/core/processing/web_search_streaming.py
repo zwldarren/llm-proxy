@@ -75,11 +75,11 @@ class WebSearchStreamProcessor:
         blocks from the provider stream already serve as the tool call indicator.
         Only emits web_search_tool_result blocks + message_delta with usage.
 
-        Anthropic and OpenResponses transformers both implement
-        ``_web_search_result_block`` to emit the result content block
-        (``web_search_tool_result`` for Anthropic, ``web_search_call`` for
-        OpenResponses). If the transformer lacks this helper, web search
-        events cannot be emitted.
+        A transformer participates by declaring
+        ``supports_web_search_continuation``; the result block and the usage
+        delta are then its own public verbs (``web_search_result_block``,
+        ``usage_delta``). A transformer that does not declare the capability
+        cannot be continued, so the search is not executed at all.
 
         Returns:
             Tuple of (SSE events str or None, list of (ServerToolUseBlock, result) pairs,
@@ -98,7 +98,7 @@ class WebSearchStreamProcessor:
         if not web_search_blocks:
             return None, [], 0
 
-        if not hasattr(transformer, "_web_search_result_block"):
+        if not getattr(transformer, "supports_web_search_continuation", False):
             logger.warning(
                 f"Streaming web search not supported for transformer {type(transformer).__name__}"
             )
@@ -136,7 +136,7 @@ class WebSearchStreamProcessor:
                 # object verbatim, OpenResponses maps it onto the
                 # ``web_search_call.action`` fields).
                 events.append(
-                    transformer._web_search_result_block(
+                    transformer.web_search_result_block(
                         current_index,
                         tool_use.id,
                         [result.result_block.content],
@@ -147,7 +147,7 @@ class WebSearchStreamProcessor:
                 )
             else:
                 events.append(
-                    transformer._web_search_result_block(
+                    transformer.web_search_result_block(
                         current_index,
                         tool_use.id,
                         result.result_block.content,
@@ -163,12 +163,12 @@ class WebSearchStreamProcessor:
 
             search_results.append((server_tool_use, result))
 
-        if total_search_count > 0 and hasattr(transformer, "_message_delta_with_usage"):
+        if total_search_count > 0:
             usage = {
                 "output_tokens": 0,
                 "server_tool_use": {"web_search_requests": total_search_count},
             }
-            events.append(transformer._message_delta_with_usage(usage))
+            events.append(transformer.usage_delta(usage))
 
         return (
             "".join(events) if events else None,

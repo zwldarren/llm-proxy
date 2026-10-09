@@ -37,6 +37,10 @@ class _FakeTransformer:
 
     created: list = []
 
+    #: The seam's capability declaration: this fake stands in for a protocol
+    #: transformer that carries web-search continuations.
+    supports_web_search_continuation = True
+
     def __init__(self, request_id: str = "resp-1", start_index: int = 0, **_kwargs: Any):
         self.response_id = request_id
         self.start_index = start_index
@@ -69,9 +73,13 @@ class _FakeTransformer:
             self._current_block_index += 1
         return "data: {}\n\n"
 
-    def _web_search_result_block(self, index: int, *_args: Any, **_kwargs: Any) -> str:
+    def web_search_result_block(self, index: int, *_args: Any, **_kwargs: Any) -> str:
         self.result_indices.append(index)
         return "event: content_block_start\ndata: {}\n\n"
+
+    def usage_delta(self, usage: dict[str, Any]) -> str:  # noqa: ARG002
+        """Declared for the seam; this fake's tests do not assert usage frames."""
+        return ""
 
 
 def _fake_interceptor() -> MagicMock:

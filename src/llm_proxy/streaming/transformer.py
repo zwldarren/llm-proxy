@@ -210,6 +210,13 @@ class StreamingTransformer(ABC):
     #: the raw SSE text.
     native_frame_accumulation: ClassVar[bool] = False
 
+    #: Whether this transformer can carry a web-search continuation: render
+    #: result blocks, report the search usage, and build the next hop's
+    #: transformer. Capability as data (cf. ``native_frame_accumulation``, the
+    #: ADR-0015 precedent) so the web-search loop reads one declaration instead
+    #: of probing for the verbs.
+    supports_web_search_continuation: ClassVar[bool] = False
+
     def __init__(
         self,
         model: str = "",
@@ -359,6 +366,40 @@ class StreamingTransformer(ABC):
         tracks no cursor.
         """
         return fallback
+
+    def web_search_result_block(
+        self,
+        index: int,
+        tool_use_id: str,
+        results: Any,
+        is_error: bool = False,
+        query: str = "",
+        error_message: str | None = None,
+    ) -> str:
+        """SSE frames for one web-search result block, or ``""`` for none.
+
+        Public verb for the web-search continuation loop, called once per search
+        result at an explicit block/item ``index``. ``results`` is the
+        protocol-shaped payload (usually a list of result dicts; Anthropic's
+        error path carries the single encoded content string) and the concrete
+        transformer decides how to render it — including rendering nothing,
+        which is what Chat Completions does, because its results reach the
+        client through the continuation request instead. Only reached on
+        transformers that declare ``supports_web_search_continuation``.
+        """
+        return ""
+
+    def usage_delta(self, usage: dict[str, Any]) -> str:
+        """SSE frames reporting the search usage of a continuation, or ``""``.
+
+        Public verb for the web-search continuation loop, called once after the
+        result blocks when at least one search ran. ``usage`` carries the
+        proxy-side search count (``server_tool_use.web_search_requests``) the
+        client protocol reports; protocols that already account for it in their
+        terminal event return nothing. Only reached on transformers that declare
+        ``supports_web_search_continuation``.
+        """
+        return ""
 
     def get_finish_reason(self) -> str | None:
         """Terminal finish/stop reason observed while streaming, if tracked.

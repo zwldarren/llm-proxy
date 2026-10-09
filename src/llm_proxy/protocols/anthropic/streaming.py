@@ -102,6 +102,10 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
     # reassembled body too (see accumulate_native_frame).
     native_frame_accumulation = True
 
+    # Anthropic renders the search results as web_search_tool_result blocks and
+    # reports the search count on a message_delta event.
+    supports_web_search_continuation = True
+
     def __init__(
         self,
         model: str = "",
@@ -812,7 +816,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             },
         )
 
-    def _message_delta_with_usage(self, usage: dict[str, Any]) -> str:
+    def usage_delta(self, usage: dict[str, Any]) -> str:
         """Generate message_delta event with usage only."""
         return self._sse_event(
             "message_delta",
@@ -845,7 +849,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         """Generate message_stop event."""
         return self._sse_event("message_stop", {"type": "message_stop"})
 
-    def _web_search_result_block(
+    def web_search_result_block(
         self,
         index: int,
         tool_use_id: str,

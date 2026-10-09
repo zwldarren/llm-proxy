@@ -118,7 +118,7 @@ class TestCaptureAndFlushRoundTrip:
 
     def test_openresponses_usage_shim_captures(self):
         transformer = OpenResponsesStreamingTransformer(model="claude-x")
-        transformer._message_delta_with_usage({"output_tokens": 0})
+        transformer.usage_delta({"output_tokens": 0})
         assert transformer._pending_usage == {"output_tokens": 0}
         assert transformer._has_pending_usage is True
 
