@@ -170,7 +170,10 @@ class EventContext:
         total keeps the total its merged counters imply.
 
         The record is copied in: the caller may still hold (and log) the one it
-        passed, and both merge rules write into the nested details blocks.
+        passed, and both merge rules write into the nested details blocks. Every
+        observation is copied, not just the first — ``merge_latest`` adopts the
+        source's nested details block when the record has none, so folding the
+        caller's object in directly would leave the record sharing it.
 
         The two billable dimensions that have a second route (the provider-info
         cost extra, the proxy-executed search count) are mirrored onto their
@@ -189,7 +192,7 @@ class EventContext:
         if self.usage is None:
             self.usage = copy_usage(usage)
         else:
-            merge_latest(self.usage, usage)
+            merge_latest(self.usage, copy_usage(usage))
 
         cost = usage.provider_reported_cost
         if cost is not None and isinstance(cost, int | float) and cost > 0:
@@ -311,20 +314,18 @@ class EventContext:
         """Check if any billable usage dimension has data.
 
         Covers token-based billing and unit-based billing (images generated,
-        audio duration, TTS characters, web search requests).
+        TTS characters, web search requests). A record's presence is enough on
+        its own — it carries the audio duration too — so the record and the
+        proxy-produced dimensions are the two things to test.
 
         Returns:
             True if any billable quantity is available
         """
-        return (
-            self.has_token_data()
-            or (self.usage is not None and self.usage.audio_duration_seconds is not None)
-            or any(
-                v is not None
-                for v in [
-                    self.images_generated,
-                    self.tts_characters,
-                    self.web_search_requests,
-                ]
-            )
+        return self.has_token_data() or any(
+            v is not None
+            for v in [
+                self.images_generated,
+                self.tts_characters,
+                self.web_search_requests,
+            ]
         )

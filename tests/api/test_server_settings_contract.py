@@ -314,6 +314,42 @@ def test_rate_limits_rejects_invalid_spec(client, repo):
     assert repo.rows == {}
 
 
+@pytest.mark.parametrize("spec", ["0/minute", "-1/minute", "5/0second", "5/-1minute"])
+def test_rate_limits_rejects_non_positive_operands(client, repo, spec):
+    """Both operands have to be positive: the middleware stores nothing that would
+    make the bucket deny every request (limit <= 0) or allow every one (window <= 0)."""
+    res = client.put(f"{BASE}/rate-limits", json={"limits": {"auth.login": spec}})
+    assert res.status_code == 422
+    assert "Invalid rate limit value for bucket 'auth.login'" in res.json()["error"]["message"]
+    assert repo.rows == {}
+
+
+def test_a_stored_null_loads_as_unset_instead_of_wedging_the_reload(repo):
+    """The PUT body is all-optional, so a stored null is reachable (and legacy rows
+    carry them). The runtime read falls back to the wire default rather than raising,
+    which would fail every later config reload until the row was repaired by hand."""
+    from llm_proxy.config.server_settings import load_server_settings
+
+    snapshot = load_server_settings(
+        {
+            "logging": {
+                "log_input_output": None,
+                "log_retention_days": None,
+                "max_logged_body_bytes": None,
+                "sampling_rate": None,
+                "mask_sensitive_data": None,
+                "sensitive_keys": None,
+            }
+        }
+    )
+
+    assert snapshot.logging.retention_days == 30
+    assert snapshot.logging.max_logged_body_bytes == 1024 * 1024
+    assert snapshot.logging.sampling_rate == 1.0
+    assert snapshot.logging.mask_sensitive_data is True
+    assert snapshot.logging.log_input_output is False
+
+
 def test_request_policy_rejects_invalid_literal(client, repo):
     res = client.put(f"{BASE}/request-policy", json={"unknown_fields_policy": "shrug"})
     assert res.status_code == 422

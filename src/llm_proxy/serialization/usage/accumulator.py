@@ -21,6 +21,7 @@ from llm_proxy.serialization.usage.adapters import (
     UsageDialect,
     count_billable_events,
     parse_usage,
+    turn_dependent_fields,
 )
 from llm_proxy.serialization.usage.merge import copy_usage, merge_latest
 
@@ -48,6 +49,8 @@ class UsageAccumulator:
         self._dialect = dialect
         self._usage: Usage | None = None
         self._billable_events = 0
+        self._turn_facts: dict[str, Any] | None = None
+        self._last_payload: Mapping[str, Any] | None = None
 
     @property
     def dialect(self) -> UsageDialect:
@@ -76,10 +79,36 @@ class UsageAccumulator:
         observed = parse_usage(self._dialect, payload, turn=turn)
         if observed is None:
             return
+        facts = dict(turn or {})
+        if self._usage is not None and self._turn_facts is not None and facts != self._turn_facts:
+            self._readopt_last_payload(facts)
+        self._turn_facts = facts
+        self._last_payload = payload
         if self._usage is None:
             self._usage = observed
         else:
             merge_latest(self._usage, observed)
+
+    def _readopt_last_payload(self, facts: dict[str, Any]) -> None:
+        """Re-read the last payload under turn facts that have since changed.
+
+        A fact the payload could not carry can arrive after the payloads that
+        needed it (gemini's grounding decides whether tool-use prompt tokens are
+        billed as input or through the per-request search fee). The accumulated
+        values of the fields those facts decide answered a question the turn has
+        since answered differently, so they are dropped and restated from the last
+        payload — the provider's own cumulative snapshot — before the new
+        observation merges on top of it.
+        """
+        assert self._usage is not None
+        fields = turn_dependent_fields(self._dialect)
+        if not fields or self._last_payload is None:
+            return
+        for name in fields:
+            setattr(self._usage, name, None)
+        reread = parse_usage(self._dialect, self._last_payload, turn=facts)
+        if reread is not None:
+            merge_latest(self._usage, reread)
 
     def result(self) -> Usage | None:
         """A snapshot of the accumulated record, or ``None`` when nothing billable was seen.

@@ -50,8 +50,11 @@ class GeminiStreamingTransformer(StreamingTransformer):
         # no statement about search grounding, so the accumulator is told what the
         # turn has seen (``turn=``) on every observation.
         self._usage = UsageAccumulator("gemini")
-        # Native Google Search grounding query count (billed per search)
-        self._web_search_requests: int = 0
+        # Whether an earlier chunk announced native Google Search grounding. The
+        # seam's own reading of the payload states it for the chunk that carries it
+        # (see ``_own_usage``), so this only carries the fact forward to the
+        # usage-only chunk that follows.
+        self._grounding_seen: bool = False
         # Accumulated base64 audio (TTS) output and its MIME type
         self._audio_buffer: str = ""
         self._audio_mime_type: str = ""
@@ -113,13 +116,6 @@ class GeminiStreamingTransformer(StreamingTransformer):
         candidate = candidates[0] if candidates else {}
         content = candidate.get("content", {})
         parts = content.get("parts", [])
-        # Native Google Search grounding is billed per search request;
-        # webSearchQueries lists the queries the model actually issued.
-        grounding = candidate.get("groundingMetadata")
-        if isinstance(grounding, dict):
-            queries = grounding.get("webSearchQueries")
-            if isinstance(queries, list) and queries:
-                self._web_search_requests = len(queries)
 
         delta: dict[str, Any] = {}
         finish_reason = None
@@ -294,12 +290,17 @@ class GeminiStreamingTransformer(StreamingTransformer):
         # them, and the grounding fact either way, so a stream that never sends a
         # ``usageMetadata`` chunk still bills the searches it announced. Only the
         # *emission* needs the chunk to carry metadata of its own.
-        self._usage.observe(chunk, turn={"search_grounded": self._web_search_requests > 0})
+        self._usage.observe(chunk, turn={"search_grounded": self._grounding_seen})
+        observed = self._usage.result()
+        if observed is not None and observed.web_search_requests:
+            # The seam's count, not a local tally: it is the distinct non-empty
+            # queries across every candidate, which is what Google bills.
+            self._grounding_seen = True
         if chunk.get("usageMetadata"):
             # Emit the chunk's usage in the OpenAI dialect the client reads; the
             # amounts come from the record, so the wire and the bill agree
             # (ADR-0009 keeps the shape here).
-            record = self._usage.result()
+            record = observed
             if record is not None:
                 emitted: dict[str, Any] = {
                     "prompt_tokens": record.input_tokens,
@@ -400,14 +401,8 @@ class GeminiStreamingTransformer(StreamingTransformer):
         Returns:
             The canonical usage record, or None when the stream reported none.
         """
-        record = self._usage.result()
-        if record is None:
-            return None
-        # Grounding may arrive after the usage chunk was captured: the search count
-        # is the turn's, and the record keeps whichever count is larger (both
-        # describe the same calls, and a later chunk cannot withdraw the fact).
-        if self._web_search_requests:
-            record.web_search_requests = (
-                max(record.web_search_requests or 0, self._web_search_requests) or None
-            )
-        return record
+        # No local fold: every chunk has been observed, so the record already
+        # carries the seam's search count (distinct non-empty queries across all
+        # candidates) whether or not a ``usageMetadata`` chunk ever arrived, and
+        # the accumulator max-folds it across observations.
+        return self._usage.result()

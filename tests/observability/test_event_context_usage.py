@@ -36,6 +36,26 @@ class TestUpdateUsage:
         assert context.usage.output_tokens == 25
         assert context.usage.cache_read_input_tokens == 50
 
+    def test_a_later_observation_is_copied_in_too(self):
+        """The first fold copies the record in; every later fold has to as well, since
+        the merge adopts the incoming nested details block when the record has none."""
+        from llm_proxy.models.types import PromptTokensDetails
+
+        context = _context()
+        context.update_usage(Usage(input_tokens=10, output_tokens=1))
+        later = Usage(
+            input_tokens=5,
+            output_tokens=2,
+            prompt_tokens_details=PromptTokensDetails(audio_tokens=7),
+        )
+
+        context.update_usage(later)
+
+        assert context.usage is not None
+        assert context.usage.prompt_tokens_details is not later.prompt_tokens_details
+        later.prompt_tokens_details.audio_tokens = 999
+        assert context.usage.prompt_tokens_details.audio_tokens == 7
+
     def test_a_value_that_is_not_a_record_is_ignored(self):
         context = _context()
         context.update_usage(None)

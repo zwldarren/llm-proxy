@@ -420,16 +420,15 @@ class NativePassthroughHandler:
         event_context.update_usage(parse_wire_usage("responses", event_data))
 
     @staticmethod
-    def process_anthropic_usage_event(
-        event_type: str, data: dict[str, Any], event_context: EventContext
-    ) -> None:
+    def process_anthropic_usage_event(data: dict[str, Any], event_context: EventContext) -> None:
         """Update EventContext token counts from a single Anthropic usage event.
 
         Native Anthropic frames bypass the streaming converter, so this is the only
         route by which a streamed turn's accounting reaches the billing pipeline for
         this tier. Extraction goes through the anthropic dialect adapter (ADR-0025):
         ``message_start`` nests its usage under ``message`` and ``message_delta``
-        carries it flat, which is the adapter's business, not this handler's. The
+        carries it flat, which is the adapter's business, not this handler's — the
+        SSE event name the caller already filtered on is not needed here. The
         EventContext merges the two events into one cumulative record.
         """
         event_context.update_usage(parse_wire_usage("anthropic", data))
@@ -583,9 +582,7 @@ class NativePassthroughHandler:
 
         for event_type, parsed in iter_sse_data_events(chunk):
             if event_type in ("message_start", "message_delta"):
-                NativePassthroughHandler.process_anthropic_usage_event(
-                    event_type, parsed, event_context
-                )
+                NativePassthroughHandler.process_anthropic_usage_event(parsed, event_context)
 
 
 __all__ = [

@@ -148,3 +148,31 @@ resource rule stands for every other resource.
 Amends ADR-0023 (server-config schemas are generated from canonical models,
 not hand-written); extends the ADR-0021 direction (the read side of the same
 data now has one owner too).
+
+## Amendment (2026-10): what the registry's own review added
+
+Three gaps the hand-written layer had already, and one dependency the registry
+introduced:
+
+- **A stored ``null`` could wedge the runtime read.** Every write path here is
+  all-optional (the derived request model, and the hand-written one before it),
+  so ``{"log_retention_days": null}`` is accepted and persisted; the runtime read
+  then did ``int(None)`` and raised ``ConfigurationError`` — after the commit, on
+  every later reload, until the row was repaired by hand. ``load_logging_config``
+  now reads a stored ``null`` as "not set" and falls back to the wire model's own
+  default, which is also what removes the third hand-written copy of those
+  defaults (the wire model is the source, so the admin response and the runtime
+  read cannot drift apart on what "unset" means). The genuinely nullable
+  audit fields keep their meaning.
+- **Rate limits accepted operands that switch the bucket off.** ``0/minute``
+  makes ``remaining_count < limit`` unsatisfiable, so every request is denied,
+  and any non-positive window expires each stored timestamp as it is written, so
+  every request is allowed. ``parse_limit_value`` rejects both now, which is also
+  what the pre-persist validator runs before storing an override.
+- **The policy vocabulary moved down a layer.** ``config.types.server`` imported
+  ``serialization.context``, which made importing any config type execute that
+  package's ``__init__`` and auto-discover every provider module — and only worked
+  because the discovery helper swallows a bootstrap ``ImportError``. The
+  ``unknown_fields_policy`` / ``unsupported_block_policy`` literals are owned by
+  the config layer now and aliased by ``serialization/context.py``, so importing
+  config types pulls in no plugin module at all.

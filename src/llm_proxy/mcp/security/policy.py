@@ -170,7 +170,7 @@ class McpSecurityPolicy(McpSecurityPolicyConfig):
             return policy
         # Override DB-managed fields from the stored record. The field set is
         # exactly the canonical server-settings model's fields (ADR-0026), so
-        # a new UI-managed field is picked up without editing this tuple.
+        # a new UI-managed field is picked up automatically.
         for field_name in McpSecurityPolicyConfig.model_fields:
             setattr(policy, field_name, getattr(stored, field_name))
         return policy

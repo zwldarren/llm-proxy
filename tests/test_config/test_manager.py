@@ -71,6 +71,51 @@ class TestLoadLoggingConfig:
         result = load_logging_config({"max_logged_body_bytes": 4096})
         assert result.max_logged_body_bytes == 4096
 
+    def test_defaults_come_from_the_wire_model(self):
+        """One source for what "unset" means: the wire model the admin endpoints
+        serve, not a third hand-written copy of the same literals."""
+        from llm_proxy.config.types.logging_config import LoggingWireConfig
+
+        wire = LoggingWireConfig().model_dump()
+        result = load_logging_config({})
+
+        assert result.retention_days == wire["log_retention_days"]
+        assert result.max_logged_body_bytes == wire["max_logged_body_bytes"]
+        assert result.sampling_rate == wire["sampling_rate"]
+        assert result.mask_sensitive_data is wire["mask_sensitive_data"]
+        assert result.log_input_output is wire["log_input_output"]
+
+    def test_a_stored_null_reads_as_unset(self):
+        """The PUT body is all-optional (and always was), so a null can reach the row;
+        the runtime read must not raise on it, or the row wedges every later reload."""
+        result = load_logging_config(
+            {
+                "log_input_output": None,
+                "log_raw_stream": None,
+                "log_retention_days": None,
+                "max_logged_body_bytes": None,
+                "verbose_routing_logs": None,
+                "mask_sensitive_data": None,
+                "sampling_rate": None,
+                "sensitive_keys": None,
+            }
+        )
+
+        assert result.retention_days == 30
+        assert result.max_logged_body_bytes == 1024 * 1024
+        assert result.sampling_rate == 1.0
+        assert result.mask_sensitive_data is True
+        assert result.log_input_output is False
+        assert result.sensitive_keys
+
+    def test_a_null_audit_field_still_means_inherit(self):
+        from llm_proxy.config.types.logging_config import LoggingWireConfig
+
+        assert LoggingWireConfig().model_dump()["audit_sampling_rate"] is None
+        result = load_logging_config({"audit_sampling_rate": None, "audit_retention_days": None})
+        assert result.audit_sampling_rate is None
+        assert result.audit_retention_days is None
+
     def test_max_logged_body_bytes_zero_disables_the_cap(self):
         result = load_logging_config({"max_logged_body_bytes": 0})
         assert result.max_logged_body_bytes == 0

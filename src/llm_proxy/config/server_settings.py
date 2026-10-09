@@ -30,8 +30,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, create_model
 
 from llm_proxy.config.types.logging_config import (
-    DEFAULT_MAX_LOGGED_BODY_BYTES,
-    DEFAULT_RETENTION_DAYS,
     LoggingConfig,
     LoggingWireConfig,
 )
@@ -404,6 +402,20 @@ def _parse_optional_int(value: Any, name: str) -> int | None:
         raise ConfigurationError(f"Invalid {name}: {exc}") from exc
 
 
+def _wire_value(overrides: dict[str, Any], defaults: dict[str, Any], name: str) -> Any:
+    """One stored wire field, with a stored ``null`` read as "not set".
+
+    The PUT schema for this key is all-optional (and so was the hand-written one
+    before it), so a client can send ``null`` for a field the runtime model cannot
+    hold; so can a legacy or hand-edited row. Falling back to the wire model's own
+    default keeps such a row from wedging every config reload in a
+    ``ConfigurationError`` — the module's stated contract is that legacy rows are
+    parsed tolerantly on this read.
+    """
+    value = overrides.get(name)
+    return defaults[name] if value is None else value
+
+
 def load_logging_config(overrides: dict[str, Any] | None = None) -> LoggingConfig:
     """Build the logging configuration from database overrides.
 
@@ -412,35 +424,39 @@ def load_logging_config(overrides: dict[str, Any] | None = None) -> LoggingConfi
     wire names; this function merges those stored values with code defaults
     into the runtime model. The only remaining env var is ``LOG_LEVEL``
     (startup-time logging pipeline verbosity).
+
+    The defaults come from ``LoggingWireConfig`` itself, so the wire shape, the
+    admin response and this runtime read cannot drift apart on what "unset"
+    means.
     """
     from llm_proxy.config.settings import get_settings
 
     settings = get_settings().logging
     overrides = overrides or {}
+    defaults = LoggingWireConfig().model_dump()
 
-    log_input_output = _parse_bool(overrides.get("log_input_output", False))
-    log_raw_stream = _parse_bool(overrides.get("log_raw_stream", False))
+    log_input_output = _parse_bool(_wire_value(overrides, defaults, "log_input_output"))
+    log_raw_stream = _parse_bool(_wire_value(overrides, defaults, "log_raw_stream"))
 
     try:
-        retention_days = int(overrides.get("log_retention_days", DEFAULT_RETENTION_DAYS))
+        retention_days = int(_wire_value(overrides, defaults, "log_retention_days"))
     except (ValueError, TypeError) as exc:
         raise ConfigurationError(f"Invalid log_retention_days: {exc}") from exc
 
     try:
-        max_logged_body_bytes = int(
-            overrides.get("max_logged_body_bytes", DEFAULT_MAX_LOGGED_BODY_BYTES)
-        )
+        max_logged_body_bytes = int(_wire_value(overrides, defaults, "max_logged_body_bytes"))
     except (ValueError, TypeError) as exc:
         raise ConfigurationError(f"Invalid max_logged_body_bytes: {exc}") from exc
 
-    verbose_routing_logs = _parse_bool(overrides.get("verbose_routing_logs", False))
-    mask_sensitive_data = _parse_bool(overrides.get("mask_sensitive_data", True))
+    verbose_routing_logs = _parse_bool(_wire_value(overrides, defaults, "verbose_routing_logs"))
+    mask_sensitive_data = _parse_bool(_wire_value(overrides, defaults, "mask_sensitive_data"))
 
     try:
-        sampling_rate = float(overrides.get("sampling_rate", 1.0))
+        sampling_rate = float(_wire_value(overrides, defaults, "sampling_rate"))
     except (ValueError, TypeError) as exc:
         raise ConfigurationError(f"Invalid sampling_rate: {exc}") from exc
 
+    # These two are genuinely nullable: ``null`` means "inherit the value above".
     audit_sampling_rate = _parse_optional_float(
         overrides.get("audit_sampling_rate"), "audit_sampling_rate"
     )
@@ -459,7 +475,7 @@ def load_logging_config(overrides: dict[str, Any] | None = None) -> LoggingConfi
         "refresh_token",
         "jwt_secret",
     ]
-    extra_keys_raw = overrides.get("sensitive_keys", "")
+    extra_keys_raw = _wire_value(overrides, defaults, "sensitive_keys")
     if isinstance(extra_keys_raw, str):
         extra_keys = [k.strip().lower() for k in extra_keys_raw.split(",") if k.strip()]
     elif isinstance(extra_keys_raw, list):

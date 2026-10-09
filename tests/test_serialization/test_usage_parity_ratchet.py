@@ -222,7 +222,7 @@ def _anthropic_passthrough(frames: Sequence[dict[str, Any]]) -> EventContext:
     """``core/conversion.py::process_anthropic_usage_event`` — the native tier's handler."""
     context = _new_context()
     for frame in frames:
-        NativePassthroughHandler.process_anthropic_usage_event(frame["type"], frame, context)
+        NativePassthroughHandler.process_anthropic_usage_event(frame, context)
     return context
 
 

@@ -28,9 +28,19 @@ DEFAULT_RATE_LIMITS: dict[str, str] = {
 
 
 def parse_limit_value(limit_value: str) -> tuple[int, int]:
-    """Parse a "N/period" rate-limit spec into (limit, window_size_seconds)."""
+    """Parse a "N/period" rate-limit spec into (limit, window_size_seconds).
+
+    Both operands must be positive, and an invalid spec raises rather than
+    yielding a bucket that silently stops limiting: a ``0`` (or negative) limit
+    makes ``remaining_count < limit`` unsatisfiable, so every request is denied,
+    while a non-positive window expires each stored timestamp as it is written,
+    so every request is allowed. The admin validator persists only what parses
+    here; the middleware's fallback warns and reverts to the code default.
+    """
     limit_str, period_str = limit_value.split("/", 1)
     limit = int(limit_str)
+    if limit <= 0:
+        raise ValueError(f"Non-positive limit: {limit_value!r}")
 
     window_size = _PERIOD_MAP.get(period_str)
     if window_size is None:
@@ -42,6 +52,8 @@ def parse_limit_value(limit_value: str) -> tuple[int, int]:
             window_size = int(period_str[:-4]) * 3600
         else:
             raise ValueError(f"Invalid rate limit period: {period_str}")
+    if window_size <= 0:
+        raise ValueError(f"Non-positive rate limit window: {limit_value!r}")
     return limit, window_size
 
 

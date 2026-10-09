@@ -372,3 +372,37 @@ protocol-side fold-back of the canonical flat ``reasoning_tokens`` into the
 OpenAI-dialect ``completion_tokens_details`` object uses a ``None`` check rather
 than truthiness, so an explicitly reported zero reaches the client the way the
 Realtime serializer already emitted it.
+
+## Amendment (2026-10): the second review's repairs
+
+A follow-up review of the merged branches found three more ways the seam could
+lose or mis-state a fact. All three are the same shape: a rule that is right for
+one dialect was stated once, in the shared code.
+
+- **`add_usage` read ``None`` as "unknown", not as "this call reported
+  nothing".** With ``target=None, source=50`` the 50 was dropped, so the sum of
+  two independent calls depended on the order they were folded in: a hop's
+  ``provider_reported_cost`` or ``reasoning_tokens`` survived only if the *other*
+  side happened to report something too. The rule is now symmetric — a value one
+  side reports is adopted, both-``None`` stays ``None`` — which is what
+  ``_sum_details`` already did for the nested blocks.
+- **A turn fact that arrives late left the fields it decides frozen.** Gemini's
+  grounded input count is derived from a turn-level fact (grounding decides
+  whether tool-use prompt tokens are billed as input or through the per-request
+  search fee), and a usage chunk can precede the grounding chunk that states it.
+  The earlier observation was parsed under the old facts, and ``merge_latest``'s
+  max then froze that higher, ungrounded count. ``DialectAdapter`` now declares
+  ``turn_dependent_fields``, and the accumulator drops exactly those fields when
+  the facts change and re-reads its last payload under the new ones — the
+  provider's cumulative snapshot restates them, so nothing else is lost.
+- **The realtime dialect read its duration without a tolerant reader.** Every
+  sibling fact goes through ``_int``/``_positive_int``/``_as_dict``; the duration
+  went in raw and reaches billing's per-minute arithmetic (and ``add_usage``'s
+  sum), where a string from a gateway would either raise or concatenate. It goes
+  through ``_duration`` now, the same guard the audio dialect applied to the same
+  fact.
+
+Two smaller repairs ride along: ``is_known_dialect`` was exported with no caller
+and is gone, and ``NativePassthroughHandler.process_anthropic_usage_event`` no
+longer takes the SSE event name it stopped reading when the anthropic adapter
+took over the envelope (its callers and the parity ratchet were updated).

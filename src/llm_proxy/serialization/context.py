@@ -3,13 +3,16 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from llm_proxy.config.types.server import UnknownFieldsPolicy, UnsupportedBlockPolicy
 from llm_proxy.models import InternalRequest
 
 if TYPE_CHECKING:
     from llm_proxy.models import ContentBlock
 
-UnknownFieldsPolicy = Literal["ignore", "passthrough", "error"]
-UnsupportedBlockPolicy = Literal["drop", "degrade", "error"]
+# Re-exported: the policy vocabulary is owned by the config layer (see
+# ``llm_proxy.config.types.server``), so importing it never drags in this
+# package's provider discovery.
+
 TargetEndpoint = Literal["chat_completions", "responses"]
 
 

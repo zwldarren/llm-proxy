@@ -404,6 +404,29 @@ class TestRealtimeDialect:
         assert usage.completion_tokens_details.reasoning_tokens is None
         assert usage.completion_tokens_details.audio_tokens == 25
 
+    def test_a_non_numeric_duration_is_not_a_duration(self) -> None:
+        """Every other wire fact goes through a tolerant reader; the duration reaches
+        billing's per-minute arithmetic, so a string must not."""
+        usage = parse_usage(
+            "realtime",
+            {
+                "type": "response.done",
+                "response": {"usage": {"input_tokens": 1, "audio_duration_seconds": "3.5"}},
+            },
+        )
+
+        assert usage is not None
+        assert usage.audio_duration_seconds is None
+
+    def test_a_numeric_duration_is_read(self) -> None:
+        usage = parse_usage(
+            "realtime",
+            {"type": "response.done", "response": {"usage": {"audio_duration_seconds": 12.5}}},
+        )
+
+        assert usage is not None
+        assert usage.audio_duration_seconds == pytest.approx(12.5)
+
 
 class TestOllamaDialect:
     """Ollama's counters, and the cache count that is a subset of the input one."""
@@ -856,6 +879,40 @@ class TestUsageAccumulator:
         assert usage.input_tokens == 10
         assert usage.total_tokens == 18
 
+    def test_a_turn_fact_that_arrives_late_restates_the_fields_it_decides(self) -> None:
+        """Gemini's grounded input count is derived from a turn-level fact, so a usage
+        chunk seen before the grounding chunk parses tool-use prompt tokens as input.
+        Max-merging would freeze that higher, wrong value; the accumulator drops the
+        fields the fact decides and re-reads its last payload under the new facts."""
+        accumulator = UsageAccumulator("gemini")
+        accumulator.observe(
+            {
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 5,
+                    "toolUsePromptTokenCount": 3,
+                    "totalTokenCount": 18,
+                }
+            },
+            turn={"search_grounded": False},
+        )
+        ungrounded = accumulator.result()
+        assert ungrounded is not None
+        assert ungrounded.input_tokens == 13  # 10 prompt + 3 tool-use
+
+        # The grounding chunk arrives after the usage chunk, and carries no counters.
+        accumulator.observe(
+            {"candidates": [{"groundingMetadata": {"webSearchQueries": ["a"]}}]},
+            turn={"search_grounded": True},
+        )
+
+        usage = accumulator.result()
+        assert usage is not None
+        assert usage.input_tokens == 10  # the tool-use tokens are the search fee now
+        assert usage.web_search_requests == 1
+        assert usage.total_tokens == 18  # the provider's own total is untouched
+        assert usage.output_tokens == 5
+
     def test_dialect_is_declared_not_guessed(self) -> None:
         # The Interactions vocabulary is a wire shape with no adapter yet: a caller
         # that declares it gets a loud error rather than a best-effort guess.
@@ -929,3 +986,20 @@ class TestMergeRules:
         assert target.prompt_tokens_details.image_tokens == 4  # unknown on one side
         assert target.completion_tokens_details is not None
         assert target.completion_tokens_details.audio_tokens == 30
+
+    def test_add_usage_adopts_a_fact_only_one_call_reports(self) -> None:
+        """``None`` is "this call reported nothing", not an unknown that invalidates
+        the other side's fact, so the sum must not depend on the fold order."""
+        target = Usage(input_tokens=10, provider_reported_cost=0.02)
+        source = Usage()
+
+        add_usage(target, source)
+
+        assert target.input_tokens == 10
+        assert target.provider_reported_cost == pytest.approx(0.02)
+
+        reversed_ = Usage()
+        add_usage(reversed_, Usage(input_tokens=10, provider_reported_cost=0.02))
+
+        assert (reversed_.input_tokens, reversed_.provider_reported_cost) == (10, 0.02)
+        assert reversed_.cache_read_input_tokens is None  # both sides silent

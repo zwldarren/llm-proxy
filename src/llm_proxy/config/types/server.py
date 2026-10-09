@@ -7,13 +7,18 @@ from pydantic import BaseModel, Field
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.config.types.web_search import WebSearchConfig
-from llm_proxy.serialization.context import UnknownFieldsPolicy, UnsupportedBlockPolicy
+
+#: How a conversion treats request fields the provider's wire does not declare,
+#: and blocks it cannot carry. The vocabulary lives here, in the config layer,
+#: and ``serialization/context.py`` aliases it: owning it in the serialization
+#: layer would make importing any config type execute that package's
+#: ``__init__``, which auto-discovers every provider module.
+UnknownFieldsPolicy = Literal["ignore", "passthrough", "error"]
+UnsupportedBlockPolicy = Literal["drop", "degrade", "error"]
 
 #: Global request-policy selection values. ``"default"`` means "not configured":
 #: the per-adapter default applies (e.g. vLLM/SGLang pass unknown fields
-#: through). Any other value is an explicit operator choice. The concrete values
-#: come from the serialization-layer policy Literals so the two layers cannot
-#: drift apart.
+#: through). Any other value is an explicit operator choice.
 UnknownFieldsPolicySelection = Literal["default", UnknownFieldsPolicy]
 
 UnsupportedBlockPolicySelection = Literal["default", UnsupportedBlockPolicy]

@@ -60,6 +60,18 @@ def _positive_int(value: Any) -> int | None:
     return count if count is not None and count > 0 else None
 
 
+def _duration(value: Any) -> float | None:
+    """A wire-reported duration in seconds; a bool is not a duration.
+
+    The sibling reader of the same fact in the audio dialect (``_parse_audio``)
+    checks the type before trusting ``seconds``; this keeps the realtime dialect
+    from handing a string or a dict to billing's duration arithmetic.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
 def _web_search_requests(server_tool_use: Any) -> int | None:
     """``server_tool_use.web_search_requests`` — provider-reported search count."""
     block = _as_dict(server_tool_use)
@@ -369,7 +381,7 @@ def _parse_realtime(
         reasoning_tokens=reasoning,
         prompt_tokens_details=prompt_details,
         completion_tokens_details=completion_details,
-        audio_duration_seconds=usage.get("audio_duration_seconds"),
+        audio_duration_seconds=_duration(usage.get("audio_duration_seconds")),
         web_search_requests=_positive_int(usage.get("web_search_requests")),
     )
 
@@ -471,13 +483,12 @@ def _parse_audio(payload: Mapping[str, Any], turn: Mapping[str, Any] | None = No
     if not usage:
         return None
 
-    seconds = usage.get("seconds")
-    duration_seconds = seconds if isinstance(seconds, int | float) else None
-    if usage.get("type") == "duration" or duration_seconds is not None:
+    seconds = _duration(usage.get("seconds"))
+    if usage.get("type") == "duration" or seconds is not None:
         # Duration-based responses may still carry the input token split
         # (gpt-4o-transcribe with ``include[]=usage``).
         return Usage(
-            audio_duration_seconds=duration_seconds,
+            audio_duration_seconds=seconds,
             prompt_tokens_details=_audio_prompt_details(usage),
             # OpenRouter's bare ``{"seconds": N, "cost": ...}`` reports what it
             # charged; a duration the proxy can price is not a reason to discard
@@ -609,6 +620,12 @@ class DialectAdapter:
     #: Billable events the payload announces outside its usage block (a
     #: streaming terminal event may never restate them). Summed per turn.
     count_events: Callable[[Mapping[str, Any]], int] = lambda _payload: 0
+    #: Fields whose parsed value is a function of the ``turn`` facts, not of the
+    #: payload alone (gemini's grounded input count). An observation parsed before
+    #: a fact was known answers a different question, so the accumulator drops
+    #: these fields when the facts change and re-reads its last payload under the
+    #: new ones.
+    turn_dependent_fields: tuple[str, ...] = ()
 
 
 _ADAPTERS: dict[str, DialectAdapter] = {
@@ -617,7 +634,7 @@ _ADAPTERS: dict[str, DialectAdapter] = {
     "anthropic": DialectAdapter(_parse_anthropic),
     "realtime": DialectAdapter(_parse_realtime),
     "ollama": DialectAdapter(_parse_ollama),
-    "gemini": DialectAdapter(_parse_gemini),
+    "gemini": DialectAdapter(_parse_gemini, turn_dependent_fields=("input_tokens",)),
     "audio": DialectAdapter(_parse_audio),
 }
 
@@ -654,11 +671,6 @@ def parse_usage(
     return adapter.parse(payload, turn)
 
 
-def is_known_dialect(dialect: str) -> bool:
-    """Whether a wire shape has an adapter (used by callers that declare one)."""
-    return dialect in _ADAPTERS
-
-
 def count_billable_events(dialect: UsageDialect, payload: Mapping[str, Any] | None) -> int:
     """Count billable events this payload announces outside its usage block."""
     if payload is None:
@@ -667,3 +679,11 @@ def count_billable_events(dialect: UsageDialect, payload: Mapping[str, Any] | No
     if adapter is None:
         raise ValueError(f"unknown usage dialect: {dialect!r}")
     return adapter.count_events(payload)
+
+
+def turn_dependent_fields(dialect: UsageDialect) -> tuple[str, ...]:
+    """The record fields this dialect's parse derives from the ``turn`` facts."""
+    adapter = _ADAPTERS.get(dialect)
+    if adapter is None:
+        raise ValueError(f"unknown usage dialect: {dialect!r}")
+    return adapter.turn_dependent_fields

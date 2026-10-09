@@ -28,7 +28,6 @@ from llm_proxy.serialization.usage.accumulator import UsageAccumulator
 from llm_proxy.serialization.usage.adapters import (
     UsageDialect,
     count_billable_events,
-    is_known_dialect,
     parse_usage,
 )
 from llm_proxy.serialization.usage.merge import add_usage, copy_usage, merge_latest
@@ -39,7 +38,6 @@ __all__ = [
     "add_usage",
     "copy_usage",
     "count_billable_events",
-    "is_known_dialect",
     "merge_latest",
     "parse_usage",
 ]

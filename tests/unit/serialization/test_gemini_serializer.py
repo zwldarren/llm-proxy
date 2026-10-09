@@ -1027,6 +1027,63 @@ class TestGeminiStreamingDetails:
         assert usage.web_search_requests == 2
         assert usage.input_tokens == 0
 
+    def test_the_search_count_is_the_seam_s_reading_not_a_local_tally(self):
+        """Google bills unique non-empty queries, so a query the model repeated — or
+        the empty strings the wire pads the list with — is one search. The converter
+        keeps no tally of its own to disagree with the seam about that."""
+        from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
+
+        transformer = GeminiStreamingTransformer(model="gemini-2.0-flash")
+        transformer.convert_chunk(
+            {
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": "hi"}]},
+                        "groundingMetadata": {"webSearchQueries": ["a", "a", ""]},
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 1},
+            }
+        )
+
+        usage = transformer.get_usage()
+        assert usage is not None
+        assert usage.web_search_requests == 1
+
+    def test_a_grounded_turn_keeps_the_seam_s_reading_across_later_chunks(self):
+        """Grounding seen in an earlier chunk is carried forward to the usage-only
+        chunk that follows, and the count it was folded in with is the seam's."""
+        from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
+
+        transformer = GeminiStreamingTransformer(model="gemini-2.0-flash")
+        transformer.convert_chunk(
+            {
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": "searching"}]},
+                        "groundingMetadata": {"webSearchQueries": ["a", "b"]},
+                    }
+                ]
+            }
+        )
+        transformer.convert_chunk(
+            {
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 5,
+                    "toolUsePromptTokenCount": 3,
+                    "totalTokenCount": 18,
+                }
+            }
+        )
+
+        usage = transformer.get_usage()
+        assert usage is not None
+        # The grounded turn bills the tool-use tokens through the search fee, so they
+        # stay out of the input count.
+        assert usage.input_tokens == 10
+        assert usage.web_search_requests == 2
+
 
 def test_build_provider_request_gemini3_injects_dummy_signature(serializer):
     """Gemini 3 requires thoughtSignature on every functionCall part.

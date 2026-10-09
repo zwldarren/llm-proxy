@@ -29,8 +29,9 @@ async def extract_streaming_usage(context: EventContext) -> None:
     """Pull accumulated usage off a streaming transformer into the context.
 
     No-op for non-streaming requests (``context.transformer`` is ``None``) and
-    safe to call multiple times: ``EventContext.update_usage`` overwrites the
-    token fields with the latest values.
+    safe to call multiple times: ``EventContext.update_usage`` folds each
+    observation monotonically (``merge_latest``), so a repeated or partial report
+    never withdraws a fact the turn already reported.
 
     Args:
         context: Event context whose transformer may carry final usage

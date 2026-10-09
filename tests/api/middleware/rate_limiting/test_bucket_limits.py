@@ -43,6 +43,19 @@ class TestParseLimitValue:
         with pytest.raises(ValueError, match="Invalid rate limit period"):
             parse_limit_value("5/fortnight")
 
+    def test_non_positive_operands_are_rejected(self):
+        """Either operand at or below zero turns the bucket off silently: a limit of
+        ``0`` denies every request, and a window of ``0`` expires each stored timestamp
+        as it is written, which allows every request."""
+        with pytest.raises(ValueError, match="Non-positive limit"):
+            parse_limit_value("0/minute")
+        with pytest.raises(ValueError, match="Non-positive limit"):
+            parse_limit_value("-1/minute")
+        with pytest.raises(ValueError, match="Non-positive rate limit window"):
+            parse_limit_value("5/0second")
+        with pytest.raises(ValueError, match="Non-positive rate limit window"):
+            parse_limit_value("5/-1minute")
+
 
 class TestResolveRateLimitValue:
     def _request_for(self, app: FastAPI) -> Request:

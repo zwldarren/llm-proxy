@@ -174,16 +174,25 @@ def copy_usage(usage: Usage) -> Usage:
 def add_usage(target: Usage, source: Usage) -> None:
     """Sum ``source`` into ``target`` in place (independent billed calls).
 
-    ``None`` on either side leaves the field untouched: unknown on one side of
-    the sum is not zero. The nested details blocks are summed too, field by
-    field: they carry billable facts of their own (``audio_tokens``,
-    ``image_tokens``), not a mirror of the flat fields.
+    A side that reported nothing contributes nothing: its ``None`` is "no known
+    contribution", not an unknown that invalidates the other side's fact, so a
+    value only one call reports is adopted rather than dropped (both ``None``
+    stays ``None``). Reading it the other way made the sum order-dependent —
+    ``add_usage(a, b)`` kept a fact that ``add_usage(b, a)`` lost. The nested
+    details blocks are summed too, field by field: they carry billable facts of
+    their own (``audio_tokens``, ``image_tokens``), not a mirror of the flat
+    fields.
     """
     for name in _SUMMED_FIELDS:
-        target_value = getattr(target, name)
         source_value = getattr(source, name)
-        if target_value is not None and source_value is not None:
-            setattr(target, name, target_value + source_value)
+        if source_value is None:
+            continue
+        target_value = getattr(target, name)
+        setattr(
+            target,
+            name,
+            source_value if target_value is None else target_value + source_value,
+        )
 
     target.prompt_tokens_details = _sum_details(
         target.prompt_tokens_details, source.prompt_tokens_details
