@@ -98,6 +98,37 @@ def test_format_response_folds_thinking_into_the_dialect_object(protocol_seriali
     assert result["usage"]["completion_tokens_details"] == {"reasoning_tokens": 4}
 
 
+def test_format_response_keeps_a_reported_zero_reasoning_count(protocol_serializer):
+    """A reported zero is a report: the provider counted the thinking tokens and
+    found none, so the dialect object carries the zero (the Realtime serializer
+    reads the record the same way)."""
+    response = InternalResponse(
+        id="test-id",
+        model="gpt-4",
+        output=[TextBlock(text="Hello!")],
+        usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15, reasoning_tokens=0),
+    )
+
+    result = protocol_serializer.format_response(response)
+
+    assert result["usage"]["completion_tokens_details"] == {"reasoning_tokens": 0}
+
+
+def test_format_response_omits_the_details_object_when_nothing_was_reported(
+    protocol_serializer,
+):
+    response = InternalResponse(
+        id="test-id",
+        model="gpt-4",
+        output=[TextBlock(text="Hello!")],
+        usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15),
+    )
+
+    result = protocol_serializer.format_response(response)
+
+    assert "completion_tokens_details" not in result["usage"]
+
+
 def test_format_response_folds_cache_read_into_the_dialect_object(protocol_serializer):
     """Same fold for the cache read: the record keeps it flat, the OpenAI client
     reads ``prompt_tokens_details.cached_tokens``."""

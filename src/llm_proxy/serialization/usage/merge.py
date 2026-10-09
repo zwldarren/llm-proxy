@@ -74,10 +74,14 @@ def merge_latest(target: Usage, source: Usage) -> None:
 
     Accounting counters take the larger of the two values (they are cumulative
     within a turn); every other field takes the later non-``None`` value.
-    ``total_tokens`` is recomputed from the merged counters, because a dialect
-    with no wire total (Anthropic) reports a per-event total that is only that
-    event's partial sum — max-merging those leaves a total the merged counters
-    contradict.
+    ``total_tokens`` is taken from the merged counters, because a dialect with no
+    wire total (Anthropic) reports a per-event total that is only that event's
+    partial sum — max-merging those leaves a total the merged counters contradict.
+    A wire total larger than those counters keeps ownership of the field: a
+    provider's own total may count dimensions the canonical counters do not
+    (Gemini's ``totalTokenCount`` includes the tool-use prompt tokens a
+    search-grounded turn bills through the per-request search fee instead), and
+    recomputing it as ``input + output`` would undercount it.
     """
     for name in _SCALAR_FIELDS:
         if name == "total_tokens":
@@ -94,11 +98,14 @@ def merge_latest(target: Usage, source: Usage) -> None:
         setattr(target, name, value)
 
     reported_total = getattr(source, "total_tokens", None)
-    if reported_total is not None and not target.input_tokens and not target.output_tokens:
-        # A record that carries only a total keeps it (nothing contradicted it).
-        target.total_tokens = reported_total
-    elif target.input_tokens or target.output_tokens:
-        target.total_tokens = target.input_tokens + target.output_tokens
+    if target.input_tokens or target.output_tokens or reported_total is not None:
+        # Cumulative counters never decrease, so the turn's largest total so far is
+        # the turn's total: an event that omits the total does not withdraw it.
+        target.total_tokens = max(
+            target.total_tokens or 0,
+            target.input_tokens + target.output_tokens,
+            reported_total or 0,
+        )
 
     target.prompt_tokens_details = _merge_details(
         target.prompt_tokens_details, source.prompt_tokens_details
@@ -119,6 +126,30 @@ def _merge_details[DetailsT: PromptTokensDetails | CompletionTokensDetails](
     for name, value in vars(source).items():
         if value is not None:
             setattr(target, name, value)
+    return target
+
+
+def _sum_details[DetailsT: PromptTokensDetails | CompletionTokensDetails](
+    target: DetailsT | None, source: DetailsT | None
+) -> DetailsT | None:
+    """Field-by-field sum of one nested details block (two independent calls).
+
+    The details blocks are not mirror expressions of the flat fields: they carry
+    billable facts the record has nowhere else (``audio_tokens``,
+    ``image_tokens``), and billing reads them, so a hop's details must add rather
+    than be dropped. ``None`` on either side leaves the field as it is — unknown
+    on one side of the sum is not zero — and two ``None``s stay ``None`` rather
+    than collapsing into an empty block.
+    """
+    if source is None:
+        return target
+    if target is None:
+        return source
+    for name, value in vars(source).items():
+        if value is None:
+            continue
+        current = getattr(target, name)
+        setattr(target, name, value if current is None else current + value)
     return target
 
 
@@ -144,10 +175,19 @@ def add_usage(target: Usage, source: Usage) -> None:
     """Sum ``source`` into ``target`` in place (independent billed calls).
 
     ``None`` on either side leaves the field untouched: unknown on one side of
-    the sum is not zero.
+    the sum is not zero. The nested details blocks are summed too, field by
+    field: they carry billable facts of their own (``audio_tokens``,
+    ``image_tokens``), not a mirror of the flat fields.
     """
     for name in _SUMMED_FIELDS:
         target_value = getattr(target, name)
         source_value = getattr(source, name)
         if target_value is not None and source_value is not None:
             setattr(target, name, target_value + source_value)
+
+    target.prompt_tokens_details = _sum_details(
+        target.prompt_tokens_details, source.prompt_tokens_details
+    )
+    target.completion_tokens_details = _sum_details(
+        target.completion_tokens_details, source.completion_tokens_details
+    )

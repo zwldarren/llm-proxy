@@ -95,6 +95,38 @@ def test_request_end_writes_one_classified_row_and_one_usage_record():
     assert usage.cost_usd == 0.002
 
 
+def test_a_reported_zero_is_stored_as_zero_not_null():
+    """A turn that reports a counter as ``0`` reported it — the whole prompt came
+    from cache, the turn had produced no output tokens yet — so the column keeps the
+    report. Only a turn with no usage record at all leaves the token columns NULL."""
+    capture = _Capture()
+    context = _context(usage=Usage(input_tokens=40, output_tokens=0, cache_read_input_tokens=40))
+
+    capture.drive(record_request_end(MagicMock(), SimpleNamespace(usage=None), context))
+
+    row = capture.logs[0]
+    assert row.prompt_tokens == 40
+    assert row.completion_tokens == 0
+    assert row.cache_read_input_tokens == 40
+    assert row.total_tokens == 40
+    usage = capture.usage[0]
+    assert usage.prompt_tokens == 40
+    assert usage.completion_tokens == 0
+
+
+def test_no_usage_record_leaves_the_token_columns_null():
+    capture = _Capture()
+    context = _context(usage=None)
+
+    capture.drive(record_request_end(MagicMock(), SimpleNamespace(usage=None), context))
+
+    row = capture.logs[0]
+    assert row.prompt_tokens is None
+    assert row.completion_tokens is None
+    assert row.total_tokens is None
+    assert row.cache_read_input_tokens is None
+
+
 def test_request_error_writes_an_error_row_without_forcing_cost():
     capture = _Capture()
     context = _context(cost_usd=None)

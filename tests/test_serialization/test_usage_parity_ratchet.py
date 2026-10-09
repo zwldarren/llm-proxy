@@ -1023,21 +1023,13 @@ _ROWS: tuple[Row, ...] = (
         dialect="gemini",
         # Grounding arrives in an earlier chunk, so the usage chunk alone cannot know
         # it: the turn-level fact is what excludes the tool-use prompt tokens, and it
-        # reaches the adapter through ``turn`` on every observation.
+        # reaches the adapter through ``turn`` on every observation. The grounding
+        # frame's own candidate also states the count, so the seam bills the searches
+        # it announced even when no ``usageMetadata`` chunk ever arrives.
         frames=(GEMINI_GROUNDING_CHUNK, GEMINI_USAGE_CHUNK),
         legacy=_gemini_streaming_converter,
         turn={"search_grounded": True},
         closed={"reasoning": _GEMINI_THINKING_WAS_UNREAD},
-        # The turn's *count* stays the caller's own counter (the converter ratchets it
-        # and folds it in on read, as the OpenResponses transformer does for the
-        # searches a provider announced as tool calls), so the seam side — a bare
-        # accumulator — cannot see it. The tokens are what this row compares.
-        declared={
-            "web_search": (
-                "the turn's search count is the caller's counter, folded in by the "
-                "converter's get_usage(); the adapter reads the counts a payload states."
-            )
-        },
         recorded={
             "input": 100,
             "output": 27,

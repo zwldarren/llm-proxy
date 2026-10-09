@@ -366,8 +366,9 @@ def _parse_realtime(
         total_tokens=_int(usage.get("total_tokens")) or (input_tokens + output_tokens),
         cache_read_input_tokens=cache_read,
         cache_creation_input_tokens=cache_write,
+        reasoning_tokens=reasoning,
         prompt_tokens_details=prompt_details,
-        completion_tokens_details=_completion_details(output_details),
+        completion_tokens_details=completion_details,
         audio_duration_seconds=usage.get("audio_duration_seconds"),
         web_search_requests=_positive_int(usage.get("web_search_requests")),
     )
@@ -478,6 +479,10 @@ def _parse_audio(payload: Mapping[str, Any], turn: Mapping[str, Any] | None = No
         return Usage(
             audio_duration_seconds=duration_seconds,
             prompt_tokens_details=_audio_prompt_details(usage),
+            # OpenRouter's bare ``{"seconds": N, "cost": ...}`` reports what it
+            # charged; a duration the proxy can price is not a reason to discard
+            # a cost the wire stated (cost.py prefers the reported one).
+            provider_reported_cost=_provider_reported_cost(usage),
         )
 
     return Usage(
@@ -486,6 +491,7 @@ def _parse_audio(payload: Mapping[str, Any], turn: Mapping[str, Any] | None = No
         total_tokens=_int(usage.get("total_tokens")),
         prompt_tokens_details=_audio_prompt_details(usage),
         completion_tokens_details=_audio_completion_details(usage),
+        provider_reported_cost=_provider_reported_cost(usage),
     )
 
 
@@ -499,19 +505,24 @@ def _gemini_search_queries(payload: Mapping[str, Any]) -> int:
 
     ``groundingMetadata.webSearchQueries`` lives on the candidate, not in
     ``usageMetadata``, and lists the queries the model actually issued; Google
-    bills each as a per-request search fee.
+    bills each as a per-request search fee. The count is of *distinct non-empty*
+    queries across every candidate, which is Google's documented rule ("we ignore
+    the empty web search queries when counting unique queries"): a query the
+    model repeated, or issued in more than one candidate of a multi-candidate
+    request, is one billable search, not two.
     """
     candidates = payload.get("candidates")
     if not isinstance(candidates, list):
         return 0
+    queries: set[str] = set()
     for candidate in candidates:
         grounding = _as_dict(candidate.get("groundingMetadata")) if _as_dict(candidate) else None
         if grounding is None:
             continue
-        queries = grounding.get("webSearchQueries")
-        if isinstance(queries, list) and queries:
-            return len(queries)
-    return 0
+        issued = grounding.get("webSearchQueries")
+        if isinstance(issued, list):
+            queries.update(query for query in issued if isinstance(query, str) and query)
+    return len(queries)
 
 
 def _gemini_billable_counts(
@@ -557,16 +568,17 @@ def _parse_gemini(
     payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
 ) -> Usage | None:
     meta = _as_dict(payload.get("usageMetadata"))
-    if meta is None:
-        return None
-    # The input count depends on whether the turn used search grounding: Google
-    # charges the per-request search fee instead of the tool-use prompt tokens it
-    # reports separately, so a grounded turn excludes them. Grounding is a
-    # *turn-level* fact — it lives on the candidate, and a usage-only stream chunk
-    # carries none — so it is read from the payload when the payload states it and
-    # from ``turn`` otherwise (the caller is the one that saw the whole turn).
+    # Native Google Search grounding is a turn-level fact: it lives on the
+    # candidate, and a usage-only stream chunk carries none. It is read from the
+    # payload when the payload states it and from ``turn`` otherwise (the caller
+    # is the one that saw the whole turn) — and it is read before the metadata,
+    # because the input count below depends on it.
     search_requests = _gemini_search_queries(payload)
     grounded = search_requests > 0 or bool((turn or {}).get("search_grounded"))
+    if meta is None:
+        # Search grounding bills per request even with no usage block (the
+        # Responses dialect's ``web_search_call`` items do the same).
+        return Usage(web_search_requests=search_requests) if search_requests else None
     input_tokens, output_tokens = _gemini_billable_counts(meta, has_search_grounding=grounded)
     return Usage(
         input_tokens=input_tokens,

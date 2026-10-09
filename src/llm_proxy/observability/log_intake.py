@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     from llm_proxy.config.manager import DatabaseConfigManager
     from llm_proxy.config.types.logging_config import LoggingConfig
     from llm_proxy.core.request_facts import RequestIdentity
-    from llm_proxy.models import InternalRequest, InternalResponse
+    from llm_proxy.models import InternalRequest, InternalResponse, Usage
     from llm_proxy.observability.event_context import EventContext
 
 logger = get_logger(__name__)
@@ -760,6 +760,18 @@ def _build_log_metadata(
     return log_metadata
 
 
+def _token_column(value: int, usage: Usage | None) -> int | None:
+    """One token column of a row: the reported value, or NULL when unreported.
+
+    A reported zero is a real observation — the whole prompt was served from
+    cache, the turn had produced no output tokens yet — and must survive as
+    ``0``; ``None`` means the turn reported no usage record at all. ``TokenUsage``
+    cannot tell the two apart (every one of its fields defaults to ``0``), so the
+    record's presence is the signal.
+    """
+    return value if usage is not None else None
+
+
 def _build_log_base(
     context: EventContext,
     default_status_code: int = 200,
@@ -789,12 +801,14 @@ def _build_log_base(
         "provider": context.provider,
         "error_message": context.error_message,
         "error_stack_trace": context.error_stack_trace,
-        "prompt_tokens": tokens.prompt_tokens or None,
-        "completion_tokens": tokens.completion_tokens or None,
-        "total_tokens": tokens.total_tokens or None,
-        "cache_creation_input_tokens": tokens.cache_creation_input_tokens or None,
-        "cache_read_input_tokens": tokens.cache_read_input_tokens or None,
-        "cached_prompt_tokens": tokens.cached_prompt_tokens or None,
+        "prompt_tokens": _token_column(tokens.prompt_tokens, context.usage),
+        "completion_tokens": _token_column(tokens.completion_tokens, context.usage),
+        "total_tokens": _token_column(tokens.total_tokens, context.usage),
+        "cache_creation_input_tokens": _token_column(
+            tokens.cache_creation_input_tokens, context.usage
+        ),
+        "cache_read_input_tokens": _token_column(tokens.cache_read_input_tokens, context.usage),
+        "cached_prompt_tokens": _token_column(tokens.cached_prompt_tokens, context.usage),
         "cost_usd": context.cost_usd,
         "cache_savings_usd": context.cache_savings_usd,
         "ttft_ms": safe_int(context.ttft_ms) if context.ttft_ms is not None else None,
@@ -825,16 +839,18 @@ def _build_usage_record(context: EventContext) -> UsageRecordCreate:
         model=context.internal_model or context.model,
         provider=context.provider,
         user_id=context.auth_user_id,
-        prompt_tokens=tokens.prompt_tokens or None,
-        completion_tokens=tokens.completion_tokens or None,
-        total_tokens=tokens.total_tokens or None,
+        prompt_tokens=_token_column(tokens.prompt_tokens, context.usage),
+        completion_tokens=_token_column(tokens.completion_tokens, context.usage),
+        total_tokens=_token_column(tokens.total_tokens, context.usage),
         cost_usd=context.cost_usd,
-        cache_creation_input_tokens=tokens.cache_creation_input_tokens or None,
-        cache_read_input_tokens=tokens.cache_read_input_tokens or None,
-        cached_prompt_tokens=tokens.cached_prompt_tokens or None,
+        cache_creation_input_tokens=_token_column(
+            tokens.cache_creation_input_tokens, context.usage
+        ),
+        cache_read_input_tokens=_token_column(tokens.cache_read_input_tokens, context.usage),
+        cached_prompt_tokens=_token_column(tokens.cached_prompt_tokens, context.usage),
         cache_savings_usd=context.cache_savings_usd,
-        audio_input_tokens=tokens.audio_input_tokens or None,
-        audio_output_tokens=tokens.audio_output_tokens or None,
+        audio_input_tokens=_token_column(tokens.audio_input_tokens, context.usage),
+        audio_output_tokens=_token_column(tokens.audio_output_tokens, context.usage),
         response_time_ms=safe_int(context.latency_ms),
         status_code=context.response_status_code,
         user_identity=context.user_id,

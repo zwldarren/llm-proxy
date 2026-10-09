@@ -290,16 +290,17 @@ class GeminiStreamingTransformer(StreamingTransformer):
         if isinstance(safety_ratings, list) and safety_ratings:
             openai_chunk["safety_ratings"] = safety_ratings
 
+        # Observe every chunk: the seam parses the counters when the chunk carries
+        # them, and the grounding fact either way, so a stream that never sends a
+        # ``usageMetadata`` chunk still bills the searches it announced. Only the
+        # *emission* needs the chunk to carry metadata of its own.
+        self._usage.observe(chunk, turn={"search_grounded": self._web_search_requests > 0})
         if chunk.get("usageMetadata"):
-            # Observe the provider's own chunk: the seam parses the counters and the
-            # grounding fact (the turn's, when this chunk carries no candidate of its
-            # own), and get_usage() serves the accumulated record.
-            self._usage.observe(chunk, turn={"search_grounded": self._web_search_requests > 0})
+            # Emit the chunk's usage in the OpenAI dialect the client reads; the
+            # amounts come from the record, so the wire and the bill agree
+            # (ADR-0009 keeps the shape here).
             record = self._usage.result()
             if record is not None:
-                # Emit the chunk's usage in the OpenAI dialect the client reads; the
-                # amounts come from the record, so the wire and the bill agree
-                # (ADR-0009 keeps the shape here).
                 emitted: dict[str, Any] = {
                     "prompt_tokens": record.input_tokens,
                     "completion_tokens": record.output_tokens,

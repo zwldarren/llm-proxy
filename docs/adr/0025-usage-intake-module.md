@@ -322,3 +322,53 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   usage; the transcription stream tracker no longer reaches into a provider
   adapter's private `_parse_usage`). The remaining shapes are the Interactions
   vocabulary and the gpt-image branch of the image stream tracker.
+
+## Amendment (2026-10): repairs the seam's first review found
+
+An integration review of the merged branch found five ways a fact could still be
+lost or mis-stated inside the seam. Each is a repair to the adapter or the merge
+rule, not a new seam:
+
+- **Realtime thinking tokens.** ``_parse_realtime`` computed the lifted reasoning
+  value and the alias-cleared completion-details block and then passed neither to
+  the record: it re-parsed the raw ``output_token_details`` instead. Thinking
+  tokens reported by the Realtime API were therefore unbilled and unlogged, and
+  the nested alias survived beside the (absent) flat field — exactly the
+  double expression ``_lift_reasoning`` exists to prevent. The dialect now passes
+  what it lifted, like every other dialect.
+- **Gemini search grounding with no usage block.** The adapter returned ``None``
+  whenever ``usageMetadata`` was absent, so a grounded response (or stream) whose
+  provider never reported counters lost the per-request search fee that a
+  ``webSearchQueries`` list states. A grounded payload now yields a
+  search-count-only record, which is what the Responses adapter already does for a
+  ``web_search_call`` item with no usage block. The Gemini streaming converter also
+  observes *every* chunk now, not only the ones carrying ``usageMetadata``, since
+  the grounding fact rides on the candidate.
+- **The search count is of distinct non-empty queries.** ``webSearchQueries`` is
+  read across all candidates and deduplicated, matching Google's documented rule
+  ("we ignore the empty web search queries when counting unique queries"): a query
+  the model repeated, or issued in a second candidate of a multi-candidate
+  request, is one billable search. Counting only the first candidate's list
+  undercounted; counting duplicates overcounted.
+- **A wire total larger than the canonical counters survives the merge.**
+  ``merge_latest`` recomputed ``total_tokens`` as ``input + output``, which is
+  right for a dialect with no wire total (Anthropic's per-event partial sum) but
+  wrong for one whose total counts dimensions the canonical counters deliberately
+  exclude — Gemini's ``totalTokenCount`` includes the tool-use prompt tokens a
+  search-grounded turn bills through the search fee instead. The merged total is
+  now the largest of the counters' sum, the reported total, and the turn's own
+  earlier total (cumulative counters never decrease, so an event that omits the
+  total does not withdraw it).
+- **The audio dialect keeps a reported cost.** Both the duration branch and the
+  token branch now carry ``provider_reported_cost``, the fact ``cost.py`` treats
+  as authoritative. OpenRouter's bare ``{"seconds": N, "cost": ...}`` was
+  discarding it and falling back to duration pricing.
+
+Two merge-rule gaps on the same read model are closed with them: ``add_usage``
+sums the nested details blocks field by field (``audio_tokens``,
+``image_tokens`` are billable facts of their own, not a mirror of the flat
+fields, so a continuation hop's details must add rather than be dropped), and the
+protocol-side fold-back of the canonical flat ``reasoning_tokens`` into the
+OpenAI-dialect ``completion_tokens_details`` object uses a ``None`` check rather
+than truthiness, so an explicitly reported zero reaches the client the way the
+Realtime serializer already emitted it.

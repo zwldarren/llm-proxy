@@ -139,3 +139,16 @@ before, which the dashboard reads as missing dimensions on MCP, web-search,
 judge and realtime rows. Payload fields keep the distinction the old sites
 relied on — ``None`` for a body the lifecycle did not capture is not the
 record's empty default.
+
+## Amendment (2026-10): a reported zero is not a missing fact
+
+The token columns used `value or None`, which turned a legitimately reported zero
+into NULL. A turn that had produced no output tokens yet, or whose whole prompt
+was served from cache, reported a real ``0``, and the pre-refactor path stored it;
+storing NULL instead cannot be told apart from "this turn reported no usage", which
+is what a missing-usage heuristic reads. The columns now take the value whenever
+the turn has a usage record at all and NULL only when it has none
+(``_token_column``, used by both ``_build_log_base`` and ``_build_usage_record``).
+``TokenUsage`` cannot distinguish the two (every field defaults to ``0``), so the
+record's presence is the signal; readers that aggregate coalesce NULL, so no
+caller loses the "unreported" case.

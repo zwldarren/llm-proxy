@@ -891,6 +891,25 @@ class TestGeminiResponseDetails:
         assert len(result.provider_info["annotations"]) == 2
         assert result.output[0].citations is result.provider_info["annotations"]
 
+    def test_grounding_without_a_usage_block_still_bills_the_search(self, serializer):
+        """A grounded response that reports no ``usageMetadata`` still owes the
+        per-request search fee: the count is a turn-level fact stated on the
+        candidate, not a counter the usage block carries."""
+        response = {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "According to source..."}]},
+                    "finishReason": "STOP",
+                    "groundingMetadata": {"webSearchQueries": ["a", "b"]},
+                }
+            ]
+        }
+        result = serializer.parse_provider_response(response)
+
+        assert result.usage is not None
+        assert result.usage.web_search_requests == 2
+        assert result.usage.input_tokens == 0
+
     def test_no_image_finish_reason_maps_to_content_filter(self, serializer):
         from llm_proxy.models.finish_reasons import GEMINI_TO_OPENAI
 
@@ -984,6 +1003,29 @@ class TestGeminiStreamingDetails:
         result = transformer.convert_chunk(chunk)
         assert "annotations" in result["choices"][0]["delta"]
         assert len(result["choices"][0]["delta"]["annotations"]) == 1
+
+    def test_grounding_without_a_usage_chunk_still_bills_the_search(self):
+        """The mirror of the non-streaming case: a provider that never sends a
+        ``usageMetadata`` chunk must not lose the searches its candidates announced."""
+        from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
+
+        transformer = GeminiStreamingTransformer(model="gemini-2.0-flash")
+        transformer.convert_chunk(
+            {
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": "Source says hello"}]},
+                        "finishReason": "STOP",
+                        "groundingMetadata": {"webSearchQueries": ["a", "b"]},
+                    }
+                ]
+            }
+        )
+
+        usage = transformer.get_usage()
+        assert usage is not None
+        assert usage.web_search_requests == 2
+        assert usage.input_tokens == 0
 
 
 def test_build_provider_request_gemini3_injects_dummy_signature(serializer):

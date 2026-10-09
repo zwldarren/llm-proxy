@@ -143,10 +143,13 @@ class OpenAIFormattingMixin:
             # cleared at parse time, ADR-0025); fold it back into the OpenAI-dialect
             # object so OpenAI clients read ``completion_tokens_details`` regardless
             # of provider, mirroring the cache-read fold below.
-            reasoning_tokens = (
-                completion_details.reasoning_tokens if completion_details else None
-            ) or response.usage.reasoning_tokens
-            if completion_details is not None or reasoning_tokens:
+            reasoning_tokens = completion_details.reasoning_tokens if completion_details else None
+            if reasoning_tokens is None:
+                reasoning_tokens = response.usage.reasoning_tokens
+            # A reported zero is a report: the details object is emitted whenever
+            # there is one, the way the Realtime serializer does it — not
+            # fabricated from an absent value alone.
+            if completion_details is not None or reasoning_tokens is not None:
                 usage_dict["completion_tokens_details"] = {
                     k: v
                     for k, v in [

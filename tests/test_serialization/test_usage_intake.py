@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from llm_proxy.models.types import Usage
+from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
 from llm_proxy.serialization.usage import UsageAccumulator, add_usage, parse_usage
 
 # ---------------------------------------------------------------------------
@@ -380,6 +380,30 @@ class TestRealtimeDialect:
         assert usage.completion_tokens_details is not None
         assert usage.completion_tokens_details.audio_tokens == 25
 
+    def test_thinking_tokens_are_lifted_out_of_the_nested_block(self) -> None:
+        """Realtime's ``output_token_details.reasoning_tokens`` is a dialect alias for
+        a fact the canonical record keeps flat; leaving the nested copy behind would
+        express one fact twice."""
+        usage = parse_usage(
+            "realtime",
+            {
+                "type": "response.done",
+                "response": {
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 30,
+                        "output_token_details": {"reasoning_tokens": 12, "audio_tokens": 25},
+                    }
+                },
+            },
+        )
+
+        assert usage is not None
+        assert usage.reasoning_tokens == 12
+        assert usage.completion_tokens_details is not None
+        assert usage.completion_tokens_details.reasoning_tokens is None
+        assert usage.completion_tokens_details.audio_tokens == 25
+
 
 class TestOllamaDialect:
     """Ollama's counters, and the cache count that is a subset of the input one."""
@@ -516,6 +540,40 @@ class TestGeminiDialect:
         assert usage.input_tokens == 10
         assert usage.web_search_requests == 1
 
+    def test_grounding_alone_is_billable_without_a_usage_block(self) -> None:
+        """Google bills the search even when the response reports no counters, so a
+        grounded candidate is a search-count-only record (the Responses dialect does
+        the same for a ``web_search_call`` with no usage block)."""
+        usage = parse_usage(
+            "gemini",
+            {"candidates": [{"groundingMetadata": {"webSearchQueries": ["a", "b"]}}]},
+        )
+
+        assert usage is not None
+        assert usage.web_search_requests == 2
+        assert usage.input_tokens == 0
+
+    def test_no_grounding_and_no_metadata_makes_no_record(self) -> None:
+        assert parse_usage("gemini", {"candidates": [{"content": {}}]}) is None
+
+    def test_the_search_count_is_of_distinct_non_empty_queries(self) -> None:
+        """Google's documented rule: billable searches are the unique non-empty
+        queries, so a query repeated in a second candidate is one search, and the
+        empty strings the wire pads the list with are none."""
+        usage = parse_usage(
+            "gemini",
+            {
+                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 1},
+                "candidates": [
+                    {"groundingMetadata": {"webSearchQueries": ["a", "b", ""]}},
+                    {"groundingMetadata": {"webSearchQueries": ["b", "c"]}},
+                ],
+            },
+        )
+
+        assert usage is not None
+        assert usage.web_search_requests == 3
+
 
 class TestAudioDialect:
     """The transcription/translation usage block: tokens or duration."""
@@ -580,6 +638,18 @@ class TestAudioDialect:
         assert usage is not None
         assert usage.audio_duration_seconds == 6.4
         assert usage.input_tokens == 0
+        assert usage.provider_reported_cost == pytest.approx(0.000178)
+
+    def test_a_token_block_keeps_the_cost_the_wire_reported(self) -> None:
+        """``cost`` is authoritative over the computed price in ``cost.py``, so it
+        survives whichever branch of the block is taken."""
+        usage = parse_usage(
+            "audio",
+            {"usage": {"input_tokens": 5, "output_tokens": 2, "cost": 0.00042}},
+        )
+
+        assert usage is not None
+        assert usage.provider_reported_cost == pytest.approx(0.00042)
 
     def test_a_duration_block_keeps_its_input_split(self) -> None:
         usage = parse_usage(
@@ -762,6 +832,30 @@ class TestUsageAccumulator:
         assert usage.output_tokens == 40
         assert usage.total_tokens == 190
 
+    def test_a_wire_total_larger_than_the_counters_survives_the_merge(self) -> None:
+        """Gemini's ``totalTokenCount`` counts facts the canonical counters do not:
+        a search-grounded turn's tool-use prompt tokens are billed through the
+        per-request search fee instead of ``input_tokens``. Recomputing the merged
+        total as ``input + output`` would undercount the turn."""
+        grounded = {
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "toolUsePromptTokenCount": 3,
+                "totalTokenCount": 18,
+            },
+            "candidates": [{"groundingMetadata": {"webSearchQueries": ["a"]}}],
+        }
+        accumulator = UsageAccumulator("gemini")
+        accumulator.observe(grounded)
+        accumulator.observe(grounded)
+
+        usage = accumulator.result()
+
+        assert usage is not None
+        assert usage.input_tokens == 10
+        assert usage.total_tokens == 18
+
     def test_dialect_is_declared_not_guessed(self) -> None:
         # The Interactions vocabulary is a wire shape with no adapter yet: a caller
         # that declares it gets a loud error rather than a best-effort guess.
@@ -812,3 +906,26 @@ class TestMergeRules:
         add_usage(target, source)
 
         assert target.audio_duration_seconds == pytest.approx(42.75)
+
+    def test_add_usage_sums_the_nested_details(self) -> None:
+        """The details blocks carry billable facts of their own (``audio_tokens``,
+        ``image_tokens``), not a mirror of the flat fields, so a hop's details must
+        add rather than be dropped."""
+        target = Usage(
+            input_tokens=10,
+            prompt_tokens_details=PromptTokensDetails(audio_tokens=100, image_tokens=4),
+            completion_tokens_details=CompletionTokensDetails(audio_tokens=25),
+        )
+        source = Usage(
+            input_tokens=5,
+            prompt_tokens_details=PromptTokensDetails(audio_tokens=50),
+            completion_tokens_details=CompletionTokensDetails(audio_tokens=5),
+        )
+
+        add_usage(target, source)
+
+        assert target.prompt_tokens_details is not None
+        assert target.prompt_tokens_details.audio_tokens == 150
+        assert target.prompt_tokens_details.image_tokens == 4  # unknown on one side
+        assert target.completion_tokens_details is not None
+        assert target.completion_tokens_details.audio_tokens == 30

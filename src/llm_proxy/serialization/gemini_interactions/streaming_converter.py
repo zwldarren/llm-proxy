@@ -148,7 +148,7 @@ class InteractionsStreamingTransformer(StreamingTransformer):
                 # usage so get_usage() reflects the real bill even though the
                 # client-side chunk was emitted without it.
                 if isinstance(usage, dict):
-                    self._usage = self._usage_to_streaming(usage)
+                    self._usage = self._usage_to_record(usage)
                 return None
             return self._finish_chunk(finish, usage=usage)
 
@@ -436,12 +436,12 @@ class InteractionsStreamingTransformer(StreamingTransformer):
 
         if isinstance(usage, dict):
             chunk["usage"] = self._usage_to_openai(usage)
-            self._usage = self._usage_to_streaming(usage)
+            self._usage = self._usage_to_record(usage)
 
         self._finalize_accumulation()
         return chunk
 
-    def _usage_to_streaming(self, usage: dict[str, Any]) -> Usage:
+    def _usage_to_record(self, usage: dict[str, Any]) -> Usage:
         """Map an Interactions usage dict onto the canonical usage record."""
         search_requests = interactions_web_search_requests(usage)
         prompt_tokens, completion_tokens = interactions_billable_token_counts(
