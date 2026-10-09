@@ -170,6 +170,10 @@ _Avoid_: peek, sniff, read-ahead
 The registered per-provider-key conversion class (`build_provider_request` / `parse_provider_response` / `get_chunk_converter`), living in `serialization/<family>/serializer.py` for the four dialect families (openai, anthropic, gemini, ollama). Adapters obtain it through the registry, never by direct import. Small provider-specific serializers (chutes, nanogpt) stay provider-local.
 _Avoid_: family serializer, provider converter
 
+**Provider declaration**:
+What a provider type *is*, before it has behaviour: the registry name (`@register_adapter`), the catalog branding (`DISPLAY_NAME_EN`/`_ZH`, `LOBE_ICON_ID`/`_VARIANT` — read only by `list_provider_types()`), `DEFAULT_BASE_URL`, and for the Chat-Completions family the upstream's wire facts — `native_protocols`, the Anthropic/Responses endpoint URLs (a fixed root, or one derived from the configured base URL), the `NATIVE_PASSTHROUGH_DEFAULT` opt-in and `DEFAULT_UNKNOWN_FIELDS_POLICY`. It lives in `providers/<type>/adapter.py`, next to any provider-local serializer; a type stays a pure declaration until it grows a method, at which point the method — and a test file for it — are the behaviour, and the declaration is unchanged. The shared half of the contract is asserted once, from one row per type, in `tests/providers/test_declared_providers.py` (the local engines have their own table in `test_local_engine_adapters.py`, whose rows carry extra engine vocabulary).
+_Avoid_: a per-provider test suite restating registration / base URL / branding / native protocols / endpoint derivation; asserting branding by comparing the class attributes to themselves instead of reading the published catalog; a declaration-only provider split across more than one module
+
 **API variant** (Gemini):
 The per-provider upstream dialect switch `metadata.api_variant` — `generate_content` (default, legacy) or `interactions` (Google's GA Interactions API, serializer at `serialization/gemini_interactions/`). The Gemini adapter picks the serializer and endpoint shape from it; embeddings/models are untouched. See ADR-0010.
 _Avoid_: dialect, flavor, api_version
