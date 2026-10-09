@@ -69,11 +69,11 @@ class WebSearchStreamProcessor:
         blocks from the provider stream already serve as the tool call indicator.
         Only emits web_search_tool_result blocks + message_delta with usage.
 
-        Anthropic and OpenResponses transformers both implement
-        ``_web_search_result_block`` to emit the result content block
-        (``web_search_tool_result`` for Anthropic, ``web_search_call`` for
-        OpenResponses). If the transformer lacks this helper, web search
-        events cannot be emitted.
+        A transformer participates by declaring
+        ``supports_web_search_continuation``; the result block and the usage
+        delta are then its own public verbs (``web_search_result_block``,
+        ``usage_delta``). A transformer that does not declare the capability
+        cannot be continued, so the search is not executed at all.
 
         Returns:
             Tuple of (SSE events str or None, list of (ServerToolUseBlock, result) pairs,
@@ -92,7 +92,7 @@ class WebSearchStreamProcessor:
         if not web_search_blocks:
             return None, [], 0
 
-        if not hasattr(transformer, "_web_search_result_block"):
+        if not getattr(transformer, "supports_web_search_continuation", False):
             logger.warning(
                 f"Streaming web search not supported for transformer {type(transformer).__name__}"
             )
@@ -130,7 +130,7 @@ class WebSearchStreamProcessor:
                 # object verbatim, OpenResponses maps it onto the
                 # ``web_search_call.action`` fields).
                 events.append(
-                    transformer._web_search_result_block(
+                    transformer.web_search_result_block(
                         current_index,
                         tool_use.id,
                         [result.result_block.content],
@@ -141,7 +141,7 @@ class WebSearchStreamProcessor:
                 )
             else:
                 events.append(
-                    transformer._web_search_result_block(
+                    transformer.web_search_result_block(
                         current_index,
                         tool_use.id,
                         result.result_block.content,
@@ -157,12 +157,12 @@ class WebSearchStreamProcessor:
 
             search_results.append((server_tool_use, result))
 
-        if total_search_count > 0 and hasattr(transformer, "_message_delta_with_usage"):
+        if total_search_count > 0:
             usage = {
                 "output_tokens": 0,
                 "server_tool_use": {"web_search_requests": total_search_count},
             }
-            events.append(transformer._message_delta_with_usage(usage))
+            events.append(transformer.usage_delta(usage))
 
         return (
             "".join(events) if events else None,
@@ -392,10 +392,6 @@ class WebSearchStreamProcessor:
                 len(ws_results), fallback=len(accumulated) + len(ws_results)
             )
             cont_cls = type(state.transformer)
-            if not hasattr(cont_cls, "continuation"):
-                raise TypeError(
-                    f"Transformer {cont_cls.__name__} does not implement 'continuation'"
-                )
             cont_kwargs = dict(
                 # Echo the client-requested alias (see InternalRequest.echo_model)
                 # so continuation chunks agree with the main stream; the upstream
@@ -403,23 +399,14 @@ class WebSearchStreamProcessor:
                 model=state.stream_request.echo_model,
                 request_id=state.transformer.response_id,
                 start_index=next_index,
+                # The continuation is the same logical request: it intercepts
+                # web search on exactly the same terms as the original hop.
+                intercept_web_search=proxy_web_search_active,
             )
-            src_state = getattr(state.transformer, "state", None)
-            if src_state is not None:
-                cont_kwargs["intercept_web_search"] = proxy_web_search_active
             cont_transformer = cont_cls.continuation(**cont_kwargs)
-
-            if src_state is not None:
-                # Preserve the encrypted-reasoning decision across the
-                # continuation: it depends on include/store, which the
-                # continuation kwargs do not carry.
-                cont_transformer.state.include_reasoning_encrypted = getattr(
-                    src_state, "include_reasoning_encrypted", False
-                )
-                for idx, item in src_state.pending_items.items():
-                    if item.get("type") == "web_search_call":
-                        cont_transformer.state.pending_items[idx] = dict(item)
-                        cont_transformer.state.closed_items.add(idx)
+            # The hops are separate objects: hand the previous one's cross-turn
+            # state over explicitly (protocols that carry none inherit a no-op).
+            cont_transformer.adopt_continuation_state(state.transformer)
 
             try:
                 async for chunk in continuation_stream:

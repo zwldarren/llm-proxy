@@ -137,7 +137,7 @@ class TestCaptureAndFlushRoundTrip:
 
     def test_openresponses_usage_shim_captures(self):
         transformer = OpenResponsesStreamingTransformer(model="claude-x")
-        transformer._message_delta_with_usage({"output_tokens": 0})
+        transformer.usage_delta({"output_tokens": 0})
         assert transformer._pending_usage == {"output_tokens": 0}
         assert transformer._has_pending_usage is True
 
@@ -268,3 +268,47 @@ class TestUsageRecordAbsorption:
         assert again is not None
         assert again.input_tokens == 107
         assert again.total_tokens == 130
+
+
+class TestContinuationStateAdoption:
+    """The hop-to-hop hand-over is a verb, not an outside reach into ``state``."""
+
+    def test_openresponses_carries_open_search_items_and_reasoning_decision(self):
+        original = OpenResponsesStreamingTransformer(model="m", request_id="r")
+        original.state.include_reasoning_encrypted = True
+        original.state.pending_items[7] = {"type": "web_search_call", "id": "ws_1"}
+        original.state.pending_items[8] = {"type": "message", "id": "msg_1"}
+
+        continuation = OpenResponsesStreamingTransformer.continuation(
+            model="m", request_id="r", start_index=3
+        )
+        continuation.adopt_continuation_state(original)
+
+        # Only the search item travels, and it travels closed: the first hop
+        # opened it, so the continuation must not re-open it.
+        assert continuation.state.pending_items == {7: {"type": "web_search_call", "id": "ws_1"}}
+        assert continuation.state.closed_items == {7}
+        # The encrypted-reasoning decision depends on include/store, which the
+        # continuation kwargs do not carry, so it has to survive the hop.
+        assert continuation.state.include_reasoning_encrypted is True
+
+    def test_a_copied_item_is_not_shared_with_the_previous_hop(self):
+        original = OpenResponsesStreamingTransformer(model="m", request_id="r")
+        original.state.pending_items[7] = {"type": "web_search_call", "id": "ws_1"}
+
+        continuation = OpenResponsesStreamingTransformer.continuation(
+            model="m", request_id="r", start_index=3
+        )
+        continuation.adopt_continuation_state(original)
+        continuation.state.pending_items[7]["id"] = "ws_1_mutated"
+
+        assert original.state.pending_items[7]["id"] == "ws_1"
+
+    def test_a_transformer_without_state_adopts_nothing(self):
+        continuation = AnthropicStreamingTransformer.continuation(
+            model="m", request_id="r", start_index=1
+        )
+
+        # The base default is a no-op: the provider-side converter carries no
+        # continuation state, and adopting from it must not raise.
+        continuation.adopt_continuation_state(AnthropicChunkConverter(model="m"))

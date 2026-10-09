@@ -1313,7 +1313,7 @@ class TestWebSearchFailureReporting:
 
         transformer = OpenResponsesStreamingTransformer(model="gpt-5.2", request_id="r1")
         return _parse_sse_events(
-            transformer._web_search_result_block(
+            transformer.web_search_result_block(
                 0,
                 "ws_1",
                 results,

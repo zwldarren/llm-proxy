@@ -227,6 +227,10 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
     # accumulate_native_frame / native_log_body).
     native_frame_accumulation = True
 
+    # OpenResponses renders the searches as web_search_call items and reports
+    # the count on a response.in_progress event.
+    supports_web_search_continuation = True
+
     def __init__(
         self,
         model: str = "",
@@ -305,8 +309,8 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                 self.state.namespace_map = ctx.namespace_map
 
         # Pending terminal usage is owned by ``PendingTerminalState``; the
-        # only writer is ``_message_delta_with_usage`` (web-search usage
-        # updates), and the continuation merge reaches it through the public
+        # only writer is ``usage_delta`` (web-search usage updates), and the
+        # continuation merge reaches it through the public
         # ``merge_terminal_state`` verb instead of poking private fields.
         #
         # What the proxy bills from (ADR-0025): two dialects reach this
@@ -385,6 +389,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         model: str,
         request_id: str,
         start_index: int,
+        *,
         include: list[str] | None = None,
         web_search_tool_indices: set[int] | None = None,
         intercept_web_search: bool = True,
@@ -400,6 +405,8 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             start_index: Starting output item index
             include: Optional include fields from the original request
             web_search_tool_indices: Optional set of web_search tool indices to propagate
+            intercept_web_search: Whether the proxy is still executing searches for
+                this request (the continuation hop matches the original transformer)
         """
         instance = cls(
             model=model,
@@ -413,6 +420,26 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         if web_search_tool_indices is not None:
             instance.state.web_search_tool_indices = set(web_search_tool_indices)
         return instance
+
+    def adopt_continuation_state(self, previous: Any) -> None:
+        """Take over the previous hop's reasoning decision and open search items.
+
+        The continuation is a second upstream call whose client-visible
+        response is the same one, so the encrypted-reasoning decision (which
+        depends on include/store, not on the continuation kwargs) must survive
+        the hop, and the web_search_call items the first hop opened but did not
+        close have to be carried over rather than re-opened.
+        """
+        previous_state = getattr(previous, "state", None)
+        if previous_state is None:
+            return
+        self.state.include_reasoning_encrypted = getattr(
+            previous_state, "include_reasoning_encrypted", False
+        )
+        for idx, item in previous_state.pending_items.items():
+            if item.get("type") == "web_search_call":
+                self.state.pending_items[idx] = dict(item)
+                self.state.closed_items.add(idx)
 
     def block_cursor(self) -> int:
         """Absolute output-item cursor.
@@ -1036,10 +1063,10 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
 
         return events
 
-    def _web_search_result_block(
+    def web_search_result_block(
         self,
         index: int,
-        _tool_use_id: str,
+        tool_use_id: str,  # noqa: ARG002 - the item id is not part of a search action
         results: list[dict[str, Any] | str],
         is_error: bool = False,
         query: str = "",
@@ -1087,7 +1114,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         status = "completed" if not is_error else "failed"
         return self._emit_web_search_call(index, action, status=status, mark_closed=True)
 
-    def _message_delta_with_usage(self, usage: dict[str, Any]) -> str:
+    def usage_delta(self, usage: dict[str, Any]) -> str:
         """Generate a response.in_progress event with updated usage.
 
         For OpenResponses protocol, this emits a response.in_progress event

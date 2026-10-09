@@ -68,6 +68,12 @@ class OpenAIStreamingTransformer(StreamingTransformer):
     # logged as a reassembled body too (see accumulate_native_frame).
     native_frame_accumulation = True
 
+    # Chat Completions participates in the continuation but renders neither the
+    # result blocks nor the usage delta on the client wire: the search results
+    # reach the client through the continuation request, and ``finalize``
+    # already reports the accumulated usage.
+    supports_web_search_continuation = True
+
     def __init__(
         self,
         model: str = "",
@@ -163,7 +169,12 @@ class OpenAIStreamingTransformer(StreamingTransformer):
 
     @classmethod
     def continuation(
-        cls, model: str, request_id: str, start_index: int
+        cls,
+        model: str,
+        request_id: str,
+        start_index: int,
+        *,
+        intercept_web_search: bool = True,
     ) -> OpenAIStreamingTransformer:
         """Create a transformer that continues an existing stream.
 
@@ -171,7 +182,9 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         own id/object/created/model), so a fresh transformer instance is
         sufficient for the web-search continuation loop; ``start_index`` is
         accepted for interface compatibility with the continuation seam
-        (Anthropic uses it for content-block indices, OpenAI has none).
+        (Anthropic uses it for content-block indices, OpenAI has none), and so
+        is ``intercept_web_search`` (Chat Completions has no proxy-side search
+        interception to carry).
         """
         return cls(model=model, request_id=request_id)
 
@@ -725,11 +738,11 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         """
         return self._usage.result()
 
-    def _web_search_result_block(
+    def web_search_result_block(
         self,
         index: int,
         tool_use_id: str,
-        content: list[dict[str, Any]] | str,
+        results: list[dict[str, Any]] | str,
         is_error: bool = False,
         query: str = "",
         error_message: str | None = None,
@@ -744,7 +757,7 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         """
         return ""
 
-    def _message_delta_with_usage(self, _usage: dict[str, Any]) -> str:
+    def usage_delta(self, usage: dict[str, Any]) -> str:  # noqa: ARG002
         """Emit a message delta with server-side tool usage.
 
         For Chat Completions the usage delta emitted by :meth:`finalize`
