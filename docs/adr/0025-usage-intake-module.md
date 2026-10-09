@@ -168,16 +168,23 @@ flat mirror fields; the flat fields and `to_usage_dict()` are deleted.
   the shape, and the two are repaired: on a block reporting 100 prompt + 5 tool-use +
   20 candidates + 7 thoughts + 30 cached, the image paths used to record 100/20 with
   no cache or thinking fact, and now record 105/27 with both.
-- That heuristic needs a *turn-level* fact: whether the turn used search grounding
-  lives on the candidate, not in `usageMetadata`. The adapter reads it from the
-  payload the caller hands in, which is exact for a response body and for a stream
-  chunk that carries its own candidates. The gemini streaming converter, however,
-  latches the turn's grounding across chunks and applies it to a later usage-only
-  chunk, and the seam has no channel for a fact that arrives beside the payload — the
-  same limitation the OpenResponses tool-call counter works around with a counter of
-  its own. Until the interface grows a turn-facts channel (or pricing learns to apply
-  the exclusion from the record), that one call site keeps its own latch and its own
-  parse.
+- Extraction therefore has *two* inputs, and the seam says so: `turn`, a mapping of
+  facts about the turn that the payload cannot carry. Gemini's
+  `search_grounded` is the first — grounding lives on the candidate, so a usage-only
+  stream chunk carries no statement about it, while the converter that saw the
+  earlier chunk does. A fact the payload states itself wins; the dialects that need
+  none ignore the argument. The alternative was to let the seam guess from the
+  payload alone and accept an over-bill whenever grounding arrived in an earlier
+  chunk, or to move the exclusion into pricing (which would need the tool-use token
+  count as a new canonical field and a new rule on the bill) — a fact the caller
+  holds is cheaper to pass than to reconstruct.
+- A turn-level *count* stays the caller's counter, as it already did for the
+  searches a provider announces as tool calls: the gemini converter ratchets the
+  queries it sees and folds them into the record on read, with the monotonic rule,
+  so a later chunk cannot withdraw a count and a usage chunk that arrives before the
+  grounding still records it. The turn-facts channel carries the boolean the adapter
+  needs to *decide* the input count; it does not carry running totals, which are
+  merges the accumulator already owns.
 - One call site turned out to speak a dialect that already existed. Decisions
   reports its usage as the Responses block: ``input_tokens`` / ``output_tokens``
   with the cache and thinking counts nested under ``input_tokens_details`` /

@@ -427,6 +427,96 @@ class TestOllamaDialect:
         assert usage.total_tokens == 13
 
 
+class TestGeminiDialect:
+    """``usageMetadata``'s two heuristics, and the turn-level grounding fact."""
+
+    def test_cached_content_does_not_break_thoughts_detection(self) -> None:
+        """``cachedContentTokenCount`` is a subset of ``promptTokenCount`` (per the
+        Gemini docs, the prompt count includes the cached content tokens), so it must
+        not affect the thoughts-detection heuristic.
+
+        Gemini API style: ``candidatesTokenCount`` already includes thinking tokens,
+        so total = prompt + candidates + toolUse with cached inside prompt.
+        """
+        usage = parse_usage(
+            "gemini",
+            {
+                "usageMetadata": {
+                    "promptTokenCount": 10,  # includes the 5 cached tokens
+                    "candidatesTokenCount": 5,  # includes the 2 thinking tokens
+                    "cachedContentTokenCount": 5,
+                    "thoughtsTokenCount": 2,
+                    "totalTokenCount": 15,
+                }
+            },
+        )
+        assert usage is not None
+        assert usage.input_tokens == 10
+        # Thoughts are already inside candidatesTokenCount: adding them again would
+        # overcount output.
+        assert usage.output_tokens == 5
+        assert usage.cache_read_input_tokens == 5
+
+    def test_cached_content_with_separate_thoughts_still_adds_them(self) -> None:
+        """Vertex AI style: ``candidatesTokenCount`` excludes thinking tokens, so
+        total = prompt + candidates + toolUse + thoughts even with cached content."""
+        usage = parse_usage(
+            "gemini",
+            {
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 5,
+                    "cachedContentTokenCount": 5,
+                    "thoughtsTokenCount": 2,
+                    "totalTokenCount": 17,
+                }
+            },
+        )
+        assert usage is not None
+        assert usage.input_tokens == 10
+        assert usage.output_tokens == 7
+
+    def test_search_grounding_excludes_all_tool_use_tokens(self) -> None:
+        """Documented limitation: ``toolUsePromptTokenCount`` is an aggregate across
+        ALL tools, so search grounding excludes function-call tool tokens too (input
+        undercounted). The API exposes no per-tool breakdown.
+
+        Grounding is a turn-level fact, so a caller that has seen the turn states it
+        in ``turn`` when the payload does not.
+        """
+        payload = {
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "toolUsePromptTokenCount": 3,  # 1 search-grounded + 2 function-call
+                "totalTokenCount": 18,
+            }
+        }
+        grounded = parse_usage("gemini", payload, turn={"search_grounded": True})
+        assert grounded is not None
+        assert grounded.input_tokens == 10  # all 3 tool-use tokens excluded
+        assert grounded.output_tokens == 5
+
+        ungrounded = parse_usage("gemini", payload)
+        assert ungrounded is not None
+        assert ungrounded.input_tokens == 13  # billed as input
+
+    def test_the_payload_states_grounding_better_than_the_turn(self) -> None:
+        """A chunk that carries its own grounded candidate is the authority: a caller
+        that has not seen the turn need not say anything."""
+        usage = parse_usage(
+            "gemini",
+            {
+                "usageMetadata": {"promptTokenCount": 10, "toolUsePromptTokenCount": 3},
+                "candidates": [{"groundingMetadata": {"webSearchQueries": ["a"]}}],
+            },
+            turn={"search_grounded": False},
+        )
+        assert usage is not None
+        assert usage.input_tokens == 10
+        assert usage.web_search_requests == 1
+
+
 # ---------------------------------------------------------------------------
 # The accumulator
 # ---------------------------------------------------------------------------

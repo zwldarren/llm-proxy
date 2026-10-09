@@ -10,7 +10,7 @@ from llm_proxy.models.finish_reasons import map_finish_reason
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
 from llm_proxy.serialization.gemini.code_execution import extract_code_execution_text
-from llm_proxy.serialization.gemini.usage import billable_token_counts
+from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.streaming.transformer import StreamingTransformer
 
 
@@ -45,7 +45,11 @@ class GeminiStreamingTransformer(StreamingTransformer):
         self._reasoning_buffer: str = ""
         self._reasoning_signature_buffer: str = ""
         self._reasoning_signature_emitted: bool = False
-        self._usage: Usage | None = None
+        # The turn's usage, through the intake seam (ADR-0025). Gemini reports the
+        # counters in a chunk of their own, which carries no candidate and therefore
+        # no statement about search grounding, so the accumulator is told what the
+        # turn has seen (``turn=``) on every observation.
+        self._usage = UsageAccumulator("gemini")
         # Native Google Search grounding query count (billed per search)
         self._web_search_requests: int = 0
         # Accumulated base64 audio (TTS) output and its MIME type
@@ -286,38 +290,30 @@ class GeminiStreamingTransformer(StreamingTransformer):
         if isinstance(safety_ratings, list) and safety_ratings:
             openai_chunk["safety_ratings"] = safety_ratings
 
-        usage_metadata = chunk.get("usageMetadata")
-        if usage_metadata:
-            prompt_tokens, completion_tokens = billable_token_counts(
-                usage_metadata, has_search_grounding=self._web_search_requests > 0
-            )
-            usage: dict[str, Any] = {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            }
-            # Canonical keys only: cache_read_input_tokens / reasoning_tokens
-            # are the keys billing/logging read (via the protocol-side
-            # transformer's get_usage); the Gemini-flavored key names would
-            # not be picked up there.
-            if "cachedContentTokenCount" in usage_metadata:
-                usage["cache_read_input_tokens"] = usage_metadata["cachedContentTokenCount"]
-            if "thoughtsTokenCount" in usage_metadata:
-                usage["reasoning_tokens"] = usage_metadata["thoughtsTokenCount"]
-            if "totalTokenCount" in usage_metadata:
-                usage["total_tokens"] = usage_metadata["totalTokenCount"]
-            openai_chunk["usage"] = usage
-
-            # Store usage for get_usage(). Cached tokens go ONLY into
-            # cache_read_input_tokens: setting prompt_tokens_details too would
-            # make billing apply the cache-rate adjustment twice for the same
-            # tokens (the canonical Usage record expresses each fact once).
-            self._usage = Usage(
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-                total_tokens=usage_metadata.get("totalTokenCount", 0),
-                cache_read_input_tokens=usage_metadata.get("cachedContentTokenCount") or None,
-                web_search_requests=self._web_search_requests or None,
-            )
+        if chunk.get("usageMetadata"):
+            # Observe the provider's own chunk: the seam parses the counters and the
+            # grounding fact (the turn's, when this chunk carries no candidate of its
+            # own), and get_usage() serves the accumulated record.
+            self._usage.observe(chunk, turn={"search_grounded": self._web_search_requests > 0})
+            record = self._usage.result()
+            if record is not None:
+                # Emit the chunk's usage in the OpenAI dialect the client reads; the
+                # amounts come from the record, so the wire and the bill agree
+                # (ADR-0009 keeps the shape here).
+                emitted: dict[str, Any] = {
+                    "prompt_tokens": record.input_tokens,
+                    "completion_tokens": record.output_tokens,
+                }
+                # Canonical keys only: cache_read_input_tokens / reasoning_tokens
+                # are the keys billing/logging read (via the protocol-side
+                # transformer's get_usage); the Gemini-flavored key names would
+                # not be picked up there.
+                if record.cache_read_input_tokens is not None:
+                    emitted["cache_read_input_tokens"] = record.cache_read_input_tokens
+                if record.reasoning_tokens is not None:
+                    emitted["reasoning_tokens"] = record.reasoning_tokens
+                emitted["total_tokens"] = record.total_tokens
+                openai_chunk["usage"] = emitted
 
         if "promptFeedback" in chunk:
             openai_chunk["prompt_feedback"] = chunk["promptFeedback"]
@@ -403,12 +399,14 @@ class GeminiStreamingTransformer(StreamingTransformer):
         Returns:
             The canonical usage record, or None when the stream reported none.
         """
-        if self._usage is not None:
-            # groundingMetadata may arrive after usageMetadata was captured.
-            if self._usage.web_search_requests is None and self._web_search_requests > 0:
-                self._usage.web_search_requests = self._web_search_requests
-            return self._usage
-        if self._web_search_requests > 0:
-            # No token usage, but native search grounding is still billable.
-            return Usage(web_search_requests=self._web_search_requests)
-        return None
+        record = self._usage.result()
+        if record is None:
+            return None
+        # Grounding may arrive after the usage chunk was captured: the search count
+        # is the turn's, and the record keeps whichever count is larger (both
+        # describe the same calls, and a later chunk cannot withdraw the fact).
+        if self._web_search_requests:
+            record.web_search_requests = (
+                max(record.web_search_requests or 0, self._web_search_requests) or None
+            )
+        return record

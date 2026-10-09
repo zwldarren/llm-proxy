@@ -54,17 +54,26 @@ class UsageAccumulator:
         """The wire shape this accumulator parses."""
         return self._dialect
 
-    def observe(self, payload: Mapping[str, Any] | None) -> None:
+    def observe(
+        self, payload: Mapping[str, Any] | None, *, turn: Mapping[str, Any] | None = None
+    ) -> None:
         """Fold one observed payload (chunk or event) into the accumulation.
 
         Payloads that carry no usage pass through harmlessly; payloads that
         announce a billable event outside their usage block (a streamed web
         search call) are counted even when no usage object ever arrives.
+
+        Args:
+            payload: the chunk or event as it arrived.
+            turn: facts about the turn that this payload cannot carry, for the
+                dialects that need them (see :func:`parse_usage`). The caller
+                that saw the whole turn states them; a chunk that carries its
+                own statement wins.
         """
         if payload is None:
             return
         self._billable_events += count_billable_events(self._dialect, payload)
-        observed = parse_usage(self._dialect, payload)
+        observed = parse_usage(self._dialect, payload, turn=turn)
         if observed is None:
             return
         if self._usage is None:

@@ -50,6 +50,7 @@ from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTr
 from llm_proxy.providers.gemini.adapter import GeminiAdapter
 from llm_proxy.serialization.anthropic.serializer import parse_usage_and_provider_extras
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
+from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
 from llm_proxy.serialization.ollama.serializer import OllamaProviderSerializer
 from llm_proxy.serialization.ollama.streaming import OllamaChunkConverter
 from llm_proxy.serialization.openai.serializer import parse_usage_from_response
@@ -299,6 +300,16 @@ def _decisions_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
     return _DecisionsProviderSerializer().parse_provider_decisions_response(frames[0]).usage
 
 
+def _gemini_streaming_converter(frames: Sequence[dict[str, Any]]) -> Usage | None:
+    """``serialization/gemini/streaming_converter.py`` — SSE chunks → usage."""
+    transformer = GeminiStreamingTransformer(model="gemini-2.5-flash", request_id="gem_1")
+    for frame in frames:
+        # ``transform`` is handed the parsed JSON payload of the SSE event, not the
+        # ``data: `` line the client receives.
+        transformer.transform(orjson.dumps(frame).decode())
+    return transformer.get_usage()
+
+
 def _gemini_body_parser(frames: Sequence[dict[str, Any]]) -> Usage | None:
     """``serialization/gemini/response_parser.py`` — a generateContent body → usage."""
     from llm_proxy.serialization.gemini.response_parser import GeminiResponseParserMixin
@@ -351,6 +362,11 @@ class Row:
     #: produces. Naming it keeps the change visible in the diff instead of leaving
     #: an amount that silently moved.
     closed: Mapping[str, str] = field(default_factory=dict)
+    #: Turn-level facts the dialect's adapter needs but the payload cannot carry,
+    #: as the caller that saw the whole turn would state them (gemini's
+    #: ``search_grounded``). The seam side of the comparison is handed them too —
+    #: otherwise it would be judged on less information than the call site has.
+    turn: Mapping[str, Any] = field(default_factory=dict)
     #: The row's contract for every fact it compares: the amount the shipped parser
     #: produced before the swap, or — for a fact in ``closed`` — the amount the
     #: repair produces. Frozen amounts, not a projection of the seam, because the
@@ -387,6 +403,13 @@ _NATIVE_SEARCHES_WERE_UNREAD = (
     "the shipped transformer's Responses branch read the token counters only, so a "
     "provider-executed search in the terminal snapshot was never counted — while the "
     "non-streaming body parser counted the same items."
+)
+
+_GEMINI_THINKING_WAS_UNREAD = (
+    "the shipped converter read the counters and the cache count off `usageMetadata` "
+    "but not `thoughtsTokenCount`, so the record lost the fact that part of its output "
+    "was thinking. The amount billed is unchanged: the heuristic already counts those "
+    "tokens in the output side."
 )
 
 _GEMINI_IMAGE_COUNTERS_WERE_RAW = (
@@ -582,6 +605,21 @@ GEMINI_GROUNDED_BODY: dict[str, Any] = {
             "groundingMetadata": {"webSearchQueries": ["weather", "news"]},
         }
     ],
+}
+
+#: A usage-only stream chunk: Gemini reports the counters in a chunk of their own,
+#: which carries no candidate and therefore says nothing about grounding.
+GEMINI_USAGE_CHUNK: dict[str, Any] = {"usageMetadata": _GEMINI_META}
+
+#: A content chunk whose candidate carries the native-search grounding. It arrives
+#: before the usage chunk, so the turn — not the chunk — is what knows the fact.
+GEMINI_GROUNDING_CHUNK: dict[str, Any] = {
+    "candidates": [
+        {
+            "content": {"parts": [{"text": "Hello"}]},
+            "groundingMetadata": {"webSearchQueries": ["weather", "news"]},
+        }
+    ]
 }
 
 GEMINI_IMAGE_BODY: dict[str, Any] = {
@@ -899,6 +937,54 @@ _ROWS: tuple[Row, ...] = (
         },
     ),
     Row(
+        id="gemini-streaming-converter",
+        dialect="gemini",
+        frames=(GEMINI_USAGE_CHUNK,),
+        legacy=_gemini_streaming_converter,
+        closed={"reasoning": _GEMINI_THINKING_WAS_UNREAD},
+        recorded={
+            "input": 105,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 0,
+            "cost": 0.0,
+        },
+    ),
+    Row(
+        id="gemini-streaming-converter-latched-grounding",
+        dialect="gemini",
+        # Grounding arrives in an earlier chunk, so the usage chunk alone cannot know
+        # it: the turn-level fact is what excludes the tool-use prompt tokens, and it
+        # reaches the adapter through ``turn`` on every observation.
+        frames=(GEMINI_GROUNDING_CHUNK, GEMINI_USAGE_CHUNK),
+        legacy=_gemini_streaming_converter,
+        turn={"search_grounded": True},
+        closed={"reasoning": _GEMINI_THINKING_WAS_UNREAD},
+        # The turn's *count* stays the caller's own counter (the converter ratchets it
+        # and folds it in on read, as the OpenResponses transformer does for the
+        # searches a provider announced as tool calls), so the seam side — a bare
+        # accumulator — cannot see it. The tokens are what this row compares.
+        declared={
+            "web_search": (
+                "the turn's search count is the caller's counter, folded in by the "
+                "converter's get_usage(); the adapter reads the counts a payload states."
+            )
+        },
+        recorded={
+            "input": 100,
+            "output": 27,
+            "total": 132,
+            "cache_read": 30,
+            "cache_write": 0,
+            "reasoning": 7,
+            "web_search": 2,
+            "cost": 0.0,
+        },
+    ),
+    Row(
         id="gemini-body-parser",
         dialect="gemini",
         frames=(GEMINI_BODY,),
@@ -1094,7 +1180,7 @@ _ROWS: tuple[Row, ...] = (
 def _seam_facts(row: Row) -> Facts:
     accumulator = UsageAccumulator(row.dialect)
     for frame in row.frames:
-        accumulator.observe(frame)
+        accumulator.observe(frame, turn=row.turn or None)
     return {k: v for k, v in _facts_of_usage(accumulator.result()).items() if k in row.facts}
 
 

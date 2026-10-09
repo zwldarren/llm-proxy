@@ -190,7 +190,11 @@ tier has no provider serializer in play. Every tier reads usage through it:
 provider serializers, streaming converters, protocol transformers and the
 passthrough bookkeeping, which hold an accumulator and expose its `result()`
 behind their existing `get_usage()` verb. Extraction only — canonical → client
-wire stays with the protocol serializer. Until a dialect's copies are deleted,
+wire stays with the protocol serializer. An adapter may also need a fact about the
+turn that the payload cannot carry (gemini's `search_grounded`: grounding sits on the
+candidate, and a usage-only stream chunk carries none) — the caller that saw the turn
+states it in `turn`, a fact the payload states itself wins, and a running total is a
+merge the accumulator already owns rather than a turn fact. Until a dialect's copies are deleted,
 `tests/test_serialization/test_usage_parity_ratchet.py` holds the seam and each
 still-live call site in agreement on the billable *amounts* (not the field
 placement), one row per dialect and call site; a row that declares a divergence

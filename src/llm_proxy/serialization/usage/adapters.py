@@ -10,7 +10,11 @@ An adapter owns two things:
   ``message_delta``; Responses stream events nest it under ``response``;
   Realtime nests it two deep in a ``response.done`` event;
 - **its aliases** — which dialect key expresses a canonical fact, folded at
-  parse time so the record holds one field per fact (ADR-0006).
+  parse time so the record holds one field per fact (ADR-0006);
+- **the turn-level facts it needs** — a fact the wire states *beside* the usage
+  block, which a later chunk may not repeat. The caller that saw the whole turn
+  passes it in ``turn`` (gemini's ``search_grounded``); a fact the payload states
+  itself wins, and a dialect that needs none ignores the argument.
 
 Extraction only: nothing here emits a client-facing shape, and nothing here
 estimates. See ADR-0025.
@@ -182,7 +186,7 @@ def _count_items(payload: dict[str, Any], item_type: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _parse_chat(payload: Mapping[str, Any]) -> Usage | None:
+def _parse_chat(payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None) -> Usage | None:
     block = _as_dict(payload.get("usage"))
     if block is None:
         return None
@@ -224,7 +228,9 @@ def _anthropic_usage_block(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     return _as_dict(payload.get("usage"))
 
 
-def _parse_anthropic(payload: Mapping[str, Any]) -> Usage | None:
+def _parse_anthropic(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
     usage = _anthropic_usage_block(payload)
     if usage is None:
         return None
@@ -265,7 +271,9 @@ def _responses_usage_block(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     return _as_dict(payload.get("usage"))
 
 
-def _parse_responses(payload: Mapping[str, Any]) -> Usage | None:
+def _parse_responses(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
     # The Responses wire has no usage-level search count: a response body
     # reports its calls as output items, so the items are the count whenever the
     # provider did not report one itself. A stream event announces its calls the
@@ -331,7 +339,9 @@ def _realtime_usage_block(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     return _as_dict(payload.get("usage"))
 
 
-def _parse_realtime(payload: Mapping[str, Any]) -> Usage | None:
+def _parse_realtime(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
     usage = _realtime_usage_block(payload)
     if usage is None:
         return None
@@ -399,7 +409,9 @@ def _ollama_cached_tokens(payload: Mapping[str, Any], input_tokens: int) -> int 
     return max(0, min(cached, input_tokens))
 
 
-def _parse_ollama(payload: Mapping[str, Any]) -> Usage | None:
+def _parse_ollama(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
     counts = _ollama_counts(payload)
     if counts is None:
         return None
@@ -478,19 +490,21 @@ def _gemini_billable_counts(
     return input_tokens, output_tokens
 
 
-def _parse_gemini(payload: Mapping[str, Any]) -> Usage | None:
+def _parse_gemini(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
     meta = _as_dict(payload.get("usageMetadata"))
     if meta is None:
         return None
     # The input count depends on whether the turn used search grounding: Google
     # charges the per-request search fee instead of the tool-use prompt tokens it
-    # reports separately, so a grounded turn excludes them. That makes the fact
-    # turn-level — it lives beside the usage block, on the candidate — so it is
-    # read from the payload the caller hands in.
+    # reports separately, so a grounded turn excludes them. Grounding is a
+    # *turn-level* fact — it lives on the candidate, and a usage-only stream chunk
+    # carries none — so it is read from the payload when the payload states it and
+    # from ``turn`` otherwise (the caller is the one that saw the whole turn).
     search_requests = _gemini_search_queries(payload)
-    input_tokens, output_tokens = _gemini_billable_counts(
-        meta, has_search_grounding=search_requests > 0
-    )
+    grounded = search_requests > 0 or bool((turn or {}).get("search_grounded"))
+    input_tokens, output_tokens = _gemini_billable_counts(meta, has_search_grounding=grounded)
     return Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -516,7 +530,7 @@ def _parse_gemini(payload: Mapping[str, Any]) -> Usage | None:
 class DialectAdapter:
     """What a dialect adapter must answer."""
 
-    parse: Callable[[Mapping[str, Any]], Usage | None]
+    parse: Callable[[Mapping[str, Any], Mapping[str, Any] | None], Usage | None]
     #: Billable events the payload announces outside its usage block (a
     #: streaming terminal event may never restate them). Summed per turn.
     count_events: Callable[[Mapping[str, Any]], int] = lambda _payload: 0
@@ -532,7 +546,12 @@ _ADAPTERS: dict[str, DialectAdapter] = {
 }
 
 
-def parse_usage(dialect: UsageDialect, payload: Mapping[str, Any] | None) -> Usage | None:
+def parse_usage(
+    dialect: UsageDialect,
+    payload: Mapping[str, Any] | None,
+    *,
+    turn: Mapping[str, Any] | None = None,
+) -> Usage | None:
     """Extract the canonical usage record from one provider wire payload.
 
     Args:
@@ -542,6 +561,10 @@ def parse_usage(dialect: UsageDialect, payload: Mapping[str, Any] | None) -> Usa
         payload: the protocol envelope — a response body, a stream chunk, or a
             stream event. The adapter knows where its dialect hides the usage
             block inside it.
+        turn: facts about the turn that the payload cannot carry, named by the
+            dialect that needs them (``search_grounded`` for gemini). A caller
+            that has seen the whole turn states them; a caller that has not
+            leaves them out and the adapter reads the payload alone.
 
     Returns:
         The canonical record, or ``None`` when the payload carries no usage
@@ -552,7 +575,7 @@ def parse_usage(dialect: UsageDialect, payload: Mapping[str, Any] | None) -> Usa
     adapter = _ADAPTERS.get(dialect)
     if adapter is None:
         raise ValueError(f"unknown usage dialect: {dialect!r}")
-    return adapter.parse(payload)
+    return adapter.parse(payload, turn)
 
 
 def is_known_dialect(dialect: str) -> bool:
