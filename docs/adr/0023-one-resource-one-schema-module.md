@@ -111,7 +111,7 @@ module.
 - New schemas have one default home, and the shared base is now visible by
   name rather than by memory of line 38.
 
-## Amendment (2026-10, ADR-0025)
+## Amendment (2026-10, ADR-0026)
 
 The server-config resource is the one exception: its schemas are not
 hand-written in `api/schemas/`. Each server setting's canonical model lives

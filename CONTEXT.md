@@ -243,7 +243,7 @@ _Avoid_: reusing HTTP status codes as close codes
 ### Server settings
 
 **Server settings**:
-One UI-managed `server_config` key — logging, web search, smart routing, provider selection, request policy, resilience, security, keepalive, rate limits, CORS origins, MCP security policy — declared once as a descriptor in the server settings registry (`llm_proxy.config.server_settings`). The descriptor carries the key's canonical model (the runtime truth, living in `llm_proxy.config.types`), its write merge mode, its response mode, and its runtime read. Three consumers are generated from the registry: the admin endpoints (`api/routers/config/server.py`), the config manager's typed snapshot (`load_server_settings`), and the contract test. Adding a setting is adding a descriptor row. See ADR-0025.
+One UI-managed `server_config` key — logging, web search, smart routing, provider selection, request policy, resilience, security, keepalive, rate limits, CORS origins, MCP security policy — declared once as a descriptor in the server settings registry (`llm_proxy.config.server_settings`). The descriptor carries the key's canonical model (the runtime truth, living in `llm_proxy.config.types`), its write merge mode, its response mode, and its runtime read. Three consumers are generated from the registry: the admin endpoints (`api/routers/config/server.py`), the config manager's typed snapshot (`load_server_settings`), and the contract test. Adding a setting is adding a descriptor row. See ADR-0026.
 _Avoid_: hand-written per-key config endpoints, a second schema module mirroring the runtime types (`api/schemas/server_config.py` is deleted)
 
 ### Request logging

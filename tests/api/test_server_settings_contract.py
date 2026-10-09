@@ -1,4 +1,4 @@
-"""Contract test for the server settings registry (ADR-0025).
+"""Contract test for the server settings registry (ADR-0026).
 
 Walks ``SERVER_SETTINGS`` key by key and asserts the wire contract each
 descriptor declares: default GET responses, PUT persistence per write mode,
