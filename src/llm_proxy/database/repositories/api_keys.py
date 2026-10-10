@@ -1,7 +1,6 @@
 """API key repository operations."""
 
 from datetime import UTC, datetime
-from typing import Final
 
 from sqlalchemy.sql import select
 
@@ -9,20 +8,11 @@ from llm_proxy.core.exceptions import ConflictError, NotFoundError
 from llm_proxy.database.repositories.base import BaseRepository
 from llm_proxy.database.tables import ApiKeyRecord
 
-
-class _UnsetType:
-    """Sentinel type for "argument not provided" in partial updates."""
-
-    __slots__: tuple[str, ...] = ()
-
-    def __repr__(self) -> str:
-        return "<UNSET>"
-
-
-# Sentinel for "argument not provided" in partial updates. It lets callers
-# distinguish "set the field to None" (allow all) from "leave the field
-# unchanged", which a plain ``None`` default cannot express.
-_UNSET: Final[_UnsetType] = _UnsetType()
+# Sentinel for "argument not provided" in partial updates (PEP 661 builtin).
+# It lets callers distinguish "set the field to None" (allow all) from "leave
+# the field unchanged", which a plain ``None`` default cannot express. The
+# name matches the module attribute so pickle round-trips preserve identity.
+_UNSET = sentinel("_UNSET")
 
 
 class ApiKeyRepository(BaseRepository):
@@ -89,8 +79,8 @@ class ApiKeyRepository(BaseRepository):
     async def update_api_key_models(
         self,
         name: str,
-        allowed_models: list[str] | None | _UnsetType = _UNSET,
-        allowed_mcp_servers: list[str] | None | _UnsetType = _UNSET,
+        allowed_models: list[str] | None | sentinel = _UNSET,
+        allowed_mcp_servers: list[str] | None | sentinel = _UNSET,
     ) -> bool:
         """Update the allowed models and/or MCP servers for an API key.
 
@@ -101,9 +91,9 @@ class ApiKeyRepository(BaseRepository):
         api_key = await self.get_api_key_by_name(name)
         if not api_key:
             return False
-        if not isinstance(allowed_models, _UnsetType):
+        if not isinstance(allowed_models, sentinel):
             api_key.allowed_models = allowed_models
-        if not isinstance(allowed_mcp_servers, _UnsetType):
+        if not isinstance(allowed_mcp_servers, sentinel):
             api_key.allowed_mcp_servers = allowed_mcp_servers
         await self.session.flush()
         return True
@@ -111,15 +101,15 @@ class ApiKeyRepository(BaseRepository):
     async def update_api_key(
         self,
         current_name: str,
-        new_name: str | None | _UnsetType = _UNSET,
-        allowed_models: list[str] | None | _UnsetType = _UNSET,
-        allowed_mcp_servers: list[str] | None | _UnsetType = _UNSET,
-        is_active: bool | _UnsetType = _UNSET,
-        expires_at: datetime | None | _UnsetType = _UNSET,
-        budget_usd: float | None | _UnsetType = _UNSET,
-        budget_period: str | None | _UnsetType = _UNSET,
-        budget_reset_day: int | None | _UnsetType = _UNSET,
-        rate_limit_rpm: int | None | _UnsetType = _UNSET,
+        new_name: str | None | sentinel = _UNSET,
+        allowed_models: list[str] | None | sentinel = _UNSET,
+        allowed_mcp_servers: list[str] | None | sentinel = _UNSET,
+        is_active: bool | sentinel = _UNSET,
+        expires_at: datetime | None | sentinel = _UNSET,
+        budget_usd: float | None | sentinel = _UNSET,
+        budget_period: str | None | sentinel = _UNSET,
+        budget_reset_day: int | None | sentinel = _UNSET,
+        rate_limit_rpm: int | None | sentinel = _UNSET,
     ) -> ApiKeyRecord:
         """Update an API key's name, restrictions, status, expiry, and/or budget.
 
@@ -144,15 +134,15 @@ class ApiKeyRepository(BaseRepository):
                 raise ConflictError(message=f"API key with name '{new_name}' already exists")
             api_key.name = new_name
 
-        if not isinstance(allowed_models, _UnsetType):
+        if not isinstance(allowed_models, sentinel):
             api_key.allowed_models = allowed_models
-        if not isinstance(allowed_mcp_servers, _UnsetType):
+        if not isinstance(allowed_mcp_servers, sentinel):
             api_key.allowed_mcp_servers = allowed_mcp_servers
-        if not isinstance(is_active, _UnsetType):
+        if not isinstance(is_active, sentinel):
             api_key.is_active = is_active
-        if not isinstance(expires_at, _UnsetType):
+        if not isinstance(expires_at, sentinel):
             api_key.expires_at = expires_at
-        if not isinstance(budget_usd, _UnsetType):
+        if not isinstance(budget_usd, sentinel):
             api_key.budget_usd = budget_usd
             if budget_usd is None:
                 # Clearing the budget also clears the (now meaningless) window
@@ -163,14 +153,14 @@ class ApiKeyRepository(BaseRepository):
                 api_key.budget_period = None
                 api_key.budget_reset_day = None
                 api_key.budget_reset_at = None
-        if not isinstance(budget_period, _UnsetType):
+        if not isinstance(budget_period, sentinel):
             api_key.budget_period = budget_period
             if budget_period != "monthly":
                 # A reset day is only meaningful for monthly windows.
                 api_key.budget_reset_day = None
-        if not isinstance(budget_reset_day, _UnsetType):
+        if not isinstance(budget_reset_day, sentinel):
             api_key.budget_reset_day = budget_reset_day
-        if not isinstance(rate_limit_rpm, _UnsetType):
+        if not isinstance(rate_limit_rpm, sentinel):
             api_key.rate_limit_rpm = rate_limit_rpm
 
         await self.session.flush()

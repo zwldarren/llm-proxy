@@ -107,7 +107,7 @@ class BaseOpenAIImagesSerializer(ProtocolSerializer):
             )
         if size_str == "auto":
             return None
-        match = self._SIZE_PATTERN.match(size_str)
+        match = self._SIZE_PATTERN.prefixmatch(size_str)
         if match is None:
             raise ValidationError(
                 message=(

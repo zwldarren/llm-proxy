@@ -32,11 +32,10 @@ logger = get_logger(__name__)
 _SNAPSHOT_ATTR = "web_search_config_snapshot"
 
 
-class _Unset:
-    """Sentinel distinguishing "never built" from "built with web search off"."""
-
-
-_UNSET = _Unset()
+# Sentinel distinguishing "never built" from "built with web search off"
+# (PEP 661 builtin; the name matches the module attribute so pickle
+# round-trips preserve identity).
+_UNSET = sentinel("_UNSET")
 
 # Lock serializing rebuilds so two concurrent requests cannot both close and
 # replace the live interceptor. Recreated when the running event loop changes

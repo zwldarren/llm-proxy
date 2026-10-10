@@ -3,7 +3,7 @@ name = "llm-proxy"
 version = "0.3.1"
 description = "A self-hostable, multi-provider LLM API gateway with protocol translation, streaming, rate limiting, MCP integration, and a Vue 3 admin dashboard."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 license = "MIT"
 dependencies = [
   "pydantic>=2.12.3",
@@ -42,7 +42,9 @@ smart-routing = [
   "scikit-learn>=1.9.0",
   "xgboost>=3.4.0",
   "transformers>=5.12.1",
-  "onnxruntime>=1.27",
+  # onnxruntime does not ship cp315 wheels yet (1.31.0 tops out at cp314t);
+  # the smart-routing stack degrades to structural signals without it.
+  "onnxruntime>=1.27; python_version < '3.15'",
   "huggingface-hub>=1.21",
 ]
 
@@ -125,3 +127,11 @@ exclude = [
   "**/versions/**",
   "tests",
 ]
+
+# onnxruntime stays behind `python_version < '3.15'` until cp315 wheels ship,
+# so under a 3.15 environment the guarded import in the embedding signal is
+# expected (and caught by the surrounding try/except ImportError at runtime).
+[[tool.ty.overrides]]
+include = ["src/llm_proxy/routing/signals/embedding.py"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"

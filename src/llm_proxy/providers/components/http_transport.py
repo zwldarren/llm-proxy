@@ -2,7 +2,7 @@
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -82,7 +82,7 @@ class HttpTransport:
         data: dict[str, Any] | None = None,
         files: Any = None,
         timeout: tuple[float, float],
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncGenerator[Any]:
         """Open a streaming POST response and always close it when iteration stops."""
         post_kwargs: dict[str, Any] = {
             "headers": headers,

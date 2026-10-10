@@ -36,12 +36,14 @@ logger = get_logger(__name__)
 # Raw reasoning delta/done events are emitted as the summary event family
 # (``response.reasoning_summary_text.delta|done``), whose names are identical in
 # the OpenResponses spec and the OpenAI Responses API.
-_RAW_REASONING_EVENT_TYPES: dict[str, str] = {
-    "response.reasoning.delta": "response.reasoning_summary_text.delta",
-    "response.reasoning_text.delta": "response.reasoning_summary_text.delta",
-    "response.reasoning.done": "response.reasoning_summary_text.done",
-    "response.reasoning_text.done": "response.reasoning_summary_text.done",
-}
+_RAW_REASONING_EVENT_TYPES: frozendict[str, str] = frozendict(
+    {
+        "response.reasoning.delta": "response.reasoning_summary_text.delta",
+        "response.reasoning_text.delta": "response.reasoning_summary_text.delta",
+        "response.reasoning.done": "response.reasoning_summary_text.done",
+        "response.reasoning_text.done": "response.reasoning_summary_text.done",
+    }
+)
 
 
 def _normalize_reasoning_event(data: dict[str, Any], chunk_type: str) -> str:

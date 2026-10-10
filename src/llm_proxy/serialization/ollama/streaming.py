@@ -1,6 +1,7 @@
 """Ollama streaming conversion mixin and chunk converter."""
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from llm_proxy.models.types import Usage
@@ -10,10 +11,14 @@ from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 from llm_proxy.streaming.transformer import StreamingTransformer
 
-_DONE_REASON_MAP: dict[str, str] = {
-    "length": "length",
-    "tool_calls": "tool_calls",
-}
+# Mapped through ``Mapping`` — the ``frozendict`` stub's parameterized ``get``
+# overloads reject ``key=None`` lookups at the call site below (ty).
+_DONE_REASON_MAP: Mapping[str, str] = frozendict(
+    {
+        "length": "length",
+        "tool_calls": "tool_calls",
+    }
+)
 
 
 class OllamaStreamingMixin:

@@ -263,7 +263,7 @@ def _derive_partial(
     definitions: dict[str, Any] = {}
     for name in names:
         field_info = model.model_fields[name]
-        annotation = field_info.annotation
+        annotation: Any = field_info.annotation
         if type(None) not in getattr(annotation, "__args__", ()):  # not already optional
             annotation = annotation | None
         # Copy the canonical FieldInfo so validation constraints (ge/le, ...)

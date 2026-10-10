@@ -155,7 +155,7 @@ def parse_data_uri(url: str) -> tuple[str | None, str] | None:
     if ";" in url:
         media_type = url.split(";")[0].split(":")[1] if ":" in url else None
 
-    match = _DATA_URI_PATTERN.match(url)
+    match = _DATA_URI_PATTERN.prefixmatch(url)
     if match:
         # Use extracted media type from regex if available, fallback to prefix extraction
         extracted_media_type = match.group(1) if match.group(1) else media_type

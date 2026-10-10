@@ -39,11 +39,13 @@ AMBIGUOUS_OPTION = "ambiguous"
 
 #: Choice option -> routing tier. Option labels are the public tier names in
 #: lower case so a logged verdict reads the same as a logged decision.
-TIER_OPTIONS: dict[str, Tier] = {
-    "simple": Tier.SIMPLE,
-    "medium": Tier.MEDIUM,
-    "complex": Tier.COMPLEX,
-}
+TIER_OPTIONS: frozendict[str, Tier] = frozendict(
+    {
+        "simple": Tier.SIMPLE,
+        "medium": Tier.MEDIUM,
+        "complex": Tier.COMPLEX,
+    }
+)
 
 _SHARED_INSTRUCTIONS = (
     "You are classifying one request so a proxy can choose which model tier serves it. "
@@ -57,37 +59,39 @@ _SHARED_INSTRUCTIONS = (
 
 #: One rubric per choice option, written as what the option means, what it looks
 #: like, and what it is not — the shape that keeps neighbouring tiers separable.
-TIER_RUBRICS: dict[str, str] = {
-    "simple": (
-        "Answerable in one step from knowledge the model already has or from text the user "
-        "supplied: lookups, definitions, translations, unit conversion, reformatting, short "
-        "factual questions, mechanical edits whose exact change is specified, greetings. "
-        "Examples: 'What is the capital of Portugal?', 'Rename this variable to user_id.', "
-        "'Summarize this paragraph in one sentence.' Not for anything needing multi-step "
-        "reasoning, a change across several files, debugging an unfamiliar failure, or a "
-        "decision with conflicting constraints."
-    ),
-    "medium": (
-        "Routine professional work with a clear goal and bounded scope: drafting prose or a "
-        "few paragraphs of code, localized edits, standard refactors, explaining a known "
-        "error, extracting structured data from supplied text, single-file debugging, "
-        "explaining a concept to a specific audience. Not for single lookups, and not for "
-        "work where the approach itself is the hard part."
-    ),
-    "complex": (
-        "Work where deciding how to do it is the hard part: multi-step reasoning, long "
-        "derivations, changes across files or systems, architecture and design trade-offs, "
-        "debugging with incomplete information, requirements that conflict, or work that "
-        "must be planned before it can be executed. Not for length: a long request can be "
-        "simple and a one-line request can be complex."
-    ),
-    AMBIGUOUS_OPTION: (
-        "Two tiers are genuinely defensible, or the request is too underspecified to place "
-        "— for example a one-line question that could be hiding a deep problem, or a "
-        "difficulty that depends on context not present here. Choose this instead of "
-        "guessing; it is not a synonym for 'medium'."
-    ),
-}
+TIER_RUBRICS: frozendict[str, str] = frozendict(
+    {
+        "simple": (
+            "Answerable in one step from knowledge the model already has or from text the user "
+            "supplied: lookups, definitions, translations, unit conversion, reformatting, short "
+            "factual questions, mechanical edits whose exact change is specified, greetings. "
+            "Examples: 'What is the capital of Portugal?', 'Rename this variable to user_id.', "
+            "'Summarize this paragraph in one sentence.' Not for anything needing multi-step "
+            "reasoning, a change across several files, debugging an unfamiliar failure, or a "
+            "decision with conflicting constraints."
+        ),
+        "medium": (
+            "Routine professional work with a clear goal and bounded scope: drafting prose or a "
+            "few paragraphs of code, localized edits, standard refactors, explaining a known "
+            "error, extracting structured data from supplied text, single-file debugging, "
+            "explaining a concept to a specific audience. Not for single lookups, and not for "
+            "work where the approach itself is the hard part."
+        ),
+        "complex": (
+            "Work where deciding how to do it is the hard part: multi-step reasoning, long "
+            "derivations, changes across files or systems, architecture and design trade-offs, "
+            "debugging with incomplete information, requirements that conflict, or work that "
+            "must be planned before it can be executed. Not for length: a long request can be "
+            "simple and a one-line request can be complex."
+        ),
+        AMBIGUOUS_OPTION: (
+            "Two tiers are genuinely defensible, or the request is too underspecified to place "
+            "— for example a one-line question that could be hiding a deep problem, or a "
+            "difficulty that depends on context not present here. Choose this instead of "
+            "guessing; it is not a synonym for 'medium'."
+        ),
+    }
+)
 
 _ESCALATION_INSTRUCTIONS = (
     "Would a top-tier frontier model measurably outperform the cheapest capable model on "

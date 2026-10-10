@@ -14,7 +14,7 @@ USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 def validate_username_format(username: str) -> str:
     """Ensure a username only contains letters, digits, underscores, and dashes."""
-    if not USERNAME_PATTERN.match(username):
+    if not USERNAME_PATTERN.prefixmatch(username):
         raise ValueError("Username may only contain letters, digits, underscores, and hyphens")
     return username
 

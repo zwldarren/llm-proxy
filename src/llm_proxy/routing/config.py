@@ -16,11 +16,13 @@ from llm_proxy.routing.types import (
 # Virtual model IDs — proxy-facing names for routing modes
 # ---------------------------------------------------------------------------
 
-VIRTUAL_MODEL_IDS: dict[RoutingMode, str] = {
-    RoutingMode.AUTO: "auto",
-    RoutingMode.FAST: "fast",
-    RoutingMode.BEST: "best",
-}
+VIRTUAL_MODEL_IDS: frozendict[RoutingMode, str] = frozendict(
+    {
+        RoutingMode.AUTO: "auto",
+        RoutingMode.FAST: "fast",
+        RoutingMode.BEST: "best",
+    }
+)
 
 
 def routing_mode_from_model(model_id: str) -> RoutingMode | None:

@@ -317,11 +317,11 @@ def determine_resource_id(path: str, request_body: Any) -> str | None:
     for part in reversed(parts):
         if not part:
             continue
-        if _UUID_PATTERN.match(part):
+        if _UUID_PATTERN.prefixmatch(part):
             return part
-        if _LONG_HEX_PATTERN.match(part):
+        if _LONG_HEX_PATTERN.prefixmatch(part):
             return part
-        if _NUMERIC_PATTERN.match(part):
+        if _NUMERIC_PATTERN.prefixmatch(part):
             return part
 
     if isinstance(request_body, dict):
@@ -454,8 +454,10 @@ def _dispatch(
 
 #: Marker for "the situation did not pass this field at all", so the row keeps the
 #: record's own default. Distinct from passing ``None``, which is a value: the
-#: endpoint lifecycle stores ``None`` for a body it did not capture.
-_UNSET: Any = object()
+#: endpoint lifecycle stores ``None`` for a body it did not capture. PEP 661
+#: builtin; the name matches the module attribute so pickle round-trips
+#: preserve identity.
+_UNSET = sentinel("_UNSET")
 
 
 def _assemble_row(

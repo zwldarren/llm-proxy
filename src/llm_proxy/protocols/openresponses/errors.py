@@ -16,19 +16,21 @@ envelope consistent for clients.
 """
 
 # OpenAI-style error types → OpenResponses spec error codes.
-_ERROR_TYPE_TO_SPEC_CODE: dict[str, str] = {
-    "invalid_request_error": "invalid_request",
-    "authentication_error": "authentication_failed",
-    "permission_error": "permission_denied",
-    "not_found_error": "not_found",
-    "rate_limit_error": "too_many_requests",
-    "api_error": "server_error",
-    "provider_error": "server_error",
-    "model_error": "model_error",
-    "server_error": "server_error",
-    "context_length_exceeded": "context_length_exceeded",
-    "content_filter": "content_filter",
-}
+_ERROR_TYPE_TO_SPEC_CODE: frozendict[str, str] = frozendict(
+    {
+        "invalid_request_error": "invalid_request",
+        "authentication_error": "authentication_failed",
+        "permission_error": "permission_denied",
+        "not_found_error": "not_found",
+        "rate_limit_error": "too_many_requests",
+        "api_error": "server_error",
+        "provider_error": "server_error",
+        "model_error": "model_error",
+        "server_error": "server_error",
+        "context_length_exceeded": "context_length_exceeded",
+        "content_filter": "content_filter",
+    }
+)
 
 # Path prefixes served by the OpenResponses protocol (canonical path plus the
 # tolerated aliases registered in ``protocols/openresponses/handler.py``).

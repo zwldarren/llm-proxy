@@ -160,7 +160,7 @@ Requires `bun` in PATH. `node_modules` is auto-installed on first start if missi
 
 ## STYLE & CONVENTIONS
 
-- **Python**: 3.14+ (`pyproject.toml`)
+- **Python**: 3.15+ (`pyproject.toml`)
 - **Comments**: All code comments must be in English
 - **Ruff**: line-length 100, excludes `**/versions/**`
 - **Type checker**: `ty` (configured in `pyproject.toml` with `include = ["src"]`)

@@ -9,7 +9,7 @@ source. Both end at the same place: a first-run setup screen at
 | Path | Needs |
 | --- | --- |
 | Docker Compose | Docker Engine 24+ with Compose v2 |
-| From source | Python **3.14+**, [uv](https://docs.astral.sh/uv/), [bun](https://bun.sh) (to build the admin UI, and required by the dev servers) |
+| From source | Python **3.15+**, [uv](https://docs.astral.sh/uv/), [bun](https://bun.sh) (to build the admin UI, and required by the dev servers) |
 
 ## Option A — Docker Compose (recommended)
 

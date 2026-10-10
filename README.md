@@ -2,7 +2,7 @@
 
 > One gateway for every LLM. Any client protocol in, any provider out — with smart routing, cost control, and a full admin console.
 
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-333.svg)](https://python.org)
+[![Python 3.15+](https://img.shields.io/badge/python-3.15+-333.svg)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-333.svg)](https://github.com/zwldarren/llm-proxy/pkgs/container/llm-proxy)
 [![Ruff](https://img.shields.io/badge/code%20style-ruff-000.svg)](https://github.com/astral-sh/ruff)
 [![Docs](https://img.shields.io/badge/docs-zwldarren.github.io-333.svg)](https://zwldarren.github.io/llm-proxy/)
@@ -122,7 +122,7 @@ you're live.
 
 ### Option B — From source
 
-Prerequisites: Python 3.14+, [uv](https://docs.astral.sh/uv/), and [bun](https://bun.sh) (to build the frontend).
+Prerequisites: Python 3.15+, [uv](https://docs.astral.sh/uv/), and [bun](https://bun.sh) (to build the frontend).
 
 ```bash
 git clone https://github.com/zwldarren/llm-proxy.git
@@ -139,6 +139,8 @@ uv run llm-proxy --build-frontend
 The server starts on `http://localhost:8080` (override with `--host`/`--port`). SQLite is used by default; set `DATABASE_URL` for PostgreSQL.
 
 The core proxy installs without any ML dependencies. The `smart-routing` extra adds the embedding-based routing signal (transformers, ONNX Runtime, XGBoost); without it, routing automatically falls back to the built-in structural signals.
+
+> **Note:** `onnxruntime` does not yet publish Python 3.15 wheels, so the `smart-routing` extra currently requires Python ≤ 3.14 (on 3.15 the extra installs without it and the proxy uses the structural signals only).
 
 ## Using the API
 
@@ -234,7 +236,7 @@ Hooks run via `uv run`, so tool versions stay locked to `pyproject.toml` and no 
 
 ### Stack
 
-**Backend** — Python 3.14, FastAPI, SQLAlchemy + Alembic (SQLite/PostgreSQL), Redis (optional), httpx. **Frontend** — Vue 3, Vite, TypeScript, Tailwind CSS v4, shadcn-vue, Pinia, vue-i18n.
+**Backend** — Python 3.15, FastAPI, SQLAlchemy + Alembic (SQLite/PostgreSQL), Redis (optional), httpx. **Frontend** — Vue 3, Vite, TypeScript, Tailwind CSS v4, shadcn-vue, Pinia, vue-i18n.
 
 ## License
 

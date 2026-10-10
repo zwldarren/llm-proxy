@@ -32,7 +32,7 @@ from llm_proxy.core.exceptions import (
 )
 from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.database import ApiKeyRepository, UserRepository
-from llm_proxy.database.repositories.api_keys import _UNSET, ApiKeyRecord, _UnsetType
+from llm_proxy.database.repositories.api_keys import _UNSET, ApiKeyRecord
 from llm_proxy.database.repositories.usage_repository import (
     BILLABLE_SPEND_LOG_TYPES,
     UsageRepository,
@@ -386,10 +386,10 @@ async def update_api_key(
     new_budget_usd = update_fields.get("budget_usd", _UNSET)
     new_budget_period = update_fields.get("budget_period", _UNSET)
     new_reset_day = update_fields.get("budget_reset_day", _UNSET)
-    if not isinstance(new_reset_day, _UnsetType) and new_reset_day is not None:
+    if not isinstance(new_reset_day, sentinel) and new_reset_day is not None:
         effective_period = (
             new_budget_period
-            if not isinstance(new_budget_period, _UnsetType)
+            if not isinstance(new_budget_period, sentinel)
             else stored.budget_period
         )
         if effective_period != "monthly":
@@ -400,10 +400,10 @@ async def update_api_key(
     # The schema validator only sees the request body, so the check here is
     # against the effective cap: the request value wins over the stored one.
     effective_budget_usd = (
-        new_budget_usd if not isinstance(new_budget_usd, _UnsetType) else stored.budget_usd
+        new_budget_usd if not isinstance(new_budget_usd, sentinel) else stored.budget_usd
     )
     if (
-        not isinstance(new_budget_period, _UnsetType)
+        not isinstance(new_budget_period, sentinel)
         and new_budget_period is not None
         and effective_budget_usd is None
     ):

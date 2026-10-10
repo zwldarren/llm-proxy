@@ -72,7 +72,7 @@ def _langfuse_trace_context(trace_id: str | None) -> TraceContext | None:
     canonical 32-char lowercase hex id is usable; the SDK logs and then raises on
     anything else, so non-Langfuse correlation ids are ignored.
     """
-    if trace_id and _LANGFUSE_TRACE_ID_RE.match(trace_id):
+    if trace_id and _LANGFUSE_TRACE_ID_RE.prefixmatch(trace_id):
         return {"trace_id": trace_id}
     return None
 

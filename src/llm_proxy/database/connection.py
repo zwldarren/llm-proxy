@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 from sqlalchemy import text
@@ -184,7 +184,7 @@ async def get_async_session() -> AsyncIterator[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_async_session_context() -> AsyncIterator[AsyncSession]:
+async def get_async_session_context() -> AsyncGenerator[AsyncSession]:
     """Get an async database session as a context manager.
 
     This function provides a session for use outside FastAPI's dependency

@@ -1,7 +1,7 @@
 """Base class for native provider implementations."""
 
 from abc import ABC
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
@@ -911,7 +911,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
         data: dict[str, Any] | None = None,
         files: Any = None,
         timeout: tuple[float, float],
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncGenerator[Any]:
         async with self._transport.streaming_post(
             client,
             url,

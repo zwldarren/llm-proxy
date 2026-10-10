@@ -81,31 +81,35 @@ from llm_proxy.serialization.responses_toolkit import (
 logger = logging.getLogger(__name__)
 
 # Audio format to media type mapping for input_audio content blocks
-_AUDIO_FORMAT_TO_MEDIA_TYPE: dict[str, str] = {
-    "wav": "audio/wav",
-    "mp3": "audio/mpeg",
-    "ogg": "audio/ogg",
-    "flac": "audio/flac",
-    "webm": "audio/webm",
-    "mp4": "audio/mp4",
-}
+_AUDIO_FORMAT_TO_MEDIA_TYPE: frozendict[str, str] = frozendict(
+    {
+        "wav": "audio/wav",
+        "mp3": "audio/mpeg",
+        "ogg": "audio/ogg",
+        "flac": "audio/flac",
+        "webm": "audio/webm",
+        "mp4": "audio/mp4",
+    }
+)
 
 # Inverse of ``_AUDIO_FORMAT_TO_MEDIA_TYPE``: an internal AudioSource media type
 # mapped back to the Responses ``input_audio.format`` value when a materialized
 # conversation is rebuilt into stored input items.
-_MEDIA_TYPE_TO_AUDIO_FORMAT: dict[str, str] = {
-    "audio/wav": "wav",
-    "audio/x-wav": "wav",
-    "audio/wave": "wav",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-    "audio/ogg": "ogg",
-    "audio/flac": "flac",
-    "audio/x-flac": "flac",
-    "audio/webm": "webm",
-    "audio/mp4": "mp4",
-    "audio/m4a": "mp4",
-}
+_MEDIA_TYPE_TO_AUDIO_FORMAT: frozendict[str, str] = frozendict(
+    {
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/wave": "wav",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/ogg": "ogg",
+        "audio/flac": "flac",
+        "audio/x-flac": "flac",
+        "audio/webm": "webm",
+        "audio/mp4": "mp4",
+        "audio/m4a": "mp4",
+    }
+)
 
 
 def _convert_input_content(content: Any) -> list[ContentBlock]:

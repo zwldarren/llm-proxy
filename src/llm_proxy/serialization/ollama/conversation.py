@@ -304,7 +304,7 @@ class OllamaConversationMixin:
             return None
 
         if url.startswith("data:"):
-            match = re.match(r"data:([^;]+);base64,(.+)", url)
+            match = re.prefixmatch(r"data:([^;]+);base64,(.+)", url)
             if not match:
                 raise ValidationError("Malformed data URI for image")
             import base64
