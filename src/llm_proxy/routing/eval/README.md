@@ -36,25 +36,27 @@ the same caveat the reference benchmark publishes about its own labels.
 
 Two rules when extending it:
 
-- Never add a case whose text (or the labels) came from Signal C's training data —
-  the 621 seeds in `routing/assets/`. Leakage there would make the embedding signal
-  look better than it is.
+- Never add a case whose text (or the labels) came from any signal's training data.
+  (The removed embedding signal trained on 621 seed prompts once vendored under
+  `routing/assets/`; the rule predates that asset and still applies to whatever
+  classifier data the structural model was fitted on.) Leakage would make the
+  signal under test look better than it is.
 - Keep the boundary subset hard. A corpus that only contains easy labels flatters
   every decision path equally and tells you nothing.
 
 ## Running
 
 ```bash
-# Ensemble baseline, no judge, signals A+B+C
-uv run python -m llm_proxy.routing.eval --embedding --out ./
+# Ensemble baseline, no judge (signals A+B)
+uv run python -m llm_proxy.routing.eval --out ./
 
 # With a local judge (Ollama serves /v1/systemone from local models only)
 ollama pull tev1:0.8b
-uv run python -m llm_proxy.routing.eval --embedding --judge ollama --judge-model tev1:0.8b --out ./
+uv run python -m llm_proxy.routing.eval --judge ollama --judge-model tev1:0.8b --out ./
 
 # With Jev, the reference judge ADR-0018 compares its numbers against
 export OPENROUTER_API_KEY=sk-or-...
-uv run python -m llm_proxy.routing.eval --embedding --judge openrouter --out ./
+uv run python -m llm_proxy.routing.eval --judge openrouter --out ./
 
 # Seeded repetitions (three is the default) and explicit bandit seed
 uv run python -m llm_proxy.routing.eval --repeats 3 --seed 20261006 --out ./

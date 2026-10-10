@@ -13,7 +13,6 @@ from llm_proxy.routing.judge.consult import consult_judge, judge_call_kwargs
 from llm_proxy.routing.judge.policy import JudgeConsultation, plan_judge_consult
 from llm_proxy.routing.model_experience import ModelExperienceStore
 from llm_proxy.routing.pool import build_candidate_pool
-from llm_proxy.routing.signals.embedding import get_embedding_signal
 from llm_proxy.routing.types import RoutingDecision, RoutingMode
 from llm_proxy.services import RuntimeServices
 
@@ -43,12 +42,11 @@ async def resolve_virtual_model(
         )
 
     experience_store = ModelExperienceStore(session=session)
-    embedding_signal = await get_embedding_signal()  # None if unavailable -> A+B
 
     # Classify once, then decide whether this turn is one the judge should settle
     # (ADR-0018). The gate reads the *same* confidence and complexity the decision
     # is made from, so what the operator measures offline is what fires here.
-    classification = routing_api.classify(messages, None, embedding_signal)
+    classification = routing_api.classify(messages, None)
     consultation = await _consult_judge_if_gated(
         classification,
         mode=mode,
@@ -66,7 +64,6 @@ async def resolve_virtual_model(
         mode=mode,
         config=DEFAULT_CONFIG,
         experience_store=experience_store,
-        embedding_signal=embedding_signal,
         mode_weights=mode_weights,
         previous_model=previous_model,
         classification=classification,

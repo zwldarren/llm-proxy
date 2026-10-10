@@ -31,21 +31,7 @@ dependencies = [
   "websockets>=15.0",
   "langfuse>=4.7.1,<5.0.0",
   "pydantic-settings>=2.14.1",
-  "numpy>=2.5.1",
   "packaging>=26.3",
-]
-
-[project.optional-dependencies]
-# Embedding-based smart-routing signal (Signal C). Heavy ML stack; the core
-# proxy degrades gracefully to the built-in structural signals without it.
-smart-routing = [
-  "scikit-learn>=1.9.0",
-  "xgboost>=3.4.0",
-  "transformers>=5.12.1",
-  # onnxruntime does not ship cp315 wheels yet (1.31.0 tops out at cp314t);
-  # the smart-routing stack degrades to structural signals without it.
-  "onnxruntime>=1.27; python_version < '3.15'",
-  "huggingface-hub>=1.21",
 ]
 
 [dependency-groups]

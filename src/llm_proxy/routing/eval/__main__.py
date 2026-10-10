@@ -1,6 +1,6 @@
 """Command line entry point for the offline routing evaluation rig.
 
-    uv run python -m llm_proxy.routing.eval --embedding
+    uv run python -m llm_proxy.routing.eval
     uv run python -m llm_proxy.routing.eval --judge ollama --judge-model tev1:0.8b --out ./
 
 Development only: this is not installed as a console script and is not part of
@@ -78,11 +78,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--limit", type=_positive_int, default=None, help="Only run the first N cases"
     )
     parser.add_argument(
-        "--embedding",
-        action="store_true",
-        help="Enable the embedding signal (downloads/loads the BGE encoder on first use)",
-    )
-    parser.add_argument(
         "--judge",
         default="none",
         choices=["none", "ollama", "openrouter"],
@@ -113,17 +108,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def _load_embedding_signal(enabled: bool) -> Any:
-    if not enabled:
-        return None
-    from llm_proxy.routing.signals.embedding import get_embedding_signal
-
-    signal = await get_embedding_signal()
-    if signal is None:
-        print("[routing-eval] embedding signal unavailable; measuring signals A+B only")
-    return signal
-
-
 def _build_judge(args: argparse.Namespace) -> JudgeTransport | None:
     """The transport ``--judge`` named, with per-transport defaults for url/model."""
     if args.judge == "none":
@@ -147,7 +131,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     cases = load_cases(args.cases)
     if args.limit is not None:
         cases = cases[: args.limit]
-    embedding_signal = await _load_embedding_signal(args.embedding)
     judge = _build_judge(args)
     mode = RoutingMode(args.mode)
 
@@ -158,7 +141,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 tier, complexity, confidence = run_ensemble_leg(
                     case,
                     mode=mode,
-                    embedding_signal=embedding_signal,
                     rng=random.Random(f"{args.seed}:{case.id}:{repeat}"),
                 )
                 result = CaseResult(
@@ -192,7 +174,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "repeats": max(1, args.repeats),
         "bootstrap": args.bootstrap,
         "seed": args.seed,
-        "embedding_signal": embedding_signal is not None,
         "judge": judge.name if judge is not None else None,
         "judge_model": judge.model if judge is not None else None,
         "gate_threshold": args.gate_threshold,

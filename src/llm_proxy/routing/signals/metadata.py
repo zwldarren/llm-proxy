@@ -56,7 +56,7 @@ class MetadataSignal:
         # In multi-step agent workflows, tool messages accumulate from prior
         # steps but the CURRENT step may be simple. The global "has_tools →
         # tier 3" prior breaks here — per-step difficulty is not correlated
-        # with tool-call count. Dampen hard so the embedding signal (which
+        # with tool-call count. Dampen hard so the structural signal (which
         # reads the actual last-user content) can dominate.
         multi_step_workflow = msg_count > 6 and tool_msg_count > 4
         conf_cap = 0.30 if multi_step_workflow else 1.0

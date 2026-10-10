@@ -190,7 +190,6 @@ def run_ensemble_leg(
     case: EvalCase,
     *,
     mode: RoutingMode = RoutingMode.AUTO,
-    embedding_signal: Any = None,
     rng: random.Random | None = None,
 ) -> tuple[Tier, float, float]:
     """Route one case with the ensemble only; return (tier, complexity, confidence).
@@ -206,7 +205,6 @@ def run_ensemble_leg(
         mode=mode,
         config=DEFAULT_CONFIG,
         experience_store=ModelExperienceStore(session=None),
-        embedding_signal=embedding_signal,
         rng=rng,
     )
     return decision.tier, float(decision.complexity), float(decision.confidence)

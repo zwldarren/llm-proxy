@@ -34,7 +34,7 @@ docker compose up -d
 `.env` is optional and also carries `POSTGRES_USER`, `POSTGRES_DB`, `JWT_SECRET`,
 `ENCRYPTION_KEY`, and the `REDIS_*` switches; see `.env.example` for the full list.
 
-The image ships the built admin UI and the full smart-routing stack, and bundles
+The image ships the built admin UI and smart routing, and bundles
 `bun`/`bunx` and `uv`/`uvx` so stdio MCP servers can run `bunx`- or `uvx`-style
 commands inside the container. (`npx` is not included.)
 
@@ -43,10 +43,7 @@ commands inside the container. (`npx` is not included.)
 ```bash
 git clone https://github.com/zwldarren/llm-proxy.git
 cd llm-proxy
-uv sync                       # core proxy, no ML dependencies
-
-# Optional: embedding-based smart-routing signal (adds the ML stack)
-uv sync --extra smart-routing
+uv sync
 
 uv run llm-proxy --build-frontend
 ```
@@ -54,9 +51,6 @@ uv run llm-proxy --build-frontend
 `--build-frontend` runs `bun install` (if needed) and `bun run build`, producing
 `frontend/dist`. The server serves that directory at `/` — if `dist` is missing at
 startup, the API works but the admin UI is not mounted until you rebuild and restart.
-
-Without the `smart-routing` extra, routing falls back to the built-in structural
-signals; everything else is identical.
 
 ## Server options
 

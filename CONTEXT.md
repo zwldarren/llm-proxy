@@ -80,7 +80,7 @@ The band a request's routing complexity falls into — `SIMPLE`, `MEDIUM` or `CO
 _Avoid_: tier (unqualified), model tier, quality tier
 
 **Routing signal**:
-One independent in-process vote on the routing tier: metadata (A), structural (B), or embedding (C). The ensemble combines the signals that did not abstain; a judge verdict is not a signal. See ADR-0018.
+One independent in-process vote on the routing tier: metadata (A) or structural (B). The embedding signal (C) was removed with its heavy ML stack (ADR-0027). The ensemble combines the signals that did not abstain; a judge verdict is not a signal. See ADR-0018.
 _Avoid_: classifier (that is signal B), heuristic, score
 
 **Routing judge**:

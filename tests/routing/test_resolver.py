@@ -7,19 +7,6 @@ from llm_proxy.routing.resolver import resolve_virtual_model
 from llm_proxy.routing.types import RoutingMode
 
 
-@pytest.fixture(autouse=True)
-def _mock_embedding_signal(monkeypatch):
-    """Prevent ML model loading in get_embedding_signal.
-
-    The real implementation downloads a HuggingFace ONNX model + tokenizer
-    which is slow (~2s) and unnecessary for unit tests.
-    """
-    monkeypatch.setattr(
-        "llm_proxy.routing.resolver.get_embedding_signal",
-        AsyncMock(return_value=None),
-    )
-
-
 @pytest.mark.asyncio
 async def test_resolve_returns_decision(monkeypatch):
     # Fake config with one eligible model.

@@ -8,9 +8,11 @@ system using the complexity score for mid_high distinction.
 from typing import Any
 
 from llm_proxy.routing.classifier import classify
-from llm_proxy.routing.signal_tuning import compact_structural_system_prompt
+from llm_proxy.routing.signal_tuning import (
+    compact_structural_system_prompt,
+    strip_client_wrapper_blocks,
+)
 from llm_proxy.routing.signals.base import TierVote
-from llm_proxy.routing.signals.embedding import _extract_last_user_message
 from llm_proxy.routing.types import Tier
 
 
@@ -27,6 +29,78 @@ def _extract_latest_system_message(messages: list[dict[str, Any]]) -> str | None
 def _compact_system_prompt_for_classification(messages: list[dict[str, Any]]) -> str | None:
     system_prompt = _extract_latest_system_message(messages)
     return compact_structural_system_prompt(system_prompt)
+
+
+def _normalize_content(content: Any) -> str:
+    """Normalize message content — handles string, list, and dataclass formats."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        has_multimodal = False
+        for part in content:
+            if isinstance(part, dict):
+                part_type = part.get("type")
+                if part_type == "text":
+                    parts.append(part.get("text", ""))
+                elif part_type in {
+                    "input_image",
+                    "image",
+                    "image_url",
+                    "input_file",
+                    "input_audio",
+                    "input_video",
+                }:
+                    has_multimodal = True
+                elif part_type == "input_text":
+                    parts.append(part.get("text", ""))
+                elif part_type == "tool_result":
+                    # Anthropic tool_result: {'type': 'tool_result', 'content': ...}
+                    # OpenAI function_call_output: {'type': 'function_call_output', 'output': ...}
+                    result_content = part.get("content", "")
+                    if isinstance(result_content, str):
+                        parts.append(result_content)
+                    elif isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                parts.append(item.get("text", ""))
+                elif part_type == "input_text":
+                    parts.append(part.get("text", ""))
+            elif not isinstance(part, (dict, str)) and hasattr(part, "text"):
+                parts.append(getattr(part, "text", ""))
+            elif isinstance(part, str):
+                parts.append(part)
+        result = " ".join(parts)
+        # If we have multimodal content but no text, add a marker so signals
+        # don't treat this as empty text (which would cause them to abstain)
+        if not result and has_multimodal:
+            return "[multimodal_content]"
+        return result
+    # Single dataclass object with a text attribute (e.g. TextBlock)
+    if not isinstance(content, (dict, str)) and hasattr(content, "text"):
+        return str(getattr(content, "text", ""))
+    # Handle dict with type field
+    if isinstance(content, dict):
+        content_type = content.get("type")
+        if content_type == "text":
+            return content.get("text", "")
+        if content_type in {"input_text", "input_image", "image", "image_url"}:
+            return content.get("text", "") or content.get("image_url", "") or ""
+        if content_type == "tool_result":
+            # Anthropic tool_result format
+            result_content = content.get("content", "")
+            if isinstance(result_content, str):
+                return result_content
+    return str(content) if content else ""
+
+
+def _extract_last_user_message(messages: list[dict[str, Any]]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            text = _normalize_content(m.get("content", ""))
+            stripped = strip_client_wrapper_blocks(text)
+            return stripped if stripped else text
+    return ""
 
 
 def _map_v1_to_v2_tier_id(tier: Tier | None, complexity: float) -> int | None:

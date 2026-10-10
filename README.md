@@ -48,7 +48,7 @@ Speak any client protocol; the proxy normalizes it to a unified internal model a
 
 ### 🧭 Smart Routing & Resilience
 
-- **Virtual models** — Route to `auto`, `fast`, or `best` and let the built-in keyword-free classifier (structural + Unicode + n-gram features, no LLM call) pick a real model by complexity, cost, and capability. An optional embedding-based signal (install with `uv sync --extra smart-routing`) sharpens tier prediction; without it, routing degrades gracefully to the structural signals.
+- **Virtual models** — Route to `auto`, `fast`, or `best` and let the built-in keyword-free classifier (structural + Unicode + n-gram features, no LLM call) pick a real model by complexity, cost, and capability. The optional routing judge (a System One decision model) settles ambiguous first turns.
 - **Cost-aware selection** — Routing tiers (`ECONOMY` / `BALANCED` / `PREMIUM`) with bandit-style exploration that learns from real outcomes.
 - **Fallback chains & circuit breakers** — Per-provider attempt tracking, automatic retries on failure, and breakers that stop hammering a sick upstream.
 - **Keepalive heartbeats** — Whitespace heartbeats keep slow non-streaming requests alive behind CDNs (avoids Cloudflare 524s), enabled by default; streaming responses emit SSE comment heartbeats during upstream silence, and abandoned requests (client/CDN gave up) are cancelled and logged as 499 failures instead of silently succeeding.
@@ -129,18 +129,13 @@ git clone https://github.com/zwldarren/llm-proxy.git
 cd llm-proxy
 uv sync
 
-# Optional: enable the embedding-based smart-routing signal (adds the ML stack)
-uv sync --extra smart-routing
-
 # Build the frontend once, then run
 uv run llm-proxy --build-frontend
 ```
 
 The server starts on `http://localhost:8080` (override with `--host`/`--port`). SQLite is used by default; set `DATABASE_URL` for PostgreSQL.
 
-The core proxy installs without any ML dependencies. The `smart-routing` extra adds the embedding-based routing signal (transformers, ONNX Runtime, XGBoost); without it, routing automatically falls back to the built-in structural signals.
-
-> **Note:** `onnxruntime` does not yet publish Python 3.15 wheels, so the `smart-routing` extra currently requires Python ≤ 3.14 (on 3.15 the extra installs without it and the proxy uses the structural signals only).
+There are no ML dependencies anywhere in the install: smart routing classifies in-process (metadata + structural signals), and the optional routing judge is a System One model you already configured in the proxy — not an extra install.
 
 ## Using the API
 

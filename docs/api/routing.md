@@ -43,7 +43,7 @@ configuration error naming the problem.
 
 ## How a request is classified
 
-The ensemble votes over three in-process signals. The [routing judge](#routing-judge)
+The ensemble votes over two in-process signals. The [routing judge](#routing-judge)
 is **not** one of them: it never contributes a vote to this blend, and no weight in
 this table changes when it is enabled — inside its band its verdict *replaces* what
 this ensemble produced, outside it nothing calls the judge at all (ADR-0018).
@@ -52,7 +52,11 @@ this ensemble produced, outside it nothing calls the judge at all (ADR-0018).
 | --- | --- | --- |
 | Metadata | 0.50 | Request shape (tool use, images, max tokens, model hints) |
 | Structural | 0.10 | Message text features: length, structure, Unicode, n-grams |
-| Embedding | 0.40 | Optional — requires the `smart-routing` extra; abstains without it |
+
+The embedding signal that used to hold the 0.40 weight was removed with the heavy
+ML stack that backed it (ONNX Runtime, transformers, XGBoost); its vote — and most
+of its error mass, which sat on the MEDIUM boundary — is gone. Ambiguous turns are
+now the [routing judge's](#routing-judge) job.
 
 The result maps to a complexity score and a public tier: **SIMPLE** (below 0.33),
 **MEDIUM** (below 0.67), or **COMPLEX**. Confidence is calibrated, and every decision

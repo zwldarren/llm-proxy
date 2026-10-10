@@ -1,8 +1,8 @@
 """Trained-asset deployment for the smart routing engine.
 
-Vendored assets (Perceptron weights, KNN index, XGBoost classifier, scaler,
-Platt params) ship inside the package and are copied to a writable data dir
-on first use so the ML libs can load them by path.
+Vendored assets (structural Perceptron weights, Platt calibration params)
+ship inside the package and are copied to a writable data dir on first use
+so the routing engine can load them by path.
 """
 
 import shutil
@@ -12,10 +12,6 @@ import platformdirs
 
 _ASSET_NAMES = (
     "model.json",
-    "seed_embeddings.npy",
-    "seed_labels.json",
-    "embedding_classifier.ubj",
-    "meta_scaler.pkl",
     "calibration_params.json",
 )
 

@@ -41,7 +41,6 @@ def test_route_returns_decision_with_model():
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
         experience_store=ModelExperienceStore(session=None),
-        embedding_signal=None,  # A+B only
     )
     assert dec.model in {"econ", "bal", "prem"}
     assert 0.0 <= dec.complexity <= 1.0
@@ -56,7 +55,6 @@ def _simple_decision():
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
         experience_store=ModelExperienceStore(session=None),
-        embedding_signal=None,
     )
 
 
@@ -72,7 +70,6 @@ def _agent_decision():
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
         experience_store=ModelExperienceStore(session=None),
-        embedding_signal=None,
     )
 
 
@@ -118,7 +115,7 @@ def test_route_includes_signal_vote_summary():
     dec = _simple_decision()
     assert "metadata" in dec.signal_votes
     assert "structural" in dec.signal_votes
-    assert "embedding" in dec.signal_votes
+    assert "embedding" not in dec.signal_votes
     assert "tier_id" in dec.signal_votes["metadata"]
     assert "confidence" in dec.signal_votes["metadata"]
 
@@ -180,7 +177,6 @@ def _judged(judge, *, features=None, messages=None):
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
         experience_store=ModelExperienceStore(session=None),
-        embedding_signal=None,
         judge=judge,
     )
 
@@ -188,7 +184,7 @@ def _judged(judge, *, features=None, messages=None):
 def test_a_verdict_that_owns_the_tier_replaces_the_ensemble_complexity():
     from llm_proxy.routing.api import classify
 
-    baseline = classify(JUDGE_MESSAGES, None, None)
+    baseline = classify(JUDGE_MESSAGES, None)
     assert baseline.v2.tier_id == 0, "fixture drifted: the ensemble no longer calls this SIMPLE"
 
     dec = _judged(_consultation(Tier.COMPLEX))
@@ -228,7 +224,7 @@ def test_a_verdict_is_still_subject_to_the_ensemble_floors_and_caps():
 def test_a_shadow_verdict_is_recorded_and_ignored():
     from llm_proxy.routing.api import classify
 
-    baseline = classify(JUDGE_MESSAGES, None, None)
+    baseline = classify(JUDGE_MESSAGES, None)
     dec = _judged(_consultation(Tier.COMPLEX, shadow=True))
 
     assert dec.tier == Tier.SIMPLE
@@ -242,7 +238,7 @@ def test_a_shadow_verdict_is_recorded_and_ignored():
 def test_an_abstention_leaves_the_decision_alone_and_records_why():
     from llm_proxy.routing.api import classify
 
-    baseline = classify(JUDGE_MESSAGES, None, None)
+    baseline = classify(JUDGE_MESSAGES, None)
     dec = _judged(_consultation(verdict=False, error="TimeoutError: deadline expired"))
 
     assert dec.tier == Tier.SIMPLE
@@ -256,7 +252,7 @@ def test_an_abstention_leaves_the_decision_alone_and_records_why():
 def test_the_judge_never_touches_the_ensemble_confidence():
     from llm_proxy.routing.api import classify
 
-    baseline = classify(JUDGE_MESSAGES, None, None)
+    baseline = classify(JUDGE_MESSAGES, None)
     dec = _judged(_consultation(Tier.COMPLEX))
 
     assert dec.confidence == baseline.v2.confidence
@@ -269,7 +265,7 @@ def test_no_consultation_means_no_judge_record():
 def test_a_reused_classification_is_the_one_the_decision_was_made_from():
     from llm_proxy.routing.api import classify
 
-    classification = classify(JUDGE_MESSAGES, None, None)
+    classification = classify(JUDGE_MESSAGES, None)
     dec = route(
         messages=JUDGE_MESSAGES,
         features=None,
@@ -277,7 +273,6 @@ def test_a_reused_classification_is_the_one_the_decision_was_made_from():
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
         experience_store=ModelExperienceStore(session=None),
-        embedding_signal=None,
         classification=classification,
     )
 

@@ -51,7 +51,6 @@ from llm_proxy.routing.signal_tuning import (
     text_substance_score,
     vision_prompt_needs_medium_floor,
 )
-from llm_proxy.routing.signals.embedding import EmbeddingSignal
 from llm_proxy.routing.signals.metadata import MetadataSignal
 from llm_proxy.routing.signals.structural import StructuralSignal
 from llm_proxy.routing.structural import estimate_tokens
@@ -88,8 +87,7 @@ _PUBLIC_TIER_COMPLEXITY = {
 _DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
 # ─── Signal A/B singletons ───
-# Signal C (embedding) is injected by the caller via ``embedding_signal``; when
-# absent it abstains. Signals A and B are cheap, stateless, and eagerly
+# Signals A (metadata) and B (structural) are cheap, stateless, and eagerly
 # initialized at module load time to avoid thread-safety concerns with
 # check-then-create lazy init under concurrent requests.
 _v2_sig_a: MetadataSignal = MetadataSignal()
@@ -280,9 +278,6 @@ def _soften_tier_cap_for_agent_state(
         return tier_cap, None
 
     predicted_tier = _derive_tier(v2.complexity)
-    embedding_support = (
-        not v2.vote_c.abstained and (v2.vote_c.tier_id or 0) >= 2 and v2.vote_c.confidence >= 0.45
-    )
     pressure_support = features.agent_pressure >= 0.55 and v2.tier_id >= 2
     high_risk_support = features.step_risk == "high" and v2.tier_id >= 2
     cap_reason = str(features.tier_cap_reason or "").strip().lower()
@@ -294,11 +289,7 @@ def _soften_tier_cap_for_agent_state(
     if cap_reason == "environment-or-routine":
         if str(features.step_risk or "").strip().lower() == "low":
             return tier_cap, f"tier-cap-preserved({cap_reason}:low-risk-step)"
-        routine_pressure_support = (
-            features.agent_pressure >= 0.65
-            and v2.tier_id >= 3
-            and (embedding_support or v2.confidence >= 0.60)
-        )
+        routine_pressure_support = features.agent_pressure >= 0.65 and v2.tier_id >= 3
         if not routine_pressure_support:
             return tier_cap, f"tier-cap-preserved({cap_reason})"
     elif (
@@ -317,9 +308,7 @@ def _soften_tier_cap_for_agent_state(
         )
         if standalone_complex_support:
             return None, "tier-cap-softened(current-complex-evidence)"
-        pressure_cap_support = rescue_exceeds_cap and (
-            embedding_support or v2.tier_id >= 1 or v2.confidence >= 0.30
-        )
+        pressure_cap_support = rescue_exceeds_cap and (v2.tier_id >= 1 or v2.confidence >= 0.30)
         if pressure_cap_support:
             return None, f"tier-cap-softened(agent-pressure={features.agent_pressure:.2f})"
         return tier_cap, f"tier-cap-preserved({cap_reason})"
@@ -328,9 +317,7 @@ def _soften_tier_cap_for_agent_state(
         "short-observation",
         "recoverable-tool-error",
     }:
-        pressure_cap_support = rescue_exceeds_cap and (
-            embedding_support or v2.tier_id >= 1 or v2.confidence >= 0.30
-        )
+        pressure_cap_support = rescue_exceeds_cap and (v2.tier_id >= 1 or v2.confidence >= 0.30)
         if pressure_cap_support:
             return None, f"tier-cap-softened(agent-pressure={features.agent_pressure:.2f})"
         return tier_cap, f"tier-cap-preserved({cap_reason})"
@@ -338,10 +325,8 @@ def _soften_tier_cap_for_agent_state(
     if _TIER_ORDER[predicted_tier] <= _TIER_ORDER[tier_cap]:
         return tier_cap, None
 
-    if embedding_support or pressure_support or high_risk_support:
+    if pressure_support or high_risk_support:
         reasons: list[str] = []
-        if embedding_support:
-            reasons.append("embedding")
         if pressure_support:
             reasons.append(f"agent-pressure={features.agent_pressure:.2f}")
         if high_risk_support:
@@ -351,20 +336,11 @@ def _soften_tier_cap_for_agent_state(
     return tier_cap, None
 
 
-def _strongest_non_structural_tier(vote_a: TierVote, vote_c: TierVote) -> int | None:
+def _strongest_non_structural_tier(vote_a: TierVote) -> int | None:
     """Return the strongest sufficiently confident non-structural support."""
     supported: list[int] = []
     if not vote_a.abstained and vote_a.tier_id is not None and vote_a.confidence >= 0.65:
         supported.append(vote_a.tier_id)
-    if not vote_c.abstained and vote_c.tier_id is not None:
-        # For short standalone tasks, Signal C is the only semantic signal that
-        # can corroborate Signal B's structural "this is hard" read. Require
-        # strong confidence for mid-tier support, but allow moderate confidence
-        # when the embedding classifier says the task is highest-tier; the cap
-        # below still limits this to public COMPLEX, not tier_id=3.
-        min_confidence = 0.55 if vote_c.tier_id >= 3 else 0.70
-        if vote_c.confidence >= min_confidence:
-            supported.append(vote_c.tier_id)
     return max(supported) if supported else None
 
 
@@ -395,20 +371,14 @@ def _row_has_structured_system_prompt(row: dict[str, Any]) -> bool:
     return False
 
 
-def _strong_embedding_low(vote_c: TierVote) -> bool:
-    return not vote_c.abstained and vote_c.tier_id == 0 and vote_c.confidence >= 0.90
-
-
-def _allow_short_structural_medium_floor(row: dict[str, Any], vote_c: TierVote) -> bool:
+def _allow_short_structural_medium_floor(row: dict[str, Any]) -> bool:
     """Use Signal B's soft medium floor only for short asks with real substance.
 
     Short prompts like "write one subject line" and "give me a shell one-liner"
-    often trip the structural classifier's medium band. A high-confidence
-    embedding LOW vote is trustworthy there unless a weighted text-shape score
-    says the current prompt has enough substance to deserve a floor.
+    often trip the structural classifier's medium band; substance checks keep
+    the floor from inflating trivial asks. (The embedding signal this floor was
+    once gated behind was removed with Signal C.)
     """
-    if not _strong_embedding_low(vote_c):
-        return True
     if _row_has_structured_system_prompt(row):
         return True
     text = _row_latest_user_text(row)
@@ -465,14 +435,13 @@ def _cap_uncorroborated_structural_high(
     row: dict[str, Any],
     vote_a: TierVote,
     vote_b: TierVote,
-    vote_c: TierVote,
 ) -> tuple[TierVote, bool, int | None]:
     """Prevent short-prompt structure alone from forcing the highest v2 tier.
 
     Signal B is a useful safety floor, but on standalone agent prompts it can
     over-read task scaffolding ("plan, use tools, edit files") as highest-tier
-    complexity. Require Signal A or C to corroborate before allowing B to vote
-    at tier 3 on short no-tool context.
+    complexity. Require Signal A (plus text substance) to corroborate before
+    allowing B to vote at tier 3 on short no-tool context.
     """
     if vote_b.abstained or vote_b.tier_id is None:
         return vote_b, False, None
@@ -484,7 +453,7 @@ def _cap_uncorroborated_structural_high(
     if tool_msg_count > 0 or len(messages) > 3:
         return vote_b, False, None
 
-    support_tier = _strongest_non_structural_tier(vote_a, vote_c)
+    support_tier = _strongest_non_structural_tier(vote_a)
     latest_high_substance = _latest_user_has_high_substance(row)
     if support_tier is not None and support_tier >= 3:
         return vote_b, False, None
@@ -507,7 +476,6 @@ class V2ClassifyResult:
     signals_text: tuple[str, ...]
     vote_a: TierVote
     vote_b: TierVote
-    vote_c: TierVote
 
 
 @dataclass(frozen=True, slots=True)
@@ -604,17 +572,15 @@ def _build_signal_row(
 def _v2_classify(
     messages: list[dict[str, Any]] | None,
     routing_features: RoutingFeatures | None,
-    embedding_signal: EmbeddingSignal | None = None,
     risk_tolerance: float = 0.5,
 ) -> V2ClassifyResult:
     """Run the v2 signal ensemble. Returns full result with all signal votes.
 
-    Signal A (metadata) and Signal B (structural) always run. Signal C
-    (embedding) runs only when an ``embedding_signal`` is supplied; otherwise
-    it abstains and the ensemble decides on A+B alone. Phase-2 online weight
-    learning and shadow-mode gating are removed: Signal B is always active and
-    the ensemble uses the source's static fallback weights (A=0.50, B=0.10,
-    C=0.40).
+    Signal A (metadata) and Signal B (structural) always run; Signal C
+    (embedding) and its heavy ML stack were removed, so the ensemble decides
+    on A+B alone. Phase-2 online weight learning and shadow-mode gating are
+    removed: Signal B is always active and the ensemble keeps the source's
+    static weights (A=0.50, B=0.10).
     """
     row = _build_signal_row(messages, routing_features)
     tool_msg_count = sum(
@@ -624,17 +590,12 @@ def _v2_classify(
 
     vote_a = _get_sig_a().predict(row)
     vote_b = _get_sig_b().predict(row)
-    if embedding_signal is not None:
-        vote_c = embedding_signal.predict(row)
-    else:
-        vote_c = TierVote(tier_id=None, confidence=0.0)
 
     effective_vote_b, structural_high_capped, structural_cap_tier = (
         _cap_uncorroborated_structural_high(
             row,
             vote_a,
             vote_b,
-            vote_c,
         )
     )
 
@@ -644,9 +605,6 @@ def _v2_classify(
     if not effective_vote_b.abstained:
         active_votes.append(effective_vote_b)
         active_weights.append(0.10)
-    if not vote_c.abstained:
-        active_votes.append(vote_c)
-        active_weights.append(0.40)
 
     ensemble = Ensemble(
         weights=active_weights, risk_tolerance=risk_tolerance, calibrator=_get_calibrator()
@@ -677,7 +635,7 @@ def _v2_classify(
         and effective_vote_b.confidence >= 0.70
         and (effective_vote_b.tier_id or 0) >= 1
         and tier_id < 1
-        and _allow_short_structural_medium_floor(row, vote_c)
+        and _allow_short_structural_medium_floor(row)
     ):
         # Short standalone implementation/design prompts are often capped to
         # 0.70 confidence by Signal B's short-text dampener. Do not let
@@ -713,7 +671,6 @@ def _v2_classify(
     signals_parts = [
         f"v2:metadata={vote_a.tier_id}({vote_a.confidence:.2f})",
         f"v2:structural={vote_b.tier_id}({vote_b.confidence:.2f})[active]",
-        f"v2:embedding={vote_c.tier_id}({vote_c.confidence:.2f})",
         f"v2:tier={tier_id} complexity={complexity:.2f} method={result.method}",
     ]
     if structural_floor_applied:
@@ -736,14 +693,12 @@ def _v2_classify(
         signals_text=signals_text,
         vote_a=vote_a,
         vote_b=vote_b,
-        vote_c=vote_c,
     )
 
 
 def classify(
     messages: list[dict[str, Any]] | None,
     features: RoutingFeatures | None = None,
-    embedding_signal: EmbeddingSignal | None = None,
     *,
     max_output_tokens: int = _DEFAULT_MAX_OUTPUT_TOKENS,
     risk_tolerance: float = 0.5,
@@ -766,7 +721,6 @@ def classify(
     v2 = _v2_classify(
         messages,
         features,
-        embedding_signal=embedding_signal,
         risk_tolerance=risk_tolerance,
     )
     return RoutingClassification(features=features, v2=v2)
@@ -779,7 +733,6 @@ def route(
     mode: RoutingMode,
     config: RoutingConfig | None = None,
     experience_store: object | None = None,
-    embedding_signal: EmbeddingSignal | None = None,
     previous_model: str | None = None,
     *,
     rng: random.Random | None = None,
@@ -790,7 +743,7 @@ def route(
 ) -> RoutingDecision:
     """Route a request to the best model using the v2 multi-signal ensemble.
 
-    Orchestrates: feature extraction → Signal A/B/C → Ensemble → tier floor/cap
+    Orchestrates: feature extraction → Signal A/B → Ensemble → tier floor/cap
     heuristics → ``_apply_tier_bounds`` → ``select_from_pool``. Agent-specific
     floor/cap branches run only when a tool loop is detected (design §7.2).
 
@@ -810,7 +763,7 @@ def route(
     """
     cfg = config or DEFAULT_CONFIG
     constraints = RoutingConstraints()
-    classification = classification or classify(messages, features, embedding_signal)
+    classification = classification or classify(messages, features)
     features = classification.features
     mode = mode if isinstance(mode, RoutingMode) else RoutingMode(mode)
     effective_max_output_tokens = features.requested_max_output_tokens or _DEFAULT_MAX_OUTPUT_TOKENS
@@ -824,7 +777,6 @@ def route(
     signal_votes = {
         "metadata": {"tier_id": v2.vote_a.tier_id, "confidence": v2.vote_a.confidence},
         "structural": {"tier_id": v2.vote_b.tier_id, "confidence": v2.vote_b.confidence},
-        "embedding": {"tier_id": v2.vote_c.tier_id, "confidence": v2.vote_c.confidence},
     }
 
     sel_weights = get_selection_weights(cfg, mode)
