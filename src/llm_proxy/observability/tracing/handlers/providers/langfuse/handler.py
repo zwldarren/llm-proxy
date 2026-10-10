@@ -2,9 +2,9 @@
 
 Exports traces to Langfuse using the official Langfuse Python SDK. Each request
 is recorded as a ``generation`` observation with structured input, output,
-usage, and metadata. Per-request state is stored in ``ContextVar`` dictionaries
-keyed by ``context.request_id`` so the handler remains safe under concurrent
-async load.
+usage, and metadata. Per-request state is stored on the handler instance keyed
+by ``context.request_id`` (not in ``ContextVar``s: the streaming request
+lifecycle spans several asyncio tasks — see ``_RequestState``).
 """
 
 import asyncio
@@ -79,10 +79,17 @@ def _langfuse_trace_context(trace_id: str | None) -> TraceContext | None:
 
 @dataclass
 class _RequestState:
-    """Per-request Langfuse state stored in the handler's ContextVar.
+    """Per-request Langfuse state stored on the handler instance.
 
-    Keeping this per-request (instead of a handler-wide set) means one request's
-    bookkeeping can never leak into another's under concurrent async load.
+    Entries are keyed by ``context.request_id`` and removed when the request
+    ends (``on_request_end`` / ``on_error`` / ``on_stream_end``). Plain dicts
+    are required here rather than ``ContextVar``s: the request's start hook runs
+    in the pipeline task (``keepalive.await_with_*`` wraps the pipeline in
+    ``ensure_future``) while a streaming request's chunk/end hooks run in the
+    task Starlette spawned for the response body — a different context, which
+    never sees a ``ContextVar.set()`` done in the pipeline task. Keying one
+    instance-level dict by request id survives that boundary; a dict mutation
+    between ``await``s on a single event loop is atomic.
     """
 
     generation: Any
@@ -272,34 +279,29 @@ class LangfuseTracingHandler(TracingHandler):
         self._base_url = base_url
         self._version = version
 
-        # Per-request state lives in ContextVars so concurrent requests never
-        # share handler instance attributes.
+        # Per-request state is keyed by request id on the instance (see
+        # ``_RequestState`` for why this must not be a ContextVar). The id of
+        # the request whose generation the *current* context created stays in
+        # a ContextVar because it is only read back in the same task that set
+        # it (the header-writing seam after ``on_request_end``).
         self._active_request_id: ContextVar[str | None] = ContextVar(
             f"langfuse_active_request_id_{id(self)}", default=None
         )
-        self._request_states: ContextVar[dict[str, _RequestState] | None] = ContextVar(
-            f"langfuse_states_{id(self)}", default=None
-        )
-        self._request_trace_ids: ContextVar[dict[str, tuple[str, str]] | None] = ContextVar(
-            f"langfuse_trace_ids_{id(self)}", default=None
-        )
+        self._request_states: dict[str, _RequestState] = {}
+        self._request_trace_ids: dict[str, tuple[str, str]] = {}
 
     def _set_active_request_id(self, context: EventContext) -> None:
         self._active_request_id.set(context.request_id)
 
     def _get_state_for_request(self, request_id: str) -> _RequestState | None:
-        return (self._request_states.get() or {}).get(request_id)
+        return self._request_states.get(request_id)
 
     def _set_state_for_request(self, request_id: str, state: _RequestState) -> None:
-        current = dict(self._request_states.get() or {})
-        current[request_id] = state
-        self._request_states.set(current)
+        self._request_states[request_id] = state
 
     def _pop_generation_for_request(self, request_id: str) -> Any | None:
         """Remove a request's state and return its generation (``None`` if absent)."""
-        current = dict(self._request_states.get() or {})
-        state = current.pop(request_id, None)
-        self._request_states.set(current)
+        state = self._request_states.pop(request_id, None)
         return state.generation if state else None
 
     def _fail_update(self, stage: str, error: Exception, generation: Any) -> None:
@@ -315,21 +317,17 @@ class LangfuseTracingHandler(TracingHandler):
     def _set_trace_ids_for_request(
         self, request_id: str, trace_id: str, observation_id: str
     ) -> None:
-        current = dict(self._request_trace_ids.get() or {})
-        current[request_id] = (trace_id, observation_id)
-        self._request_trace_ids.set(current)
+        self._request_trace_ids[request_id] = (trace_id, observation_id)
 
     def _discard_trace_ids_for_request(self, request_id: str) -> None:
-        current = dict(self._request_trace_ids.get() or {})
-        current.pop(request_id, None)
-        self._request_trace_ids.set(current)
+        self._request_trace_ids.pop(request_id, None)
 
     def _get_current_trace_ids(self) -> tuple[str, str] | None:
         """Return the active request's ``(trace_id, observation_id)``, if any."""
         request_id = self._active_request_id.get()
         if request_id is None:
             return None
-        return (self._request_trace_ids.get() or {}).get(request_id)
+        return self._request_trace_ids.get(request_id)
 
     def _get_current_trace_id(self) -> str | None:
         ids = self._get_current_trace_ids()
