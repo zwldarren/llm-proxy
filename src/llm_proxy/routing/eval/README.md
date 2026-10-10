@@ -46,44 +46,61 @@ Two rules when extending it:
 
 ## Dataset-derived corpora
 
-For a bigger corpus without hand-writing 100 cases, `corpus/` ships
-`open-source-103.jsonl` — 103 cases derived from public HuggingFace datasets
-(SimpleQA-verified, GSM8K stratified by solution steps, HumanEval, BoolQ,
-CoQA, Hermes) and mapped onto the rubric with per-case rationales:
+For a bigger corpus without hand-writing 100 cases, `corpus/` ships two
+JSONL corpora derived from public HuggingFace datasets — `open-source-103`
+(the baseline sweep) and `complex-situations-98` (long context, multi-turn
+memory, long tool loops) — mapped onto the rubric with per-case rationales:
 
 ```bash
 uv run python -m llm_proxy.routing.eval \
   --cases src/llm_proxy/routing/eval/corpus/open-source-103.jsonl --out ./
+uv run python -m llm_proxy.routing.eval \
+  --cases src/llm_proxy/routing/eval/corpus/complex-situations-98.jsonl --out ./
 ```
 
 Read `corpus/README.md` for provenance, the per-subset mapping and the honesty
-caveats (single rater, unverifiable training overlap) before quoting numbers
-from it. ADR-0028 records the gate decision those numbers produced.
+caveats (limited raters, unverifiable training overlap, the corpus skew) before
+quoting numbers from it. ADR-0028 records the gate decision the first corpus
+produced; its README section "Measurements on record" carries the numbers that
+decision and the complex corpus run rest on.
 
 ## Running
+
+Every judge run goes through this repo's own dev server — the reference
+configuration ships `jev-latest` (a System One model via OpenRouter) on it,
+registered with `supports_systemone`: `uv run llm-proxy-dev`, then point the
+rig at it. `--judge ollama` is the transport's historical name (it is a plain
+System One HTTP client, not a daemon pick): it calls `<url>/v1/systemone`.
 
 ```bash
 # Ensemble baseline, no judge (signals A+B)
 uv run python -m llm_proxy.routing.eval --out ./
 
-# With a local judge (Ollama serves /v1/systemone from local models only)
-ollama pull tev1:0.8b
-uv run python -m llm_proxy.routing.eval --judge ollama --judge-model tev1:0.8b --out ./
+# With the configured judge through this repo's dev server — an API key of that
+# deployment is a credential:
+uv run python -m llm_proxy.routing.eval \
+  --judge ollama --judge-url http://127.0.0.1:9911 \
+  --judge-model jev-latest --judge-api-key $PROXY_KEY --judge-timeout 60 --out ./
 
-# With Jev, the reference judge ADR-0018 compares its numbers against
+# Through a real deployment the same way: replace --judge-url/--judge-model.
+# Directly against OpenRouter (needs a key in the environment)
 export OPENROUTER_API_KEY=sk-or-...
 uv run python -m llm_proxy.routing.eval --judge openrouter --out ./
 
 # Seeded repetitions (three is the default) and explicit bandit seed
-uv run python -m llm_proxy.routing.eval --repeats 3 --seed 20261006 --out ./
+uv run python -m llm_proxy.routing.eval --repeats 3 --seed 20261014 --out ./
+
+# Consumption bars (ADR-0029): add an operator policy to the reported table
+uv run python -m llm_proxy.routing.eval --apply-min-confidence 0.9 --apply-min-escalation 0.5 --out ./
 ```
 
 `--out` writes `metrics.json` and `report.md`; the report always prints.
 
-`--judge-model` and `--judge-url` default per transport (`tev1:0.8b` on
-`http://localhost:11434`, `~typesafe/jev-latest` on OpenRouter). The judge model
-name is **upstream**-specific: the rig calls HTTP directly, so nothing maps an
-internal model name for it. `--judge-api-key` overrides `OPENROUTER_API_KEY`.
+`--judge-model` and `--judge-url` default per transport (`~typesafe/jev-latest`
+on OpenRouter). The judge model name is **upstream**-specific: the rig calls
+HTTP directly, so nothing maps an internal model name for it — route through
+the proxy to reuse its per-model mapping. `--judge-api-key` is sent as Bearer
+credentials on either transport.
 
 ## Reading the report
 
@@ -121,15 +138,46 @@ side by side, each with the call rate it implies:
 | `always` | every gated-eligible request (the first-turn rule still applies) |
 
 Do not assume a confidence threshold: read the reported confidence distribution first.
-On the seed corpus this ensemble's confidence clustered at 0.82–0.89 — *including on the
-cases it got wrong* — so a 0.55 gate fired on 12% of calls, all of them tool-loop steps
-the first-turn rule excludes anyway. And because complexity snaps to the tier anchors
-`{0.00, 0.40, 0.68, 0.90}`, a narrow band only ever catches the `0.40` anchor. Pick the
-trigger from these rows, not from intuition.
+On the recorded seed run (24 × 3 repeats, seed 20261014) the repaired ensemble
+matched 6 of 24 rows; its confidence still separates its own hits (0.77 on every
+correct row) from its misses (0.39–0.67), but a 0.55 gate fired on 3 of 24 calls
+and moved nothing beyond its own cost, and the MEDIUM-band trigger caught 9 of 24
+rows for +1 case over the ensemble's own 25%. With the ensemble repaired, no gate
+predicate met the bar for shipping on-by-default — see ADR-0029 for the decision
+arithmetic. Pick the trigger from these rows, not from intuition.
 
 `judge, every case` and `ensemble (no judge)` are the two extremes every gate sits
 between; the best gate is whichever row lands closest to the judge's accuracy at an
 acceptable call rate.
+
+## Verdict consumption (ADR-0029)
+
+A gate decides which turns are *consulted*; a consumption policy decides which
+*verdicts are obeyed*. The rig reports the shipped rule
+(`routing.judge.policy.verdict_consumable`) applied to every judged row, side by
+side with the operator's bars:
+
+| policy | verdict obeyed when |
+| --- | --- |
+| `obey-every-verdict` | always (the pre-amendment behavior, and the shipped default) |
+| `conf>=0.9` | the verdict's own probability mass on the tier it chose reaches 0.9 |
+| `esc>=0.5` | its escalation probability reaches 0.5 |
+| `conf>=0.9 or esc>=0.5` | either bar — an operator's `--apply-*` values join here |
+
+Every judged row was paid for — the call happens before the filter — so the
+*apply rate* is how often the verdict replaced the ensemble's tier, not a call
+rate. The `match` column is the **composite** the proxy would have scored: a
+held verdict falls back to the ensemble's tier and stays decided; nothing is
+excluded. The accuracy over the obeyed verdicts alone is reported separately
+(`applied_overall` in `metrics.json`) — that is the bar's quality read.
+
+Read the consumption table *against* the gate table: on the recorded corpora no
+consultation gate beats the ensemble, while the measured bars beat it by ~13
+points on their respective corpus (`conf>=0.9` on `open-source-103`, `esc>=0.5`
+on `complex-situations-98`) and are neutral cross-wise. The bars ship off
+(`apply_min_confidence`/`apply_min_escalation` unset); sweep them here over your
+own shadow data before enabling — thresholds picked on a recorded corpus are a
+starting point, not a constant.
 
 ## Before you trust a latency number
 
@@ -137,10 +185,8 @@ Two effects will otherwise be mistaken for the judge's speed:
 
 - **Cold start is inside the measurement.** A call cancelled at the deadline does not
   leave the model loaded, so a timeout shorter than the cold load makes *every* call time
-  out and the judge never warms up: on this machine `tev1:0.8b` needs ~3.9 s to load and
-  answer on CPU and ~0.24 s warm, which is why `--judge-timeout 3` reported 8/8 timeouts
-  on the first run. Warm the model, or give the first call a longer timeout, before
-  reading percentiles.
-- **A deadline overshoots by its cancellation cost.** Measured locally, a 0.5 s deadline
-  returned control at 0.55 s. Budget `deadline_s` plus that overhead, not the deadline
-  alone.
+  out and the judge never warms up. The proxy warms the judge model at startup and on
+  config changes, but a remote model can still cold-start on the upstream: give the first
+  call a longer `--judge-timeout` before reading percentiles.
+- **A deadline overshoots by its cancellation cost.** Budget the round trip, not the
+  configured `deadline_s` alone.

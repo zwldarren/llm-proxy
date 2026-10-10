@@ -18,6 +18,7 @@ from llm_proxy.routing.judge.policy import (
     JudgeConsultPlan,
     is_first_turn,
     plan_judge_consult,
+    verdict_consumable,
 )
 from llm_proxy.routing.judge.rubric import (
     AMBIGUOUS_OPTION,
@@ -50,4 +51,5 @@ __all__ = [
     "parse_judge_answers",
     "plan_judge_consult",
     "render_state",
+    "verdict_consumable",
 ]

@@ -454,12 +454,15 @@ def _cap_uncorroborated_structural_high(
         return vote_b, False, None
 
     support_tier = _strongest_non_structural_tier(vote_a)
-    latest_high_substance = _latest_user_has_high_substance(row)
     if support_tier is not None and support_tier >= 3:
         return vote_b, False, None
-    capped_tier = (
-        2 if (support_tier is not None and support_tier >= 2) or latest_high_substance else 1
-    )
+    # Cap target follows Signal A's vote, not the amount of text: "the ask
+    # has substance" and "the ask is an open plan" are different claims, and
+    # the second is precisely what an uncorroborated structural high vote
+    # was not allowed to make. Signal A voting SIMPLE holds the cap at one
+    # vote above the low anchor — MEDIUM — because the disagreement is real
+    # (Signal B saw something); it is just not a COMPLEX vote.
+    capped_tier = min(2, max(1, support_tier or 1))
     if vote_b.tier_id <= capped_tier:
         return vote_b, False, None
     return TierVote(capped_tier, vote_b.confidence), True, capped_tier
@@ -648,11 +651,18 @@ def _v2_classify(
         and tool_msg_count == 0
         and len(row.get("messages", [])) <= 3
         and not effective_vote_b.abstained
-        and (effective_vote_b.tier_id or 0) >= 3
-        and effective_vote_b.confidence >= 0.70
+        and not structural_high_capped
+        and (vote_b.tier_id or 0) >= 3
+        and vote_b.confidence >= 0.70
         and tier_id < 2
         and _latest_user_has_high_substance(row)
     ):
+        # Keyed on Signal B's *uncapped* vote so the floor still lifts from a
+        # genuinely corroborated high vote, and barred through a capped one:
+        # once the cap has decided that B's high reading failed corroboration,
+        # a held MEDIUM vote must not be re-promoted to COMPLEX by text
+        # substance — the two signals disagreed and that disagreement was,
+        # measured, mostly Signal B over-reading volume (ADR-0029).
         tier_id = 2
         substance_structural_high_floor_applied = True
     if (
@@ -660,10 +670,14 @@ def _v2_classify(
         and tool_msg_count == 0
         and len(row.get("messages", [])) <= 3
         and not effective_vote_b.abstained
+        and not structural_high_capped
         and (effective_vote_b.tier_id or 0) >= 1
         and effective_vote_b.confidence >= 0.70
         and _latest_user_has_high_substance(row)
     ):
+        # The uncapped condition: a capped vote is B's high reading that
+        # failed corroboration, held at MEDIUM — text substance about the
+        # same volume must not turn that MEDIUM into COMPLEX here.
         tier_id = 2
         substance_complexity_floor_applied = True
     complexity = _TIER_ID_TO_COMPLEXITY.get(tier_id, 0.40)
@@ -895,6 +909,12 @@ def route(
         elif judge.plan.shadow:
             shadow_tier = verdict.tier.value if verdict is not None and verdict.tier else "abstain"
             judge_note = f"judge-shadow={shadow_tier}({judge.plan.reason})"
+        elif verdict is not None and verdict.tier is not None:
+            # A consulted verdict that cleared no consumption bar: recorded in
+            # full, but the ensemble's tier stands (ADR-0029). Distinct from an
+            # abstention so the log tells "no answer" from "an answer not
+            # confident enough to obey".
+            judge_note = f"judge-held={verdict.tier.value}({judge.plan.reason})"
         else:
             judge_note = f"judge=abstained({judge.error or 'ambiguous'})"
 

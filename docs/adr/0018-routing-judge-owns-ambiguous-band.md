@@ -57,12 +57,15 @@ verdict owns the tier there.
   threshold, confidence below a corpus-derived quantile, the complexity band, "anything
   that is not the obvious low anchor", always — each with the call rate it implies, and
   the operator's own corpus picks the default. Shipped as two knobs, `confidence_below`
-  and `complexity_between`; neither set means every eligible turn is asked, which the seed
-  corpus found to be the best available trade. A threshold chosen before that measurement
-  is a guess: on the seed corpus this ensemble's calibrated confidence ran 0.54–0.89 with
-  a median of 0.84, and only 3 of 24 calls fell below 0.55 — every one of them a tool-loop
-  step that the first-turn rule excludes — so a 0.55 confidence gate would never have
-  fired. The gate remains the operator-visible latency and cost knob.
+  and `complexity_between`; [ADR-0029](0029-ensemble-recalibration-closed-gate.md)
+  later measured the ensemble — once its over-tier paths were fixed — beating every
+  high-call-rate gate on both recorded corpora, so unset predicates now leave the
+  plan in shadow-only sampling and the open gate is an explicit `always=True`.
+  A threshold chosen before that measurement
+  is a guess: on the recorded seed run (24 × 3 repeats) this ensemble's calibrated
+  confidence separated its own hits from its misses — 0.77 on the 3 rows it got
+  right, 0.39–0.67 on the 21 it did not — and only 3 of 24 calls fell below
+  0.55, all one hard family. The gate remains the operator-visible latency and cost knob.
 - **Authority.** Inside the band the verdict replaces the complexity/tier the ensemble
   would have produced. The judge is **not** a fourth signal blended into the ensemble:
   inside the band the other signals are weak by construction, so blending would dilute
@@ -151,16 +154,20 @@ verdict owns the tier there.
 - **A judge that is never warm is a judge that never answers.** A call cancelled at the
   deadline does not leave the model loaded, so a deadline shorter than the model's cold
   start makes every gated call pay the load and lose it — the feature degrades to the
-  ensemble silently, with a log line per turn and no verdict ever. Measured on the local
-  stand-in (`tev1:0.8b`, CPU): 3.9 s to load and answer cold, 0.24 s warm, and a 0.5 s
-  deadline that cancels the load leaves the next call cold again. Warming the judge at
+  ensemble silently, with a log line per turn and no verdict ever — measured
+  during the design runs against the reference stand-in, where a 0.5 s deadline
+  that cancelled the load left the next call cold again. On the dev deployment
+  with the configured judge (`jev-latest`, warm upstream) the judge itself is
+  quick — p50 ≈ 0.22 s, p95 ≈ 0.41 s over 103 calls — but a *remote* upstream
+  still owns its own cold start, which no proxy-side warm-up can remove.
+  Warming the judge at
   startup — which the embedding signal already does, now mirrored by
   `startup_judge_warmup`, re-run on every config reload so an operator switching the judge
   on does not have to wait for traffic — removes that trap. What a warm-up cannot remove is
   the model's own prompt processing on a cold *prompt*, which the deadline still has to
   cover. Deadline expiry also overshoots the configured value by its cancellation cost
-  (measured: 0.55 s of wall clock for a 0.5 s deadline), so the client-visible tail cap is
-  `deadline_s` plus that overhead.
+  — the client-visible tail cap sits at `deadline_s` plus that overhead, not at
+  `deadline_s` itself.
 - The feature is inert until an operator provisions a System One model.
 - Judge cost is small and input-token-only (~$0.00003 per decision at Jev's registry
   price) but real, and it is spent on the **fail-open path too**: a judge call that
@@ -187,11 +194,13 @@ verdict owns the tier there.
   in, by the rig's first run against the seed corpus. Two structural facts made the
   originally specified triggers unusable there: routing complexity snaps to the tier
   anchors `{0.00, 0.40, 0.68, 0.90}`, so a `[0.33, 0.67)` band catches only the `0.40`
-  anchor and fired on 9 of 24 calls without changing a single decision; and the
-  ensemble's calibrated confidence is high precisely when it is wrong (0.82–0.89 on five
-  wrong seed cases), so a low-confidence trigger selects for the tool-loop steps it is
-  already excluded from. The rig therefore treats triggers as candidates and reports
-  each one's call rate against the authored labels, rather than encoding a constant.
+  anchor (on the recorded re-run: 6 of 24 rows, three of which the judge corrected);
+  and the ensemble's calibrated confidence runs *lower* on its own misses (0.39–0.67
+  against 0.77) — a separation, but one the ensemble's answer already carries, so a
+  low-confidence trigger selects between a candidate answer and the judge on the same
+  0.67-band rows an anchor band already covers. The rig therefore treats triggers as
+  candidates and reports each one's call rate against the authored labels, rather than
+  encoding a constant.
 - Amends nothing. It is the routing subsystem's first recorded decision and it
   contradicts the property advertised in ADR-adjacent user documentation, which is why
   the documentation change is listed as a consequence rather than left implicit.

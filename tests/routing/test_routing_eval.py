@@ -70,6 +70,8 @@ def _result(
     judge: Tier | None = None,
     abstained: bool = False,
     latency_ms: float | None = None,
+    probabilities: dict[str, float] | None = None,
+    escalation: float | None = None,
 ) -> CaseResult:
     return CaseResult(
         case=_case(tier=expected),
@@ -81,6 +83,8 @@ def _result(
         judge_abstained=abstained,
         judge_called=judge is not None or abstained,
         judge_latency_ms=latency_ms if latency_ms is not None else (5.0 if judge else None),
+        judge_probabilities=probabilities or {},
+        judge_escalation=escalation,
     )
 
 
@@ -177,6 +181,93 @@ class TestSummarize:
         assert overall["under"] == 1
         assert overall["over"] == 1
         assert overall["match_rate"] == 0.0
+
+    def test_consumption_composite_falls_back_to_the_ensemble_on_a_held_verdict(self):
+        """A held verdict is not an exclusion: the ensemble's tier stands (ADR-0029)."""
+        metrics = summarize(
+            [
+                _result(
+                    expected=Tier.COMPLEX,
+                    ensemble=Tier.MEDIUM,
+                    judge=Tier.SIMPLE,
+                    probabilities={"simple": 0.6, "medium": 0.3, "complex": 0.1},
+                )
+            ]
+        )
+        block = metrics["judge"]["consumption"]["conf>=0.9"]
+        # The verdict's own mass is 0.6, under the 0.9 bar: held, and the
+        # composite scored the ensemble's (wrong) tier.
+        assert block["applied"] == 0
+        assert block["overall"]["matched"] == 0
+        assert block["overall"]["decided"] == 1
+        assert block["overall"]["match_rate"] == 0.0
+
+    def test_consumption_a_held_verdict_with_the_ensembles_tier_is_not_applied(self):
+        """Regression: applied is the policy decision, not tier identity.
+
+        A verdict held under the bar whose tier nonetheless equals the
+        ensemble's must not be counted as obeyed — the composite scored the
+        ensemble's decision, not the judge's (ADR-0029 consumption semantics).
+        """
+        metrics = summarize(
+            [
+                _result(
+                    expected=Tier.MEDIUM,
+                    ensemble=Tier.MEDIUM,
+                    judge=Tier.MEDIUM,
+                    probabilities={"simple": 0.2, "medium": 0.6, "complex": 0.2},
+                )
+            ]
+        )
+        block = metrics["judge"]["consumption"]["conf>=0.9"]
+        # The verdict's own mass is 0.6, under the 0.9 bar: held. The tier
+        # coincidence with the ensemble must not inflate the apply rate.
+        assert block["applied"] == 0
+        assert block["apply_rate"] == 0.0
+        assert block["applied_overall"]["decided"] == 0
+
+    def test_consumption_applies_a_verdict_that_clears_the_bar(self):
+        metrics = summarize(
+            [
+                _result(
+                    expected=Tier.COMPLEX,
+                    ensemble=Tier.MEDIUM,
+                    judge=Tier.COMPLEX,
+                    probabilities={"simple": 0.0, "medium": 0.05, "complex": 0.95},
+                )
+            ]
+        )
+        block = metrics["judge"]["consumption"]["conf>=0.9"]
+        assert block["applied"] == 1
+        assert block["overall"]["matched"] == 1
+        assert block["applied_overall"]["match_rate"] == 1.0
+
+    def test_consumption_escalation_bar_is_independent_of_the_tier_mass(self):
+        metrics = summarize(
+            [
+                _result(
+                    expected=Tier.COMPLEX,
+                    ensemble=Tier.MEDIUM,
+                    judge=Tier.COMPLEX,
+                    probabilities={"simple": 0.4, "medium": 0.4, "complex": 0.2},
+                    escalation=0.8,
+                )
+            ]
+        )
+        # Hedged tier (0.2 mass) but a loud escalation: the esc bar applies it,
+        # the confidence bar does not.
+        assert metrics["judge"]["consumption"]["esc>=0.5"]["applied"] == 1
+        assert metrics["judge"]["consumption"]["conf>=0.9"]["applied"] == 0
+
+    def test_consumption_operator_bars_join_the_measured_ones(self):
+        metrics = summarize(
+            [_result(expected=Tier.SIMPLE, ensemble=Tier.SIMPLE, judge=Tier.SIMPLE)],
+            apply_min_confidence=0.5,
+        )
+        consumption = metrics["judge"]["consumption"]
+        assert "operator(0.5,-)" in consumption
+        # The shipped candidates stay in the table beside the operator's bar.
+        assert "conf>=0.9" in consumption
 
     def test_judge_abstention_is_excluded_from_the_match_rate(self):
         metrics = summarize(

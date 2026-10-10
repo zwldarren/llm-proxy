@@ -5,6 +5,8 @@ assumed (ADR-0018): these tests pin the *rule*, while the evaluation rig
 measures which configuration of it is worth shipping.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
@@ -13,6 +15,7 @@ from llm_proxy.routing.judge.policy import (
     JudgeConsultPlan,
     is_first_turn,
     plan_judge_consult,
+    verdict_consumable,
 )
 from llm_proxy.routing.judge.rubric import RUBRIC_VERSION, JudgeVerdict
 from llm_proxy.routing.types import RoutingMode, Tier
@@ -118,23 +121,31 @@ def test_a_follow_up_turn_is_not_judged():
     assert plan.reason == "not-first-turn"
 
 
-def test_no_predicate_means_every_eligible_turn_is_judged():
-    plan = _plan(_judge(not_low_anchor=False))
+def test_no_predicate_means_shadow_only_sampling():
+    """The measured posture (ADR-0029): unset predicates consult nothing here."""
+    plan = _plan(_judge())
+    assert plan.consult is False
+    assert plan.reason == "gate-not-fired"
+
+
+def test_the_deliberate_open_gate_is_an_explicit_choice():
+    judge = _judge(always=True, not_low_anchor=False)
+    plan = _plan(judge)
     assert plan.consult is True
     assert plan.reason == "gate:open"
     assert plan.shadow is True  # shadow is the default for an unconfigured rollout
 
 
-def test_the_shipped_default_gate_is_not_low_anchor():
-    """The measured default (ADR-0028): every non-trivial placement is judged,"""
-    judge = _judge()
+def test_the_named_measured_predicate_off_by_default():
+    """ADR-0029: not_low_anchor ships off; it stays configurable."""
+    judge = _judge(not_low_anchor=True)
     assert judge.not_low_anchor is True
-    at_anchor = _plan(judge, complexity=0.0)
-    assert at_anchor.consult is False
-    assert at_anchor.reason == "gate-not-fired"
     off_anchor = _plan(judge, complexity=0.40)
     assert off_anchor.consult is True
     assert off_anchor.reason == "gate:not-low-anchor(0.40)"
+    at_anchor = _plan(judge, complexity=0.0)
+    assert at_anchor.consult is False
+    assert at_anchor.reason == "gate-not-fired"
 
 
 def test_the_confidence_gate_fires_below_its_threshold():
@@ -202,6 +213,56 @@ def test_an_abstention_does_not_own_the_tier(verdict):
 
 def test_a_live_verdict_owns_the_tier():
     assert _consultation().owns_tier is True
+
+
+# ─── Verdict consumption: the bar a verdict must clear to own the tier ───
+
+
+def test_a_verdict_below_the_confidence_bar_is_held():
+    """VERDICT carries 0.7 mass on its choice; a 0.9 bar holds it."""
+    consultation = _consultation(apply_min_confidence=0.9)
+    assert consultation.owns_tier is False
+
+
+def test_a_verdict_at_the_confidence_bar_owns_the_tier():
+    consultation = _consultation(apply_min_confidence=0.7)
+    assert consultation.owns_tier is True
+
+
+def test_a_verdict_below_the_escalation_bar_is_held():
+    """VERDICT escalates at 0.12; a 0.5 bar holds it."""
+    consultation = _consultation(apply_min_escalation=0.5)
+    assert consultation.owns_tier is False
+
+
+def test_a_verdict_clearing_either_bar_owns_the_tier():
+    """Two bars are an OR: the confidence bar alone suffices here."""
+    consultation = _consultation(apply_min_confidence=0.7, apply_min_escalation=0.5)
+    assert consultation.owns_tier is True
+    consultation = _consultation(
+        verdict=replace(
+            VERDICT,
+            probabilities={"simple": 0.1, "medium": 0.4, "complex": 0.4, "ambiguous": 0.1},
+        ),
+        apply_min_confidence=0.9,
+        apply_min_escalation=0.1,
+    )
+    assert consultation.owns_tier is True
+
+
+def test_a_held_verdict_is_still_recorded_in_full():
+    """Holding a verdict is not dropping it: the log keeps the whole answer."""
+    consultation = _consultation(apply_min_confidence=0.99)
+    meta = consultation.as_meta()
+    assert meta["owns_tier"] is False
+    assert meta["tier"] == "MEDIUM"
+    assert meta["answered"] is True
+    assert meta["confidence"] == 0.7
+
+
+def test_verdict_consumable_rejects_an_abstention_whatever_the_bars():
+    assert verdict_consumable(JudgeVerdict(), min_confidence=None, min_escalation=None) is False
+    assert verdict_consumable(JudgeVerdict(), min_confidence=0.0, min_escalation=0.0) is False
 
 
 def test_telemetry_carries_the_verdict_without_inventing_a_signal_vote():

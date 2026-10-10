@@ -994,9 +994,11 @@ export default {
     judgeModesDescription:
       "允许被裁判的虚拟模型。通常不勾选 fast：该模式的目的就是低成本选型，而裁判调用与此相背。",
     judgeGate: "何时询问",
-    judgeGateDescription: "裁判只会被用于对话的首轮请求。此项决定哪些首轮请求值得询问。",
+    judgeGateDescription:
+      "裁判只会被用于对话的首轮请求。此项决定哪些首轮请求值得询问。「仅按采样率抽样」是测量出的默认姿态。",
+    judgeGateShadowOnly: "仅按采样率抽样",
     judgeGateAlways: "所有符合条件的请求",
-    judgeGateAnchor: "非平凡请求时（默认）",
+    judgeGateAnchor: "非平凡请求时",
     judgeGateConfidence: "置信度较低时",
     judgeGateBand: "复杂度处于中间区间时",
     judgeGateBoth: "任一信号触发时",
@@ -1025,6 +1027,17 @@ export default {
     judgeContextChars: "每轮字符数",
     judgeContextTurnsUnit: "轮",
     judgeContextCharsUnit: "字符",
+    judgeAskChars: "当前提问字符数",
+    judgeAskCharsUnit: "字符",
+    judgeConsumption: "仅采纳高置信裁决",
+    judgeConsumptionDescription:
+      "仅当裁判自身的置信度达标时才采纳其裁决：它投在所选层级上的概率质量，或其升级概率。未达标时仅记录裁决，仍由信号集成决策。请先在自己的影子数据上用评测工具测出阈值，再开启（ADR-0029）。",
+    judgeApplyConfidence: "层级置信阈值",
+    judgeApplyConfidenceDescription:
+      "裁判投在所选层级上的概率质量需达到该值，裁决才会被采纳。实测起点：0.9。",
+    judgeApplyEscalation: "升级阈值",
+    judgeApplyEscalationDescription:
+      "升级概率（前沿模型会显著优于廉价模型）需达到该值，裁决才会被采纳。实测起点：0.5。",
   },
 
   // Theme

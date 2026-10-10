@@ -81,14 +81,27 @@ What matters operationally:
   polls for its answer instead of waiting on it, so there is no latency budget to spend.
 - **Only `auto` and `best` by default.** `fast` exists to pick the cheapest capable model;
   a judge call works against that.
-- **A gate decides which first turns are worth asking about:** the shipped default is
-  `not_low_anchor` — judge every turn the ensemble did not already place at the trivial
-  low anchor (complexity `0.0`) — because that is the only candidate trigger that moved
-  overall accuracy on a measured open-source corpus, while confidence thresholds and the
-  MEDIUM band moved little to nothing (ADR-0028). Confidence thresholds and a
-  half-open complexity band remain configurable, and with no gate configured every
-  eligible turn is judged. The gate — not the model — is what bounds the added latency
-  and cost.
+- **A gate decides which first turns are worth asking about.** Predicates are
+  configurable: a confidence threshold, a half-open complexity band, and
+  `not_low_anchor` (judge every turn the ensemble did not already place at the
+  trivial low anchor — complexity `0.0`). **Nothing is on by default**: run the
+  gate closed and let shadow mode collect the data first (ADR-0029) — once the
+  ensemble's over-tier distortion was fixed, the recorded corpora moved the
+  judge below the ensemble on every high-call-rate gate, so a blanket default
+  consults for less than it returns. `not_low_anchor` and the other predicates
+  are what an operator turns on when their own rig run over shadow-verdict
+  records shows a band where the judge wins. The judge call rate — not the
+  model — is what bounds the added latency and cost.
+- **A consumption bar decides which verdicts are obeyed.** A consulted verdict
+  is not automatically right: on the recorded corpora the judge's confident
+  verdicts are markedly more accurate than its hedged ones. When
+  `apply_min_confidence` (the verdict's own probability mass on the tier it
+  chose) or `apply_min_escalation` (its escalation probability) is set, a
+  verdict that clears neither bar is recorded in full but the ensemble's tier
+  stands (`judge-held=` in the decision's reasoning). Both unset — the default —
+  obey every non-abstaining verdict. The measured starting points and the
+  measure-first warning live in ADR-0029; the evaluation rig reports the
+  policies side by side with the gates.
 - **Floors and caps still win.** The verdict replaces the complexity the ensemble would
   have used; the vision, structured-output and final-verification floors and the
   routine-success cap are applied afterwards, exactly as they are without a judge.

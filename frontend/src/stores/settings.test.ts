@@ -56,10 +56,14 @@ describe("settings store: smart routing judge", () => {
         confidence_below: 0.6,
         complexity_between: null,
         not_low_anchor: false,
+        always: false,
         shadow: false,
         shadow_sample_rate: 0,
         context_turns: 1,
         context_chars: 1000,
+        ask_chars: 9000,
+        apply_min_confidence: 0.9,
+        apply_min_escalation: 0.5,
       },
     } as never);
 
@@ -73,10 +77,14 @@ describe("settings store: smart routing judge", () => {
       confidence_below: 0.6,
       complexity_between: null,
       not_low_anchor: false,
+      always: false,
       shadow: false,
       shadow_sample_rate: 0,
       context_turns: 1,
       context_chars: 1000,
+      ask_chars: 9000,
+      apply_min_confidence: 0.9,
+      apply_min_escalation: 0.5,
     });
   });
 

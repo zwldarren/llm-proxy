@@ -11,6 +11,7 @@ from llm_proxy.routing.types import (
     RoutingMode,
     ServedQuality,
     Tier,
+    TierVote,
 )
 
 
@@ -278,3 +279,45 @@ def test_a_reused_classification_is_the_one_the_decision_was_made_from():
 
     assert dec.confidence == classification.v2.confidence
     assert dec.complexity == classification.v2.complexity
+
+
+# ─── Substance floors vanish through a capped structural-high vote ───
+
+
+class _FixedVoteSignal:
+    """Stands in for MetadataSignal/StructuralSignal with a scripted vote."""
+
+    def __init__(self, tier_id: int | None, confidence: float):
+        self._vote = TierVote(tier_id, confidence)
+
+    def predict(self, row: dict) -> TierVote:
+        return self._vote
+
+
+def test_substance_structural_high_floor_vanishes_through_capped_vote(monkeypatch):
+    """ADR-0029 regression: once the corroboration cap holds Signal B's high
+    vote at MEDIUM, text substance must not re-promote it to COMPLEX.
+
+    The floor keys on B's *uncapped* vote (so a corroborated high vote still
+    lifts) but must be barred when the cap fired — otherwise a capped vote
+    (which by construction has tier_id >= 3 and confidence >= 0.95) always
+    satisfies the floor's uncapped checks and re-creates the over-tier path
+    the cap exists to remove."""
+    from llm_proxy.routing import api as routing_api
+
+    # A reads MEDIUM (so the cap target is MEDIUM and the ensemble lands at
+    # tier 1, leaving the earlier structural floor a no-op); B reads COMPLEX
+    # at cap-eligible confidence (>= 0.95) -> the cap holds B at MEDIUM.
+    monkeypatch.setattr(routing_api, "_get_sig_a", lambda: _FixedVoteSignal(1, 0.60))
+    monkeypatch.setattr(routing_api, "_get_sig_b", lambda: _FixedVoteSignal(3, 0.96))
+    monkeypatch.setattr(routing_api, "_latest_user_has_high_substance", lambda row: True)
+
+    result = routing_api._v2_classify(
+        [{"role": "user", "content": "Design a distributed rate limiter with sliding windows."}],
+        None,
+    )
+
+    assert result.tier_id == 1, f"capped high vote was re-promoted: tier {result.tier_id}"
+    assert "v2:structural-high-cap=1" in result.signals_text
+    assert "v2:substance-structural-high-floor" not in result.signals_text
+    assert "v2:substance-complexity-floor" not in result.signals_text

@@ -25,7 +25,11 @@ from llm_proxy.routing.types import Tier
 #: arithmetic/mechanical steps) is medium however long the chain is (ADR-0028
 #: boundary clarification), so capability-hungry arithmetic no longer escalates
 #: to complex purely on step count.
-RUBRIC_VERSION = 2
+#: v3: the excerpt keeps a head AND a tail of overlong text instead of a head
+#: alone (ADR-0029) — a question sitting under long pasted content used to be
+#: cut away entirely. The criteria text is unchanged: a sharpened open-plan
+#: variant was measured on the recorded corpora and moved nothing (ADR-0029).
+RUBRIC_VERSION = 3
 
 #: Question ids. System One never sends ids to the model; answers come back
 #: under the same ids, so these are wire-local names only.
@@ -121,12 +125,31 @@ _ESCALATION_CRITERIA = {
 
 
 def _truncate(text: str, budget: int) -> str:
-    """Truncate to ``budget`` characters with an explicit, visible marker."""
+    """Truncate to ``budget`` characters keeping the head AND the tail.
+
+    A long turn hides its point at both ends — a question can sit under long
+    pasted content as easily as over it — so the excerpt keeps a head and a tail
+    with an explicit marker for the omitted middle, rather than a head alone:
+    the head-only cut dropped the ask of every request whose question came after
+    the content it refers to (ADR-0029). The marker reports what was actually
+    omitted from the middle, not the raw overflow, so the window stays honest.
+    """
     if budget <= 0:
         return ""
     if len(text) <= budget:
         return text
-    return text[:budget] + f"\n...[truncated {len(text) - budget} characters]"
+    # A two-sided window needs room for a meaningful head, tail and marker;
+    # below that, keep the head alone rather than let the marker eat the window.
+    if budget < 120:
+        omitted = len(text) - budget
+        return text[:budget] + f"\n...[truncated {omitted} characters]"
+    tail = min(len(text) // 4, budget // 3)
+    head = budget - tail
+    # The marker reports what was actually cut from the middle.
+    omitted = len(text) - head - tail
+    marker = f"\n...[truncated {omitted} characters, middle omitted]...\n"
+    head -= len(marker)
+    return text[:head] + marker + text[len(text) - tail :]
 
 
 def _text_of(message: dict[str, Any]) -> str:
@@ -164,9 +187,10 @@ def build_judge_state(
 
     The current ask and the capability flags are never dropped; only *earlier*
     user turns compete for the history budget (the shape LiteLLM's classifier
-    context uses, and the reason its budget bounds prior turns only). Assistant
-    and tool content is deliberately absent: the judge classifies the request,
-    not the model's own prior output.
+    context uses, and the reason its budget bounds prior turns only). Overlong
+    text keeps a head and a tail (see :func:`_truncate`). Assistant and tool
+    content is deliberately absent: the judge classifies the request, not the
+    model's own prior output.
 
     The result is a JSON object rather than a bare string so the judge can see
     each field for what it is (the ADR's "its content is data, never

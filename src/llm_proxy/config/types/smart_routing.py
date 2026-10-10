@@ -47,32 +47,36 @@ class RoutingJudgeConfig(BaseModel):
     #: which is where the signals are weakest (ADR-0018).
     complexity_between: tuple[float, float] | None = None
     #: Fire on every turn the ensemble did not place at the obvious low anchor
-    #: (complexity ``0.0``, the SIMPLE anchor). The measured default: over a
-    #: 103-case open-source corpus the gate consulted 80% of turns — mostly the
-    #: MEDIUM/COMPLEX band where the ensemble is weakest — and took overall match
-    #: 39.8% → 74.8%, while the confidence-comparison and MEDIUM-band placements
-    #: moved nothing and the confidence distribution clustered near 0.61 on
-    #: misses and hits alike (same number made every candidate threshold the
-    #: same row in the sweep). ADR-0028.
-    not_low_anchor: bool = Field(default=True)
+    #: (complexity ``0.0``, the SIMPLE anchor). **Not shipped on by default**: the
+    #: predicate consults 80–96% of eligible turns, and once the ensemble's
+    #: over-tier distortion was fixed (ADR-0029) the recorded corpora show the
+    #: judge — whose excerpt drops the evidence that makes long-context and
+    #: multi-turn traffic hard — landing *below* the ensemble on every high-call
+    #: gate. Keep it for operators whose rig run over their own shadow data
+    #: shows a judge-only band; the confidence predicates stay configurable.
+    #: ADR-0028, amended by ADR-0029.
+    not_low_anchor: bool = Field(default=False)
+    #: Consult every gated-eligible turn — the deliberately open gate. With no
+    #: predicate set, the judge stays in shadow-only sampling (the measured
+    #: posture every recorded corpus prefers once the ensemble is fixed:
+    #: ADR-0029); ``always=True`` is the operator's explicit override.
+    always: bool = Field(default=False)
 
-    # ─── Measurement ───
-    #: Record the verdict but keep the ensemble's decision.
-    shadow: bool = Field(default=True)
-    #: Share of *non-gated* eligible turns to consult anyway (0 disables).
-    shadow_sample_rate: float = Field(default=0.05, ge=0.0, le=1.0)
-
-    # ─── Judge context budget ───
-    #: Prior user turns included, most recent first. The current ask is always
-    #: included; assistant and tool content never is (the judge classifies the
-    #: request, not the model's own prior output). The shipped gate consults
-    #: first turns only, so today the request path never has earlier user turns
-    #: to spend this budget on: the excerpt's bounded shape is built regardless,
-    #: and the evaluation rig's follow-up cases exercise it, which is what keeps
-    #: the budget honest for the day consultation moves past turn one.
-    context_turns: int = Field(default=3, ge=0)
-    #: Characters allowed per prior user turn.
-    context_chars: int = Field(default=4000, gt=0)
+    # ─── Verdict consumption: when a consulted verdict owns the tier ───
+    #: Apply a consulted verdict only when the judge's own probability mass on
+    #: the tier it chose reaches this bar (ADR-0029). On the recorded corpora
+    #: the judge's confident verdicts are markedly more accurate than its hedged
+    #: ones; a hedged verdict is still recorded, the ensemble just keeps the
+    #: decision. ``None`` applies every non-abstaining verdict (the pre-amendment
+    #: behavior). Measure the threshold with the rig over your own shadow data
+    #: before trusting a number — the recorded corpora's 0.9 bar is a starting
+    #: point, not a constant.
+    apply_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: ... or apply the verdict when its escalation probability (P(a frontier
+    #: model would measurably beat a cheap capable one)) reaches this bar.
+    #: Independent of ``apply_min_confidence``: either bar met applies the
+    #: verdict; both unset apply every non-abstaining verdict.
+    apply_min_escalation: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("complexity_between")
     @classmethod
@@ -87,14 +91,34 @@ class RoutingJudgeConfig(BaseModel):
             )
         return (float(low), float(high))
 
+    # ─── Judge context budget ───
+    #: Prior user turns included, most recent first. The current ask is always
+    #: included; assistant and tool content never is (the judge classifies the
+    #: request, not the model's own prior output). The shipped gate consults
+    #: first turns only, so today the request path never has earlier user turns
+    #: to spend this budget on: the excerpt's bounded shape is built regardless,
+    #: and the evaluation rig's follow-up cases exercise it, which is what keeps
+    #: the budget honest for the day consultation moves past turn one.
+    context_turns: int = Field(default=3, ge=0)
+    #: Characters allowed per prior user turn.
+    context_chars: int = Field(default=4000, gt=0)
+    #: Characters allowed for the current ask itself. The excerpt keeps a head
+    #: and a tail of any overlong text (the ask of a request whose question sits
+    #: under long pasted content used to be cut away entirely by a head-only
+    #: truncation), but raising this budget is the direct way to show the judge
+    #: more of a big ask. ADR-0029.
+    ask_chars: int = Field(default=8000, gt=0)
+
+    # ─── Measurement ───
+    #: Record the verdict but keep the ensemble's decision.
+    shadow: bool = Field(default=True)
+    #: Share of *non-gated* eligible turns to consult anyway (0 disables).
+    shadow_sample_rate: float = Field(default=0.05, ge=0.0, le=1.0)
+
     @property
     def gate_is_open(self) -> bool:
-        """True when no predicate is configured, i.e. every eligible turn is judged."""
-        return (
-            self.confidence_below is None
-            and self.complexity_between is None
-            and not self.not_low_anchor
-        )
+        """True when the deliberately open gate is configured (``always=True``)."""
+        return self.always
 
     @property
     def is_configured(self) -> bool:

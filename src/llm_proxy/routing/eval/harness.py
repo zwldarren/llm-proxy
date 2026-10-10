@@ -27,8 +27,8 @@ from typing import Any
 
 from llm_proxy.routing.api import route
 from llm_proxy.routing.config import DEFAULT_CONFIG
-from llm_proxy.routing.judge.policy import complexity_band_fires
-from llm_proxy.routing.judge.rubric import build_judge_state
+from llm_proxy.routing.judge.policy import complexity_band_fires, verdict_consumable
+from llm_proxy.routing.judge.rubric import JudgeVerdict, build_judge_state
 from llm_proxy.routing.model_experience import ModelExperienceStore
 from llm_proxy.routing.types import (
     CandidatePool,
@@ -334,6 +334,8 @@ def summarize(
     gate_threshold: float = DEFAULT_GATE_THRESHOLD,
     band: tuple[float, float] = BAND_GATE_RANGE,
     bootstrap: int = BOOTSTRAP_REPEATS,
+    apply_min_confidence: float | None = None,
+    apply_min_escalation: float | None = None,
 ) -> dict[str, Any]:
     """Build the whole metrics document for every decision path.
 
@@ -446,8 +448,122 @@ def summarize(
         }
         metrics["judge"]["always"]["overall"]["match_rate_ci"] = judge_match_ci
         metrics["judge"]["verdict_only"]["overall"]["match_rate_ci"] = judge_match_ci
+        metrics["judge"]["consumption"] = {
+            name: _consumption_block(judged, min_confidence, min_escalation, bootstrap)
+            for name, min_confidence, min_escalation in default_consumption_specs(
+                apply_min_confidence=apply_min_confidence,
+                apply_min_escalation=apply_min_escalation,
+            )
+        }
         metrics["comparison"] = _compare_paths(metrics["ensemble"]["overall"], metrics)
     return metrics
+
+
+def default_consumption_specs(
+    *,
+    apply_min_confidence: float | None = None,
+    apply_min_escalation: float | None = None,
+) -> list[tuple[str, float | None, float | None]]:
+    """The candidate verdict-consumption policies to measure side by side.
+
+    A gate decides which turns are *consulted*; a consumption policy decides
+    which *verdicts* are obeyed (ADR-0029). The two are measured separately
+    because their costs differ in kind: a gate saves the call, a consumption
+    bar spends every call and only filters what is obeyed. The recorded bars
+    are the ones the measured corpora moved on; the operator's ``--apply-*``
+    values join the table so a sweep needs no re-run.
+    """
+    specs = [
+        ("obey-every-verdict", None, None),
+        ("conf>=0.9", 0.9, None),
+        ("esc>=0.5", None, 0.5),
+        ("conf>=0.9|esc>=0.5", 0.9, 0.5),
+    ]
+    operator = (apply_min_confidence, apply_min_escalation)
+    if (apply_min_confidence is not None or apply_min_escalation is not None) and not any(
+        spec[1:] == operator for spec in specs
+    ):
+        low, high = apply_min_confidence, apply_min_escalation
+        name = f"operator({low if low is not None else '-'},{high if high is not None else '-'})"
+        specs.append((name, low, high))
+    return specs
+
+
+def _consumption_block(
+    judged: Sequence[CaseResult],
+    min_confidence: float | None,
+    min_escalation: float | None,
+    bootstrap: int,
+) -> dict[str, Any]:
+    """Accuracy and apply-rate of one consumption policy over the judged rows.
+
+    Every judged row was paid for — the call happens before the filter — so the
+    rate column is how often the verdict was *obeyed*, not how often the judge
+    was called. A held verdict leaves the ensemble's tier standing, exactly as
+    the request path does (ADR-0029).
+    """
+
+    def _verdict(result: CaseResult) -> JudgeVerdict:
+        return JudgeVerdict(
+            tier=result.judge_tier,
+            probabilities=dict(result.judge_probabilities),
+            escalation_probability=result.judge_escalation,
+        )
+
+    def _applied(result: CaseResult) -> bool:
+        return (
+            not result.judge_abstained
+            and result.judge_tier is not None
+            and verdict_consumable(
+                _verdict(result),
+                min_confidence=min_confidence,
+                min_escalation=min_escalation,
+            )
+        )
+
+    def _decided(result: CaseResult) -> tuple[Tier, bool]:
+        # A held row falls back to the ensemble's tier and stays *decided*: the
+        # composite is what the proxy would have served, nothing is excluded.
+        if _applied(result) and result.judge_tier is not None:
+            return result.judge_tier, False
+        return result.ensemble_tier, False
+
+    # Classify applied by the policy decision, not by tier identity: a held
+    # verdict whose tier equals the ensemble's must not count as obeyed.
+    rows = []
+    applied_rows = []
+    for result in judged:
+        applied = _applied(result)
+        rows.append(
+            (
+                result.case.expected_tier,
+                result.judge_tier if applied else result.ensemble_tier,
+                False,
+            )
+        )
+        if applied:
+            applied_rows.append(result)
+    flags = [
+        (result.case.id, 1.0 if result.case.expected_tier is decided_tier else 0.0)
+        for result, (_, decided_tier, *_) in zip(judged, rows, strict=True)
+    ]
+    applied_overall = _tier_metrics(
+        [(result.case.expected_tier, result.judge_tier, False) for result in applied_rows]
+    )
+    return {
+        "applied": len(applied_rows),
+        "apply_rate": len(applied_rows) / len(judged) if judged else None,
+        "detail": {
+            "min_confidence": min_confidence,
+            "min_escalation": min_escalation,
+        },
+        "match_rate_ci": bootstrap_match_rate_ci(flags, repeats=bootstrap),
+        "overall": _tier_metrics(rows),
+        # Accuracy over the obeyed verdicts alone — the bar's quality read
+        # separate from the composite the proxy would have scored.
+        "applied_overall": applied_overall,
+        "by_subset": _by_subset(judged, lambda r: _decided(r)),
+    }
 
 
 def default_gate_specs(
@@ -643,6 +759,36 @@ def render_report(metrics: dict[str, Any]) -> str:
             f"| {_fmt_interval(judge['always']['overall'].get('match_rate_ci'))} "
             f"| {judge['always']['overall']['under']} | {judge['always']['overall']['over']} |"
         )
+        consumption = judge.get("consumption") or {}
+        if consumption:
+            lines += [
+                "",
+                "### Verdict consumption (ADR-0029)",
+                "",
+                "Every judged row was paid for; these policies decide which verdicts are",
+                "*obeyed*. Apply rate is the share of judged rows where the verdict replaced",
+                "the ensemble's tier; a held verdict leaves the ensemble standing.",
+                "",
+                "| policy | applied | apply rate | match | 95% CI | under | over |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+            for name, block in consumption.items():
+                detail = block["detail"]
+                conf = detail.get("min_confidence")
+                esc = detail.get("min_escalation")
+                if name == "obey-every-verdict":
+                    label = "obey every verdict"
+                else:
+                    left = f"conf>={conf:g}" if conf is not None else None
+                    right = f"esc>={esc:g}" if esc is not None else None
+                    label = " or ".join(part for part in (left, right) if part)
+                lines.append(
+                    f"| {label} | {block['applied']}/{judge['n']} "
+                    f"| {_fmt_rate(block['apply_rate'])} "
+                    f"| {_fmt_rate(block['overall']['match_rate'])} "
+                    f"| {_fmt_interval(block.get('match_rate_ci'))} "
+                    f"| {block['overall']['under']} | {block['overall']['over']} |"
+                )
     lines.append("")
     return "\n".join(lines)
 

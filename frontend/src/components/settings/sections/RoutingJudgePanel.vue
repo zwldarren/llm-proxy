@@ -3,9 +3,10 @@
  * Routing judge settings (ADR-0018).
  *
  * The judge is a System One decision model consulted for the ambiguous first
- * turn of a conversation. Everything here is about *when* it is asked, because
- * that is the latency and cost knob: the gate, the per-mode switch, and shadow
- * mode, which records what the judge would have said without acting on it.
+ * turn of a conversation. Two knobs matter, with different costs: *when* it is
+ * asked (the gate, the per-mode switch, shadow mode — the latency and cost
+ * lever) and *which answers are obeyed* (the consumption bars, ADR-0029 — the
+ * accuracy lever, which spends every call and filters what is applied).
  */
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -64,17 +65,20 @@ const modelOptions = computed(() => {
 
 const hasNoJudgeModels = computed(() => !modelsLoading.value && modelOptions.value.length === 0);
 
-/** One named gate posture. The gate predicates are an OR on the backend; the
- *  dropdown normalizes the common configurations, and a stored config that
- *  mixes the anchor predicate with the classic two is shown as its most
- *  specific classic label and normalized on save. */
-type GateTrigger = "always" | "anchor" | "confidence" | "band" | "both";
+/** One named gate posture. The gate predicates and the open-gate override are
+ *  an OR on the backend; the dropdown normalizes the common configurations,
+ *  and a stored config that mixes the open-gate override with the classic
+ *  predicates is shown as its most specific classic label and normalized on
+ *  save. All-off is now a measured posture of its own (shadow-only sampling,
+ *  ADR-0029) instead of meaning "open gate". */
+type GateTrigger = "shadow" | "always" | "anchor" | "confidence" | "band" | "both";
 
 /**
- * The three gate predicates collapse into one choice; all-off means "always".
- * ``both`` is reachable: the backend treats the predicates as an OR and does not
- * reject a config that sets both, so the UI has to be able to show and clear it
- * rather than silently hiding one behind the other.
+ * The gate predicates collapse into one choice; all-off + ``always=false`` is
+ * the shadow-only posture ADR-0029 ships, and the stored default. ``both`` is
+ * reachable: the backend treats the predicates as an OR and does not reject a
+ * config that sets both, so the UI has to be able to show and clear it rather
+ * than silently hiding one behind the other.
  */
 const trigger = computed<GateTrigger>(() => {
   const confidence = judge.value.confidence_below !== null;
@@ -84,7 +88,8 @@ const trigger = computed<GateTrigger>(() => {
   if (confidence) return "confidence";
   if (band) return "band";
   if (anchor) return "anchor";
-  return "always";
+  if (judge.value.always === true) return "always";
+  return "shadow";
 });
 
 function setTrigger(value: unknown) {
@@ -93,6 +98,7 @@ function setTrigger(value: unknown) {
     judge.value.confidence_below = null;
     judge.value.complexity_between = null;
     judge.value.not_low_anchor = false;
+    judge.value.always = false;
   };
   if (next === "confidence") {
     clear();
@@ -104,15 +110,40 @@ function setTrigger(value: unknown) {
     clear();
     judge.value.confidence_below ??= 0.7;
     judge.value.complexity_between ??= [0.33, 0.67];
+  } else if (next === "shadow") {
+    clear();
+    // Shadow-only posture is meaningless with the shadow window off: the gate
+    // never fires and nothing is consulted, so carry the switch with the
+    // posture instead of leaving a silently dead judge.
+    judge.value.shadow = true;
   } else {
     clear();
     judge.value.not_low_anchor = next === "anchor";
+    judge.value.always = next === "always";
   }
 }
 
 /** Step-by-tenth fields accumulate float dust; store round numbers. */
 function round2(value: number | null, fallback: number): number {
   return Math.round((value ?? fallback) * 100) / 100;
+}
+
+/** The consumption bars are one posture: both null means every non-abstaining
+ *  verdict is obeyed (ADR-0029's measured default), either set means a verdict
+ *  must clear that bar. The switch carries the pair so the two never mix a
+ *  "one bar off" state the operator did not choose. */
+const consumptionOn = computed(
+  () => judge.value.apply_min_confidence !== null || judge.value.apply_min_escalation !== null,
+);
+
+function setConsumption(on: boolean) {
+  if (on) {
+    judge.value.apply_min_confidence ??= 0.9;
+    judge.value.apply_min_escalation ??= 0.5;
+  } else {
+    judge.value.apply_min_confidence = null;
+    judge.value.apply_min_escalation = null;
+  }
 }
 
 /** Keep the band ordered and inside [0, 1] so the backend cannot reject it. */
@@ -219,6 +250,7 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="shadow">{{ t("smartRouting.judgeGateShadowOnly") }}</SelectItem>
             <SelectItem value="anchor">{{ t("smartRouting.judgeGateAnchor") }}</SelectItem>
             <SelectItem value="always">{{ t("smartRouting.judgeGateAlways") }}</SelectItem>
             <SelectItem value="confidence">{{ t("smartRouting.judgeGateConfidence") }}</SelectItem>
@@ -361,7 +393,71 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
             :aria-label="t('smartRouting.judgeContextChars')"
             @update:model-value="judge.context_chars = $event ?? 4000"
           />
+          <NumberStepper
+            :model-value="judge.ask_chars"
+            :min="500"
+            :max="50000"
+            :step="500"
+            :suffix="t('smartRouting.judgeAskCharsUnit')"
+            :aria-label="t('smartRouting.judgeAskChars')"
+            @update:model-value="judge.ask_chars = $event ?? 8000"
+          />
         </div>
+      </template>
+    </SettingsItem>
+
+    <!-- Verdict consumption (ADR-0029): when an answer is obeyed -->
+    <SettingsItem
+      variant="nested"
+      :title="t('smartRouting.judgeConsumption')"
+      :description="t('smartRouting.judgeConsumptionDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <Switch
+          :model-value="consumptionOn"
+          :aria-label="t('smartRouting.judgeConsumption')"
+          @update:model-value="setConsumption($event)"
+        />
+      </template>
+    </SettingsItem>
+    <SettingsItem
+      v-if="consumptionOn"
+      variant="nested"
+      :title="t('smartRouting.judgeApplyConfidence')"
+      :description="t('smartRouting.judgeApplyConfidenceDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <NumberStepper
+          :model-value="judge.apply_min_confidence"
+          :min="0"
+          :max="1"
+          :step="0.05"
+          :aria-label="t('smartRouting.judgeApplyConfidence')"
+          @update:model-value="judge.apply_min_confidence = round2($event, 0.9)"
+        />
+      </template>
+    </SettingsItem>
+    <SettingsItem
+      v-if="consumptionOn"
+      variant="nested"
+      :title="t('smartRouting.judgeApplyEscalation')"
+      :description="t('smartRouting.judgeApplyEscalationDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <NumberStepper
+          :model-value="judge.apply_min_escalation"
+          :min="0"
+          :max="1"
+          :step="0.05"
+          :aria-label="t('smartRouting.judgeApplyEscalation')"
+          @update:model-value="judge.apply_min_escalation = round2($event, 0.5)"
+        />
       </template>
     </SettingsItem>
   </CollapsiblePanel>

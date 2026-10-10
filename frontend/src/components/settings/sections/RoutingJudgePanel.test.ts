@@ -137,6 +137,48 @@ describe("RoutingJudgePanel", () => {
     expect(live.wrapper.text()).not.toContain("smartRouting.judgeShadowSampleRate");
   });
 
+  it("maps the ADR-0029 postures: all-off is shadow-only, anchor and always named", async () => {
+    const shadowOnly = await mountPanel({ enabled: true });
+    expect((shadowOnly.wrapper.vm as unknown as { trigger: string }).trigger).toBe("shadow");
+
+    const anchor = await mountPanel({ enabled: true, not_low_anchor: true });
+    expect((anchor.wrapper.vm as unknown as { trigger: string }).trigger).toBe("anchor");
+
+    const open = await mountPanel({ enabled: true, always: true });
+    expect((open.wrapper.vm as unknown as { trigger: string }).trigger).toBe("always");
+  });
+
+  it("carries the shadow switch with the shadow-only posture", async () => {
+    // Shadow-only is meaningless with the shadow window off: the gate never
+    // fires and nothing is consulted, so the posture must carry the switch.
+    const { wrapper, state } = await mountPanel({ enabled: true, shadow: false });
+    const vm = wrapper.vm as unknown as { setTrigger: (value: unknown) => void };
+
+    vm.setTrigger("shadow");
+    expect(state.value.judge.shadow).toBe(true);
+    expect(state.value.judge.always).toBe(false);
+    expect(state.value.judge.confidence_below).toBeNull();
+  });
+
+  it("toggles both consumption bars together, preserving a pre-set bar", async () => {
+    const { wrapper, state } = await mountPanel({ enabled: true });
+    const vm = wrapper.vm as unknown as { setConsumption: (on: boolean) => void };
+
+    vm.setConsumption(true);
+    expect(state.value.judge.apply_min_confidence).toBe(0.9);
+    expect(state.value.judge.apply_min_escalation).toBe(0.5);
+
+    vm.setConsumption(false);
+    expect(state.value.judge.apply_min_confidence).toBeNull();
+    expect(state.value.judge.apply_min_escalation).toBeNull();
+
+    // A pre-set bar survives the switch going on: only nulls are defaulted.
+    state.value.judge.apply_min_escalation = 0.7;
+    vm.setConsumption(true);
+    expect(state.value.judge.apply_min_confidence).toBe(0.9);
+    expect(state.value.judge.apply_min_escalation).toBe(0.7);
+  });
+
   it("adds and removes judged modes, keeping the configured order", async () => {
     const { wrapper, state } = await mountPanel({ enabled: true, modes: ["auto", "best"] });
     const boxes = wrapper.findAll('[role="checkbox"]');

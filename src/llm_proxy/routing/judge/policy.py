@@ -17,13 +17,12 @@ Three questions, in order:
    agent state that decides difficulty — the ensemble can, and it keeps the call.
 3. **Does the gate fire?** Predicates are measured, not assumed: the rig reports
    candidate triggers side by side (``GateSpec`` in
-   :mod:`llm_proxy.routing.eval.harness`). The shipped default is
-   ``not_low_anchor`` — consult every turn the ensemble did not already call
-   trivial — because on a 103-case open-source corpus that was the only
-   candidate to move overall accuracy meaningfully while the confidence
-   predicates stayed equivalent to a guess (ADR-0028). All predicates unset
-   (``gate_is_open``) judges every eligible turn, which the tiny seed corpus
-   could not distinguish from this.
+   :mod:`llm_proxy.routing.eval.harness`). Every recorded corpus prefers that the
+   gate stay *closed* once the ensemble's over-tier distortion is fixed
+   (ADR-0029): no predicate set leaves the judge in shadow-only sampling, and
+   ``always=True`` is the operator's deliberate open-gate override.
+   ``not_low_anchor`` is configurable — the measured default of ADR-0028, kept
+   for deployments whose rig run shows a judge-only band.
 
 Shadow mode is expressed here too, because "consult but do not obey" is a
 property of the consultation, not of the caller: a shadow consultation records a
@@ -62,11 +61,47 @@ def not_low_anchor_fires(complexity: float) -> bool:
     The ensemble's complexity snaps to the tier anchors ``{0.00, 0.40, 0.68,
     0.90}``, so "not the low anchor" is the same predicate the rig reports as
     ``not_low_anchor``: every turn the ensemble did not already call trivial.
-    On the measured corpus it consults ~80% of eligible turns — the MEDIUM and
-    COMPLEX anchors the ensemble is weakest at — and the confidence predicates
-    cannot separate anything, this is the shipped default (ADR-0028).
+    It consults 80–96% of eligible turns — the ship-measured default of
+    ADR-0028 that was amended off by default once the recorded corpora showed
+    the judge below the fixed ensemble on every high-call gate (ADR-0029).
     """
     return complexity > 0.0
+
+
+def verdict_consumable(
+    verdict: JudgeVerdict,
+    *,
+    min_confidence: float | None,
+    min_escalation: float | None,
+) -> bool:
+    """Whether a non-abstaining verdict may own the tier (the consumption bar).
+
+    A consulted verdict is not automatically right: on the recorded corpora the
+    judge's confident verdicts are far more accurate than its hedged ones, and
+    its escalation probability carries independent signal (ADR-0029). The bar is
+    the judge's *own* meta-confidence, never the ensemble's: the tier
+    probability mass on the option it chose (``verdict.confidence``) or the
+    probability it puts on "a frontier model would measurably beat a cheap one"
+    (``verdict.escalation_probability``). Configuring either threshold applies
+    the verdict when **either** bar is met; both unset apply every
+    non-abstaining verdict — the behavior the bars amend.
+
+    The thresholds live on the consultation (carried from configuration at
+    consult time), so the same pure rule decides ownership on the request path
+    and in the rig — a consumption policy approximated only offline is a policy
+    nobody has evidence for, exactly as for the gate.
+    """
+    if verdict.tier is None:
+        return False
+    if min_confidence is None and min_escalation is None:
+        return True
+    if min_confidence is not None and verdict.confidence >= min_confidence:
+        return True
+    return (
+        min_escalation is not None
+        and verdict.escalation_probability is not None
+        and verdict.escalation_probability >= min_escalation
+    )
 
 
 def is_first_turn(messages: list[dict[str, Any]] | None) -> bool:
@@ -200,11 +235,28 @@ class JudgeConsultation:
     #: priced from the model's configured per-1M rates, ``None`` when neither
     #: was available. Never both: a reported charge is never re-estimated.
     cost_source: str | None = None
+    #: Consumption bar carried from configuration at consult time (ADR-0029):
+    #: the verdict's own tier probability mass and escalation probability must
+    #: clear these for the verdict to own the tier. ``None`` bars are unset.
+    apply_min_confidence: float | None = None
+    apply_min_escalation: float | None = None
 
     @property
     def owns_tier(self) -> bool:
-        """True when this verdict replaces the ensemble's tier for this turn."""
-        return not self.plan.shadow and self.verdict is not None and self.verdict.tier is not None
+        """True when this verdict replaces the ensemble's tier for this turn.
+
+        Three ways not to own it: the consultation is shadow (never obeyed),
+        the verdict abstained, or the verdict cleared neither consumption bar
+        (ADR-0029). A held verdict is still recorded in full — it is evidence
+        for the next consumption-policy measurement, not waste.
+        """
+        if self.plan.shadow or self.verdict is None:
+            return False
+        return verdict_consumable(
+            self.verdict,
+            min_confidence=self.apply_min_confidence,
+            min_escalation=self.apply_min_escalation,
+        )
 
     def as_meta(self) -> dict[str, Any]:
         """Flatten the consultation into the decision's telemetry record.
@@ -221,6 +273,7 @@ class JudgeConsultation:
         return {
             "gate": self.plan.reason,
             "shadow": self.plan.shadow,
+            "owns_tier": self.owns_tier,
             "model": self.model,
             "rubric_version": RUBRIC_VERSION,
             "answered": self.verdict is not None and bool(self.verdict.answers),
@@ -262,4 +315,5 @@ __all__ = [
     "not_low_anchor_fires",
     "is_first_turn",
     "plan_judge_consult",
+    "verdict_consumable",
 ]

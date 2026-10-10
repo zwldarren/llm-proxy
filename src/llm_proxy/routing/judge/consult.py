@@ -95,7 +95,14 @@ async def consult_judge(
     this unconditionally. ``deadline_s`` overrides the configured deadline, which
     the background warm-up uses to let a cold model finish loading once.
     """
-    consultation = JudgeConsultation(plan=plan, model=judge.model.strip())
+    consultation = JudgeConsultation(
+        plan=plan,
+        model=judge.model.strip(),
+        # The consumption bar rides the consultation so the same pure rule
+        # decides ownership here, in ``route()`` and in the rig (ADR-0029).
+        apply_min_confidence=judge.apply_min_confidence,
+        apply_min_escalation=judge.apply_min_escalation,
+    )
     if not plan.consult:
         return consultation
     if model_config is None:
@@ -118,6 +125,7 @@ async def consult_judge(
             messages,
             prior_user_turns=judge.context_turns,
             prior_turn_chars=judge.context_chars,
+            current_ask_chars=judge.ask_chars,
         ),
         questions=build_judge_questions(),
     )

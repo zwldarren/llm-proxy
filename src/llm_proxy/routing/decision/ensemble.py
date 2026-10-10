@@ -92,6 +92,17 @@ class Ensemble:
             )
 
         safe_tier = min(best_tier + 1, 3)
+        # Below-threshold conservatism escalates by one tier — except when the
+        # cast votes all agree on the tier already. Concordance between two
+        # independent signals is the tier decision; only the confidence is
+        # soft. Measured: the unconditional bump turned every concordant
+        # MEDIUM tool-loop pair into COMPLEX (the recorded corpora's
+        # tool-context and bounded-coding families over-tiered 100%; see
+        # corpus/README.md). At least two cast votes are required so a lone
+        # low-confidence vote keeps its safety escalation.
+        cast = [v for v in votes if v.tier_id is not None]
+        if len(cast) >= 2 and all(v.tier_id == best_tier for v in cast):
+            safe_tier = best_tier
         return EnsembleResult(
             tier_id=safe_tier,
             confidence=confidence,

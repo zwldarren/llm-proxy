@@ -1034,9 +1034,10 @@ export default {
       "Virtual models whose turns may be judged. 'fast' is usually left out: cheap model choice is its purpose, and a judge call works against it.",
     judgeGate: "When to Ask",
     judgeGateDescription:
-      "The judge is only consulted on the first turn of a conversation. This decides which of those turns are worth asking about.",
+      "The judge is only consulted on the first turn of a conversation. This decides which of those turns are worth asking about. ShadowOnly keeps asking to the sample rate below, which is the measured posture.",
+    judgeGateShadowOnly: "Shadow sampling only",
     judgeGateAlways: "Every eligible turn",
-    judgeGateAnchor: "When the ask isn't trivial (default)",
+    judgeGateAnchor: "When the ask isn't trivial",
     judgeGateConfidence: "When confidence is low",
     judgeGateBand: "When complexity is mid-range",
     judgeGateBoth: "When either signal fires",
@@ -1065,6 +1066,17 @@ export default {
     judgeContextChars: "Characters per turn",
     judgeContextTurnsUnit: "turns",
     judgeContextCharsUnit: "chars",
+    judgeAskChars: "Ask characters",
+    judgeAskCharsUnit: "chars",
+    judgeConsumption: "Only Obey Confident Verdicts",
+    judgeConsumptionDescription:
+      "Apply a consulted verdict only when the judge's own confidence clears a bar: the probability mass on the tier it chose, or its escalation probability. Below the bar the verdict is recorded but the ensemble decides. Keep this off until a rig run over your own shadow data has measured the bars (ADR-0029).",
+    judgeApplyConfidence: "Tier confidence bar",
+    judgeApplyConfidenceDescription:
+      "Minimum probability mass the judge must put on the tier it chose for the verdict to be obeyed. Measured starting point: 0.9.",
+    judgeApplyEscalation: "Escalation bar",
+    judgeApplyEscalationDescription:
+      "Minimum escalation probability (a frontier model would measurably beat a cheap one) for the verdict to be obeyed. Measured starting point: 0.5.",
   },
 
   // Theme

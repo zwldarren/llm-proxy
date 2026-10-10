@@ -106,8 +106,12 @@ class TestJudgeState:
         assert small > 0
         assert large > small
         # Truncation bounds the excerpt, never the size estimate: the judge is
-        # told how big the request really is.
-        assert long["current_request"].endswith("characters]")
+        # told how big the request really is. The two-sided excerpt keeps a
+        # head and a tail of the overlong text, with the marker in between.
+        current = long["current_request"]
+        assert "truncated" in current
+        assert current.startswith("word word")
+        assert current.rstrip().endswith("word")
 
     def test_state_renders_as_json(self):
         state = build_judge_state([{"role": "user", "content": "hi"}])

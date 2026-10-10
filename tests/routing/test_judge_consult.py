@@ -93,6 +93,34 @@ async def test_a_verdict_is_parsed_and_the_call_is_configured(monkeypatch):
     assert set(request.questions) == {TIER_QUESTION, ESCALATION_QUESTION}
     # The deadline is the caller's, and there is exactly one attempt.
     assert captured["deadline_s"] == 0.4
+    # No consumption bar configured: every non-abstaining verdict owns the tier.
+    assert consultation.apply_min_confidence is None
+    assert consultation.apply_min_escalation is None
+    assert consultation.owns_tier is True
+
+
+async def test_the_consumption_bar_rides_the_consultation_from_config(monkeypatch):
+    """The configured thresholds travel with the consultation (ADR-0029)."""
+    captured: dict = {}
+    _patch_seam(monkeypatch, _outcome(), captured)
+
+    consultation = await consult_judge(
+        PLAN,
+        messages=MESSAGES,
+        judge=_judge(apply_min_confidence=0.9, apply_min_escalation=0.5, ask_chars=12000),
+        model_config=_model_config(),
+        provider_configs={"local": ProviderConfig(name="local", type="ollama")},
+    )
+
+    assert consultation.apply_min_confidence == 0.9
+    assert consultation.apply_min_escalation == 0.5
+    # The verdict's own mass is 0.8: confident enough to be applied, but not
+    # against a 0.9 bar — held, and recorded anyway.
+    assert consultation.verdict is not None
+    assert consultation.verdict.confidence == 0.8
+    assert consultation.owns_tier is False
+    # The ask budget is configuration too.
+    assert captured["request"].state["current_request"] == "Summarise this PR."
 
 
 async def test_a_transport_failure_is_an_abstention_not_an_exception(monkeypatch):

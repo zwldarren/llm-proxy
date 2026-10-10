@@ -83,6 +83,7 @@ ignore = ["B008"]
 # enumerate() which advances on filtered-out rows and would silently change
 # which dataset rows make the corpus.
 "src/llm_proxy/routing/eval/corpus/build_open_source_corpus.py" = ["SIM113"]
+"src/llm_proxy/routing/eval/corpus/build_complex_corpus.py" = ["SIM113"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

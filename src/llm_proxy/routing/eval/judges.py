@@ -7,11 +7,11 @@ supported way to call one.
 
 Two upstreams are reachable, both plain ``/v1/systemone``:
 
-* Ollama, for local models (``tev1:0.8b``), which is what every latency number in
-  ADR-0018 was measured against.
-* OpenRouter, which is how the rig measures **Jev** — the reference judge the ADR
-  compares its numbers against. Its model id is the floating alias
-  ``~typesafe/jev-latest`` (the un-prefixed form 404s).
+* Any proxy deployment: pass a ``--judge-url`` at the deployment and one of its
+  System One models as ``--judge-model`` — this is how the committed corpora
+  were measured (the repo's dev server, ``jev-latest``).
+* OpenRouter, whose ``/api/v1`` speaks the same envelope; its model id is the
+  floating alias ``~typesafe/jev-latest`` (the un-prefixed form 404s).
 
 Every transport returns a :class:`JudgeOutcome` and never raises: a judge that
 fails is a judge that abstains, exactly as on the request path.
@@ -148,11 +148,15 @@ class SystemOneHttpJudge:
 
 
 class OllamaSystemOneJudge(SystemOneHttpJudge):
-    """System One over Ollama's local ``/v1/systemone`` endpoint.
+    """System One over any custom ``/v1/systemone`` HTTP endpoint.
 
-    Ollama serves ``/v1/systemone`` from locally pulled models only — cloud
-    models are rejected upstream — so ``model`` must be a model present in the
-    local daemon (``ollama pull tev1:0.8b``).
+    The name is historical: the transport predates the proxy's own System One
+    route and was first pointed at a loopback daemon. The same wire format is
+    what the proxy itself exposes, so pointing ``--judge-url`` at a proxy
+    deployment routes the consultation through it and reaches whatever upstream
+    System One models the deployment serves — pass ``--judge-api-key`` for a
+    deployment that requires one. This is the shape every committed corpus was
+    measured with (the repo's dev server, ``jev-latest``).
     """
 
     name = "ollama"
@@ -163,11 +167,13 @@ class OllamaSystemOneJudge(SystemOneHttpJudge):
         base_url: str = OLLAMA_JUDGE_URL,
         model: str = OLLAMA_JUDGE_MODEL,
         timeout: float = 3.0,
+        api_key: str | None = None,
     ) -> None:
         super().__init__(
             url=f"{base_url.rstrip('/')}/v1/systemone",
             model=model,
             timeout=timeout,
+            api_key=api_key,
         )
 
 

@@ -1156,14 +1156,25 @@ export interface RoutingJudgeConfig {
   /** Gate: judge when ensemble complexity lands inside the half-open band
    *  [low, high), same convention as the public tier mapping. Null = not used. */
   complexity_between: [number, number] | null;
-  /** Gate (shipped default): judge when the ensemble did not place the turn at
-   *  the trivial low anchor (complexity 0.0). */
+  /** Gate: judge when the ensemble did not place the turn at the trivial low
+   *  anchor (complexity 0.0). Off by default (ADR-0029). */
   not_low_anchor: boolean;
+  /** Gate: the deliberately open gate — judge every eligible turn. Explicit
+   *  override only; unset predicates leave the judge shadow-only (ADR-0029). */
+  always: boolean;
   shadow: boolean;
   /** Share of eligible turns the gate did not fire, still judged for measurement. */
   shadow_sample_rate: number;
   context_turns: number;
   context_chars: number;
+  /** Characters allowed for the current ask itself (ADR-0029). */
+  ask_chars: number;
+  /** Apply a consulted verdict only when its own tier probability mass reaches
+   *  this bar (ADR-0029). Null = obey every non-abstaining verdict. */
+  apply_min_confidence: number | null;
+  /** ... or when its escalation probability reaches this bar (ADR-0029); either
+   *  bar met applies the verdict. Null = not used. */
+  apply_min_escalation: number | null;
 }
 
 export interface SmartRoutingConfig {

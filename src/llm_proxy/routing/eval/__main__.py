@@ -1,7 +1,8 @@
 """Command line entry point for the offline routing evaluation rig.
 
     uv run python -m llm_proxy.routing.eval
-    uv run python -m llm_proxy.routing.eval --judge ollama --judge-model tev1:0.8b --out ./
+    uv run python -m llm_proxy.routing.eval --judge ollama \
+        --judge-url http://127.0.0.1:9911 --judge-model jev-latest --out ./
 
 Development only: this is not installed as a console script and is not part of
 the documented product surface (ADR-0018).
@@ -81,7 +82,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge",
         default="none",
         choices=["none", "ollama", "openrouter"],
-        help="Judge transport to measure alongside the ensemble (openrouter measures Jev)",
+        help="Judge transport to measure alongside the ensemble; `ollama` is this "
+        "transport's historical name — a plain System One HTTP client (the repo's "
+        "openrouter transport measures Jev through OpenRouter itself)",
     )
     parser.add_argument(
         "--gate-threshold",
@@ -92,12 +95,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--judge-url",
         default=None,
-        help="Judge base URL (defaults per transport: Ollama localhost, OpenRouter api)",
+        help="Judge base URL (default per transport: the OpenRouter api; point the "
+        "ollama transport at a proxy deployment, e.g. http://127.0.0.1:9911)",
     )
     parser.add_argument(
         "--judge-model",
         default=None,
-        help="Upstream model id (defaults per transport: tev1:0.8b, ~typesafe/jev-latest)",
+        help="Upstream model id (default per transport: ~typesafe/jev-latest; through "
+        "a proxy deployment use the deployment's own model name, e.g. jev-latest)",
     )
     parser.add_argument(
         "--judge-api-key",
@@ -105,6 +110,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Judge credential; falls back to OPENROUTER_API_KEY for the openrouter transport",
     )
     parser.add_argument("--judge-timeout", type=float, default=3.0)
+    parser.add_argument(
+        "--apply-min-confidence",
+        type=float,
+        default=None,
+        help="Add a consumption policy obeying verdicts whose own tier-probability "
+        "mass reaches this bar (the proxy's apply_min_confidence, ADR-0029)",
+    )
+    parser.add_argument(
+        "--apply-min-escalation",
+        type=float,
+        default=None,
+        help="Add a consumption policy obeying verdicts whose escalation probability "
+        "reaches this bar (the proxy's apply_min_escalation, ADR-0029)",
+    )
     return parser.parse_args(argv)
 
 
@@ -119,10 +138,14 @@ def _build_judge(args: argparse.Namespace) -> JudgeTransport | None:
             timeout=args.judge_timeout,
             api_key=args.judge_api_key,
         )
+    # The `ollama` choice is this transport's historical name; it is a plain
+    # System One HTTP client with no daemon assumption. Its default URL still
+    # points at the loopback Ollama daemon for backwards compatibility.
     return OllamaSystemOneJudge(
         base_url=args.judge_url or OLLAMA_JUDGE_URL,
         model=args.judge_model or OLLAMA_JUDGE_MODEL,
         timeout=args.judge_timeout,
+        api_key=args.judge_api_key,
     )
 
 
@@ -167,7 +190,13 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         if judge is not None:
             await judge.aclose()
 
-    metrics = summarize(results, gate_threshold=args.gate_threshold, bootstrap=args.bootstrap)
+    metrics = summarize(
+        results,
+        gate_threshold=args.gate_threshold,
+        bootstrap=args.bootstrap,
+        apply_min_confidence=args.apply_min_confidence,
+        apply_min_escalation=args.apply_min_escalation,
+    )
     metrics["run"] = {
         "cases": str(args.cases),
         "mode": args.mode,
@@ -177,6 +206,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "judge": judge.name if judge is not None else None,
         "judge_model": judge.model if judge is not None else None,
         "gate_threshold": args.gate_threshold,
+        "apply_min_confidence": args.apply_min_confidence,
+        "apply_min_escalation": args.apply_min_escalation,
     }
     return metrics
 
