@@ -41,6 +41,37 @@ def test_health_does_not_expose_db_error_message(client):
     assert data["services"]["database"]["status"] == "unavailable"
 
 
+def test_health_reports_the_rate_limit_posture(client):
+    """Which store holds the windows belongs in the operator's picture.
+
+    A memory backend enforces the configured limit once per process, so the
+    number only means what it says with Redis-backed rate limiting on. This says
+    so without degrading `status`, and never leaks a DSN.
+    """
+    import llm_proxy.api.middleware.security as security_mw
+    from llm_proxy.api.middleware.rate_limiting import RateLimitManager
+    from llm_proxy.config.types.server import SecurityParams
+
+    with (
+        patch(
+            "llm_proxy.api.middleware.rate_limiting.get_rate_limiter",
+            return_value=RateLimitManager(use_redis=False),
+        ),
+        patch.object(
+            security_mw,
+            "get_security_params",
+            lambda: SecurityParams(rate_limit_disabled=True),
+        ),
+    ):
+        data = client.get("/api/health").json()
+
+    assert data["services"]["rate_limiting"] == {
+        "backend": "memory",
+        "shared": False,
+        "disabled": True,
+    }
+
+
 def test_ready_does_not_expose_full_health_detail(client):
     """Readiness probe 503 detail is generic, not a dump of internal state."""
     with patch(

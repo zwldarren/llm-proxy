@@ -30,7 +30,7 @@ reviewing before exposing it to the internet.
 | Item | Default | Notes |
 | --- | --- | --- |
 | Rate limiting | Enabled (in-memory) | `rate_limit_disabled` is the master throttle switch: rate-limit buckets, per-key requests/minute, both failure lockouts, and the auth failure delay. It does **not** lift budget caps or the request size limit. The UI warns loudly when enabled |
-| Shared rate limits | Off until `REDIS_RATE_LIMIT_ENABLED=true` | Required for multi-worker/multi-replica deployments |
+| Shared rate limits | Off until `REDIS_RATE_LIMIT_ENABLED=true` | Required for multi-worker/multi-replica deployments: the memory backend keeps one window **per process**, so N workers enforce N times the configured limit. `GET /api/health` → `services.rate_limiting.backend` says which store is live |
 | Redis fail mode | `redis_rate_limit_fail_closed=true` | Requests blocked when Redis errors — safer for public deployments |
 | Login lockout | **Off by default.** When enabled: 5 failures / 15 min, keyed by username | Off because a hard per-account lockout lets anyone who knows the username lock the account out. The per-IP `auth.login` limit and the auth failure delay apply regardless |
 | API-key IP lockout | **Off by default.** When enabled: 10 failures / 5 min, keyed by **client IP** | Off because the lockout is keyed by IP: one client with bad credentials locks out everyone sharing that address (NAT, corporate egress — and in development, every request is `127.0.0.1`). Turn it on for instances reachable from untrusted networks. Applies to `/v1/*` and `/servers/*`; the auth failure delay applies regardless |

@@ -8,7 +8,7 @@ All three are unauthenticated:
 
 | Endpoint | Returns |
 | --- | --- |
-| `GET /api/health` | Always 200. `status` plus `services.database` (a `SELECT 1`) and `services.redis` (`status`, `healthy`, `enabled`; `disabled` when Redis is off) |
+| `GET /api/health` | Always 200. `status` plus `services.database` (a `SELECT 1`) and `services.redis` (`status`, `healthy`, `enabled`; `disabled` when Redis is off). Also `services.rate_limiting` — informational, never degrades `status`: `backend` (`redis` = one shared window per deployment, `memory` = one window **per process**, so N workers enforce N times the configured limit), `shared`, and `disabled` (the `rate_limit_disabled` switch) |
 | `GET /api/health/ready` | 200 `{"status":"ready"}` when healthy, otherwise **503** — use this for orchestrator readiness |
 | `GET /api/health/live` | Always 200 `{"status":"alive"}` — liveness only, no dependency checks |
 

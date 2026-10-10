@@ -92,7 +92,7 @@ provider is called. The flag also gates being selected as the
 
 | Path | Auth | Notes |
 | --- | --- | --- |
-| GET | `/api/health` | — | Database + Redis snapshot, always 200 |
+| GET | `/api/health` | — | Database + Redis snapshot plus the rate-limit posture, always 200 |
 | GET | `/api/health/ready` | — | 503 until dependencies are ready |
 | GET | `/api/health/live` | — | Liveness only |
 

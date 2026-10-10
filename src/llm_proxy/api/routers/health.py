@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import text
 
+from llm_proxy.api.middleware.rate_limiting import limiter_status
 from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.services import runtime_services
@@ -55,6 +56,10 @@ async def health_check(request: Request) -> dict[str, Any]:
                 "healthy": redis_healthy,
                 "enabled": redis_client is not None and redis_client.is_connected,
             },
+            # Not a health signal — never degrades `status`. It reports which
+            # store actually holds the rate-limit windows, because a configured
+            # limit means something different per process than per deployment.
+            "rate_limiting": limiter_status(),
         },
         "timestamp": datetime.now().isoformat(),
     }
