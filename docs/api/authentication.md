@@ -71,8 +71,8 @@ needs an API key.
 | Situation | Response |
 | --- | --- |
 | Missing/unknown key | 401 with the protocol's error envelope |
-| Repeated invalid keys from one IP | **429** `too_many_auth_failures` (default: 10 failures → 300 s lockout; counters are per process and reset on restart). The `/v1/*` 429 carries `Retry-After`; the `/servers/*` 429 does not |
-| Model not in the key's allowlist | 403 `model_not_allowed` |
+| Repeated invalid keys from one IP | **429** `too_many_auth_failures` when API-key IP lockout is enabled (off by default; 10 failures → 300 s, counters per process and reset on restart). The `/v1/*` 429 carries `Retry-After`; the `/servers/*` 429 does not |
+| Model not in the key's allowlist | 403 `model_not_allowed`. Not an auth failure: the key is already authenticated, so this never feeds the IP lockout and adds no delay |
 | MCP server not in the key's allowlist | 403 `Access denied to MCP server '<name>'` |
 | Budget exhausted | 429 `budget_exceeded` (or `user_budget_exceeded` for account budgets) |
 | Failed auth | Responses are delayed by `auth_failure_delay_ms` (default 100 ms, ±10% jitter) to slow brute force |

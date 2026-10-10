@@ -31,7 +31,7 @@ container/console logs:
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `401 authorization header missing` / `invalid authorization header format` | No key sent, or `Authorization` does not use `Bearer` | Send `Authorization: Bearer sk-…` or `x-api-key: sk-…`. Console JWTs do **not** work on `/v1/*` |
-| `429 too_many_auth_failures` with `Retry-After` | Too many invalid keys from this IP (default: 10 in 300 s) | Wait out `Retry-After`; check the key |
+| `429 too_many_auth_failures` with `Retry-After` | API-key IP lockout is enabled (off by default) and this address passed `max_failed_api_key_attempts` invalid keys | Wait out `Retry-After`; fix the key. Because the lockout is keyed by IP, one bad client blocks everyone sharing that address — on a dev machine, that is every request from `127.0.0.1`. Turn it off under Settings → Security, or flip **Disable Throttling** (counters are in-process, so a restart clears them too) |
 | `403 model_not_allowed` | Key or user allowlist excludes the model | Adjust the allowlist, or use an allowed model. Remember: empty allowlist = deny all |
 | `404 model_not_found` | Model name is not in the model mappings | Add the mapping (or fix the name). Virtual models need smart routing enabled |
 | `500 configuration_error` mentioning a virtual model | `auto`/`fast`/`best` used while smart routing is **disabled**, or on a non-chat endpoint | Enable smart routing, or use a concrete model name |

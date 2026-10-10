@@ -29,11 +29,12 @@ reviewing before exposing it to the internet.
 
 | Item | Default | Notes |
 | --- | --- | --- |
-| Rate limiting | Enabled (in-memory) | Setting `rate_limit_disabled` warns loudly and exposes brute-force/DoS |
+| Rate limiting | Enabled (in-memory) | `rate_limit_disabled` is the master throttle switch: rate-limit buckets, per-key requests/minute, both failure lockouts, and the auth failure delay. It does **not** lift budget caps or the request size limit. The UI warns loudly when enabled |
 | Shared rate limits | Off until `REDIS_RATE_LIMIT_ENABLED=true` | Required for multi-worker/multi-replica deployments |
 | Redis fail mode | `redis_rate_limit_fail_closed=true` | Requests blocked when Redis errors — safer for public deployments |
 | Login lockout | **Off by default.** When enabled: 5 failures / 15 min, keyed by username | Off because a hard per-account lockout lets anyone who knows the username lock the account out. The per-IP `auth.login` limit and the auth failure delay apply regardless |
-| API-key lockout | 10 failures / 5 min, keyed by **client IP** | Applies to `/v1/*` and `/servers/*` |
+| API-key IP lockout | **Off by default.** When enabled: 10 failures / 5 min, keyed by **client IP** | Off because the lockout is keyed by IP: one client with bad credentials locks out everyone sharing that address (NAT, corporate egress — and in development, every request is `127.0.0.1`). Turn it on for instances reachable from untrusted networks. Applies to `/v1/*` and `/servers/*`; the auth failure delay applies regardless |
+| Model allowlist rejection | 403, not counted as an auth failure | The key is already authenticated, so requesting a disallowed model neither feeds the IP lockout nor pays the failure delay |
 | Auth failure delay | 100 ms ±10% jitter | Slows brute force; keep enabled on public instances |
 | Console auth buckets | `auth.login` 5/min, `auth.setup` 5/min, `auth.setup_status` 10/min | Tunable per bucket |
 

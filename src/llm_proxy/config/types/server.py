@@ -65,6 +65,18 @@ class SecurityParams(BaseModel):
     lockout_duration_seconds: int = Field(
         default=900, ge=1, description="Account lockout duration in seconds"
     )
+    api_key_lockout_enabled: bool = Field(
+        default=False,
+        description=(
+            "Lock a client IP after repeated failed API key authentications. "
+            "Off by default for the same reason login lockout is: the lockout is "
+            "keyed by IP, so one client with bad credentials locks out everyone "
+            "sharing that address (a NAT gateway, a corporate egress, or every "
+            "local test request arriving as 127.0.0.1). The auth failure delay "
+            "still applies when off. Turn this on for instances reachable from "
+            "untrusted networks."
+        ),
+    )
     max_failed_api_key_attempts: int = Field(
         default=10, ge=1, description="Failed API key attempts before IP lockout"
     )
@@ -75,7 +87,14 @@ class SecurityParams(BaseModel):
         default=100, ge=0, description="Artificial delay on failed authentication (ms)"
     )
     rate_limit_disabled: bool = Field(
-        default=False, description="Disable all rate limiting (dangerous; testing only)"
+        default=False,
+        description=(
+            "Disable request throttling entirely: the named rate-limit buckets, "
+            "the per-key requests/minute caps, both failure lockouts, and the "
+            "auth failure delay. Does not touch budget caps or the request body "
+            "size limit — those protect spend and memory, not bandwidth. "
+            "Dangerous; testing only."
+        ),
     )
     redis_rate_limit_fail_closed: bool = Field(
         default=True,

@@ -158,10 +158,11 @@ reset. Counters are per process and reset on restart.
 | Field | Default | Effect |
 | --- | --- | --- |
 | Login lockout enabled | off | Lock an account after repeated failed logins (keyed by username). Off by default — a hard per-account lockout lets anyone who knows the username lock the account out on purpose |
+| API-key IP lockout enabled | off | Lock a client IP after repeated failed API key authentications. Off by default — the lockout is keyed by IP, so one client with bad credentials locks out everyone sharing that address (NAT, corporate egress, or every local test request arriving as `127.0.0.1`). Turn it on for instances reachable from untrusted networks |
 | Max failed login attempts / lockout duration | `5` / `900` s | Used only when login lockout is enabled |
-| Max failed API-key attempts / lockout duration | `10` / `300` s | Key lockout, keyed by client IP (always on) |
+| Max failed API-key attempts / lockout duration | `10` / `300` s | Used only when API-key IP lockout is enabled |
 | Auth failure delay | `100` ms | Artificial delay on failed auth (±10% jitter) |
-| Rate limiting disabled | off | Master switch. The UI warns loudly when disabled — the proxy becomes brute-force/DoS-exposed |
+| Rate limiting disabled | off | Master throttle switch: disables the rate-limit buckets, per-key requests/minute, both failure lockouts and the auth failure delay. Budget caps and the body-size limit are unaffected. The UI warns loudly when on — the proxy becomes brute-force/DoS-exposed |
 | Redis fail-closed | on | With Redis rate limiting, block requests when Redis errors (instead of allowing them) |
 | HSTS enabled / max-age | on / `31536000` | `Strict-Transport-Security` header. Disable only for local HTTP development |
 | Max request body size | `67108864` (64 MiB) | `0` disables. A declared `Content-Length` is checked up front; chunked or undeclared bodies are measured as they stream and rejected only if they exceed the limit |

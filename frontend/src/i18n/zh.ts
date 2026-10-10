@@ -1722,15 +1722,19 @@ export default {
     maxFailedLoginAttemptsDescription: "连续登录失败达到该次数后账户将被锁定。",
     lockoutDurationSeconds: "登录锁定时长",
     lockoutDurationSecondsDescription: "账户被锁定的时长（秒）。",
+    apiKeyLockoutEnabled: "API 密钥 IP 锁定",
+    apiKeyLockoutEnabledDescription:
+      "连续 API 密钥认证失败后锁定客户端 IP。默认关闭——锁定以 IP 为维度，一个持错误凭据的客户端就会锁死共享该地址的所有人（NAT 网关、企业出口，或本地测试时全部表现为 127.0.0.1 的请求）。关闭时仍保留认证失败延迟；对不可信网络开放的实例请开启。",
     maxFailedApiKeyAttempts: "最大 API 密钥失败次数",
     maxFailedApiKeyAttemptsDescription: "连续 API 密钥认证失败达到该次数后，客户端 IP 将被锁定。",
     apiKeyLockoutDurationSeconds: "API 密钥锁定时长",
     apiKeyLockoutDurationSecondsDescription: "API 密钥多次失败后 IP 被锁定的时长（秒）。",
     authFailureDelayMs: "认证失败延迟",
     authFailureDelayMsDescription: "认证失败响应的人为延迟，用于减缓暴力破解。",
-    rateLimitDisabled: "禁用限流",
-    rateLimitDisabledDescription: "关闭所有限流。危险——仅用于测试。",
-    rateLimitDisabledWarning: "限流已关闭，代理易受暴力破解和 DoS 攻击。",
+    rateLimitDisabled: "禁用限速",
+    rateLimitDisabledDescription:
+      "完全关闭请求限速：限流桶、每密钥每分钟请求数、两类失败锁定以及认证失败延迟。预算上限与请求体大小限制仍生效。危险——仅用于测试。",
+    rateLimitDisabledWarning: "限速已关闭，代理易受暴力破解和 DoS 攻击。",
     redisRateLimitFailClosed: "限流器故障时拒绝",
     redisRateLimitFailClosedDescription:
       "当 Redis 限流器出错时，拒绝请求（开）或放行（关）。仅在启用 Redis 限流（REDIS_RATE_LIMIT_ENABLED）后生效。",

@@ -9,7 +9,6 @@ directly to the mounted MCP proxy app.
 """
 
 import asyncio
-import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -43,6 +42,7 @@ from llm_proxy.api.middleware.api_key_cache import (
 )
 from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 from llm_proxy.api.middleware.security import (
+    apply_auth_failure_delay,
     build_security_headers,
     get_api_key_lockout_manager,
 )
@@ -60,15 +60,12 @@ logger = get_logger(__name__)
 
 
 async def _add_auth_failure_delay() -> None:
-    """Apply a small, jittered delay after an authentication failure."""
-    from llm_proxy.api.middleware.security import get_security_params
+    """Apply a small, jittered delay after an authentication failure.
 
-    delay_ms = get_security_params().auth_failure_delay_ms
-    if delay_ms <= 0:
-        return
-    delay_seconds = delay_ms / 1000.0
-    jitter = delay_seconds * 0.1
-    await asyncio.sleep(max(0, delay_seconds + random.uniform(-jitter, jitter)))
+    Skipped when the operator disables throttling; the shared implementation
+    lives in :func:`llm_proxy.api.middleware.security.apply_auth_failure_delay`.
+    """
+    await apply_auth_failure_delay()
 
 
 async def _verify_session_api_key(api_key: str) -> dict[str, Any] | None:

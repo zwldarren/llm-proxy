@@ -128,6 +128,7 @@ export const DEFAULT_SECURITY: SecurityConfig = {
   login_lockout_enabled: false,
   max_failed_login_attempts: 5,
   lockout_duration_seconds: 900,
+  api_key_lockout_enabled: false,
   max_failed_api_key_attempts: 10,
   api_key_lockout_duration_seconds: 300,
   auth_failure_delay_ms: 100,

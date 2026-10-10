@@ -1209,6 +1209,7 @@ export interface SecurityConfig {
   login_lockout_enabled: boolean;
   max_failed_login_attempts: number;
   lockout_duration_seconds: number;
+  api_key_lockout_enabled: boolean;
   max_failed_api_key_attempts: number;
   api_key_lockout_duration_seconds: number;
   auth_failure_delay_ms: number;

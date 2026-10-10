@@ -79,6 +79,21 @@ const { t } = useI18n();
     </SettingsItem>
 
     <SettingsItem
+      :title="t('security.apiKeyLockoutEnabled')"
+      :description="t('security.apiKeyLockoutEnabledDescription')"
+      :loading="pending"
+      :error="error"
+    >
+      <template #action>
+        <Switch
+          v-model="state.api_key_lockout_enabled"
+          :aria-label="t('security.apiKeyLockoutEnabled')"
+        />
+      </template>
+    </SettingsItem>
+
+    <SettingsItem
+      v-if="state.api_key_lockout_enabled"
       :title="t('security.maxFailedApiKeyAttempts')"
       :description="t('security.maxFailedApiKeyAttemptsDescription')"
       :loading="pending"
@@ -98,6 +113,7 @@ const { t } = useI18n();
     </SettingsItem>
 
     <SettingsItem
+      v-if="state.api_key_lockout_enabled"
       :title="t('security.apiKeyLockoutDurationSeconds')"
       :description="t('security.apiKeyLockoutDurationSecondsDescription')"
       :loading="pending"

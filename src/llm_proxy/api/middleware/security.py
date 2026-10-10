@@ -3,9 +3,13 @@
 This module provides:
 - Rate limiting to prevent brute force and DoS attacks
 - Security headers to protect against common web vulnerabilities
-- Account lockout mechanism for failed login attempts
+- Account / client-IP lockout for repeated authentication failures
+- :func:`throttling_disabled` and :func:`apply_auth_failure_delay`, the policy
+  every throttle in the authentication path consults
 """
 
+import asyncio
+import random
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -44,6 +48,35 @@ def get_security_params() -> SecurityParams:
     from llm_proxy.config.manager import resolve_security_params
 
     return resolve_security_params(_config_manager)
+
+
+def throttling_disabled() -> bool:
+    """Whether the operator turned request throttling off (`rate_limit_disabled`).
+
+    The single gate every throttle in the authentication path consults: the
+    rate-limit buckets and per-key caps (see
+    :mod:`llm_proxy.api.middleware.rate_limiting`), both failure lockouts, and
+    the auth failure delay. Budget caps and the body-size limit are separate
+    protections (spend and memory, not bandwidth) and stay in force.
+    """
+    return get_security_params().rate_limit_disabled
+
+
+async def apply_auth_failure_delay() -> None:
+    """Sleep briefly after an authentication failure, to slow down brute force.
+
+    Skipped entirely when throttling is disabled, so a disabled switch really
+    means no added latency on a failing local test client.
+    """
+    security = get_security_params()
+    if security.rate_limit_disabled:
+        return
+    delay_ms = security.auth_failure_delay_ms
+    if delay_ms <= 0:
+        return
+    delay_seconds = delay_ms / 1000.0
+    jitter = delay_seconds * 0.1
+    await asyncio.sleep(max(0, delay_seconds + random.uniform(-jitter, jitter)))
 
 
 class BaseLockoutManager:
@@ -190,7 +223,10 @@ class AccountLockoutManager(BaseLockoutManager):
                 get_security_params().max_failed_login_attempts,
                 get_security_params().lockout_duration_seconds,
             ),
-            enabled_getter=lambda: get_security_params().login_lockout_enabled,
+            # The switch means "no throttling", so it also covers this lockout.
+            enabled_getter=lambda: (
+                get_security_params().login_lockout_enabled and not throttling_disabled()
+            ),
         )
         self.log_prefix = "Login"
 
@@ -218,7 +254,13 @@ class APIKeyLockoutManager(BaseLockoutManager):
             params_getter=lambda: (
                 get_security_params().max_failed_api_key_attempts,
                 get_security_params().api_key_lockout_duration_seconds,
-            )
+            ),
+            # Off by default (an IP-keyed ban punishes every client sharing the
+            # address, including a developer's own loopback), and always off
+            # when throttling is disabled.
+            enabled_getter=lambda: (
+                get_security_params().api_key_lockout_enabled and not throttling_disabled()
+            ),
         )
         self.log_prefix = "API key"
 

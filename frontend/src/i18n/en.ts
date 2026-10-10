@@ -1784,6 +1784,9 @@ export default {
       "Consecutive failed login attempts before the account is locked out.",
     lockoutDurationSeconds: "Login Lockout Duration",
     lockoutDurationSecondsDescription: "How long an account stays locked out, in seconds.",
+    apiKeyLockoutEnabled: "API Key IP Lockout",
+    apiKeyLockoutEnabledDescription:
+      "Lock a client IP after repeated failed API key authentications. Off by default — the lockout is keyed by IP, so one client with bad credentials locks out everyone sharing that address (a NAT gateway, a corporate egress, or every local test request arriving as 127.0.0.1). The auth failure delay still applies when off; turn this on for instances reachable from untrusted networks.",
     maxFailedApiKeyAttempts: "Max Failed API Key Attempts",
     maxFailedApiKeyAttemptsDescription:
       "Consecutive failed API key authentications before the client IP is locked out.",
@@ -1793,11 +1796,11 @@ export default {
     authFailureDelayMs: "Auth Failure Delay",
     authFailureDelayMsDescription:
       "Artificial delay added to failed authentication responses to slow down brute force.",
-    rateLimitDisabled: "Disable Rate Limiting",
+    rateLimitDisabled: "Disable Throttling",
     rateLimitDisabledDescription:
-      "Turn off all rate limiting. Dangerous — intended for testing only.",
+      "Turn off request throttling entirely: rate-limit buckets, per-key requests/minute, both failure lockouts, and the auth failure delay. Budget caps and the request size limit still apply. Dangerous — intended for testing only.",
     rateLimitDisabledWarning:
-      "Rate limiting is disabled. Your proxy is vulnerable to brute-force and DoS attacks.",
+      "Throttling is disabled. Your proxy is vulnerable to brute-force and DoS attacks.",
     redisRateLimitFailClosed: "Rate Limiter Fail-Closed",
     redisRateLimitFailClosedDescription:
       "When the Redis rate limiter errors, block the request (on) or let it through (off). Only takes effect once Redis-backed rate limiting is enabled (REDIS_RATE_LIMIT_ENABLED).",

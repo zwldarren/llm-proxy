@@ -1,6 +1,6 @@
 """Tests for the model restriction middleware."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from starlette.requests import Request
@@ -90,29 +90,17 @@ class TestModelRestrictionMiddleware:
     def call_next(self):
         return AsyncMock(return_value="NEXT_RESPONSE")
 
-    @pytest.fixture
-    def lockout_manager(self):
-        manager = MagicMock()
-        manager.record_failed_attempt = MagicMock()
-        return manager
-
     async def _run(
         self,
         request: Request,
         call_next,
         *,
         identity: RequestIdentity | None = None,
-        lockout_manager: MagicMock | None = None,
     ):
         set_request_identity(request, identity or RequestIdentity(auth_method="api_key"))
-        with (
-            patch.object(mr, "get_client_ip", return_value="1.2.3.4"),
-            patch.object(mr, "get_api_key_lockout_manager", lambda: lockout_manager or MagicMock()),
-            patch.object(mr, "add_auth_failure_delay", AsyncMock()),
-        ):
-            return await model_restriction_middleware(request, call_next)
+        return await model_restriction_middleware(request, call_next)
 
-    async def test_jwt_auth_bypasses_restriction(self, call_next, lockout_manager):
+    async def test_jwt_auth_bypasses_restriction(self, call_next):
         """JWT-authenticated (admin) requests are never model-restricted."""
         request = _make_request("/v1/chat/completions", b'{"model": "claude-3"}')
         facts_for(request).allowed_models = ["gpt-4"]
@@ -121,77 +109,67 @@ class TestModelRestrictionMiddleware:
             request,
             call_next,
             identity=RequestIdentity(auth_method="jwt"),
-            lockout_manager=lockout_manager,
         )
 
         assert result == "NEXT_RESPONSE"
         call_next.assert_awaited_once()
-        lockout_manager.record_failed_attempt.assert_not_called()
 
-    async def test_non_api_path_bypasses(self, call_next, lockout_manager):
+    async def test_non_api_path_bypasses(self, call_next):
         """Paths outside /v1/ and /servers/ are not restricted."""
         request = _make_request("/api/config", b'{"model": "claude-3"}')
         facts_for(request).allowed_models = ["gpt-4"]
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(request, call_next)
 
         assert result == "NEXT_RESPONSE"
-        lockout_manager.record_failed_attempt.assert_not_called()
 
-    async def test_servers_path_bypasses_without_reading_body(self, call_next, lockout_manager):
+    async def test_servers_path_bypasses_without_reading_body(self, call_next):
         """MCP /servers/* JSON-RPC is bypassed without consuming the body."""
         request = _make_request("/servers/abc", b'{"model": "claude-3"}')
         facts_for(request).allowed_models = ["gpt-4"]
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(request, call_next)
 
         assert result == "NEXT_RESPONSE"
-        lockout_manager.record_failed_attempt.assert_not_called()
 
-    async def test_no_restrictions_bypasses(self, call_next, lockout_manager):
+    async def test_no_restrictions_bypasses(self, call_next):
         request = _make_request("/v1/chat/completions", b'{"model": "claude-3"}')
         facts_for(request).allowed_models = None
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(request, call_next)
 
         assert result == "NEXT_RESPONSE"
-        lockout_manager.record_failed_attempt.assert_not_called()
 
-    async def test_allowed_model_passes(self, call_next, lockout_manager):
+    async def test_allowed_model_passes(self, call_next):
         request = _make_request("/v1/chat/completions", b'{"model": "gpt-4"}')
         facts_for(request).allowed_models = ["gpt-4", "claude-3"]
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(request, call_next)
 
         assert result == "NEXT_RESPONSE"
         call_next.assert_awaited_once()
-        lockout_manager.record_failed_attempt.assert_not_called()
 
-    async def test_no_model_field_with_restrictions_allows(self, call_next, lockout_manager):
+    async def test_no_model_field_with_restrictions_allows(self, call_next):
         """A missing model field is treated as 'no model specified' -> allow."""
         request = _make_request("/v1/chat/completions", b'{"messages": []}')
         facts_for(request).allowed_models = ["gpt-4"]
 
-        result = await self._run(request, call_next, lockout_manager=lockout_manager)
+        result = await self._run(request, call_next)
 
         assert result == "NEXT_RESPONSE"
-        lockout_manager.record_failed_attempt.assert_not_called()
 
-    async def test_disallowed_model_rejected(self, call_next, lockout_manager):
+    async def test_disallowed_model_rejected(self, call_next):
         request = _make_request("/v1/chat/completions", b'{"model": "claude-3"}')
         facts_for(request).allowed_models = ["gpt-4"]
         identity = RequestIdentity(auth_method="api_key", api_key_name="my-key")
 
-        result = await self._run(
-            request, call_next, identity=identity, lockout_manager=lockout_manager
-        )
+        result = await self._run(request, call_next, identity=identity)
 
         assert result.status_code == 403
         payload = result.body
         assert b"model_not_allowed" in payload
         assert b"claude-3" in payload
         call_next.assert_not_awaited()
-        lockout_manager.record_failed_attempt.assert_called_once_with("1.2.3.4")
 
     @pytest.mark.parametrize(
         "path",
@@ -202,17 +180,28 @@ class TestModelRestrictionMiddleware:
             "/v1/v1/messages",
         ],
     )
-    async def test_alias_path_enforces_restriction(self, path, call_next, lockout_manager):
+    async def test_alias_path_enforces_restriction(self, path, call_next):
         """Alias paths carry no /v1 prefix but are API endpoints: a model
         outside the key's allowlist must still be rejected."""
         request = _make_request(path, b'{"model": "claude-3"}')
         facts_for(request).allowed_models = ["gpt-4"]
         identity = RequestIdentity(auth_method="api_key", api_key_name="my-key")
 
-        result = await self._run(
-            request, call_next, identity=identity, lockout_manager=lockout_manager
-        )
+        result = await self._run(request, call_next, identity=identity)
 
         assert result.status_code == 403
         assert b"model_not_allowed" in result.body
         call_next.assert_not_awaited()
+
+
+def test_model_restriction_holds_no_lockout_coupling():
+    """A model-allowlist rejection comes from an already-authenticated key.
+
+    It is an authorization miss, not credential brute force: it must not feed
+    the client IP's auth-failure lockout budget, and it must not make the client
+    pay the auth failure delay. Otherwise one misconfigured allowlist gets the
+    whole address locked out — every other key from the same client, and in
+    development, every request from 127.0.0.1.
+    """
+    assert not hasattr(mr, "get_api_key_lockout_manager")
+    assert not hasattr(mr, "add_auth_failure_delay")

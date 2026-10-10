@@ -9,15 +9,12 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.types import Scope
 
-from llm_proxy.api.middleware.api_key_auth import add_auth_failure_delay
 from llm_proxy.api.middleware.asgi_utils import (
     BodyReader,
     CoreASGIMiddleware,
     adapt_http_middleware,
 )
-from llm_proxy.api.middleware.security import get_api_key_lockout_manager
 from llm_proxy.core.request_facts import facts_for, get_request_identity
-from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.observability.log_intake import record_rejection
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import EventType, ResourceType
@@ -127,10 +124,11 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
         requested_model,
     )
     if not is_allowed:
-        client_ip = get_client_ip(request)
-        lockout_manager = get_api_key_lockout_manager()
-        lockout_manager.record_failed_attempt(client_ip)
-        await add_auth_failure_delay()
+        # An authorization miss, not an authentication failure: this key has
+        # already been verified, so requesting a disallowed model must not
+        # consume the client IP's auth-failure budget (that is how one
+        # misconfigured allowlist gets the whole address locked out) and must
+        # not make the client pay the auth failure delay.
 
         # Short-circuited here means no endpoint row is written later, so the
         # rejection itself is the only record the operator will see.

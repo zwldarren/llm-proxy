@@ -4,7 +4,6 @@ Handles API key verification for client API endpoints (/v1/*, /servers/*).
 """
 
 import asyncio
-import random
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -27,7 +26,7 @@ from llm_proxy.api.middleware.asgi_utils import (
     adapt_http_middleware,
 )
 from llm_proxy.api.middleware.exceptions import protocol_for_request
-from llm_proxy.api.middleware.security import get_api_key_lockout_manager
+from llm_proxy.api.middleware.security import apply_auth_failure_delay, get_api_key_lockout_manager
 from llm_proxy.core.request_facts import (
     RequestIdentity,
     facts_for,
@@ -66,14 +65,8 @@ def _write_auth_failure_audit_log(
 
 
 async def add_auth_failure_delay() -> None:
-    from llm_proxy.api.middleware.security import get_security_params
-
-    delay_ms = get_security_params().auth_failure_delay_ms
-    if delay_ms <= 0:
-        return
-    delay_seconds = delay_ms / 1000.0
-    jitter = delay_seconds * 0.1
-    await asyncio.sleep(max(0, delay_seconds + random.uniform(-jitter, jitter)))
+    """Apply the auth failure delay (see :func:`apply_auth_failure_delay`)."""
+    await apply_auth_failure_delay()
 
 
 async def _auth_failure_response(

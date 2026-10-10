@@ -93,8 +93,11 @@ the server-generated id.
 | `auth.login` | Client IP | 5/minute |
 | `auth.setup` | Client IP | 5/minute |
 | `auth.setup_status` | Client IP | 10/minute |
-| Failed API-key attempts | Client IP | 10 failures → 300 s lockout (`too_many_auth_failures`) |
+| Failed API-key attempts | Client IP | **Off by default.** When `api_key_lockout_enabled`: 10 failures → 300 s lockout (`too_many_auth_failures`) |
 | Failed logins | Username | Off by default; when enabled, 5 failures → 900 s lockout (`account_locked`) |
+
+Every row above is bypassed by `rate_limit_disabled` (Settings → Security), which
+also skips the auth failure delay. Budget caps are not bypassed.
 
 - The auth buckets are configurable per bucket in
   [Settings → Advanced → Rate Limits](../admin/settings.md#rate-limits) using `N/period`

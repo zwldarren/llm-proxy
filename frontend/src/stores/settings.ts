@@ -178,6 +178,8 @@ export const useSettingsStore = defineStore("settings", () => {
         data?.max_failed_login_attempts ?? DEFAULT_SECURITY.max_failed_login_attempts,
       lockout_duration_seconds:
         data?.lockout_duration_seconds ?? DEFAULT_SECURITY.lockout_duration_seconds,
+      api_key_lockout_enabled:
+        data?.api_key_lockout_enabled ?? DEFAULT_SECURITY.api_key_lockout_enabled,
       max_failed_api_key_attempts:
         data?.max_failed_api_key_attempts ?? DEFAULT_SECURITY.max_failed_api_key_attempts,
       api_key_lockout_duration_seconds:
