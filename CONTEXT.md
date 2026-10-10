@@ -92,7 +92,7 @@ The judge's typed answers for one request: a tier choice with its distribution, 
 _Avoid_: judge output, prediction
 
 **Judge gate**:
-The configured predicate that decides whether an eligible turn is worth asking the judge about: ensemble confidence below a threshold, complexity inside a band, or no predicate at all — which asks about every eligible turn and is what the seed corpus measured best. Eligibility itself is narrower: a first human turn, in a mode where the judge is enabled. The gate is the knob that sizes the judge's added latency and cost.
+The configured predicate that decides whether an eligible turn is worth asking the judge about: ensemble confidence below a threshold, complexity inside a half-open band, the shipped default `not_low_anchor` — any non-trivial placement, i.e. complexity away from the SIMPLE anchor 0.0 (ADR-0028) — or no predicate at all, which asks about every eligible turn. Eligibility itself is narrower: a first human turn, in a mode where the judge is enabled. The gate is the knob that sizes the judge's added latency and cost.
 _Avoid_: trigger, threshold
 
 **Judge abstention**:

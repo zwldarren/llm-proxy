@@ -215,6 +215,30 @@ async def test_an_ungated_turn_is_not_sent_to_the_judge(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_default_gate_leaves_a_trivial_ask_alone(monkeypatch):
+    """The shipped default (``not_low_anchor``, ADR-0028) skips the SIMPLE anchor."""
+    from types import SimpleNamespace
+
+    from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
+
+    judge = RoutingJudgeConfig(enabled=True, model="judge", shadow=False)  # default predicates
+    captured: dict = {}
+    _stub_route(monkeypatch, captured)
+
+    async def fail(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("the default gate must not consult on a trivial placement")
+
+    monkeypatch.setattr("llm_proxy.routing.resolver.consult_judge", fail)
+
+    await _resolve(
+        _judge_ready_config(judge),
+        request=SimpleNamespace(background=False),
+    )
+
+    assert captured["judge"] is None
+
+
+@pytest.mark.asyncio
 async def test_a_follow_up_turn_is_not_sent_to_the_judge(monkeypatch):
     """The judge cannot see assistant/tool state, so the ensemble keeps those turns."""
     from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
@@ -269,7 +293,15 @@ async def test_a_foreground_request_still_reaches_the_gate(monkeypatch):
 
     from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
 
-    judge = RoutingJudgeConfig(enabled=True, model="judge", shadow=False)
+    # An always-firing band keeps the gate predicate out of this test's way: the
+    # background flag above is what it isolates.
+    judge = RoutingJudgeConfig(
+        enabled=True,
+        model="judge",
+        shadow=False,
+        not_low_anchor=False,
+        complexity_between=(0.0, 1.0),
+    )
     captured: dict = {}
     _stub_route(monkeypatch, captured)
     calls: list = []
@@ -283,7 +315,7 @@ async def test_a_foreground_request_still_reaches_the_gate(monkeypatch):
     await _resolve(_judge_ready_config(judge), request=SimpleNamespace(background=False))
 
     assert len(calls) == 1
-    assert calls[0].reason == "gate:open"
+    assert calls[0].reason.startswith("gate:complexity(")
 
 
 @pytest.mark.asyncio
@@ -352,7 +384,13 @@ async def test_the_judge_is_wired_against_the_real_config_schema(monkeypatch):
         },
         smart_routing=SmartRoutingConfig(
             enabled=True,
-            judge=RoutingJudgeConfig(enabled=True, model="judge", shadow=False),
+            judge=RoutingJudgeConfig(
+                enabled=True,
+                model="judge",
+                shadow=False,
+                not_low_anchor=False,
+                complexity_between=(0.0, 1.0),
+            ),
         ),
     )
     captured: dict = {}

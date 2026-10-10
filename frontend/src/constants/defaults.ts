@@ -42,7 +42,8 @@ export const DEFAULT_WEB_SEARCH: WebSearchConfig = {
 };
 
 // Mirrors the backend's RoutingJudgeConfig defaults: off, and shadowed when it
-// is switched on, so enabling the feature starts as a measurement.
+// is switched on, so enabling the feature starts as a measurement. The gate's
+// shipped default predicate is not_low_anchor (ADR-0028).
 export const DEFAULT_ROUTING_JUDGE: RoutingJudgeConfig = {
   enabled: false,
   model: "",
@@ -50,6 +51,7 @@ export const DEFAULT_ROUTING_JUDGE: RoutingJudgeConfig = {
   deadline_s: 0.5,
   confidence_below: null,
   complexity_between: null,
+  not_low_anchor: true,
   shadow: true,
   shadow_sample_rate: 0.05,
   context_turns: 3,

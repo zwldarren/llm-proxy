@@ -44,6 +44,22 @@ Two rules when extending it:
 - Keep the boundary subset hard. A corpus that only contains easy labels flatters
   every decision path equally and tells you nothing.
 
+## Dataset-derived corpora
+
+For a bigger corpus without hand-writing 100 cases, `corpus/` ships
+`open-source-103.jsonl` — 103 cases derived from public HuggingFace datasets
+(SimpleQA-verified, GSM8K stratified by solution steps, HumanEval, BoolQ,
+CoQA, Hermes) and mapped onto the rubric with per-case rationales:
+
+```bash
+uv run python -m llm_proxy.routing.eval \
+  --cases src/llm_proxy/routing/eval/corpus/open-source-103.jsonl --out ./
+```
+
+Read `corpus/README.md` for provenance, the per-subset mapping and the honesty
+caveats (single rater, unverifiable training overlap) before quoting numbers
+from it. ADR-0028 records the gate decision those numbers produced.
+
 ## Running
 
 ```bash

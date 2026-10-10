@@ -15,7 +15,8 @@ def test_the_judge_is_off_and_shadowed_by_default():
     assert judge.modes == ["auto", "best"]
     assert judge.deadline_s == 0.5
     assert judge.context_turns == 3
-    assert judge.gate_is_open is True
+    assert judge.gate_is_open is False  # the measured default gate (ADR-0028)
+    assert judge.not_low_anchor is True
 
 
 def test_the_judge_needs_both_a_switch_and_a_model():
@@ -25,8 +26,10 @@ def test_the_judge_needs_both_a_switch_and_a_model():
 
 
 def test_a_predicate_closes_the_open_gate():
+    plain = RoutingJudgeConfig(not_low_anchor=False)
     assert RoutingJudgeConfig(confidence_below=0.55).gate_is_open is False
     assert RoutingJudgeConfig(complexity_between=(0.33, 0.67)).gate_is_open is False
+    assert plain.gate_is_open is True
 
 
 def test_the_band_must_be_ordered_and_within_range():
@@ -85,3 +88,6 @@ def test_a_row_written_before_the_judge_existed_still_loads():
 
     assert restored.judge.enabled is False
     assert restored.judge.is_configured is False
+    # The judge stays off, so the new measured default predicate changes nothing
+    # for a deployment that never asked for the judge.
+    assert restored.judge.not_low_anchor is True

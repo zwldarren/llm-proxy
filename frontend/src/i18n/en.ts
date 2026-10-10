@@ -1036,6 +1036,7 @@ export default {
     judgeGateDescription:
       "The judge is only consulted on the first turn of a conversation. This decides which of those turns are worth asking about.",
     judgeGateAlways: "Every eligible turn",
+    judgeGateAnchor: "When the ask isn't trivial (default)",
     judgeGateConfidence: "When confidence is low",
     judgeGateBand: "When complexity is mid-range",
     judgeGateBoth: "When either signal fires",

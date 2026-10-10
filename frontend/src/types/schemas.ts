@@ -1156,6 +1156,9 @@ export interface RoutingJudgeConfig {
   /** Gate: judge when ensemble complexity lands inside the half-open band
    *  [low, high), same convention as the public tier mapping. Null = not used. */
   complexity_between: [number, number] | null;
+  /** Gate (shipped default): judge when the ensemble did not place the turn at
+   *  the trivial low anchor (complexity 0.0). */
+  not_low_anchor: boolean;
   shadow: boolean;
   /** Share of eligible turns the gate did not fire, still judged for measurement. */
   shadow_sample_rate: number;

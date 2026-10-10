@@ -46,6 +46,15 @@ class RoutingJudgeConfig(BaseModel):
     #: (``[0.33, 0.67)`` is MEDIUM). The default band targets the MEDIUM band,
     #: which is where the signals are weakest (ADR-0018).
     complexity_between: tuple[float, float] | None = None
+    #: Fire on every turn the ensemble did not place at the obvious low anchor
+    #: (complexity ``0.0``, the SIMPLE anchor). The measured default: over a
+    #: 103-case open-source corpus the gate consulted 80% of turns — mostly the
+    #: MEDIUM/COMPLEX band where the ensemble is weakest — and took overall match
+    #: 39.8% → 74.8%, while the confidence-comparison and MEDIUM-band placements
+    #: moved nothing and the confidence distribution clustered near 0.61 on
+    #: misses and hits alike (same number made every candidate threshold the
+    #: same row in the sweep). ADR-0028.
+    not_low_anchor: bool = Field(default=True)
 
     # ─── Measurement ───
     #: Record the verdict but keep the ensemble's decision.
@@ -81,7 +90,11 @@ class RoutingJudgeConfig(BaseModel):
     @property
     def gate_is_open(self) -> bool:
         """True when no predicate is configured, i.e. every eligible turn is judged."""
-        return self.confidence_below is None and self.complexity_between is None
+        return (
+            self.confidence_below is None
+            and self.complexity_between is None
+            and not self.not_low_anchor
+        )
 
     @property
     def is_configured(self) -> bool:

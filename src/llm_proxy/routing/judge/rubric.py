@@ -21,7 +21,11 @@ from llm_proxy.routing.types import Tier
 #: Bumped whenever the questions, their criteria or the state shape change
 #: incompatibly, so judge telemetry stays interpretable across rubric edits
 #: (the judged answers are only comparable within one rubric version).
-RUBRIC_VERSION = 1
+#: v2: the complex option now says a determinate plan (a steady chain of
+#: arithmetic/mechanical steps) is medium however long the chain is (ADR-0028
+#: boundary clarification), so capability-hungry arithmetic no longer escalates
+#: to complex purely on step count.
+RUBRIC_VERSION = 2
 
 #: Question ids. System One never sends ids to the model; answers come back
 #: under the same ids, so these are wire-local names only.
@@ -82,7 +86,11 @@ TIER_RUBRICS: frozendict[str, str] = frozendict(
             "derivations, changes across files or systems, architecture and design trade-offs, "
             "debugging with incomplete information, requirements that conflict, or work that "
             "must be planned before it can be executed. Not for length: a long request can be "
-            "simple and a one-line request can be complex."
+            "simple and a one-line request can be complex. Reserve complex for work whose plan "
+            "is genuinely open — where more than one capable approach would work and choosing "
+            "is part of the problem. A determinate chain of steps, each one an arithmetic "
+            "operation or a mechanical edit, is medium however many steps it has: the plan is "
+            "already readable in the ask, so no planning is required."
         ),
         AMBIGUOUS_OPTION: (
             "Two tiers are genuinely defensible, or the request is too underspecified to place "

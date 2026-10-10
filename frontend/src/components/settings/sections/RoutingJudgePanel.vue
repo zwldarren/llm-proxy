@@ -64,36 +64,49 @@ const modelOptions = computed(() => {
 
 const hasNoJudgeModels = computed(() => !modelsLoading.value && modelOptions.value.length === 0);
 
-type GateTrigger = "always" | "confidence" | "band" | "both";
+/** One named gate posture. The gate predicates are an OR on the backend; the
+ *  dropdown normalizes the common configurations, and a stored config that
+ *  mixes the anchor predicate with the classic two is shown as its most
+ *  specific classic label and normalized on save. */
+type GateTrigger = "always" | "anchor" | "confidence" | "band" | "both";
 
 /**
- * The two gate predicates collapse into one choice; unset means "always".
+ * The three gate predicates collapse into one choice; all-off means "always".
  * ``both`` is reachable: the backend treats the predicates as an OR and does not
  * reject a config that sets both, so the UI has to be able to show and clear it
  * rather than silently hiding one behind the other.
  */
 const trigger = computed<GateTrigger>(() => {
-  if (judge.value.confidence_below !== null && judge.value.complexity_between !== null)
-    return "both";
-  if (judge.value.confidence_below !== null) return "confidence";
-  if (judge.value.complexity_between !== null) return "band";
+  const confidence = judge.value.confidence_below !== null;
+  const band = judge.value.complexity_between !== null;
+  const anchor = judge.value.not_low_anchor === true;
+  if (confidence && band) return "both";
+  if (confidence) return "confidence";
+  if (band) return "band";
+  if (anchor) return "anchor";
   return "always";
 });
 
 function setTrigger(value: unknown) {
   const next = value as GateTrigger;
-  if (next === "confidence") {
-    judge.value.confidence_below ??= 0.7;
-    judge.value.complexity_between = null;
-  } else if (next === "band") {
-    judge.value.complexity_between ??= [0.33, 0.67];
+  const clear = () => {
     judge.value.confidence_below = null;
+    judge.value.complexity_between = null;
+    judge.value.not_low_anchor = false;
+  };
+  if (next === "confidence") {
+    clear();
+    judge.value.confidence_below ??= 0.7;
+  } else if (next === "band") {
+    clear();
+    judge.value.complexity_between ??= [0.33, 0.67];
   } else if (next === "both") {
+    clear();
     judge.value.confidence_below ??= 0.7;
     judge.value.complexity_between ??= [0.33, 0.67];
   } else {
-    judge.value.confidence_below = null;
-    judge.value.complexity_between = null;
+    clear();
+    judge.value.not_low_anchor = next === "anchor";
   }
 }
 
@@ -206,6 +219,7 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="anchor">{{ t("smartRouting.judgeGateAnchor") }}</SelectItem>
             <SelectItem value="always">{{ t("smartRouting.judgeGateAlways") }}</SelectItem>
             <SelectItem value="confidence">{{ t("smartRouting.judgeGateConfidence") }}</SelectItem>
             <SelectItem value="band">{{ t("smartRouting.judgeGateBand") }}</SelectItem>

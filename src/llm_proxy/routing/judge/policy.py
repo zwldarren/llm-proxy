@@ -17,9 +17,13 @@ Three questions, in order:
    agent state that decides difficulty — the ensemble can, and it keeps the call.
 3. **Does the gate fire?** Predicates are measured, not assumed: the rig reports
    candidate triggers side by side (``GateSpec`` in
-   :mod:`llm_proxy.routing.eval.harness`). Both predicates unset means every
-   eligible turn is judged, which the seed corpus found to be the best available
-   trade — see ADR-0018 for the numbers.
+   :mod:`llm_proxy.routing.eval.harness`). The shipped default is
+   ``not_low_anchor`` — consult every turn the ensemble did not already call
+   trivial — because on a 103-case open-source corpus that was the only
+   candidate to move overall accuracy meaningfully while the confidence
+   predicates stayed equivalent to a guess (ADR-0028). All predicates unset
+   (``gate_is_open``) judges every eligible turn, which the tiny seed corpus
+   could not distinguish from this.
 
 Shadow mode is expressed here too, because "consult but do not obey" is a
 property of the consultation, not of the caller: a shadow consultation records a
@@ -50,6 +54,19 @@ def complexity_band_fires(complexity: float, band: tuple[float, float]) -> bool:
     """
     low, high = band
     return low <= complexity < high
+
+
+def not_low_anchor_fires(complexity: float) -> bool:
+    """Whether the ensemble placed the turn anywhere but the trivial low anchor.
+
+    The ensemble's complexity snaps to the tier anchors ``{0.00, 0.40, 0.68,
+    0.90}``, so "not the low anchor" is the same predicate the rig reports as
+    ``not_low_anchor``: every turn the ensemble did not already call trivial.
+    On the measured corpus it consults ~80% of eligible turns — the MEDIUM and
+    COMPLEX anchors the ensemble is weakest at — and the confidence predicates
+    cannot separate anything, this is the shipped default (ADR-0028).
+    """
+    return complexity > 0.0
 
 
 def is_first_turn(messages: list[dict[str, Any]] | None) -> bool:
@@ -126,6 +143,12 @@ def plan_judge_consult(
         return JudgeConsultPlan(
             consult=True,
             reason=f"gate:complexity({complexity:.2f} in [{band[0]:g},{band[1]:g}))",
+            shadow=judge.shadow,
+        )
+    if judge.not_low_anchor and not_low_anchor_fires(complexity):
+        return JudgeConsultPlan(
+            consult=True,
+            reason=f"gate:not-low-anchor({complexity:.2f})",
             shadow=judge.shadow,
         )
     if judge.gate_is_open:
@@ -236,6 +259,7 @@ __all__ = [
     "JudgeConsultPlan",
     "JudgeConsultation",
     "complexity_band_fires",
+    "not_low_anchor_fires",
     "is_first_turn",
     "plan_judge_consult",
 ]

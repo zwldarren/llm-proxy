@@ -996,6 +996,7 @@ export default {
     judgeGate: "何时询问",
     judgeGateDescription: "裁判只会被用于对话的首轮请求。此项决定哪些首轮请求值得询问。",
     judgeGateAlways: "所有符合条件的请求",
+    judgeGateAnchor: "非平凡请求时（默认）",
     judgeGateConfidence: "置信度较低时",
     judgeGateBand: "复杂度处于中间区间时",
     judgeGateBoth: "任一信号触发时",

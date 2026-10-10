@@ -81,10 +81,14 @@ What matters operationally:
   polls for its answer instead of waiting on it, so there is no latency budget to spend.
 - **Only `auto` and `best` by default.** `fast` exists to pick the cheapest capable model;
   a judge call works against that.
-- **A gate decides which first turns are worth asking about:** never, when the router's
-  confidence is below a threshold, or when its complexity estimate falls in a band. With
-  no gate configured, every eligible turn is judged. The gate — not the model — is what
-  bounds the added latency and cost.
+- **A gate decides which first turns are worth asking about:** the shipped default is
+  `not_low_anchor` — judge every turn the ensemble did not already place at the trivial
+  low anchor (complexity `0.0`) — because that is the only candidate trigger that moved
+  overall accuracy on a measured open-source corpus, while confidence thresholds and the
+  MEDIUM band moved little to nothing (ADR-0028). Confidence thresholds and a
+  half-open complexity band remain configurable, and with no gate configured every
+  eligible turn is judged. The gate — not the model — is what bounds the added latency
+  and cost.
 - **Floors and caps still win.** The verdict replaces the complexity the ensemble would
   have used; the vision, structured-output and final-verification floors and the
   routine-success cap are applied afterwards, exactly as they are without a judge.

@@ -76,6 +76,13 @@ select = [
 ]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+# Corpus-builder: the per-source row limit is "rows appended", not "rows seen",
+# so the counter must only advance past an append; ruff's SIM113 rule asks for
+# enumerate() which advances on filtered-out rows and would silently change
+# which dataset rows make the corpus.
+"src/llm_proxy/routing/eval/corpus/build_open_source_corpus.py" = ["SIM113"]
+
 [tool.pyright]
 typeCheckingMode = "standard"
 include = ["src"]

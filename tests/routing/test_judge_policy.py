@@ -119,14 +119,26 @@ def test_a_follow_up_turn_is_not_judged():
 
 
 def test_no_predicate_means_every_eligible_turn_is_judged():
-    plan = _plan(_judge())
+    plan = _plan(_judge(not_low_anchor=False))
     assert plan.consult is True
     assert plan.reason == "gate:open"
     assert plan.shadow is True  # shadow is the default for an unconfigured rollout
 
 
+def test_the_shipped_default_gate_is_not_low_anchor():
+    """The measured default (ADR-0028): every non-trivial placement is judged,"""
+    judge = _judge()
+    assert judge.not_low_anchor is True
+    at_anchor = _plan(judge, complexity=0.0)
+    assert at_anchor.consult is False
+    assert at_anchor.reason == "gate-not-fired"
+    off_anchor = _plan(judge, complexity=0.40)
+    assert off_anchor.consult is True
+    assert off_anchor.reason == "gate:not-low-anchor(0.40)"
+
+
 def test_the_confidence_gate_fires_below_its_threshold():
-    judge = _judge(confidence_below=0.55)
+    judge = _judge(confidence_below=0.55, not_low_anchor=False)
     assert _plan(judge, confidence=0.54).reason == "gate:confidence(0.54<0.55)"
     assert _plan(judge, confidence=0.54).consult is True
     below = _plan(judge, confidence=0.56)
@@ -136,7 +148,7 @@ def test_the_confidence_gate_fires_below_its_threshold():
 
 def test_the_complexity_band_is_half_open_at_the_high_end():
     """Half-open [low, high), matching the public tier mapping and the rig."""
-    judge = _judge(complexity_between=(0.33, 0.67))
+    judge = _judge(complexity_between=(0.33, 0.67), not_low_anchor=False)
     assert _plan(judge, complexity=0.33).consult is True
     assert _plan(judge, complexity=0.33).reason == "gate:complexity(0.33 in [0.33,0.67))"
     borderline = _plan(judge, complexity=0.67)
@@ -157,18 +169,20 @@ def test_a_background_call_is_never_judged_whatever_the_gate_says():
 def test_the_shadow_window_samples_turns_the_gate_did_not_fire():
     """Agreement measured only inside the gate cannot tell if the gate leaks."""
     judge = _judge(confidence_below=0.10, shadow=True, shadow_sample_rate=0.05)
-    sampled = _plan(judge, confidence=0.9, sample=0.01)
+    # complexity at the low anchor so the default predicate is out of the way:
+    # this test is about the shadow window, not about which gate fires.
+    sampled = _plan(judge, confidence=0.9, sample=0.01, complexity=0.0)
     assert sampled.consult is True
     assert sampled.reason == "shadow-sample"
     assert sampled.shadow is True
 
-    unsampled = _plan(judge, confidence=0.9, sample=0.5)
+    unsampled = _plan(judge, confidence=0.9, sample=0.5, complexity=0.0)
     assert unsampled.consult is False
 
 
 def test_sampling_is_off_when_shadow_is_off():
     judge = _judge(confidence_below=0.10, shadow=False, shadow_sample_rate=0.5)
-    assert _plan(judge, confidence=0.9, sample=0.0).consult is False
+    assert _plan(judge, confidence=0.9, sample=0.0, complexity=0.0).consult is False
 
 
 # ─── What a consultation is ───
