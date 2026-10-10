@@ -9,9 +9,9 @@ identifiers that have gone quiet, because unlike Redis it has no per-key TTL.
 import functools
 import importlib.util
 import inspect
-import itertools
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -51,6 +51,20 @@ class CustomRateLimitExceeded(RateLimitExceeded):
 
 
 logger = get_logger(__name__)
+
+
+def _decode_script_element(value: Any) -> str:
+    """Normalise a Lua script return element to ``str``.
+
+    ``decode_responses`` is not set on the shared connection pool, so redis-py
+    returns ``bytes`` for every bulk string; the script returns all elements
+    as strings (never Lua numbers, which Redis truncates to integers) so this
+    helper only ever has to handle ``bytes`` and ``int``.
+    """
+    if isinstance(value, bytes):
+        return value.decode()
+    return str(value)
+
 
 #: How often the in-memory backend sweeps expired identifiers out of its
 #: window dict. Matches the lockout managers' cadence: cheap enough to run
@@ -111,20 +125,50 @@ class RedisRateLimiter:
 
     Uses Redis sorted sets to implement sliding window rate limiting.
 
-    Algorithm:
-    1. For each key (client IP), maintain a sorted set of timestamps
-    2. When a request comes in:
-        - Remove timestamps older than window_size seconds
-        - Count remaining timestamps
-        - If count < limit, add current timestamp and allow request
-        - Otherwise, deny request
+    Algorithm (atomic — the whole check-and-record runs as one Lua script,
+    because doing it as two pipelines leaves a check-then-act window in which
+    every concurrent request reads the pre-burst count and overshoots the
+    limit by the number of requests in flight):
+    1. For each key (bucket + client IP), maintain a sorted set of timestamps
+    2. When a request comes in, one script call:
+        - Removes timestamps older than window_size seconds
+        - Counts the remaining timestamps
+        - If count < limit, adds a unique member with the current timestamp
+          and refreshes the TTL, then reports the request as allowed
+        - Otherwise denies it and reports when the oldest entry expires
     3. Clean up old data automatically with Redis TTL
+    """
 
-    Example Redis commands:
-        ZREMRANGEBYSCORE key -inf (current_time - window_size)
-        ZCARD key
-        ZADD key current_time current_time
-        EXPIRE key window_size
+    #: Check-and-record for one request, executed atomically by Redis.
+    #: Members must be unique — a sorted set keys on its member, so two
+    #: requests landing on the same time.time() value (or the same value on
+    #: different workers) would write one entry and silently widen the limit
+    #: under exactly the burst load this limiter exists to bound — hence the
+    #: uuid suffix; the score stays the timestamp, which is what expiry reads.
+    #: The denied branch returns the oldest score as a bulk string rather than
+    #: a Lua number, which Redis truncates to an integer and would corrupt
+    #: the reported reset time.
+    _ATOMIC_WINDOW_LUA = """
+    local key    = KEYS[1]
+    local now    = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local limit  = tonumber(ARGV[3])
+    local member = ARGV[4]
+
+    redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+    local count = redis.call('ZCARD', key)
+
+    if count < limit then
+        redis.call('ZADD', key, now, member)
+        redis.call('PEXPIRE', key, window * 1000)
+        return {1, tostring(limit - count - 1)}
+    end
+
+    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+    if #oldest > 0 then
+        return {0, oldest[2]}
+    end
+    return {0, tostring(now)}
     """
 
     def __init__(
@@ -136,10 +180,7 @@ class RedisRateLimiter:
         self._redis_client = redis_client
         self.prefix = prefix
         self.window_size = window_size
-        self._member_counter = itertools.count()
-
-    def _next_member(self) -> int:
-        return next(self._member_counter)
+        self._script: Any = None
 
     def _get_key(self, identifier: str) -> str:
         return f"{self.prefix}{identifier}"
@@ -157,43 +198,36 @@ class RedisRateLimiter:
         key = self._get_key(identifier)
         current_time = time.time()
 
-        async with redis_client.pipeline(transaction=True) as pipe:
-            pipe.zremrangebyscore(key, "-inf", current_time - window_size)
-            pipe.zcard(key)
-            results = await pipe.execute()
+        if self._script is None:
+            # register_script is itself synchronous; the resulting AsyncScript
+            # executes (with an EVALSHA -> EVAL fallback) when awaited.
+            self._script = redis_client.register_script(self._ATOMIC_WINDOW_LUA)
 
-        remaining_count = results[1]
+        member = f"{current_time:.17g}:{uuid.uuid4().hex}"
+        result = await self._script(
+            keys=[key],
+            args=[current_time, window_size, limit, member],
+        )
+        allowed = _decode_script_element(result[0]) == "1"
 
-        if remaining_count < limit:
-            async with redis_client.pipeline(transaction=True) as pipe:
-                # Member must be unique: a sorted set keys on its member, so two
-                # requests landing on the same time.time() value would write the
-                # same member and count as one — silently widening the limit
-                # under exactly the burst load this limiter exists to bound.
-                # The score stays the timestamp, which is what expiry reads.
-                pipe.zadd(key, {f"{current_time}:{self._next_member()}": current_time})
-                pipe.expire(key, window_size)
-                await pipe.execute()
-
-            remaining = limit - remaining_count - 1
+        if allowed:
+            # result[1] is entries still available after recording this one.
+            remaining = max(0, int(_decode_script_element(result[1])))
             reset_time = current_time + window_size
 
             return False, {
-                "remaining": max(0, remaining),
+                "remaining": remaining,
                 "reset_time": reset_time,
                 "limit": limit,
             }
 
-        oldest_timestamps = await redis_client.zrange(key, 0, 0, withscores=True)
-        if oldest_timestamps:
-            oldest_timestamp = float(oldest_timestamps[0][1])
-            reset_time = oldest_timestamp + window_size
-        else:
-            reset_time = current_time + window_size
-
+        # The window is full: the oldest surviving timestamp is what must
+        # expire before capacity is released, same convention the memory
+        # backend uses for its first rejection.
+        oldest_timestamp = float(_decode_script_element(result[1]))
         return True, {
             "remaining": 0,
-            "reset_time": reset_time,
+            "reset_time": oldest_timestamp + window_size,
             "limit": limit,
         }
 
