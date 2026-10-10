@@ -33,8 +33,9 @@ class ClientDisconnectedError(LLMProxyError):
     def __init__(self, message: str | None = None):
         super().__init__(
             message
-            or "Client disconnected before the response completed "
-            "(likely a client/CDN timeout, e.g. Cloudflare 524)",
+            or "Client disconnected before the response was completed "
+            "(the client or an intermediary such as a CDN/proxy closed the "
+            "connection; behind Cloudflare this is how a 524 surfaces)",
             code="client_disconnected",
             status_code=499,
         )

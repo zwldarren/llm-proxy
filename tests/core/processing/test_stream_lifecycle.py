@@ -15,6 +15,7 @@ import orjson
 import pytest
 
 from llm_proxy.core.conversion import NativePassthroughHandler
+from llm_proxy.core.exceptions import ClientDisconnectedError
 from llm_proxy.core.processing.stream_lifecycle import (
     GenericStreamLifecycle,
     StreamLifecycle,
@@ -221,6 +222,17 @@ def _stream(*chunks, delay: float | None = None):
 
 async def _collect(gen) -> list[str]:
     return [frame async for frame in gen]
+
+
+async def _let_pump_finish(turns: int = 5) -> None:
+    """Hand the chunk-pump task its remaining event-loop turns.
+
+    The pump records provider exhaustion one turn after the consumer takes the
+    last chunk, so a test that wants to close a stream "after the provider was
+    done" has to let those turns run first.
+    """
+    for _ in range(turns):
+        await asyncio.sleep(0)
 
 
 def _lifecycle(**overrides) -> StreamLifecycle:
@@ -434,6 +446,96 @@ class TestStreamLifecycleCancellation:
         await _collect(lifecycle.events())
 
         assert transformer.persisted is False
+
+
+class TestCleanCloseAtStreamEnd:
+    """Closing the connection at the terminal frame must not log a 499.
+
+    Real-world trigger: SSE client libraries act on the terminal frame
+    (``[DONE]`` / ``message_stop``) and drop the TCP connection on the spot,
+    while the proxy is still running finalization/persistence awaits. The
+    racing FIN wakes Starlette's disconnect listener and cancels the response
+    task; the lifecycle used to record that cancellation as
+    ClientDisconnectedError (499) even though the client received the complete
+    response, full usage and all.
+    """
+
+    async def test_close_after_consuming_terminal_frame_is_clean_success(self) -> None:
+        """Converted (transformer) path: the client stops at [DONE]."""
+        transformer = OpenAIStreamingTransformer(model="glm-5", request_id="chatcmpl-close")
+        registry = _registry()
+        lifecycle = _lifecycle(
+            stream=_stream(
+                {"choices": [{"index": 0, "delta": {"content": "hi"}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ),
+            transformer=transformer,
+            event_context=_context(),
+            tracing_registry=registry,
+            protocol_name="openai",
+        )
+
+        stream = lifecycle.events()
+        async for frame in stream:
+            if frame == "data: [DONE]\n\n":
+                break
+        # The client got the terminal frame and dropped the connection like an
+        # SDK acting on [DONE]; aclose models Starlette cancelling the response
+        # task in response to the racing FIN.
+        await stream.aclose()
+
+        assert lifecycle.client_disconnected is False
+        registry.on_stream_end.assert_awaited_once()
+        assert registry.on_stream_end.call_args.kwargs["error"] is None
+
+    async def test_native_close_after_pump_end_is_clean_success(self) -> None:
+        """Native tiers deliver message_stop/[DONE] through the pump."""
+        registry = _registry()
+        native_finish = (
+            'data: {"id":"1","model":"glm-5","choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        )
+        lifecycle = _lifecycle(
+            stream=_stream(
+                'data: {"id":"1","model":"glm-5","choices":[{"delta":{"content":"hi"}}]}\n\n',
+                native_finish,
+                "data: [DONE]\n\n",
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="glm-5"),
+            tracing_registry=registry,
+        )
+
+        stream = lifecycle.events()
+        async for frame in stream:
+            if frame == "data: [DONE]\n\n":
+                break
+        await stream.aclose()
+
+        assert lifecycle.client_disconnected is False
+        assert registry.on_stream_end.call_args.kwargs["error"] is None
+
+    async def test_close_mid_pump_is_still_an_abandonment(self) -> None:
+        """A close before the provider stream ends keeps the 499 verdict."""
+        registry = _registry()
+        lifecycle = _lifecycle(
+            stream=_stream(
+                'data: {"id":"1","model":"glm-5","choices":[{"delta":{"content":"hi"}}]}\n\n',
+                "data: [DONE]\n\n",
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="glm-5"),
+            tracing_registry=registry,
+        )
+
+        stream = lifecycle.events()
+        await anext(stream)  # first content frame consumed; [DONE] never sent
+        await stream.aclose()
+
+        assert lifecycle.client_disconnected is True
+        error = registry.on_stream_end.call_args.kwargs["error"]
+        assert isinstance(error, ClientDisconnectedError)
 
 
 class TestStreamLifecycleNativePassthrough:
@@ -832,6 +934,62 @@ class TestGenericStreamLifecycle:
 
         hook.assert_awaited_once()
         assert hook.await_args.args[1] is True
+
+    async def test_client_abandonment_is_recorded_not_silent_success(self) -> None:
+        """A generation cut short logs a failure (499), not a phantom 200.
+
+        GenericStreamLifecycle used to record no error at all when the response
+        task was cancelled mid-generation — the inverse of the chat path's
+        close-at-strict-end mislabel.
+        """
+        registry = _registry()
+        hook = AsyncMock()
+        lifecycle = self._generic(
+            _stream("a", "b", "c"), tracing_registry=registry, on_request_completed=hook
+        )
+
+        stream = lifecycle.events()
+        assert await anext(stream) == "a"
+        await stream.aclose()  # models the response task being cancelled
+
+        assert isinstance(lifecycle.stream_error, ClientDisconnectedError)
+        assert registry.on_stream_end.await_args.kwargs["error"] is lifecycle.stream_error
+        # A client disconnect is not a model failure (EWMA), same as chat.
+        assert hook.await_args.args[1] is True
+
+    async def test_close_at_final_chunk_is_clean_success(self) -> None:
+        """A client that had the complete payload is not an abandonment.
+
+        Binary payloads carry no terminal marker; the verdict comes from the
+        pump's exhaustion state at close time, not from the wire format.
+        """
+        registry = _registry()
+        lifecycle = self._generic(_stream(b"tail"), tracing_registry=registry)
+
+        stream = lifecycle.events()
+        assert await anext(stream) == b"tail"
+        await _let_pump_finish()  # the pump queues its end marker, then finishes
+        await stream.aclose()
+
+        assert lifecycle.stream_error is None
+        assert registry.on_stream_end.await_args.kwargs["error"] is None
+
+    async def test_close_with_pending_frames_is_still_an_abandonment(self) -> None:
+        """Frames queued but not yet handed out mean a truncated delivery."""
+        registry = _registry()
+
+        async def _fast_pumped():
+            for payload in ("a", "b", "c"):
+                yield payload
+
+        lifecycle = self._generic(_fast_pumped(), tracing_registry=registry)
+
+        stream = lifecycle.events()
+        assert await anext(stream) == "a"
+        await _let_pump_finish()  # "b"/"c" are queued now, but never delivered
+        await stream.aclose()
+
+        assert isinstance(lifecycle.stream_error, ClientDisconnectedError)
 
 
 class TestIterateChunksWithComments:
