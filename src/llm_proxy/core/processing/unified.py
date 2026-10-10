@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from fastapi import Request, Response
 
 from llm_proxy.config.manager import load_logging_config
-from llm_proxy.core.context import RequestUserContext, set_request_user_context
 from llm_proxy.core.errors import get_error_handler
 from llm_proxy.core.errors.protocols import protocol_for_name
 from llm_proxy.core.exceptions import (
@@ -183,16 +182,6 @@ class UnifiedProcessor:
                 "method": request.method,
                 "request_type": str(unified_request.request_type),
             },
-        )
-
-        # Set request user context for downstream logging (e.g., web search logs)
-        set_request_user_context(
-            RequestUserContext(
-                user_id=identity.user_id,
-                user_identity=context.user_id or identity.user,
-                api_key_name=identity.api_key_name,
-                auth_method=identity.auth_method,
-            )
         )
 
         return event_context

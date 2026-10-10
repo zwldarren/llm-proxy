@@ -3,6 +3,7 @@
 import orjson
 import pytest
 
+from llm_proxy.core.context import RequestUserContext
 from llm_proxy.core.exceptions import WebSearchError
 from llm_proxy.models import (
     InternalRequest,
@@ -320,6 +321,38 @@ class TestWebSearchInterceptor:
         await WebSearchInterceptor(mock_provider).execute_search(tool_use)
 
         assert [entry.provider for entry in entries] == ["ollama"]
+
+    @pytest.mark.asyncio
+    async def test_search_logs_attribution_passed_by_argument(self, mock_provider, monkeypatch):
+        """Regression: streamed searches lost user attribution.
+
+        The streaming continuation runs in the response task — an asyncio task
+        different from the pipeline that captured the identity — so the
+        interceptor must take identity by argument (\`user=\`), not from a
+        module-level request ContextVar that the response task never sees.
+        """
+        captured: list[dict] = []
+        monkeypatch.setattr(
+            "llm_proxy.web_search.interceptor.record_web_search",
+            lambda entry, **kwargs: captured.append(kwargs),
+        )
+        user = RequestUserContext(
+            user_id=7,
+            user_identity="alice",
+            api_key_name="it-key",
+            auth_method="api_key",
+        )
+        tool_use = ServerToolUseBlock(id="srvtoolu_user", name="web_search", input={"query": "q"})
+        await WebSearchInterceptor(mock_provider).execute_search(tool_use, user=user)
+
+        assert captured == [
+            {
+                "user_id": 7,
+                "user_identity": "alice",
+                "api_key_name": "it-key",
+                "auth_method": "api_key",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_execute_search_max_uses_exceeded(self, interceptor):

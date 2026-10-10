@@ -20,7 +20,7 @@ from typing import Any, cast
 
 import orjson
 
-from llm_proxy.core.context import get_request_user_context
+from llm_proxy.core.context import RequestUserContext
 from llm_proxy.models import (
     ContentBlock,
     InternalResponse,
@@ -262,6 +262,7 @@ class WebSearchInterceptor:
         tool_config: WebSearchToolConfig | None = None,
         request_id: str | None = None,
         search_state: dict[str, int] | None = None,
+        user: RequestUserContext | None = None,
     ) -> WebSearchExecutionResult:
         """Execute a web search and return the execution result.
 
@@ -288,6 +289,7 @@ class WebSearchInterceptor:
                 result_count=0,
                 error_message="Missing 'query' parameter",
                 status_code=400,
+                user=user,
             )
             return WebSearchExecutionResult(
                 tool_use_block=tool_use,
@@ -312,6 +314,7 @@ class WebSearchInterceptor:
                     status_code=429,
                     max_uses=tool_config.max_uses,
                     current_use=count + 1,
+                    user=user,
                 )
                 return WebSearchExecutionResult(
                     tool_use_block=tool_use,
@@ -360,6 +363,7 @@ class WebSearchInterceptor:
                 status_code=200,
                 max_uses=tool_config.max_uses if tool_config else None,
                 current_use=state["count"] if tool_config and tool_config.max_uses else None,
+                user=user,
             )
 
             # Successful search counts toward usage
@@ -398,6 +402,7 @@ class WebSearchInterceptor:
                 status_code=status_code,
                 max_uses=tool_config.max_uses if tool_config else None,
                 current_use=state["count"] if tool_config and tool_config.max_uses else None,
+                user=user,
             )
 
             return WebSearchExecutionResult(
@@ -418,15 +423,19 @@ class WebSearchInterceptor:
         error_message: str | None = None,
         max_uses: int | None = None,
         current_use: int | None = None,
+        user: RequestUserContext | None = None,
     ) -> None:
         """Log a web search operation if logging is configured."""
         try:
-            # Get user context for attribution
-            user_ctx = get_request_user_context()
-            user_id = user_ctx.user_id if user_ctx else None
-            user_identity = user_ctx.user_identity if user_ctx else None
-            api_key_name = user_ctx.api_key_name if user_ctx else None
-            auth_method = user_ctx.auth_method if user_ctx else None
+            # Identity arrives by argument, deliberately NOT from a request
+            # ContextVar: the streaming continuation runs in the response
+            # task, a different asyncio task than the pipeline that captured
+            # the identity (see the Langfuse handler's ``_RequestState`` for
+            # this bug class).
+            user_id = user.user_id if user else None
+            user_identity = user.user_identity if user else None
+            api_key_name = user.api_key_name if user else None
+            auth_method = user.auth_method if user else None
 
             entry = WebSearchLogEntry(
                 query=query,
@@ -456,6 +465,7 @@ class WebSearchInterceptor:
         tool_config: WebSearchToolConfig | None = None,
         request_id: str | None = None,
         search_state: dict[str, int] | None = None,
+        user: RequestUserContext | None = None,
     ) -> tuple[InternalResponse, list[tuple[ServerToolUseBlock, WebSearchExecutionResult]]]:
         """Inject web search results into a InternalResponse.
 
@@ -505,7 +515,7 @@ class WebSearchInterceptor:
                 )
             assert isinstance(tool_use, ServerToolUseBlock)
             execution_result = await self.execute_search(
-                tool_use, tool_config, request_id, search_state=state
+                tool_use, tool_config, request_id, search_state=state, user=user
             )
             search_results.append((tool_use, execution_result))
             output_blocks.append(execution_result.tool_use_block)

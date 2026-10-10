@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from llm_proxy.core.adapter import BaseAdapter
+from llm_proxy.core.context import RequestUserContext
 from llm_proxy.core.utils import quiet_aclose
 from llm_proxy.models import (
     InternalRequest,
@@ -59,11 +60,17 @@ class WebSearchStreamProcessor:
         transformer: Any,
         web_search_interceptor: Any,
         web_search_tool_config: Any,
+        user: RequestUserContext | None = None,
     ) -> tuple[str | None, list[tuple[ServerToolUseBlock, Any]], int]:
         """Process web search tool calls in streaming response.
 
         Inspects accumulated transformer output for web search tool use blocks,
         executes searches via the interceptor, and generates SSE events.
+
+        *user* carries the request identity by argument: this method runs in
+        the response task, a different asyncio task than the pipeline that
+        captured the identity, so module-level request ContextVars do not
+        reach it (see the Langfuse handler's ``_RequestState``).
 
         Does NOT emit server_tool_use SSE events because the original tool_use
         blocks from the provider stream already serve as the tool call indicator.
@@ -119,7 +126,10 @@ class WebSearchStreamProcessor:
             )
 
             result = await web_search_interceptor.execute_search(
-                server_tool_use, web_search_tool_config, search_state=search_state
+                server_tool_use,
+                web_search_tool_config,
+                search_state=search_state,
+                user=user,
             )
 
             query = tool_use.input.get("query", "") if isinstance(tool_use.input, dict) else ""
@@ -345,12 +355,17 @@ class WebSearchStreamProcessor:
         # record is folded into it, because the hop's own transformer is
         # discarded when the next one takes over.
         billing_transformer = state.transformer
+        user = (
+            RequestUserContext.from_event_context(event_context)
+            if event_context is not None
+            else None
+        )
         (
             ws_events,
             ws_results,
             total_search_count,
         ) = await self.process_streaming_web_search(
-            state.transformer, web_search_interceptor, web_search_tool_config
+            state.transformer, web_search_interceptor, web_search_tool_config, user=user
         )
         if ws_events:
             await tracing_registry.on_stream_chunk(state.stream_request, ws_events, event_context)
@@ -426,7 +441,7 @@ class WebSearchStreamProcessor:
                     ws_results,
                     ws_search_count,
                 ) = await self.process_streaming_web_search(
-                    cont_transformer, web_search_interceptor, web_search_tool_config
+                    cont_transformer, web_search_interceptor, web_search_tool_config, user=user
                 )
                 if ws_events:
                     await tracing_registry.on_stream_chunk(

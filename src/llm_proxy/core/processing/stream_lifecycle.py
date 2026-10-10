@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from llm_proxy.core.constants import DEFAULT_DISCONNECT_CHECK_INTERVAL
+from llm_proxy.core.context import RequestUserContext
 from llm_proxy.core.conversion import NativePassthroughHandler
 from llm_proxy.core.exceptions import ClientDisconnectedError
 from llm_proxy.core.processing.stream_assembly import (
@@ -731,8 +732,16 @@ class StreamLifecycle:
         for frame in self.transformer.error_frames(e):
             yield frame
         if self.should_intercept_web_search:
+            user = (
+                RequestUserContext.from_event_context(self.event_context)
+                if self.event_context is not None
+                else None
+            )
             await self.web_search_processor.process_streaming_web_search(
-                self.transformer, self.web_search_interceptor, self.web_search_tool_config
+                self.transformer,
+                self.web_search_interceptor,
+                self.web_search_tool_config,
+                user=user,
             )
 
     def _assemble_logged_response_body(self) -> None:

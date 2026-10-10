@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 from fastapi import Response
 
+from llm_proxy.core.context import RequestUserContext
 from llm_proxy.core.errors import get_error_handler
 from llm_proxy.core.errors.protocols import protocol_for_name
 from llm_proxy.core.exceptions import (
@@ -93,6 +94,7 @@ class RetryExecutor:
                         tool_config=context.web_search_tool_config,
                         request_id=state.trace_id,
                         search_state=search_state,
+                        user=RequestUserContext.from_event_context(state.event_context),
                     )
                     if search_state["count"] > 0:
                         state.event_context.web_search_requests = search_state["count"]
@@ -223,6 +225,7 @@ class RetryExecutor:
                 tool_config=context.web_search_tool_config,
                 request_id=state.trace_id,
                 search_state=search_state,
+                user=RequestUserContext.from_event_context(state.event_context),
             )
             if search_state["count"] > 0:
                 total_search_count += search_state["count"]
