@@ -99,6 +99,10 @@ the server-generated id.
 Every row above is bypassed by `rate_limit_disabled` (Settings → Security), which
 also skips the auth failure delay. Budget caps are not bypassed.
 
+Each rate-limit row is its own sliding window per client IP: polling
+`auth.setup_status` never spends the `auth.login` budget, and the per-key RPM cap
+follows the key rather than the address it arrives from.
+
 - The auth buckets are configurable per bucket in
   [Settings → Advanced → Rate Limits](../admin/settings.md#rate-limits) using `N/period`
   (`5/minute`, `100/hour`).

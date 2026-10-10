@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from llm_proxy.api.middleware import rate_limiting
 from llm_proxy.api.middleware.rate_limiting import (
     RateLimitManager,
     resolve_rate_limit_value,
@@ -132,3 +133,68 @@ class TestBucketDecorator:
         assert client.get("/limited").status_code == 200
         assert client.get("/limited").status_code == 200
         assert client.get("/limited").status_code == 429
+
+    def test_distinct_buckets_do_not_share_a_counter(self):
+        """Two buckets on one client IP are independent windows.
+
+        The dashboard polls ``auth.setup_status`` (10/minute) on the same IP an
+        operator logs in from; sharing a counter meant the polls ate the
+        ``auth.login`` (5/minute) budget and refused the login outright.
+        """
+        manager = RateLimitManager(use_redis=False)
+        app = FastAPI()
+
+        @app.get("/status")
+        @manager.limit("auth.setup_status")
+        async def status(request: Request):
+            return {"ok": True}
+
+        @app.get("/login")
+        @manager.limit("auth.login")
+        async def login(request: Request):
+            return {"ok": True}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        status_budget = parse_limit_value(DEFAULT_RATE_LIMITS["auth.setup_status"])[0]
+        login_budget = parse_limit_value(DEFAULT_RATE_LIMITS["auth.login"])[0]
+        for _ in range(status_budget):
+            assert client.get("/status").status_code == 200
+
+        # The login budget is untouched by the polls.
+        for _ in range(login_budget):
+            assert client.get("/login").status_code == 200
+        assert client.get("/login").status_code == 429
+
+    def test_retry_after_is_never_zero(self):
+        """A sub-second remainder must not truncate to "retry immediately"."""
+        from slowapi.errors import RateLimitExceeded
+
+        from llm_proxy.api.middleware.security import rate_limit_exceeded_handler
+
+        manager = RateLimitManager(use_redis=False)
+        app = FastAPI()
+        app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+        @app.get("/limited")
+        @manager.limit("1/1second")
+        async def limited(request: Request):
+            return {"ok": True}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        assert client.get("/limited").status_code == 200
+        response = client.get("/limited")
+        assert response.status_code == 429
+        assert int(response.headers["retry-after"]) >= 1
+        assert "Try again in 0 seconds" not in response.text
+
+
+def test_signature_is_resolved_at_decoration_time():
+    """The wrapper closes over its own signature instead of caching by ``id()``.
+
+    CPython hands a freed object's id to the next one, so a module-level
+    ``id(func)`` cache could answer for a different route — a discarded test
+    app's endpoint, or a reloaded module — and find its ``request`` parameter at
+    the wrong position.
+    """
+    assert not hasattr(rate_limiting, "_signature_cache")
+    assert not hasattr(rate_limiting, "_get_cached_signature")

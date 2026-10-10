@@ -1,9 +1,15 @@
-"""Rate limiting middleware with support for multiple backends (memory and Redis)."""
+"""Rate limiting middleware with support for multiple backends (memory and Redis).
 
-import asyncio
+Windows are keyed per (bucket, identifier), so distinct buckets never share a
+counter, and callers that want one deliberately shared window (the per-API-key
+requests/minute cap) simply pass no bucket. The memory backend also sweeps
+identifiers that have gone quiet, because unlike Redis it has no per-key TTL.
+"""
+
 import functools
 import importlib.util
 import inspect
+import itertools
 import threading
 import time
 from collections.abc import Callable
@@ -14,34 +20,24 @@ from slowapi.errors import RateLimitExceeded
 
 from llm_proxy.config.settings import get_settings
 from llm_proxy.config.types.rate_limits import DEFAULT_RATE_LIMITS, parse_limit_value
+from llm_proxy.core.constants import LOCKOUT_CLEANUP_INTERVAL_SECONDS
 from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.database.redis_client import RedisClient, get_redis_client_async
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.services import runtime_services
 
-_signature_cache: dict[int, tuple[list[str], int | None]] = {}
 
+def _window_key(bucket: str | None, identifier: str) -> str:
+    """Compose the limiter's window key: one counter per (bucket, identifier).
 
-async def _get_cached_signature(func: Callable) -> tuple[list[str], int | None]:
-    """Get cached function signature info.
-
-    Returns tuple of (parameter_names, request_param_index).
+    A bare identifier makes every bucket share one counter, which is exactly how
+    a dashboard quietly locks out its own operator: 10 polls of the 10/minute
+    ``auth.setup_status`` bucket consume the whole 5/minute ``auth.login`` budget
+    for that IP, so the login attempt is refused before the credentials are even
+    checked. An unbucketed key is still honoured for callers that deliberately
+    want one shared window.
     """
-    func_id = id(func)
-
-    if func_id not in _signature_cache:
-        sig = inspect.signature(func)
-        params = list(sig.parameters.keys())
-
-        request_idx: int | None = None
-        for i, param_name in enumerate(params):
-            if param_name == "request":
-                request_idx = i
-                break
-
-        _signature_cache[func_id] = (params, request_idx)
-
-    return _signature_cache[func_id]
+    return identifier if bucket is None else f"{bucket}:{identifier}"
 
 
 class CustomRateLimitExceeded(RateLimitExceeded):
@@ -55,6 +51,30 @@ class CustomRateLimitExceeded(RateLimitExceeded):
 
 
 logger = get_logger(__name__)
+
+#: How often the in-memory backend sweeps expired identifiers out of its
+#: window dict. Matches the lockout managers' cadence: cheap enough to run
+#: inside a request, rare enough that the sweep is not a hot path.
+_WINDOW_CLEANUP_INTERVAL_SECONDS = LOCKOUT_CLEANUP_INTERVAL_SECONDS
+
+
+def limiter_status() -> dict[str, Any]:
+    """Describe the live rate-limiting posture for operators and health probes.
+
+    Answers the question a configured limit cannot: whether that limit is
+    enforced once per deployment or once per process. ``disabled`` reports the
+    ``rate_limit_disabled`` switch so a deployment that shipped without
+    throttling says so out loud instead of looking configured.
+    """
+    from llm_proxy.api.middleware.security import get_security_params
+
+    limiter = get_rate_limiter()
+    return {
+        "backend": limiter.backend,
+        # Windows shared across processes only exist when Redis holds them.
+        "shared": limiter.backend == "redis",
+        "disabled": get_security_params().rate_limit_disabled,
+    }
 
 
 def resolve_rate_limit_value(request: Request, bucket: str) -> str:
@@ -116,6 +136,10 @@ class RedisRateLimiter:
         self._redis_client = redis_client
         self.prefix = prefix
         self.window_size = window_size
+        self._member_counter = itertools.count()
+
+    def _next_member(self) -> int:
+        return next(self._member_counter)
 
     def _get_key(self, identifier: str) -> str:
         return f"{self.prefix}{identifier}"
@@ -142,7 +166,12 @@ class RedisRateLimiter:
 
         if remaining_count < limit:
             async with redis_client.pipeline(transaction=True) as pipe:
-                pipe.zadd(key, {str(current_time): current_time})
+                # Member must be unique: a sorted set keys on its member, so two
+                # requests landing on the same time.time() value would write the
+                # same member and count as one — silently widening the limit
+                # under exactly the burst load this limiter exists to bound.
+                # The score stays the timestamp, which is what expiry reads.
+                pipe.zadd(key, {f"{current_time}:{self._next_member()}": current_time})
                 pipe.expire(key, window_size)
                 await pipe.execute()
 
@@ -209,20 +238,51 @@ class RateLimitManager:
             )
         self._use_redis = use_redis
         self._memory_windows: dict[str, list[float]] = {}
-        self._memory_lock_obj: asyncio.Lock | None = None
-        self._memory_lock_loop: asyncio.AbstractEventLoop | None = None
+        # Guards the window dict. A threading lock, not an asyncio one: the
+        # critical section below holds no await, and an asyncio.Lock is bound to
+        # the loop that created it — recreating it per loop (the old behaviour)
+        # left two loops mutating the shared dict concurrently. A threading.Lock
+        # is correct across loops and threads, which is what uvicorn's
+        # ``--reload`` and TestClient call paths actually run.
+        self._memory_lock: threading.Lock = threading.Lock()
+        #: Longest window this backend has served; the sweep horizon for keys
+        #: that have gone quiet (Redis gets a TTL per key, memory needs a sweep).
+        self._memory_horizon: float = 0.0
+        self._memory_next_cleanup: float = 0.0
+
+    def _sweep_expired_windows(self, current_time: float) -> None:
+        """Drop identifiers that have gone quiet for the longest window in use.
+
+        Called with the window lock held. Without this the dict keeps an entry
+        for every client IP the process has ever served — the sliding-window
+        lists shrink to empty, but the keys themselves are never revisited
+        unless that client comes back.
+        """
+        if current_time < self._memory_next_cleanup:
+            return
+        self._memory_next_cleanup = current_time + _WINDOW_CLEANUP_INTERVAL_SECONDS
+        horizon = self._memory_horizon
+        self._memory_windows = {
+            key: window
+            for key, window in self._memory_windows.items()
+            if window and current_time - window[-1] < horizon
+        }
 
     async def check_rate_limit(
         self,
         identifier: str,
         limit: int,
         window_size: int,
+        *,
+        bucket: str | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Check (and record) one request against a sliding-window limit.
 
         Public entry point for middleware-style callers that manage their own
-        identifiers (e.g. per-API-key limits), as opposed to the decorator API
-        which manages route buckets by client IP.
+        identifiers (e.g. per-API-key limits), as opposed to the decorator API,
+        which keys route buckets by client IP. ``bucket`` namespaces the counter
+        so two buckets watching the same identifier stay independent; callers
+        that want one deliberately shared window leave it unset.
         """
         from llm_proxy.api.middleware.security import get_security_params
 
@@ -230,10 +290,12 @@ class RateLimitManager:
         if security.rate_limit_disabled:
             return False, {"remaining": limit, "reset_time": 0, "limit": limit}
 
+        key = _window_key(bucket, identifier)
+
         if self._use_redis:
             try:
                 redis_limiter = get_redis_rate_limiter()
-                return await redis_limiter.is_rate_limited(identifier, limit, window_size)
+                return await redis_limiter.is_rate_limited(key, limit, window_size)
             except Exception as e:
                 logger.error(f"Redis rate limiter failed: {e}", exc_info=True)
                 if security.redis_rate_limit_fail_closed:
@@ -248,28 +310,20 @@ class RateLimitManager:
                     return False, {"remaining": limit, "reset_time": 0, "limit": limit}
 
         # In-memory sliding window rate limiter.
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        # Thread-safe lazy initialisation: use a threading lock to prevent
-        # two coroutines from creating separate lock objects on different
-        # event loops when they both observe _memory_lock_obj is None.
-        if self._memory_lock_obj is None or self._memory_lock_loop != loop:
-            self._memory_lock_obj = asyncio.Lock()
-            self._memory_lock_loop = loop
-
         current_time = time.time()
-        async with self._memory_lock_obj:
-            window = self._memory_windows.get(identifier, [])
-            # Drop timestamps outside the current window.
-            window = [t for t in window if current_time - t < window_size]
+
+        with self._memory_lock:
+            self._memory_horizon = max(self._memory_horizon, float(window_size))
+            self._sweep_expired_windows(current_time)
+
+            window = [
+                t for t in self._memory_windows.get(key, []) if current_time - t < window_size
+            ]
             request_count = len(window)
 
             if request_count < limit:
                 window.append(current_time)
-                self._memory_windows[identifier] = window
+                self._memory_windows[key] = window
                 remaining = limit - request_count - 1
                 reset_time = current_time + window_size
                 return False, {
@@ -278,17 +332,25 @@ class RateLimitManager:
                     "limit": limit,
                 }
 
-            # Clean up idle identifiers to avoid unbounded memory growth.
-            if not window:
-                self._memory_windows.pop(identifier, None)
-
-            oldest_timestamp = window[0] if window else current_time
-            reset_time = oldest_timestamp + window_size
+            # Denied: the window is full, so the first rejection's reset time is
+            # when its oldest timestamp expires. window[0] is the oldest because
+            # timestamps are appended in arrival order.
+            reset_time = (window[0] if window else current_time) + window_size
             return True, {
                 "remaining": 0,
                 "reset_time": reset_time,
                 "limit": limit,
             }
+
+    @property
+    def backend(self) -> str:
+        """Which store holds the windows: ``"redis"`` (shared) or ``"memory"``.
+
+        The memory backend keeps one window per process, so a deployment of N
+        workers enforces N times the configured limit — the number only means
+        what it says with Redis-backed rate limiting enabled.
+        """
+        return "redis" if self._use_redis else "memory"
 
     def create_decorator(
         self,
@@ -306,9 +368,20 @@ class RateLimitManager:
             raise ValueError(f"Unknown rate limit bucket: {limit_value}")
 
         def decorator(func: Callable) -> Callable:
+            # Resolved once, here: a decorated route's signature never changes.
+            # Reading it per request only taxed the hot path, and caching it by
+            # id(func) was worse — CPython hands a freed object's id to the next
+            # one, so a route belonging to a discarded app (any test client, or
+            # a reloaded module) could inherit a stale entry and look for its
+            # ``request`` parameter at the wrong position.
+            request_idx: int | None = None
+            for index, param_name in enumerate(inspect.signature(func).parameters):
+                if param_name == "request":
+                    request_idx = index
+                    break
+
             @functools.wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                params, request_idx = await _get_cached_signature(func)
                 request: Request | None = None
 
                 if "request" in kwargs:
@@ -331,6 +404,7 @@ class RateLimitManager:
                     identifier=identifier,
                     limit=eff_limit,
                     window_size=eff_window,
+                    bucket=limit_value,
                 )
 
                 if is_limited:
@@ -339,13 +413,16 @@ class RateLimitManager:
                         (),
                         {
                             "limit": eff_value,
-                            "scope": identifier,
+                            "scope": _window_key(limit_value, identifier),
                             "is_exempt": False,
                             "error_message": None,
                         },
                     )()
 
-                    retry_after = int(metadata["reset_time"] - time.time())
+                    # At least one second: a sub-second remainder would truncate
+                    # to 0, and the client would read "retry immediately" from a
+                    # response that just refused it.
+                    retry_after = max(1, int(metadata["reset_time"] - time.time()))
                     exc = CustomRateLimitExceeded(
                         limit_obj,
                         retry_after=retry_after,
