@@ -21,81 +21,89 @@ class FinishReason(StrEnum):
 # MALFORMED_FUNCTION_CALL, IMAGE_SAFETY, IMAGE_PROHIBITED_CONTENT, IMAGE_OTHER,
 # NO_IMAGE, IMAGE_RECITATION, UNEXPECTED_TOOL_CALL, TOO_MANY_TOOL_CALLS,
 # MISSING_THOUGHT_SIGNATURE, MALFORMED_RESPONSE, ESCALATION.
-GEMINI_TO_OPENAI: dict[str, str] = {
-    "STOP": "stop",
-    "MAX_TOKENS": "length",
-    "SAFETY": "content_filter",
-    "RECITATION": "content_filter",
-    "LANGUAGE": "content_filter",
-    "MALFORMED_FUNCTION_CALL": "tool_calls",
-    "IMAGE_SAFETY": "content_filter",
-    "IMAGE_PROHIBITED_CONTENT": "content_filter",
-    "IMAGE_OTHER": "stop",
-    "IMAGE_RECITATION": "content_filter",
-    "NO_IMAGE": "content_filter",
-    "UNEXPECTED_TOOL_CALL": "tool_calls",
-    "TOO_MANY_TOOL_CALLS": "tool_calls",
-    "MISSING_THOUGHT_SIGNATURE": "stop",
-    "MALFORMED_RESPONSE": "stop",
-    "OTHER": "stop",
-    "BLOCKLIST": "content_filter",
-    "PROHIBITED_CONTENT": "content_filter",
-    "SPII": "content_filter",
-    "ESCALATION": "content_filter",
-    "FINISH_REASON_UNSPECIFIED": "stop",
-}
+GEMINI_TO_OPENAI: frozendict[str, str] = frozendict(
+    {
+        "STOP": "stop",
+        "MAX_TOKENS": "length",
+        "SAFETY": "content_filter",
+        "RECITATION": "content_filter",
+        "LANGUAGE": "content_filter",
+        "MALFORMED_FUNCTION_CALL": "tool_calls",
+        "IMAGE_SAFETY": "content_filter",
+        "IMAGE_PROHIBITED_CONTENT": "content_filter",
+        "IMAGE_OTHER": "stop",
+        "IMAGE_RECITATION": "content_filter",
+        "NO_IMAGE": "content_filter",
+        "UNEXPECTED_TOOL_CALL": "tool_calls",
+        "TOO_MANY_TOOL_CALLS": "tool_calls",
+        "MISSING_THOUGHT_SIGNATURE": "stop",
+        "MALFORMED_RESPONSE": "stop",
+        "OTHER": "stop",
+        "BLOCKLIST": "content_filter",
+        "PROHIBITED_CONTENT": "content_filter",
+        "SPII": "content_filter",
+        "ESCALATION": "content_filter",
+        "FINISH_REASON_UNSPECIFIED": "stop",
+    }
+)
 
 # Anthropic → OpenAI mapping
-ANTHROPIC_TO_OPENAI: dict[str, str] = {
-    "end_turn": "stop",
-    "max_tokens": "length",
-    "tool_use": "tool_calls",
-    "stop_sequence": "stop_sequence",
-    "pause_turn": "stop",
-    "refusal": "content_filter",
-    "model_context_window_exceeded": "context_length",
-    # Beta compaction turns carry no OpenAI equivalent; preserve the value so
-    # the Anthropic client still sees ``stop_reason: "compaction"``.
-    "compaction": "compaction",
-}
+ANTHROPIC_TO_OPENAI: frozendict[str, str] = frozendict(
+    {
+        "end_turn": "stop",
+        "max_tokens": "length",
+        "tool_use": "tool_calls",
+        "stop_sequence": "stop_sequence",
+        "pause_turn": "stop",
+        "refusal": "content_filter",
+        "model_context_window_exceeded": "context_length",
+        # Beta compaction turns carry no OpenAI equivalent; preserve the value so
+        # the Anthropic client still sees ``stop_reason: "compaction"``.
+        "compaction": "compaction",
+    }
+)
 
 # OpenAI → Anthropic mapping
-OPENAI_TO_ANTHROPIC: dict[str, str] = {
-    "stop": "end_turn",
-    "length": "max_tokens",
-    "tool_calls": "tool_use",
-    "content_filter": "refusal",
-    "pause_turn": "pause_turn",
-    "refusal": "refusal",
-    "context_length": "model_context_window_exceeded",
-    "stop_sequence": "stop_sequence",
-    "compaction": "compaction",
-}
+OPENAI_TO_ANTHROPIC: frozendict[str, str] = frozendict(
+    {
+        "stop": "end_turn",
+        "length": "max_tokens",
+        "tool_calls": "tool_use",
+        "content_filter": "refusal",
+        "pause_turn": "pause_turn",
+        "refusal": "refusal",
+        "context_length": "model_context_window_exceeded",
+        "stop_sequence": "stop_sequence",
+        "compaction": "compaction",
+    }
+)
 
 # Gemini → Anthropic mapping
-GEMINI_TO_ANTHROPIC: dict[str, str] = {
-    "STOP": "end_turn",
-    "MAX_TOKENS": "max_tokens",
-    "SAFETY": "refusal",
-    "RECITATION": "refusal",
-    "LANGUAGE": "refusal",
-    "MALFORMED_FUNCTION_CALL": "tool_use",
-    "IMAGE_SAFETY": "refusal",
-    "IMAGE_PROHIBITED_CONTENT": "refusal",
-    "IMAGE_OTHER": "end_turn",
-    "IMAGE_RECITATION": "refusal",
-    "NO_IMAGE": "refusal",
-    "UNEXPECTED_TOOL_CALL": "tool_use",
-    "TOO_MANY_TOOL_CALLS": "tool_use",
-    "MISSING_THOUGHT_SIGNATURE": "end_turn",
-    "MALFORMED_RESPONSE": "end_turn",
-    "OTHER": "end_turn",
-    "BLOCKLIST": "refusal",
-    "PROHIBITED_CONTENT": "refusal",
-    "SPII": "refusal",
-    "ESCALATION": "refusal",
-    "FINISH_REASON_UNSPECIFIED": "end_turn",
-}
+GEMINI_TO_ANTHROPIC: frozendict[str, str] = frozendict(
+    {
+        "STOP": "end_turn",
+        "MAX_TOKENS": "max_tokens",
+        "SAFETY": "refusal",
+        "RECITATION": "refusal",
+        "LANGUAGE": "refusal",
+        "MALFORMED_FUNCTION_CALL": "tool_use",
+        "IMAGE_SAFETY": "refusal",
+        "IMAGE_PROHIBITED_CONTENT": "refusal",
+        "IMAGE_OTHER": "end_turn",
+        "IMAGE_RECITATION": "refusal",
+        "NO_IMAGE": "refusal",
+        "UNEXPECTED_TOOL_CALL": "tool_use",
+        "TOO_MANY_TOOL_CALLS": "tool_use",
+        "MISSING_THOUGHT_SIGNATURE": "end_turn",
+        "MALFORMED_RESPONSE": "end_turn",
+        "OTHER": "end_turn",
+        "BLOCKLIST": "refusal",
+        "PROHIBITED_CONTENT": "refusal",
+        "SPII": "refusal",
+        "ESCALATION": "refusal",
+        "FINISH_REASON_UNSPECIFIED": "end_turn",
+    }
+)
 
 
 def map_finish_reason(

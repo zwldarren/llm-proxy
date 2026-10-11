@@ -4,7 +4,7 @@ import re
 from secrets import token_hex
 from typing import Any
 
-import bcrypt
+lazy import bcrypt
 
 from llm_proxy.observability.logger import get_logger
 

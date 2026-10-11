@@ -2,9 +2,11 @@
 
 from typing import Any, cast
 
-import redis.asyncio as redis
-from redis.asyncio.connection import ConnectionPool
-from redis.exceptions import RedisError
+# Until first use these names are lazy proxies — do not isinstance()/introspect
+# them (e.g. the exception classes) before a redis call has resolved them.
+lazy import redis.asyncio as redis
+lazy from redis.asyncio.connection import ConnectionPool
+lazy from redis.exceptions import RedisError
 
 from llm_proxy.config.types.redis import RedisConfig
 from llm_proxy.core.exceptions import ConfigurationError

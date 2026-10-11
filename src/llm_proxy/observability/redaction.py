@@ -31,11 +31,12 @@ from typing import Any
 
 #: Stored in place of a body when the master switch is off. Distinct from the
 #: sampling sentinel so the UI never claims a body was "sampled out" when the
-#: operator simply disabled body logging.
-BODIES_DISABLED_MARKER: dict[str, Any] = {"_bodies_disabled": True}
+#: operator simply disabled body logging. Callers always copy it (`dict(...)`),
+#: so the shared constant can never be mutated.
+BODIES_DISABLED_MARKER: frozendict[str, Any] = frozendict({"_bodies_disabled": True})
 
 #: Stored in place of a body that lost the ``sampling_rate`` draw.
-SAMPLED_OUT_MARKER: dict[str, Any] = {"_sampled_out": True}
+SAMPLED_OUT_MARKER: frozendict[str, Any] = frozendict({"_sampled_out": True})
 
 #: ``log_metadata`` keys whose values carry user or upstream content. They are
 #: stripped whenever body logging is off: MCP tool arguments and results,

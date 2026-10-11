@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import jwt
+lazy import jwt
 
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.core.exceptions import ConfigurationError

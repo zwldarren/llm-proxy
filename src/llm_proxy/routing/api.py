@@ -69,18 +69,22 @@ from llm_proxy.routing.types import (
 
 # ─── Tier <-> complexity maps (inverse of _derive_tier boundaries) ───
 
-_TIER_ID_TO_COMPLEXITY = {0: 0.0, 1: 0.40, 2: 0.68, 3: 0.90}
-_TIER_ORDER = {Tier.SIMPLE: 0, Tier.MEDIUM: 1, Tier.COMPLEX: 2}
-_PRESSURE_RESCUE_NEXT_TIER = {
-    Tier.SIMPLE: Tier.MEDIUM,
-    Tier.MEDIUM: Tier.COMPLEX,
-    Tier.COMPLEX: Tier.COMPLEX,
-}
-_PUBLIC_TIER_COMPLEXITY = {
-    Tier.SIMPLE: 0.0,
-    Tier.MEDIUM: 0.40,
-    Tier.COMPLEX: 0.68,
-}
+_TIER_ID_TO_COMPLEXITY: frozendict[int, float] = frozendict({0: 0.0, 1: 0.40, 2: 0.68, 3: 0.90})
+_TIER_ORDER: frozendict[Tier, int] = frozendict({Tier.SIMPLE: 0, Tier.MEDIUM: 1, Tier.COMPLEX: 2})
+_PRESSURE_RESCUE_NEXT_TIER: frozendict[Tier, Tier] = frozendict(
+    {
+        Tier.SIMPLE: Tier.MEDIUM,
+        Tier.MEDIUM: Tier.COMPLEX,
+        Tier.COMPLEX: Tier.COMPLEX,
+    }
+)
+_PUBLIC_TIER_COMPLEXITY: frozendict[Tier, float] = frozendict(
+    {
+        Tier.SIMPLE: 0.0,
+        Tier.MEDIUM: 0.40,
+        Tier.COMPLEX: 0.68,
+    }
+)
 
 # The source's route() accepts max_output_tokens explicitly (default 4096).
 # Our route() signature derives it from features or falls back to this default.

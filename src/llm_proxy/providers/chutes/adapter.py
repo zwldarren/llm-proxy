@@ -15,6 +15,7 @@ and image generation endpoints. This adapter routes:
 
 import base64
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from llm_proxy.core.adapter import register_adapter
@@ -30,23 +31,33 @@ from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
 
 logger = get_logger(__name__)
 
-_EMBEDDING_ENDPOINTS = {
-    "Qwen/Qwen3-Embedding-8B": "https://chutes-qwen-qwen3-embedding-8b.chutes.ai/v1/embeddings",
-    "Qwen/Qwen3-Embedding-0.6B": "https://chutes-qwen-qwen3-embedding-0-6b.chutes.ai/v1/embeddings",
-}
+_EMBEDDING_ENDPOINTS: frozendict[str, str] = frozendict(
+    {
+        "Qwen/Qwen3-Embedding-8B": "https://chutes-qwen-qwen3-embedding-8b.chutes.ai/v1/embeddings",
+        "Qwen/Qwen3-Embedding-0.6B": "https://chutes-qwen-qwen3-embedding-0-6b.chutes.ai/v1/embeddings",
+    }
+)
 
-_IMAGE_MODEL_CONFIGS: dict[str, dict[str, Any]] = {
-    "z-image-turbo": {
-        "url_pattern": "model_in_url",
-    },
-    "Qwen-Image-2512": {
-        "url_pattern": "model_in_body",
-        "default_params": {
-            "guidance_scale": 7.5,
-            "num_inference_steps": 50,
-        },
-    },
-}
+_IMAGE_MODEL_CONFIGS: frozendict[str, frozendict[str, Any]] = frozendict(
+    {
+        "z-image-turbo": frozendict(
+            {
+                "url_pattern": "model_in_url",
+            }
+        ),
+        "Qwen-Image-2512": frozendict(
+            {
+                "url_pattern": "model_in_body",
+                "default_params": frozendict(
+                    {
+                        "guidance_scale": 7.5,
+                        "num_inference_steps": 50,
+                    }
+                ),
+            }
+        ),
+    }
+)
 
 
 @register_adapter("chutes")
@@ -83,12 +94,12 @@ class ChutesAdapter(OpenAICompatibleBase):
             body["model"] = self._normalize_model_name(body["model"])
         return body
 
-    def _get_image_model_config(self, model: str) -> dict[str, Any]:
+    def _get_image_model_config(self, model: str) -> Mapping[str, Any]:
         normalized = self._normalize_model_name(model)
         # Return known config or default to model_in_body pattern
         return _IMAGE_MODEL_CONFIGS.get(normalized, {"url_pattern": "model_in_body"})
 
-    def _resolve_image_url(self, model: str, config: dict[str, Any]) -> str:
+    def _resolve_image_url(self, model: str, config: Mapping[str, Any]) -> str:
         if self._endpoint_base_urls and "image_generation" in self._endpoint_base_urls:
             return self._resolve_endpoint_url("image_generation", "", model=model)
 
@@ -102,7 +113,7 @@ class ChutesAdapter(OpenAICompatibleBase):
             return "https://image.chutes.ai/generate"
 
     def _build_chutes_image_request_body(
-        self, request: InternalImageRequest, config: dict[str, Any]
+        self, request: InternalImageRequest, config: Mapping[str, Any]
     ) -> dict[str, Any]:
         """Build raw chutes image body without extra merge (for testing/legacy).
 

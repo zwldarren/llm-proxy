@@ -15,7 +15,7 @@ from typing import Any
 # Anthropic blocks, Responses-API items). Parts with a ``text`` string but a
 # missing/unknown type are accepted too; non-text parts (images, audio,
 # tool calls) contribute nothing so the derived key stays stable across turns.
-_TEXT_PART_TYPES = {"text", "input_text", "output_text"}
+_TEXT_PART_TYPES = frozenset({"text", "input_text", "output_text"})
 
 # Claude Code's ``metadata.user_id`` embeds the session id after this marker
 # (``user_<id>_account_<account>_session_<session>``).

@@ -22,8 +22,10 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from websockets import ConnectionClosed
-from websockets.asyncio.client import ClientConnection
+# ClientConnection appears only in annotations here, so the lazy proxy is never
+# realized unless a Realtime session opens an upstream connection.
+lazy from websockets import ConnectionClosed
+lazy from websockets.asyncio.client import ClientConnection
 
 from llm_proxy.core.ws_common import (
     WS_MAX_CONNECTION_SECONDS,

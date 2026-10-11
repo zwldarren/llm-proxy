@@ -294,12 +294,14 @@ for record in records("lbv2_easy"):
 #     hold one constraint)
 #   short conversations (3–5 turns), bounded axis → boundary
 multichallenge = rows("multichallenge_a") + rows("multichallenge_b")
-tier_by_axis_long = {
-    "INFERENCE_MEMORY": "COMPLEX",
-    "SELF_COHERENCE": "COMPLEX",
-    "RELIABLE_VERSION_EDITING": "COMPLEX",
-    "INSTRUCTION_RETENTION": "MEDIUM",
-}
+tier_by_axis_long: frozendict[str, str] = frozendict(
+    {
+        "INFERENCE_MEMORY": "COMPLEX",
+        "SELF_COHERENCE": "COMPLEX",
+        "RELIABLE_VERSION_EDITING": "COMPLEX",
+        "INSTRUCTION_RETENTION": "MEDIUM",
+    }
+)
 taken_followup: collections.Counter[str] = collections.Counter()
 for record in multichallenge:
     axis = record["AXIS"]

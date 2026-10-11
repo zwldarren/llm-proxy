@@ -6,14 +6,19 @@ building for failed/cancelled interactions. Used by both the response parser
 and the streaming converter so the two paths stay consistent.
 """
 
+from collections.abc import Mapping
 from typing import Any, Final
 
-STATUS_TO_FINISH_REASON: Final[dict[str, str]] = {
-    "completed": "stop",
-    "requires_action": "tool_calls",
-    "incomplete": "length",
-    "budget_exceeded": "length",
-}
+# Looked up through ``Mapping`` — the ``frozendict`` stub's parameterized ``get``
+# overloads reject the ``Any | None`` status read at the call sites (ty).
+STATUS_TO_FINISH_REASON: Final[Mapping[str, str]] = frozendict(
+    {
+        "completed": "stop",
+        "requires_action": "tool_calls",
+        "incomplete": "length",
+        "budget_exceeded": "length",
+    }
+)
 
 # Statuses treated as terminal errors, propagated to the client.
 FAILED_STATUSES: Final[frozenset[str]] = frozenset({"failed", "cancelled"})

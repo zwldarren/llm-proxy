@@ -5,11 +5,14 @@ configuration data like provider configurations and model mappings.
 """
 
 import asyncio
+from functools import cache
 from typing import Any
 
 import orjson
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import TimeoutError as RedisTimeoutError
+
+# Until first use these names are lazy proxies — not redis exception classes.
+lazy from redis.exceptions import ConnectionError as RedisConnectionError
+lazy from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from llm_proxy.config.types.model import ModelConfig
 from llm_proxy.config.types.provider import ProviderConfig
@@ -21,13 +24,17 @@ from llm_proxy.observability.logger import get_logger
 logger = get_logger(__name__)
 
 
-_CONNECTION_ERRORS = (
-    ConnectionError,
-    TimeoutError,
-    RedisConnectionError,
-    RedisTimeoutError,
-    OSError,
-)
+@cache
+def _connection_errors() -> tuple[type[BaseException], ...]:
+    """The retryable error classes, with the redis ones resolved on first use."""
+    return (
+        ConnectionError,
+        TimeoutError,
+        RedisConnectionError,
+        RedisTimeoutError,
+        OSError,
+    )
+
 
 #: TTL for the shared configuration generation token. The token is a change
 #: signal, not data, so it only needs to outlive the slowest worker refresh;
@@ -36,7 +43,7 @@ _CONFIG_GENERATION_TTL = 7 * 24 * 3600
 
 
 def _is_connection_error(exc: Exception) -> bool:
-    if isinstance(exc, _CONNECTION_ERRORS):
+    if isinstance(exc, _connection_errors()):
         return True
     if exc.__cause__ is not None and isinstance(exc.__cause__, Exception):
         return _is_connection_error(exc.__cause__)

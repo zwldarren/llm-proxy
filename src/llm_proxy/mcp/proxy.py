@@ -4,9 +4,9 @@ import asyncio
 import time
 from typing import Any
 
-from mcp.server import Server, ServerRequestContext
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.types import (
+lazy from mcp.server import Server, ServerRequestContext
+lazy from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+lazy from mcp.types import (
     CallToolRequestParams,
     CallToolResult,
     GetPromptRequestParams,

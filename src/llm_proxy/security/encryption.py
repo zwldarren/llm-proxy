@@ -19,7 +19,7 @@ Usage:
 import base64
 import hashlib
 
-from cryptography.fernet import Fernet, InvalidToken
+lazy from cryptography.fernet import Fernet, InvalidToken
 
 from llm_proxy.core.exceptions import EncryptionError
 from llm_proxy.observability.logger import get_logger

@@ -47,7 +47,7 @@ SUBSETS = ("short", "long", "followup", "tool-context", "boundary")
 #: a cheaper band than it needs) is the direction that costs quality, and the
 #: direction every mismatch in the reference benchmark went; over-tiering is
 #: merely expensive, so the two are never averaged together.
-_TIER_RANK = {Tier.SIMPLE: 0, Tier.MEDIUM: 1, Tier.COMPLEX: 2}
+_TIER_RANK: frozendict[Tier, int] = frozendict({Tier.SIMPLE: 0, Tier.MEDIUM: 1, Tier.COMPLEX: 2})
 
 DEFAULT_CASES_PATH = Path(__file__).resolve().parent / "cases.jsonl"
 

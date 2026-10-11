@@ -74,14 +74,16 @@ _FOREIGN_SIGNATURE_ORIGINS = ("gemini", "openai")
 # shape (plus ``caller`` on the web_search/web_fetch pair). Kept lossless
 # on parse so multi-turn histories with web_search / web_fetch / code
 # execution results survive the internal round-trip.
-_SERVER_TOOL_RESULT_BLOCK_TYPES: dict[str, type] = {
-    "web_search_tool_result": WebSearchToolResultBlock,
-    "web_fetch_tool_result": WebFetchToolResultBlock,
-    "code_execution_tool_result": CodeExecutionToolResultBlock,
-    "bash_code_execution_tool_result": BashCodeExecutionToolResultBlock,
-    "text_editor_code_execution_tool_result": TextEditorCodeExecutionToolResultBlock,
-    "tool_search_tool_result": ToolSearchToolResultBlock,
-}
+_SERVER_TOOL_RESULT_BLOCK_TYPES: frozendict[str, type] = frozendict(
+    {
+        "web_search_tool_result": WebSearchToolResultBlock,
+        "web_fetch_tool_result": WebFetchToolResultBlock,
+        "code_execution_tool_result": CodeExecutionToolResultBlock,
+        "bash_code_execution_tool_result": BashCodeExecutionToolResultBlock,
+        "text_editor_code_execution_tool_result": TextEditorCodeExecutionToolResultBlock,
+        "tool_search_tool_result": ToolSearchToolResultBlock,
+    }
+)
 
 #: Media types Anthropic accepts in an ``image`` block. Anything else (e.g. SVG)
 #: has to degrade rather than be forwarded.
@@ -93,11 +95,13 @@ _ANTHROPIC_IMAGE_MEDIA_TYPES: frozenset[str] = frozenset(
 #: OpenAI-compatible clients occasionally emit ``image/jpg`` (or the old
 #: ``image/pjpeg``) instead of ``image/jpeg``; resolving the alias here keeps an
 #: otherwise-valid image from being rejected upstream.
-_ANTHROPIC_IMAGE_MEDIA_TYPE_ALIASES: dict[str, str] = {
-    "image/jpg": "image/jpeg",
-    "image/pjpeg": "image/jpeg",
-    "image/x-png": "image/png",
-}
+_ANTHROPIC_IMAGE_MEDIA_TYPE_ALIASES: frozendict[str, str] = frozendict(
+    {
+        "image/jpg": "image/jpeg",
+        "image/pjpeg": "image/jpeg",
+        "image/x-png": "image/png",
+    }
+)
 
 
 def _normalize_image_media_type(media_type: str | None) -> str | None:
@@ -112,33 +116,35 @@ def _normalize_image_media_type(media_type: str | None) -> str | None:
 #: so a Responses ``input_file`` that carries only a URL/file_id + filename is
 #: classified here to pick between ``image`` and ``document`` and, for inline
 #: data, between base64-PDF and plain text.
-_FILE_EXTENSION_MEDIA_TYPES: dict[str, str] = {
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    # Plain-text documents (Anthropic documents ``.txt``/``.csv``/``.md`` as
-    # ``text/plain``; other text formats are decoded the same way).
-    ".txt": "text/plain",
-    ".text": "text/plain",
-    ".md": "text/plain",
-    ".markdown": "text/plain",
-    ".csv": "text/plain",
-    ".tsv": "text/plain",
-    ".json": "text/plain",
-    ".jsonl": "text/plain",
-    ".log": "text/plain",
-    ".yaml": "text/plain",
-    ".yml": "text/plain",
-    ".xml": "text/plain",
-    ".toml": "text/plain",
-    ".ini": "text/plain",
-    ".cfg": "text/plain",
-    ".rst": "text/plain",
-    ".tex": "text/plain",
-}
+_FILE_EXTENSION_MEDIA_TYPES: frozendict[str, str] = frozendict(
+    {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        # Plain-text documents (Anthropic documents ``.txt``/``.csv``/``.md`` as
+        # ``text/plain``; other text formats are decoded the same way).
+        ".txt": "text/plain",
+        ".text": "text/plain",
+        ".md": "text/plain",
+        ".markdown": "text/plain",
+        ".csv": "text/plain",
+        ".tsv": "text/plain",
+        ".json": "text/plain",
+        ".jsonl": "text/plain",
+        ".log": "text/plain",
+        ".yaml": "text/plain",
+        ".yml": "text/plain",
+        ".xml": "text/plain",
+        ".toml": "text/plain",
+        ".ini": "text/plain",
+        ".cfg": "text/plain",
+        ".rst": "text/plain",
+        ".tex": "text/plain",
+    }
+)
 
 
 class AnthropicContentMixin:

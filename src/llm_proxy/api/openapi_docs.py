@@ -16,8 +16,6 @@ Two guarantees are enforced here rather than documented by convention:
   an undocumented route.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import sys
@@ -53,10 +51,12 @@ HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "opti
 #: Endpoints registered with ``request_model=None`` whose body a Pydantic model
 #: still validates inside ``parse_http_request``. Mapping them here keeps their
 #: request schema generated from code instead of hand-written.
-MODEL_BACKED_REQUEST_BODIES: dict[tuple[str, str], type[BaseModel]] = {
-    ("/v1/images/generations", "post"): ImageGenerationRequestSchema,
-    ("/v1/images/edits", "post"): ImageEditRequestSchema,
-}
+MODEL_BACKED_REQUEST_BODIES: frozendict[tuple[str, str], type[BaseModel]] = frozendict(
+    {
+        ("/v1/images/generations", "post"): ImageGenerationRequestSchema,
+        ("/v1/images/edits", "post"): ImageEditRequestSchema,
+    }
+)
 
 #: Error responses added to every operation when the endpoint did not declare
 #: them. ``422`` is contributed by the generated spec for model-validated bodies.

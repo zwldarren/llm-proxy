@@ -20,8 +20,6 @@ Extraction only: nothing here emits a client-facing shape, and nothing here
 estimates. See ADR-0025.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -628,15 +626,17 @@ class DialectAdapter:
     turn_dependent_fields: tuple[str, ...] = ()
 
 
-_ADAPTERS: dict[str, DialectAdapter] = {
-    "chat": DialectAdapter(_parse_chat),
-    "responses": DialectAdapter(_parse_responses, _count_responses_events),
-    "anthropic": DialectAdapter(_parse_anthropic),
-    "realtime": DialectAdapter(_parse_realtime),
-    "ollama": DialectAdapter(_parse_ollama),
-    "gemini": DialectAdapter(_parse_gemini, turn_dependent_fields=("input_tokens",)),
-    "audio": DialectAdapter(_parse_audio),
-}
+_ADAPTERS: frozendict[str, DialectAdapter] = frozendict(
+    {
+        "chat": DialectAdapter(_parse_chat),
+        "responses": DialectAdapter(_parse_responses, _count_responses_events),
+        "anthropic": DialectAdapter(_parse_anthropic),
+        "realtime": DialectAdapter(_parse_realtime),
+        "ollama": DialectAdapter(_parse_ollama),
+        "gemini": DialectAdapter(_parse_gemini, turn_dependent_fields=("input_tokens",)),
+        "audio": DialectAdapter(_parse_audio),
+    }
+)
 
 
 def parse_usage(

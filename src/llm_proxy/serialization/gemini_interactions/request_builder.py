@@ -65,13 +65,15 @@ EXTRA_ALLOWED_KEYS = frozenset(
 
 # OpenAI service_tier values -> Interactions service_tier. "auto" means the
 # provider default (field omitted); unknown values are warn-and-dropped.
-_SERVICE_TIER_MAP = {
-    "auto": None,
-    "default": "standard",
-    "standard": "standard",
-    "flex": "flex",
-    "priority": "priority",
-}
+_SERVICE_TIER_MAP: frozendict[str, str | None] = frozendict(
+    {
+        "auto": None,
+        "default": "standard",
+        "standard": "standard",
+        "flex": "flex",
+        "priority": "priority",
+    }
+)
 
 # generateContent-only parameters the Interactions API does not support.
 # Warnings are logged and the values ignored (need them -> stay on the

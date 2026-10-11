@@ -29,8 +29,6 @@ property of the consultation, not of the caller: a shadow consultation records a
 verdict and its cost, and :attr:`JudgeConsultation.owns_tier` stays false.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 

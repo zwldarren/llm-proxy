@@ -31,7 +31,7 @@ An adapter inherits one of the two bridge mixins, never both: each defines
 win.
 """
 
-from typing import Any
+from typing import Any, disjoint_base
 
 from llm_proxy.models.decisions import (
     InternalDecisionRequest,
@@ -87,7 +87,17 @@ class DecisionsCapabilityMixin:
         return result
 
 
+@disjoint_base
 class DecisionsOverSystemOneMixin:
+    """Mixin for adapters whose upstream serves System One, not Decisions.
+
+    Declared a disjoint base (PEP 800): an adapter inherits exactly one of the
+    two bridge mixins, and combining this one with
+    :class:`SystemOneOverDecisionsMixin` would silently shadow ``decisions()``
+    / ``systemone()`` by MRO order. The type checker now rejects that shape
+    instead of leaving it to this docstring.
+    """
+
     """Serve ``/v1/decisions`` on an adapter that speaks System One.
 
     Pair with ``SystemOneCapabilityMixin``: the bridge reuses its transport (body
@@ -108,7 +118,14 @@ class DecisionsOverSystemOneMixin:
         return systemone_to_decisions_response(response, request)
 
 
+@disjoint_base
 class SystemOneOverDecisionsMixin:
+    """Mixin for adapters that serve System One traffic over a Decisions upstream.
+
+    Disjoint with :class:`DecisionsOverSystemOneMixin` for the reason given
+    there: the two bridges define the same methods in opposite directions.
+    """
+
     """Serve ``/v1/systemone`` on an adapter that speaks Decisions.
 
     Pair with ``DecisionsCapabilityMixin``, which supplies ``decisions()``,

@@ -21,6 +21,7 @@ so a compressed form-encoded body is still converted.
 """
 
 import zlib
+from collections.abc import Callable
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -127,14 +128,16 @@ def _decode_zstd(data: bytes, max_output: int) -> bytes:
     return out
 
 
-_DECODERS = {
-    "gzip": _decode_gzip,
-    "x-gzip": _decode_gzip,
-    "deflate": _decode_deflate,
-    "br": _decode_brotli,
-    "zstd": _decode_zstd,
-    "zst": _decode_zstd,
-}
+_DECODERS: frozendict[str, Callable[[bytes, int], bytes]] = frozendict(
+    {
+        "gzip": _decode_gzip,
+        "x-gzip": _decode_gzip,
+        "deflate": _decode_deflate,
+        "br": _decode_brotli,
+        "zstd": _decode_zstd,
+        "zst": _decode_zstd,
+    }
+)
 
 
 def _error_response(status: int, message: str, type_: str, code: str) -> JSONResponse:

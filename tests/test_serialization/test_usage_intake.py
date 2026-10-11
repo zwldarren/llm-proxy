@@ -1,7 +1,5 @@
 """Usage intake: one adapter per wire shape, one accumulator per stream (ADR-0025)."""
 
-from __future__ import annotations
-
 import pytest
 
 from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage

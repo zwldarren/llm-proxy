@@ -24,7 +24,7 @@ router = APIRouter(
 
 # Providers that don't require an API key for listing models.
 # vLLM and SGLang serve /v1/models unauthenticated unless started with --api-key.
-_NO_AUTH_PROVIDERS: set[str] = {"ollama", "vllm", "sglang"}
+_NO_AUTH_PROVIDERS: frozenset[str] = frozenset({"ollama", "vllm", "sglang"})
 
 
 @router.get("", response_model=ProviderModelsResponse)

@@ -60,7 +60,7 @@ def estimate_tokens(text: str) -> int:
 
 # ─── Structural Features ───
 
-_ENUM_CHARS = set(",;，；、：:·•–—،؛")
+_ENUM_CHARS = frozenset(",;，；、：:·•–—،؛")
 
 
 def _is_single_question(text: str) -> bool:
@@ -101,7 +101,7 @@ def score_normalized_length(text: str, max_tokens: int = 2000) -> DimensionScore
     return DimensionScore("normalized_length", score, signal)
 
 
-_SENTENCE_ENDERS = set(".。?？!！")
+_SENTENCE_ENDERS = frozenset(".。?？!！")
 
 
 def score_sentence_count(text: str) -> DimensionScore:
@@ -116,7 +116,7 @@ def score_sentence_count(text: str) -> DimensionScore:
     return DimensionScore("sentence_count", min(1.0, count * 0.12), f"{count} sentences")
 
 
-_CODE_CHARS = set("{}[]();")
+_CODE_CHARS = frozenset("{}[]();")
 
 
 def score_code_markers(text: str) -> DimensionScore:

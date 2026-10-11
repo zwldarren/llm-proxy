@@ -6,8 +6,6 @@ match the routes the app actually registers, alias/admin routes must never leak
 in, and the committed artifact must equal a fresh regeneration.
 """
 
-from __future__ import annotations
-
 import json
 from functools import lru_cache
 from typing import Any

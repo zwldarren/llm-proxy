@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-import tiktoken
+lazy import tiktoken
 
 from llm_proxy.core.constants import TOKEN_ENCODING_CACHE_SIZE
 from llm_proxy.models.types import Usage

@@ -676,93 +676,95 @@ class _ChatFileTarget:
     no_file_with_media: bool = False
 
 
-_CHAT_FILE_TARGETS: dict[str, _ChatFileTarget] = {
-    # OpenAI Chat Completions: PDF only, base64 or Files-API id, never a URL.
-    "openai": _ChatFileTarget(
-        style="nested_file",
-        url_field=None,
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=False,
-        accepts_images=False,
-    ),
-    # The generic OpenAI-compatible adapter speaks the same wire shape as OpenAI
-    # (its base URL is operator-supplied), so it inherits OpenAI's file rules.
-    "openai-compatible": _ChatFileTarget(
-        style="nested_file",
-        url_field=None,
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=False,
-        accepts_images=False,
-    ),
-    # OpenRouter's file parser accepts URLs in ``file_data`` and converts a
-    # broad set of document types server-side.
-    "openrouter": _ChatFileTarget(
-        style="nested_file",
-        url_field="file_data",
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=True,
-        accepts_images=True,
-    ),
-    # Zhipu / Z.AI GLM: nested ``file`` object with a dedicated ``file_url``, and
-    # a ``file`` part may not be mixed with an image/video part in one message.
-    "zai": _ChatFileTarget(
-        style="nested_file",
-        url_field="file_url",
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=True,
-        accepts_images=False,
-        no_file_with_media=True,
-    ),
-    "zai-coding": _ChatFileTarget(
-        style="nested_file",
-        url_field="file_url",
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=True,
-        accepts_images=False,
-        no_file_with_media=True,
-    ),
-    "zhipu": _ChatFileTarget(
-        style="nested_file",
-        url_field="file_url",
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=True,
-        accepts_images=False,
-        no_file_with_media=True,
-    ),
-    "zhipu-coding": _ChatFileTarget(
-        style="nested_file",
-        url_field="file_url",
-        file_id=True,
-        accepts_pdf=True,
-        accepts_other_documents=True,
-        accepts_images=False,
-        no_file_with_media=True,
-    ),
-    # Mistral: a flat ``document_url`` string (URL or base64 data URI).
-    "mistral": _ChatFileTarget(
-        style="document_url",
-        url_field="document_url",
-        file_id=False,
-        accepts_pdf=True,
-        accepts_other_documents=True,
-        accepts_images=False,
-    ),
-    # DeepSeek: top-level file part, images and Files-API ids only.
-    "deepseek": _ChatFileTarget(
-        style="top_level_file",
-        url_field=None,
-        file_id=True,
-        accepts_pdf=False,
-        accepts_other_documents=False,
-        accepts_images=True,
-    ),
-}
+_CHAT_FILE_TARGETS: frozendict[str, _ChatFileTarget] = frozendict(
+    {
+        # OpenAI Chat Completions: PDF only, base64 or Files-API id, never a URL.
+        "openai": _ChatFileTarget(
+            style="nested_file",
+            url_field=None,
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=False,
+            accepts_images=False,
+        ),
+        # The generic OpenAI-compatible adapter speaks the same wire shape as OpenAI
+        # (its base URL is operator-supplied), so it inherits OpenAI's file rules.
+        "openai-compatible": _ChatFileTarget(
+            style="nested_file",
+            url_field=None,
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=False,
+            accepts_images=False,
+        ),
+        # OpenRouter's file parser accepts URLs in ``file_data`` and converts a
+        # broad set of document types server-side.
+        "openrouter": _ChatFileTarget(
+            style="nested_file",
+            url_field="file_data",
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=True,
+            accepts_images=True,
+        ),
+        # Zhipu / Z.AI GLM: nested ``file`` object with a dedicated ``file_url``, and
+        # a ``file`` part may not be mixed with an image/video part in one message.
+        "zai": _ChatFileTarget(
+            style="nested_file",
+            url_field="file_url",
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=True,
+            accepts_images=False,
+            no_file_with_media=True,
+        ),
+        "zai-coding": _ChatFileTarget(
+            style="nested_file",
+            url_field="file_url",
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=True,
+            accepts_images=False,
+            no_file_with_media=True,
+        ),
+        "zhipu": _ChatFileTarget(
+            style="nested_file",
+            url_field="file_url",
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=True,
+            accepts_images=False,
+            no_file_with_media=True,
+        ),
+        "zhipu-coding": _ChatFileTarget(
+            style="nested_file",
+            url_field="file_url",
+            file_id=True,
+            accepts_pdf=True,
+            accepts_other_documents=True,
+            accepts_images=False,
+            no_file_with_media=True,
+        ),
+        # Mistral: a flat ``document_url`` string (URL or base64 data URI).
+        "mistral": _ChatFileTarget(
+            style="document_url",
+            url_field="document_url",
+            file_id=False,
+            accepts_pdf=True,
+            accepts_other_documents=True,
+            accepts_images=False,
+        ),
+        # DeepSeek: top-level file part, images and Files-API ids only.
+        "deepseek": _ChatFileTarget(
+            style="top_level_file",
+            url_field=None,
+            file_id=True,
+            accepts_pdf=False,
+            accepts_other_documents=False,
+            accepts_images=True,
+        ),
+    }
+)
 
 
 def _chat_target_forbids_file_with_media(provider_name: str) -> bool:

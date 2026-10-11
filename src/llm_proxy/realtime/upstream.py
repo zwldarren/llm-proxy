@@ -8,8 +8,10 @@ library. The relay itself lives in :mod:`llm_proxy.realtime.relay`.
 from collections.abc import Sequence
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from websockets.asyncio.client import ClientConnection, connect
-from websockets.typing import Subprotocol
+# Names below are lazy proxies until an upstream connection is opened (see
+# llm_proxy.realtime.relay).
+lazy from websockets.asyncio.client import ClientConnection, connect
+lazy from websockets.typing import Subprotocol
 
 from llm_proxy.config.types.provider import ProviderConfig
 from llm_proxy.core.ws_common import WS_MAX_MESSAGE_BYTES

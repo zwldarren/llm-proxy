@@ -12,8 +12,6 @@ part at all cannot be helped by inlining. Downloads are SSRF-protected inside
 :func:`~llm_proxy.http.client.download_image_as_base64`.
 """
 
-from __future__ import annotations
-
 import asyncio
 import dataclasses
 from typing import Any

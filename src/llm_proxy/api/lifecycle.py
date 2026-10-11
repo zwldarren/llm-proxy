@@ -9,10 +9,7 @@ from llm_proxy.config.manager import (
 )
 from llm_proxy.config.settings import get_settings
 from llm_proxy.config.types import ProxyConfig
-from llm_proxy.database import close_db, init_db
-from llm_proxy.database.redis_client import close_redis_client, get_redis_client
 from llm_proxy.http.client import ProviderHTTPClientManager
-from llm_proxy.mcp import MCPProxyManager
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.service import (
     start_background_log_writer,
@@ -20,8 +17,15 @@ from llm_proxy.observability.service import (
     stop_background_log_writer,
     stop_background_usage_writer,
 )
-from llm_proxy.security.encryption import init_encryption
 from llm_proxy.services import runtime_services
+
+# The function-level imports further down are deliberately not hoisted into
+# module-scope `lazy` imports: tests patch the source modules and rely on the
+# per-call late binding.
+lazy from llm_proxy.database import close_db, init_db
+lazy from llm_proxy.database.redis_client import close_redis_client, get_redis_client
+lazy from llm_proxy.mcp import MCPProxyManager
+lazy from llm_proxy.security.encryption import init_encryption
 
 logger = get_logger(__name__)
 

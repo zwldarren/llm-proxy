@@ -12,8 +12,6 @@ returns a consultation with an error and no verdict, which the decision layer
 treats exactly like an abstention.
 """
 
-from __future__ import annotations
-
 import logging
 import time
 from dataclasses import replace

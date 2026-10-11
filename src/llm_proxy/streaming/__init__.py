@@ -1,5 +1,14 @@
-# src/llm_proxy/streaming/__init__.py
-"""Unified streaming infrastructure for LLM Proxy."""
+"""Unified streaming infrastructure for LLM Proxy.
+
+Public names are PEP 810 lazy imports: each symbol defers its submodule until
+first use, so `import llm_proxy.streaming` on a cold path does not build the
+transformer, handler and SSE-builder modules.
+"""
+
+lazy from llm_proxy.streaming.events import StreamEvent
+lazy from llm_proxy.streaming.handler import StreamingHandler, StreamingResponseConfig
+lazy from llm_proxy.streaming.sse_builder import SSEBuilder, create_sse_error
+lazy from llm_proxy.streaming.transformer import PendingTerminalState, StreamingTransformer
 
 __all__ = [
     "PendingTerminalState",
@@ -10,22 +19,3 @@ __all__ = [
     "StreamingTransformer",
     "create_sse_error",
 ]
-
-_SUBMODULES = {
-    "PendingTerminalState": ".transformer",
-    "SSEBuilder": ".sse_builder",
-    "StreamEvent": ".events",
-    "StreamingHandler": ".handler",
-    "StreamingResponseConfig": ".handler",
-    "StreamingTransformer": ".transformer",
-    "create_sse_error": ".sse_builder",
-}
-
-
-def __getattr__(name: str):
-    if name in _SUBMODULES:
-        import importlib
-
-        mod = importlib.import_module(_SUBMODULES[name], __name__)
-        return getattr(mod, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

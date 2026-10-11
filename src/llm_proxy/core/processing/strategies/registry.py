@@ -13,17 +13,19 @@ from llm_proxy.core.processing.strategies.image import ImageEditStrategy, ImageS
 from llm_proxy.core.processing.strategies.systemone import SystemOneStrategy
 from llm_proxy.core.request_type import RequestType
 
-_STRATEGIES: dict[RequestType, type[ProcessingStrategy]] = {
-    RequestType.EMBEDDING: EmbeddingStrategy,
-    RequestType.IMAGE_GENERATION: ImageStrategy,
-    RequestType.IMAGE_EDIT: ImageEditStrategy,
-    RequestType.CHAT: ChatStrategy,
-    RequestType.SPEECH: SpeechStrategy,
-    RequestType.TRANSCRIPTION: TranscriptionStrategy,
-    RequestType.TRANSLATION: TranslationStrategy,
-    RequestType.SYSTEMONE: SystemOneStrategy,
-    RequestType.DECISIONS: DecisionsStrategy,
-}
+_STRATEGIES: frozendict[RequestType, type[ProcessingStrategy]] = frozendict(
+    {
+        RequestType.EMBEDDING: EmbeddingStrategy,
+        RequestType.IMAGE_GENERATION: ImageStrategy,
+        RequestType.IMAGE_EDIT: ImageEditStrategy,
+        RequestType.CHAT: ChatStrategy,
+        RequestType.SPEECH: SpeechStrategy,
+        RequestType.TRANSCRIPTION: TranscriptionStrategy,
+        RequestType.TRANSLATION: TranslationStrategy,
+        RequestType.SYSTEMONE: SystemOneStrategy,
+        RequestType.DECISIONS: DecisionsStrategy,
+    }
+)
 
 
 def get_strategy(request_type: RequestType | str) -> ProcessingStrategy | None:

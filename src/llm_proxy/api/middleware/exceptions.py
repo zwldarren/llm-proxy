@@ -84,110 +84,112 @@ class HandlerMeta:
 
 # Registry mapping exception types to their metadata
 # Order matters: more specific exceptions should come first
-EXCEPTION_HANDLER_REGISTRY: dict[type, HandlerMeta] = {
-    ProviderError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Provider error",
-        default_code=None,
-        default_status=500,
-    ),
-    ValidationError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Validation error",
-        default_code=None,
-        default_status=400,
-    ),
-    ModelNotFoundError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Model not found",
-        default_code="model_not_found",
-        default_status=404,
-    ),
-    ProviderNotConfiguredError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Provider not configured",
-        default_code="provider_not_configured",
-        default_status=404,
-    ),
-    ConfigurationError: HandlerMeta(
-        log_level=logging.ERROR,
-        log_message="Configuration error",
-        default_code="configuration_error",
-        default_status=500,
-    ),
-    AdapterNotFoundError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Adapter not found",
-        default_code="adapter_not_found",
-        default_status=400,
-    ),
-    RequestError: HandlerMeta(
-        log_level=logging.ERROR,
-        log_message="Request error",
-        default_code=None,
-        default_status=500,
-    ),
-    MCPServerNotFoundError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="MCP server not found",
-        default_code="mcp_server_not_found",
-        default_status=404,
-    ),
-    MCPStartupError: HandlerMeta(
-        log_level=logging.ERROR,
-        log_message="MCP server startup error",
-        default_code="mcp_startup_error",
-        default_status=400,
-    ),
-    LLMProxyError: HandlerMeta(
-        log_level=logging.ERROR,
-        log_message="LLM Proxy error",
-        default_code="internal_error",
-        default_status=500,
-    ),
-    ForbiddenError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Forbidden",
-        default_code="forbidden",
-        default_status=403,
-    ),
-    WebSearchError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Web search error",
-        default_code="web_search_error",
-        default_status=503,
-    ),
-    NotFoundError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Not found",
-        default_code="not_found",
-        default_status=404,
-    ),
-    AuthenticationFailedError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Authentication failed",
-        default_code="authentication_failed",
-        default_status=401,
-    ),
-    ConflictError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Conflict",
-        default_code="conflict",
-        default_status=409,
-    ),
-    ValueError: HandlerMeta(
-        log_level=logging.WARNING,
-        log_message="Validation error",
-        default_code="invalid_request_error",
-        default_status=400,
-    ),
-    RuntimeError: HandlerMeta(
-        log_level=logging.ERROR,
-        log_message="Runtime error",
-        default_code="internal_error",
-        default_status=500,
-    ),
-}
+EXCEPTION_HANDLER_REGISTRY: frozendict[type, HandlerMeta] = frozendict(
+    {
+        ProviderError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Provider error",
+            default_code=None,
+            default_status=500,
+        ),
+        ValidationError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Validation error",
+            default_code=None,
+            default_status=400,
+        ),
+        ModelNotFoundError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Model not found",
+            default_code="model_not_found",
+            default_status=404,
+        ),
+        ProviderNotConfiguredError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Provider not configured",
+            default_code="provider_not_configured",
+            default_status=404,
+        ),
+        ConfigurationError: HandlerMeta(
+            log_level=logging.ERROR,
+            log_message="Configuration error",
+            default_code="configuration_error",
+            default_status=500,
+        ),
+        AdapterNotFoundError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Adapter not found",
+            default_code="adapter_not_found",
+            default_status=400,
+        ),
+        RequestError: HandlerMeta(
+            log_level=logging.ERROR,
+            log_message="Request error",
+            default_code=None,
+            default_status=500,
+        ),
+        MCPServerNotFoundError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="MCP server not found",
+            default_code="mcp_server_not_found",
+            default_status=404,
+        ),
+        MCPStartupError: HandlerMeta(
+            log_level=logging.ERROR,
+            log_message="MCP server startup error",
+            default_code="mcp_startup_error",
+            default_status=400,
+        ),
+        LLMProxyError: HandlerMeta(
+            log_level=logging.ERROR,
+            log_message="LLM Proxy error",
+            default_code="internal_error",
+            default_status=500,
+        ),
+        ForbiddenError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Forbidden",
+            default_code="forbidden",
+            default_status=403,
+        ),
+        WebSearchError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Web search error",
+            default_code="web_search_error",
+            default_status=503,
+        ),
+        NotFoundError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Not found",
+            default_code="not_found",
+            default_status=404,
+        ),
+        AuthenticationFailedError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Authentication failed",
+            default_code="authentication_failed",
+            default_status=401,
+        ),
+        ConflictError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Conflict",
+            default_code="conflict",
+            default_status=409,
+        ),
+        ValueError: HandlerMeta(
+            log_level=logging.WARNING,
+            log_message="Validation error",
+            default_code="invalid_request_error",
+            default_status=400,
+        ),
+        RuntimeError: HandlerMeta(
+            log_level=logging.ERROR,
+            log_message="Runtime error",
+            default_code="internal_error",
+            default_status=500,
+        ),
+    }
+)
 
 
 async def recursion_error_handler(request: Request, exc: RecursionError) -> JSONResponse:

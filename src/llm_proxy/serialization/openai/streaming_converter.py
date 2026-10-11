@@ -595,35 +595,43 @@ class OpenAIResponsesChunkConverter(StreamingTransformer):
 # Event handler dispatch table
 # ------------------------------------------------------------------
 
-_RESPONSES_EVENT_HANDLERS: dict[str, Any] = {
-    "response.created": OpenAIResponsesChunkConverter._handle_response_created,
-    "response.output_item.added": (OpenAIResponsesChunkConverter._handle_output_item_added),
-    "response.output_text.delta": OpenAIResponsesChunkConverter._handle_text_delta,
-    "response.output_text.done": OpenAIResponsesChunkConverter._handle_text_done,
-    "response.output_text.annotation.added": (
-        OpenAIResponsesChunkConverter._handle_annotation_added
-    ),
-    "response.reasoning.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
-    "response.reasoning_text.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
-    "response.reasoning_summary_text.delta": (
-        OpenAIResponsesChunkConverter._handle_reasoning_delta
-    ),
-    "response.reasoning.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
-    "response.reasoning_text.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
-    "response.reasoning_summary_text.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
-    "response.reasoning_summary_part.added": (OpenAIResponsesChunkConverter._handle_reasoning_done),
-    "response.reasoning_summary_part.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
-    "response.output_item.done": OpenAIResponsesChunkConverter._handle_output_item_done,
-    "response.refusal.delta": (OpenAIResponsesChunkConverter._handle_refusal_delta),
-    "response.refusal.done": OpenAIResponsesChunkConverter._handle_refusal_done,
-    "response.function_call_arguments.delta": (
-        OpenAIResponsesChunkConverter._handle_function_call_delta
-    ),
-    "response.function_call_arguments.done": (
-        OpenAIResponsesChunkConverter._handle_function_call_done
-    ),
-    "response.completed": (OpenAIResponsesChunkConverter._handle_response_finished),
-    "response.failed": OpenAIResponsesChunkConverter._handle_response_finished,
-    "response.incomplete": OpenAIResponsesChunkConverter._handle_response_finished,
-    "error": OpenAIResponsesChunkConverter._handle_error,
-}
+_RESPONSES_EVENT_HANDLERS: frozendict[str, Any] = frozendict(
+    {
+        "response.created": OpenAIResponsesChunkConverter._handle_response_created,
+        "response.output_item.added": (OpenAIResponsesChunkConverter._handle_output_item_added),
+        "response.output_text.delta": OpenAIResponsesChunkConverter._handle_text_delta,
+        "response.output_text.done": OpenAIResponsesChunkConverter._handle_text_done,
+        "response.output_text.annotation.added": (
+            OpenAIResponsesChunkConverter._handle_annotation_added
+        ),
+        "response.reasoning.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
+        "response.reasoning_text.delta": (OpenAIResponsesChunkConverter._handle_reasoning_delta),
+        "response.reasoning_summary_text.delta": (
+            OpenAIResponsesChunkConverter._handle_reasoning_delta
+        ),
+        "response.reasoning.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
+        "response.reasoning_text.done": (OpenAIResponsesChunkConverter._handle_reasoning_done),
+        "response.reasoning_summary_text.done": (
+            OpenAIResponsesChunkConverter._handle_reasoning_done
+        ),
+        "response.reasoning_summary_part.added": (
+            OpenAIResponsesChunkConverter._handle_reasoning_done
+        ),
+        "response.reasoning_summary_part.done": (
+            OpenAIResponsesChunkConverter._handle_reasoning_done
+        ),
+        "response.output_item.done": OpenAIResponsesChunkConverter._handle_output_item_done,
+        "response.refusal.delta": (OpenAIResponsesChunkConverter._handle_refusal_delta),
+        "response.refusal.done": OpenAIResponsesChunkConverter._handle_refusal_done,
+        "response.function_call_arguments.delta": (
+            OpenAIResponsesChunkConverter._handle_function_call_delta
+        ),
+        "response.function_call_arguments.done": (
+            OpenAIResponsesChunkConverter._handle_function_call_done
+        ),
+        "response.completed": (OpenAIResponsesChunkConverter._handle_response_finished),
+        "response.failed": OpenAIResponsesChunkConverter._handle_response_finished,
+        "response.incomplete": OpenAIResponsesChunkConverter._handle_response_finished,
+        "error": OpenAIResponsesChunkConverter._handle_error,
+    }
+)

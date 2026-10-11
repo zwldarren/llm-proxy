@@ -603,13 +603,15 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
 # Event handler dispatch table  (faster than a chain of if/elif)
 # ------------------------------------------------------------------
 
-_EVENT_HANDLERS: dict[str, Any] = {
-    "message_start": AnthropicChunkConverter._handle_message_start,
-    "content_block_start": AnthropicChunkConverter._handle_content_block_start,
-    "content_block_delta": AnthropicChunkConverter._handle_content_block_delta,
-    "content_block_stop": AnthropicChunkConverter._handle_content_block_stop,
-    "message_delta": AnthropicChunkConverter._handle_message_delta,
-    "message_stop": AnthropicChunkConverter._handle_message_stop,
-    "ping": AnthropicChunkConverter._handle_ping,
-    "error": AnthropicChunkConverter._handle_error,
-}
+_EVENT_HANDLERS: frozendict[str, Any] = frozendict(
+    {
+        "message_start": AnthropicChunkConverter._handle_message_start,
+        "content_block_start": AnthropicChunkConverter._handle_content_block_start,
+        "content_block_delta": AnthropicChunkConverter._handle_content_block_delta,
+        "content_block_stop": AnthropicChunkConverter._handle_content_block_stop,
+        "message_delta": AnthropicChunkConverter._handle_message_delta,
+        "message_stop": AnthropicChunkConverter._handle_message_stop,
+        "ping": AnthropicChunkConverter._handle_ping,
+        "error": AnthropicChunkConverter._handle_error,
+    }
+)

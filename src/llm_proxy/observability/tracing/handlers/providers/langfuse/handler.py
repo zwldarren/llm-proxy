@@ -15,10 +15,10 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from langfuse import Langfuse, propagate_attributes
-from langfuse.types import TraceContext
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+lazy from langfuse import Langfuse, propagate_attributes
+lazy from langfuse.types import TraceContext
+lazy from opentelemetry.sdk.trace import TracerProvider
+lazy from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.logger import get_logger

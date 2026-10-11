@@ -39,27 +39,35 @@ from typing import Any
 
 from llm_proxy.models.types import ThinkingConfig
 
-PROVIDER_REASONING_FORMAT: dict[str, dict[str, Any]] = {
-    "anthropic": {
-        "message_field": None,
-        "stream_delta_field": "thinking",
-        "content_block_type": "thinking",
-        "redacted_block_type": "redacted_thinking",
-        "signature_supported": True,
-    },
-    "gemini": {
-        "message_field": None,
-        "stream_delta_field": "thought",
-        "content_block_type": "thought",
-        "signature_supported": True,
-    },
-    "ollama": {
-        "message_field": "thinking",
-        "stream_delta_field": "thinking",
-        "content_block_type": None,
-        "signature_supported": False,
-    },
-}
+PROVIDER_REASONING_FORMAT: frozendict[str, frozendict[str, Any]] = frozendict(
+    {
+        "anthropic": frozendict(
+            {
+                "message_field": None,
+                "stream_delta_field": "thinking",
+                "content_block_type": "thinking",
+                "redacted_block_type": "redacted_thinking",
+                "signature_supported": True,
+            }
+        ),
+        "gemini": frozendict(
+            {
+                "message_field": None,
+                "stream_delta_field": "thought",
+                "content_block_type": "thought",
+                "signature_supported": True,
+            }
+        ),
+        "ollama": frozendict(
+            {
+                "message_field": "thinking",
+                "stream_delta_field": "thinking",
+                "content_block_type": None,
+                "signature_supported": False,
+            }
+        ),
+    }
+)
 
 
 def normalize_thinking(data: dict[str, Any]) -> ThinkingConfig | None:

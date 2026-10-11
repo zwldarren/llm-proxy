@@ -32,8 +32,10 @@ _EWMA_ALPHA = 0.3
 # Explicit-feedback tuning (ported from UncommonRoute model_experience.py):
 # reward blends into reward_mean via EWMA; the preference delta accumulates
 # into preference_ewma and is projected to the persisted `feedback` column.
-_FEEDBACK_REWARDS = {"ok": 0.9, "weak": 0.15, "strong": 0.35}
-_FEEDBACK_PREFERENCE_DELTAS = {"ok": 0.14, "weak": -0.22, "strong": -0.10}
+_FEEDBACK_REWARDS: frozendict[str, float] = frozendict({"ok": 0.9, "weak": 0.15, "strong": 0.35})
+_FEEDBACK_PREFERENCE_DELTAS: frozendict[str, float] = frozendict(
+    {"ok": 0.14, "weak": -0.22, "strong": -0.10}
+)
 FEEDBACK_SIGNALS = frozenset(_FEEDBACK_REWARDS)
 
 

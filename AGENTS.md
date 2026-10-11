@@ -113,6 +113,54 @@ module of the resource it belongs to; a resource may import a peer's read shape
 it embeds (`ProviderDetails.models` is `ModelRead`), never a peer's write
 schema. Small router-local response shapes may stay inline in the router.
 
+### Python 3.15 features
+
+The project runs on Python 3.15 (`requires-python >= 3.15`), so use the language
+features it adds instead of the hand-rolled equivalents. Full rationale and
+measurements: `docs/adr/0030-lazy-imports-at-the-sdk-boundary.md`.
+
+**PEP 810 — `lazy` imports.** Mark an import `lazy` at module scope to keep its
+module out of the startup graph until the name is first used.
+
+- Put `lazy` on the **third-party SDK boundary**, not on our own package edges.
+  Package `__init__.py` façades (`http/`, `streaming/`, `observability/`, `mcp/`)
+  are already lazy — do not reintroduce a module `__getattr__` + `importlib` shim.
+- **Never hoist a function-level import into a module-scope `lazy` import.**
+  Hoisting turns per-call attribute reads into bind-once and silently breaks
+  tests that patch the source module (`api/lifecycle.py` keeps its
+  per-function imports for this reason).
+- `lazy` is module-scope only (`SyntaxError` inside functions, class bodies,
+  `try` blocks), so optional-dependency guards stay as they are.
+- `@dataclass`, pydantic `BaseModel` and `TypedDict` fields evaluate annotations
+  at class creation, reifying a lazy proxy immediately. For those fields keep
+  the import under `if TYPE_CHECKING:` with a string annotation.
+- Verify with `uv run python -X importtime -c "import llm_proxy.api"`. The CLI
+  is a separate check: `llm-proxy --help` must not import the server stack.
+
+**Other 3.15 idioms in this repo.**
+
+- `frozendict` (builtin) for module-level lookup tables that are never mutated.
+  It is **not** a `dict` subclass: check consumers for `isinstance(x, dict)` and
+  for passing the table as a pydantic/FastAPI/SQLAlchemy payload.
+- `sentinel` (builtin) for "argument not provided" markers
+  (`database/repositories/api_keys.py`). Keep the module-level variable name so
+  pickle/copy identity holds.
+- `typing.disjoint_base` on mixins that must never coexist in one MRO (static
+  only — the runtime `__init_subclass__` ordering check still has to stay).
+- PEP 798 comprehension unpacking (`[*x for xs in xss]`, `{**d for ds in dicts}`)
+  where the element is passed through unchanged.
+- `re.prefixmatch` replaces `re.match` when the pattern is anchored at the start.
+- PEP 686 makes UTF-8 the default encoding, but keep passing `encoding="utf-8"`
+  explicitly at I/O boundaries.
+- **Do not add `from __future__ import annotations`.** PEP 649 makes annotations
+  lazy by default, so the import is redundant — and not byte-identical:
+  `__annotations__` holds strings under the future import but evaluates on
+  access under PEP 649, which is why a `lazy` name must never appear in a
+  `@dataclass` / pydantic / `TypedDict` field.
+- PEP 799: for production performance work use the `profiling` package
+  (`python -m profiling.sampling attach <pid>`); `cProfile` is now an alias for
+  `profiling.tracing`.
+
 ### Streaming prefetch
 
 The read-ahead both streaming tiers do before the first byte reaches the client

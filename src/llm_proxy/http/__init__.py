@@ -1,4 +1,17 @@
-"""HTTP client package with connection pool management and request utilities."""
+"""HTTP client package with connection pool management and request utilities.
+
+The public names are PEP 810 lazy imports: importing this package costs nothing
+until a symbol is actually used, so packages that merely sit on the import graph
+of `llm_proxy.http` never pay for `httpx2`/`aiohttp`.
+"""
+
+lazy from llm_proxy.http.client import (
+    DEFAULT_IMAGE_DOWNLOAD_TIMEOUT,
+    HTTPClient,
+    ProviderHTTPClientManager,
+    download_image_as_base64,
+    fetch_json,
+)
 
 __all__ = [
     "DEFAULT_IMAGE_DOWNLOAD_TIMEOUT",
@@ -7,22 +20,3 @@ __all__ = [
     "download_image_as_base64",
     "fetch_json",
 ]
-
-
-def __getattr__(name: str):
-    _MODULE = "llm_proxy.http.client"
-    _SYMBOLS = {
-        "HTTPClient": "HTTPClient",
-        "ProviderHTTPClientManager": "ProviderHTTPClientManager",
-        "fetch_json": "fetch_json",
-        "DEFAULT_IMAGE_DOWNLOAD_TIMEOUT": "DEFAULT_IMAGE_DOWNLOAD_TIMEOUT",
-        "download_image_as_base64": "download_image_as_base64",
-    }
-    if name in _SYMBOLS:
-        import importlib
-
-        module = importlib.import_module(_MODULE)
-        value = getattr(module, _SYMBOLS[name])
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

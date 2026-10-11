@@ -69,24 +69,28 @@ from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.providers.registry import register_provider_serializer
 from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
-_TOOL_CHOICE_MODE_TO_ANTHROPIC = {
-    "auto": "auto",
-    "none": "none",
-    "required": "any",
-    "any": "any",
-}
+_TOOL_CHOICE_MODE_TO_ANTHROPIC: frozendict[str, str] = frozendict(
+    {
+        "auto": "auto",
+        "none": "none",
+        "required": "any",
+        "any": "any",
+    }
+)
 
 logger = logging.getLogger(__name__)
 
 # OpenAI ``service_tier`` values mapped to Anthropic ``service_tier``.
 # Anthropic Messages API only accepts ``"auto"`` or ``"standard_only"``.
-_OPENAI_SERVICE_TIER_TO_ANTHROPIC: dict[str, str] = {
-    "auto": "auto",
-    "scale": "auto",
-    "default": "standard_only",
-    "flex": "standard_only",
-    "priority": "auto",
-}
+_OPENAI_SERVICE_TIER_TO_ANTHROPIC: frozendict[str, str] = frozendict(
+    {
+        "auto": "auto",
+        "scale": "auto",
+        "default": "standard_only",
+        "flex": "standard_only",
+        "priority": "auto",
+    }
+)
 
 # Extra keys that must NOT leak into the Anthropic request body. These are
 # either internal bookkeeping keys (``_system_blocks``) consumed elsewhere, or

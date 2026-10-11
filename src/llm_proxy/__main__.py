@@ -9,14 +9,14 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-import uvicorn
 from dotenv import load_dotenv
+lazy import uvicorn
 
-from llm_proxy.cli.workers import resolve_workers
-from llm_proxy.config import DatabaseConfigManager
-from llm_proxy.config.settings import get_settings
-from llm_proxy.database import close_db, init_db
 from llm_proxy.observability.logger import get_logger
+lazy from llm_proxy.cli.workers import resolve_workers
+lazy from llm_proxy.config import DatabaseConfigManager
+lazy from llm_proxy.config.settings import get_settings
+lazy from llm_proxy.database import close_db, init_db
 
 load_dotenv()
 
@@ -193,16 +193,15 @@ async def main() -> None:
     if args.reload:
         if args.workers is not None and args.workers > 1:
             print("Warning: --reload and --workers > 1 are incompatible, ignoring --workers")
-        import llm_proxy as llm_proxy_module
-
-        assert llm_proxy_module.__file__ is not None
         uvicorn.run(
             "llm_proxy.api:app",
             host=host,
             port=port,
             log_level=log_level.lower(),
             reload=True,
-            reload_dirs=[os.path.dirname(llm_proxy_module.__file__)],
+            # `__main__.py` sits in the package directory, so this is the same
+            # tree the imported module's ``__file__`` reported.
+            reload_dirs=[str(Path(__file__).parent)],
             timeout_keep_alive=timeout_keep_alive,
             **_proxy_header_kwargs(),
         )

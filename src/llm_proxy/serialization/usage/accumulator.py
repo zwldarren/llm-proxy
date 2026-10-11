@@ -11,8 +11,6 @@ Providers send *cumulative* snapshots, not deltas, so accumulation merges the
 latest observation rather than summing observations.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any
 

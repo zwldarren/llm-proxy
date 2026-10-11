@@ -70,19 +70,21 @@ DEFAULT_GEMINI_VOICE = "Kore"
 # Mapping from OpenAI voice names to Gemini prebuilt voices with a similar
 # character. Gemini voice names pass through untouched (case-insensitive);
 # anything unknown falls back to DEFAULT_GEMINI_VOICE.
-_OPENAI_TO_GEMINI_VOICE: dict[str, str] = {
-    "alloy": "Kore",  # neutral, firm
-    "ash": "Charon",  # informative
-    "ballad": "Leda",  # youthful
-    "coral": "Aoede",  # breezy
-    "echo": "Orus",  # firm
-    "fable": "Puck",  # upbeat
-    "nova": "Sulafat",  # warm
-    "onyx": "Algenib",  # gravelly, deep
-    "sage": "Despina",  # smooth
-    "shimmer": "Vindemiatrix",  # gentle
-    "verse": "Schedar",  # even
-}
+_OPENAI_TO_GEMINI_VOICE: frozendict[str, str] = frozendict(
+    {
+        "alloy": "Kore",  # neutral, firm
+        "ash": "Charon",  # informative
+        "ballad": "Leda",  # youthful
+        "coral": "Aoede",  # breezy
+        "echo": "Orus",  # firm
+        "fable": "Puck",  # upbeat
+        "nova": "Sulafat",  # warm
+        "onyx": "Algenib",  # gravelly, deep
+        "sage": "Despina",  # smooth
+        "shimmer": "Vindemiatrix",  # gentle
+        "verse": "Schedar",  # even
+    }
+)
 
 
 def resolve_voice(voice: str | None) -> str:

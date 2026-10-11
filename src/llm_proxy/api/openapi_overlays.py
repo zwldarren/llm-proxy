@@ -118,6 +118,7 @@ SECURITY_SCHEMES: dict[str, Any] = {
     },
 }
 
+
 #: Both schemes authenticate the same API keys — either may be used.
 ROOT_SECURITY: list[dict[str, list[str]]] = [{"ApiKeyBearer": []}, {"ApiKeyHeader": []}]
 
@@ -217,251 +218,261 @@ _CHAT_CHOICE = _passthrough(
     required=["index"],
 )
 
-COMPONENTS: dict[str, Any] = {
-    "ErrorEnvelope": _OPENAI_ERROR_ENVELOPE,
-    "AnthropicErrorEnvelope": _ANTHROPIC_ERROR_ENVELOPE,
-    "ChatCompletionResponse": _passthrough(
-        {
-            "id": _str(),
-            "object": {"type": "string", "const": "chat.completion"},
-            "created": _int(),
-            "model": _str("Echoes the **client-requested alias**, never the resolved model."),
-            "choices": _array(_CHAT_CHOICE),
-            "usage": {"$ref": "#/components/schemas/Usage"},
-            "system_fingerprint": _nullable(_str()),
-            "service_tier": _nullable(_str()),
-        },
-        required=["id", "object", "created", "model", "choices"],
-    ),
-    "ChatCompletionChunk": _passthrough(
-        {
-            "id": _str(),
-            "object": {"type": "string", "const": "chat.completion.chunk"},
-            "created": _int(),
-            "model": _str(),
-            "choices": _array(_CHAT_CHOICE),
-            "usage": _nullable({"$ref": "#/components/schemas/Usage"}),
-            "system_fingerprint": _nullable(_str()),
-        },
-        required=["id", "object", "created", "model", "choices"],
-        description="One SSE frame; the stream ends with a usage-only chunk then `data: [DONE]`.",
-    ),
-    "AnthropicMessagesResponse": _passthrough(
-        {
-            "id": _str(),
-            "type": {"type": "string", "const": "message"},
-            "role": {"type": "string", "const": "assistant"},
-            "model": _str(),
-            "content": _array(_passthrough({}), "Content blocks, e.g. `text`, `tool_use`."),
-            "stop_reason": _nullable(
-                _str(enum=["end_turn", "max_tokens", "stop_sequence", "tool_use"])
+COMPONENTS: frozendict[str, Any] = frozendict(
+    {
+        "ErrorEnvelope": _OPENAI_ERROR_ENVELOPE,
+        "AnthropicErrorEnvelope": _ANTHROPIC_ERROR_ENVELOPE,
+        "ChatCompletionResponse": _passthrough(
+            {
+                "id": _str(),
+                "object": {"type": "string", "const": "chat.completion"},
+                "created": _int(),
+                "model": _str("Echoes the **client-requested alias**, never the resolved model."),
+                "choices": _array(_CHAT_CHOICE),
+                "usage": {"$ref": "#/components/schemas/Usage"},
+                "system_fingerprint": _nullable(_str()),
+                "service_tier": _nullable(_str()),
+            },
+            required=["id", "object", "created", "model", "choices"],
+        ),
+        "ChatCompletionChunk": _passthrough(
+            {
+                "id": _str(),
+                "object": {"type": "string", "const": "chat.completion.chunk"},
+                "created": _int(),
+                "model": _str(),
+                "choices": _array(_CHAT_CHOICE),
+                "usage": _nullable({"$ref": "#/components/schemas/Usage"}),
+                "system_fingerprint": _nullable(_str()),
+            },
+            required=["id", "object", "created", "model", "choices"],
+            description=(
+                "One SSE frame; the stream ends with a usage-only chunk then `data: [DONE]`."
             ),
-            "stop_sequence": _nullable(_str()),
-            "usage": _passthrough(
-                {
-                    "input_tokens": _int(),
-                    "output_tokens": _int(),
-                    "cache_creation_input_tokens": _nullable(_int()),
-                    "cache_read_input_tokens": _nullable(_int()),
-                },
-                required=["input_tokens", "output_tokens"],
-            ),
-        },
-        required=["id", "type", "role", "model", "content"],
-    ),
-    "EmbeddingResponse": _passthrough(
-        {
-            "object": {"type": "string", "const": "list"},
-            "data": _array(
-                _passthrough(
+        ),
+        "AnthropicMessagesResponse": _passthrough(
+            {
+                "id": _str(),
+                "type": {"type": "string", "const": "message"},
+                "role": {"type": "string", "const": "assistant"},
+                "model": _str(),
+                "content": _array(_passthrough({}), "Content blocks, e.g. `text`, `tool_use`."),
+                "stop_reason": _nullable(
+                    _str(enum=["end_turn", "max_tokens", "stop_sequence", "tool_use"])
+                ),
+                "stop_sequence": _nullable(_str()),
+                "usage": _passthrough(
                     {
-                        "object": {"type": "string", "const": "embedding"},
-                        "embedding": _array(_num()),
-                        "index": _int(),
+                        "input_tokens": _int(),
+                        "output_tokens": _int(),
+                        "cache_creation_input_tokens": _nullable(_int()),
+                        "cache_read_input_tokens": _nullable(_int()),
                     },
-                    required=["object", "embedding", "index"],
-                )
-            ),
-            "model": _str(),
-            "usage": _passthrough(
-                {
-                    "prompt_tokens": _int(),
-                    "total_tokens": _int(),
-                },
-                required=["prompt_tokens", "total_tokens"],
-            ),
-        },
-        required=["object", "data", "model"],
-    ),
-    "SystemOneResponse": _passthrough(
-        {
-            "model": _str("The model that performed the evaluation."),
-            "answers": _passthrough(
-                {},
-                description="One typed answer per question id (`noul`, `choice`, or `score`).",
-            ),
-            "usage": _passthrough(
-                {
-                    "input_tokens": _int(),
-                    "output_tokens": _int(),
-                    "cost": _num("Billed cost in USD (OpenRouter only)."),
-                },
-                required=["input_tokens", "output_tokens"],
-            ),
-            "id": _str("OpenRouter generation id."),
-            "provider": _str("Upstream provider name (OpenRouter only)."),
-        },
-        required=["model", "answers", "usage"],
-    ),
-    "DecisionsResponse": _passthrough(
-        {
-            "model": _str("The model that performed the evaluation."),
-            "answers": _array(
-                _passthrough(
+                    required=["input_tokens", "output_tokens"],
+                ),
+            },
+            required=["id", "type", "role", "model", "content"],
+        ),
+        "EmbeddingResponse": _passthrough(
+            {
+                "object": {"type": "string", "const": "list"},
+                "data": _array(
+                    _passthrough(
+                        {
+                            "object": {"type": "string", "const": "embedding"},
+                            "embedding": _array(_num()),
+                            "index": _int(),
+                        },
+                        required=["object", "embedding", "index"],
+                    )
+                ),
+                "model": _str(),
+                "usage": _passthrough(
                     {
-                        "type": _str("Answer kind: `predicate`, `choice`, `score`, or `refusal`."),
-                        "name": _str("The question name this answer belongs to."),
-                        "probability": _num(
-                            "`predicate`: estimated probability the condition is true, 0 to 1."
-                        ),
-                        "choice": {
-                            "type": ["string", "boolean"],
-                            "description": (
-                                "`choice`: the selected option value. Values are typed, so "
-                                "a boolean and its string form are distinct options."
+                        "prompt_tokens": _int(),
+                        "total_tokens": _int(),
+                    },
+                    required=["prompt_tokens", "total_tokens"],
+                ),
+            },
+            required=["object", "data", "model"],
+        ),
+        "SystemOneResponse": _passthrough(
+            {
+                "model": _str("The model that performed the evaluation."),
+                "answers": _passthrough(
+                    {},
+                    description="One typed answer per question id (`noul`, `choice`, or `score`).",
+                ),
+                "usage": _passthrough(
+                    {
+                        "input_tokens": _int(),
+                        "output_tokens": _int(),
+                        "cost": _num("Billed cost in USD (OpenRouter only)."),
+                    },
+                    required=["input_tokens", "output_tokens"],
+                ),
+                "id": _str("OpenRouter generation id."),
+                "provider": _str("Upstream provider name (OpenRouter only)."),
+            },
+            required=["model", "answers", "usage"],
+        ),
+        "DecisionsResponse": _passthrough(
+            {
+                "model": _str("The model that performed the evaluation."),
+                "answers": _array(
+                    _passthrough(
+                        {
+                            "type": _str(
+                                "Answer kind: `predicate`, `choice`, `score`, or `refusal`."
+                            ),
+                            "name": _str("The question name this answer belongs to."),
+                            "probability": _num(
+                                "`predicate`: estimated probability the condition is true, 0 to 1."
+                            ),
+                            "choice": {
+                                "type": ["string", "boolean"],
+                                "description": (
+                                    "`choice`: the selected option value. Values are typed, so "
+                                    "a boolean and its string form are distinct options."
+                                ),
+                            },
+                            "score": _num(
+                                "`score`: probability-weighted average of the level indices, "
+                                "which can fall between levels."
+                            ),
+                            "confidence": _num(
+                                "`choice`/`score`: confidence in the answer, 0 to 1."
+                            ),
+                            "probabilities": _passthrough(
+                                {}, description="Probability of every option or level."
                             ),
                         },
-                        "score": _num(
-                            "`score`: probability-weighted average of the level indices, "
-                            "which can fall between levels."
-                        ),
-                        "confidence": _num("`choice`/`score`: confidence in the answer, 0 to 1."),
-                        "probabilities": _passthrough(
-                            {}, description="Probability of every option or level."
-                        ),
-                    },
-                    required=["type"],
+                        required=["type"],
+                    ),
+                    description="One typed answer per question, in question order.",
                 ),
-                description="One typed answer per question, in question order.",
-            ),
-            "usage": _passthrough(
-                {
-                    "input_tokens": _int(),
-                    "input_tokens_details": _passthrough(
+                "usage": _passthrough(
+                    {
+                        "input_tokens": _int(),
+                        "input_tokens_details": _passthrough(
+                            {
+                                "cache_write_tokens": _int(),
+                                "cached_tokens": _int(),
+                            }
+                        ),
+                        "output_tokens": _int(),
+                        "output_tokens_details": _passthrough({"reasoning_tokens": _int()}),
+                        "total_tokens": _int(),
+                    },
+                    required=["input_tokens", "output_tokens", "total_tokens"],
+                ),
+            },
+            required=["answers", "model", "usage"],
+        ),
+        "ImageResponse": _passthrough(
+            {
+                "created": _int(),
+                "data": _array(
+                    _passthrough(
                         {
-                            "cache_write_tokens": _int(),
-                            "cached_tokens": _int(),
+                            "url": _nullable(_str("Present when the provider returned a URL.")),
+                            "b64_json": _nullable(
+                                _str("Present when the provider returned base64.")
+                            ),
+                            "revised_prompt": _nullable(_str()),
                         }
                     ),
-                    "output_tokens": _int(),
-                    "output_tokens_details": _passthrough({"reasoning_tokens": _int()}),
-                    "total_tokens": _int(),
-                },
-                required=["input_tokens", "output_tokens", "total_tokens"],
-            ),
-        },
-        required=["answers", "model", "usage"],
-    ),
-    "ImageResponse": _passthrough(
-        {
-            "created": _int(),
-            "data": _array(
-                _passthrough(
-                    {
-                        "url": _nullable(_str("Present when the provider returned a URL.")),
-                        "b64_json": _nullable(_str("Present when the provider returned base64.")),
-                        "revised_prompt": _nullable(_str()),
-                    }
+                    "The proxy never converts between `url` and `b64_json`.",
                 ),
-                "The proxy never converts between `url` and `b64_json`.",
-            ),
-            "background": _nullable(_str()),
-            "output_format": _nullable(_str()),
-            "quality": _nullable(_str()),
-            "size": _nullable(_str()),
-            "usage": _nullable(_passthrough({})),
-        },
-        required=["created", "data"],
-        description="There is **no `model` field** in image responses.",
-    ),
-    "TranscriptionResponse": _passthrough(
-        {
-            "text": _str(),
-            "task": _nullable(_str()),
-            "language": _nullable(_str()),
-            "duration": _nullable(_num()),
-            "segments": _nullable(_array(_passthrough({}))),
-            "words": _nullable(_array(_passthrough({}))),
-            "logprobs": _nullable(_array(_passthrough({}))),
-            "usage": _nullable(_passthrough({})),
-        },
-        required=["text"],
-        description="Extra fields appear for `verbose_json` / `diarized_json`.",
-    ),
-    "TranslationResponse": _passthrough(
-        {
-            "text": _str(),
-            "task": _nullable(_str()),
-            "language": _nullable(_str()),
-            "duration": _nullable(_num()),
-            "segments": _nullable(_array(_passthrough({}))),
-            "usage": _nullable(_passthrough({})),
-        },
-        required=["text"],
-    ),
-    "ResponsesDeleted": _passthrough(
-        {
-            "id": _str(),
-            "object": {"type": "string", "const": "response.deleted"},
-            "deleted": _bool(),
-        },
-        required=["id", "object", "deleted"],
-    ),
-    "InputItemsList": _passthrough(
-        {
-            "object": _str(),
-            "data": _array(_passthrough({}), "Input items, verbatim as stored."),
-            "first_id": _nullable(_str()),
-            "last_id": _nullable(_str()),
-            "has_more": _bool(),
-        },
-        required=["object", "data", "has_more"],
-    ),
-    "ProtocolList": _passthrough(
-        {
-            "protocols": _array(
-                _passthrough(
-                    {
-                        "name": _str(),
-                        "path": _str(),
-                        "description": _str(),
-                    },
-                    required=["name", "path"],
+                "background": _nullable(_str()),
+                "output_format": _nullable(_str()),
+                "quality": _nullable(_str()),
+                "size": _nullable(_str()),
+                "usage": _nullable(_passthrough({})),
+            },
+            required=["created", "data"],
+            description="There is **no `model` field** in image responses.",
+        ),
+        "TranscriptionResponse": _passthrough(
+            {
+                "text": _str(),
+                "task": _nullable(_str()),
+                "language": _nullable(_str()),
+                "duration": _nullable(_num()),
+                "segments": _nullable(_array(_passthrough({}))),
+                "words": _nullable(_array(_passthrough({}))),
+                "logprobs": _nullable(_array(_passthrough({}))),
+                "usage": _nullable(_passthrough({})),
+            },
+            required=["text"],
+            description="Extra fields appear for `verbose_json` / `diarized_json`.",
+        ),
+        "TranslationResponse": _passthrough(
+            {
+                "text": _str(),
+                "task": _nullable(_str()),
+                "language": _nullable(_str()),
+                "duration": _nullable(_num()),
+                "segments": _nullable(_array(_passthrough({}))),
+                "usage": _nullable(_passthrough({})),
+            },
+            required=["text"],
+        ),
+        "ResponsesDeleted": _passthrough(
+            {
+                "id": _str(),
+                "object": {"type": "string", "const": "response.deleted"},
+                "deleted": _bool(),
+            },
+            required=["id", "object", "deleted"],
+        ),
+        "InputItemsList": _passthrough(
+            {
+                "object": _str(),
+                "data": _array(_passthrough({}), "Input items, verbatim as stored."),
+                "first_id": _nullable(_str()),
+                "last_id": _nullable(_str()),
+                "has_more": _bool(),
+            },
+            required=["object", "data", "has_more"],
+        ),
+        "ProtocolList": _passthrough(
+            {
+                "protocols": _array(
+                    _passthrough(
+                        {
+                            "name": _str(),
+                            "path": _str(),
+                            "description": _str(),
+                        },
+                        required=["name", "path"],
+                    )
                 )
-            )
-        },
-        required=["protocols"],
-    ),
-    "ResponsesStreamEvent": _passthrough(
-        {
-            "type": _str(
-                "Event type, e.g. `response.output_text.delta`, `response.completed`.",
-            ),
-            "sequence_number": _int(),
-        },
-        required=["type"],
-        description="One SSE frame of the Responses event stream; fields vary by `type`.",
-    ),
-    "AnthropicStreamEvent": _passthrough(
-        {
-            "type": _str(
-                "Event type, e.g. `message_start`, `content_block_delta`, `message_stop`."
-            ),
-        },
-        required=["type"],
-        description="One SSE frame of the Anthropic event stream; fields vary by `type`.",
-    ),
-}
+            },
+            required=["protocols"],
+        ),
+        "ResponsesStreamEvent": _passthrough(
+            {
+                "type": _str(
+                    "Event type, e.g. `response.output_text.delta`, `response.completed`.",
+                ),
+                "sequence_number": _int(),
+            },
+            required=["type"],
+            description="One SSE frame of the Responses event stream; fields vary by `type`.",
+        ),
+        "AnthropicStreamEvent": _passthrough(
+            {
+                "type": _str(
+                    "Event type, e.g. `message_start`, `content_block_delta`, `message_stop`."
+                ),
+            },
+            required=["type"],
+            description="One SSE frame of the Anthropic event stream; fields vary by `type`.",
+        ),
+    }
+)
 
 # --------------------------------------------------------------------------- #
 # request bodies the generator cannot derive
@@ -520,20 +531,22 @@ _IMAGE_EDIT_FORM = _passthrough(
     description="Multipart form alternative to the JSON body.",
 )
 
-MULTIPART_REQUEST_BODIES: dict[tuple[str, str], dict[str, Any]] = {
-    ("/v1/audio/transcriptions", "post"): {
-        "required": True,
-        "content": {"multipart/form-data": {"schema": _TRANSCRIPTION_FORM}},
-    },
-    ("/v1/audio/translations", "post"): {
-        "required": True,
-        "content": {"multipart/form-data": {"schema": _TRANSLATION_FORM}},
-    },
-    ("/v1/images/edits", "post"): {
-        "required": True,
-        "content": {"multipart/form-data": {"schema": _IMAGE_EDIT_FORM}},
-    },
-}
+MULTIPART_REQUEST_BODIES: frozendict[tuple[str, str], dict[str, Any]] = frozendict(
+    {
+        ("/v1/audio/transcriptions", "post"): {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _TRANSCRIPTION_FORM}},
+        },
+        ("/v1/audio/translations", "post"): {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _TRANSLATION_FORM}},
+        },
+        ("/v1/images/edits", "post"): {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _IMAGE_EDIT_FORM}},
+        },
+    }
+)
 
 # --------------------------------------------------------------------------- #
 # per-operation overlays
@@ -544,201 +557,207 @@ _OPENAI_STREAM_NOTE = (
     "`data: [DONE]`. See [Streaming](/api/streaming)."
 )
 
-OPERATION_OVERLAYS: dict[tuple[str, str], dict[str, Any]] = {
-    ("/v1/chat/completions", "post"): {
-        "summary": "Create chat completion",
-        "tags": ["chat"],
-        "description": (
-            "OpenAI Chat Completions. Aliases `/chat/completions` and "
-            "`/v1/v1/chat/completions` are served too. " + _OPENAI_STREAM_NOTE
-        ),
-        "responses": {
-            "200": json_response("The completion.", ref("ChatCompletionResponse")),
-        },
-        "sse": ref("ChatCompletionChunk"),
-    },
-    ("/v1/responses", "post"): {
-        "summary": "Create response",
-        "tags": ["responses"],
-        "description": (
-            "OpenAI Responses API. `background: true` returns an `in_progress` response "
-            "immediately and requires Redis-backed response storage."
-        ),
-        "responses": {
-            "200": json_response("The response object.", ref("ResponsesResponse")),
-        },
-        "sse": ref("ResponsesStreamEvent"),
-    },
-    ("/v1/responses/compact", "post"): {
-        "summary": "Compact response",
-        "tags": ["responses"],
-        "description": (
-            "Losslessly compact a conversation. Native upstream passthrough is tried "
-            "first, with a local packing fallback."
-        ),
-        "responses": {
-            "200": json_response("The compacted response.", ref("ResponsesResponse")),
-        },
-    },
-    ("/v1/responses/{response_id}", "get"): {
-        "summary": "Retrieve response",
-        "tags": ["responses"],
-        "description": "Retrieve a stored response. Stored responses expire after 24 hours.",
-        "responses": {
-            "200": json_response("The stored response.", ref("ResponsesResponse")),
-            "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
-        },
-    },
-    ("/v1/responses/{response_id}", "delete"): {
-        "summary": "Delete response",
-        "tags": ["responses"],
-        "description": "Delete a stored response. Deleting an unknown id is a 404, not a 200.",
-        "responses": {
-            "200": json_response("Deletion confirmation.", ref("ResponsesDeleted")),
-            "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
-        },
-    },
-    ("/v1/responses/{response_id}/cancel", "post"): {
-        "summary": "Cancel response",
-        "tags": ["responses"],
-        "description": (
-            "Cancel a background response. Only `background: true` responses still "
-            "`queued`/`in_progress` are cancellable; cancelling twice is idempotent."
-        ),
-        "responses": {
-            "200": json_response("The (possibly cancelled) response.", ref("ResponsesResponse")),
-            "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
-            "409": json_response("The response is not cancellable.", ref("ErrorEnvelope")),
-        },
-    },
-    ("/v1/responses/{response_id}/input_items", "get"): {
-        "summary": "List input items",
-        "tags": ["responses"],
-        "description": "List the input items of a stored response.",
-        "responses": {
-            "200": json_response("The input items page.", ref("InputItemsList")),
-            "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
-        },
-    },
-    ("/v1/messages", "post"): {
-        "summary": "Anthropic Messages",
-        "tags": ["chat"],
-        "description": "Anthropic Messages API. Aliases `/messages` and `/v1/v1/messages` exist.",
-        "responses": {
-            "200": json_response("The message.", ref("AnthropicMessagesResponse")),
-        },
-        "sse": ref("AnthropicStreamEvent"),
-    },
-    ("/v1/messages/count_tokens", "post"): {
-        "summary": "Count tokens",
-        "tags": ["chat"],
-        "description": (
-            "Native upstream count when the provider offers one, otherwise a local "
-            "`o200k_base` estimate."
-        ),
-        "responses": {
-            "200": json_response(
-                "Token count.", {"$ref": "#/components/schemas/CountTokensResponse"}
+OPERATION_OVERLAYS: frozendict[tuple[str, str], dict[str, Any]] = frozendict(
+    {
+        ("/v1/chat/completions", "post"): {
+            "summary": "Create chat completion",
+            "tags": ["chat"],
+            "description": (
+                "OpenAI Chat Completions. Aliases `/chat/completions` and "
+                "`/v1/v1/chat/completions` are served too. " + _OPENAI_STREAM_NOTE
             ),
+            "responses": {
+                "200": json_response("The completion.", ref("ChatCompletionResponse")),
+            },
+            "sse": ref("ChatCompletionChunk"),
         },
-    },
-    ("/v1/embeddings", "post"): {
-        "summary": "Create embeddings",
-        "tags": ["embeddings"],
-        "responses": {
-            "200": json_response("The embeddings.", ref("EmbeddingResponse")),
-        },
-    },
-    ("/v1/systemone", "post"): {
-        "summary": "Evaluate a state with System One",
-        "tags": ["systemone"],
-        "description": (
-            "Sends `state` and typed `questions` to a System One model such as Jev and "
-            "returns one typed answer per question. TypeSafe and OpenRouter share the "
-            "wire format. A model on the `openai` provider is bridged: its System One "
-            "request is translated to `/v1/decisions` and the answers translated back."
-        ),
-        "responses": {
-            "200": json_response("The answers, one per question id.", ref("SystemOneResponse")),
-        },
-    },
-    ("/v1/decisions", "post"): {
-        "summary": "Answer typed questions about shared evidence",
-        "tags": ["decisions"],
-        "description": (
-            "Sends shared evidence (`input`) and typed `questions` to a decision model "
-            "and returns one typed answer per question. OpenAI serves this endpoint "
-            "natively; a model on a System One upstream (`typesafe`, `openrouter`, "
-            "`ollama`) is bridged: the request is translated to `/v1/systemone` and "
-            "the answers translated back."
-        ),
-        "responses": {
-            "200": json_response("The answers, one per question.", ref("DecisionsResponse")),
-        },
-    },
-    ("/v1/images/generations", "post"): {
-        "summary": "Create image",
-        "tags": ["images"],
-        "description": (
-            "JSON body. Unlike chat, the image schemas are **strict**: an unrecognized "
-            "field returns 400 `invalid_request_error`."
-        ),
-        "responses": {
-            "200": json_response("The generated images.", ref("ImageResponse")),
-        },
-    },
-    ("/v1/images/edits", "post"): {
-        "summary": "Edit image",
-        "tags": ["images"],
-        "description": "Accepts either a JSON body or the official `multipart/form-data` form.",
-        "responses": {
-            "200": json_response("The edited images.", ref("ImageResponse")),
-        },
-    },
-    ("/v1/audio/speech", "post"): {
-        "summary": "Create speech",
-        "tags": ["audio"],
-        "responses": {
-            "200": binary_response(
-                "Audio bytes in the requested `response_format`.", "application/octet-stream"
+        ("/v1/responses", "post"): {
+            "summary": "Create response",
+            "tags": ["responses"],
+            "description": (
+                "OpenAI Responses API. `background: true` returns an `in_progress` response "
+                "immediately and requires Redis-backed response storage."
             ),
+            "responses": {
+                "200": json_response("The response object.", ref("ResponsesResponse")),
+            },
+            "sse": ref("ResponsesStreamEvent"),
         },
-    },
-    ("/v1/audio/transcriptions", "post"): {
-        "summary": "Create transcription",
-        "tags": ["audio"],
-        "description": "Multipart upload. Requires `model` and `file`.",
-        "responses": {
-            "200": json_response("The transcription.", ref("TranscriptionResponse")),
-        },
-    },
-    ("/v1/audio/translations", "post"): {
-        "summary": "Create translation",
-        "tags": ["audio"],
-        "description": "Multipart upload. Requires `model` and `file`.",
-        "responses": {
-            "200": json_response("The translation.", ref("TranslationResponse")),
-        },
-    },
-    ("/v1/models", "get"): {
-        "summary": "List models",
-        "tags": ["models"],
-        "description": "The model catalogue, filtered by the calling key's allowlist.",
-        "responses": {
-            "200": json_response(
-                "The visible models.", {"$ref": "#/components/schemas/OpenAIModelList"}
+        ("/v1/responses/compact", "post"): {
+            "summary": "Compact response",
+            "tags": ["responses"],
+            "description": (
+                "Losslessly compact a conversation. Native upstream passthrough is tried "
+                "first, with a local packing fallback."
             ),
+            "responses": {
+                "200": json_response("The compacted response.", ref("ResponsesResponse")),
+            },
         },
-    },
-    ("/v1/protocols", "get"): {
-        "summary": "List protocols",
-        "tags": ["protocols"],
-        "description": "Registered client protocols with their base paths.",
-        "responses": {
-            "200": json_response("The registered protocols.", ref("ProtocolList")),
+        ("/v1/responses/{response_id}", "get"): {
+            "summary": "Retrieve response",
+            "tags": ["responses"],
+            "description": "Retrieve a stored response. Stored responses expire after 24 hours.",
+            "responses": {
+                "200": json_response("The stored response.", ref("ResponsesResponse")),
+                "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
+            },
         },
-    },
-}
+        ("/v1/responses/{response_id}", "delete"): {
+            "summary": "Delete response",
+            "tags": ["responses"],
+            "description": "Delete a stored response. Deleting an unknown id is a 404, not a 200.",
+            "responses": {
+                "200": json_response("Deletion confirmation.", ref("ResponsesDeleted")),
+                "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/responses/{response_id}/cancel", "post"): {
+            "summary": "Cancel response",
+            "tags": ["responses"],
+            "description": (
+                "Cancel a background response. Only `background: true` responses still "
+                "`queued`/`in_progress` are cancellable; cancelling twice is idempotent."
+            ),
+            "responses": {
+                "200": json_response(
+                    "The (possibly cancelled) response.", ref("ResponsesResponse")
+                ),
+                "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
+                "409": json_response("The response is not cancellable.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/responses/{response_id}/input_items", "get"): {
+            "summary": "List input items",
+            "tags": ["responses"],
+            "description": "List the input items of a stored response.",
+            "responses": {
+                "200": json_response("The input items page.", ref("InputItemsList")),
+                "404": json_response("Unknown or expired response id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/messages", "post"): {
+            "summary": "Anthropic Messages",
+            "tags": ["chat"],
+            "description": (
+                "Anthropic Messages API. Aliases `/messages` and `/v1/v1/messages` exist."
+            ),
+            "responses": {
+                "200": json_response("The message.", ref("AnthropicMessagesResponse")),
+            },
+            "sse": ref("AnthropicStreamEvent"),
+        },
+        ("/v1/messages/count_tokens", "post"): {
+            "summary": "Count tokens",
+            "tags": ["chat"],
+            "description": (
+                "Native upstream count when the provider offers one, otherwise a local "
+                "`o200k_base` estimate."
+            ),
+            "responses": {
+                "200": json_response(
+                    "Token count.", {"$ref": "#/components/schemas/CountTokensResponse"}
+                ),
+            },
+        },
+        ("/v1/embeddings", "post"): {
+            "summary": "Create embeddings",
+            "tags": ["embeddings"],
+            "responses": {
+                "200": json_response("The embeddings.", ref("EmbeddingResponse")),
+            },
+        },
+        ("/v1/systemone", "post"): {
+            "summary": "Evaluate a state with System One",
+            "tags": ["systemone"],
+            "description": (
+                "Sends `state` and typed `questions` to a System One model such as Jev and "
+                "returns one typed answer per question. TypeSafe and OpenRouter share the "
+                "wire format. A model on the `openai` provider is bridged: its System One "
+                "request is translated to `/v1/decisions` and the answers translated back."
+            ),
+            "responses": {
+                "200": json_response("The answers, one per question id.", ref("SystemOneResponse")),
+            },
+        },
+        ("/v1/decisions", "post"): {
+            "summary": "Answer typed questions about shared evidence",
+            "tags": ["decisions"],
+            "description": (
+                "Sends shared evidence (`input`) and typed `questions` to a decision model "
+                "and returns one typed answer per question. OpenAI serves this endpoint "
+                "natively; a model on a System One upstream (`typesafe`, `openrouter`, "
+                "`ollama`) is bridged: the request is translated to `/v1/systemone` and "
+                "the answers translated back."
+            ),
+            "responses": {
+                "200": json_response("The answers, one per question.", ref("DecisionsResponse")),
+            },
+        },
+        ("/v1/images/generations", "post"): {
+            "summary": "Create image",
+            "tags": ["images"],
+            "description": (
+                "JSON body. Unlike chat, the image schemas are **strict**: an unrecognized "
+                "field returns 400 `invalid_request_error`."
+            ),
+            "responses": {
+                "200": json_response("The generated images.", ref("ImageResponse")),
+            },
+        },
+        ("/v1/images/edits", "post"): {
+            "summary": "Edit image",
+            "tags": ["images"],
+            "description": "Accepts either a JSON body or the official `multipart/form-data` form.",
+            "responses": {
+                "200": json_response("The edited images.", ref("ImageResponse")),
+            },
+        },
+        ("/v1/audio/speech", "post"): {
+            "summary": "Create speech",
+            "tags": ["audio"],
+            "responses": {
+                "200": binary_response(
+                    "Audio bytes in the requested `response_format`.", "application/octet-stream"
+                ),
+            },
+        },
+        ("/v1/audio/transcriptions", "post"): {
+            "summary": "Create transcription",
+            "tags": ["audio"],
+            "description": "Multipart upload. Requires `model` and `file`.",
+            "responses": {
+                "200": json_response("The transcription.", ref("TranscriptionResponse")),
+            },
+        },
+        ("/v1/audio/translations", "post"): {
+            "summary": "Create translation",
+            "tags": ["audio"],
+            "description": "Multipart upload. Requires `model` and `file`.",
+            "responses": {
+                "200": json_response("The translation.", ref("TranslationResponse")),
+            },
+        },
+        ("/v1/models", "get"): {
+            "summary": "List models",
+            "tags": ["models"],
+            "description": "The model catalogue, filtered by the calling key's allowlist.",
+            "responses": {
+                "200": json_response(
+                    "The visible models.", {"$ref": "#/components/schemas/OpenAIModelList"}
+                ),
+            },
+        },
+        ("/v1/protocols", "get"): {
+            "summary": "List protocols",
+            "tags": ["protocols"],
+            "description": "Registered client protocols with their base paths.",
+            "responses": {
+                "200": json_response("The registered protocols.", ref("ProtocolList")),
+            },
+        },
+    }
+)
 
 __all__ = [
     "COMPONENTS",

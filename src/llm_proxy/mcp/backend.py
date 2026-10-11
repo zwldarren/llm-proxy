@@ -8,24 +8,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypeVar
 
 import httpx2
-
-from llm_proxy.core.exceptions import MCPConnectionError, MCPTimeoutError
-from llm_proxy.observability.logger import get_logger
-
-if TYPE_CHECKING:
-    from mcp.types import (
-        CallToolResult,
-        GetPromptResult,
-        ListPromptsResult,
-        ListResourcesResult,
-        ListToolsResult,
-        ReadResourceResult,
-    )
-
-from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.streamable_http import streamable_http_client
-from mcp.types import (
+lazy from mcp import ClientSession
+lazy from mcp.client.stdio import StdioServerParameters, stdio_client
+lazy from mcp.client.streamable_http import streamable_http_client
+lazy from mcp.types import (
     CallToolResult,
     GetPromptResult,
     ListPromptsResult,
@@ -33,6 +19,16 @@ from mcp.types import (
     ListToolsResult,
     ReadResourceResult,
 )
+
+from llm_proxy.core.exceptions import MCPConnectionError, MCPTimeoutError
+from llm_proxy.observability.logger import get_logger
+
+if TYPE_CHECKING:
+    # `ClientSession` above is a lazy proxy, and a @dataclass evaluates its field
+    # annotations when the class is created — which would reify the SDK at import
+    # time. The field annotations below name this TYPE_CHECKING-only alias
+    # instead, so they stay forward references at runtime.
+    from mcp import ClientSession as _ClientSessionType
 
 logger = get_logger(__name__)
 
@@ -100,7 +96,7 @@ class StdioBackend(BackendConnection):
     env: dict[str, str] | None = None
     timeout: float = 30.0
 
-    _session: ClientSession | None = field(default=None, init=False, repr=False)
+    _session: _ClientSessionType | None = field(default=None, init=False, repr=False)
     _exit_stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
 
     async def _with_timeout(self, coro: Awaitable[T]) -> T:
@@ -263,7 +259,7 @@ class HTTPBackend(BackendConnection):
     headers: dict[str, str] | None = None
     timeout: float = 30.0
 
-    _session: ClientSession | None = field(default=None, init=False, repr=False)
+    _session: _ClientSessionType | None = field(default=None, init=False, repr=False)
     _exit_stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
 
     async def _with_timeout(self, coro: Awaitable[T]) -> T:

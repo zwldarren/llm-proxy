@@ -3,7 +3,7 @@
 from typing import Any
 
 import orjson
-import redis.asyncio as redis
+lazy import redis.asyncio as redis
 
 
 class ResponseStore:

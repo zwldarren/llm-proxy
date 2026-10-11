@@ -9,22 +9,26 @@ module's data (see ADR-0026).
 
 from pydantic import BaseModel, Field
 
-_PERIOD_MAP: dict[str, int] = {
-    "second": 1,
-    "minute": 60,
-    "hour": 3600,
-    "day": 86400,
-}
+_PERIOD_MAP: frozendict[str, int] = frozendict(
+    {
+        "second": 1,
+        "minute": 60,
+        "hour": 3600,
+        "day": 86400,
+    }
+)
 
 # Named rate-limit buckets with their code defaults. Decorators reference
 # buckets by name (e.g. ``@limiter.limit("auth.login")``); the effective value
 # is resolved per request so UI-managed overrides (server_config
 # ``rate_limits`` key) are hot-reloaded.
-DEFAULT_RATE_LIMITS: dict[str, str] = {
-    "auth.login": "5/minute",
-    "auth.setup": "5/minute",
-    "auth.setup_status": "10/minute",
-}
+DEFAULT_RATE_LIMITS: frozendict[str, str] = frozendict(
+    {
+        "auth.login": "5/minute",
+        "auth.setup": "5/minute",
+        "auth.setup_status": "10/minute",
+    }
+)
 
 
 def parse_limit_value(limit_value: str) -> tuple[int, int]:

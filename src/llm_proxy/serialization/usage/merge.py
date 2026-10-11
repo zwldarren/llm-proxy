@@ -16,8 +16,6 @@ Both live here because the merge rule is part of the canonical record's
 contract, not of whichever transformer happens to hold the accumulator.
 """
 
-from __future__ import annotations
-
 from dataclasses import fields, replace
 
 from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage

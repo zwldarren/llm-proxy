@@ -280,22 +280,24 @@ def get_api_key_lockout_manager() -> APIKeyLockoutManager:
     return _api_key_lockout_manager
 
 
-_SECURITY_HEADERS = {
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "X-XSS-Protection": "1; mode=block",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
-    "Content-Security-Policy": (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
-        "font-src 'self' data:; "
-        "connect-src 'self'; "
-        "frame-ancestors 'none';"
-    ),
-}
+_SECURITY_HEADERS: frozendict[str, str] = frozendict(
+    {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+        "Content-Security-Policy": (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        ),
+    }
+)
 
 
 def build_security_headers(config_manager: DatabaseConfigManager | None = None) -> dict[str, str]:

@@ -54,20 +54,22 @@ logger = get_logger(__name__)
 
 # Lookup table for non-chat protocol context builders.
 # Add new protocol types here instead of adding boolean flags + elif branches.
-_NON_CHAT_CONTEXT_BUILDERS: dict[str, Any] = {
-    "embeddings": build_embeddings_request_context,
-    "image_generations": lambda r, fr: build_images_request_context(
-        r, fr, request_type=RequestType.IMAGE_GENERATION
-    ),
-    "image_edits": lambda r, fr: build_images_request_context(
-        r, fr, request_type=RequestType.IMAGE_EDIT
-    ),
-    "speech": build_speech_request_context,
-    "systemone": build_systemone_request_context,
-    "openai_decisions": build_decisions_request_context,
-    "transcription": build_transcription_request_context,
-    "translation": build_translation_request_context,
-}
+_NON_CHAT_CONTEXT_BUILDERS: frozendict[str, Any] = frozendict(
+    {
+        "embeddings": build_embeddings_request_context,
+        "image_generations": lambda r, fr: build_images_request_context(
+            r, fr, request_type=RequestType.IMAGE_GENERATION
+        ),
+        "image_edits": lambda r, fr: build_images_request_context(
+            r, fr, request_type=RequestType.IMAGE_EDIT
+        ),
+        "speech": build_speech_request_context,
+        "systemone": build_systemone_request_context,
+        "openai_decisions": build_decisions_request_context,
+        "transcription": build_transcription_request_context,
+        "translation": build_translation_request_context,
+    }
+)
 
 
 async def require_any_auth(request: Request):

@@ -7,8 +7,6 @@ streaming converters, the protocol transformers that consume the converted
 internal chat shape, and the adapters here.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 __all__ = ["fold_deepseek_cache_hits", "fold_top_level_reasoning_tokens"]

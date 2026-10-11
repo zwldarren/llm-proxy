@@ -8,7 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any
 
 import orjson
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+lazy from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from llm_proxy.mcp.backend import BackendConnection, HTTPBackend, StdioBackend
 from llm_proxy.mcp.proxy import MCPServerProxy

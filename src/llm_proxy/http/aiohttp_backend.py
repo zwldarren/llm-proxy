@@ -22,8 +22,6 @@ codebase depends on them:
   matching the httpx2 ``response`` event hook.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json as _json
 import time

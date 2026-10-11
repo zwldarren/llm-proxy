@@ -8,11 +8,13 @@ from llm_proxy.routing.types import (
     Tier,
 )
 
-_QUALITY_RANK = {
-    ServedQuality.ECONOMY: 0,
-    ServedQuality.BALANCED: 1,
-    ServedQuality.PREMIUM: 2,
-}
+_QUALITY_RANK: frozendict[ServedQuality, int] = frozendict(
+    {
+        ServedQuality.ECONOMY: 0,
+        ServedQuality.BALANCED: 1,
+        ServedQuality.PREMIUM: 2,
+    }
+)
 
 
 def quality_rank(value: ServedQuality | str | None) -> int:
