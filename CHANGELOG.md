@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.4.0](https://github.com/zwldarren/llm-proxy/compare/v0.3.1...v0.4.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **python:** adopt 3.15 idioms — PEP 810 lazy imports, frozendict, sentinel
+* **routing:** `not_low_anchor` now defaults to False and an unset gate no longer consults every turn; console and docs carry the same posture.
+* **security:** deployments that relied on the always-on API-key IP lockout lose it on upgrade. Public instances must enable Settings -> Security -> API Key IP Lockout.
+
+### Features
+
+* **health:** report which store actually holds the rate-limit windows ([c49c466](https://github.com/zwldarren/llm-proxy/commit/c49c466d6df98194ac25d8acf0722c4bbf776916))
+* **routing:** drop the embedding signal (Signal C) and its ML stack ([c8ab589](https://github.com/zwldarren/llm-proxy/commit/c8ab589c443e8763edba26c18fb7031ef4f60c64))
+* **routing:** repair the ensemble, close the judge gate, bar verdict consumption ([c212846](https://github.com/zwldarren/llm-proxy/commit/c21284656679be0bd0ed09ee5160a4b33adf4217))
+* **routing:** ship the not_low_anchor judge gate and the clarified tier rubric ([50efb71](https://github.com/zwldarren/llm-proxy/commit/50efb719fcc30b260806bd651b95c56011e422e3))
+* upgrade to Python 3.15 and adopt 3.15 language features ([1315d00](https://github.com/zwldarren/llm-proxy/commit/1315d003d1367dd7c46bb2c86f449caf5468feae))
+
+
+### Bug Fixes
+
+* address the second review pass on the merged refactor series ([20216eb](https://github.com/zwldarren/llm-proxy/commit/20216eb65ce475572913f0e7f64df87e537d3d47))
+* **billing:** bill every web-search continuation hop ([046cb73](https://github.com/zwldarren/llm-proxy/commit/046cb73fe78ed2dad9123ff024226b55d8e4af20))
+* **ci:** drop removed smart-routing extra; use python:3.15-rc-slim image ([597419b](https://github.com/zwldarren/llm-proxy/commit/597419ba3829398721eff55ce5b1cf298c5f5a5d))
+* **config:** address review findings on the server settings registry ([dff1859](https://github.com/zwldarren/llm-proxy/commit/dff1859417a9ea768d5f2a04a007210558dd63b5))
+* **docker:** skip dev group in production image ([aa47cb0](https://github.com/zwldarren/llm-proxy/commit/aa47cb06edd2192eeef62520e093a5905ce7b70e))
+* **observability:** keep the provider-info search count monotonic ([5bafaec](https://github.com/zwldarren/llm-proxy/commit/5bafaec9e880304a415ed8c87385e21bbcc49bd1))
+* **observability:** reach the Langfuse generation across the streaming task boundary ([d153521](https://github.com/zwldarren/llm-proxy/commit/d153521bb7c220d2bfe55e798900fd0ebb58a986))
+* **ollama:** report tool_calls when the model produced them ([ab186e9](https://github.com/zwldarren/llm-proxy/commit/ab186e9661a70a9621e8197109c1a6e7cfcd1a57))
+* **ratelimit:** give every bucket its own window and harden the limiter ([18a0992](https://github.com/zwldarren/llm-proxy/commit/18a0992ee874d53cc8c3a331101d41e8a3d9d777))
+* **ratelimit:** make the Redis check-and-record one atomic script ([7e5542c](https://github.com/zwldarren/llm-proxy/commit/7e5542cf1341a52fe6bf262ac4d2867de776099e))
+* **release:** bump the published OpenAPI version with the release ([497eb6d](https://github.com/zwldarren/llm-proxy/commit/497eb6d886d04306b3a2735ffc037bb54499e79e))
+* **security:** make "disable rate limiting" cover every auth-path throttle ([85f8d4b](https://github.com/zwldarren/llm-proxy/commit/85f8d4b61e198ceb215c772a8587aa1b74e0c65e))
+* **streaming:** keep the transformer module importable on its own ([442282d](https://github.com/zwldarren/llm-proxy/commit/442282d524f591dcee02c48f6edd4cbf08c3b105))
+* **streaming:** tell a clean close at stream end from an abandonment ([a75a4f9](https://github.com/zwldarren/llm-proxy/commit/a75a4f9b1dd4972aaf57b80a17d02c4fefe7a394))
+* **usage:** repair the facts the seam's first review found lost ([c1f9cc5](https://github.com/zwldarren/llm-proxy/commit/c1f9cc5a0459771ccf3d2e081e24595c59a877cc))
+* **web-search:** attribute streamed searches to the request's user ([5f81f7f](https://github.com/zwldarren/llm-proxy/commit/5f81f7f5ef04720cfa1879f2f6fead7661ee4395))
+
+
+### Documentation
+
+* **adr:** give the server settings registry its own number ([a8ddb99](https://github.com/zwldarren/llm-proxy/commit/a8ddb99f27584820a883c41af206b9522f1dae5d))
+* **adr:** point the superseded usage decisions at the intake seam ([c96671a](https://github.com/zwldarren/llm-proxy/commit/c96671a1dc376a1bf9923a0e428f7dccd1714270))
+* **adr:** record the declared web-search transformer seam ([cfd4d92](https://github.com/zwldarren/llm-proxy/commit/cfd4d9253a8b4cce5050d61aa124c96672bb9d5c))
+* **adr:** record the server settings registry decision ([5550bdf](https://github.com/zwldarren/llm-proxy/commit/5550bdf3ac1eaf1502c813415bdc9fdb2718b19e))
+* **config:** finish repointing the server settings registry at ADR-0026 ([8b2aea4](https://github.com/zwldarren/llm-proxy/commit/8b2aea4a9a381f44317399f665741fa6148d1dfb))
+* **context:** name the provider declaration and where it is asserted ([5d05adc](https://github.com/zwldarren/llm-proxy/commit/5d05adc8a00097471332c1dd324c46c7c1d7375f))
+
+
+### Code Refactoring
+
+* **python:** adopt 3.15 idioms — PEP 810 lazy imports, frozendict, sentinel ([d836ec2](https://github.com/zwldarren/llm-proxy/commit/d836ec2e466c60e08622278dca367cb17d452205))
+
 ## [0.3.1](https://github.com/zwldarren/llm-proxy/compare/v0.3.0...v0.3.1) (2026-10-08)
 
 
