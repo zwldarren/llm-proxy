@@ -133,7 +133,7 @@ function round2(value: number | null, fallback: number): number {
  *  must clear that bar. The switch carries the pair so the two never mix a
  *  "one bar off" state the operator did not choose. */
 const consumptionOn = computed(
-  () => judge.value.apply_min_confidence !== null || judge.value.apply_min_escalation !== null,
+  () => judge.value.apply_min_confidence !== null || judge.value.apply_min_escalation !== null
 );
 
 function setConsumption(on: boolean) {
