@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/zwldarren/llm-proxy/compare/v0.4.0...v0.4.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **deps:** require sqlalchemy[asyncio] so greenlet ships at runtime ([43e9110](https://github.com/zwldarren/llm-proxy/commit/43e9110fdbf5ad3d1c71fb7a2cc8bec40aa65bca))
+* **docker:** bypass uv run re-sync at container start ([2f53628](https://github.com/zwldarren/llm-proxy/commit/2f5362886198d842e465ea5e536e63c1f3da4a5e))
+* **test:** compare the committed OpenAPI spec structurally ([6ff8ac7](https://github.com/zwldarren/llm-proxy/commit/6ff8ac76b2b37f296a2e5afed4f778d59affc2d0))
+
 ## [0.4.0](https://github.com/zwldarren/llm-proxy/compare/v0.3.1...v0.4.0) (2026-10-11)
 
 
