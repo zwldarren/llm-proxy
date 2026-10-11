@@ -3,7 +3,10 @@
 The document at ``docs/public/v1-openapi.json`` is generated from the running
 FastAPI app, so these tests are what keep it honest: the published path set must
 match the routes the app actually registers, alias/admin routes must never leak
-in, and the committed artifact must equal a fresh regeneration.
+in, and the committed artifact must equal a fresh regeneration. The committed
+artifact is compared structurally (parsed JSON), not byte-wise: release-please
+re-serializes the file when it bumps ``$.info.version``, which reorders keys,
+so byte equality would break on every release.
 """
 
 import json
@@ -116,9 +119,9 @@ def test_spec_version_is_git_independent():
 
 
 def test_committed_spec_is_up_to_date():
-    committed = DEFAULT_SPEC_PATH.read_text() if DEFAULT_SPEC_PATH.exists() else ""
+    committed = json.loads(DEFAULT_SPEC_PATH.read_text()) if DEFAULT_SPEC_PATH.exists() else {}
 
-    assert committed == serialize_spec(build_v1_spec()), (
+    assert committed == json.loads(serialize_spec(build_v1_spec())), (
         "docs/public/v1-openapi.json is stale; run `uv run llm-proxy-openapi` and commit it."
     )
 
