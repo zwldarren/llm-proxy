@@ -51,5 +51,7 @@ RUN --mount=type=cache,id=llm-proxy-uv,target=/root/.cache/uv \
 # Expose port
 EXPOSE 8080
 
-# Default command
-CMD ["uv", "run", "llm-proxy"]
+# Run the venv entry script directly: `uv run` would re-sync the environment at
+# container start and pull in the dev group (its lupa dep has no cp315 wheel and
+# needs make/gcc, which the slim image does not ship).
+CMD ["/app/.venv/bin/llm-proxy"]
