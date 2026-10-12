@@ -1,6 +1,8 @@
 # tests/unit/protocols/anthropic/test_handler.py
 """Tests for AnthropicProtocolEndpoint."""
 
+import re
+
 from llm_proxy.models import (
     FunctionTool,
     InternalResponse,
@@ -18,6 +20,18 @@ from llm_proxy.protocols.anthropic.handler import (
 from llm_proxy.protocols.registry import get_protocol_serializer
 
 _serializer = get_protocol_serializer("anthropic")
+
+
+def _wire_blocks(rendered: str) -> list[tuple[str, int]]:
+    """The (event, index) pairs of a rendered SSE batch, in emission order."""
+    return [
+        (event, int(index))
+        for event, index in re.findall(
+            r"event: (content_block_start|content_block_stop)\ndata: "
+            r'\{"type":"[^"]+","index":(\d+)',
+            rendered,
+        )
+    ]
 
 
 class TestAnthropicProtocolEndpoint:
@@ -1014,7 +1028,14 @@ class TestAnthropicProtocolEndpoint:
         assert '"output_tokens":10' in combined
 
     def test_streaming_transformer_accumulates_tool_use_block(self):
-        """Test that streaming transformer accumulates ToolUseBlock in get_accumulated_output()."""
+        """Test that streaming transformer accumulates the tool call block.
+
+        A proxy-intercepted ``web_search`` call is a ``ServerToolUseBlock``
+        from the moment it opens (ADR-0031's decide-at-open): the wire's
+        ``content_block_start`` already announced ``server_tool_use``, so the
+        canonical block agrees whatever boundary closes it. The old machine
+        decided at close and produced a plain ``ToolUseBlock`` here.
+        """
         transformer = AnthropicStreamingTransformer(model="claude-3-opus", request_id="msg_123")
 
         # Start with message
@@ -1047,9 +1068,36 @@ class TestAnthropicProtocolEndpoint:
         # Check accumulated output
         output = transformer.get_accumulated_output()
         assert len(output) == 1
-        assert isinstance(output[0], ToolUseBlock)
+        assert isinstance(output[0], ServerToolUseBlock)
         assert output[0].id == "call_123"
         assert output[0].name == "web_search"
+        assert output[0].input == {"query": "test search"}
+
+    def test_streaming_transformer_accumulates_tool_use_block_not_intercepting(self):
+        """With interception off, a ``web_search`` call stays a ``ToolUseBlock``."""
+        transformer = AnthropicStreamingTransformer(
+            model="claude-3-opus", request_id="msg_123", intercept_web_search=False
+        )
+
+        transformer.transform(
+            'data: {"id":"chatcmpl-abc","choices":'
+            '[{"index":0,"delta":{"role":"assistant","content":""}}]}'
+        )
+        transformer.transform(
+            'data: {"id":"chatcmpl-abc","choices":[{"index":0,"delta":'
+            '{"tool_calls":[{"id":"call_123","type":"function","index":0,'
+            '"function":{"name":"web_search","arguments":""}}]}}]}'
+        )
+        transformer.transform(
+            'data: {"id":"chatcmpl-abc","choices":[{"index":0,"delta":'
+            '{"tool_calls":[{"index":0,"function":'
+            '{"arguments":"{\\"query\\": \\"test search\\"}"}}]}}]}'
+        )
+        transformer.transform('data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}')
+
+        output = transformer.get_accumulated_output()
+        assert len(output) == 1
+        assert isinstance(output[0], ToolUseBlock)
         assert output[0].input == {"query": "test search"}
 
     def test_streaming_transformer_accumulates_multiple_tool_use_blocks(self):
@@ -1142,3 +1190,55 @@ class TestAnthropicProtocolEndpoint:
         )
         assert start is not None
         assert '"type":"server_tool_use"' in start
+
+    def test_replayed_raw_block_closes_the_open_wire_block_first(self):
+        """A ``raw_content_block`` replay must not reuse the open block's index.
+
+        The engine's ``adopt()`` closes its lanes lazily; the wire still holds
+        the server_tool_use block open, so the adapter has to emit its stop and
+        take a fresh index before starting the replayed block (ADR-0031).
+        """
+        transformer = AnthropicStreamingTransformer(model="claude-3-opus", request_id="msg_1")
+        transformer.transform(
+            'data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":['
+            '{"index":0,"id":"toolu_1","type":"function","server_tool_use":true,'
+            '"function":{"name":"web_search","arguments":"{}"}}]}}]}'
+        )
+
+        result = transformer.transform(
+            'data: {"id":"c","choices":[{"index":0,"delta":{"raw_content_block":'
+            '{"type":"web_search_tool_result","content":"x"}}}]}'
+        )
+
+        assert result is not None
+        assert _wire_blocks(result) == [
+            ("content_block_stop", 0),
+            ("content_block_start", 1),
+            ("content_block_stop", 1),
+        ]
+
+    def test_redacted_thinking_after_thinking_starts_a_new_block(self):
+        """thinking → redacted_thinking is two wire blocks, payload intact.
+
+        The engine splits the redacted marker out of the open thinking lane; the
+        wire must close the thinking block, open a ``redacted_thinking`` block
+        carrying the opaque ``data``, and never render the ``[redacted]``
+        placeholder as a ``thinking_delta``.
+        """
+        transformer = AnthropicStreamingTransformer(model="claude-3-opus", request_id="msg_1")
+        transformer.transform(
+            'data: {"id":"c","choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}'
+        )
+        transformer.transform(
+            'data: {"id":"c","choices":[{"index":0,"delta":{"reasoning_signature":"sig"}}]}'
+        )
+
+        result = transformer.transform(
+            'data: {"id":"c","choices":[{"index":0,"delta":{"reasoning_content":"[redacted]",'
+            '"reasoning_is_redacted":true,"encrypted_content":"opaque"}}]}'
+        )
+
+        assert result is not None
+        assert _wire_blocks(result) == [("content_block_stop", 0), ("content_block_start", 1)]
+        assert '"type":"redacted_thinking","data":"opaque"' in result
+        assert '"thinking":"[redacted]"' not in result

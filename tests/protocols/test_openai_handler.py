@@ -401,8 +401,6 @@ class TestOpenAIStreamingTransformerContinuation:
         assert cont.response_id == "resp_1"
         # Fresh buffers: the continuation must not inherit the original
         # stream's accumulated text/tool state.
-        assert cont._text_buffer == ""
-        assert cont._tool_calls_buffer == {}
         assert cont.get_accumulated_output() == []
 
     def test_continuation_transforms_followup_chunks(self):
@@ -428,8 +426,11 @@ class TestOpenAIStreamingTransformerContinuation:
         )
         assert frame is not None
         assert "The capital of France is Paris." in frame
-        # Text accumulates in the buffer until the terminal chunk finalizes it.
-        assert cont._text_buffer == "The capital of France is Paris."
+        # The open segment is visible as a projection until the terminal
+        # chunk closes it (ADR-0031).
+        projected = cont.get_accumulated_output()
+        assert len(projected) == 1
+        assert projected[0].text == "The capital of France is Paris."
         cont.transform(
             {
                 "id": "chatcmpl-1",

@@ -10,7 +10,8 @@ from typing import Any
 import orjson
 from orjson import JSONDecodeError
 
-from llm_proxy.models import ServerToolUseBlock, TextBlock, ThinkingBlock, ToolUseBlock
+from llm_proxy.models import ServerToolUseBlock, TextBlock, ToolUseBlock
+from llm_proxy.models.content_blocks import ContentBlock
 from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
@@ -25,6 +26,7 @@ from llm_proxy.protocols.openresponses.streaming_emitter import StreamingContent
 from llm_proxy.protocols.openresponses.streaming_events import StreamingEventFactory
 from llm_proxy.serialization.responses_toolkit import generate_item_id
 from llm_proxy.serialization.usage import UsageAccumulator, merge_latest
+from llm_proxy.streaming.accumulation import CanonicalDelta, SegmentAccumulator
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
@@ -321,6 +323,13 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # ``get_usage`` merges the two.
         self._usage_chat = UsageAccumulator("chat")
         self._usage_responses = UsageAccumulator("responses")
+        # The segment engine assembles the canonical blocks (ADR-0031). Both
+        # input dialects feed it — chat deltas through ``feed``, Responses
+        # events through ``feed_delta`` — while the emitter keeps its own
+        # per-item accumulation for the wire's content_part/item done events.
+        # The default policy fits: tool calls pool by provider index, the
+        # item cursor is wire state, and tool variants classify structurally.
+        self._segments = SegmentAccumulator()
 
     def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
         """Accumulate one native Responses frame for the request log.
@@ -632,6 +641,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             if usage:
                 self._update_responses_api_usage(usage)
             self.state.is_done = True
+            self._segments.finish()
             # Keep the upstream completed snapshot for store=true persistence.
             if isinstance(response_data, dict) and response_data:
                 self.state.final_response_payload = response_data
@@ -642,6 +652,8 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                 if usage:
                     self._update_responses_api_usage(usage)
                 self.state.final_response_payload = response_data
+            self.state.is_done = True
+            self._segments.finish()
         elif chunk_type in (
             "response.output_text.delta",
             "response.reasoning.delta",
@@ -671,6 +683,14 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     )
                     self.state.content_types[key] = content_type
                     self.state.current_content_type = content_type
+                    # The engine assembles the canonical blocks (ADR-0031);
+                    # item-addressed callers state their deltas directly.
+                    self._segments.feed_delta(
+                        CanonicalDelta(
+                            kind="text" if content_type == "output_text" else "reasoning",
+                            text=delta_text,
+                        )
+                    )
 
         # Re-serialize and emit the upstream event, normalizing raw reasoning
         # events (``response.reasoning.delta|done`` / OpenAI's
@@ -724,6 +744,11 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                 events += self._process_delta(delta)
 
         if finish_reason and not self.state.is_done:
+            # The terminal chunk closes the engine's lanes: the web-search
+            # interceptor reads the canonical blocks right after this chunk,
+            # and an open tool lane would hide the call it intercepts.
+            # finish() is idempotent and non-latching (ADR-0031).
+            self._segments.finish()
             events += self._process_finish(finish_reason)
 
         return events
@@ -791,6 +816,11 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             SSE events string
         """
         events = ""
+
+        # The engine assembles the canonical blocks (ADR-0031); the returned
+        # segment events are ignored — the emitter below renders the wire from
+        # the delta itself, with the per-item bookkeeping it already owns.
+        self._segments.feed(delta)
 
         signature = delta.get("reasoning_signature")
         if signature:
@@ -950,43 +980,24 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         }
 
     def get_accumulated_output(self) -> list:
-        """Get accumulated output content for final response.
+        """The canonical blocks, from the segment engine (ADR-0031).
 
-        Returns:
-            List of ContentBlocks accumulated during streaming.
+        The rebuild the old machine performed from the emitter's per-item
+        state dicts ordered every text/reasoning block before every tool
+        call; the engine keeps arrival order, keeps signature-only reasoning
+        segments, refusal deltas and custom-tool freeform input the rebuild
+        dropped, and attaches tool ``thought_signature`` values as block extras.
         """
-        output = []
+        return self._segments.blocks()
 
-        for key, text in self.state.accumulated_text.items():
-            if text:
-                content_type = self.state.content_types.get(key, "output_text")
-                if content_type == "output_text":
-                    output.append(TextBlock(text=text))
-                elif content_type == "reasoning_text":
-                    output.append(
-                        ThinkingBlock(
-                            thinking=text, signature=self.state.reasoning_signatures.get(key[0])
-                        )
-                    )
+    def supersede(self, index: int, block: ContentBlock) -> None:
+        """Replace a closed block in the engine's canonical list (ADR-0031).
 
-        for idx, tool_id in self.state.tool_call_ids.items():
-            tool_name = self.state.tool_call_names.get(idx, "")
-            tool_args = self.state.accumulated_tool_args.get(idx, "")
-
-            try:
-                tool_input = orjson.loads(tool_args) if tool_args else {}
-            except JSONDecodeError:
-                tool_input = {}
-
-            output.append(
-                ToolUseBlock(
-                    id=tool_id,
-                    name=tool_name,
-                    input=tool_input,
-                )
-            )
-
-        return output
+        The web-search interception's ``ToolUseBlock → ServerToolUseBlock``
+        substitution; the base verb, delegating to the same engine this
+        transformer reads through.
+        """
+        self._segments.supersede(index, block)
 
     def _own_usage(self) -> Usage | None:
         """Get accumulated usage information from streaming response.

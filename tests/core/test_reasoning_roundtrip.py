@@ -832,7 +832,9 @@ class TestStreamingTransformerReasoningHandling:
                 }
             ],
         }
-        transformer._in_thinking_block = True
+        # Signature-only fragment on a fresh stream: the wire lazily opens a
+        # thinking block to carry it (the signature is the integrity payload
+        # clients echo back) — ADR-0031's signature-only ruling.
         result = transformer._transform_openai_chunk(chunk)
         assert result is not None
         assert "signature_delta" in result
@@ -882,7 +884,7 @@ class TestStreamingTransformerReasoningHandling:
             ],
         }
         transformer._normalize_chunk(chunk)
-        transformer._finalize_accumulation()
+        transformer.flush_pending_accumulation()
         blocks = transformer.get_accumulated_output()
         thinking = [b for b in blocks if isinstance(b, ThinkingBlock)]
         assert len(thinking) == 1
@@ -907,7 +909,7 @@ class TestStreamingTransformerReasoningHandling:
             ],
         }
         transformer._normalize_chunk(chunk)
-        transformer._finalize_accumulation()
+        transformer.flush_pending_accumulation()
         blocks = transformer.get_accumulated_output()
         thinking = [b for b in blocks if isinstance(b, ThinkingBlock)]
         assert len(thinking) == 1
@@ -935,7 +937,7 @@ class TestStreamingTransformerReasoningHandling:
             ],
         }
         transformer._normalize_chunk(chunk)
-        transformer._finalize_accumulation()
+        transformer.flush_pending_accumulation()
         blocks = transformer.get_accumulated_output()
         redacted = [b for b in blocks if isinstance(b, RedactedThinkingBlock)]
         assert len(redacted) == 1
@@ -1076,8 +1078,18 @@ class TestStreamingTransformerReasoningHandling:
         from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
 
         transformer = OpenAIStreamingTransformer(model="test", request_id="req-1")
-        # Pre-populate reasoning so the chunk is not otherwise empty.
-        transformer._reasoning_buffer = "done"
+        # Reasoning streams first, still buffered (no finish_reason yet), so
+        # the terminal chunk's top-level blob joins the open segment.
+        reasoning_chunk = {
+            "id": "chatcmpl-1",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "test",
+            "choices": [
+                {"index": 0, "delta": {"reasoning_content": "done"}, "finish_reason": None}
+            ],
+        }
+        transformer.transform(reasoning_chunk)
         chunk = {
             "id": "chatcmpl-1",
             "object": "chat.completion.chunk",
@@ -1096,6 +1108,7 @@ class TestStreamingTransformerReasoningHandling:
         blocks = transformer.get_accumulated_output()
         thinking = [b for b in blocks if isinstance(b, ThinkingBlock)]
         assert len(thinking) == 1
+        assert thinking[0].thinking == "done"
         assert thinking[0].encrypted_content == "final-blob"
 
 

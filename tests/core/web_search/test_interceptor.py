@@ -547,13 +547,13 @@ class TestWebSearchStreamProcessor:
         interceptor = self._make_mock_interceptor()
         processor = WebSearchStreamProcessor()
 
-        transformer._accumulated_output = [
+        transformer.adopt(
             ToolUseBlock(
                 id="toolu_ws_001",
                 name="web_search",
                 input={"query": "test query"},
-            ),
-        ]
+            )
+        )
 
         events, _, _ = await processor.process_streaming_web_search(transformer, interceptor, None)
 
@@ -576,19 +576,20 @@ class TestWebSearchStreamProcessor:
         interceptor = self._make_mock_interceptor()
         processor = WebSearchStreamProcessor()
 
-        transformer._accumulated_output = [
+        transformer.adopt(
             ToolUseBlock(
                 id="toolu_ws_001",
                 name="web_search",
                 input={"query": "test query"},
-            ),
-        ]
+            )
+        )
 
         await processor.process_streaming_web_search(transformer, interceptor, None)
 
-        assert len(transformer._accumulated_output) == 1
-        assert isinstance(transformer._accumulated_output[0], ServerToolUseBlock)
-        assert transformer._accumulated_output[0].id == "toolu_ws_001"
+        accumulated = transformer.get_accumulated_output()
+        assert len(accumulated) == 1
+        assert isinstance(accumulated[0], ServerToolUseBlock)
+        assert accumulated[0].id == "toolu_ws_001"
 
     @pytest.mark.asyncio
     async def test_multiple_web_searches_no_duplicates(self):
@@ -599,18 +600,20 @@ class TestWebSearchStreamProcessor:
         interceptor = self._make_mock_interceptor()
         processor = WebSearchStreamProcessor()
 
-        transformer._accumulated_output = [
+        transformer.adopt(
             ToolUseBlock(
                 id="toolu_ws_001",
                 name="web_search",
                 input={"query": "query 1"},
-            ),
+            )
+        )
+        transformer.adopt(
             ToolUseBlock(
                 id="toolu_ws_002",
                 name="web_search",
                 input={"query": "query 2"},
-            ),
-        ]
+            )
+        )
 
         events, _, _ = await processor.process_streaming_web_search(transformer, interceptor, None)
 
@@ -619,8 +622,113 @@ class TestWebSearchStreamProcessor:
         assert "toolu_ws_001" in events
         assert "toolu_ws_002" in events
         assert "web_search_tool_result" in events
-        assert isinstance(transformer._accumulated_output[0], ServerToolUseBlock)
-        assert isinstance(transformer._accumulated_output[1], ServerToolUseBlock)
+        accumulated = transformer.get_accumulated_output()
+        assert isinstance(accumulated[0], ServerToolUseBlock)
+        assert isinstance(accumulated[1], ServerToolUseBlock)
+
+    @pytest.mark.asyncio
+    async def test_engine_backed_openai_accumulated_block_is_superseded(self):
+        """The openai transformer's engine list shows the fulfilled ServerToolUseBlock.
+
+        The interception substitutes the executed call through the typed
+        ``supersede`` verb (ADR-0031), so the reassembled log body carries the
+        same block type every continuation reader sees — no engine keeps a
+        stale ``ToolUseBlock`` behind a replaced copy.
+        """
+        from llm_proxy.core.processing.web_search_streaming import WebSearchStreamProcessor
+        from llm_proxy.protocols.openai.streaming import OpenAIStreamingTransformer
+
+        transformer = OpenAIStreamingTransformer(model="gpt-4", request_id="chatcmpl-ws1")
+        chunk = {
+            "id": "chatcmpl-ws1",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "gpt-4",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_ws_001",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": '{"query": "test query"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        }
+        transformer.transform(chunk)
+        transformer.transform(
+            {
+                **chunk,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            }
+        )
+
+        processor = WebSearchStreamProcessor()
+        await processor.process_streaming_web_search(
+            transformer, self._make_mock_interceptor(), None
+        )
+
+        accumulated = transformer.get_accumulated_output()
+        assert any(isinstance(b, ServerToolUseBlock) for b in accumulated), accumulated
+
+    @pytest.mark.asyncio
+    async def test_engine_backed_openresponses_accumulated_block_is_superseded(self):
+        """Same substitution lands in the openresponses engine list (ADR-0031)."""
+        from llm_proxy.core.processing.web_search_streaming import WebSearchStreamProcessor
+        from llm_proxy.protocols.openresponses.streaming import (
+            OpenResponsesStreamingTransformer,
+        )
+
+        transformer = OpenResponsesStreamingTransformer(model="gpt-4", request_id="resp-ws1")
+        chunk = {
+            "id": "resp-ws1",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "gpt-4",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_ws_001",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": '{"query": "test query"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        }
+        transformer.transform(chunk)
+        transformer.transform(
+            {
+                **chunk,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            }
+        )
+
+        processor = WebSearchStreamProcessor()
+        await processor.process_streaming_web_search(
+            transformer, self._make_mock_interceptor(), None
+        )
+
+        accumulated = transformer.get_accumulated_output()
+        assert any(isinstance(b, ServerToolUseBlock) for b in accumulated), accumulated
 
     @pytest.mark.asyncio
     async def test_no_web_search_blocks_returns_none(self):
@@ -630,8 +738,6 @@ class TestWebSearchStreamProcessor:
         transformer = self._make_transformer()
         interceptor = self._make_mock_interceptor()
         processor = WebSearchStreamProcessor()
-
-        transformer._accumulated_output = []
 
         result, results, _ = await processor.process_streaming_web_search(
             transformer, interceptor, None

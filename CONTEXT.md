@@ -164,6 +164,24 @@ does not read ahead (`PrefetchResult.without_prefetch`) report
 `stream_started=True`. See ADR-0024.
 _Avoid_: peek, sniff, read-ahead
 
+**Segment accumulator**:
+The one engine that owns how a streaming turn's segments — text, thinking
+(with its signature and its redacted/encrypted variants), tool-call arguments
+— interleave and close into canonical content blocks. Fed canonical deltas,
+it exposes closed blocks incrementally (the web-search continuation reads
+them before `finalize()`), and each protocol declares its own policy: which
+block types exist, how blocks close, cursor semantics, indexing (flat vs
+item-addressed), and what counts as a signature and where it lands. The
+engine is the mechanism; the protocols stay the knowledge. Facts a previous
+per-protocol copy dropped are decided once at the engine: no observation is
+silently discarded (reasoning after text, signature-only segments, refusal,
+thought signatures all reach the canonical blocks), and the wire-level rules
+that legitimately differ per protocol (e.g. Anthropic wanting thinking first
+on its wire) are declared where the wire is spoken.
+_Avoid_: per-protocol accumulation state machines, text/thinking buffer
+(those are the engine's private internals), a second hand-rolled
+tool-args JSON fallback
+
 ### Conversion layer
 
 **Provider serializer**:

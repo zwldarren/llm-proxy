@@ -222,7 +222,6 @@ class StreamingTransformer(ABC):
         """
         self.response_id = request_id or ""
         self.model = model
-        self._accumulated_output: list[ContentBlock] = []
         # Usage from independent upstream calls billed with this turn but held by
         # a transformer that is gone (the web-search continuation's hops).
         # ``get_usage()`` folds it into whatever the subclass accumulated.
@@ -503,14 +502,31 @@ class StreamingTransformer(ABC):
         return f"data: {orjson.dumps(data).decode()}\n\n"
 
     def get_accumulated_output(self) -> list[ContentBlock]:
-        """Get accumulated output content for final response.
+        """The canonical blocks assembled during streaming.
 
-        Returns:
-            List of completed ContentBlocks accumulated during streaming.
-            This can be used to construct a InternalResponse after streaming
-            completes, ensuring all content is captured.
+        The base owns no block buffer — ADR-0031 put canonical assembly in
+        the segment engine, and the engine-backed transformers override this
+        verb to read through it. Transformers that build no blocks (identity
+        and family converters whose turns are single text streams) keep the
+        empty default, which is their honest answer.
         """
-        return self._accumulated_output
+        return []
+
+    def supersede(self, index: int, block: ContentBlock) -> None:
+        """Replace the canonical block at *index* with *block*.
+
+        The web-search continuation's verb: it substitutes the
+        ``ToolUseBlock`` it fulfills with the executed ``ServerToolUseBlock``
+        so the reassembled log body shows what the wire announced. A
+        transformer that declares ``supports_web_search_continuation``
+        overrides this — engine-backed ones delegate to
+        :meth:`SegmentAccumulator.supersede`, a wire-rebuilt list replaces in
+        place. Reaching the base is a capability declaration without an
+        implementation, never a data path.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} declares no canonical block store to supersede"
+        )
 
     def get_usage(self) -> Usage | None:
         """The turn's canonical usage record, with every absorbed call folded in.

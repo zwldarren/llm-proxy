@@ -93,7 +93,7 @@ class TestAnthropicRedactedStreamPassthrough:
         from llm_proxy.models import RedactedThinkingBlock
 
         redacted = [
-            b for b in transformer._accumulated_output if isinstance(b, RedactedThinkingBlock)
+            b for b in transformer.get_accumulated_output() if isinstance(b, RedactedThinkingBlock)
         ]
         assert redacted and redacted[0].data == "OPAQUE-DATA"
 

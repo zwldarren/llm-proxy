@@ -14,17 +14,10 @@ from typing import Any
 import orjson
 from orjson import JSONDecodeError
 
-from llm_proxy.core.utils import create_image_source_from_url
-from llm_proxy.models import AudioBlock, ImageBlock
-from llm_proxy.models.content_blocks import (
-    CustomToolUseBlock,
-    RedactedThinkingBlock,
-    TextBlock,
-    ThinkingBlock,
-    ToolUseBlock,
-)
-from llm_proxy.models.types import AudioSource, Usage
+from llm_proxy.models.content_blocks import ContentBlock
+from llm_proxy.models.types import Usage
 from llm_proxy.serialization.usage import UsageAccumulator
+from llm_proxy.streaming.accumulation import SegmentAccumulator
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import StreamingTransformer
 
@@ -97,19 +90,12 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         # stays byte-faithful, this one is what the proxy bills from.
         self._usage = UsageAccumulator("chat")
         self._emitted_usage_chunk: bool = False
-        self._text_buffer: str = ""
-        self._reasoning_buffer: str = ""
-        self._reasoning_signature: str = ""
-        self._reasoning_is_redacted: bool = False
-        self._reasoning_encrypted_content: str | None = None
-        # OpenRouter-style structured reasoning array (last non-empty snapshot).
-        # Carried on the accumulated block's ``extra`` so a streamed turn logs/
-        # persists the same structured reasoning a non-streamed one does.
-        self._reasoning_details: list[dict[str, Any]] = []
-        self._tool_calls_buffer: dict[int, dict[str, Any]] = {}
-        self._images_buffer: list[dict[str, Any]] = []
-        self._audio_data_buffer: str = ""
-        self._audio_transcript_buffer: str = ""
+        # The segment engine assembles the canonical blocks (ADR-0031); the
+        # Chat Completions policy is the default one: parallel tool lanes,
+        # no cursor, structural tool classification. The events it returns
+        # are ignored — this protocol's wire is a fidelity-first passthrough
+        # and derives nothing from the assembly decisions.
+        self._segments = SegmentAccumulator()
         self._include_obfuscation: bool | None = include_obfuscation
         self._finish_reason: str | None = None
         self._system_fingerprint: str | None = None
@@ -162,10 +148,10 @@ class OpenAIStreamingTransformer(StreamingTransformer):
 
         Called before the response log is reassembled: a native stream that
         never delivered a terminal ``finish_reason`` (client abort, upstream
-        cut) would otherwise log nothing. ``finalize`` flushes the same buffers
-        on the converted path, which is skipped for native streams.
+        cut) would otherwise log nothing. ``finalize`` flushes the same
+        buffers on the converted path, which is skipped for native streams.
         """
-        self._finalize_accumulation()
+        self._segments.finish()
 
     @classmethod
     def continuation(
@@ -298,13 +284,14 @@ class OpenAIStreamingTransformer(StreamingTransformer):
         return result if result else None
 
     def _accumulate_from_chunk(self, original_chunk: dict | None) -> None:
-        """Accumulate content from a streaming chunk.
+        """Feed one canonical chunk's segments to the accumulator.
 
-        This method extracts and buffers content from streaming chunks to build
-        the final accumulated output for tracing/logging purposes.
-
-        Args:
-            original_chunk: The original parsed chunk dictionary
+        Envelope facts (``system_fingerprint``, ``service_tier``) and the
+        terminal ``finish_reason`` stay here — they are chunk-envelope
+        knowledge, not segment assembly. The encrypted reasoning blob the
+        OpenAI Responses bridge attaches at the chunk's top level feeds as a
+        synthetic delta; the engine holds it for the next reasoning segment
+        instead of opening an empty one (ADR-0031).
         """
         if not original_chunk:
             return
@@ -322,11 +309,11 @@ class OpenAIStreamingTransformer(StreamingTransformer):
 
         # Capture encrypted reasoning state from OpenAI Responses provider.
         # This can arrive as a top-level field (response.completed fallback)
-        # or inside a delta; either way it must survive to the OpenResponses
-        # streaming transformer so it can emit reasoning.encrypted_content.
+        # or inside a delta; either way it must survive to the reasoning
+        # segment it belongs to.
         encrypted = original_chunk.get("encrypted_content")
-        if encrypted is not None:
-            self._reasoning_encrypted_content = encrypted
+        if isinstance(encrypted, str) and encrypted:
+            self._segments.feed({"encrypted_content": encrypted})
 
         choices = original_chunk.get("choices", [])
         if not choices:
@@ -342,270 +329,31 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             if not isinstance(delta, dict):
                 continue
 
-            # Buffer the three content kinds in canonical order
-            # (reasoning precedes visible content, which precedes tool calls).
-            # Each helper flushes the opposite kinds at a boundary so an
-            # interleaved turn keeps every segment as its own block instead of
-            # merging text and concatenating signatures.
-            self._accumulate_reasoning_delta(delta)
-            self._accumulate_text_delta(delta)
-            self._accumulate_tool_calls_delta(delta)
-
-            # Accumulate image output (OpenRouter image generation via chat completions)
-            if "images" in delta and isinstance(delta["images"], list):
-                for img in delta["images"]:
-                    if isinstance(img, dict) and img not in self._images_buffer:
-                        self._images_buffer.append(img)
-
-            # Accumulate audio output (OpenRouter audio output via chat completions)
-            if "audio" in delta and isinstance(delta["audio"], dict):
-                audio = delta["audio"]
-                if "data" in audio and audio["data"]:
-                    self._audio_data_buffer += audio["data"]
-                if "transcript" in audio and audio["transcript"]:
-                    self._audio_transcript_buffer += audio["transcript"]
+            # The engine assembles the canonical blocks (ADR-0031); the
+            # returned segment events are ignored — this protocol's wire is
+            # a fidelity-first passthrough and derives nothing from the
+            # assembly decisions.
+            self._segments.feed(delta)
 
             if finish_reason:
                 # Kept for the reassembled log body: the wire finish_reason is
                 # otherwise discarded, and the formatter would default it to
                 # "stop" even for a truncated (``length``) stream.
                 self._finish_reason = finish_reason
-                self._finalize_accumulation()
+                self._segments.finish()
 
-    def _accumulate_reasoning_delta(self, delta: dict[str, Any]) -> None:
-        """Buffer one delta's reasoning, closing any preceding text/tool block.
+    def get_accumulated_output(self) -> list[ContentBlock]:
+        """The assembled canonical blocks, from the segment engine (ADR-0031)."""
+        return self._segments.blocks()
 
-        Reasoning segments interleave with tool calls (``thinking -> tool ->
-        thinking``); flushing the previously-open segment at the boundary keeps
-        each segment its own block instead of merging their text and
-        concatenating their signatures.
+    def supersede(self, index: int, block: ContentBlock) -> None:
+        """Replace a closed block in the engine's canonical list (ADR-0031).
+
+        The web-search interception's ``ToolUseBlock → ServerToolUseBlock``
+        substitution; the base verb, delegating to the same engine this
+        transformer reads through.
         """
-        reasoning = delta.get("reasoning_content")
-        if not isinstance(reasoning, str) or not reasoning:
-            alternate = delta.get("reasoning")
-            reasoning = alternate if isinstance(alternate, str) and alternate else ""
-        signature = delta.get("reasoning_signature")
-        encrypted = delta.get("encrypted_content")
-        details = delta.get("reasoning_details")
-        has_signature = isinstance(signature, str) and bool(signature)
-        has_encrypted = isinstance(encrypted, str) and bool(encrypted)
-        has_details = isinstance(details, list) and bool(details)
-        if not (reasoning or has_signature or has_encrypted or has_details):
-            return
-
-        # A new reasoning segment starts: close the segment before it.
-        self._flush_text()
-        self._flush_tools()
-
-        if reasoning:
-            self._reasoning_buffer += reasoning
-        if has_signature:
-            self._reasoning_signature += signature
-        if delta.get("reasoning_is_redacted"):
-            self._reasoning_is_redacted = True
-        if has_encrypted:
-            self._reasoning_encrypted_content = encrypted
-        if has_details:
-            self._reasoning_details = [d for d in details if isinstance(d, dict)]
-
-    def _accumulate_text_delta(self, delta: dict[str, Any]) -> None:
-        """Buffer one delta's visible text/images, closing preceding blocks."""
-        if "content" not in delta or delta["content"] is None:
-            return
-        content = delta["content"]
-        text_parts: list[str] = []
-        image_parts: list[str] = []
-        if isinstance(content, str):
-            if content:
-                text_parts.append(content)
-        elif isinstance(content, list):
-            for part in content:
-                if not isinstance(part, dict):
-                    continue
-                if part.get("type") == "text":
-                    text = part.get("text", "")
-                    if text:
-                        text_parts.append(text)
-                elif part.get("type") == "image_url":
-                    url = part.get("image_url", {}).get("url", "")
-                    if url:
-                        image_parts.append(f"![image]({url})")
-        if not text_parts and not image_parts:
-            return
-
-        # Visible content starts: close the preceding reasoning/tool segment.
-        self._flush_reasoning()
-        self._flush_tools()
-
-        if text_parts:
-            self._text_buffer += "".join(text_parts)
-        if image_parts:
-            joined = "\n".join(image_parts)
-            if self._text_buffer:
-                self._text_buffer += "\n" + joined
-            else:
-                self._text_buffer += joined
-
-    def _accumulate_tool_calls_delta(self, delta: dict[str, Any]) -> None:
-        """Buffer one delta's tool calls, closing preceding reasoning/text."""
-        tool_calls = delta.get("tool_calls")
-        if not isinstance(tool_calls, list) or not tool_calls:
-            return
-
-        # A tool call starts: close the preceding reasoning/text segment.
-        self._flush_reasoning()
-        self._flush_text()
-
-        for tc in tool_calls:
-            if not isinstance(tc, dict):
-                continue
-            idx = tc.get("index", 0)
-            if idx not in self._tool_calls_buffer:
-                tc_type = tc.get("type", "function")
-                if tc_type == "custom":
-                    self._tool_calls_buffer[idx] = {
-                        "id": "",
-                        "type": "custom",
-                        "custom": {"name": "", "input": ""},
-                    }
-                else:
-                    self._tool_calls_buffer[idx] = {
-                        "id": "",
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                        "thought_signature": None,
-                    }
-
-            if "id" in tc and tc["id"]:
-                self._tool_calls_buffer[idx]["id"] = tc["id"]
-            if "type" in tc and tc["type"]:
-                self._tool_calls_buffer[idx]["type"] = tc["type"]
-            if "function" in tc and isinstance(tc["function"], dict):
-                func = tc["function"]
-                if "name" in func and func["name"]:
-                    self._tool_calls_buffer[idx]["function"]["name"] = func["name"]
-                if "arguments" in func and func["arguments"]:
-                    self._tool_calls_buffer[idx]["function"]["arguments"] += func["arguments"]
-            if "thought_signature" in tc and tc["thought_signature"]:
-                self._tool_calls_buffer[idx]["thought_signature"] = tc["thought_signature"]
-            if "custom" in tc and isinstance(tc["custom"], dict):
-                custom = tc["custom"]
-                if "name" in custom and custom["name"]:
-                    self._tool_calls_buffer[idx]["custom"]["name"] = custom["name"]
-                if "input" in custom and custom["input"]:
-                    self._tool_calls_buffer[idx]["custom"]["input"] += custom["input"]
-
-    def _flush_reasoning(self) -> None:
-        """Append the pending reasoning segment as its own block.
-
-        A segment with no text but a signature is kept: the signature is the
-        integrity payload replayed next turn, matching the non-streaming
-        formatter.
-        """
-        if not (self._reasoning_buffer or self._reasoning_details or self._reasoning_signature):
-            return
-        reasoning_details = self._reasoning_details or None
-        if self._reasoning_is_redacted:
-            # The opaque payload rides ``encrypted_content`` on the wire;
-            # ``_reasoning_buffer`` only holds the "[redacted]" display
-            # placeholder, which would fail upstream validation if echoed.
-            self._accumulated_output.append(
-                RedactedThinkingBlock(
-                    data=self._reasoning_encrypted_content or self._reasoning_buffer,
-                    extra={"reasoning_details": reasoning_details} if reasoning_details else {},
-                )
-            )
-        else:
-            self._accumulated_output.append(
-                ThinkingBlock(
-                    thinking=self._reasoning_buffer,
-                    signature=self._reasoning_signature or None,
-                    encrypted_content=self._reasoning_encrypted_content,
-                    extra={"reasoning_details": reasoning_details} if reasoning_details else {},
-                )
-            )
-        self._reasoning_buffer = ""
-        self._reasoning_signature = ""
-        self._reasoning_is_redacted = False
-        self._reasoning_encrypted_content = None
-        self._reasoning_details = []
-
-    def _flush_text(self) -> None:
-        """Append the pending visible text as its own block."""
-        if self._text_buffer:
-            self._accumulated_output.append(TextBlock(text=self._text_buffer))
-            self._text_buffer = ""
-
-    def _flush_tools(self) -> None:
-        """Append buffered tool calls as blocks, in index order."""
-        if not self._tool_calls_buffer:
-            return
-        for idx in sorted(self._tool_calls_buffer.keys()):
-            tc = self._tool_calls_buffer[idx]
-            tc_type = tc.get("type", "function")
-            if tc_type == "custom":
-                if tc["id"] and tc["custom"]["name"]:
-                    self._accumulated_output.append(
-                        CustomToolUseBlock(
-                            id=tc["id"],
-                            name=tc["custom"]["name"],
-                            input=tc["custom"]["input"],
-                        )
-                    )
-            else:
-                if tc["id"] and tc["function"]["name"]:
-                    try:
-                        tool_input = (
-                            orjson.loads(tc["function"]["arguments"])
-                            if tc["function"]["arguments"]
-                            else {}
-                        )
-                    except JSONDecodeError:
-                        tool_input = {}
-
-                    self._accumulated_output.append(
-                        ToolUseBlock(
-                            id=tc["id"],
-                            name=tc["function"]["name"],
-                            input=tool_input,
-                            extra={"thought_signature": tc.get("thought_signature")}
-                            if tc.get("thought_signature")
-                            else {},
-                        )
-                    )
-        self._tool_calls_buffer = {}
-
-    def _finalize_accumulation(self) -> None:
-        """Finalize and add accumulated content to _accumulated_output."""
-        self._flush_reasoning()
-        self._flush_text()
-        self._flush_tools()
-
-        # Accumulate image output blocks
-        if self._images_buffer:
-            for img in self._images_buffer:
-                if isinstance(img, dict) and img.get("type") == "image_url":
-                    image_url = img.get("image_url") or {}
-                    url = image_url.get("url", "")
-                    source = create_image_source_from_url(url)
-                    if source:
-                        self._accumulated_output.append(ImageBlock(source=source))
-            self._images_buffer = []
-
-        # Accumulate audio output block
-        if self._audio_data_buffer:
-            self._accumulated_output.append(
-                AudioBlock(
-                    source=AudioSource(
-                        type="base64",
-                        data=self._audio_data_buffer,
-                        media_type="audio/wav",
-                        transcript=self._audio_transcript_buffer or None,
-                    )
-                )
-            )
-            self._audio_data_buffer = ""
-            self._audio_transcript_buffer = ""
+        self._segments.supersede(index, block)
 
     def _normalize_choice(self, choice: dict) -> dict | None:
         """Normalize a choice object, passing unknown fields through."""
@@ -721,8 +469,10 @@ class OpenAIStreamingTransformer(StreamingTransformer):
 
     def finalize(self) -> str:
         """Generate stream end marker."""
-        if self._text_buffer or self._reasoning_buffer or self._tool_calls_buffer:
-            self._finalize_accumulation()
+        # Flush every non-empty lane — media included. The old gate checked
+        # only the text/reasoning/tool buffers, so a turn that produced only
+        # images or audio lost them from the reassembled log (ADR-0031).
+        self._segments.finish()
         chunks: list[str] = []
         if self._pending_usage is not None and not self._emitted_usage_chunk:
             chunks.append(self._make_chunk({"choices": [], "usage": self._pending_usage}))

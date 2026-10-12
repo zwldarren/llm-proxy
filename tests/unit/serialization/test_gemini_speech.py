@@ -388,10 +388,15 @@ class TestAudioStreaming:
                 ]
             }
         )
-        audio_blocks = [b for b in transformer._accumulated_output if isinstance(b, AudioBlock)]
+        # The canonical audio block is the protocol dialect's: the OpenAI
+        # audio delta carries no MIME field, so the engine's AudioSource is
+        # base64/wav (what the reassembled log body always carried).
+        audio_blocks = [
+            b for b in transformer.get_accumulated_output() if isinstance(b, AudioBlock)
+        ]
         assert len(audio_blocks) == 1
         assert audio_blocks[0].source.data == b64 + b64
-        assert audio_blocks[0].source.media_type == "audio/l16"
+        assert audio_blocks[0].source.media_type == "audio/wav"
 
     def test_image_chunk_still_markdown(self):
         chunk = {

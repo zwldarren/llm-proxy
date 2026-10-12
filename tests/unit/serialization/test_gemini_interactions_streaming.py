@@ -126,6 +126,33 @@ class TestThinkingStreaming:
         assert isinstance(thought, ThinkingBlock)
         assert thought.thinking == "Think"
         assert thought.signature == "SIG_1"
+        assert thought.signature_origin == "gemini"
+
+    def test_finalize_without_terminal_keeps_the_thought_signature(self):
+        """A stream cut off before its terminal event keeps the signature.
+
+        ``_finish_chunk`` feeds it on the completed path; ``finalize()`` must
+        do the same for a truncated turn, or the ThinkingBlock loses both the
+        payload and its origin.
+        """
+        conv = make_transformer()
+        conv.convert_chunk({"type": "step.start", "index": 0, "step": {"type": "thought"}})
+        conv.convert_chunk(
+            {"type": "step.delta", "index": 0, "delta": {"type": "thought", "text": "Think"}}
+        )
+        conv.convert_chunk(
+            {
+                "type": "step.delta",
+                "index": 0,
+                "delta": {"type": "thought_signature", "signature": "SIG_1"},
+            }
+        )
+        conv.finalize()  # truncated: no interaction.completed
+        thought = conv.get_accumulated_output()[0]
+        assert isinstance(thought, ThinkingBlock)
+        assert thought.thinking == "Think"
+        assert thought.signature == "SIG_1"
+        assert thought.signature_origin == "gemini"
 
     def test_step_start_summary_seeds_reasoning_without_duplication(self):
         """A thought step.start that already carries its summary emits it once,
@@ -180,7 +207,7 @@ class TestThinkingStreaming:
         )
         assert chunk["choices"][0]["delta"] == {"content": " a time..."}
         conv.finalize()
-        assert conv._accumulated_output[0].text == "Once upon a time..."
+        assert conv.get_accumulated_output()[0].text == "Once upon a time..."
 
 
 class TestToolCallStreaming:

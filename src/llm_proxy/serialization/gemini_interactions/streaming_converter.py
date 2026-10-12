@@ -40,6 +40,7 @@ from llm_proxy.serialization.gemini_interactions.usage import (
     interactions_normalize_usage,
     interactions_web_search_requests,
 )
+from llm_proxy.streaming.accumulation import SegmentAccumulator, SegmentPolicy
 from llm_proxy.streaming.transformer import StreamingTransformer
 
 
@@ -58,10 +59,17 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         self._text_buffer: str = ""
         self._reasoning_buffer: str = ""
         self._reasoning_signature: str | None = None
-        self._audio_buffer: str = ""
-        self._audio_mime_type: str | None = None
         # Tool call state per step index: {"id", "name", "arguments", "emitted"}
         self._tool_calls: dict[int, dict[str, Any]] = {}
+        # The segment engine assembles the canonical blocks (ADR-0031): the
+        # whole turn buffers and materializes once, audio → thinking → text →
+        # tools, at the terminal chunk. The canonical chunks this converter
+        # emits feed it directly.
+        self._segments = SegmentAccumulator(
+            SegmentPolicy(
+                whole_turn_close_order=("media", "reasoning", "text", "refusal", "tool"),
+            )
+        )
         # web search requests seen as google_search_call steps
         self._web_search_requests: int = 0
         self._usage: Usage | None = None
@@ -276,12 +284,8 @@ class InteractionsStreamingTransformer(StreamingTransformer):
 
         if delta_type == "audio":
             data = delta.get("data") or ""
-            mime_type = delta.get("mime_type") or delta.get("mimeType") or ""
             if not data:
                 return None
-            self._audio_buffer += data
-            if mime_type and self._audio_mime_type is None:
-                self._audio_mime_type = mime_type
             return self._make_openai_chunk(
                 {
                     "audio": {
@@ -438,7 +442,23 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             chunk["usage"] = self._usage_to_openai(usage)
             self._usage = self._usage_to_record(usage)
 
-        self._finalize_accumulation()
+        # The turn's last thought signature snaps onto the (single) reasoning
+        # lane here: the engine concatenates signature fragments per lane, and
+        # the Interactions dialect's per-step signatures are distinct values,
+        # not fragments of one — last-wins is what the old machine's block
+        # carried (each function_call already replays its own preceding
+        # signature via the tool path).
+        if self._reasoning_signature:
+            self._segments.feed(
+                {
+                    "reasoning_signature": self._reasoning_signature,
+                    # The signature is Gemini-issued: stamp the origin so the
+                    # Gemini history builder replays it and the Anthropic
+                    # builder withholds it (ADR-0031).
+                    "signature_origin": "gemini",
+                }
+            )
+        self._segments.finish()
         return chunk
 
     def _usage_to_record(self, usage: dict[str, Any]) -> Usage:
@@ -485,6 +505,11 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         delta: dict[str, Any],
         finish_reason: str | None = None,
     ) -> dict[str, Any]:
+        # The engine assembles the canonical blocks from the same canonical
+        # delta the client path emits (ADR-0031); the whole-turn policy keeps
+        # every kind in one lane until the terminal chunk.
+        if delta:
+            self._segments.feed(delta)
         chunk: dict[str, Any] = {
             "id": self.response_id or f"chatcmpl-{self._chunk_index}",
             "object": "chat.completion.chunk",
@@ -495,63 +520,25 @@ class InteractionsStreamingTransformer(StreamingTransformer):
         self._chunk_index += 1
         return chunk
 
-    def _finalize_accumulation(self) -> None:
-        """Convert accumulated buffers to ContentBlocks."""
-        from llm_proxy.models import AudioBlock, TextBlock, ThinkingBlock, ToolUseBlock
-        from llm_proxy.models.types import AudioSource
-
-        if self._audio_buffer:
-            self._accumulated_output.append(
-                AudioBlock(
-                    source=AudioSource(
-                        type="base64",
-                        data=self._audio_buffer,
-                        media_type=self._audio_mime_type,
-                    )
-                )
-            )
-
-        if self._reasoning_buffer:
-            self._accumulated_output.append(
-                ThinkingBlock(
-                    thinking=self._reasoning_buffer,
-                    signature=self._reasoning_signature,
-                    signature_origin="gemini",
-                )
-            )
-
-        if self._text_buffer:
-            self._accumulated_output.append(TextBlock(text=self._text_buffer))
-
-        for call in self._tool_calls.values():
-            try:
-                tool_input = orjson.loads(call["arguments"]) if call["arguments"] else {}
-            except JSONDecodeError, TypeError:
-                tool_input = {}
-            # The Interactions API requires the thought signature to be
-            # replayed with a function_call step in stateless multi-turn tool
-            # conversations; the signature arrives in a thought_signature delta
-            # before the function_call step, so attach the per-call snapshot
-            # here. The adapter caches it keyed by tool call id and re-attaches
-            # on the next request.
-            block = ToolUseBlock(id=call["id"], name=call["name"], input=tool_input)
-            signature = call.get("signature")
-            if signature:
-                block.extra = {"thought_signature": signature}
-            self._accumulated_output.append(block)
-
-        self._text_buffer = ""
-        self._reasoning_buffer = ""
-        self._reasoning_signature = None
-        self._audio_buffer = ""
-        self._audio_mime_type = None
-        self._tool_calls = {}
-
     def finalize(self) -> str:
         """Generate stream end marker."""
-        if not self._finished:
-            self._finalize_accumulation()
+        # A stream cut off before its terminal event never ran ``_finish_chunk``:
+        # feed the last thought signature here too, or the truncated turn's
+        # ThinkingBlock loses it (the old ``_finalize_accumulation`` path kept
+        # it on the ``not self._finished`` branch).
+        if not self._finished and self._reasoning_signature:
+            self._segments.feed(
+                {
+                    "reasoning_signature": self._reasoning_signature,
+                    "signature_origin": "gemini",
+                }
+            )
+        self._segments.finish()
         return "data: [DONE]\n\n"
+
+    def get_accumulated_output(self) -> list:
+        """The canonical blocks, from the segment engine (ADR-0031)."""
+        return self._segments.blocks()
 
     def _own_usage(self) -> Usage | None:
         """Return accumulated usage from the interactions stream."""

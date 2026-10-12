@@ -11,6 +11,7 @@ from llm_proxy.models.types import Usage
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
 from llm_proxy.serialization.gemini.code_execution import extract_code_execution_text
 from llm_proxy.serialization.usage import UsageAccumulator
+from llm_proxy.streaming.accumulation import SegmentAccumulator, SegmentPolicy
 from llm_proxy.streaming.transformer import StreamingTransformer
 
 
@@ -45,6 +46,11 @@ class GeminiStreamingTransformer(StreamingTransformer):
         self._reasoning_buffer: str = ""
         self._reasoning_signature_buffer: str = ""
         self._reasoning_signature_emitted: bool = False
+        # Tool-call indices the converter has already emitted. Gemini numbers
+        # ``functionCall`` parts per chunk; the canonical dialect (and the
+        # protocol transformers pooling deltas by index) needs a turn-global
+        # identity, so the local index is offset by everything emitted before.
+        self._tool_call_seq: int = 0
         # The turn's usage, through the intake seam (ADR-0025). Gemini reports the
         # counters in a chunk of their own, which carries no candidate and therefore
         # no statement about search grounding, so the accumulator is told what the
@@ -55,9 +61,15 @@ class GeminiStreamingTransformer(StreamingTransformer):
         # (see ``_own_usage``), so this only carries the fact forward to the
         # usage-only chunk that follows.
         self._grounding_seen: bool = False
-        # Accumulated base64 audio (TTS) output and its MIME type
-        self._audio_buffer: str = ""
-        self._audio_mime_type: str = ""
+        # The segment engine assembles the canonical blocks (ADR-0031): the
+        # whole turn buffers (Gemini never splits a kind across blocks) and
+        # materializes once, audio → thinking → text → tools, at the terminal
+        # chunk. The canonical chunks this converter emits feed it directly.
+        self._segments = SegmentAccumulator(
+            SegmentPolicy(
+                whole_turn_close_order=("media", "reasoning", "text", "refusal", "tool"),
+            )
+        )
 
     def transform(self, chunk: str | dict[str, Any]) -> str | None:
         """Transform a raw SSE chunk from Gemini to OpenAI format.
@@ -147,8 +159,6 @@ class GeminiStreamingTransformer(StreamingTransformer):
                     data = inline.get("data", "")
                     if data:
                         audio_parts.append(data)
-                        if not self._audio_mime_type:
-                            self._audio_mime_type = mime_type
                 case {"inlineData": inline}:
                     mime_type = inline.get("mime_type") or inline.get("mimeType") or "image/png"
                     data = inline.get("data", "")
@@ -165,7 +175,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
                 case {"functionCall": func_call}:
                     tool_calls.append(
                         {
-                            "index": len(tool_calls),
+                            "index": self._tool_call_seq + len(tool_calls),
                             "id": f"call_{self._chunk_index}_{len(tool_calls)}",
                             "type": "function",
                             "function": {
@@ -209,6 +219,10 @@ class GeminiStreamingTransformer(StreamingTransformer):
         # whole signature per part would corrupt them.
         if self._reasoning_signature_buffer and not self._reasoning_signature_emitted:
             delta["reasoning_signature"] = self._reasoning_signature_buffer
+            # Gemini-issued: the origin rides the signature so the block keeps
+            # it (ADR-0031); without it the Gemini history builder drops the
+            # signature and the Anthropic builder replays it as its own.
+            delta["signature_origin"] = "gemini"
             self._reasoning_signature_emitted = True
 
         if tool_calls:
@@ -222,7 +236,6 @@ class GeminiStreamingTransformer(StreamingTransformer):
                 "id": f"audio_{self.response_id or self._chunk_index}",
                 "data": "".join(audio_parts),
             }
-            self._audio_buffer += "".join(audio_parts)
 
         if image_parts:
             # Degrade images to markdown syntax like new-api does,
@@ -244,6 +257,12 @@ class GeminiStreamingTransformer(StreamingTransformer):
                     self._text_buffer += "\n" + "\n".join(markdown_images)
                 else:
                     self._text_buffer += "\n".join(markdown_images)
+        # The engine assembles the canonical blocks from the same canonical
+        # delta the client path emits (ADR-0031); the whole-turn policy keeps
+        # every kind in one lane until the terminal chunk.
+        self._tool_call_seq += len(tool_calls)
+        if delta:
+            self._segments.feed(delta)
         if (
             not delta
             and not finish_reason
@@ -321,64 +340,14 @@ class GeminiStreamingTransformer(StreamingTransformer):
             openai_chunk["prompt_feedback"] = chunk["promptFeedback"]
 
         if finish_reason:
-            self._finalize_accumulation()
+            self._segments.finish()
 
         self._chunk_index += 1
         return openai_chunk
 
-    def _finalize_accumulation(self) -> None:
-        """Convert accumulated buffers to ContentBlocks."""
-        from llm_proxy.models import AudioBlock, TextBlock, ThinkingBlock, ToolUseBlock
-        from llm_proxy.models.types import AudioSource
-
-        if self._audio_buffer:
-            self._accumulated_output.append(
-                AudioBlock(
-                    source=AudioSource(
-                        type="base64",
-                        data=self._audio_buffer,
-                        media_type=self._audio_mime_type or None,
-                    )
-                )
-            )
-
-        if self._reasoning_buffer:
-            self._accumulated_output.append(
-                ThinkingBlock(
-                    thinking=self._reasoning_buffer,
-                    signature=self._reasoning_signature_buffer or None,
-                    signature_origin="gemini",
-                )
-            )
-
-        if self._text_buffer:
-            self._accumulated_output.append(TextBlock(text=self._text_buffer))
-
-        for tc in self._tool_calls_buffer:
-            try:
-                tool_input = (
-                    orjson.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
-                )
-            except JSONDecodeError, TypeError:
-                tool_input = {}
-
-            self._accumulated_output.append(
-                ToolUseBlock(
-                    id=tc["id"],
-                    name=tc["function"]["name"],
-                    input=tool_input,
-                    extra={"thought_signature": tc.get("thought_signature")}
-                    if tc.get("thought_signature")
-                    else {},
-                )
-            )
-
-        self._text_buffer = ""
-        self._tool_calls_buffer = []
-        self._reasoning_buffer = ""
-        self._reasoning_signature_buffer = ""
-        self._audio_buffer = ""
-        self._audio_mime_type = ""
+    def get_accumulated_output(self) -> list:
+        """The canonical blocks, from the segment engine (ADR-0031)."""
+        return self._segments.blocks()
 
     def finalize(self) -> str:
         """Generate stream end marker.
@@ -386,13 +355,8 @@ class GeminiStreamingTransformer(StreamingTransformer):
         Returns:
             OpenAI-style stream termination: 'data: [DONE]\\n\\n'
         """
-        if (
-            self._text_buffer
-            or self._tool_calls_buffer
-            or self._audio_buffer
-            or self._reasoning_buffer
-        ):
-            self._finalize_accumulation()
+        # A stream cut off before its terminal chunk still logs what it sent.
+        self._segments.finish()
         return "data: [DONE]\n\n"
 
     def _own_usage(self) -> Usage | None:

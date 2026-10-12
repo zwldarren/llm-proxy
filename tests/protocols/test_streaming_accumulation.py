@@ -243,12 +243,20 @@ class TestOpenAINativeFrameAccumulation:
         assert accumulated[0].text == "dict"
 
     def test_flush_recovers_content_from_a_truncated_stream(self):
-        """A stream cut off before its terminal chunk still logs what it sent."""
+        """A stream cut off before its terminal chunk still logs what it sent.
+
+        The open segment is already visible as a projection before the flush
+        (ADR-0031); the flush closes it, and the reassembled body is the same
+        either way.
+        """
         from llm_proxy.models.content_blocks import TextBlock
 
         transformer = OpenAIStreamingTransformer(model="gpt-4", request_id="chatcmpl-native")
         transformer.accumulate_native_frame(_native_frame({"content": "partial"}))
-        assert transformer.get_accumulated_output() == []
+        projected = transformer.get_accumulated_output()
+        assert len(projected) == 1
+        assert isinstance(projected[0], TextBlock)
+        assert projected[0].text == "partial"
 
         transformer.flush_pending_accumulation()
 

@@ -3,6 +3,7 @@
 
 import pytest
 
+from llm_proxy.models import ThinkingBlock
 from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
 
 
@@ -285,6 +286,15 @@ def test_thought_part_signature_is_emitted_to_the_client(transformer):
     assert result is not None
     assert '"reasoning_content":"let me think"' in result
     assert '"reasoning_signature":"THOUGHT_SIG"' in result
+
+    # The canonical block keeps the signature *and* its Gemini origin: the
+    # Gemini history builder only replays a signature marked ``gemini``, and
+    # the Anthropic builder must withhold it (ADR-0031).
+    transformer.finalize()
+    thought = transformer.get_accumulated_output()[-1]
+    assert isinstance(thought, ThinkingBlock)
+    assert thought.signature == "THOUGHT_SIG"
+    assert thought.signature_origin == "gemini"
 
 
 def test_thought_part_signature_emitted_once(transformer):

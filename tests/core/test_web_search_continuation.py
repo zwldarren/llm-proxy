@@ -65,6 +65,10 @@ class _FakeTransformer:
     def get_accumulated_output(self) -> list[Any]:
         return self._output
 
+    def supersede(self, index: int, block: Any) -> None:
+        # The seam's substitution verb (ADR-0031): this fake owns its list.
+        self._output[index] = block
+
     def absorb_usage_record(self, other: Any) -> None:
         self.absorbed.append(other)
 

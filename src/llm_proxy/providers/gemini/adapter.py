@@ -430,7 +430,7 @@ class GeminiAdapter(
                     ):
                         block.extra["thought_signature"] = self._thought_signature_cache[block.id]
 
-    def _cache_thought_signatures(self, blocks: list[ToolUseBlock]) -> None:
+    def _cache_thought_signatures(self, blocks: list[ToolUseBlock | CustomToolUseBlock]) -> None:
         """Cache thought_signatures from tool use blocks for follow-up requests.
 
         Uses LRU eviction via OrderedDict: on overflow, only the oldest entry
@@ -443,12 +443,19 @@ class GeminiAdapter(
                 if isinstance(block, (ToolUseBlock, CustomToolUseBlock)) and (
                     ts := block.extra.get("thought_signature")
                 ):
-                    if block.id in cache:
-                        cache.move_to_end(block.id)
-                    else:
-                        if len(cache) >= max_cache:
-                            cache.popitem(last=False)
-                    cache[block.id] = ts
+                    self._remember_thought_signature(cache, max_cache, block.id, ts)
+
+    @staticmethod
+    def _remember_thought_signature(
+        cache: OrderedDict[str, str], max_cache: int, tool_id: str, signature: str
+    ) -> None:
+        """Insert one (tool_call_id → signature) pair under the caller's lock."""
+        if tool_id in cache:
+            cache.move_to_end(tool_id)
+        else:
+            if len(cache) >= max_cache:
+                cache.popitem(last=False)
+        cache[tool_id] = signature
 
     def _parse_error_response(self, status_code: int, error_body: dict[str, Any]):
         error_data = error_body.get("error", {})
@@ -566,7 +573,17 @@ class GeminiAdapter(
                         except orjson.JSONDecodeError:
                             continue
 
-                self._cache_thought_signatures(getattr(converter, "_accumulated_output", []))
+                # The converter's segment engine assembles the canonical
+                # blocks (ADR-0031); tool-call thought signatures ride the
+                # blocks' ``extra`` — read through the public verb, not a
+                # private attribute probe.
+                self._cache_thought_signatures(
+                    [
+                        b
+                        for b in converter.get_accumulated_output()
+                        if isinstance(b, (ToolUseBlock, CustomToolUseBlock))
+                    ]
+                )
 
                 yield "[DONE]"
 

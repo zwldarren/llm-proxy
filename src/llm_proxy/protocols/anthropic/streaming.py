@@ -11,14 +11,10 @@ from typing import Any
 import orjson
 
 from llm_proxy.core.exceptions import ProviderError
-from llm_proxy.models import (
-    RawBlock,
-    ServerToolUseBlock,
-    TextBlock,
-    ThinkingBlock,
-    ToolUseBlock,
-)
+from llm_proxy.models import RawBlock
+from llm_proxy.models.content_blocks import ContentBlock
 from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
+from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import (
     ANTHROPIC_USAGE_EXTENSION_KEYS,
@@ -27,6 +23,17 @@ from llm_proxy.serialization.anthropic import (
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.serialization.usage.folds import fold_deepseek_cache_hits
+from llm_proxy.streaming.accumulation import (
+    CanonicalDelta,
+    Coexistence,
+    CursorPolicy,
+    SegmentAccumulator,
+    SegmentClosed,
+    SegmentEvent,
+    SegmentOpened,
+    SegmentPolicy,
+    ToolVariant,
+)
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
 from llm_proxy.streaming.transformer import (
     PendingTerminalState,
@@ -123,27 +130,43 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         self._usage = UsageAccumulator("chat")
         self._sent_message_start = False
         self._current_block_index = 0
-        self._in_text_block = False
-        self._in_thinking_block = False
-        self._in_tool_block = False
-        self._text_buffer = ""
-        self._thinking_buffer = ""
-        self._thinking_signature = ""
-        self._thinking_is_redacted = False
-        # Opaque redacted_thinking payload for the open thinking block. The
-        # provider converter keeps "[redacted]" as a display placeholder in
-        # ``reasoning_content`` and carries the real ``data`` in
-        # ``delta.encrypted_content``; clients must echo the real payload back.
-        self._thinking_redacted_data = ""
+        # The kind of block currently open on the wire. The engine tracks its
+        # own lanes; what the wire has open is this adapter's state — the two
+        # views coincide except where the wire has blocks the canonical model
+        # does not (the estimated-tokens thinking corner, the citations text
+        # block) or the reverse (thinking suppressed after text).
+        self._wire_open_kind: str | None = None
+        # Why the wire-open block exists: ``engine`` — a segment lane backs
+        # it; ``orphan`` — the lane closed but the wire block lingers (the
+        # stop is withheld until a visible boundary needs the slot, so a
+        # reasoning tail after text does not split the client's text block);
+        # ``wire_only`` — no lane ever backed it (estimated-tokens thinking,
+        # citations text) and a later segment of the same kind adopts it.
+        self._wire_block_state: str = "engine"
+        # Whether the wire-open block is a ``redacted_thinking`` one: its
+        # payload is complete in the start event's ``data``, so the canonical
+        # ``[redacted]`` placeholder must never be rendered as a
+        # ``thinking_delta`` inside it.
+        self._wire_is_redacted = False
+        # The wire keeps Anthropic's rule that thinking never resumes after
+        # text; the canonical model no longer enforces it (ADR-0031).
         self._text_output_started = False
-        self._tool_id = ""
-        self._tool_name = ""
-        self._tool_args = ""
-        # True when the open tool block is an upstream ``server_tool_use``
-        # (web_fetch, bash, code_execution, tool_search, ...) rather than a
-        # plain client ``tool_use``. Set from the canonical marker the
-        # provider converter attaches.
-        self._tool_is_server_tool_use = False
+        # The segment engine assembles the canonical blocks (ADR-0031). This
+        # protocol is the engine's first event consumer: one block on the wire
+        # at a time (sequential tool calls), tool variants classified at open,
+        # and the cursor counting closed blocks.
+        self._segments = SegmentAccumulator(
+            SegmentPolicy(
+                tool_coexistence=Coexistence.SEQUENTIAL,
+                cursor=CursorPolicy.NEXT_FREE,
+                classify_tool=self._classify_tool,
+            )
+        )
+        # Which tier this instance serves — flipped by the first native frame;
+        # a converted-path instance never sees one. The routing behind
+        # ``get_accumulated_output``/``flush_pending_accumulation`` must be
+        # stable for the instance's whole life, not re-derived per call.
+        self._native_tier = False
         # Pending terminal state (stop_reason / stop_sequence / stop_details /
         # container / usage) is owned by ``PendingTerminalState``; captured in
         # ``_transform_openai_chunk`` and flushed in ``finalize``.
@@ -166,6 +189,11 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         # them so the logged body stays in index order even when the stream
         # ended with several blocks open (see flush_pending_accumulation).
         self._native_log_blocks: dict[int, RawBlock] = {}
+        # Native passthrough keeps its own wire-rebuilt block list — the
+        # RawBlocks replayed verbatim into the log body (ADR-0015). This is
+        # the native tier's state, not a canonical buffer: the converted
+        # tier's canonical blocks live in the segment engine (ADR-0031).
+        self._accumulated_output: list[ContentBlock] = []
         # Where the native blocks start in ``_accumulated_output``; ``None``
         # until the first one is queued.
         self._native_output_start: int | None = None
@@ -194,10 +222,12 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 payload.
         """
         if isinstance(frame, dict):
+            self._native_tier = True
             self._accumulate_native_event("", frame)
             return
         if not isinstance(frame, str) or not frame.strip():
             return
+        self._native_tier = True
         for event_type, payload in iter_sse_data_events(frame):
             if isinstance(payload, dict):
                 self._accumulate_native_event(event_type, payload)
@@ -210,16 +240,56 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         block would otherwise be missing from the log entirely. The queued blocks
         are re-emitted in wire ``index`` order — a block that closed after a
         higher-index one would otherwise be logged out of order.
+
+        The converted tier flushes the segment engine instead; the
+        native-passthrough tier's RawBlock rebuild is out of the engine's
+        scope (ADR-0031) and keeps its own queue.
         """
-        for index in sorted(self._native_blocks):
-            self._close_native_block(index)
-        if self._native_output_start is None:
+        if self._native_tier:
+            for index in sorted(self._native_blocks):
+                self._close_native_block(index)
+            if self._native_output_start is None:
+                return
+            self._accumulated_output[self._native_output_start :] = [
+                self._native_log_blocks[index] for index in sorted(self._native_log_blocks)
+            ]
+            self._native_log_blocks.clear()
+            self._native_output_start = None
             return
-        self._accumulated_output[self._native_output_start :] = [
-            self._native_log_blocks[index] for index in sorted(self._native_log_blocks)
-        ]
-        self._native_log_blocks.clear()
-        self._native_output_start = None
+        self._segments.finish()
+
+    def get_accumulated_output(self) -> list[ContentBlock]:
+        """The canonical blocks of the stream.
+
+        The native-passthrough tier accumulates ``RawBlock``s on the base
+        list; the converted tier reads the segment engine (ADR-0031). One
+        instance serves one tier, so the routing is stable per request.
+        """
+        if self._native_tier:
+            return self._accumulated_output
+        return self._segments.blocks()
+
+    def supersede(self, index: int, block: ContentBlock) -> None:
+        """Replace a closed canonical block — the web-search interception's verb.
+
+        The interceptor substitutes the ``ToolUseBlock`` it fulfills with the
+        ``ServerToolUseBlock``. One instance serves one tier, so the verb
+        routes by the same flag as :meth:`get_accumulated_output`: the engine
+        holds the converted tier's list, the native tier rebuilds its own.
+        """
+        if self._native_tier:
+            self._accumulated_output[index] = block
+            return
+        self._segments.supersede(index, block)
+
+    def adopt(self, block: ContentBlock) -> tuple[SegmentEvent, ...]:
+        """Close every open lane, then append a pre-built block as closed.
+
+        The converted path's one window for blocks that exist outside the
+        segment vocabulary (``raw_content_block`` replays, and tests injecting
+        a closed block); see :meth:`SegmentAccumulator.adopt`.
+        """
+        return self._segments.adopt(block)
 
     def get_terminal_provider_info(self) -> dict[str, Any] | None:
         """Beta terminal extras for the reassembled request-log body.
@@ -480,198 +550,62 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 if choice is None:
                     continue
                 delta = choice.get("delta", {})
+                if not isinstance(delta, dict):
+                    delta = {}
                 finish_reason = choice.get("finish_reason")
 
-                # Handle text content
-                content = delta.get("content")
-                if content is not None and content != "":
-                    if not self._in_text_block:
-                        # Close whatever block is open (thinking or tool) before
-                        # switching to text. _close_current_open_block accumulates
-                        # it and resets the per-block buffers, so each interleaved
-                        # segment is its own block instead of being merged into or
-                        # overwritten by the next one.
-                        self._close_current_open_block(result_chunks)
-                        self._in_text_block = True
-                        result_chunks.append(
-                            self._content_block_start(
-                                self._current_block_index, {"type": "text", "text": ""}
-                            )
-                        )
-                    if self._in_text_block:
-                        self._text_output_started = True
-                        self._text_buffer += content
-                        result_chunks.append(
-                            self._content_block_delta(
-                                self._current_block_index, {"type": "text_delta", "text": content}
-                            )
-                        )
-
-                # Handle reasoning/thinking content
-                reasoning = delta.get("reasoning_content")
-                if reasoning is None or reasoning == "":
-                    reasoning = delta.get("reasoning")
-                # thinking-token-count beta: ``estimated_tokens`` may accompany
-                # the text (or arrive with empty text under ``display:
-                # \"omitted\"``).
-                estimated_tokens = delta.get("reasoning_estimated_tokens")
-                if reasoning is not None and reasoning != "":
-                    if self._text_output_started:
-                        continue
-
-                    is_redacted = delta.get("reasoning_is_redacted", False)
-                    if is_redacted and reasoning == REDACTED_THINKING_TEXT:
-                        # A redacted_thinking block is a new content block: close
-                        # whichever block is open (text, thinking, or tool) first.
-                        self._close_current_open_block(result_chunks)
-                        # The provider converter carries the real opaque
-                        # payload in ``encrypted_content``; ``reasoning``
-                        # itself is only the "[redacted]" placeholder.
-                        redacted_data = delta.get("encrypted_content") or reasoning
-                        result_chunks.append(
-                            self._content_block_start(
-                                self._current_block_index,
-                                {"type": "redacted_thinking", "data": redacted_data},
-                            )
-                        )
-                        self._in_thinking_block = True
-                        self._thinking_is_redacted = True
-                        self._thinking_redacted_data = redacted_data
-                        self._thinking_buffer = reasoning
-                        continue
-
-                    if is_redacted:
-                        self._thinking_is_redacted = True
-                        if delta.get("encrypted_content"):
-                            self._thinking_redacted_data = delta["encrypted_content"]
-
-                    self._ensure_thinking_block(result_chunks)
-                    self._thinking_buffer += reasoning
-                    thinking_delta: dict[str, Any] = {
-                        "type": "thinking_delta",
-                        "thinking": reasoning,
-                    }
-                    if estimated_tokens is not None:
-                        thinking_delta["estimated_tokens"] = estimated_tokens
-                        estimated_tokens = None
-                    result_chunks.append(
-                        self._content_block_delta(self._current_block_index, thinking_delta)
+                # The engine assembles the canonical blocks (ADR-0031); this
+                # adapter renders the wire from the segment events it returns.
+                if delta:
+                    self._render_segments(
+                        self._segments.feed(delta),
+                        result_chunks,
+                        estimated=delta.get("reasoning_estimated_tokens"),
                     )
 
-                if estimated_tokens is not None and not self._text_output_started:
-                    # ``estimated_tokens`` with no thinking text: keep a
-                    # (possibly empty) thinking block open and emit the count on
-                    # its own delta so the value is not dropped.
-                    self._ensure_thinking_block(result_chunks)
-                    result_chunks.append(
-                        self._content_block_delta(
-                            self._current_block_index,
-                            {
-                                "type": "thinking_delta",
-                                "thinking": "",
-                                "estimated_tokens": estimated_tokens,
-                            },
-                        )
-                    )
-
-                reasoning_sig = delta.get("reasoning_signature")
-                if reasoning_sig is not None and reasoning_sig != "":
-                    # A signature with no open block is an interleaved/degenerate
-                    # provider; give it a (possibly empty-text) thinking block.
-                    self._ensure_thinking_block(result_chunks)
-                    self._thinking_signature += reasoning_sig
-                    result_chunks.append(
-                        self._content_block_delta(
-                            self._current_block_index,
-                            {"type": "signature_delta", "signature": reasoning_sig},
-                        )
-                    )
-
-                # Handle tool calls
-                tool_calls = delta.get("tool_calls")
-                if tool_calls:
-                    for tc in tool_calls:
-                        # Tool call start
-                        if tc.get("id") and tc.get("function", {}).get("name"):
-                            # Close whatever block is open (previous tool, text, or
-                            # thinking) before starting the next tool call.
-                            # _close_current_open_block accumulates it and resets the
-                            # per-block buffers, keeping interleaved segments and
-                            # multiple tool calls distinct. ``server_aware`` keeps the
-                            # tool-call branch's web_search-as-ServerToolUseBlock
-                            # behavior for the tool it is closing.
-                            self._close_current_open_block(result_chunks, server_aware=True)
-
-                            self._in_tool_block = True
-                            self._tool_id = tc["id"]
-                            self._tool_name = tc["function"]["name"]
-                            self._tool_args = ""  # Reset for new tool
-
-                            normalized = self._tool_name.lower().replace("_", "").replace("-", "")
-                            is_ws = normalized == "websearch" and self._intercept_web_search
-                            # Upstream server_tool_use blocks carry the marker
-                            # the converter attaches; web_search interception
-                            # synthesises the same block type.
-                            self._tool_is_server_tool_use = bool(tc.get("server_tool_use"))
-                            block_type = (
-                                "server_tool_use"
-                                if is_ws or self._tool_is_server_tool_use
-                                else "tool_use"
-                            )
-                            result_chunks.append(
-                                self._content_block_start(
-                                    self._current_block_index,
-                                    {
-                                        "type": block_type,
-                                        "id": self._tool_id,
-                                        "name": self._tool_name,
-                                        "input": {},
-                                    },
-                                )
-                            )
-
-                        # Tool call arguments delta
-                        args = tc.get("function", {}).get("arguments")
-                        if args and self._in_tool_block:
-                            self._tool_args += args  # Accumulate arguments
-                            result_chunks.append(
-                                self._content_block_delta(
-                                    self._current_block_index,
-                                    {"type": "input_json_delta", "partial_json": args},
-                                )
-                            )
                 # Server-side tool result blocks arriving losslessly from the
                 # converter (web_search_tool_result, web_fetch_tool_result,
                 # container_upload, ...): replay as a start+stop pair so
-                # native-shaped clients keep the full block.
+                # native-shaped clients keep the full block. The engine adopts
+                # the RawBlock so the logged body keeps the wire order.
                 raw_block = delta.get("raw_content_block")
                 if isinstance(raw_block, dict):
-                    self._close_current_open_block(result_chunks)
-                    block_events = [self._content_block_start(self._current_block_index, raw_block)]
-                    block_events.append(self._content_block_stop(self._current_block_index))
-                    result_chunks.extend(block_events)
-                    self._current_block_index += 1
-                    self._accumulated_output.append(
-                        RawBlock(
-                            provider_type=f"anthropic:{raw_block.get('type', 'unknown')}",
-                            data=raw_block,
-                        )
+                    self._render_segments(
+                        self._segments.adopt(
+                            RawBlock(
+                                provider_type=f"anthropic:{raw_block.get('type', 'unknown')}",
+                                data=raw_block,
+                            )
+                        ),
+                        result_chunks,
                     )
+                    # adopt() closes the engine's lanes, but their wire stops
+                    # are lazy: free the open wire block's slot first so the
+                    # replayed block starts at a fresh index (what the old
+                    # ``_close_current_open_block`` call did here).
+                    self._flush_wire_block(result_chunks)
+                    result_chunks.append(
+                        self._content_block_start(self._current_block_index, raw_block)
+                    )
+                    result_chunks.append(self._content_block_stop(self._current_block_index))
+                    self._current_block_index += 1
 
                 # Citations attach only to text blocks: close any open
                 # tool/thinking block first, then land the citation on a
-                # (possibly fresh) text block.
+                # (possibly fresh) text block. They are wire-only: the
+                # canonical TextBlock never carried them and still does not.
                 citation = delta.get("citations")
                 if isinstance(citation, dict):
-                    if self._in_tool_block or self._in_thinking_block:
-                        self._close_current_open_block(result_chunks)
-                    if not self._in_text_block:
-                        self._in_text_block = True
+                    if self._wire_open_kind in ("tool", "reasoning"):
+                        self._flush_wire_block(result_chunks)
+                    if self._wire_open_kind != "text":
                         result_chunks.append(
                             self._content_block_start(
                                 self._current_block_index, {"type": "text", "text": ""}
                             )
                         )
+                        self._wire_open_kind = "text"
+                        self._wire_block_state = "wire_only"
                     result_chunks.append(
                         self._content_block_delta(
                             self._current_block_index,
@@ -680,7 +614,14 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                     )
 
                 if finish_reason:
-                    self._close_current_open_block(result_chunks)
+                    # The terminal chunk closes the engine's lanes as well: the
+                    # web-search interceptor reads the canonical blocks right
+                    # after this chunk, and an open tool lane would hide the
+                    # call it intercepts. finish() is idempotent and
+                    # non-latching (ADR-0031), so finalize's own finish() is a
+                    # no-op after this.
+                    self._render_segments(self._segments.finish(), result_chunks)
+                    self._flush_wire_block(result_chunks)
                     self.capture_stop_reason(self._map_finish_reason(finish_reason))
                 # Anthropic-native terminal fields arriving through the
                 # converter's canonical channel: choice["stop_sequence"] and
@@ -920,111 +861,243 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         events.append(self._content_block_stop(index))
         return "".join(events)
 
-    def _ensure_thinking_block(self, result_chunks: list[str]) -> None:
-        """Open a thinking block if none is currently open.
+    def _classify_tool(self, delta: CanonicalDelta) -> ToolVariant:
+        """Decide a tool call's block variant at open (ADR-0031).
 
-        The canonical stream carries no boundary chunk on a text/tool block
-        stop, so a thinking delta that follows one must close the open block
-        and start a fresh thinking block first; otherwise it would open a
-        second block at the same index with no intervening content_block_stop.
+        The upstream ``server_tool_use`` marker and the proxy-intercepted
+        ``web_search`` name both make the block a ``ServerToolUseBlock`` —
+        decided once, at open, so the wire's ``content_block_start`` and the
+        canonical block can never disagree. The old machine decided at close,
+        and only on the tool-start boundary, leaving a ``web_search`` call
+        closed by any other boundary a plain ``ToolUseBlock`` even though the
+        wire had already announced ``server_tool_use``.
         """
-        if self._in_thinking_block:
-            return
-        self._close_current_open_block(result_chunks)
-        self._in_thinking_block = True
-        result_chunks.append(
-            self._content_block_start(
-                self._current_block_index, {"type": "thinking", "thinking": ""}
-            )
-        )
-
-    def _close_current_open_block(
-        self, result_chunks: list[str], *, server_aware: bool = False
-    ) -> None:
-        """Close the currently open content block if one exists.
-
-        ``server_aware`` mirrors the tool-call branch's historical behavior:
-        when a tool block is closed because the *next tool call* started, a
-        proxy-intercepted ``web_search`` becomes a ``ServerToolUseBlock``. Every
-        other boundary (finish_reason, a following text/thinking block) closes
-        it as a plain ``ToolUseBlock``; the web-search interceptor normalizes
-        that later. Keeping the distinction preserves the two documented
-        accumulation paths.
-        """
-        if not (self._in_text_block or self._in_thinking_block or self._in_tool_block):
-            return
-
-        # If closing a text block, accumulate the TextBlock
-        if self._in_text_block and self._text_buffer:
-            self._accumulated_output.append(TextBlock(text=self._text_buffer))
-
-        # If closing a thinking block, accumulate the ThinkingBlock or
-        # RedactedThinkingBlock. A block with no text but a signature is kept:
-        # the signature is the integrity payload replayed on the next turn, so
-        # dropping it would break interleaved-thinking continuations.
-        if self._in_thinking_block and (
-            self._thinking_buffer or self._thinking_signature or self._thinking_redacted_data
+        if delta.server_tool or (
+            is_web_search_tool_name(delta.tool_name or "") and self._intercept_web_search
         ):
-            if self._thinking_is_redacted:
-                from llm_proxy.models import RedactedThinkingBlock
+            return "server_tool_use"
+        return delta.tool_variant or "function"
 
-                self._accumulated_output.append(
-                    RedactedThinkingBlock(
-                        data=self._thinking_redacted_data or self._thinking_buffer
-                    )
-                )
-            else:
-                self._accumulated_output.append(
-                    ThinkingBlock(
-                        thinking=self._thinking_buffer,
-                        signature=self._thinking_signature or None,
-                    )
-                )
-        if self._in_thinking_block:
-            self._thinking_signature = ""
-            self._thinking_is_redacted = False
-            self._thinking_redacted_data = ""
+    def _open_is_suppressed(self, kind: str, frag: CanonicalDelta) -> bool:
+        """Whether a segment open renders nothing on the Anthropic wire.
 
-        # If closing a tool block, accumulate the ToolUseBlock (or the
-        # ServerToolUseBlock the proxy intercepts web search with, when the
-        # caller is the tool-call branch).
-        if self._in_tool_block and self._tool_id:
-            try:
-                tool_input = orjson.loads(self._tool_args) if self._tool_args else {}
-            except orjson.JSONDecodeError:
-                tool_input = {}
+        ``refusal`` and ``media`` have no wire representation at all;
+        thinking does not resume after text (the canonical model keeps it,
+        ADR-0031). A signature-only thinking fragment still renders — the
+        signature is the integrity payload clients echo back.
+        """
+        if kind in ("refusal", "media"):
+            return True
+        if kind == "reasoning" and self._text_output_started:
+            return bool(frag.text or frag.is_redacted)
+        return False
 
-            normalized = self._tool_name.lower().replace("_", "").replace("-", "")
-            if self._tool_is_server_tool_use or (
-                server_aware and normalized == "websearch" and self._intercept_web_search
-            ):
-                self._accumulated_output.append(
-                    ServerToolUseBlock(
-                        id=self._tool_id,
-                        name=self._tool_name,
-                        input=tool_input,
-                    )
-                )
-            else:
-                self._accumulated_output.append(
-                    ToolUseBlock(
-                        id=self._tool_id,
-                        name=self._tool_name,
-                        input=tool_input,
-                    )
-                )
+    def _flush_wire_block(self, chunks: list[str]) -> None:
+        """Emit ``content_block_stop`` for the wire-open block and free its slot.
 
-        result_chunks.append(self._content_block_stop(self._current_block_index))
+        The engine's lane closes arrive as ``SegmentClosed`` events and are
+        rendered by :meth:`_render_segments`; a block only the wire opened —
+        the estimated-tokens thinking corner, the citations text block — has
+        no engine lane, so the adapter closes it itself at boundaries.
+        """
+        if self._wire_open_kind is None:
+            return
+        chunks.append(self._content_block_stop(self._current_block_index))
         self._current_block_index += 1
-        self._in_text_block = False
-        self._in_thinking_block = False
-        self._in_tool_block = False
-        self._tool_id = ""
-        self._tool_name = ""
-        self._tool_args = ""
-        self._tool_is_server_tool_use = False
-        self._text_buffer = ""
-        self._thinking_buffer = ""
+        self._wire_open_kind = None
+        self._wire_block_state = "engine"
+        self._wire_is_redacted = False
+
+    def _open_wire_block(self, kind: str, frag: CanonicalDelta, chunks: list[str]) -> None:
+        """Start the wire block for an opened segment, unless already open.
+
+        ``refusal`` and ``media`` have no Anthropic wire representation — the
+        canonical model carries them (ADR-0031's drift rulings). Thinking is
+        suppressed once text has started, except a signature-only fragment:
+        the signature is the integrity payload clients echo back, so it still
+        gets its block. A tool call without id/name stays unopened, as before.
+        """
+        if kind in ("refusal", "media"):
+            return
+        if self._open_is_suppressed(kind, frag):
+            return
+        if self._wire_open_kind == kind and self._wire_block_state in (
+            "wire_only",
+            "adoptable",
+        ):
+            # A block the wire keeps up without a live lane — a wire-only
+            # block (citations text, estimated-tokens thinking) or a text
+            # block that yielded to a suppressed segment — is adopted by the
+            # segment that just opened; its deltas keep flowing into it.
+            self._wire_block_state = "engine"
+            return
+        if self._wire_open_kind is not None:
+            # A fresh segment of a kind whose block is still up (sequential
+            # tool calls, a closed lane): close it, start the new one.
+            self._flush_wire_block(chunks)
+        self._wire_is_redacted = False
+        if kind == "text":
+            chunks.append(
+                self._content_block_start(self._current_block_index, {"type": "text", "text": ""})
+            )
+        elif kind == "reasoning":
+            if frag.is_redacted and (frag.encrypted_content or frag.text == REDACTED_THINKING_TEXT):
+                # The provider converter keeps "[redacted]" as a display
+                # placeholder in ``reasoning_content`` and carries the real
+                # ``data`` in ``encrypted_content``; clients must echo the
+                # real payload back.
+                self._wire_is_redacted = True
+                chunks.append(
+                    self._content_block_start(
+                        self._current_block_index,
+                        {
+                            "type": "redacted_thinking",
+                            "data": frag.encrypted_content or frag.text,
+                        },
+                    )
+                )
+            else:
+                chunks.append(
+                    self._content_block_start(
+                        self._current_block_index, {"type": "thinking", "thinking": ""}
+                    )
+                )
+        elif kind == "tool":
+            if not (frag.tool_id and frag.tool_name):
+                return
+            block_type = (
+                "server_tool_use" if self._classify_tool(frag) == "server_tool_use" else "tool_use"
+            )
+            chunks.append(
+                self._content_block_start(
+                    self._current_block_index,
+                    {
+                        "type": block_type,
+                        "id": frag.tool_id,
+                        "name": frag.tool_name or "",
+                        "input": {},
+                    },
+                )
+            )
+        self._wire_open_kind = kind
+
+    def _render_segments(
+        self,
+        events: tuple[SegmentEvent, ...],
+        chunks: list[str],
+        estimated: Any = None,
+    ) -> None:
+        """Render segment events onto the Anthropic wire.
+
+        The engine assembles the canonical blocks (ADR-0031); this adapter is
+        its first event consumer. ``estimated`` is the delta's
+        ``reasoning_estimated_tokens`` beta value: it rides the first thinking
+        delta the batch renders, or — when no reasoning text arrives — opens
+        a (possibly empty) thinking block of its own, as the
+        thinking-token-count wire contract requires.
+        """
+        pending_estimated = estimated
+        for pos, event in enumerate(events):
+            if isinstance(event, SegmentClosed):
+                # Closes are lazy on this wire: the stop is emitted when a
+                # visible boundary needs the slot. One exception stays live: a
+                # TEXT block whose lane yielded to a suppressed segment (a
+                # reasoning tail after text) — the client's text block
+                # continues, so the next text segment adopts it instead of
+                # splitting it. Tool calls never adopt: two calls are two
+                # blocks, whatever the wire suppressed between them.
+                if self._wire_open_kind == event.kind:
+                    nxt = events[pos + 1] if pos + 1 < len(events) else None
+                    if (
+                        event.kind == "text"
+                        and isinstance(nxt, SegmentOpened)
+                        and self._open_is_suppressed(nxt.kind, nxt.delta)
+                    ):
+                        self._wire_block_state = "adoptable"
+                    else:
+                        self._wire_block_state = "closed"
+                continue
+            if isinstance(event, SegmentOpened):
+                self._open_wire_block(event.kind, event.delta, chunks)
+                continue
+            kind, frag = event.kind, event.delta
+            if kind == "text":
+                self._text_output_started = True
+                if frag.text:
+                    chunks.append(
+                        self._content_block_delta(
+                            self._current_block_index,
+                            {"type": "text_delta", "text": frag.text},
+                        )
+                    )
+                if frag.markdown:
+                    chunks.append(
+                        self._content_block_delta(
+                            self._current_block_index,
+                            {"type": "text_delta", "text": frag.markdown},
+                        )
+                    )
+            elif kind == "reasoning":
+                if frag.text and not self._text_output_started and not self._wire_is_redacted:
+                    thinking_delta: dict[str, Any] = {
+                        "type": "thinking_delta",
+                        "thinking": frag.text,
+                    }
+                    if pending_estimated is not None:
+                        thinking_delta["estimated_tokens"] = pending_estimated
+                        pending_estimated = None
+                    chunks.append(
+                        self._content_block_delta(self._current_block_index, thinking_delta)
+                    )
+                if frag.signature:
+                    if self._wire_open_kind != "reasoning":
+                        if self._wire_open_kind is not None:
+                            self._flush_wire_block(chunks)
+                        chunks.append(
+                            self._content_block_start(
+                                self._current_block_index,
+                                {"type": "thinking", "thinking": ""},
+                            )
+                        )
+                        self._wire_open_kind = "reasoning"
+                        self._wire_block_state = "engine"
+                    chunks.append(
+                        self._content_block_delta(
+                            self._current_block_index,
+                            {"type": "signature_delta", "signature": frag.signature},
+                        )
+                    )
+            elif kind == "tool":
+                if self._wire_open_kind == "tool" and frag.text:
+                    chunks.append(
+                        self._content_block_delta(
+                            self._current_block_index,
+                            {"type": "input_json_delta", "partial_json": frag.text},
+                        )
+                    )
+            # refusal and media appends render nothing: no wire representation.
+
+        if pending_estimated is not None and not self._text_output_started:
+            if self._wire_open_kind != "reasoning":
+                if self._wire_open_kind is not None:
+                    self._flush_wire_block(chunks)
+                chunks.append(
+                    self._content_block_start(
+                        self._current_block_index, {"type": "thinking", "thinking": ""}
+                    )
+                )
+                self._wire_open_kind = "reasoning"
+                self._wire_block_state = "wire_only"
+            chunks.append(
+                self._content_block_delta(
+                    self._current_block_index,
+                    {
+                        "type": "thinking_delta",
+                        "thinking": "",
+                        "estimated_tokens": pending_estimated,
+                    },
+                )
+            )
 
     def _sse_event(self, event_type: str, data: dict[str, Any]) -> str:
         """Create an SSE event string."""
@@ -1037,7 +1110,8 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         """
         result_chunks = []
 
-        self._close_current_open_block(result_chunks)
+        self._render_segments(self._segments.finish(), result_chunks)
+        self._flush_wire_block(result_chunks)
 
         if self._pending_stop_reason is not None:
             usage = self._pending_usage if self._pending_usage is not None else {"output_tokens": 0}

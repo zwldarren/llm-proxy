@@ -163,7 +163,11 @@ class WebSearchStreamProcessor:
             current_index += 1
 
             if isinstance(accumulated_output[idx], ToolUseBlock):
-                accumulated_output[idx] = server_tool_use
+                # Engine-backed transformers hold the canonical list behind
+                # ``blocks()`` (a copy); the substitution goes through the
+                # transformer's typed ``supersede`` verb so the reassembled
+                # log body sees the ServerToolUseBlock too (ADR-0031).
+                transformer.supersede(idx, server_tool_use)
 
             search_results.append((server_tool_use, result))
 
