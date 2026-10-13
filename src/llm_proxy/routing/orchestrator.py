@@ -24,7 +24,6 @@ from llm_proxy.config.types.main import ProxyConfig
 from llm_proxy.core.conversation_key import conversation_key
 from llm_proxy.core.exceptions import ConfigurationError
 from llm_proxy.core.request_type import RequestType
-from llm_proxy.database.connection import get_async_session_context
 from llm_proxy.routing.config import routing_mode_from_model
 from llm_proxy.routing.message_extract import extract_messages_for_routing
 from llm_proxy.routing.resolver import resolve_virtual_model
@@ -64,7 +63,7 @@ async def orchestrate_smart_routing(
 
     Returns ``None`` when ``model_name`` is not a virtual model (no routing
     needed). Otherwise performs conversation-continuity lookup, resolves the
-    virtual model (persisting the route record), stores the chosen model for
+    virtual model, stores the chosen model for
     the next turn, and returns the resolution result. Raises
     :class:`ConfigurationError` when smart routing is disabled or a non-chat
     request targets a virtual model.
@@ -103,23 +102,21 @@ async def orchestrate_smart_routing(
                 exc,
             )
 
-    # A short-lived session carries the experience-store side effects this
-    # resolution writes (per-model EWMA stats); there is no route-record table.
-    async with get_async_session_context() as routing_session:
-        routing_decision = await resolve_virtual_model(
-            mode=routing_mode,
-            messages=messages,
-            request=request,
-            config=config,
-            config_manager=config_manager,
-            services=services,
-            session=routing_session,
-            request_id=request_id,
-            mode_weights=smart_cfg.mode_weights,
-            previous_model=previous_model,
-            conversation_key=conv_key,
-        )
-        await routing_session.commit()  # persist the experience-store upserts
+    # Resolution itself is I/O-free apart from the judge: the experience store
+    # is process-lifetime (``RuntimeServices.experience_store``) and persists
+    # through its own completion-time session.
+    routing_decision = await resolve_virtual_model(
+        mode=routing_mode,
+        messages=messages,
+        request=request,
+        config=config,
+        config_manager=config_manager,
+        services=services,
+        request_id=request_id,
+        mode_weights=smart_cfg.mode_weights,
+        previous_model=previous_model,
+        conversation_key=conv_key,
+    )
 
     # ─── Store the chosen model for next turn ───
     if redis is not None and conv_key:

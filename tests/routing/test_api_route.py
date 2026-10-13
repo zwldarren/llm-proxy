@@ -41,7 +41,7 @@ def test_route_returns_decision_with_model():
         pool=_pool(),
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
-        experience_store=ModelExperienceStore(session=None),
+        experience_store=ModelExperienceStore(),
     )
     assert dec.model in {"econ", "bal", "prem"}
     assert 0.0 <= dec.complexity <= 1.0
@@ -55,7 +55,7 @@ def _simple_decision():
         pool=_pool(),
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
-        experience_store=ModelExperienceStore(session=None),
+        experience_store=ModelExperienceStore(),
     )
 
 
@@ -70,7 +70,7 @@ def _agent_decision():
         pool=_pool(),
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
-        experience_store=ModelExperienceStore(session=None),
+        experience_store=ModelExperienceStore(),
     )
 
 
@@ -177,7 +177,7 @@ def _judged(judge, *, features=None, messages=None):
         pool=_pool(),
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
-        experience_store=ModelExperienceStore(session=None),
+        experience_store=ModelExperienceStore(),
         judge=judge,
     )
 
@@ -273,7 +273,7 @@ def test_a_reused_classification_is_the_one_the_decision_was_made_from():
         pool=_pool(),
         mode=RoutingMode.AUTO,
         config=DEFAULT_CONFIG,
-        experience_store=ModelExperienceStore(session=None),
+        experience_store=ModelExperienceStore(),
         classification=classification,
     )
 

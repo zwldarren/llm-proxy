@@ -10,6 +10,7 @@ from typing import Any
 from llm_proxy.routing.classifier import classify
 from llm_proxy.routing.signal_tuning import (
     compact_structural_system_prompt,
+    extract_closed_form_ask,
     strip_client_wrapper_blocks,
 )
 from llm_proxy.routing.signals.base import TierVote
@@ -130,14 +131,23 @@ class StructuralSignal:
         # including all of that text makes trivial prompts like "hello" look
         # complex. Short system constraints still matter, e.g. JSON output.
         system_prompt = _compact_system_prompt_for_classification(messages)
-        result = classify(text, system_prompt=system_prompt)
+        # The same volume-does-not-imply-difficulty argument applies to the
+        # user turn: when a message's bulk is reference material terminated by
+        # a closed-form ask (yes/no directive, lettered options), classify the
+        # ask — the selection it demands — not the corpus it cites.
+        classification_text = extract_closed_form_ask(text) or text
+        result = classify(classification_text, system_prompt=system_prompt)
         tier_id = _map_v1_to_v2_tier_id(result.tier, result.complexity)
         confidence = max(0.0, min(1.0, result.confidence))
 
         # Dampen confidence for very short prompts — structural features
         # are unreliable when there's little text to analyze.
         # Use word count for Latin scripts, character count for CJK.
-        length_text = text if not system_prompt else f"{system_prompt}\n\n{text}"
+        length_text = (
+            classification_text
+            if not system_prompt
+            else f"{system_prompt}\n\n{classification_text}"
+        )
         word_count = len(length_text.split())
         if word_count <= 2 and len(length_text) > 15:
             # CJK or no-space script: use character length instead

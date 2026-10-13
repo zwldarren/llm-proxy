@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from llm_proxy.database.redis_client import RedisClient
     from llm_proxy.http.client import ProviderHTTPClientManager
     from llm_proxy.mcp.manager import MCPProxyManager
+    from llm_proxy.routing.model_experience import ModelExperienceStore
     from llm_proxy.web_search.interceptor import WebSearchInterceptor
 
 
@@ -170,6 +171,17 @@ class RuntimeServices:
         """
         return self._read("provider_stats")
 
+    def experience_store(self) -> ModelExperienceStore | None:
+        """The process-lifetime routing experience store, or ``None`` when absent.
+
+        Hydrated once at startup from the ``model_experience`` table, so the
+        routing read path is pure memory and the persisted EWMAs actually
+        reach the next selection. Absent only before startup completes or in
+        tests — resolution then degrades to a request-local store with
+        neutral priors, never to a failure.
+        """
+        return self._read("experience_store")
+
     def mcp_manager(self) -> MCPProxyManager | None:
         """The per-worker MCP server manager, or ``None`` when it was not built."""
         return self._read("mcp_manager")
@@ -242,6 +254,10 @@ class RuntimeServices:
     def install_provider_stats(self, store: ProviderStatsStore) -> None:
         """Install the provider latency store (``startup_provider_stats``)."""
         self._state.provider_stats = store
+
+    def install_experience_store(self, store: ModelExperienceStore) -> None:
+        """Install the routing experience store (``startup_experience_store``)."""
+        self._state.experience_store = store
 
     def install_mcp_manager(self, manager: MCPProxyManager) -> None:
         """Install the MCP server manager (``startup_mcp_servers``)."""

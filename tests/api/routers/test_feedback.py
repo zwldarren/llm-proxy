@@ -73,7 +73,9 @@ class TestSubmitFeedback:
         response = client.post("/api/me/feedback", json={"request_id": "req-1", "signal": "ok"})
 
         assert response.status_code == 204
-        mock_store.record_feedback_async.assert_awaited_once_with("gpt-routed", "ok")
+        mock_store.record_feedback_async.assert_awaited_once_with(
+            "gpt-routed", "ok", session=mock_session
+        )
         mock_session.add.assert_called_once()
         mock_session.commit.assert_awaited_once()
         # Non-admin: log lookup is scoped to the caller.

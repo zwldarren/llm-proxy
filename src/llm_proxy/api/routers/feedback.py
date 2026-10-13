@@ -7,7 +7,7 @@ rating; nothing re-fits the router's calibration from it, and no such
 calibration machinery exists (ADR-0018).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from llm_proxy.database.repositories.log_repository import LogRepository
 from llm_proxy.database.tables import FeedbackRecord, UserRecord
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.routing.model_experience import ModelExperienceStore
+from llm_proxy.services import runtime_services
 
 router = APIRouter(
     prefix="/api/me", tags=["Feedback"], dependencies=[Depends(require_authenticated)]
@@ -59,6 +60,7 @@ async def list_feedback(
 @router.post("/feedback", status_code=204)
 async def submit_feedback(
     body: MeFeedback,
+    request: Request,
     session: AsyncSession = get_async_session_dep,
     user: UserRecord = Depends(get_current_user),
 ) -> None:
@@ -89,8 +91,10 @@ async def submit_feedback(
     if existing.scalar_one_or_none() is not None:
         raise ConflictError(message="Feedback already recorded for this request")
 
-    store = ModelExperienceStore(session=session)
-    await store.record_feedback_async(resolved_model, body.signal)
+    # The shared store's cache is hydrated at startup, so the feedback lands on
+    # live EWMA state; persistence rides the request's own session.
+    store = runtime_services(request).experience_store() or ModelExperienceStore()
+    await store.record_feedback_async(resolved_model, body.signal, session=session)
     session.add(
         FeedbackRecord(
             request_id=body.request_id,

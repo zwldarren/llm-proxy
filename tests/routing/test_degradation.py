@@ -163,7 +163,7 @@ from llm_proxy.routing.model_experience import ModelExperienceStore  # noqa: E40
 
 class TestCacheLossPricing:
     def _store_with_affinity(self, affinity: float) -> ModelExperienceStore:
-        store = ModelExperienceStore(session=None)
+        store = ModelExperienceStore()
         # One observation so the snapshot conversion keeps cache_affinity
         # (a zero-sample model discards it in favor of defaults).
         store.observe("m/prev", success=True, latency_ms=100, cache_hit=False)
@@ -321,7 +321,7 @@ class TestUnobservedIncumbent:
     """The neutral ``cache_affinity`` prior is not evidence that a cache exists."""
 
     def test_an_unobserved_previous_model_gets_no_discount(self):
-        store = ModelExperienceStore(session=None)
+        store = ModelExperienceStore()
         decision = select_from_pool(
             complexity=0.5,
             mode=RoutingMode.AUTO,

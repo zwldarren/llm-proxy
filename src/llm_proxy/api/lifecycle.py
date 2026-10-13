@@ -386,6 +386,31 @@ async def startup_provider_stats(app: FastAPI) -> None:
     logger.debug("Provider stats store initialized")
 
 
+async def startup_experience_store(app: FastAPI) -> None:
+    """Hydrate the routing experience store once, after migrations.
+
+    The store is the process-lifetime cache the routing read path reads
+    (``RuntimeServices.experience_store``); hydrating it at startup is what
+    turns the per-model EWMAs the proxy persists into a signal selection
+    actually consumes. Runs after ``startup_database`` so the migrations that
+    create the table have already run. A hydration failure starts the cache
+    cold rather than failing startup — observations re-create the rows.
+    """
+    from llm_proxy.routing.model_experience import ModelExperienceStore
+
+    store = ModelExperienceStore()
+    try:
+        from llm_proxy.database import get_async_session_context
+
+        async with get_async_session_context() as session:
+            hydrated = await store.hydrate(session)
+    except Exception:  # noqa: BLE001 - a cold cache must not block startup
+        logger.warning("Experience store hydration failed; starting cold", exc_info=True)
+    else:
+        logger.debug(f"Experience store hydrated: {hydrated} models")
+    runtime_services(app).install_experience_store(store)
+
+
 async def startup_judge_warmup(app: FastAPI) -> None:
     """Warm the routing judge in the background, on startup and on every reload.
 

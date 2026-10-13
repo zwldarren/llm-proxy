@@ -46,6 +46,8 @@ from llm_proxy.routing.judge.policy import JudgeConsultation
 from llm_proxy.routing.selector import _derive_tier, select_from_pool
 from llm_proxy.routing.signal_tuning import (
     DEFAULT_SIGNAL_TUNING,
+    extract_closed_form_ask,
+    is_closed_form_ask,
     system_prompt_has_structured_output_constraint,
     text_high_substance_score,
     text_substance_score,
@@ -349,6 +351,9 @@ def _strongest_non_structural_tier(vote_a: TierVote) -> int | None:
 
 
 def _latest_user_has_high_substance(row: dict[str, Any]) -> bool:
+    ask = _row_closed_form_ask_text(row)
+    if ask is not None:
+        return False
     return (
         text_high_substance_score(_row_latest_user_text(row))
         >= DEFAULT_SIGNAL_TUNING.high_substance_score
@@ -362,6 +367,25 @@ def _row_latest_user_text(row: dict[str, Any]) -> str:
         if message.get("role") == "user":
             return _message_text(message.get("content"))
     return ""
+
+
+def _row_closed_form_ask_text(row: dict[str, Any]) -> str | None:
+    """The bounded selection ask of the latest user turn, when one exists.
+
+    Two shapes qualify: a long message whose terminal block is a closed-form
+    ask (yes/no directive, lettered options) — the ask is extracted and the
+    material behind it is reference volume — and a latest user turn that is
+    itself a bounded selection question (the corpus convention of a document
+    turn followed by a question turn). When one exists, the difficulty-
+    relevant text is the ask, and the substance/structural floors stand down:
+    they exist for implementation/design asks, not for selection over
+    supplied material.
+    """
+    text = _row_latest_user_text(row)
+    ask = extract_closed_form_ask(text)
+    if ask is not None:
+        return ask
+    return text if is_closed_form_ask(text) else None
 
 
 def _row_has_structured_system_prompt(row: dict[str, Any]) -> bool:
@@ -381,8 +405,12 @@ def _allow_short_structural_medium_floor(row: dict[str, Any]) -> bool:
     Short prompts like "write one subject line" and "give me a shell one-liner"
     often trip the structural classifier's medium band; substance checks keep
     the floor from inflating trivial asks. (The embedding signal this floor was
-    once gated behind was removed with Signal C.)
+    once gated behind was removed with Signal C.) A closed-form ask — yes/no
+    directive, lettered options — is a selection task, not an implementation
+    ask, so the floor never applies to it regardless of substance.
     """
+    if _row_closed_form_ask_text(row) is not None:
+        return False
     if _row_has_structured_system_prompt(row):
         return True
     text = _row_latest_user_text(row)
@@ -590,6 +618,7 @@ def _v2_classify(
     static weights (A=0.50, B=0.10).
     """
     row = _build_signal_row(messages, routing_features)
+    closed_form_ask = _row_closed_form_ask_text(row)
     tool_msg_count = sum(
         1 for m in row.get("messages", []) if m.get("role") == "tool" or m.get("tool_calls")
     )
@@ -625,6 +654,7 @@ def _v2_classify(
         tool_msg_count == 0
         and len(row.get("messages", [])) <= 3
         and not effective_vote_b.abstained
+        and closed_form_ask is None
         and effective_vote_b.confidence >= (0.70 if has_system_prompt else 0.95)
         and (effective_vote_b.tier_id or 0) >= 1
         and tier_id < (effective_vote_b.tier_id or 0)

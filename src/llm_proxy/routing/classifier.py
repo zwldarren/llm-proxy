@@ -38,6 +38,33 @@ from llm_proxy.routing.types import (
 _model: ScriptAgnosticClassifier | None = None
 _model_load_attempted = False
 
+# ─── Bounded feature extraction ───
+# Feature extraction is O(text length) in pure Python: char n-grams (~14 ms per
+# 10k chars), Unicode block proportions and the structural scores all scan the
+# text character by character, synchronously on the event loop. Beyond a few
+# thousand characters the extra text buys the classifier almost nothing — the
+# n-grams are a vocabulary proxy, not a content index, and every length-driven
+# score is saturated long before the budget (``normalized_length`` tops out at
+# 2000 tokens ≈ 8000 alphabetic chars). So the feature extractors see a
+# head+tail excerpt; the length-sensitive logic around them (trivial detection,
+# token estimate, the soften guards in :func:`classify`) keeps the full text.
+# The budget mirrors the routing judge's excerpt philosophy (``ask_chars``).
+_FEATURE_BUDGET_HEAD_CHARS = 6000
+_FEATURE_BUDGET_TAIL_CHARS = 2000
+
+
+def _bounded_feature_text(text: str) -> str:
+    """Head+tail excerpt of ``text`` within the feature-extraction budget.
+
+    The tail is what keeps the end-sensitive checks the softening guards do
+    ("ends with a question mark", "contains a fenced code block") meaningful
+    for pasted-content asks.
+    """
+    budget = _FEATURE_BUDGET_HEAD_CHARS + _FEATURE_BUDGET_TAIL_CHARS
+    if len(text) <= budget:
+        return text
+    return text[:_FEATURE_BUDGET_HEAD_CHARS] + text[-_FEATURE_BUDGET_TAIL_CHARS:]
+
 
 def _get_online_model_path() -> Path:
     data_dir = Path(platformdirs.user_data_dir("llm-proxy", "llm-proxy")) / "routing-assets"
@@ -80,16 +107,17 @@ def _extract_all_features(
     step information as pure numerical signals.
     """
     feature_text = _merge_feature_text(prompt, system_prompt)
-    struct_dims = extract_structural_features(feature_text)
+    bounded = _bounded_feature_text(feature_text)
+    struct_dims = extract_structural_features(bounded)
     structural_scores = {d.name: d.score for d in struct_dims}
 
-    unicode_blocks = extract_unicode_block_features(feature_text)
+    unicode_blocks = extract_unicode_block_features(bounded)
 
     if _model is not None:
         return _model._build_features(
             structural_scores,
             unicode_blocks,
-            prompt=feature_text,
+            prompt=bounded,
             context_features=context_features,
         )
 
@@ -265,7 +293,7 @@ def classify(
     tier, confidence = _rule_based_classify(all_features, config)
     _TIER_TO_COMPLEXITY = {Tier.SIMPLE: 0.0, Tier.MEDIUM: 0.40, Tier.COMPLEX: 0.90}
     complexity = _TIER_TO_COMPLEXITY.get(tier, 0.33)
-    struct_dims = extract_structural_features(prompt)
+    struct_dims = extract_structural_features(_bounded_feature_text(prompt))
     signals = [d.signal for d in struct_dims if d.signal is not None]
     signals.append("rule-fallback")
     signals.append(f"complexity:{complexity:.2f}")

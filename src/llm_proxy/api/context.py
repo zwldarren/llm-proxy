@@ -319,11 +319,17 @@ async def _build_request_context(
         ctx.routing_decision = routing_decision
         # Post-request EWMA observation lives in the routing package; wire it
         # here as a callback so core never imports routing (keeps the
-        # dependency direction routing -> core only).
-        from llm_proxy.routing.model_experience import observe_model_experience
+        # dependency direction routing -> core only). The store is the
+        # process-lifetime one, captured now: its warm cache is what makes the
+        # next selection see this request's outcome.
+        from llm_proxy.routing.model_experience import (
+            ModelExperienceStore,
+            observe_model_experience,
+        )
 
+        experience_store = services.experience_store() or ModelExperienceStore()
         ctx.on_request_completed = lambda event_context, success: observe_model_experience(
-            event_context, ctx, success=success
+            experience_store, event_context, ctx, success=success
         )
     if requested_model is not None:
         ctx.requested_model = requested_model

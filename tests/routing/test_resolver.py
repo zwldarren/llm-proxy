@@ -62,7 +62,6 @@ async def test_resolve_returns_decision(monkeypatch):
         config=fake_config,
         config_manager=cm,
         services=services_for(),
-        session=MagicMock(),
     )
     assert decision.model == "good"
 
@@ -84,7 +83,6 @@ async def test_resolve_raises_when_pool_empty():
             config=fake_config,
             config_manager=cm,
             services=services_for(),
-            session=MagicMock(),
         )
 
 
@@ -149,15 +147,16 @@ def _stub_route(monkeypatch, captured):
     monkeypatch.setattr(routing_api, "route", fake_route)
 
 
-async def _resolve(config, messages=None, rng=None, request=None):
+async def _resolve(config, messages=None, rng=None, request=None, services_override=None):
     return await resolve_virtual_model(
         mode=RoutingMode.AUTO,
         messages=messages or [{"role": "user", "content": "hi"}],
         request=request if request is not None else MagicMock(),
         config=config,
         config_manager=MagicMock(),
-        services=services_for(),
-        session=MagicMock(),
+        services=services_for(experience_store=services_override)
+        if services_override is not None
+        else services_for(),
         rng=rng,
     )
 
@@ -413,3 +412,23 @@ async def test_the_judge_is_wired_against_the_real_config_schema(monkeypatch):
     assert seen["unknown_fields_policy"] == config.server_params.unknown_fields_policy
     assert seen["unsupported_block_policy"] == config.server_params.unsupported_block_policy
     assert captured["judge"] is sentinel
+
+
+# ─── The experience store comes from the process-lifetime services ───
+
+
+@pytest.mark.asyncio
+async def test_resolution_reads_the_shared_experience_store(monkeypatch):
+    """The store the decision is made from is the services one, not a fresh
+    per-request store — its warm cache is what makes persisted EWMAs count."""
+    from llm_proxy.config.types.smart_routing import RoutingJudgeConfig
+    from llm_proxy.routing.model_experience import ModelExperienceStore
+
+    store = ModelExperienceStore()
+    store.observe("good", success=True, latency_ms=100)
+    captured: dict = {}
+    _stub_route(monkeypatch, captured)
+
+    await _resolve(_judge_ready_config(RoutingJudgeConfig(enabled=False)), services_override=store)
+
+    assert captured["experience_store"] is store

@@ -1,6 +1,27 @@
-"""Per-model EWMA experience + Thompson sampling support, DB-backed."""
+"""Per-model EWMA experience + Thompson sampling support.
+
+Process-lifetime in production (ADR-0021): the lifespan constructs one store,
+hydrates it once from the ``model_experience`` table, and installs it behind
+:class:`llm_proxy.services.RuntimeServices`. The routing read path
+(:meth:`get` / :meth:`snapshot`, consumed by the selector's
+``_experience_snapshot``) is then pure memory — zero queries per decision —
+and the EWMAs the store persists actually influence the next selection,
+which a per-request store could never do (its cache started empty every
+time, so reads always saw neutral priors while the writes accumulated
+unused rows).
+
+The store never owns a session. Persistence goes through an explicitly
+passed session (:meth:`observe_async` / :meth:`record_feedback_async`), and
+the caller commits. Concurrency model: updates to one model's entry happen
+synchronously inside that model's :class:`asyncio.Lock`, and reads are
+synchronous too, so on a single event loop a reader never sees a torn EWMA
+update. Across workers the cache is process-local — each worker hydrates at
+startup and persists its own observations (last-writer-wins upserts); EWMA
+stats are approximate by construction, so the divergence is acceptable.
+"""
 
 import asyncio
+import copy
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -40,15 +61,13 @@ FEEDBACK_SIGNALS = frozenset(_FEEDBACK_REWARDS)
 
 
 class ModelExperienceStore:
-    """In-memory cache with optional async DB persistence.
+    """In-memory per-model EWMA cache; DB persistence via an explicit session.
 
-    When ``session`` is None, behaves as a pure in-memory store (used in tests
-    and before the DB table exists). When a session is provided, ``observe``
-    also upserts a ``ModelExperienceRecord`` row.
+    With no session passed to the persisting methods the store still records
+    observations in memory — that is the shape the eval rig and tests use.
     """
 
-    def __init__(self, session: Any | None) -> None:
-        self._session = session
+    def __init__(self) -> None:
         self._cache: dict[str, ModelExperience] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -65,6 +84,33 @@ class ModelExperienceStore:
     def snapshot(self) -> dict[str, ModelExperience]:
         return dict(self._cache)
 
+    async def hydrate(self, session: Any) -> int:
+        """Load every persisted row into the cache. Startup, after migrations.
+
+        Returns the number of models hydrated. A failure here leaves the cache
+        empty rather than raising: the caller (the lifespan) logs and starts
+        cold, and the first observations re-create the rows.
+        """
+        from sqlalchemy import select
+
+        from llm_proxy.database.tables import ModelExperienceRecord
+
+        result = await session.execute(select(ModelExperienceRecord))
+        for row in result.scalars().all():
+            self._cache[row.name] = ModelExperience(
+                name=row.name,
+                samples=row.samples,
+                reward_mean=row.reward_mean,
+                latency=row.latency,
+                reliability=row.reliability,
+                cache_affinity=row.cache_affinity,
+                feedback=row.feedback,
+                # Inverse of the persisted projection (see ModelExperience),
+                # so preference survives restarts without a dedicated column.
+                preference_ewma=(row.feedback - 0.5) * 2.0,
+            )
+        return len(self._cache)
+
     def observe(self, name: str, success: bool, latency_ms: int, cache_hit: bool = False) -> None:
         exp = self.get(name)
         reward = 1.0 if success else 0.0
@@ -76,7 +122,6 @@ class ModelExperienceStore:
         exp.cache_affinity = _ewma(exp.cache_affinity, 1.0 if cache_hit else 0.0, _EWMA_ALPHA)
         exp.name = name
         self._cache[name] = exp
-        # DB persistence is live via _persist (ModelExperienceRecord upsert).
 
     def record_feedback(self, name: str, signal: str) -> None:
         """Apply explicit user feedback (ok/weak/strong) to a model's experience.
@@ -94,80 +139,69 @@ class ModelExperienceStore:
         exp.feedback = max(0.0, min(1.0, 0.5 + preference * 0.5))
         self._cache[name] = exp
 
-    async def record_feedback_async(self, name: str, signal: str) -> None:
-        """DB-backed variant of record_feedback, mirroring observe_async."""
+    async def record_feedback_async(
+        self, name: str, signal: str, *, session: Any | None = None
+    ) -> None:
+        """Record feedback in memory, then persist it through ``session``."""
         async with self._lock(name):
-            await self.load_from_db(name)
             # Snapshot the current cache entry so we can revert on persist failure
             before = self._snapshot_entry(name)
             self.record_feedback(name, signal)
-            try:
-                await self._persist(name)
-            except Exception:
-                # Revert in-memory cache to pre-feedback state
-                if before is not None:
-                    self._cache[name] = before
-                raise
+            if session is not None:
+                try:
+                    await self._persist(name, session)
+                except Exception:
+                    # Revert in-memory cache to pre-feedback state
+                    if before is not None:
+                        self._cache[name] = before
+                    raise
 
     async def observe_async(
-        self, name: str, success: bool, latency_ms: int, cache_hit: bool = False
+        self,
+        name: str,
+        *,
+        success: bool,
+        latency_ms: int,
+        cache_hit: bool = False,
+        session: Any | None = None,
     ) -> None:
+        """Record one request observation in memory, then persist it.
+
+        No ``load_from_db`` before the update — with a hydrated process-lifetime
+        store the cache *is* the authority inside this process, and re-reading
+        the row per observation would both cost a query and clobber newer
+        in-memory samples with a stale snapshot.
+        """
         async with self._lock(name):
-            await self.load_from_db(name)
             # Snapshot the current cache entry so we can revert on persist failure
             before = self._snapshot_entry(name)
             self.observe(name, success, latency_ms, cache_hit)
-            try:
-                await self._persist(name)
-            except Exception:
-                # Revert in-memory cache to pre-observe state
-                if before is not None:
-                    self._cache[name] = before
-                raise
+            if session is not None:
+                try:
+                    await self._persist(name, session)
+                except Exception:
+                    # Revert in-memory cache to pre-observe state
+                    if before is not None:
+                        self._cache[name] = before
+                    raise
 
     def _snapshot_entry(self, name: str) -> ModelExperience | None:
-        import copy
-
         entry = self._cache.get(name)
         if entry is None:
             return None
         return copy.deepcopy(entry)
 
-    async def load_from_db(self, name: str) -> None:
-        """Hydrate the in-memory cache from the DB row if one exists."""
-        if self._session is None:
-            return
-
-        stmt = select_by_name(name)
-        existing = await self._session.execute(stmt)
-        row = existing.scalar_one_or_none()
-        if row is not None:
-            self._cache[name] = ModelExperience(
-                name=name,
-                samples=row.samples,
-                reward_mean=row.reward_mean,
-                latency=row.latency,
-                reliability=row.reliability,
-                cache_affinity=row.cache_affinity,
-                feedback=row.feedback,
-                # Inverse of the persisted projection (see ModelExperience),
-                # so preference survives restarts without a dedicated column.
-                preference_ewma=(row.feedback - 0.5) * 2.0,
-            )
-
-    async def _persist(self, name: str) -> None:
-        if self._session is None:
-            return
+    async def _persist(self, name: str, session: Any) -> None:
         from llm_proxy.database.tables import ModelExperienceRecord  # lazy
 
         exp = self.get(name)
         # Upsert by name.
         stmt = select_by_name(name)
-        existing = await self._session.execute(stmt)
+        existing = await session.execute(stmt)
         row = existing.scalar_one_or_none()
         if row is None:
             row = ModelExperienceRecord(name=name)
-            self._session.add(row)
+            session.add(row)
         row.samples = exp.samples
         row.reward_mean = exp.reward_mean
         row.latency = exp.latency
@@ -175,7 +209,7 @@ class ModelExperienceStore:
         row.feedback = exp.feedback
         row.cache_affinity = exp.cache_affinity
         row.updated_at = time.time()
-        await self._session.flush()
+        await session.flush()
 
 
 def _ewma(prev: float, new: float, alpha: float) -> float:
@@ -191,17 +225,19 @@ def select_by_name(name: str):
 
 
 async def observe_model_experience(
+    store: ModelExperienceStore,
     event_context: Any,
     context: Any,
     *,
     success: bool,
 ) -> None:
-    """Update model experience EWMA after a routed request completes.
+    """Update the shared store's EWMA after a routed request completes.
 
-    Opens a fresh session so telemetry failures never break the response.
+    ``store`` is the process-lifetime store captured by the caller (the API
+    context wires the completion callback); this helper only opens the
+    short-lived session the persistence needs, so telemetry failures never
+    break the response.
     """
-    from llm_proxy.database.connection import get_async_session_context
-
     decision = context.routing_decision
     resolved: str | None = getattr(decision, "model", None)
     if resolved is None:
@@ -214,13 +250,15 @@ async def observe_model_experience(
     )
 
     try:
+        from llm_proxy.database.connection import get_async_session_context
+
         async with get_async_session_context() as session:
-            store = ModelExperienceStore(session=session)
             await store.observe_async(
                 resolved,
                 success=success,
                 latency_ms=int(latency_ms),
                 cache_hit=cache_hit,
+                session=session,
             )
             await session.commit()
     except Exception:  # noqa: BLE001

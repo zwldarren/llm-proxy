@@ -21,6 +21,7 @@ from llm_proxy.api.lifecycle import (
     startup_config,
     startup_database,
     startup_derived_caches,
+    startup_experience_store,
     startup_http_client,
     startup_judge_warmup,
     startup_mcp_servers,
@@ -103,6 +104,7 @@ async def lifespan(app: FastAPI):
     restore_loop_handler = install_asyncgen_close_race_filter()
     try:
         await startup_database(app)
+        await startup_experience_store(app)
         await startup_http_client(app)
         config_manager = await startup_config(app)
 

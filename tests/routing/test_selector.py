@@ -23,7 +23,7 @@ from llm_proxy.routing.types import (
 
 def _biased_experience_store() -> ModelExperienceStore:
     """Return a store with enough samples to make quality ranks visible."""
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     store._cache = {
         "econ/cheap": ModelExperience(
             name="econ/cheap", samples=50, reward_mean=0.45, reliability=0.7
@@ -53,7 +53,7 @@ VALID_TIERS = (Tier.SIMPLE, Tier.MEDIUM, Tier.COMPLEX)
 
 
 def test_select_best_complex_returns_valid_decision():
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     dec = select_from_pool(
         complexity=0.85,
         mode=RoutingMode.BEST,
@@ -73,7 +73,7 @@ def test_select_best_complex_returns_valid_decision():
 
 
 def test_select_fast_low_complexity_returns_valid_decision():
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     dec = select_from_pool(
         complexity=0.15,
         mode=RoutingMode.FAST,
@@ -93,7 +93,7 @@ def test_select_fast_low_complexity_returns_valid_decision():
 
 
 def test_select_from_pool_reasoning_is_structured_dict():
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     dec = select_from_pool(
         complexity=0.85,
         mode=RoutingMode.BEST,
@@ -115,7 +115,7 @@ def test_select_from_pool_reasoning_is_structured_dict():
 
 
 def test_select_from_pool_raises_when_no_models():
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     with pytest.raises(RoutingInfeasibleError):
         select_from_pool(
             complexity=0.4,
@@ -133,7 +133,7 @@ def test_select_from_pool_raises_when_no_models():
 
 
 def test_select_from_pool_respects_max_cost_constraint():
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     # Use SIMPLE-tier complexity so econ/cheap passes the quality guard.
     dec = select_from_pool(
         complexity=0.15,
@@ -200,7 +200,7 @@ def test_fast_and_best_diverge_with_seeded_rng():
 
 
 def test_select_from_pool_populates_scorecards_and_weights():
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     # Use flat served qualities so the quality guard does not filter any
     # candidates — this test focuses on scorecard/weight population.
     flat_served = {m: ServedQuality.BALANCED for m in MODELS}
@@ -248,7 +248,7 @@ def test_select_from_pool_populates_scorecards_and_weights():
 
 def _two_identical_models_store(penalized_pref: float = 0.0, other_pref: float = 0.0):
     """Two candidates identical in every way except feedback preference."""
-    store = ModelExperienceStore(session=None)
+    store = ModelExperienceStore()
     store._cache = {
         "m/a": ModelExperience(
             name="m/a", samples=50, reward_mean=0.8, preference_ewma=penalized_pref

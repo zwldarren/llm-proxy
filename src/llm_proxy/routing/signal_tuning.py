@@ -29,6 +29,17 @@ class RoutingSignalTuning:
     vision_prompt_token_floor: int = 3
     compact_system_prompt_char_limit: int = 1200
     compact_system_prompt_word_limit: int = 180
+    #: Messages at or below this length are classified whole — ask extraction
+    #: only applies when supplied material dwarfs the operative question.
+    closed_form_ask_min_chars: int = 400
+    #: A closed-form ask run longer than this is treated as instruction-dense
+    #: content, not a terminal selection question.
+    closed_form_ask_max_chars: int = 1200
+    #: The ask must be far smaller than the message it terminates; otherwise
+    #: the volume itself is the instruction set, not reference material.
+    closed_form_ask_max_share: float = 0.50
+    #: How far back from the end a closed-form anchor may sit.
+    closed_form_ask_window_chars: int = 2000
 
 
 DEFAULT_SIGNAL_TUNING = RoutingSignalTuning()
@@ -279,3 +290,123 @@ def vision_prompt_needs_medium_floor(
         return False
     text = str(prompt or "").strip()
     return estimate_tokens(text) >= tuning.vision_prompt_token_floor
+
+
+# ─── Closed-form ask extraction ───
+# A closed-form ask constrains the response space: a yes/no directive, a
+# lettered multiple-choice run, or a "which of the following" selection.
+# Selection over supplied material is a lookup whose difficulty lives in the
+# ask, not in the volume of the material — the same insight that motivates
+# ``compact_structural_system_prompt`` for system prompts. The patterns are
+# response-FORMAT markers, not domain keywords.
+
+_MC_OPTION_RE = re.compile(r"(?<![A-Za-z])(?P<letter>[A-D])[.)](?=\s)")
+_YES_NO_RE = re.compile(
+    r"\b(?:answer|respond|reply)\s+(?:only\s+)?(?:with\s+)?(?:yes\s+or\s+no|true\s+or\s+false)\b"
+    r"|\byes\s+or\s+no\b|\btrue\s+or\s+false\b",
+    re.IGNORECASE,
+)
+_WHICH_FOLLOWING_RE = re.compile(r"\bwhich\s+of\s+(?:the\s+)?following\b", re.IGNORECASE)
+_SENTENCE_END_RE = re.compile(r"[.?!](?=\s)|\n+")
+
+
+def _sentence_start_before(text: str, pos: int, back: int = 1) -> int:
+    """Start position of the sentence unit *back* units before *pos*.
+
+    Sentence units end at ``.``/``?``/``!`` followed by whitespace, or at a
+    newline run. Falls back to the text start when there are fewer units.
+    """
+    ends = [m.end() for m in _SENTENCE_END_RE.finditer(text, 0, pos)]
+    if not ends:
+        return 0
+    return ends[-back] if len(ends) >= back else 0
+
+
+def _last_mc_option_run(text: str) -> tuple[int, int] | None:
+    """Span of the last ascending run of lettered options (``A. ... B. ...``).
+
+    Returns ``(run_start, run_end)`` or ``None``. A run needs at least two
+    distinct ascending letters inside a 1200-char neighborhood so a stray
+    ``B.`` in a citation cannot anchor an extraction.
+    """
+    markers = [(m.start(), ord(m.group("letter"))) for m in _MC_OPTION_RE.finditer(text)]
+    if len(markers) < 2:
+        return None
+    # Walk from the last marker backwards collecting an ascending run.
+    run: list[tuple[int, int]] = [markers[-1]]
+    for start, letter in reversed(markers[:-1]):
+        if letter < run[-1][1] and run[-1][0] - start <= 1200:
+            run.append((start, letter))
+        elif run[-1][0] - start > 1200:
+            break
+    run.reverse()
+    if len({letter for _, letter in run}) < 2:
+        return None
+    return run[0][0], run[-1][0]
+
+
+def is_closed_form_ask(text: str) -> bool:
+    """Whether *text* is a bounded selection question.
+
+    True when the text carries a response-FORMAT marker — a yes/no or
+    true/false directive, a lettered multiple-choice run, or a "which of the
+    following" selection. The response space of such an ask is closed by
+    construction, so the material it cites is reference, not difficulty.
+    """
+    text = str(text or "")
+    if not text.strip():
+        return False
+    if _YES_NO_RE.search(text) or _WHICH_FOLLOWING_RE.search(text):
+        return True
+    return _last_mc_option_run(text) is not None
+
+
+def extract_closed_form_ask(
+    text: str,
+    *,
+    tuning: RoutingSignalTuning = DEFAULT_SIGNAL_TUNING,
+) -> str | None:
+    """Return the terminal closed-form ask of a long message, else ``None``.
+
+    ``None`` means "classify the message whole" — the short-message case, and
+    any long message whose volume is itself the instruction set (a pasted
+    spec, a stack trace to fix). Only a message whose bulk is reference
+    material and whose tail is a bounded selection question yields an ask.
+    """
+    text = str(text or "")
+    if len(text) <= tuning.closed_form_ask_min_chars:
+        return None
+    window_start = max(0, len(text) - tuning.closed_form_ask_window_chars)
+    window = text[window_start:]
+
+    ask: str | None = None
+    mc_run = _last_mc_option_run(window)
+    if mc_run is not None:
+        # Include the question stem: back up over the sentence holding the
+        # first option marker, then one more unit for a stem glued to it.
+        absolute = window_start + mc_run[0]
+        stem_start = _sentence_start_before(text, absolute, back=2)
+        ask = text[stem_start:]
+    if ask is None:
+        yn = None
+        for m in _YES_NO_RE.finditer(window):
+            yn = m
+        if yn is not None and yn.end() >= len(window) - 600:
+            absolute = window_start + yn.start()
+            ask = text[_sentence_start_before(text, absolute, back=1) :]
+    if ask is None:
+        which = None
+        for m in _WHICH_FOLLOWING_RE.finditer(window):
+            which = m
+        if which is not None:
+            absolute = window_start + which.start()
+            ask = text[_sentence_start_before(text, absolute, back=1) :]
+
+    if ask is None:
+        return None
+    ask = ask.strip()
+    if not ask or len(ask) > tuning.closed_form_ask_max_chars:
+        return None
+    if len(ask) >= len(text) * tuning.closed_form_ask_max_share:
+        return None
+    return ask

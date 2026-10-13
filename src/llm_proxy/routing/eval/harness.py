@@ -208,7 +208,7 @@ def run_ensemble_leg(
         pool=build_eval_pool(),
         mode=mode,
         config=DEFAULT_CONFIG,
-        experience_store=ModelExperienceStore(session=None),
+        experience_store=ModelExperienceStore(),
         rng=rng,
     )
     return decision.tier, float(decision.complexity), float(decision.confidence)
@@ -563,6 +563,30 @@ def summarize(
         ),
         repeats=bootstrap,
     )
+
+    # Best-single baseline (LLMRouterBench's negative finding: under unified
+    # evaluation many routers fail to beat one constant choice). The constant
+    # tier is picked on the same rows the router is scored on, so it is an
+    # oracle-in-retrospect floor a signal-free router could reach, not a
+    # deployable policy — a router below it is adding noise, not signal.
+    best_rate = -1.0
+    best_tier: Tier | None = None
+    for tier in Tier:
+        block = _tier_metrics([(result.case.expected_tier, tier, False) for result in results])
+        if block["match_rate"] is not None and block["match_rate"] > best_rate:
+            best_rate = block["match_rate"]
+            best_tier = tier
+    if best_tier is not None:
+        metrics["best_single"] = {
+            "tier": best_tier.value,
+            "overall": _tier_metrics(
+                [(result.case.expected_tier, best_tier, False) for result in results]
+            ),
+        }
+        metrics["best_single"]["overall"]["match_rate_ci"] = bootstrap_match_rate_ci(
+            _match_rows(lambda r: 1.0 if best_tier is r.case.expected_tier else 0.0),
+            repeats=bootstrap,
+        )
 
     judged = [result for result in results if result.judge_called]
     if judged:
@@ -984,6 +1008,17 @@ def render_report(metrics: dict[str, Any]) -> str:
             f"| {subset} | {row['n']} | {_fmt_rate(row['match_rate'])} "
             f"| {row['under']} | {row['over']} |"
         )
+
+    best_single = metrics.get("best_single")
+    if best_single:
+        bs = best_single["overall"]
+        bs_ci = bs.get("match_rate_ci")
+        lines += [
+            "",
+            f"- Best single tier (no routing): always **{best_single['tier']}** — "
+            f"{bs['matched']}/{bs['decided']} ({_fmt_rate(bs['match_rate'])}"
+            + (f", 95% CI {_fmt_interval(bs_ci)})" if bs_ci else ")"),
+        ]
 
     if "judge" in metrics:
         judge = metrics["judge"]

@@ -27,7 +27,6 @@ async def resolve_virtual_model(
     config: ProxyConfig,
     config_manager: Any,
     services: RuntimeServices,
-    session: Any | None = None,
     request_id: str | None = None,
     mode_weights: dict[str, float] | None = None,
     previous_model: str | None = None,
@@ -41,7 +40,9 @@ async def resolve_virtual_model(
             "Mark at least one model as auto-eligible in the model configuration."
         )
 
-    experience_store = ModelExperienceStore(session=session)
+    # The process-lifetime store carries the hydrated per-model EWMAs; a fresh
+    # store (tests, early startup) reads neutral priors instead of failing.
+    experience_store = services.experience_store() or ModelExperienceStore()
 
     # Classify once, then decide whether this turn is one the judge should settle
     # (ADR-0018). The gate reads the *same* confidence and complexity the decision

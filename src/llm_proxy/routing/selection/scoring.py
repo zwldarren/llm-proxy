@@ -53,25 +53,9 @@ def _experience_snapshot(
 ) -> CandidateExperience:
     if store is None:
         return CandidateExperience()
-    snapshot: object | None = None
-    if hasattr(store, "snapshot"):
-        try:
-            snapshot = store.snapshot(model, mode, tier)
-        except TypeError:
-            try:
-                snapshot = store.snapshot(model, mode)
-            except TypeError:
-                try:
-                    # llm-proxy's ModelExperienceStore.snapshot() takes no args
-                    # and returns dict[str, ModelExperience].
-                    snapshot = store.snapshot()
-                except TypeError:
-                    snapshot = None
-        if isinstance(snapshot, CandidateExperience):
-            return snapshot
-        if isinstance(snapshot, dict) and model in snapshot:
-            return _candidate_experience_from_model(snapshot[model])
-    # Stores without a compatible snapshot() but exposing get(name) -> ModelExperience.
+    # ``get(name)`` first: the process-lifetime store serves warm per-model
+    # entries straight from memory, and calling ``snapshot()`` per candidate
+    # would copy the whole cache once per candidate per request.
     if hasattr(store, "get"):
         try:
             return _candidate_experience_from_model(store.get(model))
@@ -84,6 +68,24 @@ def _experience_snapshot(
                 exc,
             )
             return CandidateExperience()
+    snapshot: object | None = None
+    if hasattr(store, "snapshot"):
+        try:
+            snapshot = store.snapshot(model, mode, tier)
+        except TypeError:
+            try:
+                snapshot = store.snapshot(model, mode)
+            except TypeError:
+                try:
+                    # Another store shape's snapshot() takes no args
+                    # and returns a mapping of model -> experience.
+                    snapshot = store.snapshot()
+                except TypeError:
+                    snapshot = None
+        if isinstance(snapshot, CandidateExperience):
+            return snapshot
+        if isinstance(snapshot, dict) and model in snapshot:
+            return _candidate_experience_from_model(snapshot[model])
     return CandidateExperience()
 
 
