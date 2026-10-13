@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import llm_proxy.api.middleware.mcp_proxy as mcp_proxy
+import llm_proxy.api.gate as mcp_proxy
 import llm_proxy.api.middleware.security as security_mw
 from llm_proxy.api.middleware.rate_limiting import RateLimitManager
 from llm_proxy.config.types.server import SecurityParams
@@ -60,7 +60,7 @@ class TestRateLimitDisabledCoversTheLimiter:
         assert await _drain(manager, "127.0.0.1", limit=1, times=3) == [False, False, False]
 
     async def test_per_key_rpm_is_bypassed(self, set_security_params):
-        auth_info = {"principal_id": "dev-key", "rate_limit_rpm": 1}
+        auth_info = mcp_proxy.VerifiedKeyAuth(principal_id="dev-key", rate_limit_rpm=1)
         manager = RateLimitManager(use_redis=False)
 
         set_security_params(rate_limit_disabled=False)

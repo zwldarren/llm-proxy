@@ -1,11 +1,12 @@
 """Shared helpers for the proxy's WebSocket transports.
 
 Both WebSocket transports (OpenResponses ``/v1/responses`` and the Realtime
-relay ``/v1/realtime``) authenticate with proxy API keys the same way,
-enforce the same 64 MiB per-message cap and 60-minute connection cap, and
-speak one close-code language (4401 auth failure, 4403 forbidden, 1011
-upstream/provider failure). The shared pieces live here so the two routers
-cannot drift apart.
+relay ``/v1/realtime``) authenticate through the API-key gate
+(:mod:`llm_proxy.api.gate`, with each router's own extraction policy and
+rejection rendering), enforce the same 64 MiB per-message cap and 60-minute
+connection cap, and speak one close-code language (4401 auth failure, 4403
+forbidden, 1011 upstream/provider failure). The shared pieces live here so
+the two routers cannot drift apart.
 """
 
 import asyncio
@@ -15,11 +16,7 @@ from typing import Any
 
 from starlette.requests import Request as StarletteRequest
 
-from llm_proxy.core.request_facts import (
-    RequestIdentity,
-    facts_for,
-    mint_request_id,
-)
+from llm_proxy.core.request_facts import facts_for, mint_request_id
 
 # Connection age cap shared by both WebSocket transports (60 minutes).
 WS_MAX_CONNECTION_SECONDS = 60 * 60
@@ -39,87 +36,23 @@ class WebSocketConnectionLimitError(TimeoutError):
     """The connection age cap was reached before a message arrived."""
 
 
-def extract_ws_api_key(
-    websocket: Any, *, insecure_key_subprotocol_prefix: str | None = None
-) -> str | None:
-    """Extract the API key from headers, subprotocols, or query params.
-
-    Header-based auth (``Authorization`` / ``x-api-key``) is preferred. The
-    ``api_key`` query parameter is accepted because browser WebSocket clients
-    cannot set headers — be aware that query strings can end up in reverse
-    proxy access logs, so operators fronting the proxy should strip or hash
-    them in log pipelines. When ``insecure_key_subprotocol_prefix`` is given,
-    a subprotocol starting with that prefix (e.g. OpenAI's
-    ``openai-insecure-api-key.`` convention for browser clients) is also
-    accepted.
-    """
-    auth_header = websocket.headers.get("Authorization")
-    if auth_header:
-        if auth_header.startswith("Bearer "):
-            return auth_header[7:].strip() or None
-        return auth_header.strip() or None
-    x_api_key = websocket.headers.get("x-api-key")
-    if x_api_key:
-        return x_api_key.strip() or None
-    if insecure_key_subprotocol_prefix is not None:
-        for subprotocol in websocket.scope.get("subprotocols") or []:
-            if subprotocol.startswith(insecure_key_subprotocol_prefix):
-                key = subprotocol[len(insecure_key_subprotocol_prefix) :]
-                if key:
-                    return key
-    query_key = websocket.query_params.get("api_key")
-    if query_key:
-        return query_key.strip() or None
-    return None
-
-
-async def authenticate_ws(
-    websocket: Any, *, insecure_key_subprotocol_prefix: str | None = None
-) -> tuple[RequestIdentity, dict[str, Any]] | None:
-    """Authenticate a WebSocket connection with a proxy API key.
-
-    Returns ``(identity, auth_info)`` on success; ``auth_info`` carries the
-    key's ``allowed_models`` (model-restriction check) and budget
-    configuration (spending-cap check). ``insecure_key_subprotocol_prefix``
-    is forwarded to :func:`extract_ws_api_key`. The import is deferred to
-    avoid a circular import with the middleware package.
-    """
-    from llm_proxy.api.middleware.mcp_proxy import verify_api_key_for_mcp
-
-    api_key = extract_ws_api_key(
-        websocket, insecure_key_subprotocol_prefix=insecure_key_subprotocol_prefix
-    )
-    if not api_key:
-        return None
-    auth_info = await verify_api_key_for_mcp(api_key)
-    if auth_info is None:
-        return None
-    identity = RequestIdentity(
-        api_key_name=auth_info["principal_id"],
-        auth_method="api_key",
-        user_id=auth_info.get("user_id"),
-    )
-    return identity, auth_info
-
-
-def build_ws_request(websocket: Any, identity: RequestIdentity) -> StarletteRequest:
+def build_ws_request(websocket: Any) -> StarletteRequest:
     """Build an HTTP Request from a WebSocket scope for shared accessors.
 
     Config/dependency accessors expect an HTTP request; this fakes one from
-    the websocket scope (a GET on the same path), stamps the authenticated
-    identity and mints a per-connection request id so downstream code (budget
-    checks, model resolution, usage logging) works unchanged. The state dict
-    is shared with the websocket's own scope, so the record stays reachable
-    for the connection's lifetime.
+    the websocket scope (a GET on the same path) and mints a per-connection
+    request id so downstream code (model resolution, usage logging) works
+    unchanged. The identity is *not* stamped here: the API-key gate stamps it
+    into the request's facts after verification, like on every transport.
+    The state dict is shared with the websocket's own scope, so the record
+    stays reachable for the connection's lifetime.
     """
     scope = dict(websocket.scope)
     scope["type"] = "http"
     scope["method"] = "GET"
     scope.setdefault("http_version", "1.1")
     request = StarletteRequest(scope)
-    facts = facts_for(request)
-    facts.identity = identity
-    facts.request_id = mint_request_id("ws_")
+    facts_for(request).request_id = mint_request_id("ws_")
     return request
 
 
@@ -153,8 +86,6 @@ __all__ = [
     "WS_MAX_CONNECTION_SECONDS",
     "WS_MAX_MESSAGE_BYTES",
     "WebSocketConnectionLimitError",
-    "authenticate_ws",
     "build_ws_request",
-    "extract_ws_api_key",
     "receive_with_connection_cap",
 ]

@@ -11,8 +11,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.requests import Request as StarletteRequest
 
+from llm_proxy.api import gate
 from llm_proxy.api.context import HasModel, build_request_context
 from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
+from llm_proxy.api.gate import GatePolicy, KeyExtraction
 from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
     ConfigurationError,
@@ -25,7 +27,6 @@ from llm_proxy.core.ws_common import (
     WS_MAX_CONNECTION_SECONDS,
     WS_MAX_MESSAGE_BYTES,
     WebSocketConnectionLimitError,
-    authenticate_ws,
     build_ws_request,
     receive_with_connection_cap,
 )
@@ -57,6 +58,22 @@ router = APIRouter(tags=["responses"], dependencies=[Depends(require_any_auth)])
 
 # WebSocket transport router: no router-level HTTP auth dependency (the
 # WebSocket endpoint authenticates the connection itself after accept).
+#: The OpenResponses WebSocket transport's gate policy: auth only. The
+#: handshake enforces no lockout, no per-key rate limit, and no budget
+#: (matching this transport's pre-gate behavior).
+OPENRESPONSES_WS_POLICY = GatePolicy(
+    extraction=KeyExtraction.WEBSOCKET,
+    lockout=False,
+    auth_failure_penalty=False,
+    rate_limit=False,
+    budget=False,
+    claim_last_used=False,
+)
+#: The rejection kinds this transport's policy can produce. Every check but
+#: auth is disabled, so the renderer below speaks only the auth-failure event
+#: type — if the policy ever gains a check, its rendering must be taught here
+#: (the contract test in ``test_key_gate_contract.py`` pins the policy).
+
 ws_router = APIRouter(tags=["responses"])
 
 
@@ -712,16 +729,19 @@ async def responses_websocket(websocket: WebSocket) -> None:
     """
     await websocket.accept()
 
-    auth = await authenticate_ws(websocket)
-    if auth is None:
-        await _ws_send_error(websocket, 401, "authentication_failed", "Authentication required.")
+    # Auth only: the OpenResponses WebSocket transport carries no budget or
+    # rate-limit enforcement (matching its pre-gate behavior).
+    request = build_ws_request(websocket)
+    rejection = await gate.gate_request(request, OPENRESPONSES_WS_POLICY)
+    if rejection is not None:
+        # Only AUTH_FAILED is reachable under this transport's policy (see
+        # the kinds note on OPENRESPONSES_WS_POLICY).
+        await _ws_send_error(
+            websocket, rejection.status_code, "authentication_failed", rejection.message
+        )
         await websocket.close(code=WS_CLOSE_AUTH_FAILED)
         return
-    identity, _ = auth
-
-    # Build a Request-like object from the websocket scope so the standard
-    # context builder and pipeline stages work unchanged.
-    request = build_ws_request(websocket, identity)
+    identity = get_request_identity(request)
 
     processor = runtime_services(websocket).protocol_processor("openresponses")
     if processor is None:

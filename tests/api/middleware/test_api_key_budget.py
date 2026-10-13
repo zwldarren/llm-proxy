@@ -1,7 +1,7 @@
 """Tests for API key expiry and budget enforcement at request-auth time.
 
 Covers:
-- ``verify_api_key_for_mcp`` rejecting expired keys (fast and slow cache paths)
+- ``verify_api_key`` rejecting expired keys (fast and slow cache paths)
 - ``is_key_budget_exceeded`` / ``is_user_budget_exceeded`` consulting the
   spend cache / usage table, including cache-namespace isolation and
   window-identity handling
@@ -17,20 +17,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from middleware_helpers import build_auth_info, split_budget_fields
 
-from llm_proxy.api.middleware import mcp_proxy as mcp_proxy_module
-from llm_proxy.api.middleware.api_key_cache import (
-    CachedApiKey,
-    get_api_key_cache,
-    get_budget_spend_cache,
-    hash_api_key_for_cache,
-)
-from llm_proxy.api.middleware.mcp_proxy import (
+from llm_proxy.api import gate as mcp_proxy_module
+from llm_proxy.api.gate import (
     BudgetCheckStatus,
     BudgetCheckUnavailableError,
     check_key_budget,
     is_key_budget_exceeded,
     is_user_budget_exceeded,
-    verify_api_key_for_mcp,
+    verify_api_key,
+)
+from llm_proxy.api.middleware.api_key_cache import (
+    CachedApiKey,
+    get_api_key_cache,
+    get_budget_spend_cache,
+    hash_api_key_for_cache,
 )
 from llm_proxy.core.budget import BudgetEnvelope, get_effective_budget_start_ts
 
@@ -70,7 +70,7 @@ def _reset_caches():
 
 
 class TestKeyExpiry:
-    """Expiry checks in verify_api_key_for_mcp."""
+    """Expiry checks in verify_api_key."""
 
     @pytest.mark.asyncio
     async def test_expired_key_rejected_slow_path(self):
@@ -80,12 +80,12 @@ class TestKeyExpiry:
             patch.object(
                 mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[expired])
             ),
-            patch.object(mcp_proxy_module, "verify_api_key", return_value=True),
+            patch.object(mcp_proxy_module, "key_matches_hash", return_value=True),
             patch.object(
                 mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)
             ),
         ):
-            assert await verify_api_key_for_mcp("sk-secret") is None
+            assert await verify_api_key("sk-secret") is None
 
     @pytest.mark.asyncio
     async def test_future_expiry_accepted_slow_path(self):
@@ -95,13 +95,13 @@ class TestKeyExpiry:
             patch.object(
                 mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[future])
             ),
-            patch.object(mcp_proxy_module, "verify_api_key", return_value=True),
+            patch.object(mcp_proxy_module, "key_matches_hash", return_value=True),
         ):
-            auth_info = await verify_api_key_for_mcp("sk-secret")
+            auth_info = await verify_api_key("sk-secret")
 
         assert auth_info is not None
-        assert auth_info["principal_id"] == "test-key"
-        assert auth_info["expires_at"] is not None
+        assert auth_info.principal_id == "test-key"
+        assert auth_info.expires_at is not None
 
     @pytest.mark.asyncio
     async def test_expired_verified_cache_entry_evicted(self):
@@ -118,7 +118,7 @@ class TestKeyExpiry:
         with patch.object(
             mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)
         ):
-            assert await verify_api_key_for_mcp("sk-secret") is None
+            assert await verify_api_key("sk-secret") is None
         assert cache.get_verified_key(sha) is None
 
     @pytest.mark.asyncio
@@ -130,12 +130,12 @@ class TestKeyExpiry:
             patch.object(
                 mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[expired])
             ),
-            patch.object(mcp_proxy_module, "verify_api_key", return_value=True),
+            patch.object(mcp_proxy_module, "key_matches_hash", return_value=True),
             patch.object(
                 mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)
             ),
         ):
-            assert await verify_api_key_for_mcp("sk-secret") is None
+            assert await verify_api_key("sk-secret") is None
 
 
 class TestBudgetExceeded:
@@ -153,7 +153,7 @@ class TestBudgetExceeded:
     async def test_session_keys_skipped(self):
         """Session API keys carry no budget configuration."""
         auth_info = build_auth_info(
-            principal_id="session:42", budget_usd=1.0, budget_period="daily"
+            principal_id="session:42", is_session=True, budget_usd=1.0, budget_period="daily"
         )
         assert await is_key_budget_exceeded(auth_info) is False
 
@@ -451,6 +451,7 @@ class TestUserBudgetExceeded:
         auth_info = build_auth_info(
             principal_id="session:42",
             user_id=1,
+            is_session=True,
             user_budget_usd=20.0,
             user_budget_period=None,  # lifetime cap
         )
@@ -596,11 +597,11 @@ class TestV1MiddlewareBudgetResponse:
         auth_info = build_auth_info(principal_id="test-key", budget_usd=10.0, budget_period="daily")
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                "llm_proxy.api.gate.is_key_budget_exceeded",
                 new=AsyncMock(return_value=True),
             ),
         ):
@@ -622,11 +623,11 @@ class TestV1MiddlewareBudgetResponse:
         auth_info = build_auth_info(principal_id="test-key", budget_usd=10.0, budget_period="daily")
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                "llm_proxy.api.gate.is_key_budget_exceeded",
                 new=AsyncMock(return_value=False),
             ),
         ):
@@ -646,11 +647,11 @@ class TestV1MiddlewareBudgetResponse:
         auth_info = build_auth_info(principal_id="test-key", budget_usd=10.0, budget_period="daily")
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                "llm_proxy.api.gate.is_key_budget_exceeded",
                 new=AsyncMock(side_effect=BudgetCheckUnavailableError("test-key")),
             ),
         ):
@@ -678,15 +679,15 @@ class TestV1MiddlewareBudgetResponse:
         )
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                "llm_proxy.api.gate.is_key_budget_exceeded",
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_user_budget_exceeded",
+                "llm_proxy.api.gate.is_user_budget_exceeded",
                 new=AsyncMock(return_value=True),
             ),
         ):
@@ -714,15 +715,15 @@ class TestV1MiddlewareBudgetResponse:
         )
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                "llm_proxy.api.gate.is_key_budget_exceeded",
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_user_budget_exceeded",
+                "llm_proxy.api.gate.is_user_budget_exceeded",
                 new=AsyncMock(side_effect=BudgetCheckUnavailableError("user 1")),
             ),
         ):

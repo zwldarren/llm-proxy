@@ -14,15 +14,16 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from llm_proxy.api import gate
 from llm_proxy.api.dependencies import get_config_manager
+from llm_proxy.api.gate import GatePolicy, GateRejection, GateRejectionKind, KeyExtraction
 from llm_proxy.api.middleware.model_restriction import check_model_restriction
 from llm_proxy.core.provider_selector import create_provider_selector
-from llm_proxy.core.request_facts import facts_for
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.ws_common import (
     WS_CLOSE_AUTH_FAILED,
     WS_CLOSE_FORBIDDEN,
     WS_CLOSE_UPSTREAM_FAILURE,
-    authenticate_ws,
     build_ws_request,
 )
 from llm_proxy.observability.logger import get_logger
@@ -49,6 +50,17 @@ _REALTIME_PROVIDER_TYPES = frozenset({"openai", "openai-compatible"})
 # (openai-insecure-api-key.<key>).
 _INSECURE_KEY_SUBPROTOCOL_PREFIX = "openai-insecure-api-key."
 
+#: The Realtime transport's gate policy: budget only. The handshake carries
+#: no lockout accounting and no per-key rate limit (a long-lived socket is
+#: not a request rate), and accepts the WebSocket key sources.
+REALTIME_GATE_POLICY = GatePolicy(
+    extraction=KeyExtraction.WEBSOCKET,
+    ws_subprotocol_prefix=_INSECURE_KEY_SUBPROTOCOL_PREFIX,
+    lockout=False,
+    auth_failure_penalty=False,
+    rate_limit=False,
+)
+
 # WebSocket close codes used by this endpoint. Two codes follow the official
 # OpenAI Realtime close-code scheme (4000-4009 client errors, 4100-4108
 # server errors) where a semantic match exists (4004 invalid model, 4007
@@ -60,6 +72,33 @@ _INSECURE_KEY_SUBPROTOCOL_PREFIX = "openai-insecure-api-key."
 # full table.
 _CLOSE_INVALID_MODEL = 4004  # official: invalid model
 _CLOSE_RATE_LIMITED = 4007  # official: rate limited (budget cap reached)
+
+#: How each gate rejection kind maps onto this transport's close code,
+#: error-event type, and error code. Budget rejections close with the
+#: official OpenAI rate-limited code (4007); an unconfirmable budget fails
+#: closed with the proxy-wide upstream-failure code (1011). Only the kinds
+#: :data:`REALTIME_GATE_POLICY` can produce have rows: the handshake runs no
+#: lockout accounting and no per-key rate limit, so LOCKED_OUT/RATE_LIMITED
+#: never reach this renderer.
+_WS_REJECTION_CLOSE: frozendict[GateRejectionKind, tuple[int, str, str]] = frozendict(
+    {
+        GateRejectionKind.AUTH_FAILED: (
+            WS_CLOSE_AUTH_FAILED,
+            "invalid_request_error",
+            "authentication_failed",
+        ),
+        GateRejectionKind.BUDGET_EXCEEDED: (
+            _CLOSE_RATE_LIMITED,
+            "invalid_request_error",
+            "budget_exceeded",
+        ),
+        GateRejectionKind.BUDGET_UNAVAILABLE: (
+            WS_CLOSE_UPSTREAM_FAILURE,
+            "server_error",
+            "budget_unavailable",
+        ),
+    }
+)
 
 ws_router = APIRouter(tags=["realtime"])
 
@@ -117,35 +156,12 @@ def _negotiated_subprotocol(websocket: WebSocket) -> str | None:
     return REALTIME_SUBPROTOCOL if REALTIME_SUBPROTOCOL in offered else None
 
 
-async def _ws_check_budget(websocket: WebSocket, auth_info: dict[str, Any]) -> bool:
-    """Enforce the key/account spending caps; returns True to proceed.
-
-    Mirrors the budget enforcement shared by the /v1/* and /servers/*
-    middlewares (the HTTP middleware never sees WebSocket scopes, so the
-    check must happen here): a capped key or account is rejected with a
-    Realtime error event, and spend that cannot be confirmed fails closed.
-    """
-    from llm_proxy.api.middleware.mcp_proxy import BudgetCheckStatus, check_key_budget
-
-    status = await check_key_budget(auth_info)
-    if status is BudgetCheckStatus.OK:
-        return True
-    if status is BudgetCheckStatus.UNAVAILABLE:
-        await _ws_fail(
-            websocket,
-            "Budget check unavailable; request rejected (fail closed).",
-            close_code=WS_CLOSE_UPSTREAM_FAILURE,
-            error_type="server_error",
-            code="budget_unavailable",
-        )
-        return False
+async def _render_gate_rejection(websocket: WebSocket, rejection: GateRejection) -> None:
+    """Render a gate rejection as a Realtime error event, then close the socket."""
+    close_code, error_type, code = _WS_REJECTION_CLOSE[rejection.kind]
     await _ws_fail(
-        websocket,
-        "Budget limit exceeded for this API key or account.",
-        close_code=_CLOSE_RATE_LIMITED,
-        code="budget_exceeded",
+        websocket, rejection.message, close_code=close_code, error_type=error_type, code=code
     )
-    return False
 
 
 @ws_router.websocket("/v1/realtime")
@@ -163,21 +179,14 @@ async def realtime_websocket(websocket: WebSocket) -> None:
     """
     await websocket.accept(subprotocol=_negotiated_subprotocol(websocket))
 
-    auth = await authenticate_ws(
-        websocket, insecure_key_subprotocol_prefix=_INSECURE_KEY_SUBPROTOCOL_PREFIX
-    )
-    if auth is None:
-        await _ws_fail(
-            websocket,
-            "Authentication required.",
-            close_code=WS_CLOSE_AUTH_FAILED,
-            code="authentication_failed",
-        )
+    # Build the synthetic HTTP request first: the gate stamps the verified
+    # identity into its facts, and everything downstream reads from there.
+    request = build_ws_request(websocket)
+    rejection = await gate.gate_request(request, REALTIME_GATE_POLICY)
+    if rejection is not None:
+        await _render_gate_rejection(websocket, rejection)
         return
-    identity, auth_info = auth
-
-    if not await _ws_check_budget(websocket, auth_info):
-        return
+    identity = get_request_identity(request)
 
     model_name = websocket.query_params.get("model") or ""
     if not model_name:
@@ -190,7 +199,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         return
 
     # Enforce the per-API-key model allowlist (None means unrestricted).
-    allowed_models = auth_info.get("allowed_models")
+    allowed_models = facts_for(request).allowed_models
     if isinstance(allowed_models, list):
         is_allowed, error_msg = check_model_restriction(
             identity.api_key_name or "unknown",
@@ -205,10 +214,6 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                 code="forbidden",
             )
             return
-
-    # Build a Request-like object from the websocket scope so the standard
-    # config/dependency accessors work unchanged.
-    request = build_ws_request(websocket, identity)
 
     config_manager = get_config_manager(request)
     config = await config_manager.get_config()

@@ -1256,10 +1256,10 @@ class TestApiKeyMcpAllowAllDefault:
 
     @pytest.mark.asyncio
     async def test_effective_mcp_allows_all_when_unconfigured(self, app_and_db):
-        """verify_api_key_for_mcp returns None (allow all) for an unconfigured key."""
+        """verify_api_key returns None (allow all) for an unconfigured key."""
         _, _, session_factory = app_and_db
+        from llm_proxy.api.gate import verify_api_key
         from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
-        from llm_proxy.api.middleware.mcp_proxy import verify_api_key_for_mcp
         from llm_proxy.security.passwords import generate_api_key, hash_api_key
 
         user_id = await _seed_user(app_and_db, "viewer1")
@@ -1271,16 +1271,18 @@ class TestApiKeyMcpAllowAllDefault:
             await s.commit()
 
         invalidate_api_key_cache()
-        info = await verify_api_key_for_mcp(plain_key)
+        info = await verify_api_key(plain_key)
         assert info is not None
-        assert info["allowed_mcp_servers"] is None
+        assert info.allowed_mcp_servers is None
         # An unconfigured key must be able to access any configured MCP server.
         from llm_proxy.api.routers.mcp import _server_access_allowed
         from llm_proxy.mcp.security.policy import McpSecurityPolicy
 
         assert (
             _server_access_allowed(
-                "any_server", McpSecurityPolicy(require_key_mcp_permissions=True), info
+                "any_server",
+                McpSecurityPolicy(require_key_mcp_permissions=True),
+                info.allowed_mcp_servers,
             )
             is True
         )
@@ -1315,8 +1317,8 @@ class TestDisabledUserKeyAccess:
     @pytest.mark.asyncio
     async def test_api_key_of_disabled_user_rejected(self, app_and_db):
         _, _, session_factory = app_and_db
+        from llm_proxy.api.gate import verify_api_key
         from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
-        from llm_proxy.api.middleware.mcp_proxy import verify_api_key_for_mcp
         from llm_proxy.security.passwords import generate_api_key, hash_api_key
 
         user_id = await _seed_user(app_and_db, "viewer1")
@@ -1328,19 +1330,19 @@ class TestDisabledUserKeyAccess:
             await s.commit()
 
         invalidate_api_key_cache()
-        assert await verify_api_key_for_mcp(plain_key) is not None
+        assert await verify_api_key(plain_key) is not None
 
         async with session_factory() as s:
             await UserRepository(s).deactivate_user(user_id)
             await s.commit()
 
         invalidate_api_key_cache()
-        assert await verify_api_key_for_mcp(plain_key) is None
+        assert await verify_api_key(plain_key) is None
 
     @pytest.mark.asyncio
     async def test_session_key_of_disabled_user_rejected(self, app_and_db):
         _, _, session_factory = app_and_db
-        from llm_proxy.api.middleware.mcp_proxy import _verify_session_api_key
+        from llm_proxy.api.gate import _verify_session_api_key
         from llm_proxy.database import UserSessionRepository
 
         user_id = await _seed_user(app_and_db, "viewer1")
@@ -1360,8 +1362,8 @@ class TestDisabledUserKeyAccess:
     async def test_effective_models_intersected_with_user_allowlist(self, app_and_db):
         """Key verification returns key.allowed_models ∩ user.allowed_models."""
         _, _, session_factory = app_and_db
+        from llm_proxy.api.gate import verify_api_key
         from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
-        from llm_proxy.api.middleware.mcp_proxy import verify_api_key_for_mcp
         from llm_proxy.security.passwords import generate_api_key, hash_api_key
 
         user_id = await _seed_user(app_and_db, "viewer1")
@@ -1378,14 +1380,14 @@ class TestDisabledUserKeyAccess:
             await s.commit()
 
         invalidate_api_key_cache()
-        info = await verify_api_key_for_mcp(plain_key)
+        info = await verify_api_key(plain_key)
         assert info is not None
-        assert info["allowed_models"] == ["gpt-4o"]
+        assert info.allowed_models == ["gpt-4o"]
 
     @pytest.mark.asyncio
     async def test_session_key_inherits_user_allowlist(self, app_and_db):
         _, _, session_factory = app_and_db
-        from llm_proxy.api.middleware.mcp_proxy import _verify_session_api_key
+        from llm_proxy.api.gate import _verify_session_api_key
         from llm_proxy.database import UserSessionRepository
 
         user_id = await _seed_user(app_and_db, "viewer1")
@@ -1397,7 +1399,7 @@ class TestDisabledUserKeyAccess:
 
         info = await _verify_session_api_key(session_key)
         assert info is not None
-        assert info["allowed_models"] == ["gpt-4o"]
+        assert info.allowed_models == ["gpt-4o"]
 
 
 class TestUserLevelBudget:
@@ -1408,14 +1410,14 @@ class TestUserLevelBudget:
     async def test_user_budget_full_flow(self, app_and_db, client):
         import time as _time
 
+        from llm_proxy.api.gate import (
+            BudgetCheckStatus,
+            check_key_budget,
+            verify_api_key,
+        )
         from llm_proxy.api.middleware.api_key_cache import (
             get_budget_spend_cache,
             invalidate_api_key_cache,
-        )
-        from llm_proxy.api.middleware.mcp_proxy import (
-            BudgetCheckStatus,
-            check_key_budget,
-            verify_api_key_for_mcp,
         )
         from llm_proxy.database.tables import UsageRecord
 
@@ -1457,9 +1459,9 @@ class TestUserLevelBudget:
 
         # The budget rides along in the verified key's auth info.
         invalidate_api_key_cache()
-        info = await verify_api_key_for_mcp(plain_key)
+        info = await verify_api_key(plain_key)
         assert info is not None
-        assert info["user_budget"].budget_usd == 10.0
+        assert info.user_budget.budget_usd == 10.0
         assert await check_key_budget(info) is BudgetCheckStatus.OK
 
         # Seed usage over the cap: the member's key is now blocked.
@@ -1493,8 +1495,8 @@ class TestUserLevelBudget:
         )
         assert resp.status_code == 200, resp.text
         invalidate_api_key_cache()
-        info = await verify_api_key_for_mcp(plain_key)
-        assert info["user_budget"].budget_usd == 50.0
+        info = await verify_api_key(plain_key)
+        assert info.user_budget.budget_usd == 50.0
         assert await check_key_budget(info) is BudgetCheckStatus.OK
 
         # Lower the cap again and reset the window: spend counts from the
@@ -1513,7 +1515,7 @@ class TestUserLevelBudget:
         assert resp.json()["budget_spend_usd"] == 0.0
 
         invalidate_api_key_cache()
-        info = await verify_api_key_for_mcp(plain_key)
+        info = await verify_api_key(plain_key)
         assert await check_key_budget(info) is BudgetCheckStatus.OK
 
     @pytest.mark.asyncio
@@ -1555,12 +1557,12 @@ class TestUserLevelBudget:
         """
         import time as _time
 
-        from llm_proxy.api.middleware.api_key_cache import get_budget_spend_cache
-        from llm_proxy.api.middleware.mcp_proxy import (
+        from llm_proxy.api.gate import (
             BudgetCheckStatus,
             _verify_session_api_key,
             check_key_budget,
         )
+        from llm_proxy.api.middleware.api_key_cache import get_budget_spend_cache
         from llm_proxy.database import UserSessionRepository
         from llm_proxy.database.tables import UsageRecord
 
@@ -1582,9 +1584,9 @@ class TestUserLevelBudget:
         # owner's account-level budget envelope.
         info = await _verify_session_api_key(session_key)
         assert info is not None
-        assert info["user_id"] == user_id
-        assert info["user_budget"].budget_usd == 10.0
-        assert info["user_budget"].budget_period == "monthly"
+        assert info.user_id == user_id
+        assert info.user_budget.budget_usd == 10.0
+        assert info.user_budget.budget_period == "monthly"
 
         # Under the cap the session key is allowed...
         assert await check_key_budget(info) is BudgetCheckStatus.OK

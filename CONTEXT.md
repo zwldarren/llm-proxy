@@ -34,6 +34,24 @@ field of the record, reached through `get_request_identity`. See ADR-0022.
 _Avoid_: request state, request context (that is `RequestContext`, the processing
 carrier), session context
 
+### Access control
+
+**Key gate**:
+The single gate every protected transport passes through before its traffic
+proceeds: key extraction, verification (bcrypt against the cached key snapshot,
+stale-entry cheap revalidation, session-key fallback), per-key rate limit, key
+and user budget (fail-closed on a stats-DB error), lockout accounting, and the
+throttled last-used claim. One module (`llm_proxy.api.gate`) owns the sequence;
+each transport — the `/v1/*` middleware, the `/servers/*` MCP middleware, the
+Realtime and OpenResponses WebSocket handshakes — declares a policy row (which
+checks apply, how strictly a key is extracted) and renders rejections in its own
+wire form. A rejection — auth failure or quota — is logged by the gate itself,
+never by the transport. The verified principal is a fact of the request, not a
+scope dict: identity goes through the request facts' `RequestIdentity`.
+See ADR-0032.
+_Avoid_: verify_api_key_for_mcp (the old misnomer for the shared verifier), a
+per-transport hand-rolled gate sequence, `scope["llm_proxy_auth"]`
+
 ### Evaluation endpoints
 
 **Decision model**:

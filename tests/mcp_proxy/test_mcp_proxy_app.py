@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
+from middleware_helpers import authed_scope as _authed_scope
 
 from llm_proxy.api.routers.mcp import MCPProxyApp
 from llm_proxy.mcp.security.policy import McpSecurityPolicy
@@ -38,11 +39,7 @@ async def test_rejects_unauthorized_server() -> None:
         "type": "http",
         "method": "POST",
         "path": "/servers/github_mcp/mcp",
-        "llm_proxy_auth": {
-            "principal_type": "api_key",
-            "principal_id": "agent",
-            "allowed_mcp_servers": ["other_mcp"],
-        },
+        **_authed_scope(["other_mcp"]),
     }
     messages = []
 
@@ -72,11 +69,7 @@ async def test_allows_authorized_server() -> None:
         "type": "http",
         "method": "POST",
         "path": "/servers/github_mcp/mcp",
-        "llm_proxy_auth": {
-            "principal_type": "api_key",
-            "principal_id": "agent",
-            "allowed_mcp_servers": ["github_mcp", "other_mcp"],
-        },
+        **_authed_scope(["github_mcp", "other_mcp"]),
         "app": FastAPI(),
     }
     scope["app"].state.mcp_manager = MagicMock()
@@ -137,11 +130,7 @@ async def test_permissions_enforced_by_default() -> None:
         "type": "http",
         "method": "POST",
         "path": "/servers/github_mcp/mcp",
-        "llm_proxy_auth": {
-            "principal_type": "api_key",
-            "principal_id": "agent",
-            "allowed_mcp_servers": ["other_mcp"],
-        },
+        **_authed_scope(["other_mcp"]),
     }
     messages = []
 
@@ -174,11 +163,7 @@ async def test_allows_when_permissions_disabled() -> None:
         "type": "http",
         "method": "POST",
         "path": "/servers/github_mcp/mcp",
-        "llm_proxy_auth": {
-            "principal_type": "api_key",
-            "principal_id": "agent",
-            "allowed_mcp_servers": ["other_mcp"],
-        },
+        **_authed_scope(["other_mcp"]),
         "app": FastAPI(),
     }
     scope["app"].state.mcp_manager = MagicMock()
@@ -212,11 +197,7 @@ async def test_allows_null_allowlist() -> None:
         "type": "http",
         "method": "POST",
         "path": "/servers/github_mcp/mcp",
-        "llm_proxy_auth": {
-            "principal_type": "api_key",
-            "principal_id": "agent",
-            "allowed_mcp_servers": None,
-        },
+        **_authed_scope(None),
         "app": FastAPI(),
     }
     scope["app"].state.mcp_manager = MagicMock()

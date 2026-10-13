@@ -217,7 +217,7 @@ def _validate_token_user(user, payload: dict) -> JSONResponse | None:
 
 
 def _set_jwt_identity(request: Request, payload: dict) -> None:
-    """Set the request identity and scope auth from a verified JWT payload."""
+    """Set the request identity from a verified JWT payload."""
     set_request_identity(
         request,
         RequestIdentity(
@@ -225,8 +225,3 @@ def _set_jwt_identity(request: Request, payload: dict) -> None:
             auth_method="jwt",
         ),
     )
-    scope_auth = {
-        "principal_type": "jwt",
-        "principal_id": payload.get("sub"),
-    }
-    request.scope["llm_proxy_auth"] = scope_auth

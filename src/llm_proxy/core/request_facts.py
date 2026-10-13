@@ -23,7 +23,8 @@ each group readable:
   so a rejected request still has its id for the rejection row. Websocket
   handshakes mint their own (``ws_`` prefix) in
   :func:`llm_proxy.core.ws_common.build_ws_request`.
-- ``identity``, ``allowed_models`` — the auth gates only.
+- ``identity``, ``allowed_models``, ``allowed_mcp_servers`` — the auth gates
+  only.
 - ``model``, ``provider``, ``session_id``, ``parsed_request_body`` — the
   protocol handlers and the processing pipeline.
 - ``request_headers``/``request_body``/``response_headers``/``response_body`` —
@@ -93,6 +94,9 @@ class RequestFacts:
     identity: RequestIdentity = field(default_factory=RequestIdentity)
     #: The API key's model allowlist (``None`` = unrestricted, ``[]`` = deny-all).
     allowed_models: list[str] | None = None
+    #: The API key's MCP-server allowlist (``None`` = unrestricted), read by
+    #: the mounted MCP app off the shared scope's facts.
+    allowed_mcp_servers: list[str] | None = None
     #: The user-facing model, until provider selection replaces it with the
     #: concrete model being served — the value error rows and logs report.
     model: str | None = None

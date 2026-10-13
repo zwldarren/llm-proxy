@@ -10,8 +10,14 @@ import orjson
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from middleware_helpers import authed_scope as _authed_scope
 
 from llm_proxy.api.routers.mcp import MCPProxyApp, _server_access_allowed
+from llm_proxy.core.request_facts import (
+    RequestIdentity,
+    facts_for,
+    set_request_identity,
+)
 from llm_proxy.mcp.proxy import MCPServerProxy
 from llm_proxy.mcp.security.policy import McpSecurityPolicy
 
@@ -51,11 +57,7 @@ class TestServerLevelAccessControl:
             "type": "http",
             "method": "POST",
             "path": "/servers/github_mcp/mcp",
-            "llm_proxy_auth": {
-                "principal_type": "api_key",
-                "principal_id": "agent",
-                "allowed_mcp_servers": ["other_mcp"],
-            },
+            **_authed_scope(["other_mcp"]),
         }
         messages = []
 
@@ -84,11 +86,7 @@ class TestServerLevelAccessControl:
             "type": "http",
             "method": "POST",
             "path": "/servers/github_mcp/mcp",
-            "llm_proxy_auth": {
-                "principal_type": "api_key",
-                "principal_id": "agent",
-                "allowed_mcp_servers": ["github_mcp", "other_mcp"],
-            },
+            **_authed_scope(["github_mcp", "other_mcp"]),
             "app": FastAPI(),
         }
         scope["app"].state.mcp_manager = MagicMock()
@@ -151,11 +149,7 @@ class TestServerLevelAccessControl:
             "type": "http",
             "method": "POST",
             "path": "/servers/github_mcp/mcp",
-            "llm_proxy_auth": {
-                "principal_type": "api_key",
-                "principal_id": "agent",
-                "allowed_mcp_servers": None,
-            },
+            **_authed_scope(None),
             "app": FastAPI(),
         }
         scope["app"].state.mcp_manager = MagicMock()
@@ -332,34 +326,25 @@ class TestManagerStartupPolicyEnforcement:
 class TestServerAccessAllowed:
     """Direct tests for the _server_access_allowed function."""
 
-    def test_null_auth_denied(self) -> None:
-        """Null auth is denied when permissions are required."""
-        policy = _default_policy()
-        assert _server_access_allowed("github_mcp", policy, None) is False
-
     def test_null_allowlist_allowed(self) -> None:
         """None allowlist is allowed (permissive default: unconfigured = all)."""
         policy = _default_policy()
-        auth = {"allowed_mcp_servers": None}
-        assert _server_access_allowed("github_mcp", policy, auth) is True
+        assert _server_access_allowed("github_mcp", policy, None) is True
 
     def test_server_in_allowlist_allowed(self) -> None:
         """Server in allowlist is allowed."""
         policy = _default_policy()
-        auth = {"allowed_mcp_servers": ["github_mcp", "other"]}
-        assert _server_access_allowed("github_mcp", policy, auth) is True
+        assert _server_access_allowed("github_mcp", policy, ["github_mcp", "other"]) is True
 
     def test_server_not_in_allowlist_denied(self) -> None:
         """Server not in allowlist is denied."""
         policy = _default_policy()
-        auth = {"allowed_mcp_servers": ["other_mcp"]}
-        assert _server_access_allowed("github_mcp", policy, auth) is False
+        assert _server_access_allowed("github_mcp", policy, ["other_mcp"]) is False
 
     def test_compat_mode_allows_all(self) -> None:
         """When require_key_mcp_permissions is False, all servers are accessible."""
         policy = McpSecurityPolicy(require_key_mcp_permissions=False)
-        auth = {"allowed_mcp_servers": ["other_mcp"]}
-        assert _server_access_allowed("github_mcp", policy, auth) is True
+        assert _server_access_allowed("github_mcp", policy, ["other_mcp"]) is True
 
     def test_permissions_disabled_allows_all(self) -> None:
         """When require_key_mcp_permissions is False, access is always allowed."""
@@ -599,11 +584,10 @@ class TestMcpHttpEndToEnd:
 
         class InjectAuth(BaseHTTPMiddleware):
             async def dispatch(self, request, call_next):
-                request.scope["llm_proxy_auth"] = {
-                    "principal_type": "api_key",
-                    "principal_id": "agent",
-                    "allowed_mcp_servers": ["other_mcp"],
-                }
+                set_request_identity(
+                    request, RequestIdentity(api_key_name="agent", auth_method="api_key")
+                )
+                facts_for(request).allowed_mcp_servers = ["other_mcp"]
                 return await call_next(request)
 
         mock_mgr = self._make_mcp_manager()
@@ -628,11 +612,10 @@ class TestMcpHttpEndToEnd:
 
         class InjectAuth(BaseHTTPMiddleware):
             async def dispatch(self, request, call_next):
-                request.scope["llm_proxy_auth"] = {
-                    "principal_type": "api_key",
-                    "principal_id": "agent",
-                    "allowed_mcp_servers": ["github-mcp"],
-                }
+                set_request_identity(
+                    request, RequestIdentity(api_key_name="agent", auth_method="api_key")
+                )
+                facts_for(request).allowed_mcp_servers = ["github-mcp"]
                 return await call_next(request)
 
         mock_mgr = self._make_mcp_manager()
@@ -664,11 +647,10 @@ class TestMcpHttpEndToEnd:
 
         class InjectAuth(BaseHTTPMiddleware):
             async def dispatch(self, request, call_next):
-                request.scope["llm_proxy_auth"] = {
-                    "principal_type": "api_key",
-                    "principal_id": "agent",
-                    "allowed_mcp_servers": None,
-                }
+                set_request_identity(
+                    request, RequestIdentity(api_key_name="agent", auth_method="api_key")
+                )
+                facts_for(request).allowed_mcp_servers = None
                 return await call_next(request)
 
         mock_mgr = self._make_mcp_manager()

@@ -6,10 +6,26 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from llm_proxy.api.gate import VerifiedKeyAuth
 from llm_proxy.api.middleware.jwt_auth import jwt_auth_middleware
 from llm_proxy.config.types.auth import ProxyAuthConfig
+from llm_proxy.core.request_facts import facts_for, get_request_identity
 
 _TEST_JWT_SECRET = "test-secret-at-least-32-characters-long"
+
+
+def _auth_context_response(request: Request) -> dict:
+    """What the test handlers report back: the facts the middleware stamped."""
+    identity = get_request_identity(request)
+    facts = facts_for(request)
+    return {
+        "scope_auth": {
+            "principal_type": identity.auth_method,
+            "principal_id": identity.api_key_name or identity.user,
+            "allowed_models": facts.allowed_models,
+            "allowed_mcp_servers": facts.allowed_mcp_servers,
+        }
+    }
 
 
 def _make_auth_config() -> ProxyAuthConfig:
@@ -168,7 +184,7 @@ class TestApiKeyAuthMCPPermissions:
 
         @app.get("/servers/test/mcp")
         async def handler(request: Request):
-            return {"scope_auth": request.scope.get("llm_proxy_auth")}
+            return _auth_context_response(request)
 
         app.middleware("http")(api_key_auth_middleware)
 
@@ -180,24 +196,24 @@ class TestApiKeyAuthMCPPermissions:
 
         mock_sleep = AsyncMock()
 
-        auth_info = {
-            "principal_type": "api_key",
-            "principal_id": "agent",
-            "allowed_models": None,
-            "allowed_mcp_servers": ["github_mcp"],
-        }
+        auth_info = VerifiedKeyAuth(
+            principal_id="agent",
+            allowed_models=None,
+            allowed_mcp_servers=["github_mcp"],
+            user_id=1,
+        )
 
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth.get_api_key_lockout_manager",
+                "llm_proxy.api.gate.get_api_key_lockout_manager",
                 return_value=mock_lockout,
             ),
-            patch("llm_proxy.api.middleware.api_key_auth.add_auth_failure_delay", new=mock_sleep),
-            patch("llm_proxy.api.middleware.api_key_auth._update_key_last_used", new=AsyncMock()),
+            patch("llm_proxy.api.gate.apply_auth_failure_delay", new=mock_sleep),
+            patch("llm_proxy.api.gate._update_key_last_used", new=AsyncMock()),
         ):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/servers/test/mcp", headers={"Authorization": "Bearer sk_test"})
@@ -221,7 +237,7 @@ class TestApiKeyAuthMCPPermissions:
 
         @app.get("/servers/test/mcp")
         async def handler(request: Request):
-            return {"scope_auth": request.scope.get("llm_proxy_auth")}
+            return _auth_context_response(request)
 
         app.middleware("http")(api_key_auth_middleware)
 
@@ -233,24 +249,24 @@ class TestApiKeyAuthMCPPermissions:
 
         mock_sleep = AsyncMock()
 
-        auth_info = {
-            "principal_type": "api_key",
-            "principal_id": "basic",
-            "allowed_models": ["gpt-4"],
-            "allowed_mcp_servers": None,
-        }
+        auth_info = VerifiedKeyAuth(
+            principal_id="basic",
+            allowed_models=["gpt-4"],
+            allowed_mcp_servers=None,
+            user_id=1,
+        )
 
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth.get_api_key_lockout_manager",
+                "llm_proxy.api.gate.get_api_key_lockout_manager",
                 return_value=mock_lockout,
             ),
-            patch("llm_proxy.api.middleware.api_key_auth.add_auth_failure_delay", new=mock_sleep),
-            patch("llm_proxy.api.middleware.api_key_auth._update_key_last_used", new=AsyncMock()),
+            patch("llm_proxy.api.gate.apply_auth_failure_delay", new=mock_sleep),
+            patch("llm_proxy.api.gate._update_key_last_used", new=AsyncMock()),
         ):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/servers/test/mcp", headers={"Authorization": "Bearer sk_test"})
@@ -277,13 +293,13 @@ class TestJwtAuthMCPPermissions:
         return mock_manager
 
     @pytest.mark.asyncio
-    async def test_jwt_admin_sets_scope_auth(self, mock_config_manager) -> None:
-        """Admin JWT on /api/* paths should set scope['llm_proxy_auth']."""
+    async def test_jwt_admin_stamps_identity(self, mock_config_manager) -> None:
+        """Admin JWT on /api/* paths should stamp the request facts' identity."""
         app = FastAPI()
 
         @app.get("/api/admin/test")
         async def handler(request: Request):
-            return {"scope_auth": request.scope.get("llm_proxy_auth")}
+            return _auth_context_response(request)
 
         app.state.config_manager = mock_config_manager
 
@@ -328,8 +344,8 @@ class TestJwtAuthMCPPermissions:
         assert data["scope_auth"]["principal_type"] == "jwt"
         assert data["scope_auth"]["principal_id"] == "admin"
         # JWT on /api/* should not have allowed_models/allowed_mcp_servers (those are for API keys)
-        assert "allowed_models" not in data["scope_auth"]
-        assert "allowed_mcp_servers" not in data["scope_auth"]
+        assert data["scope_auth"]["allowed_models"] is None
+        assert data["scope_auth"]["allowed_mcp_servers"] is None
 
     @pytest.mark.asyncio
     async def test_jwt_rejected_on_v1_paths(self, mock_config_manager) -> None:
@@ -387,14 +403,19 @@ class TestApiKeyAuthSessionKeys:
 
         @app.get("/v1/chat")
         async def handler(request: Request):
-            from llm_proxy.core.request_facts import get_request_identity
+            from llm_proxy.core.request_facts import facts_for, get_request_identity
 
             identity = get_request_identity(request)
             return {
                 "identity_user": identity.user,
                 "identity_api_key_name": identity.api_key_name,
                 "identity_auth_method": identity.auth_method,
-                "scope_auth": request.scope.get("llm_proxy_auth"),
+                "scope_auth": {
+                    "principal_type": identity.auth_method,
+                    "principal_id": identity.api_key_name or identity.user,
+                    "allowed_models": facts_for(request).allowed_models,
+                    "allowed_mcp_servers": facts_for(request).allowed_mcp_servers,
+                },
             }
 
         app.middleware("http")(api_key_auth_middleware)
@@ -412,43 +433,26 @@ class TestApiKeyAuthSessionKeys:
 
         mock_sleep = AsyncMock()
 
-        auth_info = {
-            "principal_type": "api_key",
-            "principal_id": "session:session-abc",
-            "allowed_models": None,
-            "allowed_mcp_servers": None,
-            "user_id": 1,
-        }
-
-        async def set_identity(api_key: str, request: Request) -> str | None:
-            from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
-
-            set_request_identity(
-                request,
-                RequestIdentity(
-                    user="admin",
-                    api_key_name="session:session-abc",
-                    auth_method="session_api_key",
-                    user_id=1,
-                ),
-            )
-            return "session:session-abc"
+        auth_info = VerifiedKeyAuth(
+            principal_id="session:session-abc",
+            allowed_models=None,
+            allowed_mcp_servers=None,
+            user_id=1,
+            is_session=True,
+            username="admin",
+        )
 
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth._set_session_identity",
-                new=set_identity,
-            ),
-            patch(
-                "llm_proxy.api.middleware.api_key_auth.get_api_key_lockout_manager",
+                "llm_proxy.api.gate.get_api_key_lockout_manager",
                 return_value=mock_lockout,
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth.add_auth_failure_delay",
+                "llm_proxy.api.gate.apply_auth_failure_delay",
                 new=mock_sleep,
             ),
         ):
@@ -465,7 +469,8 @@ class TestApiKeyAuthSessionKeys:
         # Session API key: allowed_models=None (all models), allowed_mcp_servers=None (all MCP)
         assert data["scope_auth"]["allowed_models"] is None
         assert data["scope_auth"]["allowed_mcp_servers"] is None
-        assert data["scope_auth"]["principal_type"] == "api_key"
+        # The session identity's auth method surfaces as the principal type.
+        assert data["scope_auth"]["principal_type"] == "session_api_key"
         assert data["scope_auth"]["principal_id"] == "session:session-abc"
 
     @pytest.mark.asyncio
@@ -489,15 +494,15 @@ class TestApiKeyAuthSessionKeys:
 
         with (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=None),
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth.get_api_key_lockout_manager",
+                "llm_proxy.api.gate.get_api_key_lockout_manager",
                 return_value=mock_lockout,
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth.add_auth_failure_delay",
+                "llm_proxy.api.gate.apply_auth_failure_delay",
                 new=mock_sleep,
             ),
         ):
@@ -762,11 +767,11 @@ class TestApiKeyAuthAliasPaths:
 
         with (
             patch(
-                "llm_proxy.api.middleware.api_key_auth.get_api_key_lockout_manager",
+                "llm_proxy.api.gate.get_api_key_lockout_manager",
                 return_value=mock_lockout,
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth.add_auth_failure_delay",
+                "llm_proxy.api.gate.apply_auth_failure_delay",
                 new=AsyncMock(),
             ),
             TestClient(app, raise_server_exceptions=False) as client,

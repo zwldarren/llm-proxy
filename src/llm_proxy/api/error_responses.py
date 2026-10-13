@@ -86,6 +86,18 @@ class ErrorResponseBuilder(ErrorFormatter):
         return error_body
 
     @staticmethod
+    def create_anthropic_error(
+        message: str,
+        error_type: str = "api_error",
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        return ErrorResponseBuilder._create_anthropic_error(
+            message=message,
+            error_type=error_type,
+            request_id=request_id,
+        )
+
+    @staticmethod
     def _create_anthropic_error(
         message: str,
         error_type: str = "api_error",
@@ -184,11 +196,42 @@ def rate_limit_exceeded_error_body(limit_rpm: int, retry_after: int) -> dict[str
     )
 
 
+def lockout_error_body(remaining_seconds: int) -> dict[str, Any]:
+    """Build the 429 body for a client IP locked out after repeated auth failures."""
+    return ErrorResponseBuilder.create_openai_error(
+        message=(
+            f"Too many failed authentication attempts. Try again in {remaining_seconds} seconds."
+        ),
+        error_type="rate_limit_error",
+        code="too_many_auth_failures",
+    )
+
+
+def auth_error_body(message: str, protocol: ErrorProtocol = "openai") -> dict[str, Any]:
+    """Build the body for an API-key auth failure, shaped per client protocol.
+
+    The OpenAI envelope by default; the Anthropic envelope on the Anthropic
+    Messages path, so SDKs parse the rejection natively.
+    """
+    if protocol == "anthropic":
+        return ErrorResponseBuilder.create_anthropic_error(
+            message=message,
+            error_type="authentication_error",
+        )
+    return ErrorResponseBuilder.create_openai_error(
+        message=message,
+        error_type="authentication_error",
+        code="invalid_api_key",
+    )
+
+
 __all__ = [
     "ErrorResponseBuilder",
+    "auth_error_body",
     "budget_check_unavailable_error_body",
     "budget_exceeded_error_body",
     "extract_error_details",
+    "lockout_error_body",
     "rate_limit_exceeded_error_body",
     "user_budget_exceeded_error_body",
 ]

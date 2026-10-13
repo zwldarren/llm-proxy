@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from llm_proxy.api.gate import VerifiedKeyAuth
 from llm_proxy.api.middleware.api_key_auth import api_key_auth_middleware
 from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 
@@ -38,18 +39,18 @@ class TestPerKeyRateLimit:
 
         return app
 
-    def _patchers(self, auth_info: dict):
+    def _patchers(self, auth_info: VerifiedKeyAuth):
         return (
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             ),
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                "llm_proxy.api.gate.is_key_budget_exceeded",
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "llm_proxy.api.middleware.api_key_auth._update_key_last_used",
+                "llm_proxy.api.gate._update_key_last_used",
                 new=AsyncMock(),
             ),
         )
@@ -136,7 +137,7 @@ class TestPerKeyRateLimit:
     @pytest.mark.asyncio
     async def test_session_key_carries_no_rate_limit(self, app, make_auth_info):
         """Session keys (sk-ui-) never carry a rate-limit configuration."""
-        info = make_auth_info(principal_id="session:abc-123")
+        info = make_auth_info(principal_id="session:abc-123", is_session=True)
         p1, p2, p3 = self._patchers(info)
         with p1, p2, p3:
             transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -181,5 +182,7 @@ class TestMCPMiddlewareRateLimit:
 
     @pytest.mark.asyncio
     async def test_session_key_not_capped(self, run_mcp_middleware, make_auth_info):
-        status, _, _ = await run_mcp_middleware(make_auth_info(principal_id="session:abc-123"))
+        status, _, _ = await run_mcp_middleware(
+            make_auth_info(principal_id="session:abc-123", is_session=True)
+        )
         assert status == 200

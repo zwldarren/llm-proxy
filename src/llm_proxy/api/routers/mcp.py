@@ -20,6 +20,7 @@ from llm_proxy.api.schemas.mcp import (
     McpServerUpdate,
 )
 from llm_proxy.core.exceptions import ConflictError, MCPSecurityError, MCPServerNotFoundError
+from llm_proxy.core.request_facts import facts_from_scope
 from llm_proxy.database import ConfigRepository, get_async_session
 from llm_proxy.mcp.security.policy import McpSecurityPolicy
 from llm_proxy.mcp.security.validator import McpSecurityValidator
@@ -99,7 +100,9 @@ def _build_server_read(server, status: str) -> McpServerRead:
     )
 
 
-def _server_access_allowed(server_name: str, policy: McpSecurityPolicy, auth: dict | None) -> bool:
+def _server_access_allowed(
+    server_name: str, policy: McpSecurityPolicy, allowed_mcp_servers: list[str] | None
+) -> bool:
     """Check whether the authenticated principal can access the given MCP server.
 
     An unconfigured key (``allowed_mcp_servers is None``) is permissive and
@@ -108,12 +111,9 @@ def _server_access_allowed(server_name: str, policy: McpSecurityPolicy, auth: di
     """
     if not policy.require_key_mcp_permissions:
         return True
-    if auth is None:
-        return False
-    allowed = auth.get("allowed_mcp_servers")
-    if allowed is None:
+    if allowed_mcp_servers is None:
         return True
-    return server_name in allowed
+    return server_name in allowed_mcp_servers
 
 
 class MCPProxyApp:
@@ -194,14 +194,16 @@ class MCPProxyApp:
         # Extract server name between '/servers/' and '/mcp'
         server_name = path[len("/servers/") : mcp_index]
 
-        # Enforce server-level access control
-        auth = scope.get("llm_proxy_auth")
-        if auth is None:
+        # The key gate stamps the verified identity and the MCP-server
+        # allowlist into the request's facts (carried on the shared scope
+        # state) — there is no separate scope dict to read.
+        facts = facts_from_scope(scope)
+        if not facts.identity.is_authenticated:
             await self._send_json(send, 401, {"error": "Authentication required"})
             return
 
         policy = await self._get_policy()
-        if not _server_access_allowed(server_name, policy, auth):
+        if not _server_access_allowed(server_name, policy, facts.allowed_mcp_servers):
             await self._send_json(
                 send,
                 403,

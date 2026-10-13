@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from llm_proxy.api.dependencies import require_api_key_auth
+from llm_proxy.api.gate import VerifiedKeyAuth
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers.openresponses import _parse_sse_blocks
 from llm_proxy.protocols.openresponses.store import ResponseStore
@@ -70,14 +71,14 @@ def app(mock_redis, monkeypatch):
 
     # Mock API key verification so any key authenticates.
     async def fake_verify(api_key: str):
-        return {
-            "principal_id": "test-key",
-            "allowed_models": None,
-            "allowed_mcp_servers": None,
-            "user_id": None,
-        }
+        return VerifiedKeyAuth(
+            principal_id="test-key",
+            allowed_models=None,
+            allowed_mcp_servers=None,
+            user_id=None,
+        )
 
-    monkeypatch.setattr("llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp", fake_verify)
+    monkeypatch.setattr("llm_proxy.api.gate.verify_api_key", fake_verify)
 
     # Mock the context builder (the real one needs DB config).
     async def fake_build_context(body, req, protocol_name=None):
@@ -365,7 +366,7 @@ class TestOpenResponsesWebSocket:
             return None
 
         monkeypatch.setattr(
-            "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+            "llm_proxy.api.gate.verify_api_key",
             fake_verify_none,
         )
         with client.websocket_connect(

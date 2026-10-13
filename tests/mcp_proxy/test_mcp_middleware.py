@@ -5,7 +5,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from starlette.types import Scope
 
+from llm_proxy.api.gate import VerifiedKeyAuth
 from llm_proxy.api.middleware.mcp_proxy import MCPProxyMiddleware
+from llm_proxy.core.request_facts import facts_from_scope
+
+
+def _auth_info() -> VerifiedKeyAuth:
+    """The verified record the mocked ``verify_api_key`` hands the gate."""
+    return VerifiedKeyAuth(
+        principal_id="agent",
+        allowed_models=None,
+        allowed_mcp_servers=["github"],
+        user_id=1,
+    )
 
 
 def _make_scope(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> Scope:
@@ -59,15 +71,10 @@ async def test_routes_servers_to_mcp_app() -> None:
     )
     messages, send = _collect_send()
 
-    auth_info = {
-        "principal_type": "api_key",
-        "principal_id": "agent",
-        "allowed_models": None,
-        "allowed_mcp_servers": ["github"],
-    }
+    auth_info = _auth_info()
 
     with patch(
-        "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+        "llm_proxy.api.gate.verify_api_key",
         new=AsyncMock(return_value=auth_info),
     ):
         await middleware(scope, _receive, send)
@@ -75,7 +82,12 @@ async def test_routes_servers_to_mcp_app() -> None:
     main_app.assert_not_awaited()
     mcp_app.assert_awaited_once()
     routed_scope, routed_receive, routed_send = mcp_app.await_args.args
-    assert routed_scope["llm_proxy_auth"] == auth_info
+    # The verified principal travels as request facts on the shared scope
+    # state, not as a scope dict.
+    routed_facts = facts_from_scope(routed_scope)
+    assert routed_facts.identity.api_key_name == auth_info.principal_id
+    assert routed_facts.allowed_models == auth_info.allowed_models
+    assert routed_facts.allowed_mcp_servers == auth_info.allowed_mcp_servers
     assert routed_scope["app"] is middleware.main_app
     assert routed_receive is _receive
     assert routed_send is send
@@ -114,7 +126,7 @@ async def test_rejects_missing_authorization() -> None:
     scope = _make_scope("/servers/github/mcp")
     messages, send = _collect_send()
 
-    with patch("llm_proxy.api.middleware.mcp_proxy._add_auth_failure_delay", new=AsyncMock()):
+    with patch("llm_proxy.api.gate.apply_auth_failure_delay", new=AsyncMock()):
         await middleware(scope, _receive, send)
 
     mcp_app.assert_not_awaited()
@@ -142,10 +154,10 @@ async def test_rejects_invalid_api_key() -> None:
 
     with (
         patch(
-            "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+            "llm_proxy.api.gate.verify_api_key",
             new=AsyncMock(return_value=None),
         ),
-        patch("llm_proxy.api.middleware.mcp_proxy._add_auth_failure_delay", new=AsyncMock()),
+        patch("llm_proxy.api.gate.apply_auth_failure_delay", new=AsyncMock()),
     ):
         await middleware(scope, _receive, send)
 
@@ -176,12 +188,12 @@ async def test_respects_ip_lockout() -> None:
 
     with (
         patch(
-            "llm_proxy.api.middleware.mcp_proxy.get_api_key_lockout_manager",
+            "llm_proxy.api.gate.get_api_key_lockout_manager",
             return_value=mock_lockout,
         ),
-        patch("llm_proxy.api.middleware.mcp_proxy._add_auth_failure_delay", new=AsyncMock()),
+        patch("llm_proxy.api.gate.apply_auth_failure_delay", new=AsyncMock()),
         patch(
-            "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+            "llm_proxy.api.gate.verify_api_key",
             new=AsyncMock(),
         ) as mock_verify,
     ):
@@ -209,16 +221,11 @@ async def test_refreshes_config_before_reading_derived_caches() -> None:
         "/servers/github/mcp",
         headers=[(b"authorization", b"Bearer sk-test")],
     )
-    auth_info = {
-        "principal_type": "api_key",
-        "principal_id": "agent",
-        "allowed_models": None,
-        "allowed_mcp_servers": ["github"],
-    }
+    auth_info = _auth_info()
     messages, send = _collect_send()
 
     with patch(
-        "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+        "llm_proxy.api.gate.verify_api_key",
         new=AsyncMock(return_value=auth_info),
     ):
         await middleware(scope, _receive, send)

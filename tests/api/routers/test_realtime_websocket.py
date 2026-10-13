@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.server import serve
 
+from llm_proxy.api.gate import VerifiedKeyAuth
 from llm_proxy.config.types.model import ModelConfig, ModelProviderConfig, ProviderSelectionStrategy
 from llm_proxy.config.types.provider import ProviderConfig
 
@@ -91,14 +92,14 @@ def _build_app(monkeypatch, *, provider_configs, model_configs):
     app.include_router(router_module.ws_router)
 
     async def fake_verify(api_key: str):
-        return {
-            "principal_id": "test-key",
-            "allowed_models": None,
-            "allowed_mcp_servers": None,
-            "user_id": None,
-        }
+        return VerifiedKeyAuth(
+            principal_id="test-key",
+            allowed_models=None,
+            allowed_mcp_servers=None,
+            user_id=None,
+        )
 
-    monkeypatch.setattr("llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp", fake_verify)
+    monkeypatch.setattr("llm_proxy.api.gate.verify_api_key", fake_verify)
 
     config = SimpleNamespace(
         provider_configs=provider_configs,
@@ -203,10 +204,10 @@ class TestRealtimeWebSocket:
             _expect_close(ws, 4401)
 
     def test_invalid_key_rejected(self, client, monkeypatch):
-        """An unknown key is rejected like a missing one."""
+        """An unknown key gets the same close code as a missing key (a distinct message)."""
 
         monkeypatch.setattr(
-            "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+            "llm_proxy.api.gate.verify_api_key",
             AsyncMock(return_value=None),
         )
         with _connect(client) as ws:
@@ -251,16 +252,14 @@ class TestRealtimeWebSocket:
         """A key whose allowlist excludes the model is rejected."""
 
         async def restricted_verify(api_key: str):
-            return {
-                "principal_id": "test-key",
-                "allowed_models": ["other-model"],
-                "allowed_mcp_servers": None,
-                "user_id": None,
-            }
+            return VerifiedKeyAuth(
+                principal_id="test-key",
+                allowed_models=["other-model"],
+                allowed_mcp_servers=None,
+                user_id=None,
+            )
 
-        monkeypatch.setattr(
-            "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp", restricted_verify
-        )
+        monkeypatch.setattr("llm_proxy.api.gate.verify_api_key", restricted_verify)
         with _connect(client) as ws:
             error = ws.receive_json()
             assert error["error"]["code"] == "forbidden"
@@ -268,10 +267,10 @@ class TestRealtimeWebSocket:
 
     def test_budget_exceeded_rejected(self, client, monkeypatch):
         """A key/account at its spending cap → error event and close 4007."""
-        from llm_proxy.api.middleware.mcp_proxy import BudgetCheckStatus
+        from llm_proxy.api.gate import BudgetCheckStatus
 
         monkeypatch.setattr(
-            "llm_proxy.api.middleware.mcp_proxy.check_key_budget",
+            "llm_proxy.api.gate.check_key_budget",
             AsyncMock(return_value=BudgetCheckStatus.EXCEEDED),
         )
         with _connect(client) as ws:
@@ -282,10 +281,10 @@ class TestRealtimeWebSocket:
 
     def test_budget_unavailable_fails_closed(self, client, monkeypatch):
         """Unconfirmable spend fails closed → server_error event and close 1011."""
-        from llm_proxy.api.middleware.mcp_proxy import BudgetCheckStatus
+        from llm_proxy.api.gate import BudgetCheckStatus
 
         monkeypatch.setattr(
-            "llm_proxy.api.middleware.mcp_proxy.check_key_budget",
+            "llm_proxy.api.gate.check_key_budget",
             AsyncMock(return_value=BudgetCheckStatus.UNAVAILABLE),
         )
         with _connect(client) as ws:

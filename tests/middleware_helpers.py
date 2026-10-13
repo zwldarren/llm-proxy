@@ -11,7 +11,9 @@ logic lives here instead.
 
 from typing import Any
 
+from llm_proxy.api.gate import VerifiedKeyAuth
 from llm_proxy.core.budget import BudgetEnvelope
+from llm_proxy.core.request_facts import RequestFacts, RequestIdentity
 
 
 def split_budget_fields(
@@ -38,25 +40,36 @@ def split_budget_fields(
     return budget_fields, user_budget_fields, remaining
 
 
-def build_auth_info(**overrides: Any) -> dict[str, Any]:
-    """Build a minimal verified-key auth-info dict for middleware tests.
+def build_auth_info(**overrides: Any) -> VerifiedKeyAuth:
+    """Build a minimal verified-key record for middleware tests.
 
-    Mirrors the shape ``verify_api_key_for_mcp`` returns: budget
-    configuration travels as ``BudgetEnvelope`` objects under ``budget`` /
-    ``user_budget``; the flat ``budget_*`` / ``user_budget_*`` kwargs are
-    accepted and bundled for readability.
+    Mirrors the shape ``verify_api_key`` returns: budget configuration
+    travels as ``BudgetEnvelope`` objects under ``budget`` / ``user_budget``;
+    the flat ``budget_*`` / ``user_budget_*`` kwargs are accepted and bundled
+    for readability.
     """
     budget_fields, user_budget_fields, remaining = split_budget_fields(overrides)
-    base = {
-        "principal_type": "api_key",
+    fields: dict[str, Any] = {
         "principal_id": "test-key",
         "allowed_models": None,
         "allowed_mcp_servers": None,
         "user_id": 1,
     }
-    base.update(remaining)
+    fields.update(remaining)
     if budget_fields:
-        base["budget"] = BudgetEnvelope(**budget_fields)
+        fields["budget"] = BudgetEnvelope(**budget_fields)
     if user_budget_fields:
-        base["user_budget"] = BudgetEnvelope(**user_budget_fields)
-    return base
+        fields["user_budget"] = BudgetEnvelope(**user_budget_fields)
+    return VerifiedKeyAuth(**fields)
+
+
+def authed_scope(allowed_mcp_servers: list[str] | None) -> dict:
+    """Scope pieces carrying the facts an authenticated key gate stamps."""
+    return {
+        "state": {
+            "request_facts": RequestFacts(
+                identity=RequestIdentity(api_key_name="agent", auth_method="api_key"),
+                allowed_mcp_servers=allowed_mcp_servers,
+            )
+        }
+    }

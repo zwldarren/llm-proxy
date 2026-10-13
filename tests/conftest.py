@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from middleware_helpers import build_auth_info
 
+from llm_proxy.api.gate import VerifiedKeyAuth
+
 
 @pytest.fixture(autouse=True)
 def _reset_global_secrets():
@@ -236,9 +238,9 @@ def make_mock_client():
 
 @pytest.fixture
 def make_auth_info():
-    """Build a minimal verified-key auth-info dict for middleware tests.
+    """Build a minimal verified-key record for middleware tests.
 
-    Mirrors the shape ``verify_api_key_for_mcp`` returns; tests pass the
+    Mirrors the shape ``verify_api_key`` returns; tests pass the
     fields their scenario needs (budget, rate limit, session id, ...).
     Budget configuration travels as ``BudgetEnvelope`` objects under
     ``budget`` / ``user_budget``; the flat ``budget_*`` / ``user_budget_*``
@@ -252,7 +254,7 @@ def make_auth_info():
 def run_mcp_middleware():
     """Invoke MCPProxyMiddleware against a synthetic /servers/* request.
 
-    ``verify_api_key_for_mcp`` is mocked to return ``auth_info``; pass
+    ``verify_api_key`` is mocked to return ``auth_info``; pass
     ``budget_exceeded`` (an AsyncMock) to also mock the budget spend check.
     Returns ``(status, body, headers)`` parsed from the ASGI messages.
     """
@@ -265,7 +267,7 @@ def run_mcp_middleware():
     from llm_proxy.api.middleware.mcp_proxy import MCPProxyMiddleware
 
     async def _run(
-        auth_info: dict[str, Any],
+        auth_info: VerifiedKeyAuth,
         budget_exceeded: AsyncMock | None = None,
         user_budget_exceeded: AsyncMock | None = None,
     ) -> tuple[int, dict, list]:
@@ -303,27 +305,25 @@ def run_mcp_middleware():
 
         patches = [
             patch(
-                "llm_proxy.api.middleware.mcp_proxy.verify_api_key_for_mcp",
+                "llm_proxy.api.gate.verify_api_key",
                 new=AsyncMock(return_value=auth_info),
             )
         ]
         if budget_exceeded is not None:
             patches.append(
                 patch(
-                    "llm_proxy.api.middleware.mcp_proxy.is_key_budget_exceeded",
+                    "llm_proxy.api.gate.is_key_budget_exceeded",
                     new=budget_exceeded,
                 )
             )
         if user_budget_exceeded is not None:
             patches.append(
                 patch(
-                    "llm_proxy.api.middleware.mcp_proxy.is_user_budget_exceeded",
+                    "llm_proxy.api.gate.is_user_budget_exceeded",
                     new=user_budget_exceeded,
                 )
             )
-        patches.append(
-            patch("llm_proxy.api.middleware.mcp_proxy._update_key_last_used", new=AsyncMock())
-        )
+        patches.append(patch("llm_proxy.api.gate._update_key_last_used", new=AsyncMock()))
         with ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)

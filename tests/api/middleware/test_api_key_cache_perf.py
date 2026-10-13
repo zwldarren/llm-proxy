@@ -18,8 +18,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from llm_proxy.api import gate as mcp_proxy_module
+from llm_proxy.api.gate import verify_api_key
 from llm_proxy.api.middleware import api_key_cache as cache_module
-from llm_proxy.api.middleware import mcp_proxy as mcp_proxy_module
 from llm_proxy.api.middleware.api_key_cache import (
     ApiKeyCache,
     CachedApiKey,
@@ -28,7 +29,6 @@ from llm_proxy.api.middleware.api_key_cache import (
     get_budget_spend_cache,
     hash_api_key_for_cache,
 )
-from llm_proxy.api.middleware.mcp_proxy import verify_api_key_for_mcp
 from llm_proxy.core.budget import BudgetEnvelope
 
 
@@ -121,12 +121,12 @@ async def test_stale_verified_entry_revalidates_without_bcrypt():
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
-        patch.object(mcp_proxy_module, "verify_api_key", return_value=True) as bcrypt,
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=True) as bcrypt,
     ):
-        auth = await verify_api_key_for_mcp("sk-secret")
+        auth = await verify_api_key("sk-secret")
 
     assert auth is not None
-    assert auth["principal_id"] == "k"
+    assert auth.principal_id == "k"
     bcrypt.assert_not_called()
     # Revalidation refreshed the entry, so it is fresh again.
     assert cache.get_verified_key(sha) is not None
@@ -143,10 +143,10 @@ async def test_revalidation_skipped_when_hash_rotated():
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
-        patch.object(mcp_proxy_module, "verify_api_key", return_value=False) as bcrypt,
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=False) as bcrypt,
         patch.object(mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)),
     ):
-        auth = await verify_api_key_for_mcp("sk-secret")
+        auth = await verify_api_key("sk-secret")
 
     assert auth is None
     bcrypt.assert_called_once()
@@ -163,9 +163,9 @@ async def test_stale_entry_without_hash_falls_back_to_bcrypt():
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
-        patch.object(mcp_proxy_module, "verify_api_key", return_value=True) as bcrypt,
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=True) as bcrypt,
     ):
-        auth = await verify_api_key_for_mcp("sk-secret")
+        auth = await verify_api_key("sk-secret")
 
     assert auth is not None
     bcrypt.assert_called_once()
@@ -184,9 +184,9 @@ async def test_expired_key_is_evicted_even_when_verified_entry_is_stale():
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
-        patch.object(mcp_proxy_module, "verify_api_key", return_value=True) as bcrypt,
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=True) as bcrypt,
     ):
-        auth = await verify_api_key_for_mcp("sk-secret")
+        auth = await verify_api_key("sk-secret")
 
     assert auth is None
     bcrypt.assert_not_called()
