@@ -66,6 +66,7 @@ from llm_proxy.api.routers import (
     openresponses_router,
     openresponses_ws_router,
     realtime_ws_router,
+    routing_export_router,
     system_router,
     team_router,
 )
@@ -219,6 +220,7 @@ def create_app() -> FastAPI:
     app.include_router(team_router)
     app.include_router(me_router)
     app.include_router(feedback_router)
+    app.include_router(routing_export_router)
     app.include_router(me_tracing_router)
     app.include_router(system_router)
 

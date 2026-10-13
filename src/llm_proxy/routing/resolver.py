@@ -68,6 +68,7 @@ async def resolve_virtual_model(
         previous_model=previous_model,
         classification=classification,
         judge=consultation,
+        degrade=config.smart_routing.graceful_degradation,
     )
 
     # The conversation key is application-layer context: ``route()`` stays a pure

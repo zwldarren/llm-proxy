@@ -11,10 +11,12 @@ from llm_proxy.routing.eval.harness import (
     EvalCase,
     bootstrap_match_rate_ci,
     build_eval_pool,
+    cost_quality_summary,
     judge_state_for,
     load_cases,
     render_report,
     run_ensemble_leg,
+    served_tier_quality,
     summarize,
 )
 from llm_proxy.routing.eval.judges import (
@@ -41,9 +43,11 @@ __all__ = [
     "SystemOneHttpJudge",
     "bootstrap_match_rate_ci",
     "build_eval_pool",
+    "cost_quality_summary",
     "judge_state_for",
     "load_cases",
     "render_report",
     "run_ensemble_leg",
+    "served_tier_quality",
     "summarize",
 ]

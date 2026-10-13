@@ -128,6 +128,16 @@ class RoutingJudgeConfig(BaseModel):
 
 class SmartRoutingConfig(BaseModel):
     enabled: bool = Field(default=False)
+    #: Serve a request instead of failing it when routing cannot satisfy every
+    #: preference at once. Off by default: a refusal is honest, a degraded
+    #: answer is silent. When on, two — and only two — relaxations become
+    #: possible, each recorded in the decision's reasoning: a virtual-model
+    #: assignment (``routing_assignments``) may be ignored when it empties the
+    #: pool, and a model that fits the input tokens alone may be chosen when
+    #: none fits input plus output. Never relaxed: image capability, the
+    #: allowlist (allowed_models / allowed_providers — those are permissions,
+    #: not preferences) and the max_cost budget (an explicit cap).
+    graceful_degradation: bool = Field(default=False)
     mode_weights: dict[str, float] = Field(
         default_factory=lambda: {"fast": 0.35, "auto": 0.65, "best": 1.0}
     )

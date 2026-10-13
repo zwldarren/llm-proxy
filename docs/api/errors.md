@@ -60,15 +60,15 @@ server logs.
 
 | Status | Typical codes | Meaning |
 | --- | --- | --- |
-| 400 | `ValidationError`, `invalid_content_length`, `payload_too_deeply_nested` | Malformed request or body |
+| 400 | `ValidationError`, `invalid_content_length`, `payload_too_deeply_nested`, `no_available_models`, `routing_constraints_unmet` | Malformed request or body; a routed request no model can serve (image capability, context length) |
 | 401 | `authentication_error` | Missing/unknown API key |
-| 403 | `model_not_allowed`, `forbidden`, `password_change_required` | Not permitted by allowlist/role/account state; deactivated accounts get `{"detail": "Account is disabled"}` on `/api/*` |
+| 403 | `model_not_allowed`, `forbidden`, `allowlist_exhausted`, `password_change_required` | Not permitted by allowlist/role/account state; `allowlist_exhausted` is the routed pool exhausting a key's model/provider restriction; deactivated accounts get `{"detail": "Account is disabled"}` on `/api/*` |
 | 404 | `model_not_found`, `not_found`, `mcp_server_not_found`, `provider_not_configured` | Unknown model/response/server; stored responses expire after 24 h |
 | 409 | `conflict` | Duplicate feedback, cancel of a non-cancellable response |
 | 413 | `body_size_exceeded` | Over `max_request_body_size_bytes` (default 64 MiB) |
-| 429 | `rate_limit_exceeded`, `too_many_auth_failures`, `budget_exceeded`, `user_budget_exceeded` | Rate limit, lockout, or budget cap. Rate-limit, per-key RPM, and `/v1/*` lockout 429s carry `Retry-After`; the `/servers/*` MCP lockout 429 and budget rejections do not |
+| 429 | `rate_limit_exceeded`, `too_many_auth_failures`, `budget_exceeded`, `user_budget_exceeded` | Rate limit, lockout, or budget cap. Rate-limit, per-key RPM, and `/v1/*` lockout 429s carry `Retry-After`; the `/servers/*` MCP lockout 429, the routed `max_cost` cap, and budget rejections do not |
 | 499 | `client_disconnected` | Client/CDN gave up; upstream cancelled (logged as failure) |
-| 500 | `configuration_error`, `internal_error` | Bad configuration (e.g. smart routing disabled, missing model), routing constraints unsatisfiable, or upstream responses that fail to parse (500 `api_error`) |
+| 500 | `configuration_error`, `internal_error` | Bad configuration (e.g. smart routing disabled, missing model), or upstream responses that fail to parse (500 `api_error`) |
 | 502 | `provider_error`, `network_error` | Upstream failed |
 | 503 | `redis_not_available`, `budget_check_unavailable`, `web_search_error`, readiness | Dependency missing/unhealthy; budget checks fail closed |
 | 504 | `timeout_error` | Upstream read timeout (600 s) |

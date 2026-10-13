@@ -109,6 +109,7 @@ dropping: a block with no specific placeholder gets a generic `[<TypeName> block
 | **Mode weights** | `fast 0.35`, `auto 0.65`, `best 1.0` | Quality-vs-cost bias per virtual model |
 | **Routing Judge** | off | Consults a System One model on ambiguous first turns; see [Routing Judge](../api/routing.md#routing-judge) |
 | **Routing Diagnostics** | off | Adds the full routing decision payload to smart-routing log metadata (diagnostics) |
+| **Graceful Degradation** | off | When routing cannot satisfy a preference (mode assignment, output half of the context window), serve degraded instead of refusing; see [Virtual Models & Routing](../api/routing.md) |
 
 The signal ensemble runs in-process (metadata + structural signals; the embedding
 signal was removed with the heavy ML stack that backed it). The optional routing

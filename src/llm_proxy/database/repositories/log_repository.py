@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import time
+from itertools import batched
 from threading import RLock
 from typing import Any
 
@@ -12,11 +13,16 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.database.repositories.base_usage import BaseUsageRepository
-from llm_proxy.database.tables import AuditSequence, RequestLog
+from llm_proxy.database.tables import AuditSequence, FeedbackRecord, RequestLog
 
 #: Content hash algorithm version stamped on audit rows (this repository owns
 #: the hash chain).
 CONTENT_HASH_VERSION: int = 1
+
+#: Chunk size for ``IN (...)`` lookups. A training export names up to 50,000
+#: parent requests, past SQLite's ``SQLITE_MAX_VARIABLE_NUMBER`` (32,766), so
+#: the ids are looked up in batches that both SQLite and PostgreSQL accept.
+_IN_CHUNK_SIZE: int = 500
 
 
 class _SchemaCache:
@@ -367,6 +373,138 @@ class LogRepository(BaseUsageRepository):
         await self.session.flush()
         await self.session.refresh(log)
         return log
+
+    async def get_feedback_dataset_rows(
+        self,
+        *,
+        since: float | None = None,
+        limit: int = 5000,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Feedback labels joined with the routed request's log (training export).
+
+        Rows are ``(feedback, log)`` pairs in creation order; a feedback whose
+        request log has been pruned still comes back (with ``log=None``), the
+        row builder decides whether it is usable. ``since`` plus ``offset``
+        pages a sweep without loading the corpus at once.
+        """
+        stmt = (
+            select(
+                FeedbackRecord.request_id,
+                FeedbackRecord.signal,
+                FeedbackRecord.model,
+                FeedbackRecord.created_at,
+                RequestLog.request_body,
+                RequestLog.log_metadata,
+            )
+            .outerjoin(RequestLog, FeedbackRecord.request_id == RequestLog.request_id)
+            .order_by(FeedbackRecord.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        if since is not None:
+            stmt = stmt.where(FeedbackRecord.created_at >= since)
+        result = await self.session.execute(stmt)
+        rows: list[dict[str, Any]] = []
+        for row in result.all():
+            log = (
+                {
+                    "request_body": row.request_body,
+                    "log_metadata": row.log_metadata or {},
+                }
+                if row.request_body is not None or row.log_metadata is not None
+                else None
+            )
+            rows.append(
+                {
+                    "feedback": {
+                        "request_id": row.request_id,
+                        "signal": row.signal,
+                        "model": row.model,
+                        "created_at": row.created_at,
+                    },
+                    "log": log,
+                }
+            )
+        return rows
+
+    async def get_judge_dataset_rows(
+        self,
+        *,
+        since: float | None = None,
+        limit: int = 5000,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Recorded judge verdicts joined with their parent request (training export).
+
+        Driven by the judge call rows (``log_type='judge'``): each names the
+        parent request it was consulted for. Returns ``(judge_log, parent_log,
+        signal)`` triples; the user's feedback signal on the parent rides along
+        when it has been given.
+
+        Rows come back in ascending timestamp order, matching
+        :meth:`get_feedback_dataset_rows`, so the endpoint's ``since`` lower
+        bound advances page over page for both corpora.
+        """
+        judge_stmt = select(RequestLog.request_id, RequestLog.log_metadata).where(
+            RequestLog.log_type == "judge"
+        )
+        if since is not None:
+            judge_stmt = judge_stmt.where(RequestLog.timestamp >= since)
+        judge_stmt = judge_stmt.order_by(RequestLog.timestamp).limit(limit).offset(offset)
+        judge_result = await self.session.execute(judge_stmt)
+        judge_rows = judge_result.all()
+        if not judge_rows:
+            return []
+
+        parent_ids = sorted(
+            {
+                parent_id
+                for row in judge_rows
+                if isinstance(row.log_metadata, dict)
+                and (parent_id := row.log_metadata.get("parent_request_id"))
+            }
+        )
+        parents: dict[str, dict[str, Any]] = {}
+        signals: dict[str, str] = {}
+        # Chunked: ``limit`` reaches 50,000, well past SQLite's bound-parameter
+        # ceiling (``SQLITE_MAX_VARIABLE_NUMBER``), and one IN list per lookup
+        # would fail the whole export with "too many SQL variables".
+        for chunk in batched(parent_ids, _IN_CHUNK_SIZE, strict=False):
+            parent_stmt = select(
+                RequestLog.request_id, RequestLog.request_body, RequestLog.log_metadata
+            ).where(RequestLog.request_id.in_(chunk))
+            parent_result = await self.session.execute(parent_stmt)
+            parents.update(
+                {
+                    row.request_id: {
+                        "request_body": row.request_body,
+                        "log_metadata": row.log_metadata or {},
+                    }
+                    for row in parent_result.all()
+                }
+            )
+            feedback_stmt = select(FeedbackRecord.request_id, FeedbackRecord.signal).where(
+                FeedbackRecord.request_id.in_(chunk)
+            )
+            feedback_result = await self.session.execute(feedback_stmt)
+            signals.update({row.request_id: row.signal for row in feedback_result.all()})
+
+        rows: list[dict[str, Any]] = []
+        for row in judge_rows:
+            metadata = row.log_metadata if isinstance(row.log_metadata, dict) else {}
+            parent_request_id = metadata.get("parent_request_id")
+            rows.append(
+                {
+                    "judge_log": {
+                        "request_id": row.request_id,
+                        "log_metadata": metadata,
+                    },
+                    "parent_log": parents.get(parent_request_id),
+                    "signal": signals.get(parent_request_id),
+                }
+            )
+        return rows
 
     async def get_log_by_request_id_for_api(
         self, request_id: str, user_id: int | None = None

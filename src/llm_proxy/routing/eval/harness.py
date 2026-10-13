@@ -49,6 +49,10 @@ SUBSETS = ("short", "long", "followup", "tool-context", "boundary")
 #: merely expensive, so the two are never averaged together.
 _TIER_RANK: frozendict[Tier, int] = frozendict({Tier.SIMPLE: 0, Tier.MEDIUM: 1, Tier.COMPLEX: 2})
 
+#: Quality retained when a case is served one or two ranks *below* its authored
+#: tier (the same half-a-rank-per-step convention the under/over split implies).
+_UNDER_TIER_QUALITY: frozendict[int, float] = frozendict({1: 0.5, 2: 0.0})
+
 DEFAULT_CASES_PATH = Path(__file__).resolve().parent / "cases.jsonl"
 
 #: Provisional confidence gate; the shipped value comes from configuration
@@ -234,6 +238,193 @@ BOOTSTRAP_REPEATS = 1000
 
 #: Interval level of every bootstrap interval (the ADR's protocol: 95%).
 BOOTSTRAP_LEVEL = 0.95
+
+#: Recovery levels the CPT readout reports (RouteLLM's CPT(50%) / CPT(80%)).
+CPT_LEVELS: tuple[float, ...] = (0.5, 0.8)
+
+#: Grid the cost-quality curve is evaluated on for APGR (uniform in call share,
+#: the axis RouteLLM integrates the Pareto-gain curve over).
+_COST_QUALITY_GRID = 101
+
+
+def served_tier_quality(expected: Tier, predicted: Tier) -> float:
+    """Tier-quality of serving ``predicted`` for a case authored at ``expected``.
+
+    At or above the authored tier the quality is intact — over-tiering costs
+    money, not quality, the same convention the under/over split uses. Each
+    rank below loses half: a MEDIUM-expected case served from the weak lane
+    retains 0.5, a COMPLEX-expected one 0.0.
+    """
+    gap = _TIER_RANK[expected] - _TIER_RANK[predicted]
+    if gap <= 0:
+        return 1.0
+    return _UNDER_TIER_QUALITY[min(gap, 2)]
+
+
+def _cost_quality_point(
+    rows: Sequence[tuple[float, Tier]],
+    *,
+    threshold: float,
+) -> dict[str, float]:
+    """One point of the binary cost-quality curve at a complexity threshold.
+
+    The two-model collapse mirrors RouteLLM's strong/weak setting: the strong
+    lane is the COMPLEX band, the weak lane is SIMPLE/MEDIUM (a weak-lane turn
+    is served by the economy model whatever its authored tier). A row is
+    escalated when its ensemble complexity clears ``threshold``; escalated rows
+    keep full quality, weak-lane rows keep :func:`served_tier_quality` of the
+    weak lane.
+    """
+    n = len(rows)
+    escalated = sum(1 for complexity, _ in rows if complexity >= threshold)
+    weak_rows = sum(
+        served_tier_quality(expected, Tier.SIMPLE)
+        for complexity, expected in rows
+        if complexity < threshold
+    )
+    quality = (escalated + weak_rows) / n if n else 0.0
+    return {
+        "threshold": threshold,
+        "strong_share": escalated / n if n else 0.0,
+        "quality": quality,
+    }
+
+
+def _oracle_quality(
+    rows: Sequence[tuple[float, Tier]],
+    *,
+    strong_share: float,
+    weak_quality: float,
+    gains: Sequence[float],
+) -> float:
+    """Best quality any router reaches at ``strong_share`` calls (the oracle)."""
+    n = len(rows)
+    if n == 0:
+        return weak_quality
+    budget = min(n, max(0, round(strong_share * n)))
+    # Upgrade the highest-gain rows first; ``gains`` is aligned with ``rows``.
+    order = sorted(range(n), key=lambda i: (-gains[i], i))
+    upgraded = set(order[:budget])
+    return (
+        sum(
+            1.0 if i in upgraded else served_tier_quality(expected, Tier.SIMPLE)
+            for i, (_, expected) in enumerate(rows)
+        )
+        / n
+    )
+
+
+def cost_quality_summary(
+    results: Sequence[CaseResult],
+    *,
+    grid: int = _COST_QUALITY_GRID,
+) -> dict[str, Any] | None:
+    """CPT/APGR readout over the binary strong/weak collapse (RouteLLM's metrics).
+
+    The sweep variable is the ensemble's continuous complexity: thresholding it
+    traces the quality-vs-strong-call-share curve a threshold gate on this
+    ensemble can reach. CPT(x%) is the smallest strong-call share on that curve
+    recovering x% of the always-strong minus always-weak quality gap; APGR is
+    the Pareto-gain area against the random-router diagonal, normalized so a
+    random router scores 0 and the oracle 1. Both need label variety: a corpus
+    with a single authored tier has no gap and reports ``None`` everywhere.
+    """
+    rows = [(result.ensemble_complexity, result.case.expected_tier) for result in results]
+    if not rows:
+        return None
+    weak_quality = sum(served_tier_quality(expected, Tier.SIMPLE) for _, expected in rows) / len(
+        rows
+    )
+    strong_quality = 1.0
+    gap = strong_quality - weak_quality
+    if gap <= 1e-9:
+        return None
+    gains = [1.0 - served_tier_quality(expected, Tier.SIMPLE) for _, expected in rows]
+
+    # Sweep the threshold over the observed complexity values plus the two
+    # extremes, so the curve spans every call share the ensemble can express.
+    thresholds = sorted({0.0, 1.0, *(complexity for complexity, _ in rows)})
+    curve = [_cost_quality_point(rows, threshold=t) for t in thresholds]
+    curve.sort(key=lambda point: point["strong_share"])
+
+    def _quality_at(share: float) -> float:
+        """Linear interpolation of the swept curve at a call share."""
+        if share <= curve[0]["strong_share"]:
+            return curve[0]["quality"]
+        if share >= curve[-1]["strong_share"]:
+            return curve[-1]["quality"]
+        for low, high in zip(curve, curve[1:], strict=False):
+            if low["strong_share"] <= share <= high["strong_share"]:
+                span = high["strong_share"] - low["strong_share"]
+                if span <= 0:
+                    return high["quality"]
+                weight = (share - low["strong_share"]) / span
+                return low["quality"] + weight * (high["quality"] - low["quality"])
+        return curve[-1]["quality"]
+
+    def _cpt(level: float) -> float | None:
+        target = weak_quality + level * gap
+        for point in curve:
+            if point["quality"] >= target:
+                return point["strong_share"]
+        return None
+
+    # APGR: the Pareto-gain curve over a uniform call-share grid, clamped to
+    # the range the sweep can express (a threshold router cannot spend *less*
+    # than its cheapest reachable share without leaving the curve).
+    step = 1.0 / max(1, grid - 1)
+    pareto_gains: list[float] = []
+    for i in range(grid):
+        share = i * step
+        random_quality = weak_quality + share * gap
+        oracle = _oracle_quality(rows, strong_share=share, weak_quality=weak_quality, gains=gains)
+        denom = oracle - random_quality
+        if denom <= 1e-9:
+            continue
+        pareto_gains.append(max(0.0, min(1.0, (_quality_at(share) - random_quality) / denom)))
+    apgr = sum(pareto_gains) / len(pareto_gains) if pareto_gains else None
+
+    return {
+        "weak_quality": weak_quality,
+        "strong_quality": strong_quality,
+        "curve": curve,
+        "cpt": {f"{level * 100:.0f}": _cpt(level) for level in CPT_LEVELS},
+        "random_cpt": {f"{level * 100:.0f}": level for level in CPT_LEVELS},
+        "apgr": apgr,
+    }
+
+
+def _path_cost_quality(
+    results: Sequence[CaseResult],
+    decided: Sequence[Tier],
+    *,
+    weak_quality: float,
+    gap: float,
+) -> dict[str, float | None] | None:
+    """(strong share, recovered quality-gap share) of one fixed decision path.
+
+    ``decided`` is the tier each result row would be served from. The recovery
+    is the inverse read of CPT: where on the gap this path sits at its own call
+    rate; ``None`` when this corpus has no gap to recover.
+    """
+    n = len(decided)
+    if n == 0 or len(results) != n or gap <= 1e-9:
+        return None
+    quality = (
+        sum(
+            1.0
+            if _TIER_RANK[tier] >= 2
+            else served_tier_quality(result.case.expected_tier, Tier.SIMPLE)
+            for result, tier in zip(results, decided, strict=True)
+        )
+        / n
+    )
+    strong_share = sum(1 for tier in decided if _TIER_RANK[tier] >= 2) / n
+    return {
+        "strong_share": strong_share,
+        "quality": quality,
+        "recovery": (quality - weak_quality) / gap,
+    }
 
 
 def bootstrap_match_rate_ci(
@@ -456,6 +647,84 @@ def summarize(
             )
         }
         metrics["comparison"] = _compare_paths(metrics["ensemble"]["overall"], metrics)
+
+    cq = cost_quality_summary(results)
+    if cq is not None:
+        paths: dict[str, Any] = {}
+        ensemble_point = _path_cost_quality(
+            results,
+            [result.ensemble_tier for result in results],
+            weak_quality=cq["weak_quality"],
+            gap=cq["strong_quality"] - cq["weak_quality"],
+        )
+        if ensemble_point is not None:
+            paths["ensemble"] = ensemble_point
+        # Judge paths are scored over the consulted subset alone, which need
+        # not share the corpus's tier mix. They are measured against that
+        # subset's own weak/strong baseline, so a recovery figure always reads
+        # against the population the path actually ran on.
+        judged_cq = cost_quality_summary(judged) if judged else None
+        if judged_cq is not None:
+            judged_weak_quality = judged_cq["weak_quality"]
+            judged_gap = judged_cq["strong_quality"] - judged_weak_quality
+            paths["judge_always"] = _path_cost_quality(
+                judged,
+                [
+                    result.judge_tier
+                    if not result.judge_abstained and result.judge_tier is not None
+                    else result.ensemble_tier
+                    for result in judged
+                ],
+                weak_quality=judged_weak_quality,
+                gap=judged_gap,
+            )
+            for spec in default_gate_specs(
+                confidences=confidences,
+                threshold=gate_threshold,
+                band=band,
+            ):
+                decided = [
+                    (
+                        result.judge_tier
+                        if spec.fires(result.ensemble_confidence, result.ensemble_complexity)
+                        and not result.judge_abstained
+                        and result.judge_tier is not None
+                        else result.ensemble_tier
+                    )
+                    for result in judged
+                ]
+                point = _path_cost_quality(
+                    judged, decided, weak_quality=judged_weak_quality, gap=judged_gap
+                )
+                if point is not None:
+                    paths[f"gate:{spec.name}"] = point
+            for name, min_confidence, min_escalation in default_consumption_specs(
+                apply_min_confidence=apply_min_confidence,
+                apply_min_escalation=apply_min_escalation,
+            ):
+                decided = []
+                for result in judged:
+                    consumable = (
+                        not result.judge_abstained
+                        and result.judge_tier is not None
+                        and verdict_consumable(
+                            JudgeVerdict(
+                                tier=result.judge_tier,
+                                probabilities=dict(result.judge_probabilities),
+                                escalation_probability=result.judge_escalation,
+                            ),
+                            min_confidence=min_confidence,
+                            min_escalation=min_escalation,
+                        )
+                    )
+                    decided.append(result.judge_tier if consumable else result.ensemble_tier)
+                point = _path_cost_quality(
+                    judged, decided, weak_quality=judged_weak_quality, gap=judged_gap
+                )
+                if point is not None:
+                    paths[f"consumption:{name}"] = point
+        cq["paths"] = paths
+        metrics["cost_quality"] = cq
     return metrics
 
 
@@ -676,6 +945,11 @@ def _fmt_rate(value: float | None) -> str:
     return "—" if value is None else f"{100 * value:.2f}%"
 
 
+def _fmt_share(value: float | None) -> str:
+    """A share of calls, e.g. ``31.3% of strong-lane calls``; em-dash when none."""
+    return "—" if value is None else f"{100 * value:.1f}%"
+
+
 def _fmt_interval(ci: dict[str, Any] | None) -> str:
     """A printed bootstrap interval, e.g. ``[65.3%, 98.1%]``; em-dash when none."""
     if not ci:
@@ -789,6 +1063,30 @@ def render_report(metrics: dict[str, Any]) -> str:
                     f"| {_fmt_interval(block.get('match_rate_ci'))} "
                     f"| {block['overall']['under']} | {block['overall']['over']} |"
                 )
+    cq = metrics.get("cost_quality")
+    if cq:
+        cpt = cq["cpt"]
+        lines += [
+            "",
+            "## Cost–quality (CPT/APGR)",
+            "",
+            "RouteLLM's readout over the binary strong/weak collapse: the strong lane is",
+            "the COMPLEX band, the weak lane SIMPLE/MEDIUM. CPT(x%) is the smallest",
+            "strong-call share recovering x% of the quality gap (the random-router",
+            "baseline is x itself); APGR is the Pareto-gain area (0 = random, 1 = oracle).",
+            f"CPT(50%): {_fmt_share(cpt.get('50'))} (random 50%) · "
+            f"CPT(80%): {_fmt_share(cpt.get('80'))} (random 80%)",
+            f"APGR: {cq['apgr']:.3f}" if cq["apgr"] is not None else "APGR: —",
+            "",
+            "| path | strong share | quality recovery |",
+            "| --- | --- | --- |",
+        ]
+        for name, point in (cq.get("paths") or {}).items():
+            recovery = point["recovery"]
+            lines.append(
+                f"| {name} | {_fmt_rate(point['strong_share'])} "
+                f"| {'—' if recovery is None else f'{100 * recovery:.1f}%'} |"
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -797,6 +1095,7 @@ __all__ = [
     "BAND_GATE_RANGE",
     "BOOTSTRAP_LEVEL",
     "BOOTSTRAP_REPEATS",
+    "CPT_LEVELS",
     "DEFAULT_CASES_PATH",
     "DEFAULT_GATE_THRESHOLD",
     "SUBSETS",
@@ -805,10 +1104,12 @@ __all__ = [
     "GateSpec",
     "bootstrap_match_rate_ci",
     "build_eval_pool",
+    "cost_quality_summary",
     "default_gate_specs",
     "judge_state_for",
     "load_cases",
     "render_report",
     "run_ensemble_leg",
+    "served_tier_quality",
     "summarize",
 ]

@@ -28,6 +28,7 @@ import contextlib
 import logging
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -210,29 +211,59 @@ def _filter_available_models(
     context_lengths: dict[str, int | None] | None,
     estimated_input_tokens: int,
     max_output_tokens: int,
-) -> list[str]:
+    degrade: bool = False,
+) -> tuple[list[str], list[str]]:
     """Apply routing-assignment, image-support, and context-length filters.
 
     Raises the same infeasibility errors as the inline code it replaces, in
     the same order: empty pool, no mode-compatible model, no image-capable
     model, no model with sufficient context length.
+
+    With ``degrade`` set, two relaxations become possible instead of raising,
+    each recorded as a note: a virtual-model assignment that empties the pool
+    is ignored, and (when no model fits input plus output) a model that fits
+    the input tokens with at least one token to spare is accepted — a model
+    with no output headroom left at all would be rejected by the provider
+    anyway. Image capability is never relaxed: a model that cannot see the
+    images cannot serve the request at all.
     """
+    notes: list[str] = []
     if not available_models:
         _raise_no_available_models()
+
+    def _refuse(message: str) -> None:
+        """Refuse the pool, carrying whatever the ladder already relaxed.
+
+        A note recorded before this point is part of the diagnosis: the
+        refusal happened *after* degradation moved the pool.
+        """
+        raise _annotate_with_degradation_notes(
+            RoutingInfeasibleError(
+                RoutingInfeasibility(
+                    code=RoutingFailureCode.NO_AVAILABLE_MODELS,
+                    message=message,
+                )
+            ),
+            notes,
+        )
 
     # Filter by routing_assignments: if a model has explicit routing_assignments,
     # it is only considered for modes listed in its assignments. Models without
     # routing_assignments (None) are available for all modes.
     if routing_assignments:
         mode_value = mode.value if hasattr(mode, "value") else str(mode)
-        available_models = [
+        assigned = [
             m
             for m in available_models
             if m not in routing_assignments
             or not routing_assignments[m]
             or mode_value in routing_assignments[m]
         ]
-        if not available_models:
+        if assigned:
+            available_models = assigned
+        elif degrade:
+            notes.append("degraded=mode-assignment")
+        else:
             _raise_no_available_models()
 
     # Filter by image support: when the request contains images, exclude
@@ -240,14 +271,9 @@ def _filter_available_models(
     if require_images and supports_images is not None:
         available_models = [m for m in available_models if supports_images.get(m, False)]
         if not available_models:
-            raise RoutingInfeasibleError(
-                RoutingInfeasibility(
-                    code=RoutingFailureCode.NO_AVAILABLE_MODELS,
-                    message=(
-                        "No models support image input. "
-                        "Mark at least one model with 'Supports Images' enabled."
-                    ),
-                )
+            _refuse(
+                "No models support image input. "
+                "Mark at least one model with 'Supports Images' enabled."
             )
 
     if context_lengths:
@@ -257,6 +283,18 @@ def _filter_available_models(
             cl = context_lengths.get(m)
             if cl is None or cl >= required_capacity:
                 context_feasible.append(m)
+        if not context_feasible and degrade:
+            # Second relaxation: fit the input and leave room for output. The
+            # output *budget* is the preference being dropped; what must not
+            # happen is refusing a request whose input a model could hold — nor
+            # choosing one with zero headroom left, which the provider would
+            # reject anyway (`max_output_tokens` is at least 1).
+            for m in available_models:
+                cl = context_lengths.get(m)
+                if cl is None or cl > estimated_input_tokens:
+                    context_feasible.append(m)
+            if context_feasible:
+                notes.append("degraded=context-window")
         if context_feasible:
             available_models = context_feasible
         else:
@@ -264,19 +302,14 @@ def _filter_available_models(
                 (cl for cl in context_lengths.values() if cl is not None),
                 default=None,
             )
-            raise RoutingInfeasibleError(
-                RoutingInfeasibility(
-                    code=RoutingFailureCode.NO_AVAILABLE_MODELS,
-                    message=(
-                        f"No routed model has sufficient context length for "
-                        f"~{required_capacity} tokens (input + output). "
-                        f"Largest configured context_length: {max_ctx}. "
-                        "Increase a model's context_length or add a model "
-                        "with a larger context window."
-                    ),
-                )
+            _refuse(
+                f"No routed model has sufficient context length for "
+                f"~{required_capacity} tokens (input + output). "
+                f"Largest configured context_length: {max_ctx}. "
+                "Increase a model's context_length or add a model "
+                "with a larger context window."
             )
-    return available_models
+    return available_models, notes
 
 
 def _apply_constraints_or_raise(
@@ -299,11 +332,61 @@ def _apply_constraints_or_raise(
     return candidates
 
 
+def _annotate_with_degradation_notes(
+    error: RoutingInfeasibleError, notes: Sequence[str]
+) -> RoutingInfeasibleError:
+    """Fold the degradation notes a refusal was reached *after* into its message.
+
+    The ladder can be climbed and the request still refused by something it
+    must never relax (the allowlist, the explicit budget). Without this the
+    notes die with the raise, and the 4xx the client sees gives no hint that
+    degradation moved the pool before the refusal. Returns ``error`` unchanged
+    when no relaxation fired.
+    """
+    if not notes:
+        return error
+    infeasibility = error.infeasibility
+    return RoutingInfeasibleError(
+        replace(
+            infeasibility,
+            message=f"{infeasibility.message} [{' '.join(notes)}]",
+        )
+    )
+
+
 def _estimate_effective_output(prompt: str, tier: Tier, max_output_tokens: int) -> int:
     """Clamp the prompt-derived output budget to the request's max tokens."""
     difficulty_tier_label = tier.value
     budget = estimate_output_budget(prompt, difficulty_tier_label)
     return min(max_output_tokens, max(1, budget))
+
+
+#: Price of a cache-read token relative to a full-price input token. The
+#: baseline charges every candidate full input price, so incumbency is modeled
+#: as a discount on the cached share rather than a penalty on the switcher:
+#: the switcher's cost is unchanged from the no-continuity baseline, the
+#: incumbent's reflects what the provider actually bills. 0.5 is conservative
+#: across providers (Anthropic charges 0.1×, OpenAI 0.5×).
+CACHE_READ_PRICE_RATIO = 0.5
+
+
+def _cache_retention_input_factor(
+    previous_model: str | None,
+    model: str,
+    prev_cache_affinity: float,
+) -> float:
+    """Input-token multiplier pricing the prefix cache the incumbent retains.
+
+    Staying on the previous model keeps its provider-side prefix cache: the
+    cached share of the input bills at the cache-read ratio instead of full
+    price. Switching away (or no previous model, or no observed cache
+    affinity) leaves the full-price baseline untouched — the switcher pays
+    exactly what the no-continuity baseline charges, which is the switch's
+    cost.
+    """
+    if not previous_model or model != previous_model or prev_cache_affinity <= 0.0:
+        return 1.0
+    return 1.0 - (1.0 - CACHE_READ_PRICE_RATIO) * min(1.0, prev_cache_affinity)
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,18 +485,30 @@ def _build_cost_model(
     pricing: dict[str, ModelPricing],
     hard_constraints: RoutingConstraints,
     available_models: list[str],
+    previous_model: str | None = None,
+    prev_cache_affinity: float = 0.0,
 ) -> _CostModel:
     """Compute per-candidate dollar costs and apply the max_cost constraint.
 
     Raises ``RoutingInfeasibleError`` (budget) when no candidate fits
     ``max_cost``.
+
+    When the conversation had a previous model, the candidate that *is* that
+    model keeps the provider-side prefix cache: the cached share of its input
+    bills at the cache-read ratio instead of full price. The previous model's
+    observed cache-affinity (its EWMA of cache hits, passed as
+    ``prev_cache_affinity``) estimates that share; every other candidate pays
+    the untouched full-price baseline, which is exactly the switch's cost.
     """
     quality_priors = _quality_prior_scores(candidates)
     experience = _collect_experience(candidates, model_experience, mode, tier)
     dollar_costs = {
         m: _calc_cost(
             m,
-            estimated_input_tokens,
+            round(
+                estimated_input_tokens
+                * _cache_retention_input_factor(previous_model, m, prev_cache_affinity)
+            ),
             effective_output,
             pricing,
             input_cost_multiplier=experience[m].input_cost_multiplier,
@@ -775,6 +870,7 @@ def _build_reasoning_parts(
     weights: SelectionWeights,
     bandit_state: _BanditState,
     premium_exploration_blocked: int,
+    cache_loss_priced: bool = False,
 ) -> list[str]:
     """Assemble the human-readable reasoning trail for the decision."""
     reasoning_parts = [
@@ -791,6 +887,8 @@ def _build_reasoning_parts(
         reasoning_parts.append(f"model-stickiness={selected.model}")
     elif features.previous_model:
         reasoning_parts.append(f"model-switch={features.previous_model}->{selected.model}")
+        if cache_loss_priced:
+            reasoning_parts.append("cache-loss-priced=switch")
     if abs(selected.feedback_preference) >= 0.05:
         reasoning_parts.append(f"feedback-preference={selected.feedback_preference:+.2f}")
     if pressure_rescue_note:
@@ -878,12 +976,18 @@ def select_from_pool(
     require_images: bool = False,
     context_lengths: dict[str, int | None] | None = None,
     signal_votes: dict[str, Any] | None = None,
+    degrade: bool = False,
 ) -> RoutingDecision:
     """Select the best model from the full discovered pool.
 
     Unlike ``select_model`` which picks from a per-tier list, this evaluates ALL
     available models and lets ``complexity`` drive the cost-vs-quality trade-off
     via weight interpolation.
+
+    ``degrade`` enables graceful degradation (ADR on the fallback ladder): two
+    relaxations — mode assignment and the output half of the context window —
+    are applied instead of refusing the request. Permissions (allowlist) and
+    the explicit budget cap are never relaxed.
     """
     effective_rng = rng if rng is not None else _rng
     weights = selection_weights or SelectionWeights()
@@ -895,7 +999,7 @@ def select_from_pool(
     if step_stable and bc.enabled:
         bc = replace(bc, enabled=False)
 
-    available_models = _filter_available_models(
+    available_models, degradation_notes = _filter_available_models(
         available_models,
         mode=mode,
         routing_assignments=routing_assignments,
@@ -904,9 +1008,15 @@ def select_from_pool(
         context_lengths=context_lengths,
         estimated_input_tokens=estimated_input_tokens,
         max_output_tokens=max_output_tokens,
+        degrade=degrade,
     )
 
-    candidates = _apply_constraints_or_raise(available_models, hard_constraints)
+    try:
+        candidates = _apply_constraints_or_raise(available_models, hard_constraints)
+    except RoutingInfeasibleError as exc:
+        if not degradation_notes:
+            raise
+        raise _annotate_with_degradation_notes(exc, degradation_notes) from exc
     effective_output = _estimate_effective_output(prompt, tier, max_output_tokens)
 
     candidates, quality_state = _apply_quality_guards_and_target(
@@ -919,17 +1029,38 @@ def select_from_pool(
         confidence=confidence,
     )
 
-    cost_model = _build_cost_model(
-        candidates,
-        model_experience,
-        mode,
-        tier,
-        estimated_input_tokens=estimated_input_tokens,
-        effective_output=effective_output,
-        pricing=pricing,
-        hard_constraints=hard_constraints,
-        available_models=available_models,
+    prev_snapshot = (
+        _experience_snapshot(model_experience, effective_features.previous_model, mode, tier)
+        if effective_features.previous_model
+        else None
     )
+    # ``CandidateExperience.cache_affinity`` defaults to a neutral 0.5, so an
+    # unobserved model is indistinguishable from one measured at a 0.5 hit
+    # rate. Only samples prove a cache exists: without them the incumbent keeps
+    # the full-price baseline, exactly like every other candidate.
+    prev_cache_affinity = (
+        prev_snapshot.cache_affinity
+        if prev_snapshot is not None and prev_snapshot.samples > 0
+        else 0.0
+    )
+    try:
+        cost_model = _build_cost_model(
+            candidates,
+            model_experience,
+            mode,
+            tier,
+            estimated_input_tokens=estimated_input_tokens,
+            effective_output=effective_output,
+            pricing=pricing,
+            hard_constraints=hard_constraints,
+            available_models=available_models,
+            previous_model=effective_features.previous_model,
+            prev_cache_affinity=prev_cache_affinity,
+        )
+    except RoutingInfeasibleError as exc:
+        if not degradation_notes:
+            raise
+        raise _annotate_with_degradation_notes(exc, degradation_notes) from exc
 
     bandit_state = _resolve_bandit_state(bc, tier, mode, effective_features)
     resolved_weights = _compute_weights(
@@ -991,7 +1122,13 @@ def select_from_pool(
         weights=weights,
         bandit_state=bandit_state,
         premium_exploration_blocked=premium_exploration_blocked,
+        cache_loss_priced=(
+            effective_features.previous_model is not None
+            and selected.model != effective_features.previous_model
+            and prev_cache_affinity > 0.0
+        ),
     )
+    reasoning_parts.extend(degradation_notes)
 
     return _build_decision(
         selected=selected,

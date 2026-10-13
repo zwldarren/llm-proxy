@@ -129,6 +129,14 @@ _Avoid_: prompt, summary
 The wall-clock budget a single judge call gets before the router gives up and treats it as an abstention.
 _Avoid_: timeout (unqualified)
 
+**Graceful degradation (routing)**:
+The opt-in relaxation of two routing *preferences* — a virtual-model assignment that empties the pool, and the output half of the context window — so a request is served degraded (each relaxation recorded as a `degraded=…` reasoning note) instead of refused. Image capability, the allowlist and the `max_cost` budget are never relaxed: those are permissions and explicit caps, not preferences.
+_Avoid_: fallback model (that is provider failover), loose routing
+
+**Cascade (routing)**:
+The proposed post-hoc escalation lane for `fast`: serve the cheap draft, score the `(ask, draft answer)` pair with a System One model, and re-serve from a stronger candidate only when the score says the draft is inadequate. Fail-open, shadow-first, latency-budget-decayed; both calls bill. See ADR-0033 (proposed).
+_Avoid_: retry, failover, judge (it uses one, but the mechanism is the escalation lane)
+
 ### OpenResponses protocol module
 
 **OpenResponses protocol module**:

@@ -190,3 +190,31 @@ Two effects will otherwise be mistaken for the judge's speed:
   call a longer `--judge-timeout` before reading percentiles.
 - **A deadline overshoots by its cancellation cost.** Budget the round trip, not the
   configured `deadline_s` alone.
+
+## Cost–quality readout (CPT / APGR)
+
+Beside the match-rate tables, the report renders RouteLLM's cost–quality
+readout (see [RouteLLM](https://arxiv.org/abs/2406.18665)) over a binary
+strong/weak collapse of the three-band ladder: the strong lane is the COMPLEX
+band, the weak lane SIMPLE/MEDIUM. Serving at or above the authored tier keeps
+quality intact (over-tiering is money, not quality); each rank below loses
+half.
+
+- **The curve** sweeps a threshold over the ensemble's continuous complexity,
+  escalating the cases above it. It traces every (strong-call share, quality)
+  point a threshold gate on this ensemble can reach.
+- **CPT(x%)** is the smallest strong-call share on that curve recovering x% of
+  the always-strong minus always-weak quality gap — the shipped readouts are
+  CPT(50%) and CPT(80%). The random-router baseline recovers x% at a call
+  share of x, so a CPT *above* the level means the score is a weak escalation
+  predictor on this corpus.
+- **APGR** is the area under the Pareto-gain curve against the random diagonal,
+  normalized to the oracle: 0 ≈ random, 1 ≈ perfect. (A discrete or tiny corpus
+  leaves interpolation residue — read the seed corpus' numbers as the
+  consistency check they are.)
+- **Paths** — the shipped ensemble, the judge-everywhere leg, every candidate
+  gate and consumption policy — report where each sits on the (share,
+  recovery) plane at its own call rate.
+
+The readout needs label variety: a corpus with a single authored tier has no
+gap and reports `None` everywhere.

@@ -109,6 +109,7 @@ All under `/api`, all requiring a JWT unless noted. Groups:
 | `/api/config/server/*` | All server settings sections (logging, web search, smart routing, provider selection, request policy, resilience, security, keepalive, rate limits, CORS, MCP security) |
 | `/api/config/circuit-breaker*` | Breaker state and resets |
 | `/api/logs*` | Log query/detail/stats, usage stats, audit verification, cleanup |
+| `/api/routing/*` | Training-data export: feedback labels and judge verdicts as JSONL (`/api/routing/export/dataset`) |
 | `/api/mcp/*` | MCP server CRUD, status, capabilities |
 | `/api/team/members*` | Member CRUD, roles, model allowlists, account budgets, password resets |
 | `/api/me/*` | Profile, budget, password, username, tracing, feedback |

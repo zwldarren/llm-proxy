@@ -758,6 +758,7 @@ def route(
     require_images: bool = False,
     classification: RoutingClassification | None = None,
     judge: JudgeConsultation | None = None,
+    degrade: bool = False,
 ) -> RoutingDecision:
     """Route a request to the best model using the v2 multi-signal ensemble.
 
@@ -773,6 +774,10 @@ def route(
     classification: A prior :func:`classify` result to reuse instead of
         classifying again, so a caller that already looked at the ensemble's
         confidence is deciding from the numbers it saw.
+    degrade: Enable graceful degradation (the fallback ladder): two
+        relaxations — mode assignment and the output half of the context
+        window — apply instead of refusing the request. Recorded as
+        ``degraded=...`` reasoning notes.
     judge: A judge consultation for this turn. When its verdict owns the tier,
         that tier replaces the ensemble's complexity before floors and caps are
         applied — so a judge can never lift a request above a cap or drop it
@@ -965,6 +970,7 @@ def route(
         require_images=require_images,
         context_lengths=getattr(pool, "context_lengths", None),
         signal_votes=signal_votes,
+        degrade=degrade,
     )
 
     if judge_meta is None:

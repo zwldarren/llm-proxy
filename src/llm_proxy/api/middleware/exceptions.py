@@ -35,6 +35,7 @@ from llm_proxy.protocols.openresponses.errors import (
     openresponses_error_code,
 )
 from llm_proxy.protocols.registry import protocol_name_for_path
+from llm_proxy.routing.types import RoutingFailureCode, RoutingInfeasibleError
 
 logger = get_logger(__name__)
 
@@ -223,6 +224,53 @@ async def recursion_error_handler(request: Request, exc: RecursionError) -> JSON
     )
 
 
+async def routing_infeasible_handler(request: Request, exc: RoutingInfeasibleError) -> JSONResponse:
+    """Map a routing infeasibility to the status its failure code deserves.
+
+    ``RoutingInfeasibleError`` subclasses ``RuntimeError`` (registered above as
+    a 500), so without this handler every routed refusal surfaced as
+    ``500 internal_error`` — misattributing the cause and hiding the
+    structured code the failure already carries. The codes map by blame:
+
+    - ``no_available_models`` / ``routing_constraints_unmet`` — the request
+      (images, context length) or the pool's configuration; a client error.
+    - ``allowlist_exhausted`` — the key's permission boundary; forbidden.
+    - ``budget_exceeded`` — the explicit ``max_cost`` cap; quota-shaped 429,
+      matching OpenAI's ``insufficient_quota``.
+    """
+    request_id = facts_for(request).request_id
+    infeasibility = exc.infeasibility
+    code = infeasibility.code
+    if code is RoutingFailureCode.ALLOWLIST_EXHAUSTED:
+        status_code, error_type = 403, "forbidden"
+    elif code is RoutingFailureCode.BUDGET_EXCEEDED:
+        status_code, error_type = 429, "insufficient_quota"
+    else:
+        status_code, error_type = 400, "invalid_request_error"
+
+    logger.warning(
+        f"Routing infeasible [request_id={request_id}] [endpoint={request.url.path}]: "
+        f"{infeasibility.message}"
+    )
+
+    record_early_failure(
+        request,
+        exc,
+        status_code=status_code,
+        error_type=error_type,
+        error_message=infeasibility.message,
+    )
+
+    return ErrorResponseBuilder.create_json_response(
+        message=infeasibility.message,
+        error_type=_error_type_for_request(request, error_type),
+        code=code.value,
+        status_code=status_code,
+        error_id=request_id,
+        protocol=protocol_for_request(request),
+    )
+
+
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Handle HTTPException with unified error format."""
     request_id = facts_for(request).request_id
@@ -334,3 +382,8 @@ def register_exception_handlers(app) -> None:
     # Starlette resolves handlers via the exception's MRO, so the explicit
     # registration wins over the RuntimeError entry.
     app.add_exception_handler(RecursionError, recursion_error_handler)
+
+    # Same MRO reasoning: RoutingInfeasibleError subclasses RuntimeError, but a
+    # routed refusal is a structured 4xx with the failure code attached, not a
+    # 500.
+    app.add_exception_handler(RoutingInfeasibleError, routing_infeasible_handler)

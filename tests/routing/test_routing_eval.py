@@ -17,9 +17,11 @@ from llm_proxy.routing.eval import (
     CaseResult,
     EvalCase,
     bootstrap_match_rate_ci,
+    cost_quality_summary,
     load_cases,
     render_report,
     run_ensemble_leg,
+    served_tier_quality,
     summarize,
 )
 from llm_proxy.routing.eval.judges import (
@@ -72,9 +74,10 @@ def _result(
     latency_ms: float | None = None,
     probabilities: dict[str, float] | None = None,
     escalation: float | None = None,
+    case_id: str = "case-1",
 ) -> CaseResult:
     return CaseResult(
-        case=_case(tier=expected),
+        case=_case(case_id, tier=expected),
         repeat=0,
         ensemble_tier=ensemble,
         ensemble_complexity=complexity,
@@ -447,6 +450,130 @@ class TestBootstrapIntervals:
         off = summarize(results, bootstrap=0)
         assert off["ensemble"]["overall"]["match_rate_ci"] is None
         assert off["judge"]["gates"]["always"]["match_rate_ci"] is None
+
+
+class TestCostQuality:
+    """RouteLLM's CPT/APGR readout over the binary strong/weak collapse."""
+
+    @staticmethod
+    def _corpus() -> list[CaseResult]:
+        """One case per tier whose complexity tracks its authored tier exactly."""
+        return [
+            _result(expected=Tier.SIMPLE, ensemble=Tier.SIMPLE, complexity=0.1),
+            _result(expected=Tier.MEDIUM, ensemble=Tier.MEDIUM, complexity=0.5),
+            _result(expected=Tier.COMPLEX, ensemble=Tier.COMPLEX, complexity=0.9),
+        ]
+
+    def test_served_quality_convention(self):
+        assert served_tier_quality(Tier.SIMPLE, Tier.SIMPLE) == 1.0
+        assert served_tier_quality(Tier.SIMPLE, Tier.COMPLEX) == 1.0  # over-tier is money
+        assert served_tier_quality(Tier.MEDIUM, Tier.SIMPLE) == 0.5
+        assert served_tier_quality(Tier.COMPLEX, Tier.MEDIUM) == 0.5
+        assert served_tier_quality(Tier.COMPLEX, Tier.SIMPLE) == 0.0
+
+    def test_a_single_tier_corpus_has_no_gap(self):
+        results = [_result(expected=Tier.SIMPLE, ensemble=Tier.SIMPLE, complexity=0.2)]
+        assert cost_quality_summary(results) is None
+        assert cost_quality_summary([]) is None
+
+    def test_a_perfect_escalation_score_earns_the_full_pareto_gain(self):
+        # A 3-row curve is coarse (interpolation between discrete shares), so a
+        # perfect score lands near — not at — the oracle; a denser corpus converges.
+        small = cost_quality_summary(self._corpus())
+        assert small is not None
+        assert small["weak_quality"] == pytest.approx(0.5)
+        assert small["cpt"]["50"] == pytest.approx(1 / 3)
+        assert small["apgr"] > 0.8
+
+        dense: list[CaseResult] = []
+        for tier, base in ((Tier.SIMPLE, 0.100), (Tier.MEDIUM, 0.500), (Tier.COMPLEX, 0.900)):
+            dense.extend(
+                _result(
+                    expected=tier,
+                    ensemble=tier,
+                    # Distinct per-row scores so the sweep gets a dense curve —
+                    # a 3-valued score interpolates coarsely against the oracle.
+                    complexity=base + i / 1000,
+                    case_id=f"{tier.value}-{i}",
+                )
+                for i in range(9)
+            )
+        summary = cost_quality_summary(dense)
+        assert summary is not None
+        # Discrete fixtures leave interpolation residue against the oracle's
+        # staircase; a real ensemble's continuous complexity closes it.
+        assert summary["apgr"] > 0.95
+
+    def test_an_inverted_score_loses_to_the_random_diagonal(self):
+        inverted = [
+            _result(expected=Tier.SIMPLE, ensemble=Tier.SIMPLE, complexity=0.9),
+            _result(expected=Tier.MEDIUM, ensemble=Tier.MEDIUM, complexity=0.5),
+            _result(expected=Tier.COMPLEX, ensemble=Tier.COMPLEX, complexity=0.1),
+        ]
+        summary = cost_quality_summary(inverted)
+        assert summary is not None
+        assert summary["apgr"] == 0.0
+        assert summary["cpt"]["50"] > 0.5  # worse than the random-router baseline
+
+    def test_summarize_attaches_paths_and_the_report_renders_them(self):
+        metrics = summarize(self._corpus())
+        cq = metrics["cost_quality"]
+        assert cq["paths"]["ensemble"]["strong_share"] == pytest.approx(1 / 3)
+        assert cq["paths"]["ensemble"]["recovery"] == pytest.approx(2 / 3)
+        report = render_report(metrics)
+        assert "## Cost–quality (CPT/APGR)" in report
+        assert "| ensemble |" in report
+
+    def test_the_report_keeps_cpt_when_apgr_is_undefined(self):
+        """A missing APGR must not swallow the CPT figures that are present."""
+        metrics = summarize(
+            [
+                _result(expected=Tier.SIMPLE, ensemble=Tier.SIMPLE, complexity=0.1, case_id="a"),
+                _result(expected=Tier.COMPLEX, ensemble=Tier.COMPLEX, complexity=0.9, case_id="b"),
+            ]
+        )
+        metrics["cost_quality"]["apgr"] = None
+        report = render_report(metrics)
+        assert "CPT(50%): 50.0%" in report
+        assert "CPT(80%): 50.0%" in report
+        assert "APGR: —" in report
+
+    def test_judge_paths_are_measured_against_the_judged_population(self):
+        """A path scored on a subset reads its recovery against that subset.
+
+        The judge fires on a different tier mix than the corpus carries; a
+        baseline taken from the whole corpus would report a negative recovery
+        for a path that is in fact exactly at its own floor.
+        """
+        results = [
+            _result(expected=Tier.SIMPLE, ensemble=Tier.SIMPLE, complexity=0.1, case_id=f"s{i}")
+            for i in range(4)
+        ]
+        results += [
+            _result(
+                expected=Tier.COMPLEX,
+                ensemble=Tier.SIMPLE,
+                complexity=0.8,
+                judge=Tier.SIMPLE,
+                case_id=f"c{i}",
+            )
+            for i in range(2)
+        ]
+        results += [
+            _result(
+                expected=Tier.MEDIUM,
+                ensemble=Tier.SIMPLE,
+                complexity=0.8,
+                judge=Tier.SIMPLE,
+                case_id=f"m{i}",
+            )
+            for i in range(2)
+        ]
+        paths = summarize(results)["cost_quality"]["paths"]
+
+        assert paths["ensemble"]["recovery"] == pytest.approx(0.0)
+        assert paths["judge_always"]["recovery"] == pytest.approx(0.0)
+        assert paths["judge_always"]["strong_share"] == pytest.approx(0.0)
 
 
 class TestOllamaTransport:

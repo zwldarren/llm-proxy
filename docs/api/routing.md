@@ -135,6 +135,22 @@ use the routing evaluation rig (`python -m llm_proxy.routing.eval`), which repor
 judge's accuracy against an authored corpus, the call rate each gate trigger implies, and
 its latency percentiles.
 
+## Training data export
+
+The two corpora a router's next generation is trained on are exported as JSONL from the
+admin API (`GET /api/routing/export/dataset?format=feedback|judge_shadow|all`): the
+explicit feedback labels (each with the routed prompt and the tier decision) and the
+judge's recorded verdicts (each with the ensemble decision it would have replaced, its
+own distribution, and the user's signal when one was given). This is the data the
+[shadow mode](#routing-judge) exists to collect (ADR-0029); the prompt text is truncated
+to the judge's own ask budget, so a training run reads what the router saw.
+
+The response streams and pages: rows are read and serialized in batches rather than
+assembled in memory, and both corpora come back in ascending time order. A sweep larger
+than one page re-issues the request with `since` at the newest timestamp already seen —
+the boundary row repeats, but the sweep always advances — and `limit` bounded by the
+per-corpus cap (50,000 rows).
+
 ## How a model is chosen
 
 Candidates must pass hard gates first: the key/user allowlist, context length, image
@@ -150,13 +166,26 @@ capability, and budget. Then scoring combines:
   (`model_experience`: reward mean, reliability, latency, explicit feedback, cache
   affinity), plus in-memory latency statistics.
 - **Continuity** — the previous model for the same conversation is preferred
-  (Redis key `routing:conv:<conversation>:last_model`, 30-minute TTL).
+  (Redis key `routing:conv:<conversation>:last_model`, 30-minute TTL). The
+  retained provider-side prefix cache is priced too: the incumbent's observed
+  cache affinity estimates the share of the input that bills at the cache-read
+  ratio instead of full price, so a switch pays the cache it loses.
 - **Exploration** — new or under-sampled models get trial pulls; exploration is
   disabled for tool/agent steps so multi-step flows stay coherent.
 
-If nothing qualifies, the request fails with a routing constraint error
-(`no_available_models`, `allowlist_exhausted`, `routing_constraints_unmet`, or
-`budget_exceeded`).
+If nothing qualifies, the request fails with a routing constraint error — a
+structured 4xx carrying the code: `no_available_models` (400, no image-capable
+or context-feasible model), `allowlist_exhausted` (403, the key's permission
+boundary), `routing_constraints_unmet` (400), or `budget_exceeded` (429
+`insufficient_quota`, the explicit `max_cost` cap).
+
+With **Graceful Degradation** enabled (`smart_routing.graceful_degradation`),
+two *preferences* relax instead of failing the request, each recorded as a
+`degraded=...` note in the decision's reasoning: a virtual-model assignment
+that empties the pool is ignored, and — when no model fits input plus output —
+a model that fits the input tokens alone serves, with the upstream truncating
+the output. Image capability, the allowlist and the budget cap are never
+relaxed; those refusals are the feature.
 
 For the first turn of a conversation, and when the gate fires, a configured
 [routing judge](#routing-judge) replaces the tier the signals produced for this step —

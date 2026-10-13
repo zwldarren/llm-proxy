@@ -24,6 +24,7 @@ from .models import router as models_router
 from .openresponses import router as openresponses_router
 from .openresponses import ws_router as openresponses_ws_router
 from .realtime import ws_router as realtime_ws_router
+from .routing import router as routing_export_router
 from .system import router as system_router
 from .team import router as team_router
 
@@ -38,6 +39,7 @@ __all__ = [
     "catalog_router",
     "config_router",
     "feedback_router",
+    "routing_export_router",
     "health_router",
     "logs_router",
     "mcp_proxy_app",
