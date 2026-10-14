@@ -680,6 +680,9 @@ async def gate_request(request: Request, policy: GatePolicy) -> GateRejection | 
     if policy.lockout and lockout_manager.is_locked_out(client_ip):
         remaining = lockout_manager.get_lockout_remaining(client_ip)
         message = f"Too many failed authentication attempts. Try again in {remaining} seconds."
+        # Deliberately no auth-failure delay: the lockout is itself the brake
+        # (ADR-0032), and Retry-After already states the wait. The delay
+        # applies only to the missing/invalid-key paths in ``_auth_failure``.
         _log_auth_failure(
             request, 429, "IP locked out due to too many failed auth attempts", client_ip
         )

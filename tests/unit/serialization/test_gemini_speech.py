@@ -369,7 +369,7 @@ class TestAudioStreaming:
     def test_audio_accumulated_into_output_blocks(self):
         transformer = GeminiStreamingTransformer(model="m")
         b64 = base64.b64encode(b"pcm").decode()
-        transformer.convert_chunk(
+        first = transformer.convert_chunk(
             {
                 "candidates": [
                     {"content": {"parts": [{"inlineData": {"mimeType": "audio/l16", "data": b64}}]}}
@@ -388,15 +388,16 @@ class TestAudioStreaming:
                 ]
             }
         )
-        # The canonical audio block is the protocol dialect's: the OpenAI
-        # audio delta carries no MIME field, so the engine's AudioSource is
-        # base64/wav (what the reassembled log body always carried).
+        # The canonical audio block carries the chunk's inline MIME type (the
+        # converter passes it to the segment engine on the audio delta), while
+        # the OpenAI client wire delta stays free of the engine-only field.
+        assert first["choices"][0]["delta"]["audio"].get("mime_type") is None
         audio_blocks = [
             b for b in transformer.get_accumulated_output() if isinstance(b, AudioBlock)
         ]
         assert len(audio_blocks) == 1
         assert audio_blocks[0].source.data == b64 + b64
-        assert audio_blocks[0].source.media_type == "audio/wav"
+        assert audio_blocks[0].source.media_type == "audio/l16"
 
     def test_image_chunk_still_markdown(self):
         chunk = {

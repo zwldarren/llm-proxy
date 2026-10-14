@@ -20,11 +20,8 @@ from llm_proxy.api.middleware.asgi_utils import (
     CoreASGIMiddleware,
     adapt_http_middleware,
 )
-from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.registry import protocol_name_for_path
 from llm_proxy.services import runtime_services
-
-logger = get_logger(__name__)
 
 #: The /v1/* transport's gate policy: every check on, strict key extraction
 #: (a non-Bearer Authorization header is an invalid-format auth failure).

@@ -152,6 +152,11 @@ class CanonicalDelta:
     #: Media payload: ``{"image": {...}}`` or ``{"audio_data": str,
     #: "audio_transcript": str}``.
     payload: dict[str, Any] | None = None
+    #: Close the open lane of ``kind`` before feeding this delta, so two
+    #: same-kind deltas materialize as separate blocks. An item-addressed
+    #: caller states its item/part boundary this way; the default merges a
+    #: run of same-kind deltas into one block.
+    close: bool = False
 
 
 #: Decides a tool call's block variant at open time from what the canonical
@@ -226,6 +231,8 @@ class _MediaLane:
     images: list[dict[str, Any]] = field(default_factory=list)
     audio_data: str = ""
     audio_transcript: str = ""
+    #: The chunk's inline MIME type; empty falls back to ``audio/wav``.
+    audio_media_type: str = ""
 
 
 def _build_reasoning_block(lane: _ReasoningLane) -> ThinkingBlock | RedactedThinkingBlock:
@@ -288,7 +295,7 @@ def _build_media_blocks(lane: _MediaLane) -> list[ContentBlock]:
                 source=AudioSource(
                     type="base64",
                     data=lane.audio_data,
-                    media_type="audio/wav",
+                    media_type=lane.audio_media_type or "audio/wav",
                     transcript=lane.audio_transcript or None,
                 )
             )
@@ -354,6 +361,8 @@ class SegmentAccumulator:
     def feed_delta(self, delta: CanonicalDelta) -> tuple[SegmentEvent, ...]:
         """Feed one pre-extracted delta (item-addressed callers use this)."""
         events: list[SegmentEvent] = []
+        if delta.close:
+            events.extend(self._close_kind(delta.kind))
         # A delta of one kind closes the other kinds' open lanes, in canonical
         # content order — the one eviction rule all the per-protocol machines
         # shared, now stated once. Media is the exception: every current
@@ -559,13 +568,19 @@ class SegmentAccumulator:
         if isinstance(audio, dict):
             audio_data = audio.get("data")
             audio_transcript = audio.get("transcript")
+            audio_media_type = audio.get("mime_type")
             audio_data = audio_data if isinstance(audio_data, str) else ""
             audio_transcript = audio_transcript if isinstance(audio_transcript, str) else ""
+            audio_media_type = audio_media_type if isinstance(audio_media_type, str) else ""
             if audio_data or audio_transcript:
                 fragments.append(
                     CanonicalDelta(
                         kind="media",
-                        payload={"audio_data": audio_data, "audio_transcript": audio_transcript},
+                        payload={
+                            "audio_data": audio_data,
+                            "audio_transcript": audio_transcript,
+                            "audio_media_type": audio_media_type,
+                        },
                     )
                 )
 
@@ -700,6 +715,8 @@ class SegmentAccumulator:
             lane.audio_data += payload["audio_data"]
         if isinstance(payload.get("audio_transcript"), str) and payload["audio_transcript"]:
             lane.audio_transcript += payload["audio_transcript"]
+        if isinstance(payload.get("audio_media_type"), str) and payload["audio_media_type"]:
+            lane.audio_media_type = payload["audio_media_type"]
         events.append(SegmentAppended(kind="media", index=self._index(), delta=delta))
         return events
 

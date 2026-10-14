@@ -24,6 +24,7 @@ from llm_proxy.models.content_blocks import (
     ToolUseBlock,
 )
 from llm_proxy.streaming.accumulation import (
+    CanonicalDelta,
     Coexistence,
     CursorPolicy,
     SegmentAccumulator,
@@ -523,3 +524,14 @@ def test_unknown_signature_origin_is_dropped() -> None:
         [{"reasoning_content": "hmm", "reasoning_signature": "sig", "signature_origin": "nope"}]
     )
     assert blocks == [ThinkingBlock(thinking="hmm", signature="sig", signature_origin=None)]
+
+
+def test_close_flag_splits_a_same_kind_run() -> None:
+    accumulator = SegmentAccumulator()
+    accumulator.feed_delta(CanonicalDelta(kind="text", text="one "))
+    accumulator.feed_delta(CanonicalDelta(kind="text", text="two "))
+    # Same-kind deltas merge into one block by default...
+    assert accumulator.blocks() == [TextBlock(text="one two ")]
+    # ...and a delta marked ``close`` states the boundary before it.
+    accumulator.feed_delta(CanonicalDelta(kind="text", text="three", close=True))
+    assert accumulator.blocks() == [TextBlock(text="one two "), TextBlock(text="three")]

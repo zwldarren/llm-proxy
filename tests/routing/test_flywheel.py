@@ -311,7 +311,7 @@ def test_train_and_gate_writes_only_when_it_wins(tmp_path: Path, monkeypatch: py
             ],
             verdict_tier=("SIMPLE", "MEDIUM", "COMPLEX")[i % 3],
         )
-        for i in range(120)
+        for i in range(240)
     ]
     out_model = tmp_path / "model_online.json"
     out_cal = tmp_path / "calibration.json"
@@ -324,9 +324,10 @@ def test_train_and_gate_writes_only_when_it_wins(tmp_path: Path, monkeypatch: py
         out_model=out_model,
         out_calibration=out_cal,
     )
-    # The toy problem is separable by construction, so the gate passes and both
-    # artifacts land.
-    assert report.examples == 120
+    # The toy problem is separable by construction and large enough that the
+    # trained model beats the shipped baseline on the disjoint holdout, so the
+    # gate passes and both artifacts land.
+    assert report.examples == 240
     assert report.gate_passed
     assert out_model.exists()
     assert out_cal.exists()

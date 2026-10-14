@@ -46,10 +46,14 @@ _RowBuilder = Callable[[dict[str, Any]], dict[str, Any] | None]
 
 
 async def _pages(fetch: _PageFetcher, build: _RowBuilder, *, limit: int) -> AsyncIterator[str]:
-    """Yield JSONL lines for ``limit`` rows, one page at a time.
+    """Yield JSONL lines one page at a time, fetching at most ``limit`` rows.
 
-    Paging stops early on a short page, so a caller asking for more rows than
-    exist pays one extra query rather than walking offsets to the cap.
+    ``limit`` bounds the rows *fetched*, not the lines yielded: a row the
+    builder drops (returns ``None``) is not replaced, so a call can return
+    fewer usable lines than ``limit``, and a ``since``-advance sweep recovers
+    the rest. Paging stops early on a short page, so a caller asking for more
+    rows than exist pays one extra query rather than walking offsets to the
+    cap.
     """
     fetched = 0
     while fetched < limit:
@@ -137,6 +141,10 @@ async def export_dataset(
     Streamed, so the document is never assembled in memory. Both corpora page
     in ascending time order, so a sweep advances by re-issuing with
     ``since`` set to the newest row it saw.
+
+    ``limit`` bounds the rows fetched per corpus, not the usable lines: a row
+    with no usable prompt is dropped rather than replaced, so the ``since``
+    sweep is what eventually exports the remainder.
     """
     repo = LogRepository(session)
     return StreamingResponse(

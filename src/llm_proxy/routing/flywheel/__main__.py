@@ -32,15 +32,25 @@ def _default_db_path() -> Path:
 
     from llm_proxy.database.db_config import DEFAULT_DB_PATH
 
+    database_url = os.environ.get("DATABASE_URL")
+    # Mirror get_db_url(): DATABASE_URL wins over LLM_PROXY_DB_PATH, and a
+    # sqlite DATABASE_URL carries the store path. Checking LLM_PROXY_DB_PATH
+    # first (as this once did) silently sampled the default database whenever
+    # both were set, or whenever a custom sqlite URL path was configured.
+    if database_url:
+        if not database_url.startswith("sqlite"):
+            raise SystemExit(
+                "--from-logs supports the SQLite log store only; "
+                f"DATABASE_URL is {database_url.split(':')[0]} — pass --db explicitly."
+            )
+        # ``sqlite+aiosqlite:///<path>`` / ``sqlite:///<path>``: the three
+        # slashes precede an absolute path.
+        path = database_url.split("///", 1)[-1]
+        if path:
+            return Path(path)
     override = os.environ.get("LLM_PROXY_DB_PATH")
     if override:
         return Path(override)
-    database_url = os.environ.get("DATABASE_URL")
-    if database_url and not database_url.startswith("sqlite"):
-        raise SystemExit(
-            "--from-logs supports the SQLite log store only; "
-            f"DATABASE_URL is {database_url.split(':')[0]} — pass --db explicitly."
-        )
     return DEFAULT_DB_PATH
 
 

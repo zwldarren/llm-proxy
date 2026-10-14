@@ -398,7 +398,11 @@ class LogRepository(BaseUsageRepository):
                 RequestLog.log_metadata,
             )
             .outerjoin(RequestLog, FeedbackRecord.request_id == RequestLog.request_id)
-            .order_by(FeedbackRecord.created_at)
+            # ``created_at`` is a float epoch and rows can tie (written in one
+            # flush); offset paging over a non-unique sort key is
+            # non-deterministic, so a tie straddling a page boundary can be
+            # dropped or duplicated. ``request_id`` pins each page.
+            .order_by(FeedbackRecord.created_at, FeedbackRecord.request_id)
             .limit(limit)
             .offset(offset)
         )
@@ -451,7 +455,14 @@ class LogRepository(BaseUsageRepository):
         )
         if since is not None:
             judge_stmt = judge_stmt.where(RequestLog.timestamp >= since)
-        judge_stmt = judge_stmt.order_by(RequestLog.timestamp).limit(limit).offset(offset)
+        # Same stable-page tiebreaker as ``get_feedback_dataset_rows``: a
+        # float timestamp can tie between sibling judge rows, and offset
+        # paging over a non-unique sort key can drop or duplicate a verdict.
+        judge_stmt = (
+            judge_stmt.order_by(RequestLog.timestamp, RequestLog.request_id)
+            .limit(limit)
+            .offset(offset)
+        )
         judge_result = await self.session.execute(judge_stmt)
         judge_rows = judge_result.all()
         if not judge_rows:

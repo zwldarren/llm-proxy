@@ -330,6 +330,9 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # The default policy fits: tool calls pool by provider index, the
         # item cursor is wire state, and tool variants classify structurally.
         self._segments = SegmentAccumulator()
+        # The last (output_index, content_index) fed to the engine as a
+        # text/reasoning delta; a change is a new canonical block boundary.
+        self._last_segment_key: tuple[int | None, int] | None = None
 
     def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
         """Accumulate one native Responses frame for the request log.
@@ -683,12 +686,17 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     )
                     self.state.content_types[key] = content_type
                     self.state.current_content_type = content_type
-                    # The engine assembles the canonical blocks (ADR-0031);
-                    # item-addressed callers state their deltas directly.
+                    # The engine assembles the canonical blocks (ADR-0031).
+                    # A change of (item, content part) is a new block: the
+                    # deleted state-dict rebuild keyed blocks by this pair, so
+                    # state the boundary and let same-part deltas keep merging.
+                    boundary = key != self._last_segment_key
+                    self._last_segment_key = key
                     self._segments.feed_delta(
                         CanonicalDelta(
                             kind="text" if content_type == "output_text" else "reasoning",
                             text=delta_text,
+                            close=boundary,
                         )
                     )
 
@@ -978,6 +986,16 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             "query": query,
             "queries": [query] if query else [],
         }
+
+    def flush_pending_accumulation(self) -> None:
+        """Close the engine's lanes when the stream ended before its terminal event.
+
+        Called before the log body is reassembled: a client abort or an
+        upstream cut ends the stream without a terminal event, and the
+        engine's tool and media lanes only materialize on ``finish()``.
+        Without this a completed tool call is missing from the log entirely.
+        """
+        self._segments.finish()
 
     def get_accumulated_output(self) -> list:
         """The canonical blocks, from the segment engine (ADR-0031).

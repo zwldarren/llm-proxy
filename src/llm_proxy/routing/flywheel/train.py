@@ -10,12 +10,15 @@ training code ever lived in this repo. This module adds it:
   system prompt), run through ``classifier._extract_all_features``;
 * the trainer is the classic multiclass averaged perceptron matching the
   ``model.json`` layout (``weights`` / ``avg_weights`` / ``update_count``);
-* evaluation is a seeded holdout, and the artifact is written ONLY when the
-  new model beats the shipped one on that holdout — a model that loses stays
-  unwritten. The output goes to the sanctioned hot-swap path
-  (``model_online.json``), never to the packaged asset;
+* evaluation is a seeded split: the best epoch is chosen on a validation slice
+  and the gate scores the untouched holdout, so selecting on the gate set
+  cannot inflate the result. The artifact is written ONLY when the new model
+  beats the shipped one on the holdout (or when no shipped model exists — the
+  report says which) — a model that loses stays unwritten. The output goes to
+  the sanctioned hot-swap path (``model_online.json``), never to the packaged
+  asset;
 * the Platt temperature is re-fit from (raw ensemble confidence, correct)
-  pairs on the same holdout, using the already-shipped grid search.
+  pairs on the holdout, using the already-shipped grid search.
 """
 
 import random
@@ -33,6 +36,7 @@ from llm_proxy.routing.learned import ScriptAgnosticClassifier
 from llm_proxy.routing.signal_tuning import (
     compact_structural_system_prompt,
     extract_closed_form_ask,
+    strip_client_wrapper_blocks,
 )
 from llm_proxy.routing.signals.structural import (
     _extract_latest_system_message,
@@ -65,7 +69,12 @@ def build_training_features(record: LabelRecord) -> dict[str, float] | None:
     system prompt is compacted the same way. Returns ``None`` when the record
     has no user text to learn from.
     """
-    text = _last_user_text(record.messages).strip()
+    raw_text = _last_user_text(record.messages)
+    # The serving path strips client-injected wrapper scaffolds before the
+    # closed-form-ask detection (see ``_extract_last_user_message``); mirror it
+    # so a log-sourced record builds the features the deployed model scores.
+    stripped = strip_client_wrapper_blocks(raw_text)
+    text = (stripped or raw_text).strip()
     if not text:
         return None
     classification_text = extract_closed_form_ask(text) or text
@@ -238,8 +247,9 @@ class TrainReport:
 
     examples: int = 0
     train_size: int = 0
+    validation_size: int = 0
     holdout_size: int = 0
-    per_epoch_holdout: list[float] = field(default_factory=list)
+    per_epoch_validation: list[float] = field(default_factory=list)
     best_epoch: int = 0
     new_holdout_accuracy: float | None = None
     shipped_holdout_accuracy: float | None = None
@@ -250,6 +260,7 @@ class TrainReport:
     label_verdict_counts: dict[str, int] = field(default_factory=dict)
     platt_temperature_new: float | None = None
     platt_temperature_shipped: float | None = None
+    no_baseline: bool = False
     gate_passed: bool = False
     model_written: str | None = None
     calibration_written: str | None = None
@@ -348,16 +359,24 @@ def train_and_gate(
     rng = random.Random(seed)
     rng.shuffle(examples)
     holdout_size = max(10, int(len(examples) * holdout_fraction))
-    holdout, train = examples[:holdout_size], examples[holdout_size:]
-    report.train_size, report.holdout_size = len(train), len(holdout)
+    holdout, train_pool = examples[:holdout_size], examples[holdout_size:]
+    # Carve a validation slice out of the training pool. The best epoch is
+    # chosen on it and the gate then scores the untouched holdout: taking the
+    # argmax of ``epochs`` holdout evaluations and gating on the same rows
+    # would bias the new model's accuracy upward against a baseline scored
+    # once, and could install an overfit-to-holdout model.
+    validation_size = min(max(5, int(len(train_pool) * 0.2)), len(train_pool) // 2)
+    validation, train = train_pool[:validation_size], train_pool[validation_size:]
+    report.train_size, report.validation_size = len(train), len(validation)
+    report.holdout_size = len(holdout)
 
     init = load_shipped_classifier() if warm_start else None
     trainer = AveragedPerceptronTrainer(init=init)
     best_accuracy, best_trainer = -1.0, trainer
     for epoch in range(1, epochs + 1):
         trainer.train_epoch(train, rng)
-        accuracy, _, _ = _holdout_accuracy(trainer.to_classifier(), holdout)
-        report.per_epoch_holdout.append(round(accuracy, 4))
+        accuracy, _, _ = _holdout_accuracy(trainer.to_classifier(), validation)
+        report.per_epoch_validation.append(round(accuracy, 4))
         if accuracy > best_accuracy:
             report.best_epoch = epoch
             best_accuracy, best_trainer = accuracy, _snapshot(trainer)
@@ -385,6 +404,7 @@ def train_and_gate(
         shipped_pairs = _platt_pairs(holdout, shipped)
         report.platt_temperature_shipped = fit_platt_from_evals(shipped_pairs).temperature
 
+    report.no_baseline = shipped_accuracy is None
     report.gate_passed = shipped_accuracy is None or new_accuracy > shipped_accuracy
     if report.gate_passed and out_model is not None:
         save_classifier(new_classifier, out_model)
@@ -419,9 +439,13 @@ def render_report(report: TrainReport) -> str:
     lines = ["# Flywheel training report", ""]
     lines.append(f"- Labeled records: {report.examples} usable ({report.label_verdict_counts})")
     lines.append(f"- Sources: {report.label_source_counts}")
-    lines.append(f"- Train/holdout: {report.train_size}/{report.holdout_size}")
     lines.append(
-        f"- Holdout accuracy per epoch: {report.per_epoch_holdout} (best epoch {report.best_epoch})"
+        f"- Train/validation/holdout: {report.train_size}/"
+        f"{report.validation_size}/{report.holdout_size}"
+    )
+    lines.append(
+        f"- Validation accuracy per epoch (best epoch {report.best_epoch}): "
+        f"{report.per_epoch_validation}"
     )
     lines.append(
         f"- NEW holdout accuracy: {_fmt(report.new_holdout_accuracy)} "
@@ -436,6 +460,8 @@ def render_report(report: TrainReport) -> str:
         f"- Platt temperature new/shipped: {report.platt_temperature_new} / "
         f"{report.platt_temperature_shipped}"
     )
+    if report.no_baseline:
+        lines.append("- No shipped baseline found: the gate passes without a comparison")
     lines.append(
         "- Gate: "
         + ("PASSED — artifact written" if report.gate_passed else "NOT PASSED — nothing written")

@@ -137,7 +137,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         # block) or the reverse (thinking suppressed after text).
         self._wire_open_kind: str | None = None
         # Why the wire-open block exists: ``engine`` — a segment lane backs
-        # it; ``orphan`` — the lane closed but the wire block lingers (the
+        # it; ``closed`` — the lane closed but the wire block lingers (the
         # stop is withheld until a visible boundary needs the slot, so a
         # reasoning tail after text does not split the client's text block);
         # ``wire_only`` — no lane ever backed it (estimated-tokens thinking,

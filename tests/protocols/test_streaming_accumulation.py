@@ -924,6 +924,39 @@ class TestOpenResponsesAccumulation:
         assert isinstance(accumulated[0], TextBlock)
         assert accumulated[0].text == "Hello world!"
 
+    def test_item_and_part_boundaries_split_text_blocks(self):
+        """Two items' (or parts') text log as distinct blocks, not one merge."""
+        from llm_proxy.models.content_blocks import TextBlock
+
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5.2", request_id="r1")
+        events = [
+            {
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "first ",
+            },
+            {
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "part",
+            },
+            {
+                "type": "response.output_text.delta",
+                "output_index": 1,
+                "content_index": 0,
+                "delta": "second",
+            },
+        ]
+        for event in events:
+            transformer._transform_responses_api_chunk(event)
+
+        assert transformer.get_accumulated_output() == [
+            TextBlock(text="first part"),
+            TextBlock(text="second"),
+        ]
+
     def test_response_completed_includes_reasoning_and_text_content(self):
         """Final response.completed event must retain reasoning and message content."""
         transformer = OpenResponsesStreamingTransformer(model="gpt-4", request_id="test-013")

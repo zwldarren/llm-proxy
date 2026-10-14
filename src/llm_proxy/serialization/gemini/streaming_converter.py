@@ -43,7 +43,6 @@ class GeminiStreamingTransformer(StreamingTransformer):
         self._chunk_index = 0
         self._text_buffer: str = ""
         self._tool_calls_buffer: list[dict[str, Any]] = []
-        self._reasoning_buffer: str = ""
         self._reasoning_signature_buffer: str = ""
         self._reasoning_signature_emitted: bool = False
         # Tool-call indices the converter has already emitted. Gemini numbers
@@ -141,6 +140,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
         reasoning_parts: list[str] = []
         image_parts: list[dict[str, Any]] = []
         audio_parts: list[str] = []
+        audio_mime: str = ""
 
         for part in parts:
             match part:
@@ -159,6 +159,7 @@ class GeminiStreamingTransformer(StreamingTransformer):
                     data = inline.get("data", "")
                     if data:
                         audio_parts.append(data)
+                        audio_mime = mime_type
                 case {"inlineData": inline}:
                     mime_type = inline.get("mime_type") or inline.get("mimeType") or "image/png"
                     data = inline.get("data", "")
@@ -204,7 +205,6 @@ class GeminiStreamingTransformer(StreamingTransformer):
 
         if reasoning_parts:
             delta["reasoning_content"] = "".join(reasoning_parts)
-            self._reasoning_buffer += "".join(reasoning_parts)
 
         # A Gemini thought part's ``thoughtSignature`` is integrity data the
         # client must be able to echo back; surface it as the canonical
@@ -235,6 +235,10 @@ class GeminiStreamingTransformer(StreamingTransformer):
             delta["audio"] = {
                 "id": f"audio_{self.response_id or self._chunk_index}",
                 "data": "".join(audio_parts),
+                # Engine bookkeeping: the segment engine stamps this on the
+                # logged AudioBlock; without it the block hardcodes
+                # ``audio/wav`` (ADR-0031). Popped before the client wire.
+                "mime_type": audio_mime or None,
             }
 
         if image_parts:
@@ -263,6 +267,14 @@ class GeminiStreamingTransformer(StreamingTransformer):
         self._tool_call_seq += len(tool_calls)
         if delta:
             self._segments.feed(delta)
+            # Engine bookkeeping rides the same delta but is not part of the
+            # OpenAI chunk dialect: ``signature_origin`` steers the block's
+            # origin and ``audio.mime_type`` the logged AudioBlock. Drop both
+            # before the chunk below embeds ``delta`` on the client wire.
+            delta.pop("signature_origin", None)
+            audio = delta.get("audio")
+            if isinstance(audio, dict):
+                audio.pop("mime_type", None)
         if (
             not delta
             and not finish_reason

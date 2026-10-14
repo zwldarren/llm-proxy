@@ -40,14 +40,28 @@ from llm_proxy.routing.types import RoutingFailureCode, RoutingInfeasibleError
 logger = get_logger(__name__)
 
 
-def _error_type_for_request(request: Request, error_type: str) -> str:
-    """Map the error type to the OpenResponses spec enum on OpenResponses paths.
+#: Anthropic names its 403/429 error types differently from the OpenAI
+#: envelope the routing handler selects them in. Anthropic SDKs key on the
+#: canonical spellings, so an Anthropic path gets those while the OpenAI
+#: envelope keeps ``forbidden``/``insufficient_quota``.
+_ANTHROPIC_ERROR_TYPE_ALIASES = {
+    "forbidden": "permission_error",
+    "insufficient_quota": "rate_limit_error",
+}
 
-    Shared with the streaming ``response.failed`` builder so HTTP error bodies
-    and streaming error events emit the same spec code for the same error.
+
+def _error_type_for_request(request: Request, error_type: str) -> str:
+    """Map the error type to the target protocol's enum.
+
+    OpenResponses paths get the Responses spec enum (shared with the streaming
+    ``response.failed`` builder so HTTP error bodies and streaming error events
+    emit the same spec code); Anthropic paths get the Anthropic type names.
+    Everything else passes through.
     """
     if is_openresponses_path(request.url.path):
         return openresponses_error_code(error_type)
+    if _is_anthropic_path(request.url.path):
+        return _ANTHROPIC_ERROR_TYPE_ALIASES.get(error_type, error_type)
     return error_type
 
 

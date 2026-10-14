@@ -385,7 +385,14 @@ def _row_closed_form_ask_text(row: dict[str, Any]) -> str | None:
     ask = extract_closed_form_ask(text)
     if ask is not None:
         return ask
-    return text if is_closed_form_ask(text) else None
+    # The "turn is itself a bounded selection question" shape only holds for a
+    # short question turn. Running the marker test over a long message would
+    # stand the substance/structural floors down on any pasted volume that
+    # merely mentions a marker, so long text qualifies only through the
+    # guarded ``extract_closed_form_ask`` above.
+    if len(text) <= DEFAULT_SIGNAL_TUNING.closed_form_ask_min_chars and is_closed_form_ask(text):
+        return text
+    return None
 
 
 def _row_has_structured_system_prompt(row: dict[str, Any]) -> bool:
