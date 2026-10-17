@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0](https://github.com/zwldarren/llm-proxy/compare/v0.4.1...v0.5.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** one key gate owns the auth sequence
+* **streaming:** one segment accumulator owns canonical block assembly
+
+### Features
+
+* **providers:** add OpenCode gateway adapters with per-model dialect routing ([24bb8cd](https://github.com/zwldarren/llm-proxy/commit/24bb8cdb822cb648c7eb6f5e8b80f2ec9e6e1a1a))
+* **routing:** a fallback ladder, a corpus export, a cost-quality readout ([e673eee](https://github.com/zwldarren/llm-proxy/commit/e673eeea249d4ea59a47e16761dbafb6078f5a95))
+* **routing:** warm experience store, ask-shaped classifier input, label flywheel ([e060776](https://github.com/zwldarren/llm-proxy/commit/e060776e2b2b45b9fee2579993bc70881b8f64e5))
+
+
+### Bug Fixes
+
+* address open-code-review findings from the routing/streaming/auth work ([552ff65](https://github.com/zwldarren/llm-proxy/commit/552ff6554530b66464b4bea94a058f00ccbcc400))
+
+
+### Code Refactoring
+
+* **auth:** one key gate owns the auth sequence ([76e1366](https://github.com/zwldarren/llm-proxy/commit/76e13667b4accbc380fbe44add61b8e4f4fde1d8))
+* **streaming:** one segment accumulator owns canonical block assembly ([1f63d74](https://github.com/zwldarren/llm-proxy/commit/1f63d740fec9cf73724392c830beb892d24a4cf0))
+
 ## [0.4.1](https://github.com/zwldarren/llm-proxy/compare/v0.4.0...v0.4.1) (2026-10-11)
 
 
