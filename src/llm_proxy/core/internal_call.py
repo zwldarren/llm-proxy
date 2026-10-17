@@ -132,6 +132,10 @@ def build_provider_adapter(
             # "interactions") — forwarded opaquely through AdapterConfig.extra;
             # only the Gemini adapter reads it.
             api_variant=provider_config.metadata.get("api_variant", "generate_content"),
+            # Location of the models.dev catalog the OpenCode adapter resolves
+            # per-model wire dialects from (empty disables it; heuristics then
+            # carry the routing). Forwarded opaquely; only that adapter reads it.
+            opencode_catalog_url=provider_config.metadata.get("opencode_catalog_url"),
             # App-attribution identity (OpenRouter's HTTP-Referer /
             # X-OpenRouter-Title). Forwarded opaquely; only adapters for
             # upstreams that track client apps read it.

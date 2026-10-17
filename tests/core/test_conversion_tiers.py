@@ -936,4 +936,6 @@ class TestDeclarationPartition:
             "qwen-intl",
             "vllm",
             "sglang",
+            "opencode-zen",
+            "opencode-go",
         }

@@ -13,7 +13,7 @@ and let fallback and priority decide who answers.
 | Field | Notes |
 | --- | --- |
 | **Name** | Unique identifier, referenced by model mappings. Not the vendor name — e.g. `openai-prod` |
-| **Type** | One of the 22 built-in adapter types (table below) |
+| **Type** | One of the 23 built-in adapter types (table below) |
 | **API key** | Required for most types; not required (and not used) by `ollama`, `vllm`, `sglang` |
 | **Base URL** | Pre-filled per type. **Required** for `openai-compatible`. Trailing slashes are trimmed |
 | **Icon URL** | Optional logo shown next to the provider in the console; must be a public URL (`https:`/`http:`) — private/loopback addresses are rejected by the SSRF guard |
@@ -58,6 +58,8 @@ variable makes stored keys undecryptable.
 | `chutes` | Chat Completions | `https://llm.chutes.ai/v1` |
 | `mistral` | Chat Completions | `https://api.mistral.ai/v1` |
 | `nanogpt` | Chat Completions | `https://nano-gpt.com/api/v1` |
+| `opencode-zen` | Per-model dialect: Chat Completions / Anthropic / Responses / Google / System One (see below) | `https://opencode.ai/zen/v1` |
+| `opencode-go` | Same gateway, subscription lane (own model catalog) | `https://opencode.ai/zen/go/v1` |
 
 **Native protocol** means the proxy can forward a request *verbatim* to that upstream
 when the client speaks the same protocol (Anthropic clients hitting a native-Anthropic
@@ -67,6 +69,39 @@ provider metadata `native_passthrough: true`.
 
 Cost reporting: `openrouter` and `nanogpt` return their own cost figures, which the
 proxy records instead of computing them from token prices.
+
+### OpenCode (`opencode-zen` / `opencode-go`)
+
+The OpenCode gateway fronts model families whose upstreams speak different wire
+protocols. Which dialect a request takes is a property of the **model**, resolved per
+request from, in order: a learned correction (below), the models.dev catalog (the
+OpenCode team's own per-model `provider.npm` data, fetched with a 6h TTL cache — new
+model families route correctly with no code change), then model-id prefix heuristics
+(Chat Completions by default). Claude models are served on Anthropic Messages, GPT/Grok
+on OpenAI Responses, Gemini on generateContent, Jev on System One (`/v1/systemone`
+endpoint only — chat requests for Jev models are rejected with a pointer there), and
+everything else on Chat Completions.
+
+- **Types = lanes**: `opencode-zen` is the Console pay-as-you-go lane
+  (`https://opencode.ai/zen/v1`), `opencode-go` the subscription lane
+  (`https://opencode.ai/zen/go/v1`) — the two lanes serve different model catalogs
+  (the same id can even speak a different dialect on each; the adapter reads the
+  lane's own models.dev entry). Both keep every dialect on one flat root under the
+  base URL. The Console lane's dialect-prefixed paths (`https://opencode.ai/inference/v1`)
+  are reachable by setting `base_url` to it.
+- **Headers**: `Authorization: Bearer` everywhere, plus the dialect's auth header where
+  the gateway reads one (`x-api-key` on the Anthropic route, `x-goog-api-key` on the
+  Google route). The OpenCode CLI's client-identity headers (`User-Agent: opencode/...`,
+  `x-opencode-client`, `x-opencode-project`, per-request `x-opencode-session` /
+  `x-opencode-request`) are sent by default — the free-tier models are rejected with
+  `403 FreeTierError` without them. Any of these can be replaced via **Custom headers**.
+- **Self-healing**: when the gateway rejects a model with a model-flavored 400/404, the
+  request is retried on the remaining dialects (Chat Completions first) and the working
+  dialect is remembered for the process lifetime.
+- **Model list**: the gateway's `/v1/models` answers with bare ids; display names,
+  context windows and pricing are enriched from the models.dev catalog. Set provider
+  metadata `opencode_catalog_url` to a mirror to pin the catalog, or to an empty value
+  to disable it (heuristics then carry the routing).
 
 ### OpenRouter specifics
 

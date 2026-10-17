@@ -19,6 +19,11 @@ and, usually, nothing else.
 
 Rows are deliberately wide: the differences between providers are the
 information, so they sit side by side instead of being buried in ten files.
+
+The OpenCode types (``opencode-zen`` / ``opencode-go``) are deliberately not
+rows: their endpoint choice is a per-model decision (ADR-0037), so the
+protocol→URL mapping these rows assert does not exist for them. Their facts
+live in ``tests/providers/opencode/``.
 """
 
 from dataclasses import dataclass
