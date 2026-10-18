@@ -7,6 +7,7 @@ provider side reuses the shared content parsers from
 ``llm_proxy.serialization.content_parsers``.
 """
 
+import logging
 from typing import Any
 
 import orjson
@@ -32,9 +33,12 @@ from llm_proxy.models import (
     ToolUseBlock,
 )
 from llm_proxy.models.tools import (
+    DEPRECATED_HOSTED_TOOL_TYPES,
+    HostedTool,
     ToolChoice,
     ToolChoiceFunction,
     ToolDefinition,
+    is_provider_hosted_tool_type,
 )
 from llm_proxy.models.tools.openai_builtin import WebSearchTool
 from llm_proxy.models.types import AudioSource
@@ -51,6 +55,8 @@ from llm_proxy.serialization.responses_toolkit import (
     parse_function_tool,
     read_tool_controls,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _interleave_reasoning_blocks(
@@ -572,6 +578,29 @@ class OpenAIParsingMixin:
                         max_uses=tool.get("max_uses"),
                     )
                 )
+            elif is_provider_hosted_tool_type(tool_type):
+                # Provider-hosted tools (google_search, x_search, web_extractor,
+                # retrieval, Kimi's builtin_function, ...) are executed by an
+                # upstream, so the proxy's job is to carry the declaration to a
+                # wire that understands it (``serialization.hosted_tools``) —
+                # not to drop it here, which is what used to happen silently.
+                if (reason := DEPRECATED_HOSTED_TOOL_TYPES.get(tool_type)) is not None:
+                    logger.warning(
+                        "Tool type %r is deprecated upstream: %s",
+                        tool_type,
+                        reason,
+                    )
+                result.append(HostedTool.from_wire(tool))
+            else:
+                # An unknown tool type reaches the model only if a provider
+                # dialect forwards it, so keep the declaration and say so
+                # instead of dropping it without a trace.
+                logger.warning(
+                    "Preserving unknown tool type %r verbatim; it is dropped "
+                    "unless the selected provider forwards it",
+                    tool_type,
+                )
+                result.append(HostedTool.from_wire(tool))
         return result if result else None
 
     def _parse_tool_choice(self, tool_choice: Any | None) -> Any:

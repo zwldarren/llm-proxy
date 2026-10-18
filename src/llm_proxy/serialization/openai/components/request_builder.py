@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 
 from llm_proxy.models import InternalRequest
 from llm_proxy.models.tools import ToolChoiceAllowedTools
+from llm_proxy.models.tools.openai_builtin import with_web_search_options
+from llm_proxy.serialization.hosted_tools import (
+    chat_search_dialect,
+    render_chat_native_tools,
+)
 from llm_proxy.serialization.openai.converter import format_conversation
 
 if TYPE_CHECKING:
@@ -92,9 +97,25 @@ class OpenAIRequestBuilder:
         body = self._build_stream_options(body, request)
         body = self._build_params(body, request)
         body = self._build_response_format(body, request)
-        body = self._build_tools(body, request, context)
+
+        # ``web_search_options`` is the OpenAI chat field for "please search".
+        # A provider whose chat wire has its own search shape speaks that shape
+        # instead (``serialization.hosted_tools``), so the option becomes the
+        # hosted tool here and the OpenAI-only field is dropped below — sending
+        # both would declare the search twice.
+        tools = request.tools
+        options = request.chat_web_search_options
+        native_search = bool(
+            options
+            and context.target_endpoint == "chat_completions"
+            and chat_search_dialect(context.provider_type) is not None
+        )
+        if native_search:
+            tools = with_web_search_options(tools, options)
+
+        body = self._build_tools(body, request, context, tools=tools)
         body = self._build_thinking(body, request, context)
-        body = self._build_openai_params(body, request, context)
+        body = self._build_openai_params(body, request, context, dialect_owns_search=native_search)
         body = self._build_extra(body, request, context)
         body = self.normalize_reasoning_for_request(body, context.base_url, model=body.get("model"))
 
@@ -184,9 +205,14 @@ class OpenAIRequestBuilder:
         return body
 
     def _build_tools(
-        self, body: dict[str, Any], request: InternalRequest, context: BuildContext
+        self,
+        body: dict[str, Any],
+        request: InternalRequest,
+        context: BuildContext,
+        tools: list[Any] | None = None,
     ) -> dict[str, Any]:
-        if not request.tools and not request.tool_choice:
+        tool_list = request.tools if tools is None else tools
+        if not tool_list and not request.tool_choice:
             return body
 
         from llm_proxy.serialization.openai.components.tools_handler import (
@@ -194,8 +220,8 @@ class OpenAIRequestBuilder:
         )
 
         handler = OpenAIToolsHandler()
-        if request.tools:
-            tools = list(request.tools)
+        if tool_list:
+            tool_list = list(tool_list)
             # Enforce the allowed_tools hard constraint: Chat Completions has no
             # allowed_tools concept, so the tool set is filtered to the allowed
             # subset and the mode is used as tool_choice.
@@ -206,8 +232,20 @@ class OpenAIRequestBuilder:
                     if isinstance(t, dict)
                 }
                 if allowed_names:
-                    tools = [t for t in tools if getattr(t, "name", None) in allowed_names]
-            body["tools"] = handler.build_tools(tools, target_endpoint=context.target_endpoint)
+                    tool_list = [t for t in tool_list if getattr(t, "name", None) in allowed_names]
+            # Hosted tools run on the upstream, so they are rendered in that
+            # provider's own dialect instead of being handed to the handler
+            # (which only speaks functions / custom tools).
+            native_entries: list[dict[str, Any]] = []
+            if context.target_endpoint == "chat_completions":
+                tool_list, native_entries, search_body = render_chat_native_tools(
+                    tool_list, context.provider_type
+                )
+                body.update(search_body)
+            built = handler.build_tools(tool_list, target_endpoint=context.target_endpoint)
+            built = [*(built or []), *native_entries]
+            if built:
+                body["tools"] = built
         if request.tool_choice:
             body["tool_choice"] = handler.build_tool_choice(
                 request.tool_choice, target_endpoint=context.target_endpoint
@@ -259,10 +297,23 @@ class OpenAIRequestBuilder:
 
     @staticmethod
     def _build_openai_params(
-        body: dict[str, Any], request: InternalRequest, context: BuildContext
+        body: dict[str, Any],
+        request: InternalRequest,
+        context: BuildContext,
+        dialect_owns_search: bool = False,
     ) -> dict[str, Any]:
+        """Copy the OpenAI-specific params onto the body.
+
+        ``dialect_owns_search`` is the request builder's already-made decision
+        that the provider's chat dialect renders the search itself (as a tools
+        entry or body object); when true — or when a body-level ``web_search``
+        object is already present — the ``web_search_options`` chat field is
+        skipped, because a second declaration would make the upstream
+        arbitrate between two competing search requests.
+        """
         op = request.params.openai
         if op is not None:
+            search_rendered = dialect_owns_search or "web_search" in body
             for attr in (
                 "service_tier",
                 "verbosity",
@@ -279,6 +330,8 @@ class OpenAIRequestBuilder:
                 "parallel_tool_calls",
                 "logit_bias",
             ):
+                if attr == "web_search_options" and search_rendered:
+                    continue
                 val = getattr(op, attr, None)
                 if val is not None:
                     body[attr] = val
@@ -322,6 +375,18 @@ class OpenAIRequestBuilder:
                 logger.debug(
                     "Dropping Responses-API-only extra keys %r from Chat Completions request body",
                     dropped,
+                )
+            preserved_tools = request.extra.get("responses_tools")
+            if preserved_tools:
+                # The one dropped key an operator can act on: the client
+                # declared tools (mcp, computer use, image generation, ...) that
+                # this Chat Completions upstream will never see. The generic
+                # debug line above stays quiet-by-default; this names the loss.
+                logger.warning(
+                    "Dropping Responses-API-only tools %r preserved from the "
+                    "/v1/responses request; the Chat Completions wire has no "
+                    "equivalent for them",
+                    [t.get("type") for t in preserved_tools if isinstance(t, dict)],
                 )
             reasoning_object = context.reasoning_object
             body.update(

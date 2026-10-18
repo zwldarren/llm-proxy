@@ -6,8 +6,14 @@ from llm_proxy.models import (
     Message,
     TextBlock,
 )
-from llm_proxy.models.params import GenerationParams
-from llm_proxy.models.tools import OpenAIToolSearchTool, OpenAIWebSearchTool
+from llm_proxy.models.params import GenerationParams, OpenAISpecificParams
+from llm_proxy.models.tools import (
+    AnthropicWebSearchTool,
+    FunctionTool,
+    OpenAIToolSearchTool,
+    OpenAIWebSearchTool,
+    UserLocation,
+)
 from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
 
 
@@ -60,6 +66,108 @@ class TestOpenAIWebSearchToolSerialization:
         body = self._serializer.build_provider_request(request)
 
         assert body["tools"][0] == {"type": "web_search"}
+
+
+class TestAnthropicWebSearchToolSerialization:
+    """A Messages-protocol client's hosted search must not vanish here.
+
+    Regression: ``_build_tools`` matched only ``OpenAIWebSearchTool``, so a
+    Claude Code client (``web_search_20250305``) routed to an OpenAI model lost
+    web search entirely — the built body carried no ``tools`` key at all.
+    """
+
+    _serializer = OpenAIResponsesProviderSerializer()
+
+    def test_anthropic_web_search_becomes_the_responses_hosted_tool(self):
+        request = InternalRequest(
+            model="gpt-5.6",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="search")])]
+            ),
+            params=GenerationParams(),
+            tools=[
+                AnthropicWebSearchTool(
+                    allowed_domains=["good.example"],
+                    blocked_domains=["bad.example"],
+                    user_location=UserLocation(country="US", city="New York"),
+                )
+            ],
+        )
+
+        body = self._serializer.build_provider_request(request)
+
+        assert body["tools"] == [
+            {
+                "type": "web_search",
+                "filters": {
+                    "allowed_domains": ["good.example"],
+                    "blocked_domains": ["bad.example"],
+                },
+                "user_location": {"type": "approximate", "country": "US", "city": "New York"},
+            }
+        ]
+
+    def test_max_uses_has_no_responses_equivalent(self):
+        request = InternalRequest(
+            model="gpt-5.6",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="search")])]
+            ),
+            params=GenerationParams(),
+            tools=[AnthropicWebSearchTool(max_uses=3, response_inclusion="excluded")],
+        )
+
+        body = self._serializer.build_provider_request(request)
+
+        assert body["tools"] == [{"type": "web_search"}]
+
+
+class TestWebSearchOptionsTranslation:
+    """``web_search_options`` is a Chat Completions field; this wire is Responses.
+
+    Regression: the option was dropped with the rest of the unknown Chat
+    Completions fields, so a client asking for web search reached OpenAI with no
+    search at all whenever the proxy had no interceptor of its own to fall back
+    on (``WebSearchStage`` only translates while an interceptor exists).
+    """
+
+    _serializer = OpenAIResponsesProviderSerializer()
+
+    def _request(self, **params):
+        return InternalRequest(
+            model="gpt-5.6",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="search")])]
+            ),
+            params=GenerationParams(
+                openai=OpenAISpecificParams(web_search_options=params.get("options"))
+            ),
+        )
+
+    def test_options_dict_becomes_a_hosted_tool(self):
+        body = self._serializer.build_provider_request(
+            self._request(options={"search_context_size": "low"})
+        )
+
+        assert body["tools"] == [{"type": "web_search", "search_context_size": "low"}]
+
+    def test_bare_true_uses_defaults(self):
+        body = self._serializer.build_provider_request(self._request(options=True))
+
+        assert body["tools"] == [{"type": "web_search"}]
+
+    def test_interception_bridge_is_not_duplicated(self):
+        """The proxy's own ``web_search`` function tool means search is owned
+        by the interceptor; adding the hosted tool back would search upstream too."""
+        request = self._request(options={"search_context_size": "low"})
+        request.tools = [
+            FunctionTool(name="web_search", parameters={"type": "object", "properties": {}})
+        ]
+
+        body = self._serializer.build_provider_request(request)
+
+        assert body["tools"] == [body["tools"][0]]
+        assert body["tools"][0]["type"] == "function"
 
 
 class TestOpenAIToolSearchToolSerialization:

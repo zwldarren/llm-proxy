@@ -33,6 +33,7 @@ from llm_proxy.models.tools import (
     OpenAIWebSearchTool,
     WebSearchTool,
     is_web_search_tool_name,
+    is_web_search_tool_type,
 )
 from llm_proxy.observability.log_intake import WebSearchLogEntry, record_web_search
 from llm_proxy.observability.logger import get_logger
@@ -41,15 +42,6 @@ from llm_proxy.observability.types import WebSearchStatus
 from .provider import WebSearchExecutionResult, WebSearchProvider, WebSearchToolConfig
 
 logger = get_logger(__name__)
-
-
-def _is_web_search_tool_type(tool_type: str) -> bool:
-    """Check if a tool type string corresponds to web search.
-
-    Handles both Anthropic-style (web_search_20250305) and
-    OpenAI-style (web_search, web_search_preview) type values.
-    """
-    return isinstance(tool_type, str) and tool_type.startswith("web_search")
 
 
 class WebSearchInterceptor:
@@ -113,7 +105,7 @@ class WebSearchInterceptor:
 
             if isinstance(tool, dict):
                 tool_type = tool.get("type", "")
-                if _is_web_search_tool_type(tool_type):
+                if is_web_search_tool_type(tool_type):
                     return True
 
         return False
@@ -183,7 +175,7 @@ class WebSearchInterceptor:
 
             if isinstance(tool, dict):
                 tool_type = tool.get("type", "")
-                if _is_web_search_tool_type(tool_type):
+                if is_web_search_tool_type(tool_type):
                     # Extract allowed/blocked domains from both top-level and filters wrapper
                     allowed_domains = tool.get("allowed_domains")
                     blocked_domains = tool.get("blocked_domains")
@@ -228,7 +220,7 @@ class WebSearchInterceptor:
                 continue
             if isinstance(tool, dict):
                 tool_type = tool.get("type", "")
-                if _is_web_search_tool_type(tool_type):
+                if is_web_search_tool_type(tool_type):
                     continue
             filtered.append(tool)
 

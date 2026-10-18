@@ -17,6 +17,7 @@ from llm_proxy.models import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from llm_proxy.models.params import OpenAISpecificParams
 from llm_proxy.models.tools import CustomTool, FunctionTool
 from llm_proxy.protocols.anthropic.serializer import AnthropicProtocolSerializer
 from llm_proxy.serialization.anthropic.serializer import AnthropicProviderSerializer
@@ -785,6 +786,70 @@ def test_build_tools_with_web_search_tool(serializer):
     assert "tools" in body
     assert len(body["tools"]) == 1
     assert body["tools"][0] == {"type": "web_search_20250305", "name": "web_search"}
+
+
+def test_build_tools_bridges_openai_web_search(serializer):
+    """A Responses-protocol client's hosted search reaches the Messages wire.
+
+    Regression: ``_build_tools`` matched only the Anthropic ``WebSearchTool``,
+    so ``{"type": "web_search"}`` from a Codex-style client was dropped without
+    a warning — an Anthropic upstream that executes the tool server-side never
+    saw the declaration.
+    """
+    from llm_proxy.models.tools import OpenAIWebSearchTool
+
+    request = InternalRequest(
+        model="claude-opus-4-7",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="Search for news")])]
+        ),
+        params=GenerationParams(max_tokens=1024),
+        tools=[
+            OpenAIWebSearchTool(
+                max_uses=4,
+                allowed_domains=["good.example"],
+                blocked_domains=["bad.example"],
+                search_context_size="high",
+                user_location={"type": "approximate", "country": "US"},
+            )
+        ],
+    )
+    body = serializer.build_provider_request(request)
+
+    assert body["tools"] == [
+        {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 4,
+            "allowed_domains": ["good.example"],
+            "blocked_domains": ["bad.example"],
+            "user_location": {"type": "approximate", "country": "US"},
+        }
+    ]
+
+
+def test_web_search_options_skipped_when_interceptor_bridged_the_tool(serializer):
+    """Proxy-side interception owns the search: a function tool named
+    ``web_search`` must not also get the hosted tool added back (that would let
+    the upstream search a second time)."""
+    from llm_proxy.models.tools import FunctionTool
+
+    request = InternalRequest(
+        model="claude-opus-4-7",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="Search")])]
+        ),
+        params=GenerationParams(
+            max_tokens=1024,
+            openai=OpenAISpecificParams(web_search_options={"search_context_size": "low"}),
+        ),
+        tools=[FunctionTool(name="web_search", parameters={"type": "object", "properties": {}})],
+    )
+    body = serializer.build_provider_request(request)
+
+    assert len(body["tools"]) == 1
+    assert body["tools"][0]["name"] == "web_search"
+    assert "input_schema" in body["tools"][0]
 
 
 def test_build_tools_with_dict_passthrough(serializer):

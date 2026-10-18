@@ -3,7 +3,7 @@
 import logging
 
 from llm_proxy.models import CustomTool, FunctionTool
-from llm_proxy.models.tools import OpenAIToolSearchTool, OpenAIWebSearchTool
+from llm_proxy.models.tools import HostedTool, OpenAIToolSearchTool, OpenAIWebSearchTool
 from llm_proxy.protocols.openresponses.serializer import extract_custom_tool_names
 from llm_proxy.protocols.openresponses.tool_converter import convert_responses_tools
 from llm_proxy.serialization.responses_toolkit.namespace import restore_tool_name
@@ -32,6 +32,17 @@ class TestConvertResponsesTools:
         tools, _, preserved = convert_responses_tools([{"type": "web_search"}])
         assert isinstance(tools[0], OpenAIWebSearchTool)
         assert preserved == []
+
+    def test_dated_web_search_variant_converted(self, caplog):
+        """DeepSeek accepts ``web_search_2025_08_26``: the same hosted tool, so
+        it must reach the interceptor like ``web_search`` instead of falling
+        into the preserved/unknown branch (which only native OpenAI forwards)."""
+        with caplog.at_level(logging.WARNING):
+            tools, _, preserved = convert_responses_tools([{"type": "web_search_2025_08_26"}])
+        assert len(tools) == 1 and isinstance(tools[0], OpenAIWebSearchTool)
+        assert tools[0].type == "web_search_2025_08_26"
+        assert preserved == []
+        assert [record for record in caplog.records if record.levelno >= logging.WARNING] == []
 
     def test_custom_converted(self):
         tools, _, preserved = convert_responses_tools(
@@ -198,3 +209,35 @@ class TestConvertResponsesTools:
         tools, _, preserved = convert_responses_tools(raw)
         assert len(tools) == 1 and isinstance(tools[0], FunctionTool)
         assert preserved == [raw[1]]
+
+    def test_provider_hosted_tools_become_hosted_tool(self):
+        """``google_search`` / ``x_search`` / ``web_extractor`` are executed by an
+        upstream, so they leave the raw-dict carrier (which only a native
+        Responses wire forwards) and reach the dialect tables instead."""
+        raw = [
+            {"type": "google_search"},
+            {"type": "x_search", "allowed_x_handles": ["x"]},
+            {"type": "web_extractor"},
+            {"type": "retrieval", "retrieval": {"knowledge_id": "k1"}},
+        ]
+        tools, _, preserved = convert_responses_tools(raw)
+
+        assert preserved == []
+        assert [t.type for t in tools if isinstance(t, HostedTool)] == [
+            "google_search",
+            "x_search",
+            "web_extractor",
+            "retrieval",
+        ]
+        x_search = next(t for t in tools if getattr(t, "type", None) == "x_search")
+        assert x_search.params == {"allowed_x_handles": ["x"]}
+
+    def test_deprecated_builtin_function_preserved_with_warning(self, caplog):
+        raw = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
+        with caplog.at_level(logging.WARNING):
+            tools, _, preserved = convert_responses_tools(raw)
+
+        assert preserved == []
+        assert isinstance(tools[0], HostedTool)
+        assert tools[0].params == {"function": {"name": "$web_search"}}
+        assert any("deprecated" in record.message for record in caplog.records)

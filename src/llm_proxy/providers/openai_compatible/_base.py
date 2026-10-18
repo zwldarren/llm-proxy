@@ -366,6 +366,19 @@ class OpenAICompatibleBase(
         # Reasoning-echo models (DeepSeek-style) stay on the converted path:
         # the streaming transformer's accumulation feeds the reasoning cache
         # that ``_enforce_reasoning_echo`` reads when building the next turn.
+        #
+        # Chat Completions-only rationale: the echo guarantee is a property of
+        # the body this family *rebuilds* (``_build_request_body``). A native
+        # Anthropic Messages / Responses body forwards the client's own
+        # reasoning blocks and never passes through ``_enforce_reasoning_echo``,
+        # while the native tier already caches reasoning from the terminal
+        # snapshot (``maybe_capture_native_openresponses``) or the accumulated
+        # frames (``_cache_accumulated_reasoning``). Vetoing those protocols
+        # too would strand the request side on a native body while the stream
+        # took the converted path — and the converted path posts that body to
+        # the Chat Completions endpoint.
+        if request.protocol_name != "openai":
+            return False
         return self._requires_reasoning_echo(request)
 
     async def stream_chat_completion_native(

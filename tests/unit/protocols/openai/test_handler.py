@@ -1330,3 +1330,64 @@ class TestOpenAIStreamingInterleavedThinking:
         assert len(thinking) == 1
         assert thinking[0].thinking == ""
         assert thinking[0].signature == "SIG"
+
+
+class TestChatToolIntake:
+    """Provider-hosted tool declarations survive the Chat Completions intake.
+
+    Regression: ``_parse_tools`` had no ``else`` branch, so any tool type it did
+    not model (``google_search``, ``x_search``, ``web_extractor``, Z.ai's
+    ``retrieval``, Kimi's ``builtin_function``) vanished without a trace — the
+    request reached the upstream with no tools at all and no log line.
+    """
+
+    @staticmethod
+    def _parse(tools):
+        ChatRequest = openai_protocol.request_model
+        request = ChatRequest(
+            model="gpt-4", messages=[{"role": "user", "content": "hi"}], tools=tools
+        )
+        return _openai_serializer.parse_request(request.model_dump(exclude_none=True))
+
+    def test_provider_hosted_types_are_preserved(self):
+        from llm_proxy.models.tools import HostedTool
+
+        unified = self._parse(
+            [
+                {"type": "google_search"},
+                {"type": "x_search", "allowed_x_handles": ["x"]},
+                {"type": "web_extractor"},
+                {"type": "retrieval", "retrieval": {"knowledge_id": "k1"}},
+            ]
+        )
+
+        assert [t.type for t in unified.tools] == [
+            "google_search",
+            "x_search",
+            "web_extractor",
+            "retrieval",
+        ]
+        assert all(isinstance(t, HostedTool) for t in unified.tools)
+        assert unified.tools[1].params == {"allowed_x_handles": ["x"]}
+
+    def test_zai_subobject_is_kept_verbatim(self, caplog):
+        """The Z.ai shape reuses ``type: web_search`` but carries its own object."""
+        unified = self._parse(
+            [{"type": "web_search", "web_search": {"search_engine": "search_std"}}]
+        )
+
+        tool = unified.tools[0]
+        assert tool.type == "web_search"
+        assert tool.search_context_size is None
+
+    def test_unknown_type_is_preserved_with_warning(self, caplog):
+        import logging
+
+        from llm_proxy.models.tools import HostedTool
+
+        with caplog.at_level(logging.WARNING):
+            unified = self._parse([{"type": "some_future_tool", "foo": "bar"}])
+
+        assert isinstance(unified.tools[0], HostedTool)
+        assert unified.tools[0].params == {"foo": "bar"}
+        assert any("some_future_tool" in record.message for record in caplog.records)

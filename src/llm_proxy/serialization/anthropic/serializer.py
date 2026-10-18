@@ -45,8 +45,10 @@ from llm_proxy.models.tools import (
     CodeExecutionTool,
     CustomTool,
     FunctionTool,
+    HostedTool,
     MemoryTool,
     OpenAIToolSearchTool,
+    OpenAIWebSearchTool,
     TextEditorTool,
     ToolChoice,
     ToolChoiceAllowedTools,
@@ -57,6 +59,7 @@ from llm_proxy.models.tools import (
     UserLocation,
     WebFetchTool,
     WebSearchTool,
+    declares_web_search_tool,
 )
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import (
@@ -65,6 +68,7 @@ from llm_proxy.serialization.anthropic import (
 )
 from llm_proxy.serialization.anthropic.streaming_converter import AnthropicChunkConverter
 from llm_proxy.serialization.context import BuildContext
+from llm_proxy.serialization.hosted_tools import openai_web_search_to_anthropic
 from llm_proxy.serialization.providers.base import ProviderSerializer
 from llm_proxy.serialization.providers.registry import register_provider_serializer
 from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
@@ -552,10 +556,14 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
         if (
             request.params.openai
             and request.params.openai.web_search_options
-            and not any(isinstance(t, WebSearchTool) for t in tools)
+            and not declares_web_search_tool(tools)
         ):
             # Map OpenAI web_search_options to Anthropic WebSearchTool fields.
             # search_context_size is OpenAI-specific and has no Anthropic equivalent.
+            # ``declares_web_search_tool`` also covers the proxy's own
+            # interception bridge (a ``web_search`` function tool): when the
+            # proxy executes the search, adding the hosted tool back would make
+            # the upstream search too.
             wso = request.params.openai.web_search_options
             user_location = self._extract_user_location(wso)
             tools.append(
@@ -823,6 +831,10 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                         tool_def["user_location"]["timezone"] = tool.user_location.timezone
                 self._add_common_tool_fields(tool_def, tool)
                 result.append(tool_def)
+            elif isinstance(tool, OpenAIWebSearchTool):
+                tool_def = openai_web_search_to_anthropic(tool)
+                self._add_common_tool_fields(tool_def, tool)
+                result.append(tool_def)
             elif isinstance(tool, WebFetchTool):
                 tool_def = {
                     "type": tool.type,
@@ -892,18 +904,34 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                 result.append(tool_def)
             elif isinstance(tool, dict):
                 result.append(tool)
+            elif isinstance(tool, HostedTool):
+                # A hosted tool the Messages wire has no server-tool model for
+                # (google_search, x_search, web_extractor, ...). Forwarding it
+                # would reach Anthropic as an unknown tool type, so name it and
+                # drop it instead of leaving a silent hole in the tool list.
+                logger.warning(
+                    "Dropping hosted tool %r for Anthropic provider: no Messages "
+                    "server-tool equivalent",
+                    tool.type,
+                )
         return result
 
     def _add_common_tool_fields(self, tool_def: dict[str, Any], tool: Any) -> None:
         """Add common tool fields that are shared across multiple tool types.
 
-        Fields: allowed_callers, defer_loading, strict, cache_control
+        Fields: allowed_callers, defer_loading, strict, cache_control.
+
+        Read through ``getattr``: the OpenAI built-in tool classes carry none of
+        them (``ToolDefinition`` declares only ``name``), and a hosted
+        ``web_search`` bridged onto the Anthropic shape must not crash here.
         """
-        if tool.allowed_callers:
-            tool_def["allowed_callers"] = tool.allowed_callers
-        if tool.defer_loading is not None:
-            tool_def["defer_loading"] = tool.defer_loading
-        if tool.strict:
+        allowed_callers = getattr(tool, "allowed_callers", None)
+        if allowed_callers:
+            tool_def["allowed_callers"] = allowed_callers
+        defer_loading = getattr(tool, "defer_loading", None)
+        if defer_loading is not None:
+            tool_def["defer_loading"] = defer_loading
+        if getattr(tool, "strict", None):
             tool_def["strict"] = True
         cache_control = getattr(tool, "cache_control", None)
         if cache_control:

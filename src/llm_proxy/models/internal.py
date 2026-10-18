@@ -187,6 +187,19 @@ class InternalRequest:
         """
         return self.user_facing_model or self.model
 
+    @property
+    def chat_web_search_options(self) -> dict[str, Any] | None:
+        """``params.openai.web_search_options`` — the Chat Completions search signal.
+
+        ``None`` unless the client (or an override) set it. Serializers that
+        speak a wire without such a field read this single accessor to
+        translate the intent into that wire's hosted search shape
+        (``serialization.hosted_tools``), instead of each re-navigating the
+        optional ``params.openai`` chain.
+        """
+        openai_params = self.params.openai
+        return openai_params.web_search_options if openai_params is not None else None
+
 
 @dataclass
 class InternalResponse:

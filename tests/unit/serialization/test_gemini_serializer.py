@@ -17,6 +17,7 @@ from llm_proxy.models import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from llm_proxy.models.params import OpenAISpecificParams
 from llm_proxy.models.tools import FunctionTool
 from llm_proxy.serialization.gemini.serializer import GeminiProviderSerializer
 
@@ -399,6 +400,49 @@ def test_build_provider_request_with_mixed_tools(serializer):
     assert body["tools"][0]["google_search"] == {}
     assert "function_declarations" in body["tools"][0]
     assert body["tools"][0]["function_declarations"][0]["name"] == "calculator"
+
+
+def test_build_provider_request_web_search_options_become_google_search(serializer):
+    """A chat client's ``web_search_options`` must still ground on Gemini.
+
+    Regression: the option is a Chat Completions field with no
+    ``generateContent`` equivalent and was dropped with the other unknown
+    fields, so ``web_search_options``-style requests reached Gemini with no
+    grounding whenever the proxy had no interceptor of its own.
+    """
+    request = InternalRequest(
+        model="gemini-2.0-flash",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="latest news")])]
+        ),
+        params=GenerationParams(
+            openai=OpenAISpecificParams(web_search_options={"search_context_size": "low"})
+        ),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    assert body["tools"] == [{"google_search": {}}]
+
+
+def test_web_search_options_ignored_when_a_search_tool_is_declared(serializer):
+    from llm_proxy.models.tools import FunctionTool as Fn
+
+    request = InternalRequest(
+        model="gemini-2.0-flash",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="latest news")])]
+        ),
+        params=GenerationParams(
+            openai=OpenAISpecificParams(web_search_options={"search_context_size": "low"})
+        ),
+        tools=[Fn(name="web_search", parameters={"type": "object", "properties": {}})],
+    )
+
+    body = serializer.build_provider_request(request)
+
+    assert "google_search" not in body["tools"][0]
+    assert body["tools"][0]["function_declarations"][0]["name"] == "web_search"
 
 
 def test_build_provider_request_with_image(serializer):

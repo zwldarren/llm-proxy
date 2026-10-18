@@ -103,6 +103,21 @@ class TestNativeStreamingGate:
         plan = plan_conversion(_adapter(), _request("deepseek-reasoner"))
         assert plan.stream_mode == ConversionTier.FULL_CONVERSION
 
+    def test_reasoning_echo_veto_is_chat_only(self) -> None:
+        """The echo guarantee covers the rebuilt Chat Completions body only.
+
+        A native Anthropic/Responses body forwards the client's own reasoning
+        blocks and never runs ``_enforce_reasoning_echo``, so vetoing those
+        streams would only split the request and stream tiers apart.
+        """
+        adapter = _adapter()
+        req = _request("deepseek-reasoner")
+        assert adapter.native_streaming_veto(req) is True
+        req.protocol_name = "openresponses"
+        assert adapter.native_streaming_veto(req) is False
+        req.protocol_name = "anthropic"
+        assert adapter.native_streaming_veto(req) is False
+
     def test_plan_converted_when_disabled(self) -> None:
         req = _request("glm-5")
         req.native_request_disabled = True

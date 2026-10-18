@@ -143,3 +143,45 @@ def is_web_search_tool_name(name: str) -> bool:
         True if the name refers to a web search tool
     """
     return name.lower().replace("_", "").replace("-", "") == "websearch"
+
+
+def is_web_search_tool_type(tool_type: Any) -> bool:
+    """Check if a wire ``tools[].type`` names the hosted web-search tool.
+
+    The single home of the rule: besides Anthropic's ``web_search_20250305``
+    family and OpenAI's ``web_search`` / ``web_search_preview`` pair, providers
+    ship dated spellings of the same hosted tool (DeepSeek:
+    ``web_search_2025_08_26``), so the match is on the ``web_search`` prefix.
+    Used by the OpenResponses tool converter, the web-search interceptor and
+    :func:`declares_web_search_tool`.
+    """
+    return isinstance(tool_type, str) and tool_type.startswith("web_search")
+
+
+def declares_web_search_tool(tools: Any) -> bool:
+    """Whether ``tools`` already declares a web-search tool.
+
+    Covers every shape that means "search is already spoken for": both
+    families' hosted declarations (``web_search`` / ``web_search_preview`` /
+    ``web_search_20250305``) and a plain *function* tool named ``web_search`` —
+    the proxy's interception bridge, or a client that runs the search itself.
+    A request carrying one of these must not have a second one added by a
+    serializer (that would either double-search or fight the interceptor).
+    """
+    for tool in tools or ():
+        if isinstance(tool, dict):
+            if is_web_search_tool_type(tool.get("type")):
+                return True
+            function = tool.get("function")
+            name = (
+                tool.get("name")
+                if tool.get("name")
+                else function.get("name")
+                if isinstance(function, dict)
+                else None
+            )
+        else:
+            name = getattr(tool, "name", None)
+        if is_web_search_tool_name(str(name or "")):
+            return True
+    return False

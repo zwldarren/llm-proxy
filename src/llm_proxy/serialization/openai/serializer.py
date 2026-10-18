@@ -32,7 +32,9 @@ from llm_proxy.models import (
     ToolUseBlock,
 )
 from llm_proxy.models.tools import (
+    AnthropicWebSearchTool,
     FunctionTool,
+    HostedTool,
     OpenAIToolSearchTool,
     OpenAIWebSearchTool,
     ToolChoice,
@@ -41,10 +43,18 @@ from llm_proxy.models.tools import (
     ToolChoiceFunction,
     ToolChoiceNamed,
 )
+from llm_proxy.models.tools.openai_builtin import (
+    normalized_user_location,
+    with_web_search_options,
+)
 from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.serialization.context import BuildContext
+from llm_proxy.serialization.hosted_tools import (
+    anthropic_web_search_to_openai,
+    responses_hosted_type_supported,
+)
 from llm_proxy.serialization.openai.converter import (
     _assistant_message_to_openai,
     _effective_role_for_provider,
@@ -221,8 +231,15 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
         # response_format -> Responses API ``text.format`` (Structured Outputs).
         self._apply_response_format(body, request.params.response_format)
 
-        if request.tools:
-            tools_list = self._build_tools(request.tools, context)
+        # ``web_search_options`` is a Chat Completions field with no Responses
+        # equivalent; the hosted tool it stands for is what this wire protocol
+        # consumes (see ``with_web_search_options``).
+        tools_for_body = with_web_search_options(
+            request.tools,
+            request.chat_web_search_options,
+        )
+        if tools_for_body:
+            tools_list = self._build_tools(tools_for_body, context)
             if tools_list:
                 body["tools"] = tools_list
         # Merge Responses-API-only tools (file_search, code_interpreter,
@@ -633,7 +650,7 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
         return reasoning if reasoning else None
 
     def _build_tools(
-        self, tools: list, _context: BuildContext | None = None
+        self, tools: list, context: BuildContext | None = None
     ) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for tool in tools:
@@ -654,7 +671,9 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             elif isinstance(tool, OpenAIWebSearchTool):
                 # Preserve the client's requested tool type. Newer controls
                 # (filters, external_web_access, return_token_budget,
-                # image_settings) are only valid on ``web_search``;
+                # image_settings) are only valid on ``web_search``; the dated
+                # spellings providers ship (DeepSeek's
+                # ``web_search_2025_08_26``) are the same modern tool.
                 # ``web_search_preview`` is the legacy type and does not
                 # support them, so they are dropped rather than sent as
                 # unknown fields.
@@ -664,18 +683,8 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                 if tool.search_content_types is not None:
                     ws_def["search_content_types"] = tool.search_content_types
                 if tool.user_location is not None:
-                    ws_def["user_location"] = {
-                        k: v
-                        for k, v in {
-                            "type": "approximate",
-                            "city": tool.user_location.get("city"),
-                            "country": tool.user_location.get("country"),
-                            "region": tool.user_location.get("region"),
-                            "timezone": tool.user_location.get("timezone"),
-                        }.items()
-                        if v is not None
-                    }
-                if tool.type == "web_search":
+                    ws_def["user_location"] = normalized_user_location(tool)
+                if tool.type != "web_search_preview":
                     if tool.external_web_access is not None:
                         ws_def["external_web_access"] = tool.external_web_access
                     if tool.return_token_budget is not None:
@@ -705,6 +714,27 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
                         "web_search_preview tool type"
                     )
                 result.append(ws_def)
+            elif isinstance(tool, AnthropicWebSearchTool):
+                # The mirrored case of the Anthropic serializer's projection: a
+                # Messages-protocol client (Claude Code) declares
+                # ``web_search_20250305``, and the hosted tool on this wire
+                # protocol is ``web_search``. ``max_uses`` and
+                # ``response_inclusion`` have no Responses equivalent here.
+                result.append(anthropic_web_search_to_openai(tool))
+            elif isinstance(tool, HostedTool):
+                # Provider-hosted tool carried over from either protocol. The
+                # dialect table decides whether this upstream understands it; a
+                # provider the proxy has no dialect for keeps the client's
+                # declaration verbatim (the aggregator case).
+                provider_type = context.provider_type if context is not None else ""
+                if responses_hosted_type_supported(provider_type, tool.type):
+                    result.append({"type": tool.type, **tool.params})
+                else:
+                    logger.warning(
+                        "Dropping hosted tool "
+                        f"{tool.type!r} for provider {provider_type or 'unknown'!r}: not "
+                        "accepted on the Responses wire"
+                    )
             elif isinstance(tool, OpenAIToolSearchTool):
                 result.append({"type": "tool_search"})
             elif isinstance(tool, CustomTool):

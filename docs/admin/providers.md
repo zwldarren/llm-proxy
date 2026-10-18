@@ -210,7 +210,128 @@ vice versa. Business-space dedicated domains
 - **Web search.** DashScope's Responses API has its own `web_search` /
   `web_extractor` / `code_interpreter` tools. Set provider metadata
   `native_web_search: true` to let `web_search` tools reach it; otherwise the proxy
-  intercepts them and runs its own web search.
+  intercepts them and runs its own web search. On Chat Completions the proxy emits
+  `enable_search: true` for a hosted search; `search_options` is deliberately left
+  at DashScope's default because `search_strategy: agent` is rejected by the models
+  this proxy serves and `freshness` / `assigned_site_list` only apply to
+  `qwen-plus` / `qwen-flash`. On the **Anthropic-compatible** endpoint DashScope
+  only runs the server tool when the request also carries its billing header
+  (`system` block containing `x-anthropic-billing-header: cc_entrypoint=cli;`) —
+  without it `web_search_20250305` is accepted and ignored upstream.
+
+### DeepSeek specifics
+
+DeepSeek serves three wire protocols from one host: Chat Completions
+(`https://api.deepseek.com/v1`), the Anthropic Messages endpoint
+(`https://api.deepseek.com/anthropic/v1/messages`) and the OpenAI Responses
+endpoint (`https://api.deepseek.com/responses`). The adapter strips the `/v1`
+compatibility alias when it derives the two native endpoints.
+
+- **Native web search.** DeepSeek runs `web_search` **server-side on the
+  Responses endpoint only**, and only for `deepseek-v4-pro` (`deepseek-flash`
+  accepts the tool and silently ignores it). Declare it as you would for
+  OpenAI — `"tools": [{"type": "web_search"}]`, or DeepSeek's dated spelling
+  `{"type": "web_search_2025_08_26"}` — and set provider metadata
+  `native_web_search: true`, otherwise the proxy intercepts the tool and runs
+  its own search instead. The proxy forwards the body verbatim, passes the
+  `response.web_search_call.*` stream events through, and carries the
+  `web_search_call` output items back to the client, so a follow-up turn can
+  send them back as `input` and have DeepSeek restore the results.
+  Chat Completions has no web search at all — a `web_search` tool there is only
+  useful through proxy-side interception.
+- **The Anthropic endpoint is content-block compatible, not
+  server-tool-compatible.** `server_tool_use` and `web_search_tool_result`
+  blocks are accepted (they survive replay), but DeepSeek's documented built-in
+  tool list stops at `function`, so do not expect `web_search_20250305` to be
+  executed there.
+- **Stateless Responses.** There is no `previous_response_id`: the proxy
+  materializes a stored turn into `input` items and falls back to the Chat
+  Completions translation for that turn, which is also why a materialized
+  continuation cannot use the server-side `web_search`.
+
+## Web search: native or proxy-side
+
+Two systems can answer a `web_search` tool, and exactly one of them runs per request:
+
+- **Proxy-side (default).** With a search provider configured under **Settings → Web
+  search** (SearXNG or Ollama), the proxy rewrites the hosted tool into a plain
+  function tool, executes the searches itself and injects the results in
+  Anthropic-compatible shape. This works for every provider, including
+  Chat-Completions-only upstreams that have no hosted search at all.
+- **Native (per provider).** Set the provider's **Use Native Web Search**
+  (provider metadata `native_web_search: true`) to let the upstream execute the
+  tool instead. The proxy then forwards the tool declaration in that upstream's
+  own shape — including on Chat Completions wires, where the shape is often not a
+  `tools[]` entry at all (`enable_search` on Qwen, a `web_search` body object on
+  NanoGPT, `web_search.search_engine` on Z.ai) — and only relays the results it
+  produces.
+
+The default is proxy-side because a hosted declaration means "search for me" —
+the client cannot execute it. If both are configured, the flag decides.
+
+A hosted declaration normally never comes back as a `function_call`: if the
+selected upstream has no documented server-side search on the wire it speaks,
+the proxy **drops the tool and warns with the reason** rather than handing the
+client a function it never declared. The one exception is a Chat Completions
+upstream the proxy has no dialect for at all (a custom `openai-compatible`
+endpoint), where the pre-dialect function bridge remains the fallback — every
+Chat Completions wire accepts functions. See [Hosted tools](#hosted-tools) for
+the per-wire rules.
+
+### Which upstreams actually search
+
+| Provider | Native server-side search | Reaches the upstream through |
+|---|---|---|
+| `openai` | Responses `web_search`; Chat `web_search_options` (search models) | any client protocol (translated) |
+| `anthropic` | `web_search_20260318` / `20260209` / `20250305` server tool | Messages (verbatim), Chat `web_search_options`, or any client declaring `web_search` |
+| `gemini` | `google_search` grounding (`url_context` / `google_maps` are separate tools) | any client protocol |
+| `deepseek` | Responses `web_search` (only `deepseek-v4-pro`; see above) | Responses (verbatim) |
+| `xai` | Responses `web_search` (`filters.allowed_domains` / `filters.excluded_domains`) and `x_search` | Responses (verbatim) |
+| `qwen`, `qwen-intl` | Responses `web_search` / `web_extractor` (bare objects; extractor needs search); Chat `enable_search` + `search_options`; Anthropic server tool | Responses and Anthropic (verbatim), Chat if the client sends `enable_search` |
+| `openrouter` | server tool `openrouter:web_search` (`parameters.*`); Responses hoists a plain `web_search` into it | Responses and Messages (verbatim), Chat if the client sends the server-tool type or the legacy `plugins: [{"id": "web"}]` (deprecated) |
+| `zai`, `zai-coding` | Chat `{"type": "web_search", "web_search": {"search_engine": ...}}` (`search_engine` required; the API reference lists only `search_pro_jina`) | Chat Completions (verbatim) |
+| `zhipu`, `zhipu-coding` | same Chat shape (`search_engine`: `search_std` / `search_pro` / `search_pro_sogou` / `search_pro_quark`); Responses `{"type": "web_search"}` | Chat (verbatim) |
+| `minimax` | Responses `{"type": "web_search"}`; Anthropic `{"type": "web_search_20250305", "name": "web_search"}` | Responses and Messages (verbatim); Chat has **no** server tools |
+| `nanogpt` | Responses `web_search`; Chat body `web_search: {"enabled": true, ...}` (NanoGPT runs the search itself; shape transcribed from NanoGPT's published API notes — not verifiable against a public reference doc) | Responses (verbatim), Chat body field |
+| `moonshot` | Responses `{"type": "web_search"}`; Chat `$web_search` (`type: "builtin_function"`, **deprecated — retires 2026-10-20** in favour of upstream `/v1/tools/search`) | Chat (`$web_search`, legacy) — the Messages endpoint accepts only client tools |
+| `mistral` | none on Chat Completions — `web_search` / `web_search_premium` are documented for the **Agents / Conversations** APIs only, and the docs warn Chat Completions "isn't supported" | proxy-side only |
+| `vllm`, `sglang`, `ollama`, `chutes`, `opencode-zen`, `opencode-go` | none (Ollama's web search is a standalone `POST /api/web_search`, not a chat feature) | proxy-side only |
+
+One hosted tool, several spellings: the proxy normalizes Anthropic's
+`web_search_20250305` family, OpenAI's `web_search` / `web_search_preview`, dated
+variants (`web_search_2025_08_26`) and the OpenAI chat field `web_search_options`
+into the shape the selected provider's wire protocol consumes, so a client does
+not have to know which upstream it was routed to. A declared `web_search` *function*
+tool always wins over `web_search_options` — that is either a client running the
+search itself or the proxy's own interception bridge, and a second declaration
+would search twice.
+
+Provider-specific hosted tools are carried, not translated away. A declaration
+survives intake on both protocols and reaches the wire that documents it; on a
+wire that does not, it is dropped with a warning that names the tool:
+
+### Hosted tools
+
+| Declaration | Forwarded to | Dropped (with warning) everywhere else |
+|---|---|---|
+| `google_search` / `google_search_retrieval` | Gemini (`{"google_search": {}}`) | yes |
+| `url_context`, `google_maps` | Gemini (bare tool keys) | yes |
+| `x_search` (+ `allowed_x_handles`, date range, image/video flags) | xAI Responses (verbatim) | yes |
+| `web_extractor` | Qwen Responses (verbatim; Qwen requires `web_search` alongside) | yes |
+| `retrieval` (`knowledge_id`) | Z.ai / BigModel Chat Completions | yes |
+| `$web_search` (`type: "builtin_function"`) | Kimi Chat Completions — forwarded only because the client asked; the proxy never generates it (deprecated upstream, retires 2026-10-20) | yes |
+| `code_interpreter`, `file_search` | native Responses wires that support them | yes |
+| anything the proxy has never seen | a Responses or Gemini wire (their `tools[]` unions are open-ended), verbatim | dropped on chat wires |
+
+Two deliberate asymmetries, both documented in ADR-0038:
+
+- An upstream the proxy has **no dialect for** (a custom `openai-compatible`
+  endpoint, an aggregator nobody has modelled) keeps the old behaviour: chat
+  wires get the `web_search` function bridge, Responses wires get the client's
+  declaration verbatim. Unknown is not the same as unsupported.
+- Proxy-side interception still wins by default. Turning on **Use Native Web
+  Search** is what makes a hosted declaration reach these tables at all; with it
+  off the proxy replaces the tool with the function bridge it executes itself.
 
 ## Verifying a provider
 

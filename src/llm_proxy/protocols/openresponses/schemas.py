@@ -582,7 +582,11 @@ class WebSearchToolParam(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: Literal["web_search", "web_search_preview"] = "web_search"
+    #: ``web_search`` / ``web_search_preview`` are OpenAI's own spellings;
+    #: ``web_search_2025_08_26`` is the dated variant DeepSeek documents. Any
+    #: other dated spelling still validates through ``ToolParam``'s raw-dict
+    #: fallback and is recognized by the converter's ``web_search`` prefix rule.
+    type: Literal["web_search", "web_search_preview", "web_search_2025_08_26"] = "web_search"
     search_context_size: Literal["low", "medium", "high"] | None = Field(
         None, description="Controls how much context from web search results is made available"
     )

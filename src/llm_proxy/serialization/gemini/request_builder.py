@@ -13,6 +13,7 @@ from llm_proxy.models import InternalRequest
 from llm_proxy.models.tools import (
     CustomTool,
     FunctionTool,
+    HostedTool,
     OpenAIToolSearchTool,
     OpenAIWebSearchTool,
     ToolChoice,
@@ -23,9 +24,11 @@ from llm_proxy.models.tools import (
     ToolDefinition,
     WebSearchTool,
 )
+from llm_proxy.models.tools.openai_builtin import with_web_search_options
 from llm_proxy.models.types import unwrap_json_schema_wrapper
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.gemini.speech import build_speech_config, is_gemini_tts_model
+from llm_proxy.serialization.hosted_tools import GEMINI_HOSTED_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +113,15 @@ class GeminiRequestBuilderMixin:
         if gen_config:
             body["generationConfig"] = gen_config
 
-        if request.tools:
-            tools = self._convert_tools_to_gemini(request.tools)
+        # ``web_search_options`` is a Chat Completions field with no Gemini
+        # equivalent; the grounding tool it stands for is ``google_search``
+        # (see ``with_web_search_options``).
+        tools_for_body = with_web_search_options(
+            request.tools,
+            request.chat_web_search_options,
+        )
+        if tools_for_body:
+            tools = self._convert_tools_to_gemini(tools_for_body)
             if tools:
                 body["tools"] = tools
 
@@ -355,6 +365,7 @@ class GeminiRequestBuilderMixin:
         """
         declarations: list[dict[str, Any]] = []
         has_google_search = False
+        hosted_keys: list[str] = []
 
         for tool in tools:
             if isinstance(tool, FunctionTool):
@@ -394,6 +405,23 @@ class GeminiRequestBuilderMixin:
                 declarations.append(decl)
             elif isinstance(tool, (WebSearchTool, OpenAIWebSearchTool)):
                 has_google_search = True
+            elif isinstance(tool, HostedTool):
+                # Provider-hosted tool from either protocol. Gemini consumes a
+                # subset as bare tool keys (``{"google_search": {}}``); the rest
+                # (``x_search``, ``web_extractor``, ...) have no Gemini
+                # equivalent and are dropped here rather than reaching the
+                # upstream as an unknown field.
+                key = GEMINI_HOSTED_TYPES.get(tool.type)
+                if key == "google_search":
+                    has_google_search = True
+                elif key is not None:
+                    hosted_keys.append(key)
+                else:
+                    logger.warning(
+                        "Dropping hosted tool %r for Gemini provider: no "
+                        "generateContent equivalent",
+                        tool.type,
+                    )
             elif isinstance(tool, CustomTool):
                 # Convert CustomTool to a function declaration for Gemini.
                 # Custom tools are not natively supported by Gemini API, so we
@@ -434,6 +462,8 @@ class GeminiRequestBuilderMixin:
             entry["function_declarations"] = declarations
         if has_google_search:
             entry["google_search"] = {}
+        for key in hosted_keys:
+            entry[key] = {}
 
         return [entry] if entry else None
 

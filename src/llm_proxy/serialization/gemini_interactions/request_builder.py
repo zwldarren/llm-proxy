@@ -31,6 +31,7 @@ from llm_proxy.models import InternalRequest
 from llm_proxy.models.tools import (
     CustomTool,
     FunctionTool,
+    HostedTool,
     OpenAIToolSearchTool,
     OpenAIWebSearchTool,
     ToolChoice,
@@ -45,6 +46,7 @@ from llm_proxy.models.types import unwrap_json_schema_wrapper
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.gemini.request_builder import GeminiRequestBuilderMixin
 from llm_proxy.serialization.gemini.speech import is_gemini_tts_model, resolve_voice
+from llm_proxy.serialization.hosted_tools import INTERACTIONS_HOSTED_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +361,20 @@ class GeminiInteractionsRequestBuilderMixin:
                 )
             elif isinstance(tool, (WebSearchTool, OpenAIWebSearchTool)):
                 has_google_search = True
+            elif isinstance(tool, HostedTool):
+                # The Interactions wire spells every built-in as a typed tool;
+                # host-side types without an Interactions equivalent stay out of
+                # the body instead of reaching the upstream as unknown fields.
+                hosted_type = INTERACTIONS_HOSTED_TYPES.get(tool.type)
+                if hosted_type == "google_search":
+                    has_google_search = True
+                elif hosted_type is not None:
+                    result.append({"type": hosted_type})
+                else:
+                    logger.warning(
+                        "Dropping hosted tool %r for Gemini Interactions provider: no equivalent",
+                        tool.type,
+                    )
             elif isinstance(tool, CustomTool):
                 result.append(
                     {

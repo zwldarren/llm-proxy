@@ -7,7 +7,12 @@ Converts raw Responses API tool dictionaries into protocol-agnostic
 import logging
 from typing import Any
 
-from llm_proxy.models.tools.core import CustomTool, ToolDefinition
+from llm_proxy.models.tools.core import CustomTool, ToolDefinition, is_web_search_tool_type
+from llm_proxy.models.tools.hosted import (
+    DEPRECATED_HOSTED_TOOL_TYPES,
+    HostedTool,
+    is_provider_hosted_tool_type,
+)
 from llm_proxy.models.tools.openai_builtin import OpenAIToolSearchTool, WebSearchTool
 from llm_proxy.serialization.responses_toolkit.namespace import NamespaceMapping
 from llm_proxy.serialization.responses_toolkit.tools import (
@@ -93,7 +98,8 @@ def convert_responses_tools(
     Handles:
     - ``function`` → ``FunctionTool``
     - ``tool_search`` → ``OpenAIToolSearchTool``
-    - ``web_search`` / ``web_search_preview`` → ``OpenAIWebSearchTool``
+    - ``web_search`` / ``web_search_preview`` / dated ``web_search*`` variants
+      → ``OpenAIWebSearchTool``
     - ``custom`` → ``CustomTool``
     - ``namespace`` → child tools are flattened and a ``NamespaceMapping`` is returned
     - ``file_search`` / ``code_interpreter`` and any other Responses-only or
@@ -127,7 +133,7 @@ def convert_responses_tools(
             )
             preserved_tools.append(tool_dict)
             continue
-        elif tool_type in ("web_search", "web_search_preview"):
+        elif is_web_search_tool_type(tool_type):
             tools.append(_build_web_search_tool(tool_dict))
         elif tool_type == "function":
             tools.append(_parse_tool(tool_dict))
@@ -171,7 +177,7 @@ def convert_responses_tools(
                     flat_name = namespace_mapping.flatten(ns_name, custom_tool.name)
                     custom_tool.name = flat_name
                     tools.append(custom_tool)
-                elif child_type in ("web_search", "web_search_preview", "tool_search"):
+                elif child_type in ("tool_search",) or is_web_search_tool_type(child_type):
                     logger.warning(
                         "Skipping namespace %r child tool of built-in type %r: "
                         "built-in tools cannot be namespaced.",
@@ -185,6 +191,16 @@ def convert_responses_tools(
                         child_type,
                     )
         else:
+            # Provider-hosted tools (google_search, x_search, web_extractor,
+            # retrieval, Kimi's builtin_function, ...) are executed by an
+            # upstream. Carrying them as ``HostedTool`` lets the provider dialect
+            # decide (``serialization.hosted_tools``) instead of the raw-dict
+            # carrier, which only a native Responses wire can forward.
+            if is_provider_hosted_tool_type(tool_type):
+                if (reason := DEPRECATED_HOSTED_TOOL_TYPES.get(str(tool_type))) is not None:
+                    logger.warning("Tool type %r is deprecated upstream: %s", tool_type, reason)
+                tools.append(HostedTool.from_wire(tool_dict))
+                continue
             # Unknown / Responses-only tool type (e.g. computer_use, mcp,
             # future built-ins). Preserve the raw definition so a native
             # Responses provider can still forward it, but warn that

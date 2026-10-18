@@ -32,9 +32,11 @@ from unittest.mock import AsyncMock, patch
 import orjson
 import pytest
 
+from llm_proxy.core.conversion import plan_conversion
 from llm_proxy.core.processing.stages.base import is_native_responses_upstream
 from llm_proxy.core.processing.strategies.chat import ChatStrategy
 from llm_proxy.models import (
+    ConversionTier,
     InternalRequest,
 )
 from llm_proxy.protocols.registry import get_protocol_serializer
@@ -683,6 +685,90 @@ class TestNativeStreaming:
 # ---------------------------------------------------------------------------
 # previous_response_id: DeepSeek's Responses API is stateless
 # ---------------------------------------------------------------------------
+
+
+class TestNativeStreamTierPlan:
+    """The stream tier must agree with the request tier on the native protocols.
+
+    DeepSeek's ``_requires_reasoning_echo`` is unconditional, so an
+    unscoped veto used to strand a native Anthropic/Responses request on the
+    converted stream: the seam still built the *native* body
+    (``request_tier`` = NATIVE_PASSTHROUGH) while ``stream_chat_completion``
+    posted it to ``/v1/chat/completions``. The echo guarantee is a property of
+    the rebuilt Chat Completions body, so the veto is chat-only.
+    """
+
+    @pytest.mark.parametrize(
+        ("protocol_name", "raw"),
+        [
+            ("anthropic", raw_anthropic()),
+            ("openresponses", raw_responses()),
+        ],
+    )
+    def test_both_sides_native_for_native_protocols(self, adapter, protocol_name, raw):
+        req = _request(raw, protocol_name=protocol_name)
+        plan = plan_conversion(adapter, req, context=adapter._build_chat_context(req))
+        assert plan.request_tier is ConversionTier.NATIVE_PASSTHROUGH
+        assert plan.stream_mode is ConversionTier.NATIVE_PASSTHROUGH
+        assert plan.response_mode is ConversionTier.NATIVE_PASSTHROUGH
+
+    def test_chat_protocol_keeps_the_converted_stream(self, adapter):
+        # The reasoning-echo guarantee still pins Chat Completions to the
+        # converted stream: the transformer's accumulation is what feeds the
+        # cache ``_enforce_reasoning_echo`` reads on the next turn.
+        req = _request(raw_anthropic(), protocol_name="openai")
+        plan = plan_conversion(adapter, req, context=adapter._build_chat_context(req))
+        assert plan.stream_mode is ConversionTier.FULL_CONVERSION
+
+    def test_web_search_interception_still_pins_the_converted_stream(self, adapter):
+        # Proxy-side search sets native_request_disabled, which vetoes the
+        # native stream even now that the reasoning-echo veto is chat-only.
+        req = _request(raw_responses(tools=[{"type": "web_search"}]), protocol_name="openresponses")
+        req.native_request_disabled = True
+        plan = plan_conversion(adapter, req, context=adapter._build_chat_context(req))
+        assert plan.stream_mode is ConversionTier.FULL_CONVERSION
+
+    @pytest.mark.asyncio
+    async def test_native_responses_web_search_stream_reaches_responses_endpoint(self, adapter):
+        """DeepSeek executes ``web_search`` server-side on /responses: the tool
+        declaration goes out verbatim and the ``web_search_call`` events the
+        upstream emits are replayed to the client untouched."""
+        sse_events = make_sse_events(
+            [
+                (
+                    "response.created",
+                    '{"type":"response.created","response":{"id":"resp_ws",'
+                    '"status":"in_progress"}}',
+                ),
+                (
+                    "response.web_search_call.in_progress",
+                    '{"type":"response.web_search_call.in_progress","item_id":"ws_1"}',
+                ),
+                (
+                    "response.web_search_call.completed",
+                    '{"type":"response.web_search_call.completed","item_id":"ws_1"}',
+                ),
+                (
+                    "response.completed",
+                    '{"type":"response.completed","response":{"id":"resp_ws",'
+                    '"status":"completed","usage":{"input_tokens":3,'
+                    '"output_tokens":2,"total_tokens":5}}}',
+                ),
+            ]
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=MockStreamResponse(sse_events))
+
+        raw = raw_responses(tools=[{"type": "web_search"}], stream=True)
+        req = _request(raw, protocol_name="openresponses")
+        req.stream = True
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            frames = [frame async for frame in await adapter.stream_chat_completion_native(req)]
+
+        call = mock_client.post.call_args
+        assert call.args[0] == "https://api.deepseek.com/responses"
+        assert call.kwargs["json"]["tools"] == [{"type": "web_search"}]
+        assert any("response.web_search_call.completed" in frame for frame in frames)
 
 
 class TestStatelessResponsesUpstream:
