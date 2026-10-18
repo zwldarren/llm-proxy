@@ -523,10 +523,13 @@ def test_build_provider_request_with_tool_result(serializer):
 
     body = serializer.build_provider_request(request)
 
-    assert len(body["contents"]) == 2
-    assert body["contents"][1]["role"] == "user"
-    assert "functionResponse" in body["contents"][1]["parts"][0]
-    func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+    # A tool result is a user turn: it shares the content with the user message
+    # before it (Gemini requires the roles to alternate and both are "user").
+    assert len(body["contents"]) == 1
+    assert body["contents"][0]["role"] == "user"
+    assert body["contents"][0]["parts"][0]["text"] == "What's the weather?"
+    assert "functionResponse" in body["contents"][0]["parts"][1]
+    func_resp = body["contents"][0]["parts"][1]["functionResponse"]
     assert func_resp["name"] == "call_abc123"
     assert func_resp["response"]["content"] == "Sunny, 72°F"
 
@@ -548,7 +551,7 @@ def test_build_provider_request_with_tool_result_no_name(serializer):
     )
 
     body = serializer.build_provider_request(request)
-    func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+    func_resp = body["contents"][0]["parts"][1]["functionResponse"]
     assert func_resp["name"] == "get_weather"
 
 
@@ -574,7 +577,7 @@ def test_build_provider_request_with_tool_result_json_content(serializer):
     )
 
     body = serializer.build_provider_request(request)
-    func_resp = body["contents"][1]["parts"][0]["functionResponse"]
+    func_resp = body["contents"][0]["parts"][1]["functionResponse"]
     assert func_resp["name"] == "call_1"
     assert func_resp["response"]["temperature"] == 72
     assert func_resp["response"]["unit"] == "F"
@@ -879,14 +882,16 @@ class TestSanitizeGeminiSchema:
         body = serializer.build_provider_request(request)
         contents = body["contents"]
 
-        assert len(contents) == 3
+        # The mid-conversation system message becomes a user turn, and the user
+        # message that follows merges into it (roles must alternate).
+        assert len(contents) == 2
         sys_msg = contents[1]
         assert sys_msg["role"] == "user", f"Expected 'user', got '{sys_msg['role']}'"
-        assert len(sys_msg["parts"]) == 1
-        assert "text" in sys_msg["parts"][0]
+        assert len(sys_msg["parts"]) == 2
         assert "<system-prompt>" in sys_msg["parts"][0]["text"]
         assert "Speak only French." in sys_msg["parts"][0]["text"]
         assert "</system-prompt>" in sys_msg["parts"][0]["text"]
+        assert sys_msg["parts"][1]["text"] == "How are you?"
 
 
 class TestGeminiResponseDetails:
@@ -1025,6 +1030,38 @@ class TestGeminiStreamingDetails:
         usage = transformer.get_usage()
         assert usage is not None
         assert usage.input_tokens == 13
+
+    def test_streaming_continuation_token_reaches_the_chunk(self):
+        """CONTINUATION maps to ``length``, so the token that resumes the turn has
+        to reach a streaming client too — the non-streaming path files it in
+        ``provider_info``, a stream only has the chunk to ride on."""
+        from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
+
+        transformer = GeminiStreamingTransformer(model="gemini-3-flash")
+        result = transformer.convert_chunk(
+            {
+                "candidates": [
+                    {
+                        "content": {"parts": [{"text": "partial"}]},
+                        "finishReason": "CONTINUATION",
+                        "continuationToken": "resume-me",
+                    }
+                ]
+            }
+        )
+
+        assert result["choices"][0]["finish_reason"] == "length"
+        assert result["continuation_token"] == "resume-me"
+
+    def test_a_complete_turn_carries_no_continuation_token(self):
+        from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer
+
+        transformer = GeminiStreamingTransformer(model="gemini-3-flash")
+        result = transformer.convert_chunk(
+            {"candidates": [{"content": {"parts": [{"text": "done"}]}, "finishReason": "STOP"}]}
+        )
+
+        assert "continuation_token" not in result
 
     def test_streaming_annotations_from_grounding(self):
         from llm_proxy.serialization.gemini.streaming_converter import GeminiStreamingTransformer

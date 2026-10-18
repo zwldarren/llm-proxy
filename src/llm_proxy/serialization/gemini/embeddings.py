@@ -37,9 +37,12 @@ class GeminiEmbeddingsMixin:
 
     def build_provider_embedding_request(self, request: InternalEmbeddingRequest) -> dict[str, Any]:
         # EmbedContentRequest.model is Required (resource name format
-        # "models/{model}") even when the model is also in the URL.
+        # "models/{model}") even when the model is also in the URL. Clients reach
+        # this path with either spelling, so the prefix is normalized rather
+        # than doubled.
+        model = request.model.removeprefix("models/")
         body: dict[str, Any] = {
-            "model": f"models/{request.model}",
+            "model": f"models/{model}",
             "content": {"parts": [{"text": request.input}]},
         }
         if request.dimensions:

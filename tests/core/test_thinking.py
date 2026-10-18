@@ -309,49 +309,85 @@ class TestConvertToAnthropic:
 
 
 class TestConvertToGemini:
+    """Gemini 3+ thinking shape: a level plus includeThoughts.
+
+    ``includeThoughts`` is always set — without it the API returns no thought
+    parts at all, so a client that asked for reasoning would see none.
+    """
+
     def test_low_budget(self):
         config = ThinkingConfig(type="enabled", budget_tokens=4000)
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "LOW"}}
+        assert result == {"thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": True}}
 
     def test_medium_budget(self):
         config = ThinkingConfig(type="enabled", budget_tokens=16000)
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "MEDIUM"}}
+        assert result == {"thinkingConfig": {"thinkingLevel": "MEDIUM", "includeThoughts": True}}
 
     def test_high_budget(self):
         config = ThinkingConfig(type="enabled", budget_tokens=32000)
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+        assert result == {"thinkingConfig": {"thinkingLevel": "HIGH", "includeThoughts": True}}
 
     def test_from_effort_low(self):
         config = ThinkingConfig(type="enabled", effort="low")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "LOW"}}
+        assert result["thinkingConfig"]["thinkingLevel"] == "LOW"
 
     def test_from_effort_high(self):
         config = ThinkingConfig(type="enabled", effort="high")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+        assert result["thinkingConfig"]["thinkingLevel"] == "HIGH"
 
     def test_from_effort_xhigh(self):
         config = ThinkingConfig(type="enabled", effort="xhigh")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+        assert result["thinkingConfig"]["thinkingLevel"] == "HIGH"
 
     def test_from_effort_max(self):
         config = ThinkingConfig(type="enabled", effort="max")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+        assert result["thinkingConfig"]["thinkingLevel"] == "HIGH"
 
-    def test_from_effort_minimal(self):
+    def test_from_effort_minimal_without_model(self):
+        """No model id: the safe level is LOW (MINIMAL support is model-specific)."""
         config = ThinkingConfig(type="enabled", effort="minimal")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "LOW"}}
+        assert result["thinkingConfig"]["thinkingLevel"] == "LOW"
 
-    def test_disabled_returns_none(self):
+    def test_from_effort_minimal_uses_minimal_when_supported(self):
+        """3.x Flash models take ``minimal`` as the closest thing to "off"."""
+        config = ThinkingConfig(type="enabled", effort="minimal")
+        result = convert_to_gemini(config, model="gemini-3.6-flash")
+        assert result["thinkingConfig"]["thinkingLevel"] == "MINIMAL"
+
+    def test_disabled_without_model_returns_none(self):
         config = ThinkingConfig(type="disabled")
         assert convert_to_gemini(config) is None
+
+    def test_disabled_uses_minimal_when_supported(self):
+        config = ThinkingConfig(type="disabled")
+        result = convert_to_gemini(config, model="gemini-3.6-flash")
+        assert result == {"thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}}
+
+    def test_disabled_falls_back_to_low_where_minimal_errors(self):
+        """Gemini 3.8 Flash and Gemini 4 reject ``minimal``; LOW is the floor.
+
+        The Flash-Lite Image model is NOT in that set: the thinking table takes
+        ``minimal`` as its default there (it is ``low``/``medium`` it rejects).
+        """
+        config = ThinkingConfig(type="disabled")
+        for model in ("gemini-3.8-flash", "gemini-4-argon"):
+            result = convert_to_gemini(config, model=model)
+            assert result == {
+                "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": True}
+            }, model
+
+    def test_disabled_takes_minimal_on_flash_lite_image(self):
+        config = ThinkingConfig(type="disabled")
+        result = convert_to_gemini(config, model="gemini-3.1-flash-lite-image")
+        assert result == {"thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}}
 
     def test_none(self):
         assert convert_to_gemini(None) is None
@@ -359,7 +395,7 @@ class TestConvertToGemini:
     def test_default_medium(self):
         config = ThinkingConfig(type="enabled")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "MEDIUM"}}
+        assert result == {"thinkingConfig": {"thinkingLevel": "MEDIUM", "includeThoughts": True}}
 
 
 class TestConvertToOllama:
@@ -414,7 +450,7 @@ class TestCrossProtocolConversion:
         data = {"reasoning_effort": "high"}
         config = normalize_thinking(data)
         gemini = convert_to_gemini(config)
-        assert gemini == {"thinkingConfig": {"thinkingLevel": "HIGH"}}
+        assert gemini == {"thinkingConfig": {"thinkingLevel": "HIGH", "includeThoughts": True}}
 
     def test_anthropic_thinking_to_openai(self):
         data = {"thinking": {"type": "enabled", "budget_tokens": 5000}}

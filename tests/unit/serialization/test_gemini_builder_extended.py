@@ -48,10 +48,12 @@ class _ConcreteGeminiBuilder(GeminiRequestBuilderMixin):
                 contents.append({"role": role, "parts": [{"text": text}] if text else []})
         return contents, system_instruction
 
-    def _convert_tools_to_gemini(self, tools):
+    def _convert_tools_to_gemini(self, tools, model=None, model_family_overrides=None):
         return None
 
-    def _build_tool_config(self, request):
+    def _build_tool_config(
+        self, request, model=None, has_builtin_tools=False, model_family_overrides=None
+    ):
         return None
 
 
@@ -237,7 +239,12 @@ class TestResponseModalities:
         assert body["generationConfig"]["responseModalities"] == ["TEXT", "AUDIO"]
 
     def test_image_models_auto_inject_image_modality(self, builder):
-        """Gemini image models auto-inject ``responseModalities: [IMAGE]``."""
+        """Gemini image models auto-inject ``responseModalities: [TEXT, IMAGE]``.
+
+        The docs pair both modalities: the text part carries the model's
+        commentary, which the OpenAI Images response surfaces as
+        ``revised_prompt``.
+        """
         from llm_proxy.serialization.context import BuildContext
 
         request = InternalRequest(
@@ -250,7 +257,7 @@ class TestResponseModalities:
             request, BuildContext.from_request(request, base_url="https://test.example.com")
         )
         assert "generationConfig" in body
-        assert body["generationConfig"]["responseModalities"] == ["IMAGE"]
+        assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
 
     def test_image_preview_model_auto_injects(self, builder):
         """``-image-preview`` suffix models also auto-inject IMAGE modality."""
@@ -265,7 +272,22 @@ class TestResponseModalities:
         body = builder._build_provider_request(
             request, BuildContext.from_request(request, base_url="https://test.example.com")
         )
-        assert body["generationConfig"]["responseModalities"] == ["IMAGE"]
+        assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
+
+    def test_nano_banana_model_auto_injects(self, builder):
+        """``gemini-nano-banana-*`` is an image model id without ``-image`` in it."""
+        from llm_proxy.serialization.context import BuildContext
+
+        request = InternalRequest(
+            model="gemini-nano-banana-2.1",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="Draw")])]
+            ),
+        )
+        body = builder._build_provider_request(
+            request, BuildContext.from_request(request, base_url="https://test.example.com")
+        )
+        assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
 
     def test_non_image_model_no_auto_inject(self, builder, basic_request):
         """Regular text models do not auto-inject IMAGE modality."""
@@ -314,7 +336,7 @@ class TestThinkingConfig:
         from llm_proxy.serialization.context import BuildContext
 
         request = InternalRequest(
-            model="gemini-3.0-pro",
+            model="gemini-3.6-flash",
             conversation=ConversationContext(
                 messages=[Message(role="user", content=[TextBlock(text="Complex problem")])]
             ),
@@ -327,22 +349,35 @@ class TestThinkingConfig:
         tc = body["generationConfig"]["thinkingConfig"]
         assert tc["thinkingLevel"] == "HIGH"
 
-    def test_gemini_3_disabled_thinking_no_config(self, builder):
-        """Disabled thinking omits thinkingConfig entirely for Gemini 3."""
+    def test_gemini_3_disabled_thinking_uses_lowest_level(self, builder):
+        """A disabled request asks for the lowest level the model accepts.
+
+        Gemini 3 has no "off": the API documents ``minimal`` as "little to no
+        thinking" where it is supported (3.x Flash / Flash-Lite) and as an error
+        on 3.8 Flash, 3.1 Flash-Lite Image and Gemini 4, whose floor is ``LOW``.
+        Every other family gets ``LOW``, which is the closest it can get.
+        """
         from llm_proxy.serialization.context import BuildContext
 
-        request = InternalRequest(
-            model="gemini-3.0-pro",
-            conversation=ConversationContext(
-                messages=[Message(role="user", content=[TextBlock(text="Quick fact")])]
-            ),
-            params=GenerationParams(thinking=ThinkingConfig(type="disabled")),
-        )
-        body = builder._build_provider_request(
-            request, BuildContext.from_request(request, base_url="https://test.example.com")
-        )
-        if "generationConfig" in body:
-            assert "thinkingConfig" not in body["generationConfig"]
+        cases = {
+            "gemini-3.6-flash": "MINIMAL",
+            "gemini-3.8-flash": "LOW",
+            "gemini-4-argon": "LOW",
+            "gemini-3.0-pro": "LOW",
+        }
+        for model, expected in cases.items():
+            request = InternalRequest(
+                model=model,
+                conversation=ConversationContext(
+                    messages=[Message(role="user", content=[TextBlock(text="Quick fact")])]
+                ),
+                params=GenerationParams(thinking=ThinkingConfig(type="disabled")),
+            )
+            body = builder._build_provider_request(
+                request, BuildContext.from_request(request, base_url="https://test.example.com")
+            )
+            generation_config = body.get("generationConfig") or {}
+            assert generation_config["thinkingConfig"]["thinkingLevel"] == expected, model
 
     def test_gemini_3_effort_from_openai_reasoning_effort_when_thinking_unset(self, builder):
         """Regression: effort sources other than ``thinking`` must still reach Gemini.
@@ -356,7 +391,7 @@ class TestThinkingConfig:
         from llm_proxy.serialization.context import BuildContext
 
         request = InternalRequest(
-            model="gemini-3.0-pro",
+            model="gemini-3.6-flash",
             conversation=ConversationContext(
                 messages=[Message(role="user", content=[TextBlock(text="Complex problem")])]
             ),

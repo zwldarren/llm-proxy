@@ -1,14 +1,20 @@
 """Extended ContentBlock types supported by multiple providers but not universal."""
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
-from llm_proxy.models.content_blocks.core import ContentBlock
+from llm_proxy.models.content_blocks.core import ContentBlock, SignatureOrigin
 
-#: Providers whose thought signatures may be replayed to the same provider.
-#: ``openai`` marks a genuine Responses ``encrypted_content`` blob (which is
-#: not an Anthropic verification payload and must not be replayed as one).
-SignatureOrigin = Literal["gemini", "openai"]
+__all__ = [
+    "CustomToolUseBlock",
+    "FileBlock",
+    "RawBlock",
+    "RedactedThinkingBlock",
+    "RefusalBlock",
+    "ServerToolUseBlock",
+    "SignatureOrigin",
+    "ThinkingBlock",
+]
 
 
 @dataclass

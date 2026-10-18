@@ -23,6 +23,7 @@ from llm_proxy.models import (
     InternalResponse,
     InternalSpeechRequest,
     InternalSpeechResponse,
+    TextBlock,
     ToolUseBlock,
 )
 from llm_proxy.models.image import (
@@ -40,6 +41,7 @@ from llm_proxy.providers.capabilities import (
     EmbeddingCapabilityMixin,
 )
 from llm_proxy.providers.capabilities.image import normalize_image_stream_chunk
+from llm_proxy.serialization.gemini.model_family import normalize_family_overrides
 from llm_proxy.serialization.gemini.speech import (
     build_speech_config,
     parse_audio_mime,
@@ -157,6 +159,19 @@ class GeminiAdapter(
     # we cache it at the class level and re-attach when building subsequent requests.
     # Uses OrderedDict for LRU eviction: on overflow, only the oldest entry is removed.
     _thought_signature_cache: OrderedDict[str, str] = OrderedDict()
+    # Built-in tool context: the ``toolCall`` / ``toolResponse`` parts Gemini 3
+    # returns beside a function call, keyed by that call's id. The OpenAI and
+    # Anthropic wires have no field for them, so without this cache the client's
+    # next turn could never return them (which loses the grounding context and
+    # can fail thought-signature validation).
+    _tool_context_cache: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+    # Gemini thoughtSignature issued on a text part, keyed by that exact text:
+    # the text is the only handle the client sends back on the next turn.
+    _text_signature_cache: OrderedDict[str, str] = OrderedDict()
+    #: Longest text allowed as a text-signature cache key. Very long replies are
+    #: rare, and these signatures are a documented *recommendation* (only the
+    #: functionCall ones are validated), so the cache stays bounded in bytes.
+    _MAX_TEXT_SIGNATURE_KEY_CHARS = 4096
     _thought_signature_cache_lock: Lock = Lock()
 
     def __init__(
@@ -174,6 +189,13 @@ class GeminiAdapter(
         # The choice is per provider instance, so operators can grayscale per
         # provider and roll back instantly.
         self._api_variant = str(self._extra_config.get(_API_VARIANT_EXTRA_KEY, "generate_content"))
+        # Family-version pins (metadata.model_family_overrides): exact model id
+        # → family version, for ids the proxy cannot parse (Google aliases like
+        # "gemini-flash-latest", aggregator nicknames). Invalid entries are
+        # warn-and-dropped once, here, where the operator's config is read.
+        self._model_family_overrides = normalize_family_overrides(
+            self._extra_config.get("model_family_overrides")
+        )
         # Acquired through the registry, never by direct import (CONTEXT.md):
         # the registry applies its post-create hook (_registered_provider_name)
         # and is the single source of truth for provider serializer keys.
@@ -187,6 +209,12 @@ class GeminiAdapter(
     def api_variant(self) -> str:
         """The upstream API dialect selected for this adapter instance."""
         return self._api_variant
+
+    def _build_chat_context(self, request: Any) -> Any:
+        """Build the context, carrying this provider's family-version pins."""
+        context = super()._build_chat_context(request)
+        context.model_family_overrides = self._model_family_overrides
+        return context
 
     def _is_interactions_variant(self) -> bool:
         return self._api_variant == "interactions"
@@ -413,22 +441,43 @@ class GeminiAdapter(
             return "image/png", data_url.split(",", 1)[-1] if "," in data_url else ""
 
     def _enrich_conversation_with_thought_signatures(self, conversation) -> None:
-        """Re-attach cached thought_signatures to tool-use blocks in the conversation.
+        """Re-attach the caches' per-turn facts to the conversation blocks.
 
-        Handles both ToolUseBlock and CustomToolUseBlock: the Interactions
-        stateless replay requires the signature on every function_call step,
-        and custom tools (e.g. codex's ``exec``) parse as CustomToolUseBlock.
+        Three facts the client cannot echo on a protocol that has no field for
+        them are cached server-side and put back here, before the request is
+        built:
+
+        - ``thought_signature`` on every tool-use block. Handles both
+          ToolUseBlock and CustomToolUseBlock: the Interactions stateless replay
+          requires the signature on every function_call step, and custom tools
+          (e.g. codex's ``exec``) parse as CustomToolUseBlock.
+        - ``gemini_tool_parts`` — the built-in tools' ``toolCall`` /
+          ``toolResponse`` parts, keyed by the function call they preceded
+          (Gemini 3 tool context circulation).
+        - the Gemini ``thoughtSignature`` issued on a *text* part, keyed by the
+          text itself, which is the only handle the client sends back.
         """
         with self._thought_signature_cache_lock:
-            if not self._thought_signature_cache:
+            signature_cache = self._thought_signature_cache
+            tool_context = self._tool_context_cache
+            text_signatures = self._text_signature_cache
+            if not (signature_cache or tool_context or text_signatures):
                 return
             for msg in conversation.messages:
                 for block in msg.content:
-                    if isinstance(block, (ToolUseBlock, CustomToolUseBlock)) and (
-                        not block.extra.get("thought_signature")
-                        and block.id in self._thought_signature_cache
-                    ):
-                        block.extra["thought_signature"] = self._thought_signature_cache[block.id]
+                    if isinstance(block, (ToolUseBlock, CustomToolUseBlock)):
+                        if not block.extra.get("thought_signature") and (
+                            signature := signature_cache.get(block.id)
+                        ):
+                            block.extra["thought_signature"] = signature
+                        if not block.extra.get("gemini_tool_parts") and (
+                            parts := tool_context.get(block.id)
+                        ):
+                            block.extra["gemini_tool_parts"] = parts
+                    elif isinstance(block, TextBlock) and not block.signature:
+                        if text_signature := text_signatures.get(block.text):
+                            block.signature = text_signature
+                            block.signature_origin = "gemini"
 
     def _cache_thought_signatures(self, blocks: list[ToolUseBlock | CustomToolUseBlock]) -> None:
         """Cache thought_signatures from tool use blocks for follow-up requests.
@@ -444,6 +493,57 @@ class GeminiAdapter(
                     ts := block.extra.get("thought_signature")
                 ):
                     self._remember_thought_signature(cache, max_cache, block.id, ts)
+                # The built-in tools' own invocation log rides the same blocks.
+                if isinstance(block, (ToolUseBlock, CustomToolUseBlock)) and (
+                    parts := block.extra.get("gemini_tool_parts")
+                ):
+                    self._remember_tool_context(block.id, parts)
+
+    def _cache_text_signatures(self, blocks: list[Any]) -> None:
+        """Cache text-part thoughtSignatures keyed by the text they signed.
+
+        A signature on a text part has no id to key it on, and the client only
+        ever sends the text back; the exact text is therefore the handle the
+        next turn's history can be matched against.
+        """
+        with self._thought_signature_cache_lock:
+            for block in blocks:
+                if (
+                    isinstance(block, TextBlock)
+                    and block.signature
+                    and block.signature_origin == "gemini"
+                    and block.text
+                    and len(block.text) <= self._MAX_TEXT_SIGNATURE_KEY_CHARS
+                ):
+                    cache = self._text_signature_cache
+                    if block.text in cache:
+                        cache.move_to_end(block.text)
+                    elif len(cache) >= self._MAX_THOUGHT_SIGNATURE_CACHE:
+                        cache.popitem(last=False)
+                    cache[block.text] = block.signature
+
+    def _cache_tool_context(self, tool_context: dict[str, list[dict[str, Any]]]) -> None:
+        """Cache built-in tool ``toolCall``/``toolResponse`` parts per call id.
+
+        The streaming converter collects them while the stream runs (it owns the
+        part order); this stores them under the same id the client receives as
+        ``tool_call_id``, so the next turn's replay finds them.
+        """
+        if not tool_context:
+            return
+        with self._thought_signature_cache_lock:
+            for tool_id, parts in tool_context.items():
+                if tool_id and parts:
+                    self._remember_tool_context(tool_id, parts)
+
+    def _remember_tool_context(self, tool_id: str, parts: list[dict[str, Any]]) -> None:
+        """Insert one (tool_call_id → built-in tool parts) pair under the lock."""
+        cache = self._tool_context_cache
+        if tool_id in cache:
+            cache.move_to_end(tool_id)
+        elif len(cache) >= self._MAX_THOUGHT_SIGNATURE_CACHE:
+            cache.popitem(last=False)
+        cache[tool_id] = parts
 
     @staticmethod
     def _remember_thought_signature(
@@ -511,6 +611,7 @@ class GeminiAdapter(
             self._serializer, response, model=request.model, request=request
         )
         self._cache_thought_signatures([b for b in result.output if isinstance(b, ToolUseBlock)])
+        self._cache_text_signatures(result.output)
         return result
 
     async def stream_chat_completion(
@@ -577,13 +678,15 @@ class GeminiAdapter(
                 # blocks (ADR-0031); tool-call thought signatures ride the
                 # blocks' ``extra`` — read through the public verb, not a
                 # private attribute probe.
+                blocks = converter.get_accumulated_output()
                 self._cache_thought_signatures(
-                    [
-                        b
-                        for b in converter.get_accumulated_output()
-                        if isinstance(b, (ToolUseBlock, CustomToolUseBlock))
-                    ]
+                    [b for b in blocks if isinstance(b, (ToolUseBlock, CustomToolUseBlock))]
                 )
+                # Built-in tool context and text-part signatures have no block
+                # field to ride on the wire, so they come from the converter's
+                # own accumulators.
+                self._cache_tool_context(converter.get_tool_context())
+                self._cache_text_signatures(blocks)
 
                 yield "[DONE]"
 
@@ -1071,8 +1174,11 @@ class GeminiAdapter(
                 "store": False,
             }
 
+        # Image models are documented with TEXT + IMAGE; the text part carries
+        # the model's commentary, which IMAGE-only requests drop (and which the
+        # OpenAI Images response surfaces as ``revised_prompt``).
         generation_config: dict[str, Any] = {
-            "responseModalities": ["IMAGE"],
+            "responseModalities": ["TEXT", "IMAGE"],
         }
         if gemini_size is not None:
             generation_config["imageConfig"] = {
@@ -1453,7 +1559,7 @@ class GeminiAdapter(
 
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {"responseModalities": ["IMAGE"]},
+            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
         }
 
         return body, {}

@@ -9,7 +9,7 @@ from llm_proxy.models.tools.core import (
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class WebSearchTool(ToolDefinition):
     """Web search tool (OpenAI built-in).
 
@@ -37,7 +37,7 @@ class WebSearchTool(ToolDefinition):
     max_uses: int | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class CodeInterpreterTool(ToolDefinition):
     """Code interpreter tool (OpenAI built-in)."""
 
@@ -45,7 +45,7 @@ class CodeInterpreterTool(ToolDefinition):
     type: Literal["code_interpreter"] = "code_interpreter"
 
 
-@dataclass
+@dataclass(frozen=True)
 class FileSearchTool(ToolDefinition):
     """File search tool (OpenAI built-in)."""
 
@@ -56,7 +56,7 @@ class FileSearchTool(ToolDefinition):
     ranking_options: dict[str, Any] | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class OpenAIToolSearchTool(ToolDefinition):
     """OpenAI Responses API hosted tool-search. Converted to function tool for Chat providers."""
 

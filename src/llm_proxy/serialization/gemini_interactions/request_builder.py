@@ -83,6 +83,58 @@ _SERVICE_TIER_MAP: frozendict[str, str | None] = frozendict(
 _UNSUPPORTED_COMMON_PARAMS = ("frequency_penalty", "presence_penalty")
 _UNSUPPORTED_GEMINI_PARAMS = ("top_k", "candidate_count")
 
+#: ``generateContent`` ``generationConfig`` keys → the Interactions dialect's
+#: snake_case ``generation_config`` keys. Operators write the escape hatch in the
+#: dialect they know (usually the native camelCase one), and Interactions rejects
+#: unknown fields, so known keys are renamed and unknown ones dropped.
+_GENERATION_CONFIG_KEY_MAP: frozendict[str, str] = frozendict(
+    {
+        "maxOutputTokens": "max_output_tokens",
+        "max_output_tokens": "max_output_tokens",
+        "temperature": "temperature",
+        "topP": "top_p",
+        "top_p": "top_p",
+        "seed": "seed",
+        "stopSequences": "stop_sequences",
+        "stop_sequences": "stop_sequences",
+        "thinkingLevel": "thinking_level",
+        "thinking_level": "thinking_level",
+        "thinkingSummaries": "thinking_summaries",
+        "thinking_summaries": "thinking_summaries",
+        "speechConfig": "speech_config",
+        "speech_config": "speech_config",
+        "mediaResolution": "media_resolution",
+        "media_resolution": "media_resolution",
+        "tool_choice": "tool_choice",
+    }
+)
+
+
+def normalize_generation_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """Rename an escape-hatch ``generationConfig`` onto the Interactions keys.
+
+    ``includeThoughts`` is folded into ``thinking_summaries`` (``auto`` / ``none``)
+    because the Interactions dialect expresses it as a summary mode instead of a
+    boolean. Unknown keys are dropped rather than sent (the API would 400).
+    """
+    normalized: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in raw.items():
+        if key == "includeThoughts" or key == "include_thoughts":
+            normalized["thinking_summaries"] = "auto" if value else "none"
+            continue
+        mapped = _GENERATION_CONFIG_KEY_MAP.get(key)
+        if mapped is None:
+            dropped.append(key)
+            continue
+        normalized[mapped] = value
+    if dropped:
+        logger.warning(
+            "Gemini Interactions API generation_config has no field for %s; dropping them",
+            ", ".join(sorted(dropped)),
+        )
+    return normalized
+
 
 class GeminiInteractionsRequestBuilderMixin:
     """Build Interactions API request bodies from InternalRequest."""
@@ -244,7 +296,7 @@ class GeminiInteractionsRequestBuilderMixin:
                 config.update(interactions_thinking)
 
         if params.gemini is not None and params.gemini.generation_config:
-            config.update(params.gemini.generation_config)
+            config.update(normalize_generation_config(params.gemini.generation_config))
 
         # Speech handling (TTS). The Interactions API takes
         # ``speech_config`` as an ARRAY of {language, speaker, voice}

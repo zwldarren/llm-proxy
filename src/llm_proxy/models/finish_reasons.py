@@ -20,7 +20,8 @@ class FinishReason(StrEnum):
 # RECITATION, LANGUAGE, OTHER, BLOCKLIST, PROHIBITED_CONTENT, SPII,
 # MALFORMED_FUNCTION_CALL, IMAGE_SAFETY, IMAGE_PROHIBITED_CONTENT, IMAGE_OTHER,
 # NO_IMAGE, IMAGE_RECITATION, UNEXPECTED_TOOL_CALL, TOO_MANY_TOOL_CALLS,
-# MISSING_THOUGHT_SIGNATURE, MALFORMED_RESPONSE, ESCALATION.
+# MISSING_THOUGHT_SIGNATURE, MALFORMED_RESPONSE, ESCALATION,
+# PUP_LIMITED_DISABLED, CONTINUATION.
 GEMINI_TO_OPENAI: frozendict[str, str] = frozendict(
     {
         "STOP": "stop",
@@ -43,6 +44,16 @@ GEMINI_TO_OPENAI: frozendict[str, str] = frozendict(
         "PROHIBITED_CONTENT": "content_filter",
         "SPII": "content_filter",
         "ESCALATION": "content_filter",
+        # Prohibited Use Policy limit on the account: the candidate was filtered.
+        "PUP_LIMITED_DISABLED": "content_filter",
+        # The response hit the per-request cap but is not complete (long decode);
+        # the candidate's ``continuationToken`` resumes it. OpenAI's nearest
+        # client-visible meaning of "stopped at the limit" is ``length``. Both
+        # paths surface the token itself — the non-streaming parser as
+        # ``provider_info["continuationToken"]``, the streaming converter as a
+        # ``continuation_token`` chunk field — so a truncated turn stays
+        # resumable however it was delivered.
+        "CONTINUATION": "length",
         "FINISH_REASON_UNSPECIFIED": "stop",
     }
 )
@@ -101,6 +112,8 @@ GEMINI_TO_ANTHROPIC: frozendict[str, str] = frozendict(
         "PROHIBITED_CONTENT": "refusal",
         "SPII": "refusal",
         "ESCALATION": "refusal",
+        "PUP_LIMITED_DISABLED": "refusal",
+        "CONTINUATION": "max_tokens",
         "FINISH_REASON_UNSPECIFIED": "end_turn",
     }
 )

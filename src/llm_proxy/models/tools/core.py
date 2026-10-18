@@ -4,14 +4,22 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-@dataclass
+@dataclass(frozen=True)
 class ToolDefinition:
-    """Base class for all tool definitions."""
+    """Base class for all tool definitions.
+
+    Frozen because a tool definition is a value: it is parsed once from the
+    client wire, then only read by every downstream serializer. Immutability is
+    also what lets a built-in tool class narrow ``name`` to the exact wire
+    spellings the upstream accepts (``Literal["bash"]``): reads stay covariant,
+    and there is no writable ``str`` slot a base-typed reference could fill with
+    an arbitrary name.
+    """
 
     name: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class FunctionTool(ToolDefinition):
     """Function tool definition with name, parameters, and optional description."""
 
@@ -34,7 +42,7 @@ class FunctionTool(ToolDefinition):
     cache_control: dict[str, Any] | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class CustomTool(ToolDefinition):
     """Custom tool definition for provider-specific tool types."""
 

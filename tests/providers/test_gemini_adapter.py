@@ -11,10 +11,12 @@ from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.http.client import download_image_as_base64
 from llm_proxy.models import (
     ConversationContext,
+    GenerationParams,
     InternalEmbeddingRequest,
     InternalRequest,
     InternalResponse,
     Message,
+    ThinkingConfig,
     ToolUseBlock,
 )
 from llm_proxy.models.content_blocks import ImageBlock, TextBlock
@@ -672,8 +674,10 @@ class TestThoughtSignatureCache:
     """Tests for thought_signature caching and re-attachment."""
 
     def setup_method(self):
-        """Clear class-level cache before each test to ensure isolation."""
+        """Clear the class-level caches before each test to ensure isolation."""
         GeminiAdapter._thought_signature_cache.clear()
+        GeminiAdapter._tool_context_cache.clear()
+        GeminiAdapter._text_signature_cache.clear()
 
     def test_cache_thought_signatures_from_response(self):
         adapter = GeminiAdapter(api_key="test-key")
@@ -845,7 +849,9 @@ class TestGeminiImageSizeMapping:
             size=None,
         )
         assert "imageConfig" not in body["generationConfig"]
-        assert body["generationConfig"]["responseModalities"] == ["IMAGE"]
+        # TEXT + IMAGE is the documented pair: the text part carries the model's
+        # commentary (the OpenAI Images response's ``revised_prompt``).
+        assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
 
     def test_image_edit_mask_with_file_id_is_preserved(self):
         """A mask referenced by file_id must not be silently dropped."""
@@ -1068,3 +1074,113 @@ class TestGeminiNoSpaceSseTolerance:
         content_chunks = [chunk for chunk in chunks if chunk != "[DONE]"]
         assert content_chunks, "no-space SSE frames must still produce chunks"
         assert any(chunk.get("choices") for chunk in content_chunks)
+
+
+class TestConversationFactCaches:
+    """The two facts the wire cannot carry are cached and re-attached.
+
+    Gemini 3 returns the built-in tools' ``toolCall`` / ``toolResponse`` parts
+    and may put a ``thoughtSignature`` on a text part; neither has a field on the
+    OpenAI/Anthropic wires the client answers on, so the adapter keeps them and
+    puts them back before building the next request.
+    """
+
+    def setup_method(self):
+        GeminiAdapter._thought_signature_cache.clear()
+        GeminiAdapter._tool_context_cache.clear()
+        GeminiAdapter._text_signature_cache.clear()
+
+    def test_tool_context_rides_the_extra_and_is_cached(self):
+        adapter = GeminiAdapter(api_key="test-key")
+        parts = [{"toolCall": {"id": "tc_1", "toolType": "GOOGLE_SEARCH", "args": {}}}]
+        block = ToolUseBlock(
+            id="fc_1",
+            name="f",
+            input={},
+            extra={"gemini_tool_parts": parts, "thought_signature": "s"},
+        )
+        adapter._cache_thought_signatures([block])
+
+        assert adapter._tool_context_cache == {"fc_1": parts}
+
+    def test_cache_tool_context_from_stream_converter(self):
+        adapter = GeminiAdapter(api_key="test-key")
+        parts = [{"toolResponse": {"id": "tc_1", "toolType": "GOOGLE_SEARCH", "response": {}}}]
+        adapter._cache_tool_context({"fc_1": parts})
+        assert adapter._tool_context_cache == {"fc_1": parts}
+
+    def test_enrich_reattaches_tool_context(self):
+        adapter = GeminiAdapter(api_key="test-key")
+        parts = [{"toolCall": {"id": "tc_1", "toolType": "GOOGLE_SEARCH", "args": {}}}]
+        adapter._tool_context_cache = {"fc_1": parts}
+        block = ToolUseBlock(id="fc_1", name="f", input={}, extra={})
+        adapter._enrich_conversation_with_thought_signatures(
+            ConversationContext(messages=[Message(role="assistant", content=[block])])
+        )
+        assert block.extra["gemini_tool_parts"] == parts
+
+    def test_text_signature_cache_round_trip(self):
+        adapter = GeminiAdapter(api_key="test-key")
+        adapter._cache_text_signatures(
+            [TextBlock(text="the answer", signature="sig_text", signature_origin="gemini")]
+        )
+        assert adapter._text_signature_cache == {"the answer": "sig_text"}
+
+        block = TextBlock(text="the answer")
+        adapter._enrich_conversation_with_thought_signatures(
+            ConversationContext(messages=[Message(role="assistant", content=[block])])
+        )
+        assert block.signature == "sig_text"
+        assert block.signature_origin == "gemini"
+
+    def test_foreign_text_signature_is_not_cached(self):
+        adapter = GeminiAdapter(api_key="test-key")
+        adapter._cache_text_signatures(
+            [TextBlock(text="x", signature="sig", signature_origin="openai")]
+        )
+        assert adapter._text_signature_cache == {}
+
+    def test_enrich_leaves_a_real_signature_alone(self):
+        adapter = GeminiAdapter(api_key="test-key")
+        adapter._text_signature_cache = {"the answer": "cached"}
+        block = TextBlock(text="the answer", signature="real", signature_origin="gemini")
+        adapter._enrich_conversation_with_thought_signatures(
+            ConversationContext(messages=[Message(role="assistant", content=[block])])
+        )
+        assert block.signature == "real"
+
+
+class TestModelFamilyOverrides:
+    """metadata.model_family_overrides pins unparseable ids to a family."""
+
+    def test_metadata_flows_into_the_build_context(self):
+        adapter = get_adapter(
+            "gemini",
+            api_key="test-key",
+            model_family_overrides={"gemini-flash-latest": "4.0", "bad": "not-a-version"},
+        )
+        context = adapter._build_chat_context(self._chat_request("gemini-flash-latest"))
+        # Invalid entries were dropped when the adapter read the metadata.
+        assert context.model_family_overrides == {"gemini-flash-latest": "4.0"}
+
+    def test_pinned_id_gets_the_pinned_family_shape(self):
+        adapter = get_adapter(
+            "gemini", api_key="test-key", model_family_overrides={"gemini-flash-latest": "4.0"}
+        )
+        request = self._chat_request("gemini-flash-latest")
+        body = adapter._build_chat_raw(request, adapter._build_chat_context(request))
+        config = body["generationConfig"]
+        # Gemini 4 shapes: thinkingLevel floor (minimal is an error there) and
+        # no sampling parameters.
+        assert config["thinkingConfig"] == {"thinkingLevel": "LOW", "includeThoughts": True}
+        assert "temperature" not in config
+
+    @staticmethod
+    def _chat_request(model: str) -> InternalRequest:
+        return InternalRequest(
+            model=model,
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            params=GenerationParams(temperature=0.2, thinking=ThinkingConfig(type="disabled")),
+        )

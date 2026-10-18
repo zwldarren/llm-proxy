@@ -573,6 +573,58 @@ def _gemini_billable_counts(
     return input_tokens, output_tokens
 
 
+def _gemini_modality_counts(entries: Any) -> dict[str, int]:
+    """Read a ``UsageMetadata`` modality breakdown into ``{modality: tokens}``.
+
+    Gemini reports its prompt / candidate / cached token totals twice: as the
+    flat count and, since the multimodal models, as a list of
+    ``ModalityTokenCount`` (``modality``: ``TEXT`` | ``IMAGE`` | ``VIDEO`` |
+    ``AUDIO`` | ``DOCUMENT``). The breakdown is what the per-modality price
+    differentials are read from, so it is folded into the canonical details
+    blocks instead of being dropped — except ``DOCUMENT``, which has no slot in
+    :class:`PromptTokensDetails` and is therefore dropped here.
+    """
+    counts: dict[str, int] = {}
+    if not isinstance(entries, list):
+        return counts
+    for entry in entries:
+        block = _as_dict(entry)
+        if block is None:
+            continue
+        modality = str(block.get("modality") or "").lower()
+        count = _int(block.get("tokenCount"))
+        if not modality or modality.startswith("modality_") or count is None:
+            continue
+        counts[modality] = counts.get(modality, 0) + count
+    return counts
+
+
+def _gemini_prompt_details(meta: Mapping[str, Any]) -> PromptTokensDetails | None:
+    """The prompt side of the modality breakdown, in the canonical details block.
+
+    ``cached_tokens`` is deliberately left unset: ``cachedContentTokenCount`` is
+    already flat in ``cache_read_input_tokens`` (one fact, one field).
+    """
+    counts = _gemini_modality_counts(meta.get("promptTokensDetails"))
+    details = PromptTokensDetails(
+        text_tokens=counts.get("text"),
+        image_tokens=counts.get("image"),
+        audio_tokens=counts.get("audio"),
+        video_tokens=counts.get("video"),
+    )
+    return details if any(value is not None for value in vars(details).values()) else None
+
+
+def _gemini_completion_details(meta: Mapping[str, Any]) -> CompletionTokensDetails | None:
+    """The candidate side of the modality breakdown (image/audio output tokens)."""
+    counts = _gemini_modality_counts(meta.get("candidatesTokensDetails"))
+    details = CompletionTokensDetails(
+        image_tokens=counts.get("image"),
+        audio_tokens=counts.get("audio"),
+    )
+    return details if any(value is not None for value in vars(details).values()) else None
+
+
 def _parse_gemini(
     payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
 ) -> Usage | None:
@@ -602,6 +654,8 @@ def _parse_gemini(
         # dialects express.
         reasoning_tokens=_int(meta.get("thoughtsTokenCount")),
         web_search_requests=search_requests or None,
+        prompt_tokens_details=_gemini_prompt_details(meta),
+        completion_tokens_details=_gemini_completion_details(meta),
     )
 
 

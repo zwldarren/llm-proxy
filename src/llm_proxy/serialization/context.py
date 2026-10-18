@@ -55,6 +55,10 @@ class BuildContext:
             [namespace, original_name]) carried over from the request so
             provider serializers can flatten history tool-call names to match
             the flattened tool definitions sent upstream.
+        model_family_overrides: Provider-pinned model id → family version
+            (Gemini's ``metadata.model_family_overrides``), consulted before
+            the id's own ``gemini-X.Y`` segment so an alias the proxy cannot
+            parse still gets the family shape it needs. See ADR-0039.
         extra: Additional provider-specific parameters
     """
 
@@ -77,6 +81,7 @@ class BuildContext:
     response_passthrough: bool = True
     reasoning_object: bool = False
     namespace_map: dict[str, list[str]] | None = None
+    model_family_overrides: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -101,6 +106,7 @@ class BuildContext:
         compatible_protocols = kwargs.pop("compatible_protocols", frozenset())
         response_passthrough = kwargs.pop("response_passthrough", True)
         reasoning_object = kwargs.pop("reasoning_object", False)
+        model_family_overrides = kwargs.pop("model_family_overrides", None)
         return cls(
             stream=request.stream,
             model=request.model,
@@ -116,5 +122,6 @@ class BuildContext:
             response_passthrough=response_passthrough,
             reasoning_object=reasoning_object,
             namespace_map=request._namespace_map,
+            model_family_overrides=dict(model_family_overrides or {}),
             extra=kwargs,
         )

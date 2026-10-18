@@ -27,6 +27,7 @@ from llm_proxy.serialization._shared_degradation import (
     should_degrade_block,
 )
 from llm_proxy.serialization.context import BuildContext
+from llm_proxy.serialization.gemini.model_family import supports_thought_signatures
 from llm_proxy.serialization.gemini.request_builder import GeminiRequestBuilderMixin
 from llm_proxy.serialization.responses_toolkit.namespace import (
     flatten_history_tool_name,
@@ -195,16 +196,29 @@ class GeminiConversationMixin:
                 continue
 
             if parts:
-                contents.append({"role": gemini_role, "parts": parts})
+                # Gemini's contents are a user/model alternation. Clients on the
+                # OpenAI/Anthropic wires routinely produce two turns in a row
+                # (a mid-conversation system message replayed as a user part, a
+                # tool result followed by the user's next message, or a retry
+                # after a dropped assistant turn), so a same-role neighbour is
+                # merged instead of emitted as a second ``role`` entry.
+                if contents and contents[-1].get("role") == gemini_role:
+                    contents[-1].setdefault("parts", []).extend(parts)
+                else:
+                    contents.append({"role": gemini_role, "parts": parts})
 
-        # Gemini 2.5+/3 require thoughtSignature on every functionCall part in
-        # the request; history produced by other providers (or by Gemini before
-        # the proxy cached the signature) lacks them. Inject Google's
-        # recommended dummy signature so the request passes validation instead
-        # of failing with "Function call is missing a thought_signature".
-        # Older models (2.0/1.5) reject inconsistent signatures, so for those
-        # the previous behavior is kept: strip all when any is missing.
-        if self._model_supports_thought_signatures(context.model if context else None):
+        # Gemini 2.5+ require thoughtSignature on the functionCall parts of the
+        # current turn (Gemini 3/4 fail with 400 without it); history produced
+        # by other providers (or by Gemini before the proxy cached the
+        # signature) lacks them. Inject Google's recommended dummy signature so
+        # the request passes validation instead of failing with "Function call
+        # is missing a thought_signature". Older models (2.0/1.5) reject
+        # inconsistent signatures, so for those the previous behavior is kept:
+        # strip all when any is missing.
+        if supports_thought_signatures(
+            context.model if context else None,
+            context.model_family_overrides if context else None,
+        ):
             contents = self._inject_dummy_thought_signatures(contents)
         elif not self._all_tool_uses_have_thought_signature(conversation):
             contents = self._strip_thought_signatures(contents)
@@ -217,33 +231,37 @@ class GeminiConversationMixin:
         """Whether the target Gemini model supports thought signatures.
 
         Thought signatures were introduced with Gemini 2.5 and are strictly
-        required for function calling on Gemini 3. Older models (2.0/1.5) do
-        not support the field.
+        required for function calling from Gemini 3 on. Older models (2.0/1.5)
+        do not support the field.
         """
-        if not model:
-            return False
-        return "gemini-2.5" in model or "gemini-3" in model
+        return supports_thought_signatures(model)
 
     @staticmethod
     def _inject_dummy_thought_signatures(
         contents: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Add Google's recommended dummy thought signature to parts missing one.
+        """Add Google's recommended dummy thought signature where one is required.
 
         ``base64("skip_thought_signature_validator")`` is the approach Google
         recommends for conversation history from models that do not produce
-        thought signatures; it passes Gemini's validation while real
-        signatures (from Gemini responses, re-attached by the adapter cache)
-        are preserved verbatim.
+        thought signatures; it passes Gemini's validation while real signatures
+        (from Gemini responses, re-attached by the adapter cache) are preserved
+        verbatim.
+
+        Only the **first** ``functionCall`` part of each step gets it: that is
+        the one Gemini validates ("the first functionCall part in each step of
+        the current turn must include its thought_signature"), and Google's own
+        responses leave the subsequent parallel calls unsigned. A real
+        signature on that part is never overwritten.
         """
         for msg in contents:
             for part in msg.get("parts", []):
-                if (
-                    isinstance(part, dict)
-                    and "functionCall" in part
-                    and not part.get("thoughtSignature")
-                ):
-                    part["thoughtSignature"] = _DUMMY_THOUGHT_SIGNATURE
+                if isinstance(part, dict) and "functionCall" in part:
+                    if not part.get("thoughtSignature"):
+                        part["thoughtSignature"] = _DUMMY_THOUGHT_SIGNATURE
+                    # Signatures are per step, not per call: stop after the first
+                    # function call of this content block.
+                    break
         return contents
 
     @staticmethod
@@ -297,10 +315,17 @@ class GeminiConversationMixin:
             if isinstance(block, TextBlock):
                 if block.text:
                     model = context.model if context else None
+                    produced: list[dict[str, Any]]
                     if model and GeminiRequestBuilderMixin._is_gemini_image_model(model):
-                        parts.extend(self._parse_gemini_markdown_images(block.text))
+                        produced = self._parse_gemini_markdown_images(block.text)
                     else:
-                        parts.append({"text": block.text})
+                        produced = [{"text": block.text}]
+                    # A Gemini-issued thoughtSignature on a text part is replayed
+                    # where it arrived (Gemini 3/4 put one on the last part of a
+                    # response; the docs ask for every signature back).
+                    if block.signature and block.signature_origin == "gemini" and produced:
+                        produced[-1]["thoughtSignature"] = block.signature
+                    parts.extend(produced)
             elif isinstance(block, ImageBlock):
                 part = self._make_media_part(
                     block.source.type,
@@ -354,6 +379,7 @@ class GeminiConversationMixin:
                 # Custom (freeform) tools are bridged to function declarations
                 # with a {"content": string} schema (see request_builder), so
                 # the raw input is re-wrapped to keep history consistent.
+                parts.extend(self._gemini_tool_context_parts(block))
                 parts.append(
                     {
                         "functionCall": {
@@ -361,18 +387,27 @@ class GeminiConversationMixin:
                                 context.namespace_map if context else None, block.name
                             ),
                             "args": {"content": block.input},
+                            **({"id": block.id} if block.id else {}),
                         }
                     }
                 )
             elif isinstance(block, ToolUseBlock):
-                func_call_part: dict[str, Any] = {
-                    "functionCall": {
-                        "name": flatten_history_tool_name(
-                            context.namespace_map if context else None, block.name
-                        ),
-                        "args": block.input,
-                    }
+                # Built-in tool invocations Gemini returned alongside this
+                # function call (``toolCall`` / ``toolResponse`` parts) come
+                # first: the API asks for them back verbatim, in place, to keep
+                # tool context circulating.
+                parts.extend(self._gemini_tool_context_parts(block))
+                function_call: dict[str, Any] = {
+                    "name": flatten_history_tool_name(
+                        context.namespace_map if context else None, block.name
+                    ),
+                    "args": block.input,
                 }
+                # FunctionCall.id is the correlation id the model's
+                # functionResponse must echo back (Gemini 3 always issues one).
+                if block.id:
+                    function_call["id"] = block.id
+                func_call_part: dict[str, Any] = {"functionCall": function_call}
                 # thoughtSignature lives at the PART level (sibling of
                 # functionCall), NOT inside the functionCall object. Gemini
                 # 3.x rejects the field inside functionCall with "Unknown name
@@ -401,6 +436,12 @@ class GeminiConversationMixin:
                     context.namespace_map if context else None, raw_name
                 )
                 function_response: dict[str, Any] = {"name": func_name}
+                # Gemini 3 always returns an ``id`` with every functionCall and
+                # requires the functionResponse to carry the same one ("Include
+                # this exact id in your functionResponse"); the client's
+                # tool_call_id is that id on both the streamed and parsed paths.
+                if block.tool_use_id:
+                    function_response["id"] = block.tool_use_id
                 if isinstance(block.content, str):
                     try:
                         parsed = orjson.loads(block.content)
@@ -455,6 +496,26 @@ class GeminiConversationMixin:
                     parts.append({"text": degraded})
 
         return parts if parts else [{"text": ""}]
+
+    @staticmethod
+    def _gemini_tool_context_parts(block: Any) -> list[dict[str, Any]]:
+        """The ``toolCall`` / ``toolResponse`` parts cached for a tool call.
+
+        Gemini 3's tool context circulation returns the built-in tools'
+        invocations and results as parts inside the model's content; the API
+        asks for them back verbatim (dropping them loses the grounding context
+        and can fail thought-signature validation). The adapter caches them
+        keyed by the function call id and re-attaches them here, immediately
+        before the ``functionCall`` part they preceded.
+        """
+        cached = block.extra.get("gemini_tool_parts") if isinstance(block.extra, dict) else None
+        if not isinstance(cached, list):
+            return []
+        return [
+            part
+            for part in cached
+            if isinstance(part, dict) and ("toolCall" in part or "toolResponse" in part)
+        ]
 
     # ── nano-banana markdown image parsing ────────────────────────────
 

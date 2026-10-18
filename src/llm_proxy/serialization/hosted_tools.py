@@ -318,12 +318,20 @@ RESPONSES_HOSTED_TYPES: frozendict[str, frozenset[str]] = frozendict(
 
 #: Gemini ``generateContent`` tool keys: bare objects, not a ``type`` field.
 #: ``google_search_retrieval`` is the legacy spelling of the same grounding tool.
+#: The set mirrors the ``Tool`` message's own fields (``googleSearch``,
+#: ``codeExecution``, ``googleMaps``, ``urlContext``, ``computerUse``,
+#: ``fileSearch``). ``file_search`` is the one entry whose object cannot be
+#: empty: it needs ``fileSearchStoreNames``, so the request builder drops it
+#: unless the client supplied store names.
 GEMINI_HOSTED_TYPES: frozendict[str, str] = frozendict(
     {
         "google_search": "google_search",
         "google_search_retrieval": "google_search",
         "url_context": "url_context",
         "google_maps": "google_maps",
+        "code_execution": "code_execution",
+        "computer_use": "computer_use",
+        "file_search": "file_search",
     }
 )
 

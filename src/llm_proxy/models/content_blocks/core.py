@@ -1,9 +1,16 @@
 """Universal ContentBlock types understood by all providers."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from llm_proxy.models.types import AudioSource, DocumentSource, ImageSource, VideoSource
+
+#: Providers whose thought signatures may be replayed to the same provider.
+#: ``openai`` marks a genuine Responses ``encrypted_content`` blob (which is
+#: not an Anthropic verification payload and must not be replayed as one).
+#: Declared here, next to the universal blocks that carry it, so every block or
+#: lane mentioning a signature origin reads one alias (extended re-exports it).
+SignatureOrigin = Literal["gemini", "openai"]
 
 
 @dataclass
@@ -13,11 +20,20 @@ class ContentBlock:
 
 @dataclass
 class TextBlock(ContentBlock):
-    """Text content block with optional raw citation dicts."""
+    """Text content block with optional raw citation dicts.
+
+    ``signature`` carries a provider signature issued *on a text part* — Gemini
+    3/4 may put a ``thoughtSignature`` on the last part of a response, including
+    a text one, and the documented advice is to return every signature exactly
+    where it arrived. ``signature_origin`` records which provider issued it, so
+    only Gemini-issued signatures are replayed to Gemini.
+    """
 
     text: str
     citations: list[dict[str, Any]] | None = None
     cache_control: Any | None = None
+    signature: str | None = None
+    signature_origin: SignatureOrigin | None = None
     # OpenAI explicit prompt-cache boundary (``{"mode": "explicit"}``) carried
     # on this content part. Preserved verbatim (separately from
     # ``cache_control``) so a native OpenAI upstream receives the client's exact

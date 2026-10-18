@@ -55,6 +55,14 @@ class GeminiResponseParserMixin:
             parts = content.get("parts", [])
 
             text_parts: list[str] = []
+            # A thoughtSignature on a text part belongs to the response as a
+            # whole (it rides the last part); the internal model keeps it on the
+            # TextBlock so history can return it where it arrived.
+            text_signature: str | None = None
+            # ``toolCall`` / ``toolResponse`` parts are the built-in tools' own
+            # invocation log (Gemini 3 tool context circulation); they precede
+            # the functionCall they belong to and must be replayed verbatim.
+            pending_tool_parts: list[dict[str, Any]] = []
             for part in parts:
                 if not isinstance(part, dict):
                     continue
@@ -67,8 +75,17 @@ class GeminiResponseParserMixin:
                         )
                     case {"text": str(text)}:
                         text_parts.append(text)
+                        sig = part.get("thoughtSignature") or part.get("thought_signature")
+                        if sig:
+                            text_signature = sig
+                    case {"toolCall": _} | {"toolResponse": _}:
+                        pending_tool_parts.append(part)
                     case {"functionCall": fc}:
                         sig = part.get("thoughtSignature") or part.get("thought_signature")
+                        extra: dict[str, Any] = {"thought_signature": sig}
+                        if pending_tool_parts:
+                            extra["gemini_tool_parts"] = list(pending_tool_parts)
+                            pending_tool_parts.clear()
                         output.append(
                             ToolUseBlock(
                                 # FunctionCall.id is the correlation id the
@@ -76,7 +93,7 @@ class GeminiResponseParserMixin:
                                 id=fc.get("id") or f"{fc.get('name', '')}_call",
                                 name=fc.get("name", ""),
                                 input=fc.get("args", {}),
-                                extra={"thought_signature": sig},
+                                extra=extra,
                             )
                         )
                     case {"executableCode": _} | {"codeExecutionResult": _}:
@@ -152,7 +169,15 @@ class GeminiResponseParserMixin:
                 annotations = extract_gemini_annotations(candidate, text)
 
             if text_parts:
-                output.insert(0, TextBlock(text=text, citations=annotations or None))
+                output.insert(
+                    0,
+                    TextBlock(
+                        text=text,
+                        citations=annotations or None,
+                        signature=text_signature,
+                        signature_origin="gemini" if text_signature else None,
+                    ),
+                )
 
             gemini_reason = candidate.get("finishReason")
             finish_reason = map_finish_reason(gemini_reason, "gemini", "openai")
@@ -164,6 +189,18 @@ class GeminiResponseParserMixin:
 
             if annotations:
                 provider_info["annotations"] = annotations
+
+            # Long decode: the turn stopped at the per-request cap and can be
+            # resumed by echoing this token back verbatim.
+            if candidate.get("continuationToken"):
+                provider_info["continuationToken"] = candidate["continuationToken"]
+            if candidate.get("finishMessage"):
+                provider_info["finishMessage"] = candidate["finishMessage"]
+            if pending_tool_parts:
+                # Built-in tool invocations with no function call after them
+                # (a grounding-only turn) have no tool-call id to key a replay
+                # on; they are kept for the log only.
+                provider_info["toolParts"] = pending_tool_parts
 
             if "citationMetadata" in candidate:
                 provider_info["citationMetadata"] = candidate["citationMetadata"]

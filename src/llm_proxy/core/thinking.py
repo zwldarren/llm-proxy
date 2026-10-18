@@ -35,9 +35,13 @@ OpenAI-compatible providers (openai, deepseek, openrouter, etc.):
   and OpenAICompatibleBase in providers/openai_compatible/_base.py.
 """
 
+import logging
+from collections.abc import Mapping
 from typing import Any
 
 from llm_proxy.models.types import ThinkingConfig
+
+logger = logging.getLogger(__name__)
 
 PROVIDER_REASONING_FORMAT: frozendict[str, frozendict[str, Any]] = frozendict(
     {
@@ -272,18 +276,54 @@ def convert_to_anthropic(config: ThinkingConfig | None) -> dict[str, Any] | None
     return result
 
 
-def convert_to_gemini(config: ThinkingConfig | None) -> dict[str, Any] | None:
+def convert_to_gemini(
+    config: ThinkingConfig | None,
+    model: str | None = None,
+    model_family_overrides: Mapping[str, str] | None = None,
+) -> dict[str, Any] | None:
     """Convert ThinkingConfig to Gemini provider format (Gemini 3+).
 
-    Returns ``{"thinkingConfig": {"thinkingLevel": "LOW" | "MEDIUM" | "HIGH"}}`` suitable for
-    merging into ``generationConfig`` for Gemini 3+ models.
+    Returns ``{"thinkingConfig": {"thinkingLevel": ..., "includeThoughts": True}}``
+    suitable for merging into ``generationConfig`` for Gemini 3+ models.
     For older Gemini models, use :func:`convert_to_gemini_legacy` instead.
+
+    ``includeThoughts`` is always set: without it the API returns no thought
+    parts at all, so a client that asked for reasoning would get none (the 2.5
+    path has always set it).
+
+    *model* decides how close to "off" a disabled request can get. Google's
+    thinking table documents ``MINIMAL`` ("little to no thinking") on the 3.x
+    Flash / Flash-Lite / robotics models — including Gemini 3.1 Flash-Lite
+    Image, where ``minimal`` is the default and ``low``/``medium`` are the
+    levels it rejects — but as an **error** on Gemini 3.8 Flash and Gemini 4
+    Argon; those families take ``LOW`` as their floor. Without a model id the
+    request is left untouched (no thinking config), which is the old behaviour.
     """
     if config is None:
         return None
 
+    # Function-level import: ``core.thinking`` must not import the serializer
+    # package at module scope (``serialization.gemini`` imports this module).
+    from llm_proxy.serialization.gemini.model_family import (
+        supports_minimal_thinking_level,
+    )
+
+    minimal = supports_minimal_thinking_level(model, model_family_overrides)
+
     if config.type == "disabled":
-        return None  # Gemini does not support explicit disabling
+        if model is None:
+            return None
+        level = "MINIMAL" if minimal else "LOW"
+        if not minimal:
+            # Debug, not info: the answer is deterministic per model, so an
+            # info line here is one per request on the hot path.
+            logger.debug(
+                "Gemini model %r cannot disable thinking; using thinkingLevel=%s "
+                "as the lowest level it accepts",
+                model,
+                level,
+            )
+        return {"thinkingConfig": {"thinkingLevel": level, "includeThoughts": True}}
 
     level = "MEDIUM"
     if config.budget_tokens is not None:
@@ -294,13 +334,15 @@ def convert_to_gemini(config: ThinkingConfig | None) -> dict[str, Any] | None:
     elif config.effort is not None:
         effort_lower = config.effort.lower()
         if effort_lower in ("none", "minimal", "low"):
-            level = "LOW"
+            # ``minimal`` matches the "no thinking" setting where the model
+            # supports it; ``none`` is the closest expressible level.
+            level = "MINIMAL" if minimal and effort_lower != "low" else "LOW"
         elif effort_lower == "medium":
             level = "MEDIUM"
         elif effort_lower in ("high", "xhigh", "max"):
             level = "HIGH"
 
-    return {"thinkingConfig": {"thinkingLevel": level}}
+    return {"thinkingConfig": {"thinkingLevel": level, "includeThoughts": True}}
 
 
 def convert_to_gemini_interactions(config: ThinkingConfig | None) -> dict[str, Any] | None:

@@ -18,6 +18,7 @@ and let fallback and priority decide who answers.
 | **Base URL** | Pre-filled per type. **Required** for `openai-compatible`. Trailing slashes are trimmed |
 | **Icon URL** | Optional logo shown next to the provider in the console; must be a public URL (`https:`/`http:`) — private/loopback addresses are rejected by the SSRF guard |
 | **Gemini Interactions** | `gemini` type only: use Google's newer Interactions API instead of `generateContent` (`metadata.api_variant`). The provider list shows an **Interactions** badge |
+| **Gemini model family overrides** | `gemini` type only, API/DB (`metadata.model_family_overrides`): maps an exact model id to a Gemini family version (e.g. `{"gemini-flash-latest": "4.0"}`) for the generateContent dialect. Use it when a model's id carries no `gemini-X.Y` segment (Google aliases, aggregator nicknames) — without it the proxy falls back to the legacy-safe request shape for that id and logs a warning once; with it the pinned family's shapes apply (thinking level vs budget, JSON-Schema fields, thought signatures, sampling-parameter dropping). Values must be versions like `"4.0"`/`"3.8"`; invalid entries are dropped with a warning. The Interactions dialect has no family gates, so a pin is a no-op there |
 | **API version** | Not in the console dialog; set via API/DB only. Not applied by any adapter in v0.2.3 |
 | **Timeout** | Not in the console dialog; set via API/DB only. Not applied in v0.2.3 — upstream calls use a fixed 600 s read timeout (10 s connect) |
 | **Custom headers** | Extra headers sent upstream (e.g. tenant or organization headers). These win over any other source for the same header name |
@@ -316,12 +317,18 @@ wire that does not, it is dropped with a warning that names the tool:
 |---|---|---|
 | `google_search` / `google_search_retrieval` | Gemini (`{"google_search": {}}`) | yes |
 | `url_context`, `google_maps` | Gemini (bare tool keys) | yes |
+| `code_execution` (Anthropic) / `code_interpreter` (OpenAI) | Gemini (`{"code_execution": {}}`, Gemini runs the code itself); native Responses wires | yes |
+| `computer_use`, `file_search` (Gemini's own) | Gemini (`computer_use` gets the documented `ENVIRONMENT_BROWSER` default unless the client names one; `file_search` needs `fileSearchStoreNames` or it is dropped) | yes |
 | `x_search` (+ `allowed_x_handles`, date range, image/video flags) | xAI Responses (verbatim) | yes |
 | `web_extractor` | Qwen Responses (verbatim; Qwen requires `web_search` alongside) | yes |
 | `retrieval` (`knowledge_id`) | Z.ai / BigModel Chat Completions | yes |
 | `$web_search` (`type: "builtin_function"`) | Kimi Chat Completions — forwarded only because the client asked; the proxy never generates it (deprecated upstream, retires 2026-10-20) | yes |
-| `code_interpreter`, `file_search` | native Responses wires that support them | yes |
+| `file_search` (OpenAI, `vector_store_ids`) | native Responses wires that support them | yes — Gemini's file search reads *Gemini* file-search stores, so OpenAI vector-store ids are not translated |
 | anything the proxy has never seen | a Responses or Gemini wire (their `tools[]` unions are open-ended), verbatim | dropped on chat wires |
+
+On a Gemini 3+ model, mixing a built-in tool with function declarations turns on
+`toolConfig.includeServerSideToolInvocations`, which is what makes Gemini share
+the built-in tools' calls and results with the conversation (ADR-0039).
 
 Two deliberate asymmetries, both documented in ADR-0038:
 

@@ -5,6 +5,7 @@ Converts raw Responses API tool dictionaries into protocol-agnostic
 """
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from llm_proxy.models.tools.core import CustomTool, ToolDefinition, is_web_search_tool_type
@@ -164,8 +165,7 @@ def convert_responses_tools(
                         )
                         continue
                     flat_name = namespace_mapping.flatten(ns_name, fn.name)
-                    fn.name = flat_name
-                    tools.append(fn)
+                    tools.append(replace(fn, name=flat_name))
                 elif child_type == "custom":
                     custom_tool = _build_custom_tool(child_dict)
                     if not custom_tool.name:
@@ -175,8 +175,7 @@ def convert_responses_tools(
                         )
                         continue
                     flat_name = namespace_mapping.flatten(ns_name, custom_tool.name)
-                    custom_tool.name = flat_name
-                    tools.append(custom_tool)
+                    tools.append(replace(custom_tool, name=flat_name))
                 elif child_type in ("tool_search",) or is_web_search_tool_type(child_type):
                     logger.warning(
                         "Skipping namespace %r child tool of built-in type %r: "

@@ -11,7 +11,7 @@ from typing import Any, Literal
 from llm_proxy.models.tools.core import ToolDefinition
 
 
-@dataclass
+@dataclass(frozen=True)
 class UserLocation:
     """User location for web search tools."""
 
@@ -22,7 +22,7 @@ class UserLocation:
     timezone: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class BashTool(ToolDefinition):
     """Bash tool for code execution (Anthropic built-in)."""
 
@@ -37,7 +37,7 @@ class BashTool(ToolDefinition):
     strict: bool | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class CodeExecutionTool(ToolDefinition):
     """Code execution tool (Anthropic built-in)."""
 
@@ -53,7 +53,7 @@ class CodeExecutionTool(ToolDefinition):
     strict: bool | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class MemoryTool(ToolDefinition):
     """Memory tool (Anthropic built-in)."""
 
@@ -68,7 +68,7 @@ class MemoryTool(ToolDefinition):
     strict: bool | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class TextEditorTool(ToolDefinition):
     """Text editor tool (Anthropic built-in)."""
 
@@ -86,7 +86,7 @@ class TextEditorTool(ToolDefinition):
     strict: bool | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ToolSearchTool(ToolDefinition):
     """Tool search tool (Anthropic built-in)."""
 
@@ -105,7 +105,7 @@ class ToolSearchTool(ToolDefinition):
     strict: bool | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class WebSearchTool(ToolDefinition):
     """Web search tool with optional context size and user location.
 
@@ -131,7 +131,7 @@ class WebSearchTool(ToolDefinition):
     user_location: UserLocation | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class WebFetchTool(ToolDefinition):
     """Web fetch tool."""
 

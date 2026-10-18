@@ -512,6 +512,20 @@ class StreamingTransformer(ABC):
         """
         return []
 
+    def get_tool_context(self) -> dict[str, list[dict[str, Any]]]:
+        """Provider tool invocations that ride beside a tool call, per call id.
+
+        A provider may return context for its own built-in tools next to the
+        function calls (Gemini 3's ``toolCall`` / ``toolResponse`` parts), context
+        that no OpenAI- or Anthropic-shaped field can carry to the client. The
+        adapter caches what this verb reports so the next turn can hand it back.
+
+        The base answers with nothing, which is the honest answer for every
+        dialect that has no such parts; only the converter that produces them
+        overrides it.
+        """
+        return {}
+
     def supersede(self, index: int, block: ContentBlock) -> None:
         """Replace the canonical block at *index* with *block*.
 

@@ -6,6 +6,7 @@ from typing import Any
 import orjson
 from orjson import JSONDecodeError
 
+from llm_proxy.models import TextBlock
 from llm_proxy.models.finish_reasons import map_finish_reason
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.gemini.annotations import extract_gemini_annotations
@@ -69,6 +70,17 @@ class GeminiStreamingTransformer(StreamingTransformer):
                 whole_turn_close_order=("media", "reasoning", "text", "refusal", "tool"),
             )
         )
+        # A thoughtSignature delivered on a text part (Gemini 3/4 put one on the
+        # last part of a response). Stamped on the assembled TextBlock in
+        # ``get_accumulated_output`` so history can return it where it arrived.
+        self._text_signature: str | None = None
+        # Built-in tool invocations (``toolCall`` / ``toolResponse`` parts, the
+        # Gemini 3 tool-context-circulation log) that preceded a function call,
+        # keyed by that call's id: replayed verbatim before the same
+        # ``functionCall`` on the next turn. ``_pending_tool_parts`` holds the
+        # ones seen since the last function call.
+        self._tool_context: dict[str, list[dict[str, Any]]] = {}
+        self._pending_tool_parts: list[dict[str, Any]] = []
 
     def transform(self, chunk: str | dict[str, Any]) -> str | None:
         """Transform a raw SSE chunk from Gemini to OpenAI format.
@@ -151,6 +163,11 @@ class GeminiStreamingTransformer(StreamingTransformer):
                         self._reasoning_signature_buffer = sig
                 case {"text": str(text)}:
                     text_parts.append(text)
+                    sig = part.get("thoughtSignature") or part.get("thought_signature")
+                    if sig:
+                        self._text_signature = sig
+                case {"toolCall": _} | {"toolResponse": _}:
+                    self._pending_tool_parts.append(part)
                 case {"inlineData": inline} if str(
                     inline.get("mime_type") or inline.get("mimeType") or ""
                 ).startswith("audio/"):
@@ -174,10 +191,17 @@ class GeminiStreamingTransformer(StreamingTransformer):
                     if text:
                         text_parts.append(text)
                 case {"functionCall": func_call}:
+                    # FunctionCall.id is the correlation id the client echoes
+                    # back in FunctionResponse (Gemini 3 always issues one); a
+                    # synthetic one is only the fallback for models that omit it.
+                    call_id = func_call.get("id") or f"call_{self._chunk_index}_{len(tool_calls)}"
+                    if self._pending_tool_parts:
+                        self._tool_context[call_id] = list(self._pending_tool_parts)
+                        self._pending_tool_parts.clear()
                     tool_calls.append(
                         {
                             "index": self._tool_call_seq + len(tool_calls),
-                            "id": f"call_{self._chunk_index}_{len(tool_calls)}",
+                            "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": func_call.get("name", ""),
@@ -317,6 +341,16 @@ class GeminiStreamingTransformer(StreamingTransformer):
         if isinstance(safety_ratings, list) and safety_ratings:
             openai_chunk["safety_ratings"] = safety_ratings
 
+        # Long decode: the turn stopped at the per-request cap (finish reason
+        # ``CONTINUATION``) and the candidate carries the token that resumes it.
+        # The non-streaming parser files it under ``provider_info``, but a stream
+        # has no response object, so it rides the chunk next to ``safety_ratings``
+        # — the OpenAI protocol transformer is fidelity-first and forwards
+        # unknown chunk fields verbatim, which is the only way a streaming client
+        # can learn that the truncated turn is resumable.
+        if candidate.get("continuationToken"):
+            openai_chunk["continuation_token"] = candidate["continuationToken"]
+
         # Observe every chunk: the seam parses the counters when the chunk carries
         # them, and the grounding fact either way, so a stream that never sends a
         # ``usageMetadata`` chunk still bills the searches it announced. Only the
@@ -359,7 +393,24 @@ class GeminiStreamingTransformer(StreamingTransformer):
 
     def get_accumulated_output(self) -> list:
         """The canonical blocks, from the segment engine (ADR-0031)."""
-        return self._segments.blocks()
+        blocks = self._segments.blocks()
+        if self._text_signature:
+            # The signature rides the turn's last text part; stamp the assembled
+            # TextBlock so the request builder can replay it in place.
+            for block in reversed(blocks):
+                if isinstance(block, TextBlock) and not block.signature:
+                    block.signature = self._text_signature
+                    block.signature_origin = "gemini"
+                    break
+        return blocks
+
+    def get_tool_context(self) -> dict[str, list[dict[str, Any]]]:
+        """Built-in tool parts keyed by the function call they preceded.
+
+        The adapter caches these so the next turn can return ``toolCall`` /
+        ``toolResponse`` parts verbatim, wherever Gemini asked for them back.
+        """
+        return dict(self._tool_context)
 
     def finalize(self) -> str:
         """Generate stream end marker.

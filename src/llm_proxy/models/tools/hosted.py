@@ -48,7 +48,7 @@ DEPRECATED_HOSTED_TOOL_TYPES: frozendict[str, str] = frozendict(
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class HostedTool(ToolDefinition):
     """A provider-hosted tool carried verbatim.
 
