@@ -18,6 +18,12 @@ Covers gaps found by an audit against the official Anthropic Messages API:
 - body-level ``betas`` merges into the ``anthropic-beta`` header
 - legacy ``output_format`` body field aliases ``output_config.format``
 - system text blocks keep per-block citations (via ``_system_blocks`` stash)
+- streaming ``thinking`` blocks open with a ``signature`` (SDK-required field)
+- streaming ``message_delta.usage`` carries only the official
+  ``MessageDeltaUsage`` keys
+- non-streaming messages always carry ``stop_sequence`` (``null`` if unused)
+- body-level ``workspace_id`` / ``user_profile_id`` become their headers
+- the protocol's prompt estimate feeds ``message_start.usage.input_tokens``
 """
 
 import pytest
@@ -1421,3 +1427,131 @@ def test_non_streaming_compaction_stop_reason_is_preserved(protocol, provider):
     }
     out = protocol.format_response(provider.parse_provider_response(raw, model="claude-opus-5"))
     assert out["stop_reason"] == "compaction"
+
+
+# ---------------------------------------------------------------------------
+# Official wire shapes found by the SDK-level audit: the emitted events must
+# validate against ``anthropic.types`` (thinking start carries its signature,
+# message_delta.usage is MessageDeltaUsage-shaped, stop_sequence is always
+# present) and header-spelled request fields must not ride the body.
+# ---------------------------------------------------------------------------
+
+
+def test_stream_thinking_block_start_carries_signature():
+    """``thinking`` block starts must open with ``signature`` (SDK-required field).
+
+    ``ThinkingBlock.signature`` is required, so a start event without it is
+    rejected outright by the official SDK's event parser — the block never
+    reaches the client's content list.
+    """
+    transformer = AnthropicStreamingTransformer(model="claude-x", request_id="msg_1")
+    sse = transformer.transform(
+        {"choices": [{"index": 0, "delta": {"reasoning_content": "step"}, "finish_reason": None}]}
+    )
+    start = [frame for frame in (sse or "").split("\n\n") if "content_block_start" in frame]
+    assert start, "no content_block_start emitted"
+    assert '"content_block":{"type":"thinking","thinking":"","signature":""}' in start[0]
+
+
+def test_stream_message_delta_usage_matches_official_shape():
+    """``message_delta.usage`` drops OpenAI-dialect members.
+
+    The canonical channel carries ``prompt_tokens_details``/
+    ``completion_tokens_details`` for OpenAI-family providers, but
+    ``MessageDeltaUsage`` defines neither; leaking them puts fields on the
+    Anthropic wire that no official client knows.
+    """
+    official_keys = {
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens_details",
+        "server_tool_use",
+    }
+    transformer = AnthropicStreamingTransformer(model="claude-x", request_id="msg_1")
+    canonical = {
+        "id": "msg_1",
+        "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 40},
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        },
+    }
+    sse = (transformer.transform(canonical) or "") + transformer.finalize()
+    usage = _message_delta_payloads(sse)[-1]["usage"]
+    assert set(usage) <= official_keys
+    # The facts that DO belong still ride: cache read lifted out of the nested
+    # dialect, and input_tokens exclusive of it.
+    assert usage["cache_read_input_tokens"] == 40
+    assert usage["input_tokens"] == 60
+
+
+def test_non_streaming_stop_sequence_always_present(protocol, provider):
+    """Official messages always carry ``stop_sequence`` (``null`` when unused)."""
+    from llm_proxy.models import TextBlock
+    from llm_proxy.models.internal import InternalResponse
+
+    response = InternalResponse(id="msg_1", model="claude-x", output=[TextBlock(text="hi")])
+    body = protocol.format_response(response)
+    assert "stop_sequence" in body
+    assert body["stop_sequence"] is None
+
+
+def test_body_workspace_and_user_profile_fields_become_headers():
+    """``workspace_id``/``user_profile_id`` are header facts, not body fields.
+
+    The Messages API rejects unknown top-level body fields, so the protocol hook
+    lifts them into the header context (and out of the raw body the native
+    passthrough tier forwards verbatim).
+    """
+    from llm_proxy.providers.anthropic.client_headers import (
+        clear_client_headers,
+        get_client_headers,
+    )
+
+    clear_client_headers()
+    raw = {
+        "model": "claude-x",
+        "max_tokens": 10,
+        "messages": [{"role": "user", "content": "hi"}],
+        "workspace_id": "wrkspc_1",
+        "user_profile_id": "up_1",
+    }
+    anthropic_protocol.on_parse_request(raw)
+    headers = get_client_headers()
+    try:
+        assert headers["anthropic-workspace-id"] == "wrkspc_1"
+        assert headers["anthropic-user-profile-id"] == "up_1"
+        assert "workspace_id" not in raw
+        assert "user_profile_id" not in raw
+    finally:
+        clear_client_headers()
+
+
+def test_estimate_input_tokens_hook_feeds_message_start():
+    """The protocol's prompt estimate is what a converted stream's start reports.
+
+    ``message_start.usage`` is the only place the wire carries a prompt count
+    before the upstream answers; on the converted tier the protocol supplies the
+    estimate instead of opening the turn with zeros.
+    """
+    raw = {
+        "model": "claude-x",
+        "max_tokens": 10,
+        "system": "You are terse.",
+        "messages": [{"role": "user", "content": "Hello there"}],
+    }
+    estimate = anthropic_protocol.estimate_input_tokens(raw)
+    assert estimate > 0
+
+    transformer = AnthropicStreamingTransformer(
+        model="claude-x", request_id="msg_1", estimated_input_tokens=estimate
+    )
+    sse = transformer.transform(
+        {"choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}]}
+    )
+    assert _message_start_usage(sse or "")["input_tokens"] == estimate

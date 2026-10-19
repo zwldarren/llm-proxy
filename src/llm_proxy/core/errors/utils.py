@@ -77,12 +77,24 @@ def get_error_type_for_status(status_code: int) -> str:
     match status_code:
         case 401:
             return "authentication_error"
+        case 402:
+            return "billing_error"
         case 403:
             return "permission_error"
         case 404:
             return "not_found_error"
+        case 409:
+            return "conflict_error"
+        case 413:
+            return "request_too_large"
         case 429:
             return "rate_limit_error"
+        # Anthropic's overload status: not a standard HTTP code, but mapped
+        # when the upstream is Anthropic (docs/en/api/errors#http-errors).
+        case 529:
+            return "overloaded_error"
+        case 504:
+            return "timeout_error"
         case s if s >= 500:
             return "api_error"
         case _:

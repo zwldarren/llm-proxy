@@ -18,6 +18,7 @@ from llm_proxy.billing.transcription_stream_usage import TranscriptionStreamUsag
 from llm_proxy.core.adapter import BaseAdapter
 from llm_proxy.core.conversion import NativePassthroughHandler, plan_conversion
 from llm_proxy.core.errors.handler import ErrorHandler
+from llm_proxy.core.errors.protocols import protocol_for_name
 from llm_proxy.core.exceptions import (
     ConfigurationError,
     ProviderError,
@@ -58,6 +59,19 @@ from llm_proxy.streaming.handler import StreamingHandler
 
 logger = get_logger(__name__)
 
+#: Prefix of the stream ids the proxy mints for itself, per client protocol. An
+#: Anthropic client expects ``msg_…`` (Claude Code and the SDK's own tooling key
+#: on the prefix), an OpenAI client ``chatcmpl-…``. The proxy never rewrites an
+#: upstream's own response id; this only names the id it generates.
+_STREAM_ID_PREFIX: frozendict[str, str] = frozendict({"anthropic": "msg_"})
+_DEFAULT_STREAM_ID_PREFIX = "chatcmpl-"
+
+
+def stream_response_id(protocol_name: str | None) -> str:
+    """Mint the proxy's own stream id in the client protocol's id dialect."""
+    prefix = _STREAM_ID_PREFIX.get(protocol_name or "", _DEFAULT_STREAM_ID_PREFIX)
+    return f"{prefix}{uuid.uuid4().hex[:29]}"
+
 
 # ------------------------------------------------------------------
 # Stream usage trackers (image/transcription billing) live in
@@ -81,6 +95,10 @@ class StreamingProcessor:
         self.protocol_endpoint = protocol_endpoint
         self.streaming_handler = streaming_handler
         self._error_handler = error_handler
+        # Precomputed once: streaming-path errors must be shaped for the
+        # protocol the client speaks (Anthropic Messages clients get the
+        # Anthropic error envelope, not the OpenAI default).
+        self._error_protocol = protocol_for_name(protocol_endpoint.name)
         self._param_override_service = param_override_service
         self._chunk_parser = chunk_parser or OpenAIStreamChunkParser()
         self._prefetch_policy = PrefetchPolicy(self._chunk_parser)
@@ -134,7 +152,8 @@ class StreamingProcessor:
             )
 
         _exit_stack = exit_stack or AsyncExitStack()
-        response_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+        protocol_name = context.protocol_name
+        response_id = stream_response_id(protocol_name)
         # The client-visible model name echoed in stream chunks: the
         # client-requested alias (event_context.model, set by
         # ProviderSelectionStage), never the resolved provider model name.
@@ -151,8 +170,6 @@ class StreamingProcessor:
         stream = None
         should_clean_stream = True
         should_clean_exit_stack = True
-
-        protocol_name = context.protocol_name
 
         try:
             while True:
@@ -204,6 +221,22 @@ class StreamingProcessor:
                 sig = inspect.signature(transformer_cls.__init__)
                 if "intercept_web_search" in sig.parameters:
                     transformer_kwargs["intercept_web_search"] = proxy_web_search_active
+
+                # The Anthropic wire reports the prompt count in its FIRST event
+                # (``message_start.usage``), which the converted tier emits before
+                # the upstream has told us its own count. Ask the protocol for its
+                # estimate — never on the native tier, where the transformer does
+                # not render the wire and the count would be paid for nothing. The
+                # estimate is a tokenizer pass, so it runs off the event loop.
+                estimator = self.protocol_endpoint.estimate_input_tokens
+                if (
+                    estimator is not None
+                    and not native
+                    and "estimated_input_tokens" in sig.parameters
+                ):
+                    transformer_kwargs["estimated_input_tokens"] = await asyncio.to_thread(
+                        estimator, raw_request_data
+                    )
 
                 transformer = transformer_cls(**transformer_kwargs)
 
@@ -270,7 +303,9 @@ class StreamingProcessor:
                         final_error = self._error_handler.create_context_length_error(
                             current_adapter.provider_name, context_exceeded_reason
                         )
-                        result_response = self._error_handler.format_response(final_error)
+                        result_response = self._error_handler.format_response(
+                            final_error, protocol=self._error_protocol
+                        )
                         break
 
                     if retryable_stream_finish_reason:
@@ -296,7 +331,9 @@ class StreamingProcessor:
                         final_error = self._error_handler.create_retryable_stream_error(
                             current_adapter.provider_name, retryable_stream_finish_reason
                         )
-                        result_response = self._error_handler.format_response(final_error)
+                        result_response = self._error_handler.format_response(
+                            final_error, protocol=self._error_protocol
+                        )
                         break
 
                     if not stream_started:
@@ -319,7 +356,9 @@ class StreamingProcessor:
                         final_error = self._error_handler.create_empty_stream_error(
                             current_adapter.provider_name
                         )
-                        result_response = self._error_handler.format_response(final_error)
+                        result_response = self._error_handler.format_response(
+                            final_error, protocol=self._error_protocol
+                        )
                         break
 
                     should_clean_stream = False
@@ -390,7 +429,9 @@ class StreamingProcessor:
                             error_type="api_error",
                             status_code=500,
                         )
-                    result_response = self._error_handler.format_response(e)
+                    result_response = self._error_handler.format_response(
+                        e, protocol=self._error_protocol
+                    )
                     break
 
             if event_context is not None and context.on_request_completed is not None:
@@ -572,7 +613,7 @@ class StreamingProcessor:
                     status_code=500,
                 )
             )
-            return self._error_handler.format_response(error)
+            return self._error_handler.format_response(error, protocol=self._error_protocol)
         finally:
             if _exit_stack is not None:
                 await asyncio.shield(_exit_stack.aclose())

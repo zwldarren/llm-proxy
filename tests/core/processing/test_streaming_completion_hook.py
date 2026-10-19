@@ -158,3 +158,19 @@ async def test_completion_hook_absent_is_noop():
     )
 
     await _consume(response)  # must not raise
+
+
+def test_stream_response_id_uses_client_protocol_prefix():
+    """Proxy-minted stream ids carry the client protocol's own id dialect.
+
+    An Anthropic client receives ``msg_…`` (the prefix Claude Code and the SDK's
+    tooling key on); OpenAI-shaped protocols keep ``chatcmpl-…``. Upstream ids
+    are never rewritten — this only names the id the proxy generates itself.
+    """
+    from llm_proxy.core.processing.streaming_processor import stream_response_id
+
+    assert stream_response_id("anthropic").startswith("msg_")
+    assert stream_response_id("openai").startswith("chatcmpl-")
+    assert stream_response_id("openresponses").startswith("chatcmpl-")
+    assert stream_response_id(None).startswith("chatcmpl-")
+    assert stream_response_id("anthropic") != stream_response_id("anthropic")

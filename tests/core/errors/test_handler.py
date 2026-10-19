@@ -380,6 +380,58 @@ class TestFormatResponse:
         )
         assert body == expected
 
+    def test_format_response_openai_body_to_anthropic_client_is_reshaped(self):
+        """An OpenAI-dialect upstream body is re-shaped for an Anthropic client.
+
+        The verbatim passthrough only applies when the upstream body already
+        speaks the client's dialect; otherwise the official SDK's typed
+        dispatch (keyed on the top-level ``"type": "error"`` member) breaks.
+        """
+        handler = ErrorHandler()
+        error = ProviderError(
+            message="Rate limited",
+            error_type="rate_limit_error",
+            status_code=429,
+            original_error={
+                "error": {"type": "rate_limit_exceeded", "message": "Rate limited"},
+                "retry_after": 12,
+            },
+        )
+        response = handler.format_response(error, protocol="anthropic")
+        import json
+
+        body = json.loads(
+            response.body.decode() if isinstance(response.body, bytes) else response.body
+        )
+        assert body["type"] == "error"
+        assert body["error"]["type"] == "rate_limit_error"
+        assert body["error"]["message"] == "Rate limited"
+        assert "retry_after" not in body
+        # The Retry-After bookkeeping still surfaces as a header.
+        assert response.headers.get("Retry-After") == "12"
+
+    def test_format_response_anthropic_body_to_openai_client_is_reshaped(self):
+        """An Anthropic-dialect upstream body is re-shaped for an OpenAI client."""
+        handler = ErrorHandler()
+        error = ProviderError(
+            message="Overloaded",
+            error_type="api_error",
+            status_code=529,
+            original_error={
+                "type": "error",
+                "error": {"type": "overloaded_error", "message": "Overloaded"},
+                "request_id": "req_01ABC",
+            },
+        )
+        response = handler.format_response(error, protocol="openai")
+        import json
+
+        body = json.loads(
+            response.body.decode() if isinstance(response.body, bytes) else response.body
+        )
+        assert "type" not in body or body.get("type") != "error"
+        assert body["error"]["message"] == "Overloaded"
+
     def test_format_response_surfaces_retry_after_header(self):
         """Upstream Retry-After is surfaced as a response header."""
         handler = ErrorHandler()

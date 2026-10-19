@@ -593,12 +593,18 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
 
         # OpenAI ``parallel_tool_calls: false`` and the Anthropic protocol's
         # ``disable_parallel_tool_use`` flag must both end up inside
-        # ``tool_choice.disable_parallel_tool_use`` for the Anthropic API.
-        # We only emit a tool_choice when tools are actually present; without
-        # tools the flag is dropped because it has no meaning.
+        # ``tool_choice.disable_parallel_tool_use``: that is the only place the
+        # Messages API defines the flag, and the API rejects unknown top-level
+        # fields, so it must never be emitted on the body itself. We only emit a
+        # tool_choice when tools are actually present; without tools the flag is
+        # dropped because it has no meaning.
         disable_parallel = (
             request.extra.get("disable_parallel_tool_use") is True
             or request.extra.get("parallel_tool_calls") is False
+            or (
+                request.params.anthropic is not None
+                and request.params.anthropic.disable_parallel_tool_use is True
+            )
             or (
                 request.params.openai is not None
                 and request.params.openai.parallel_tool_calls is False
@@ -637,9 +643,6 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
 
             if anthropic_params.context_management is not None:
                 body["context_management"] = anthropic_params.context_management
-
-            if anthropic_params.disable_parallel_tool_use is not None:
-                body["disable_parallel_tool_use"] = anthropic_params.disable_parallel_tool_use
 
         # Claude models reject a forced tool_choice (``any``/``tool``) while
         # thinking is enabled. Preserve the caller's explicit tool constraint

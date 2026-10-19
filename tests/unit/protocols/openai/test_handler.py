@@ -1391,3 +1391,69 @@ class TestChatToolIntake:
         assert isinstance(unified.tools[0], HostedTool)
         assert unified.tools[0].params == {"foo": "bar"}
         assert any("some_future_tool" in record.message for record in caplog.records)
+
+
+class TestFinishReasonClamp:
+    """Canonical-channel extras are clamped onto the official OpenAI enum.
+
+    The canonical channel preserves Anthropic-native values end-to-end
+    (``compaction``, ``stop_sequence``) so an Anthropic-protocol client can
+    still see them; an OpenAI-protocol client must not — the wire only defines
+    the official ``finish_reason`` members.
+    """
+
+    def test_streaming_illegal_values_are_clamped(self):
+        transformer = OpenAIStreamingTransformer(model="test")
+
+        for raw, expected in (
+            ("compaction", "stop"),
+            ("stop_sequence", "stop"),
+            ("context_length", "length"),
+            ("eos", "stop"),
+        ):
+            chunk = {
+                "id": "chatcmpl-1",
+                "object": "chat.completion.chunk",
+                "created": 123,
+                "model": "test",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": raw}],
+            }
+            result = transformer.transform(chunk)
+            assert result is not None
+            data = orjson.loads(result.removeprefix("data: ").removesuffix("\n\n"))
+            assert data["choices"][0]["finish_reason"] == expected
+
+    def test_streaming_legal_values_pass_through(self):
+        transformer = OpenAIStreamingTransformer(model="test")
+
+        chunk = {
+            "id": "chatcmpl-1",
+            "object": "chat.completion.chunk",
+            "created": 123,
+            "model": "test",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+        }
+        result = transformer.transform(chunk)
+        assert result is not None
+        data = orjson.loads(result.removeprefix("data: ").removesuffix("\n\n"))
+        assert data["choices"][0]["finish_reason"] == "tool_calls"
+
+    def test_non_streaming_illegal_values_are_clamped(self):
+        response = InternalResponse(
+            id="chatcmpl-1",
+            model="test",
+            output=[TextBlock(text="hi")],
+            finish_reason="compaction",
+        )
+        result = _openai_serializer.format_response(response)
+        assert result["choices"][0]["finish_reason"] == "stop"
+
+    def test_non_streaming_context_length_folds_to_length(self):
+        response = InternalResponse(
+            id="chatcmpl-1",
+            model="test",
+            output=[TextBlock(text="hi")],
+            finish_reason="context_length",
+        )
+        result = _openai_serializer.format_response(response)
+        assert result["choices"][0]["finish_reason"] == "length"

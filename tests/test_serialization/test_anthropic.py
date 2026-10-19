@@ -567,7 +567,8 @@ def test_map_finish_reason(serializer):
     assert serializer._map_finish_reason("stop") == "end_turn"
     assert serializer._map_finish_reason("tool_calls") == "tool_use"
     assert serializer._map_finish_reason("length") == "max_tokens"
-    assert serializer._map_finish_reason("unknown") == "unknown"
+    # Unknown values must not leak as illegal stop_reason enum members.
+    assert serializer._map_finish_reason("unknown") == "end_turn"
 
 
 def test_disable_parallel_tool_use_converts_to_parallel_tool_calls(serializer):
@@ -607,23 +608,38 @@ def test_disable_parallel_tool_use_top_level_converts(serializer):
 
 
 def test_build_provider_request_with_disable_parallel_tool_use(serializer):
-    """Test that disable_parallel_tool_use is built correctly in provider request."""
+    """The flag lands inside ``tool_choice``, never on the body itself.
+
+    ``disable_parallel_tool_use`` is a ``tool_choice`` field in the Messages API;
+    the API rejects unknown top-level request fields, so a body-level copy would
+    make the request fail upstream.
+    """
     from llm_proxy.models import AnthropicSpecificParams
+    from llm_proxy.models.tools import FunctionTool
 
-    request = InternalRequest(
-        model="claude-3-opus",
-        conversation=ConversationContext(
-            messages=[Message(role="user", content=[TextBlock(text="Hello")])]
-        ),
-        params=GenerationParams(
-            max_tokens=1024,
-            anthropic=AnthropicSpecificParams(disable_parallel_tool_use=True),
-        ),
-    )
+    def _request(tools: list) -> InternalRequest:
+        return InternalRequest(
+            model="claude-3-opus",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="Hello")])]
+            ),
+            params=GenerationParams(
+                max_tokens=1024,
+                anthropic=AnthropicSpecificParams(disable_parallel_tool_use=True),
+            ),
+            tools=tools or None,
+        )
 
-    body = serializer.build_provider_request(request)
+    tool = FunctionTool(name="f", parameters={"type": "object"})
+    body = serializer.build_provider_request(_request([tool]))
 
-    assert body["disable_parallel_tool_use"] is True
+    assert body["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
+    assert "disable_parallel_tool_use" not in body
+
+    # Without tools the flag has no meaning and is dropped entirely.
+    body_without_tools = serializer.build_provider_request(_request([]))
+    assert "disable_parallel_tool_use" not in body_without_tools
+    assert "tool_choice" not in body_without_tools
 
 
 def test_parse_request_with_output_config(serializer):

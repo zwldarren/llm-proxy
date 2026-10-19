@@ -247,10 +247,12 @@ class TestErrorResponseBuilder:
 
         error = ErrorResponseBuilder().from_provider_error(provider_error, protocol="anthropic")
 
+        # "provider_error" is a proxy-internal type with no official Anthropic
+        # wire value; it is normalized to "api_error" for schema-valid output.
         assert error == {
             "type": "error",
             "error": {
-                "type": "provider_error",
+                "type": "api_error",
                 "message": "Provider failed",
             },
         }

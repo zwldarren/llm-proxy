@@ -15,6 +15,7 @@ import orjson
 from orjson import JSONDecodeError
 
 from llm_proxy.models.content_blocks import ContentBlock
+from llm_proxy.models.finish_reasons import to_openai_finish_reason
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.usage import UsageAccumulator
 from llm_proxy.streaming.accumulation import SegmentAccumulator
@@ -361,6 +362,13 @@ class OpenAIStreamingTransformer(StreamingTransformer):
             return None
         result = _strip_internal_keys(choice)
         result.pop("delta", None)
+
+        # Canonical-channel extras (Anthropic ``compaction``/``stop_sequence``,
+        # the internal ``context_length`` sentinel) are not members of the
+        # official OpenAI enum; clamp at the wire. Legal values — including the
+        # legacy ``function_call`` — pass untouched.
+        if "finish_reason" in result:
+            result["finish_reason"] = to_openai_finish_reason(result["finish_reason"])
 
         if "delta" in choice and choice["delta"] is not None:
             normalized_delta = self._normalize_delta(choice["delta"])

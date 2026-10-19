@@ -89,6 +89,71 @@ OPENAI_TO_ANTHROPIC: frozendict[str, str] = frozendict(
     }
 )
 
+#: The official Anthropic ``StopReason`` enum (docs/en/api — StopReason object)
+#: plus the beta ``compaction`` turn the proxy preserves end-to-end. Any other
+#: value reaching an Anthropic-protocol client is an illegal enum member.
+ANTHROPIC_STOP_REASONS: frozenset[str] = frozenset(
+    {
+        "end_turn",
+        "max_tokens",
+        "stop_sequence",
+        "tool_use",
+        "pause_turn",
+        "refusal",
+        "model_context_window_exceeded",
+        # Beta compaction turns carry no OpenAI equivalent; the raw value is
+        # preserved through the canonical channel (see ANTHROPIC_TO_OPENAI).
+        "compaction",
+    }
+)
+
+
+def to_anthropic_stop_reason(reason: str | None) -> str:
+    """Coerce any upstream finish reason onto the official StopReason enum.
+
+    Canonical-channel finish reasons are the OpenAI dialect, but upstreams
+    (OpenRouter, older OpenAI models, internal converters) emit values outside
+    it — ``function_call``, ``error``, ``eos``. Unknown values must not leak
+    onto the Anthropic wire as an illegal ``stop_reason``; the ones that are
+    already official Anthropic values (native values preserved through the
+    canonical channel) pass through, everything else collapses to
+    ``end_turn``.
+    """
+    if not reason:
+        return "end_turn"
+    if reason in ANTHROPIC_STOP_REASONS:
+        return reason
+    mapped = OPENAI_TO_ANTHROPIC.get(reason)
+    return mapped if mapped is not None else "end_turn"
+
+
+#: The official OpenAI Chat Completions ``finish_reason`` enum. Canonical-channel
+#: values outside it must not reach an OpenAI-protocol client (see
+#: :func:`to_openai_finish_reason`).
+OPENAI_FINISH_REASONS: frozenset[str] = frozenset(
+    {"stop", "length", "tool_calls", "content_filter", "function_call"}
+)
+
+
+def to_openai_finish_reason(reason: str | None) -> str | None:
+    """Clamp any canonical finish reason onto the official OpenAI enum.
+
+    The canonical channel preserves Anthropic-native values end-to-end
+    (``compaction``, ``stop_sequence``) and carries the proxy-internal
+    ``context_length`` sentinel; none of those exist on the OpenAI wire. The
+    official Anthropic direction clamps unknowns onto ``end_turn`` — this is
+    the mirror: legal values pass, canonical extras fold onto their closest
+    official member, anything else collapses to ``stop``.
+    """
+    if not reason:
+        return reason
+    if reason in OPENAI_FINISH_REASONS:
+        return reason
+    if reason == "context_length":
+        return "length"
+    return "stop"
+
+
 # Gemini → Anthropic mapping
 GEMINI_TO_ANTHROPIC: frozendict[str, str] = frozendict(
     {

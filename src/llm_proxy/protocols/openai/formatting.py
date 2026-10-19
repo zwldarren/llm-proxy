@@ -23,6 +23,7 @@ from llm_proxy.models import (
     TextBlock,
     ThinkingBlock,
 )
+from llm_proxy.models.finish_reasons import to_openai_finish_reason
 from llm_proxy.models.types import ChoiceLogprobs
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 
@@ -116,6 +117,10 @@ class OpenAIFormattingMixin:
                 finish_reason = choice_meta[i - 1].finish_reason
             else:
                 finish_reason = response.finish_reason or "stop"
+            # Canonical-channel extras (Anthropic ``compaction``/``stop_sequence``
+            # preserved end-to-end, the internal ``context_length`` sentinel) are
+            # not members of the official OpenAI enum; clamp at the wire.
+            finish_reason = to_openai_finish_reason(finish_reason)
 
             choice_entry: dict[str, Any] = {
                 "index": i,

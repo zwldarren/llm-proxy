@@ -42,7 +42,10 @@ class MessagesRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     model: str = Field(..., description="Model to use")
-    max_tokens: int = Field(16384, description="Maximum tokens to generate")
+    # Officially required (docs/en/api/messages — max_tokens, minimum 0). A
+    # default here silently rewrote client bugs into a 16384-token budget;
+    # omitting it must fail the request the way the official API does.
+    max_tokens: int = Field(..., description="Maximum tokens to generate", ge=0)
     messages: list[dict[str, Any]] = Field(..., description="List of messages")
 
     system: str | list[dict[str, Any]] | None = Field(None, description="System prompt")

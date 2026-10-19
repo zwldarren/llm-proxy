@@ -3,6 +3,8 @@
 from llm_proxy.core.thinking import (
     convert_to_anthropic,
     convert_to_gemini,
+    convert_to_gemini_interactions,
+    convert_to_gemini_legacy,
     convert_to_ollama,
     convert_to_openai,
     normalize_thinking,
@@ -652,3 +654,44 @@ class TestResolveThinking:
             openai=OpenAISpecificParams(reasoning_effort="high"),
         )
         assert resolve_thinking(req) == ThinkingConfig(type="disabled")
+
+
+class TestBetweenToolsConversion:
+    """``between_tools`` (Anthropic's lowest thinking setting, Claude Sonnet 5.5).
+
+    Anthropic upstreams receive the value verbatim; every other provider gets
+    the lowest thinking setting it can express, mirroring how
+    ``convert_to_openai`` leaves the provider default in place rather than
+    sending a type the upstream would reject.
+    """
+
+    def test_anthropic_receives_between_tools_verbatim(self):
+        result = convert_to_anthropic(ThinkingConfig(type="between_tools"))
+        assert result == {"thinking": {"type": "between_tools"}}
+
+    def test_openai_translation_leaves_provider_default(self):
+        assert convert_to_openai(ThinkingConfig(type="between_tools")) is None
+
+    def test_gemini_uses_lowest_acceptable_level(self):
+        config = ThinkingConfig(type="between_tools")
+        # Without a model id: untouched, like a disabled request.
+        assert convert_to_gemini(config) is None
+        # Models that accept MINIMAL get it; the rest get their LOW floor.
+        assert convert_to_gemini(config, model="gemini-3.1-flash-lite-image") == {
+            "thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}
+        }
+        for model in ("gemini-3.8-flash", "gemini-4-argon"):
+            assert convert_to_gemini(config, model=model) == {
+                "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": True}
+            }, model
+
+    def test_gemini_interactions_uses_minimal(self):
+        result = convert_to_gemini_interactions(ThinkingConfig(type="between_tools"))
+        assert result == {"thinking_level": "minimal"}
+
+    def test_gemini_legacy_uses_floor_budget(self):
+        result = convert_to_gemini_legacy(ThinkingConfig(type="between_tools"))
+        assert result == {"thinkingConfig": {"thinkingBudget": 1024, "includeThoughts": True}}
+
+    def test_ollama_uses_low(self):
+        assert convert_to_ollama(ThinkingConfig(type="between_tools")) == "low"

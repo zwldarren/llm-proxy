@@ -1153,6 +1153,7 @@ class TestModelEchoConsistency:
 
         request_model = MessagesRequest(
             model="fast",
+            max_tokens=100,
             messages=[{"role": "user", "content": "hi"}],
             stream=True,
         )
@@ -1576,3 +1577,114 @@ class TestDisconnectIntervalGating:
 
         assert result is True
         assert cancel_token.is_set(), "cancel_token must be set on disconnect"
+
+
+def _sse_payloads(payload: str, event: str) -> list[dict]:
+    """Parse the payloads of one named SSE event out of a rendered stream."""
+    import json
+
+    out = []
+    for frame in payload.split("\n\n"):
+        name = None
+        data = None
+        for line in frame.split("\n"):
+            if line.startswith("event:"):
+                name = line[6:].strip()
+            elif line.startswith("data:"):
+                data = line[5:].strip()
+        if name == event and data:
+            out.append(json.loads(data))
+    return out
+
+
+class TestAnthropicConvertedStreamWire:
+    """End-to-end wire shape of the converted Anthropic streaming tier."""
+
+    @pytest.mark.asyncio
+    async def test_converted_stream_mints_msg_id_and_reports_prompt_estimate(self) -> None:
+        """``message_start`` carries a ``msg_`` id and a real prompt count.
+
+        The proxy mints the stream id itself, so it uses the client protocol's
+        prefix; and because the upstream's prompt count only lands in the
+        terminal ``message_delta``, the protocol's own estimate fills
+        ``message_start.usage`` instead of a zero.
+        """
+
+        async def _provider_stream():
+            yield {
+                "id": "chatcmpl-x",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}],
+            }
+            yield {
+                "id": "chatcmpl-x",
+                "object": "chat.completion.chunk",
+                "created": 2,
+                "model": "glm-5",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 7,
+                    "total_tokens": 127,
+                    "prompt_tokens_details": {"cached_tokens": 20},
+                    "completion_tokens_details": {"reasoning_tokens": 3},
+                },
+            }
+
+        adapter = MagicMock()
+        adapter.supports_native_streaming = MagicMock(return_value=False)
+        adapter.provider_name = "openai-compatible"
+        adapter.stream_chat_completion = AsyncMock(return_value=_provider_stream())
+
+        orchestrator = MagicMock()
+        orchestrator.should_retry.return_value = False
+        orchestrator.select_next_provider.return_value = None
+        orchestrator.needs_role_transform.return_value = False
+        orchestrator.exhausted = False
+
+        context = RequestContext(
+            orchestrator=orchestrator,
+            services=ServiceDependencies(adapter_factory=AsyncMock(return_value=adapter)),
+            protocol_name="anthropic",
+        )
+
+        raw_request_data = {
+            "model": "glm-5",
+            "max_tokens": 64,
+            "stream": True,
+            "system": "You are terse.",
+            "messages": [{"role": "user", "content": "hello there"}],
+        }
+        processor = UnifiedProcessor(protocol_endpoint=anthropic_protocol)
+        streaming_marker = StreamingResponseMarker(_build_unified_request(), adapter)
+        response = await processor._streaming_processor.process(
+            streaming_marker=streaming_marker,
+            raw_request_data=raw_request_data,
+            req=_build_mock_request(),
+            context=context,
+            trace_id="trace-converted-anthropic",
+        )
+
+        payload = await _collect_stream_text(response)
+
+        start = _sse_payloads(payload, "message_start")[0]["message"]
+        assert start["id"].startswith("msg_")
+        assert start["usage"]["input_tokens"] == anthropic_protocol.estimate_input_tokens(
+            raw_request_data
+        )
+        assert start["usage"]["input_tokens"] > 0
+
+        # Official MessageDeltaUsage shape: no OpenAI-dialect members.
+        delta_usage = _sse_payloads(payload, "message_delta")[-1]["usage"]
+        assert set(delta_usage) <= {
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens_details",
+            "server_tool_use",
+        }
+        assert delta_usage["cache_read_input_tokens"] == 20
+        assert delta_usage["input_tokens"] == 100

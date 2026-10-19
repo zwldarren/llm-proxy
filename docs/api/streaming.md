@@ -72,7 +72,14 @@ event: message_stop
 ```
 
 Mid-stream failures arrive as `event: error`. Usage (including cache read/creation
-tokens) is reported in `message_delta`.
+tokens) is reported in `message_delta`, where `usage` carries only the official
+`MessageDeltaUsage` keys — no OpenAI-dialect `prompt_tokens_details`/`total_tokens`.
+
+On the [converted tier](../getting-started/concepts.md#protocol-in-protocol-out)
+the upstream's own prompt count only arrives with `message_delta`, so
+`message_start.usage.input_tokens` carries the proxy's o200k-based estimate of the
+request (the same heuristic `count_tokens` falls back to) rather than zero. On the
+native tier the upstream's real value is forwarded untouched.
 
 ## OpenAI Responses API
 

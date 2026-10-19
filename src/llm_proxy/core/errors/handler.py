@@ -17,6 +17,21 @@ from llm_proxy.observability.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _upstream_body_matches_protocol(body: dict[str, Any], protocol: ErrorProtocol) -> bool:
+    """Whether a stashed upstream error body already speaks the client's dialect.
+
+    Both major dialects put the detail under an ``error`` object, so the
+    discriminator is the Anthropic envelope's top-level ``"type": "error"``
+    member (docs/en/api/errors), which the OpenAI dialect never carries. A
+    body in the *other* dialect must not be forwarded verbatim: an official
+    SDK dispatches typed exceptions off the envelope shape, and a mismatched
+    one breaks that dispatch — so the caller re-shapes it instead.
+    """
+    if protocol == "anthropic":
+        return body.get("type") == "error"
+    return body.get("type") != "error"
+
+
 _formatter_factory: Callable[[], ErrorFormatter] | None = None
 
 
@@ -71,9 +86,22 @@ class ErrorHandler:
         import orjson
 
         original = error.original_error
-        if isinstance(original, dict) and isinstance(original.get("error"), dict):
-            error_dict = original
-        else:
+        error_dict: dict[str, Any] | None = None
+        if (
+            isinstance(original, dict)
+            and isinstance(original.get("error"), dict)
+            and _upstream_body_matches_protocol(original, protocol)
+        ):
+            # The official error body has exactly three top-level members
+            # (type, error, request_id); the proxy's own ``retry_after``
+            # bookkeeping rides the same dict and is surfaced as a response
+            # header below, so copy and strip it rather than leaking the
+            # extra key to clients.
+            error_dict = {k: v for k, v in original.items() if k != "retry_after"}
+        # A body in another dialect is re-shaped for the client protocol: the
+        # rebuild path keeps the extracted message and the upstream
+        # ``request_id`` where the official envelope has a slot for it.
+        if error_dict is None:
             error_dict = self.formatter.from_provider_error(error, protocol=protocol)
         headers = {}
         retry_after = original.get("retry_after") if isinstance(original, dict) else None

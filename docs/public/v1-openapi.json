@@ -6399,9 +6399,9 @@
           },
           "max_tokens": {
             "type": "integer",
+            "minimum": 0.0,
             "title": "Max Tokens",
-            "description": "Maximum tokens to generate",
-            "default": 16384
+            "description": "Maximum tokens to generate"
           },
           "messages": {
             "items": {
@@ -6624,6 +6624,7 @@
         "type": "object",
         "required": [
           "model",
+          "max_tokens",
           "messages"
         ],
         "title": "MessagesRequest",

@@ -328,7 +328,9 @@ class TestAssembleStreamResponseBody:
 
         assert body is not None
         assert terminal_provider_info(transformer) is None
-        assert "stop_sequence" not in body
+        # Official messages always carry ``stop_sequence`` (``null`` when no
+        # custom sequence matched), so the reassembled body mirrors that shape.
+        assert body["stop_sequence"] is None
         assert "diagnostics" not in body
 
     @pytest.mark.parametrize(

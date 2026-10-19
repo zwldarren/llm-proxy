@@ -94,7 +94,8 @@ class TestAnthropicFinalizeMessageDelta:
         assert deltas == [
             {
                 "type": "message_delta",
-                "delta": {"stop_reason": "end_turn"},
+                # Official terminal deltas always carry ``stop_sequence``.
+                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
                 "usage": {"output_tokens": 9},
             }
         ]
@@ -107,7 +108,7 @@ class TestAnthropicFinalizeMessageDelta:
         transformer.capture_usage({"output_tokens": 3})
         events = _parse_sse_blocks(transformer.finalize())
         deltas = [d for name, d in events if name == "message_delta"]
-        assert deltas[0]["delta"] == {"stop_reason": "max_tokens"}
+        assert deltas[0]["delta"] == {"stop_reason": "max_tokens", "stop_sequence": None}
 
 
 # ---------------------------------------------------------------------------

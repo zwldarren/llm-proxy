@@ -59,6 +59,12 @@ class ProtocolEndpoint:
             persisted to the response store, receiving the response body
             dict, the unified request, and the raw request data. Returns the
             body dict, possibly modified (e.g. attaching materialized input).
+        estimate_input_tokens: Optional protocol-owned prompt-token estimate,
+            receiving the raw request dict. Read by the streaming pipeline when
+            it drives the converted tier, so the protocol's first stream event
+            can report a prompt count before the upstream has sent one (the
+            Anthropic ``message_start.usage`` contract). Protocol knowledge
+            stays here: the pipeline never inspects request fields itself.
     """
 
     name: str
@@ -84,6 +90,7 @@ class ProtocolEndpoint:
     on_response_store: Callable[[dict[str, Any], Any, dict[str, Any]], dict[str, Any]] | None = (
         field(default=None, repr=False)
     )
+    estimate_input_tokens: Callable[[dict[str, Any]], int] | None = field(default=None, repr=False)
     _transformer: type[StreamingTransformer] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:

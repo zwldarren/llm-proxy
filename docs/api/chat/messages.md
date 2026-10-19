@@ -64,13 +64,14 @@ print(message.content[0].text)
 | `system` | String, or a block list. With a block list, non-text blocks are dropped unless a text block carries `cache_control`/`citations` — then the list is forwarded verbatim |
 | `stop_sequences` | Forwarded as-is |
 | `temperature`, `top_p`, `top_k` | Omitted for Claude targets while thinking is enabled; restored when a forced `tool_choice` (`any`/`tool`) disables thinking |
-| `tools`, `tool_choice` | `tool_choice.type`: `auto` / `any` / `tool` / `none`; `disable_parallel_tool_use` accepted at top level, inside `tool_choice`, or via OpenAI's `parallel_tool_calls: false` |
+| `tools`, `tool_choice` | `tool_choice.type`: `auto` / `any` / `tool` / `none`; `disable_parallel_tool_use` accepted at top level, inside `tool_choice`, or via OpenAI's `parallel_tool_calls: false` — always emitted where the API defines it, inside `tool_choice` |
 | `thinking` | `{"type":"enabled","budget_tokens":N}` or an effort form. For Claude targets, `budget_tokens` must be ≥ 1024 and < `max_tokens`, otherwise 400 `invalid_parameter` |
 | `cache_control` | Top level and per content block (`{"type":"ephemeral","ttl":…}`); accepted on text, image, audio, file/document, tool_use, server_tool_use, tool_result, and other block types |
 | `metadata` | Forwarded; `user_id` is also filled from OpenAI-style metadata or `user` |
 | `container`, `inference_geo`, `service_tier`, `output_config` | Forwarded; legacy `output_format` is aliased into `output_config.format` |
 | `context_management` | Accepted and forwarded |
 | `betas` | Folded into the `anthropic-beta` header context and removed from the body |
+| `workspace_id`, `user_profile_id` | Header facts in the official API: lifted into `anthropic-workspace-id` / `anthropic-user-profile-id` and removed from the body (the Messages API rejects them as unknown top-level fields) |
 
 Unknown top-level fields are **accepted** (never a 422) and forwarded to the upstream
 unless they are known cross-protocol extras (`reasoning`, `previous_response_id`,

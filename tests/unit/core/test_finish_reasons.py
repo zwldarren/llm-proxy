@@ -5,6 +5,7 @@ from llm_proxy.models.finish_reasons import (
     OPENAI_TO_ANTHROPIC,
     FinishReason,
     map_finish_reason,
+    to_openai_finish_reason,
 )
 
 
@@ -120,3 +121,24 @@ class TestMapFinishReasonFunction:
 
     def test_none_input_returns_none(self):
         assert map_finish_reason(None, "gemini", "openai") is None
+
+
+class TestToOpenaiFinishReason:
+    def test_legal_values_pass_through(self):
+        for reason in ("stop", "length", "tool_calls", "content_filter", "function_call"):
+            assert to_openai_finish_reason(reason) == reason
+
+    def test_none_passes_through(self):
+        assert to_openai_finish_reason(None) is None
+
+    def test_canonical_extras_fold_onto_official_members(self):
+        # Preserved Anthropic-native values and the internal sentinel have no
+        # OpenAI wire member; they fold onto the closest official one.
+        assert to_openai_finish_reason("compaction") == "stop"
+        assert to_openai_finish_reason("stop_sequence") == "stop"
+        assert to_openai_finish_reason("pause_turn") == "stop"
+        assert to_openai_finish_reason("context_length") == "length"
+
+    def test_unknown_collapses_to_stop(self):
+        assert to_openai_finish_reason("eos") == "stop"
+        assert to_openai_finish_reason("error") == "stop"

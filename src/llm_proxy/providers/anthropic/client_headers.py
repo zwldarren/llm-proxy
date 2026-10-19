@@ -38,6 +38,10 @@ _PASSTHROUGH_EXACT = frozenset(
         "x-client-request-id",
         # user-profiles beta: attribution when acting on behalf of another party.
         "anthropic-user-profile-id",
+        # Workspace selection for credentials valid in more than one workspace;
+        # also the header form of a body-level ``workspace_id`` (see
+        # ``lift_body_headers``).
+        "anthropic-workspace-id",
     }
 )
 
@@ -92,6 +96,21 @@ def get_client_headers() -> dict[str, str]:
 def clear_client_headers() -> None:
     """Drop the captured headers (request-scoped cleanup)."""
     _client_headers.set(None)
+
+
+def merge_captured_headers(values: Mapping[str, str]) -> None:
+    """Merge extra header values into the captured client headers.
+
+    Existing captured values win: an explicit request header is authoritative
+    over a body-level spelling of the same fact (see
+    ``llm_proxy.protocols.anthropic.handler.lift_body_headers``).
+    """
+    if not values:
+        return
+    stored = dict(get_client_headers())
+    for key, value in values.items():
+        stored.setdefault(key, value)
+    _client_headers.set(stored)
 
 
 def ensure_claude_code_beta(beta: str | None) -> str:
@@ -167,5 +186,6 @@ __all__ = [
     "get_client_headers",
     "is_claude_code_client",
     "merge_body_betas",
+    "merge_captured_headers",
     "merge_client_headers",
 ]

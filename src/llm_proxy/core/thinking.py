@@ -102,7 +102,7 @@ def normalize_thinking(data: dict[str, Any]) -> ThinkingConfig | None:
         return ThinkingConfig(type="disabled")
     if isinstance(thinking, dict):
         thinking_type = thinking.get("type", "enabled")
-        if thinking_type not in ("enabled", "disabled", "adaptive"):
+        if thinking_type not in ("enabled", "disabled", "adaptive", "between_tools"):
             thinking_type = "enabled"
         effort = thinking.get("effort")
         if effort is None and thinking_type == "adaptive":
@@ -235,6 +235,12 @@ def convert_to_openai(config: ThinkingConfig | None) -> dict[str, Any] | None:
     if config.type == "adaptive":
         return None
 
+    if config.type == "between_tools":
+        # Anthropic-specific: "no up-front thinking" has no OpenAI equivalent.
+        # Sending the raw type would 400 on OpenAI-compatible upstreams; leaving
+        # the provider default in place is the least-wrong translation.
+        return None
+
     if config.type is not None or config.budget_tokens is not None:
         thinking_dict: dict[str, Any] = {}
         if config.type is not None:
@@ -310,7 +316,11 @@ def convert_to_gemini(
 
     minimal = supports_minimal_thinking_level(model, model_family_overrides)
 
-    if config.type == "disabled":
+    # ``between_tools`` is Anthropic's lowest thinking setting (no up-front
+    # thinking); Gemini has no between-tools mode, so express the same intent
+    # with the lowest level the target accepts — the same treatment a plain
+    # "disabled" request gets.
+    if config.type in ("disabled", "between_tools"):
         if model is None:
             return None
         level = "MINIMAL" if minimal else "LOW"
@@ -361,7 +371,10 @@ def convert_to_gemini_interactions(config: ThinkingConfig | None) -> dict[str, A
         return None  # Interactions has no explicit disable; omit the field.
 
     level = "medium"
-    if config.budget_tokens is not None:
+    if config.type == "between_tools":
+        # Anthropic's lowest thinking setting; the Interactions dialect's floor.
+        level = "minimal"
+    elif config.budget_tokens is not None:
         if config.budget_tokens < 8000:
             level = "low"
         elif config.budget_tokens > 24000:
@@ -397,7 +410,10 @@ def convert_to_gemini_legacy(config: ThinkingConfig | None) -> dict[str, Any] | 
         return None
 
     budget = 4096  # default medium
-    if config.budget_tokens is not None:
+    if config.type == "between_tools":
+        # Anthropic's lowest thinking setting; the legacy dialect's floor.
+        budget = 1024
+    elif config.budget_tokens is not None:
         budget = config.budget_tokens
     elif config.effort is not None:
         effort_lower = config.effort.lower()
@@ -421,6 +437,9 @@ def convert_to_ollama(config: ThinkingConfig | None) -> bool | str | None:
 
     if config.type == "disabled":
         return False
+    if config.type == "between_tools":
+        # Anthropic's lowest thinking setting; Ollama's floor.
+        return "low"
 
     # If effort is set, map directly
     if config.effort is not None:

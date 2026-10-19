@@ -17,6 +17,43 @@ from llm_proxy.core.exceptions import ProviderError
 # it from there to avoid depending on the api package).
 
 
+# The Anthropic wire error vocabulary (platform.claude.com/docs/en/api/errors):
+# 11 official ``error.type`` values. Proxy-internal types that have no official
+# value are normalized to the closest official one, and anything unknown falls
+# back to "api_error" so official SDKs can still dispatch a typed exception.
+_ANTHROPIC_WIRE_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "invalid_request_error",
+        "authentication_error",
+        "billing_error",
+        "permission_error",
+        "not_found_error",
+        "conflict_error",
+        "request_too_large",
+        "rate_limit_error",
+        "api_error",
+        "timeout_error",
+        "overloaded_error",
+    }
+)
+
+_ANTHROPIC_ERROR_TYPE_FALLBACKS: frozendict[str, str] = frozendict(
+    {
+        # Proxy-internal: transport failure — the official closest is a 5xx class.
+        "network_error": "api_error",
+        # Proxy-internal: context-window overflow is a request-shape problem.
+        "context_length_error": "invalid_request_error",
+    }
+)
+
+
+def _normalize_anthropic_error_type(error_type: str) -> str:
+    """Clamp an error type onto the official Anthropic wire vocabulary."""
+    if error_type in _ANTHROPIC_WIRE_ERROR_TYPES:
+        return error_type
+    return _ANTHROPIC_ERROR_TYPE_FALLBACKS.get(error_type, "api_error")
+
+
 class ErrorResponseBuilder(ErrorFormatter):
     """Unified error response builder supporting multiple protocols.
 
@@ -106,7 +143,7 @@ class ErrorResponseBuilder(ErrorFormatter):
         error_body: dict[str, Any] = {
             "type": "error",
             "error": {
-                "type": error_type,
+                "type": _normalize_anthropic_error_type(error_type),
                 "message": message,
             },
         }
@@ -128,6 +165,10 @@ class ErrorResponseBuilder(ErrorFormatter):
             error_body = ErrorResponseBuilder._create_anthropic_error(
                 message=message,
                 error_type=error_type,
+                # Official error bodies carry the request id for support
+                # tracing (docs/en/api/errors#request-id); the OpenAI branch
+                # embeds the same value as error.error_id.
+                request_id=error_id,
             )
         else:
             error_body = ErrorResponseBuilder._create_openai_error(

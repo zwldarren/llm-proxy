@@ -12,6 +12,7 @@ from llm_proxy.models import (
 )
 from llm_proxy.protocols.registry import register_protocol_serializer
 from llm_proxy.protocols.serializer_base import ProtocolSerializer
+from llm_proxy.serialization.anthropic import normalize_service_tier_for_anthropic
 from llm_proxy.serialization.anthropic.mixin import AnthropicContentMixin
 from llm_proxy.serialization.content_parsers import parse_reasoning_blocks
 
@@ -219,7 +220,12 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
                 "output_tokens_details"
             ]
         if response.provider_info.get("service_tier"):
-            result["usage"]["service_tier"] = response.provider_info["service_tier"]
+            # Normalize onto the official response enum: OpenAI upstreams report
+            # their own tiers (auto/default/flex/scale) that have no place in
+            # the Anthropic usage object.
+            tier = normalize_service_tier_for_anthropic(response.provider_info["service_tier"])
+            if tier is not None:
+                result["usage"]["service_tier"] = tier
 
         # Beta usage extensions (fast-mode, compaction/server-side-fallback).
         if response.provider_info.get("speed") is not None:
@@ -228,8 +234,10 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
             result["usage"]["iterations"] = response.provider_info["iterations"]
 
         stop_seq = response.provider_info.get("stop_sequence")
-        if stop_seq:
-            result["stop_sequence"] = stop_seq
+        # Official messages always carry ``stop_sequence`` — ``null`` when no
+        # custom stop sequence matched — so the field is emitted on every turn
+        # instead of only when one matched.
+        result["stop_sequence"] = stop_seq
 
         if response.provider_info.get("stop_details"):
             result["stop_details"] = response.provider_info["stop_details"]

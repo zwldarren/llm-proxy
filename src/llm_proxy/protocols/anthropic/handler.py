@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import Request
 
-from llm_proxy.billing.tokens import count_messages_tokens, count_tools_tokens
 from llm_proxy.core.exceptions import AuthenticationFailedError, ModelNotFoundError
 from llm_proxy.models.content_blocks import TextBlock
 from llm_proxy.observability.logger import get_logger
@@ -22,6 +21,7 @@ from llm_proxy.providers.anthropic.client_headers import (
     capture_client_headers,
     clear_client_headers,
     merge_body_betas,
+    merge_captured_headers,
 )
 
 logger = get_logger(__name__)
@@ -45,17 +45,86 @@ def _clear_client_headers() -> None:
 
 
 def _merge_body_betas(raw_request_data: dict[str, Any]) -> None:
-    """Protocol hook (on_parse_request): merge a body-level ``betas`` list.
+    """Protocol hook (on_parse_request): body-level beta/header spellings.
 
-    Back-compat for non-SDK clients: a body-level ``betas`` list behaves
-    like the ``anthropic-beta`` header. Runs before parsing, in the same
-    context as the header capture, so the adapter's merged upstream headers
-    see it. This owns the header-context side effect so the serializer's
-    ``parse_request`` stays a pure wire-to-internal conversion (ADR-0009).
+    Two back-compat lifts for non-SDK clients, both running before parsing in
+    the same context as the header capture, so the adapter's merged upstream
+    headers see them. This owns the header-context side effect so the
+    serializer's ``parse_request`` stays a pure wire-to-internal conversion
+    (ADR-0009).
+
+    1. A body-level ``betas`` list behaves like the ``anthropic-beta`` header
+       (the official SDKs send the header). The key is popped from the body:
+       it is not an official Messages body field, and the native-passthrough
+       tier forwards this same dict verbatim — leaving it in place would get
+       the request rejected by a strict upstream for an unknown top-level
+       field (the same reason ``lift_body_headers`` pops the header fields
+       below). The merged header context carries the value upstream instead.
+    2. ``workspace_id`` / ``user_profile_id`` are header facts in the official
+       API (``anthropic-workspace-id`` / ``anthropic-user-profile-id``); the
+       Messages API rejects them as unknown top-level body fields, so they are
+       lifted into the header context and removed from the body — including the
+       raw body the native-passthrough tier forwards verbatim.
     """
-    betas = raw_request_data.get("betas")
+    betas = raw_request_data.pop("betas", None)
     if isinstance(betas, list) and betas:
         merge_body_betas(betas)
+    lift_body_headers(raw_request_data)
+
+
+#: Body-level request fields the official API carries as headers instead. The
+#: Messages API rejects unknown top-level body fields, so a body-spelled value
+#: has to become the header form rather than be forwarded in place.
+_BODY_TO_HEADER_FIELDS: frozendict[str, str] = frozendict(
+    {
+        "workspace_id": "anthropic-workspace-id",
+        "user_profile_id": "anthropic-user-profile-id",
+    }
+)
+
+
+def lift_body_headers(raw_request_data: dict[str, Any]) -> None:
+    """Move header-spelled request fields out of the body into the header context."""
+    lifted: dict[str, str] = {}
+    for field_name, header_name in _BODY_TO_HEADER_FIELDS.items():
+        value = raw_request_data.pop(field_name, None)
+        if isinstance(value, str) and value:
+            lifted[header_name] = value
+    merge_captured_headers(lifted)
+
+
+def _estimate_input_tokens(raw_request_data: dict[str, Any]) -> int:
+    """Prompt-token estimate for the converted streaming tier.
+
+    The Anthropic wire reports the prompt count in its first event
+    (``message_start.usage``), but on the converted tier the upstream's real
+    count only arrives in the terminal ``message_delta``. The protocol
+    therefore estimates one from the request it owns — the same o200k-based
+    heuristics the count_tokens fallback uses, so the two never disagree about
+    how a request is measured.
+    """
+    # Function-level import: this keeps tiktoken out of the startup graph.
+    from llm_proxy.billing.tokens import count_messages_tokens, count_tokens, count_tools_tokens
+
+    total_tokens = 0
+
+    system_prompt = raw_request_data.get("system")
+    if isinstance(system_prompt, str):
+        total_tokens += count_tokens(system_prompt)
+    elif isinstance(system_prompt, list):
+        for block in system_prompt:
+            if isinstance(block, dict) and block.get("type") == "text":
+                total_tokens += count_tokens(block.get("text", ""))
+
+    messages = raw_request_data.get("messages")
+    if isinstance(messages, list):
+        total_tokens += count_messages_tokens([m for m in messages if isinstance(m, dict)])
+
+    tools = raw_request_data.get("tools")
+    if isinstance(tools, list):
+        total_tokens += count_tools_tokens(tools)
+
+    return total_tokens
 
 
 _BILLING_HEADER_PREFIX = "x-anthropic-billing-header:"
@@ -186,28 +255,9 @@ async def _forward_count_tokens(
 
 def _estimate_count_tokens(request: CountTokensRequest) -> CountTokensResponse:
     """Local heuristic token estimate (o200k_base) — fallback only."""
-    from llm_proxy.billing.tokens import count_tokens
-
-    messages = request.messages
-    system_prompt = request.system
-    tools = request.tools
-
-    total_tokens = 0
-
-    if system_prompt:
-        if isinstance(system_prompt, str):
-            total_tokens += count_tokens(system_prompt)
-        elif isinstance(system_prompt, list):
-            for block in system_prompt:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text = block.get("text", "")
-                    if text:
-                        total_tokens += count_tokens(text)
-
-    total_tokens += count_messages_tokens(messages)
-    total_tokens += count_tools_tokens(tools)
-
-    return CountTokensResponse(input_tokens=total_tokens)
+    return CountTokensResponse(
+        input_tokens=_estimate_input_tokens(request.model_dump(exclude_none=True))
+    )
 
 
 # Path aliases: clients whose base_url is missing /v1 or double-writes it
@@ -225,6 +275,7 @@ anthropic_protocol = ProtocolEndpoint(
     on_parse_request=_merge_body_betas,
     on_format_done=_clear_client_headers,
     on_provider_selected=_strip_claude_cli_billing_header,
+    estimate_input_tokens=_estimate_input_tokens,
     additional_routes=[
         (
             f"{messages_path}/count_tokens",

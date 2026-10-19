@@ -45,7 +45,7 @@ from llm_proxy.models.content_blocks.anthropic_builtin import (
     WebSearchResultContentBlock,
     WebSearchToolResultBlock,
 )
-from llm_proxy.models.finish_reasons import map_finish_reason
+from llm_proxy.models.finish_reasons import to_anthropic_stop_reason
 from llm_proxy.serialization._shared_degradation import (
     degrade_block_to_text,
     should_degrade_block,
@@ -1087,5 +1087,10 @@ class AnthropicContentMixin:
         return result
 
     def _map_finish_reason(self, finish_reason: str) -> str:
-        result = map_finish_reason(finish_reason, "openai", "anthropic")
-        return result if result else finish_reason
+        """Map an internal finish reason to an official Anthropic stop_reason.
+
+        Unknown upstream values (OpenRouter ``eos``, legacy OpenAI
+        ``function_call``, internal ``error``) must not reach Anthropic clients
+        as an illegal enum member; they collapse to ``end_turn``.
+        """
+        return to_anthropic_stop_reason(finish_reason)

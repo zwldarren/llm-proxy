@@ -13,11 +13,12 @@ import orjson
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.models import RawBlock
 from llm_proxy.models.content_blocks import ContentBlock
-from llm_proxy.models.finish_reasons import OPENAI_TO_ANTHROPIC
+from llm_proxy.models.finish_reasons import to_anthropic_stop_reason
 from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import (
     ANTHROPIC_USAGE_EXTENSION_KEYS,
+    normalize_service_tier_for_anthropic,
     parse_usage_and_provider_extras,
 )
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
@@ -60,6 +61,38 @@ def _cache_counters(usage: dict[str, Any]) -> tuple[int | None, int | None]:
     return cache_read, cache_creation
 
 
+#: Keys the official ``MessageDeltaUsage`` object defines (plus the beta
+#: counters that ride it). Anything else a canonical usage dict may carry — the
+#: OpenAI-dialect ``prompt_tokens_details``/``completion_tokens_details`` nested
+#: objects, ``total_tokens``, ``prompt_tokens``, … — has no field on the
+#: Anthropic wire and is dropped rather than leaked to strict clients.
+_MESSAGE_DELTA_USAGE_KEYS: frozenset[str] = frozenset(
+    {
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens_details",
+        "server_tool_use",
+        # Beta counters: fast-mode ``speed`` and compaction/server-side-fallback
+        # ``iterations``. Top-level token counts exclude compaction iterations,
+        # so dropping them would break per-iteration cost accounting.
+        "speed",
+        "iterations",
+    }
+)
+
+
+def _thinking_block_start() -> dict[str, Any]:
+    """The official ``thinking`` block-start shape.
+
+    ``signature`` is a required field of the ``thinking`` block and the official
+    stream opens the block with an empty one; omitting it makes SDK clients
+    reject the event outright (``ThinkingBlock.signature`` is required).
+    """
+    return {"type": "thinking", "thinking": "", "signature": ""}
+
+
 def _exclusive_input_tokens(usage: dict[str, Any]) -> int:
     """Canonical inclusive ``input_tokens`` → Anthropic's exclusive count.
 
@@ -77,19 +110,18 @@ def _exclusive_input_tokens(usage: dict[str, Any]) -> int:
 def _message_delta_usage(usage: dict) -> dict:
     """Shape the terminal ``message_delta`` usage block.
 
-    Everything except ``service_tier`` passes through: ``service_tier`` is
-    only valid on the full ``Usage`` object (emitted in ``message_start``).
-    The remaining keys — cache counters, ``output_tokens_details``, and the
-    beta extensions (fast-mode ``speed``, compaction/fallback
-    ``iterations``) — ride through verbatim: SDKs ignore unknown keys, and
-    stripping the compaction counter would break per-iteration cost
-    accounting, since top-level tokens EXCLUDE compaction iterations.
+    Only the keys the official ``MessageDeltaUsage`` defines are emitted
+    (``_MESSAGE_DELTA_USAGE_KEYS``): ``service_tier`` is valid on the full
+    ``Usage`` object alone (emitted in ``message_start``), and the canonical
+    channel's OpenAI-dialect members (``prompt_tokens_details``,
+    ``completion_tokens_details``, ``total_tokens``) have no field on the
+    Anthropic wire.
 
     ``input_tokens`` is rewritten to the exclusive count: the delta usage
     repeats the cumulative prompt accounting, and the wire invariant for that
     field excludes the cache counters reported beside it.
     """
-    result = {k: v for k, v in usage.items() if k != "service_tier"}
+    result = {k: v for k, v in usage.items() if k in _MESSAGE_DELTA_USAGE_KEYS}
     cache_read, cache_creation = _cache_counters(usage)
     if cache_read is not None:
         result["cache_read_input_tokens"] = cache_read
@@ -638,8 +670,13 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         return "".join(result_chunks) if result_chunks else None
 
     def _map_finish_reason(self, finish_reason: str) -> str:
-        """Map OpenAI finish_reason to Anthropic stop_reason."""
-        return OPENAI_TO_ANTHROPIC.get(finish_reason, finish_reason or "end_turn")
+        """Map OpenAI finish_reason to an official Anthropic stop_reason.
+
+        Unknown upstream values (OpenRouter ``eos``, legacy OpenAI
+        ``function_call``, the internal ``error`` sentinel) collapse to
+        ``end_turn`` instead of leaking an illegal enum member.
+        """
+        return to_anthropic_stop_reason(finish_reason)
 
     def _extract_token_count(self, usage: dict | None, *keys: str) -> int:
         """Extract token count from usage while preserving explicit zero values."""
@@ -699,6 +736,9 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             "server_tool_use",
         ):
             value = pending.get(key)
+            if key == "service_tier":
+                # Official response enum only; OpenAI tiers fold or drop.
+                value = normalize_service_tier_for_anthropic(value)
             if value is not None:
                 start_usage[key] = value
         # Surface the nested OpenAI-dialect cache read on the wire too, then
@@ -751,9 +791,11 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
     ) -> str:
         """Generate message_delta event with stop_reason and usage combined."""
         delta: dict[str, Any] = {"stop_reason": stop_reason}
-        if self._pending_stop_sequence is not None:
-            delta["stop_sequence"] = self._pending_stop_sequence
-            self._pending_stop_sequence = None
+        # Official terminal deltas always carry ``stop_sequence`` (``null`` when
+        # no custom sequence matched), so emit it on every turn rather than only
+        # when one matched.
+        delta["stop_sequence"] = self._pending_stop_sequence
+        self._pending_stop_sequence = None
         if self._pending_stop_details is not None:
             delta["stop_details"] = self._pending_stop_details
             self._pending_stop_details = None
@@ -958,9 +1000,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 )
             else:
                 chunks.append(
-                    self._content_block_start(
-                        self._current_block_index, {"type": "thinking", "thinking": ""}
-                    )
+                    self._content_block_start(self._current_block_index, _thinking_block_start())
                 )
         elif kind == "tool":
             if not (frag.tool_id and frag.tool_name):
@@ -1055,8 +1095,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                             self._flush_wire_block(chunks)
                         chunks.append(
                             self._content_block_start(
-                                self._current_block_index,
-                                {"type": "thinking", "thinking": ""},
+                                self._current_block_index, _thinking_block_start()
                             )
                         )
                         self._wire_open_kind = "reasoning"
@@ -1082,9 +1121,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
                 if self._wire_open_kind is not None:
                     self._flush_wire_block(chunks)
                 chunks.append(
-                    self._content_block_start(
-                        self._current_block_index, {"type": "thinking", "thinking": ""}
-                    )
+                    self._content_block_start(self._current_block_index, _thinking_block_start())
                 )
                 self._wire_open_kind = "reasoning"
                 self._wire_block_state = "wire_only"

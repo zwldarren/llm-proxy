@@ -205,7 +205,7 @@ class StreamOptions:
 class ThinkingConfig:
     """Thinking/thinking_budget configuration for models that support it."""
 
-    type: Literal["enabled", "disabled", "adaptive"] | None = None
+    type: Literal["enabled", "disabled", "adaptive", "between_tools"] | None = None
     budget_tokens: int | None = None
     effort: str | None = None
     display: str | None = None
