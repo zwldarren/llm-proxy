@@ -9,7 +9,12 @@ from typing import Any
 
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.protocols.base import ProtocolEndpoint
-from llm_proxy.protocols.openresponses.schemas import ResponsesRequest
+from llm_proxy.protocols.openresponses.input_tokens import handle_input_tokens
+from llm_proxy.protocols.openresponses.schemas import (
+    InputTokensRequest,
+    InputTokensResponse,
+    ResponsesRequest,
+)
 from llm_proxy.protocols.openresponses.serializer import (
     _tool_entry_name,
     _unique_raw_tools,
@@ -187,6 +192,14 @@ openresponses_protocol = ProtocolEndpoint(
     on_parse_request=set_format_context,
     on_format_done=clear_format_context,
     on_response_store=_materialize_stored_input,
+    additional_routes=[
+        (
+            "/v1/responses/input_tokens",
+            InputTokensRequest,
+            InputTokensResponse,
+            handle_input_tokens,
+        )
+    ],
 )
 
 

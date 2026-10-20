@@ -48,6 +48,7 @@ from llm_proxy.serialization.content_parsers import (
     parse_image_block_openai,
     parse_reasoning_segments,
     parse_text_block,
+    parse_video_block_anthropic,
     parse_video_block_openai,
     unparseable_image_placeholder,
 )
@@ -416,6 +417,13 @@ class OpenAIParsingMixin:
                         blocks.append(block)
                         continue
                     block = parse_video_block_openai(part)
+                    if block:
+                        blocks.append(block)
+                        continue
+                    # An Anthropic-shaped video block (MiniMax's Anthropic-
+                    # compatible wire declares one) on the OpenAI protocol:
+                    # kept as a video instead of degrading to a text stub.
+                    block = parse_video_block_anthropic(part)
                     if block:
                         blocks.append(block)
                         continue

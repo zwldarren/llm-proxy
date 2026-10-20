@@ -96,6 +96,20 @@ _OPENAI_SERVICE_TIER_TO_ANTHROPIC: frozendict[str, str] = frozendict(
     }
 )
 
+#: The Anthropic protocol also accepts the tier names an Anthropic-compatible
+#: upstream (MiniMax) documents — ``standard``/``priority``. Anthropic itself
+#: has no such spellings, so they are translated to the closest one:
+#: ``standard`` means "no priority tier" and ``priority`` means "priority
+#: allowed", which is what Anthropic's ``standard_only``/``auto`` say.
+_ANTHROPIC_REQUEST_SERVICE_TIER: frozendict[str, str] = frozendict(
+    {
+        "auto": "auto",
+        "standard_only": "standard_only",
+        "standard": "standard_only",
+        "priority": "auto",
+    }
+)
+
 # Extra keys that must NOT leak into the Anthropic request body. These are
 # either internal bookkeeping keys (``_system_blocks``) consumed elsewhere, or
 # cross-protocol fields from OpenAI/Responses that have no Anthropic top-level
@@ -639,7 +653,9 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                 body["output_config"] = anthropic_params.output_config
 
             if anthropic_params.service_tier is not None:
-                body["service_tier"] = anthropic_params.service_tier
+                body["service_tier"] = _ANTHROPIC_REQUEST_SERVICE_TIER.get(
+                    anthropic_params.service_tier, anthropic_params.service_tier
+                )
 
             if anthropic_params.context_management is not None:
                 body["context_management"] = anthropic_params.context_management

@@ -180,6 +180,27 @@ Full event set with `sequence_number` on every event and `event:` matching the b
 `type`; terminal `data: [DONE]`. Failures emit `error` then `response.failed` then
 `[DONE]`. Details: [Streaming](../streaming.md#openai-responses-api).
 
+## Input token estimate
+
+`POST /v1/responses/input_tokens` estimates the prompt size of a request
+without invoking the model.
+
+```bash
+curl https://your-proxy/v1/responses/input_tokens \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-5", "input": "Summarize the release notes."}'
+```
+
+```json
+{"object": "response.input_tokens", "input_tokens": 12}
+```
+
+The body carries the counting-relevant fields only (`model`, `input`,
+`instructions`, `tools`, `tool_choice`, `text`, `reasoning`). When the
+selected provider serves its own counter (MiniMax does), the upstream's count
+is returned; otherwise a local `o200k_base` estimate is used.
+
 ## WebSocket transport
 
 `WS /v1/responses` speaks the same events as the SSE stream, as JSON text frames.

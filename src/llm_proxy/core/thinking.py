@@ -37,7 +37,7 @@ OpenAI-compatible providers (openai, deepseek, openrouter, etc.):
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from llm_proxy.models.types import ThinkingConfig
 
@@ -217,19 +217,45 @@ def resolve_thinking(request: Any) -> ThinkingConfig | None:
 
 _VALID_REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 
+#: How a provider's Chat Completions wire expresses "thinking off".
+#:
+#: ``effort`` — the OpenAI spelling: ``reasoning_effort: "none"``. Accepted by
+#: OpenAI and the OpenAI-compatible upstreams that document it.
+#: ``thinking`` — the Anthropic spelling: ``thinking: {"type": "disabled"}``,
+#: for upstreams that answer HTTP 400 to ``reasoning_effort: "none"``
+#: (MiniMax).
+#: ``omit`` — send nothing at all, for upstreams whose thinking cannot be
+#: turned off (MiniMax-M3.1-Flash answers HTTP 400 to ``disabled`` too).
+ThinkingDisabledWire = Literal["effort", "thinking", "omit"]
 
-def convert_to_openai(config: ThinkingConfig | None) -> dict[str, Any] | None:
+
+def convert_to_openai(
+    config: ThinkingConfig | None,
+    *,
+    disabled_wire: ThinkingDisabledWire = "effort",
+) -> dict[str, Any] | None:
     """Convert ThinkingConfig to OpenAI provider format.
 
     Returns either ``{"reasoning_effort": ...}`` or ``{"thinking": {...}}``.
     Prefers reasoning_effort when a valid effort value can be derived; falls
     back to thinking dict for provider-specific budget_tokens precision.
+
+    ``disabled_wire`` selects how "thinking off" reaches an upstream that does
+    not accept the OpenAI spelling: ``"thinking"`` emits
+    ``thinking: {"type": "disabled"}``, ``"omit"`` emits nothing (the model
+    thinks regardless), and ``"effort"`` (the default) keeps
+    ``reasoning_effort: "none"``.
     """
     if config is None:
         return None
 
     effort = thinking_config_to_reasoning_effort(config)
     if effort is not None and effort.lower() in _VALID_REASONING_EFFORTS:
+        if effort.lower() == "none":
+            if disabled_wire == "omit":
+                return None
+            if disabled_wire == "thinking":
+                return {"thinking": {"type": "disabled"}}
         return {"reasoning_effort": effort}
 
     if config.type == "adaptive":

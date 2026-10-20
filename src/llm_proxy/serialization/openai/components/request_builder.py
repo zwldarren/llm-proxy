@@ -267,7 +267,9 @@ class OpenAIRequestBuilder:
 
         thinking = resolve_thinking(request)
         if thinking is not None:
-            thinking_params = convert_to_openai(thinking)
+            thinking_params = convert_to_openai(
+                thinking, disabled_wire=context.thinking_disabled_wire
+            )
             if thinking_params:
                 body.update(thinking_params)
         return body

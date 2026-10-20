@@ -594,6 +594,19 @@ OPERATION_OVERLAYS: frozendict[tuple[str, str], dict[str, Any]] = frozendict(
                 "200": json_response("The compacted response.", ref("ResponsesResponse")),
             },
         },
+        ("/v1/responses/input_tokens", "post"): {
+            "summary": "Estimate input tokens",
+            "tags": ["responses"],
+            "description": (
+                "Estimates the prompt size of a Responses request without invoking the "
+                "model. Native upstream count when the provider offers one (MiniMax "
+                "serves `/v1/responses/input_tokens`), otherwise a local `o200k_base` "
+                "estimate."
+            ),
+            "responses": {
+                "200": json_response("The estimate.", ref("InputTokensResponse")),
+            },
+        },
         ("/v1/responses/{response_id}", "get"): {
             "summary": "Retrieve response",
             "tags": ["responses"],

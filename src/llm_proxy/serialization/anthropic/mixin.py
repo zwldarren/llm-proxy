@@ -29,6 +29,7 @@ from llm_proxy.models import (
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    VideoBlock,
 )
 from llm_proxy.models.content_blocks.anthropic_builtin import (
     BashCodeExecutionToolResultBlock,
@@ -54,6 +55,7 @@ from llm_proxy.serialization.content_parsers import (
     parse_audio_block_anthropic,
     parse_file_block_anthropic,
     parse_image_block_anthropic,
+    parse_video_block_anthropic,
 )
 from llm_proxy.serialization.responses_toolkit.namespace import (
     flatten_history_tool_name,
@@ -213,6 +215,16 @@ class AnthropicContentMixin:
                         continue
 
                     block = parse_audio_block_anthropic(part)
+                    if block:
+                        block.cache_control = self._parse_cache_control(part)
+                        blocks.append(block)
+                        continue
+
+                    # ``video`` is not an Anthropic block (MiniMax's
+                    # Anthropic-compatible Messages endpoint declares one);
+                    # parsing it into a VideoBlock keeps the video alive when
+                    # the request is translated to a chat wire.
+                    block = parse_video_block_anthropic(part)
                     if block:
                         block.cache_control = self._parse_cache_control(part)
                         blocks.append(block)
@@ -479,6 +491,15 @@ class AnthropicContentMixin:
             return self._format_document_block(block)
         if isinstance(block, AudioBlock):
             return self._format_audio_block(block)
+        if isinstance(block, VideoBlock):
+            # The Anthropic ``video`` block exists only on MiniMax's
+            # Anthropic-compatible wire. A dialect that declares video
+            # support gets the block; every other Anthropic upstream falls
+            # back to the unsupported-block policy (drop/degrade) instead of
+            # receiving a block it would reject with HTTP 400.
+            if self._supports_video_block(context):
+                return self._format_video_block(block)
+            return self._format_unsupported_block(block, context=context)
         if isinstance(block, FileBlock):
             return self._format_file_block(block, context=context)
         if isinstance(block, SearchResultBlock):
@@ -770,6 +791,47 @@ class AnthropicContentMixin:
                 "text": f"[Audio: file_id={block.source.data}]",
             }
         return {"type": "text", "text": degrade_block_to_text(block)}
+
+    def _supports_video_block(self, context: BuildContext | None) -> bool:
+        """Whether the target wire carries an Anthropic ``video`` block.
+
+        Declared by the dialect through ``supported_content_blocks`` — the
+        Anthropic-compatible MiniMax wire is the only one that has it.
+        """
+        if context is None:
+            return False
+        return VideoBlock in context.supported_content_blocks
+
+    def _format_video_block(self, block: VideoBlock) -> dict[str, Any]:
+        """Format a VideoBlock to the Anthropic ``video`` content block.
+
+        Anthropic itself has no video block, but MiniMax's Anthropic-compatible
+        Messages endpoint does: ``{"type": "video", "source": {...}}`` with a
+        ``url`` or ``base64`` source. The source-level knobs MiniMax declares
+        (``fps``, ``max_long_side_pixel``) ride in ``VideoBlock.extra`` and are
+        replayed verbatim.
+
+        A ``file_id`` source names an id no Anthropic-compatible upstream can
+        resolve, so it degrades to a text placeholder instead of being sent as
+        an unreadable source.
+        """
+        source = block.source
+        if source.type == "url":
+            source_dict: dict[str, Any] = {"type": "url", "url": source.data}
+        elif source.type == "base64":
+            source_dict = {
+                "type": "base64",
+                "media_type": source.media_type or "video/mp4",
+                "data": source.data,
+            }
+        else:
+            return {"type": "text", "text": degrade_block_to_text(block)}
+
+        source_dict.update(block.extra)
+        video_block: dict[str, Any] = {"type": "video", "source": source_dict}
+        if block.cache_control:
+            video_block["cache_control"] = self._format_cache_control(block.cache_control)
+        return video_block
 
     @staticmethod
     def _media_type_from_filename(filename: str | None) -> str | None:

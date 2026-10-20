@@ -336,3 +336,51 @@ def parse_video_block_openai(part: dict) -> VideoBlock | None:
             )
         )
     return None
+
+
+def parse_video_block_anthropic(part: dict) -> VideoBlock | None:
+    """Parse an Anthropic-format ``video`` content block into a VideoBlock.
+
+    Anthropic's own API has no video block; MiniMax's Anthropic-compatible
+    Messages endpoint does (``{"type": "video", "source": {...}}``). Parsing it
+    into the shared VideoBlock keeps the video instead of degrading it to a
+    text placeholder when the request is translated to a chat wire
+    (``video_url``).
+
+    The source-level knobs MiniMax declares (``fps``, ``max_long_side_pixel``)
+    ride along in ``VideoBlock.extra`` so the Anthropic formatter can replay
+    them verbatim.
+    """
+    if part.get("type") != "video":
+        return None
+    source = part.get("source")
+    if not isinstance(source, dict):
+        return None
+
+    source_type = source.get("type", "base64")
+    if source_type == "url":
+        url = source.get("url", "")
+        if not url:
+            return None
+        parsed = create_image_source_from_url(url)
+        if parsed is None:
+            return None
+        video_source = VideoSource(
+            type=parsed.type,
+            data=parsed.data,
+            media_type=parsed.media_type or source.get("media_type"),
+        )
+    elif source_type == "base64":
+        data = source.get("data", "")
+        if not data:
+            return None
+        video_source = VideoSource(
+            type="base64",
+            data=data,
+            media_type=source.get("media_type"),
+        )
+    else:
+        return None
+
+    extra = {k: v for k, v in source.items() if k not in ("type", "url", "data", "media_type")}
+    return VideoBlock(source=video_source, extra=extra)

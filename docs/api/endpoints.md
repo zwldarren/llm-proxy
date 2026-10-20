@@ -16,6 +16,7 @@ Every route the proxy serves. `X` in the auth column means "API key
 | POST | `/v1/chat/completions` | X | OpenAI | Chat Completions |
 | POST | `/v1/responses` | X | Responses | JSON or SSE; `background: true` requires Redis |
 | POST | `/v1/responses/compact` | X | Responses | Native passthrough first, local lossless packing fallback |
+| POST | `/v1/responses/input_tokens` | X | Responses | Estimate the prompt size without invoking the model; native upstream count when available, otherwise a local o200k_base estimate |
 | GET | `/v1/responses/{response_id}` | X | Responses | Retrieve a stored response (24 h TTL) |
 | DELETE | `/v1/responses/{response_id}` | X | Responses | Delete a stored response |
 | POST | `/v1/responses/{id}/cancel` | X | Responses | Cancel a background response (409 if not cancellable) |

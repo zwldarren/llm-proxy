@@ -1422,6 +1422,88 @@
         "description": "OpenAI Responses API. `background: true` returns an `in_progress` response immediately and requires Redis-backed response storage."
       }
     },
+    "/v1/responses/input_tokens": {
+      "post": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Estimate input tokens",
+        "operationId": "openresponses__v1_responses_input_tokens_v1_responses_input_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputTokensRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The estimate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputTokensResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Estimates the prompt size of a Responses request without invoking the model. Native upstream count when the provider offers one (MiniMax serves `/v1/responses/input_tokens`), otherwise a local `o200k_base` estimate."
+      }
+    },
     "/v1/audio/speech": {
       "post": {
         "tags": [
@@ -5985,6 +6067,124 @@
         "title": "InputTokensDetails",
         "description": "Input token usage details."
       },
+      "InputTokensRequest": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "Model the estimate is for"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Input",
+            "description": "Input text or array of items"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions",
+            "description": "System instructions"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools",
+            "description": "Tool list"
+          },
+          "tool_choice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Choice",
+            "description": "Tool selection strategy"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Output format control"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning",
+            "description": "Reasoning control"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "model",
+          "input"
+        ],
+        "title": "InputTokensRequest",
+        "description": "Request model for the input-token estimate (/v1/responses/input_tokens).\n\nThe counting-relevant subset of the Responses request: the conversation,\nthe instructions, the tools and the reasoning control. Everything else a\ngeneration request carries (sampling, streaming, response storage) does\nnot change the prompt size."
+      },
+      "InputTokensResponse": {
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "response.input_tokens",
+            "title": "Object",
+            "description": "Object type",
+            "default": "response.input_tokens"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "description": "Estimated input token count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_tokens"
+        ],
+        "title": "InputTokensResponse",
+        "description": "Response model for the input-token estimate (/v1/responses/input_tokens)."
+      },
       "InputVideoContent": {
         "properties": {
           "type": {
@@ -6596,7 +6796,9 @@
                 "type": "string",
                 "enum": [
                   "auto",
-                  "standard_only"
+                  "standard_only",
+                  "standard",
+                  "priority"
                 ]
               },
               {
@@ -6604,7 +6806,7 @@
               }
             ],
             "title": "Service Tier",
-            "description": "Service tier"
+            "description": "Service tier. 'auto'/'standard_only' are Anthropic's spellings; 'standard'/'priority' are the tier names an Anthropic-compatible upstream (MiniMax) documents, accepted so a client that targets such an upstream can name its tier."
           },
           "output_config": {
             "anyOf": [

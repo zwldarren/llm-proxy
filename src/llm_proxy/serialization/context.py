@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from llm_proxy.config.types.server import UnknownFieldsPolicy, UnsupportedBlockPolicy
+from llm_proxy.core.thinking import ThinkingDisabledWire
 from llm_proxy.models import InternalRequest
 
 if TYPE_CHECKING:
@@ -51,6 +52,11 @@ class BuildContext:
             that declare ``REASONING_OBJECT`` so the OpenAI request builder
             emits the object instead of a bare ``reasoning_effort`` and stops
             dropping it as a Responses-only field.
+        thinking_disabled_wire: How "thinking off" reaches this provider's
+            Chat Completions wire: ``effort`` (the default) sends
+            ``reasoning_effort: "none"``, ``thinking`` sends
+            ``thinking: {"type": "disabled"}``, ``omit`` sends neither. Set by
+            adapters whose upstream rejects the OpenAI spelling (MiniMax).
         namespace_map: OpenResponses namespace mapping (flat name ->
             [namespace, original_name]) carried over from the request so
             provider serializers can flatten history tool-call names to match
@@ -80,6 +86,7 @@ class BuildContext:
     compatible_protocols: frozenset[str] = frozenset()
     response_passthrough: bool = True
     reasoning_object: bool = False
+    thinking_disabled_wire: ThinkingDisabledWire = "effort"
     namespace_map: dict[str, list[str]] | None = None
     model_family_overrides: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
@@ -106,6 +113,7 @@ class BuildContext:
         compatible_protocols = kwargs.pop("compatible_protocols", frozenset())
         response_passthrough = kwargs.pop("response_passthrough", True)
         reasoning_object = kwargs.pop("reasoning_object", False)
+        thinking_disabled_wire = kwargs.pop("thinking_disabled_wire", "effort")
         model_family_overrides = kwargs.pop("model_family_overrides", None)
         return cls(
             stream=request.stream,
@@ -121,6 +129,7 @@ class BuildContext:
             compatible_protocols=compatible_protocols,
             response_passthrough=response_passthrough,
             reasoning_object=reasoning_object,
+            thinking_disabled_wire=thinking_disabled_wire,
             namespace_map=request._namespace_map,
             model_family_overrides=dict(model_family_overrides or {}),
             extra=kwargs,

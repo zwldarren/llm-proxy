@@ -243,6 +243,10 @@ class OpenAICompatibleBase(
 
         response = await self._post_json_response_with_retry(url, headers, body)
         response_data = response.json()
+        # Some upstreams answer 200 and carry the failure in the body
+        # (MiniMax's ``base_resp``); the provider hook turns that into an
+        # error before the body is parsed into a success.
+        self._check_upstream_body_error(response_data)
         plan = plan_conversion(self, request, context=self._build_chat_context(request))
         if plan.response_mode == ConversionTier.WIRE_REUSE:
             # Response wire-reuse: the provider answered in the client's own
@@ -304,6 +308,7 @@ class OpenAICompatibleBase(
     def _stream_transform_chunk(
         self, chunk: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any] | None:
+        self._check_upstream_body_error(chunk)
         self.record_reasoning_field_preference(
             detect_reasoning_field_in_stream_chunk(chunk),
             model=context.get("model"),

@@ -64,10 +64,18 @@ class AudioBlock(ContentBlock):
 
 @dataclass
 class VideoBlock(ContentBlock):
-    """Video content block with source."""
+    """Video content block with source.
+
+    ``extra`` carries the source-level knobs a wire dialect declares but the
+    shared model has no field for (MiniMax's ``fps`` and
+    ``max_long_side_pixel``). They ride along so a dialect that understands
+    them can replay them verbatim instead of losing the tuning on a
+    round-trip.
+    """
 
     source: VideoSource
     cache_control: Any | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

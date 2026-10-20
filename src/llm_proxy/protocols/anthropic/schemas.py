@@ -67,5 +67,13 @@ class MessagesRequest(BaseModel):
         None, description="Container identifier or params (skills) for code execution"
     )
     inference_geo: str | None = Field(None, description="Geographic region for inference")
-    service_tier: Literal["auto", "standard_only"] | None = Field(None, description="Service tier")
+    service_tier: Literal["auto", "standard_only", "standard", "priority"] | None = Field(
+        None,
+        description=(
+            "Service tier. 'auto'/'standard_only' are Anthropic's spellings; "
+            "'standard'/'priority' are the tier names an Anthropic-compatible "
+            "upstream (MiniMax) documents, accepted so a client that targets "
+            "such an upstream can name its tier."
+        ),
+    )
     output_config: dict[str, Any] | None = Field(None, description="Output configuration")

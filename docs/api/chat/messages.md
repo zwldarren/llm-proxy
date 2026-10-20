@@ -68,7 +68,7 @@ print(message.content[0].text)
 | `thinking` | `{"type":"enabled","budget_tokens":N}` or an effort form. For Claude targets, `budget_tokens` must be ≥ 1024 and < `max_tokens`, otherwise 400 `invalid_parameter` |
 | `cache_control` | Top level and per content block (`{"type":"ephemeral","ttl":…}`); accepted on text, image, audio, file/document, tool_use, server_tool_use, tool_result, and other block types |
 | `metadata` | Forwarded; `user_id` is also filled from OpenAI-style metadata or `user` |
-| `container`, `inference_geo`, `service_tier`, `output_config` | Forwarded; legacy `output_format` is aliased into `output_config.format` |
+| `container`, `inference_geo`, `service_tier`, `output_config` | Forwarded; legacy `output_format` is aliased into `output_config.format`. `service_tier` accepts Anthropic's `auto`/`standard_only` and the `standard`/`priority` names an Anthropic-compatible upstream (MiniMax) documents; the latter are translated to the closest Anthropic tier when the upstream is Anthropic itself |
 | `context_management` | Accepted and forwarded |
 | `betas` | Folded into the `anthropic-beta` header context and removed from the body |
 | `workspace_id`, `user_profile_id` | Header facts in the official API: lifted into `anthropic-workspace-id` / `anthropic-user-profile-id` and removed from the body (the Messages API rejects them as unknown top-level fields) |

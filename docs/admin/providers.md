@@ -250,6 +250,51 @@ compatibility alias when it derives the two native endpoints.
   Completions translation for that turn, which is also why a materialized
   continuation cannot use the server-side `web_search`.
 
+### MiniMax specifics
+
+MiniMax serves Chat Completions (`https://api.minimax.io/v1/chat/completions`),
+an Anthropic-compatible Messages endpoint
+(`https://api.minimax.io/anthropic/v1/messages`) and an OpenAI Responses
+endpoint (`https://api.minimax.io/v1/responses`). The two native endpoints are
+forwarded verbatim, so the client's own fields survive.
+
+- **The thinking vocabulary is translated.** MiniMax does not speak
+  Anthropic's: `thinking.type` is `disabled` or `adaptive` (there is no
+  `budget_tokens`), the depth rides `reasoning_effort` (Chat) or
+  `output_config.effort` (Messages), and `none` / `minimal` are not spellings
+  it accepts — it answers HTTP 400. The proxy therefore rewrites the
+  vocabulary on every tier: an Anthropic client's
+  `thinking: {"type": "enabled", "budget_tokens": 16000}` becomes
+  `{"type": "adaptive"}`, an effort of `minimal` becomes `low`, and "no
+  reasoning" becomes `thinking: {"type": "disabled"}` rather than
+  `reasoning_effort: "none"`. `MiniMax-M3.1-Flash` always thinks and rejects
+  `disabled` as well, so on that model the field is dropped instead.
+- **`reasoning_split`** is MiniMax's own output switch: with it off, the
+  thinking content stays inside `content` wrapped in `<think>` tags instead of
+  moving to `reasoning_content`. It is forwarded on the chat wire.
+- **Video input.** The M-series models read image and video. The OpenAI chat
+  wire carries `video_url`; the Anthropic-compatible Messages endpoint carries
+  a `video` block, which the proxy parses into the shared video block and
+  renders as `video_url` on a chat wire.
+- **The service tier is translated.** MiniMax names its tiers `standard` and
+  `priority` (the priority tier costs 1.5× and buys priority admission;
+  `MiniMax-M3.1-Flash` does not support the field). The clients speak other
+  words — Anthropic `auto`/`standard_only`, OpenAI `auto`/`default`/`flex`/
+  `priority` — so the proxy maps them: `standard_only`/`default` become
+  `standard`, `priority` stays, and a tier MiniMax has no word for (`auto`,
+  `flex`) is dropped rather than sent as an illegal enum value.
+- **Errors arrive in the body.** The Chat Completions endpoint answers
+  HTTP 200 and carries the failure in `base_resp.status_code` (1002 rate
+  limit, 1004 authentication, 1008 balance, 1026/1027 sensitive content,
+  2013 invalid params, …). The proxy turns those into real HTTP errors
+  (429/401/402/400) instead of an empty success. The Messages and Responses
+  endpoints use ordinary HTTP status codes and need no translation.
+- **Token counting.** MiniMax serves two counters: the Anthropic-compatible
+  `POST /anthropic/v1/messages/count_tokens` (behind
+  `POST /v1/messages/count_tokens`) and `POST /v1/responses/input_tokens`
+  (behind `POST /v1/responses/input_tokens`). Both are forwarded to the
+  upstream, so the numbers are MiniMax's own rather than a local estimate.
+
 ## Web search: native or proxy-side
 
 Two systems can answer a `web_search` tool, and exactly one of them runs per request:

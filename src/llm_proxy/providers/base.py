@@ -513,6 +513,20 @@ class BaseHttpProvider(BaseAdapter, ABC):
     # Chat context builder (minimal – refined in Task 5)
     # ------------------------------------------------------------------
 
+    def _check_upstream_body_error(self, body: dict[str, Any]) -> None:
+        """Raise when the upstream answered HTTP 200 with an in-body error.
+
+        Some upstreams report failures in the body instead of the status
+        line — MiniMax's Chat Completions endpoint carries the error code in
+        ``base_resp``. The default is a no-op; an adapter that knows the
+        shape raises a :class:`ProviderError` here so the failure reaches the
+        client as an error instead of an empty success.
+
+        Called on the non-streaming response body and on every converted
+        stream chunk.
+        """
+        return None
+
     def _get_serializer(self):
         """Return the serializer for this provider.
 
@@ -525,6 +539,17 @@ class BaseHttpProvider(BaseAdapter, ABC):
         from llm_proxy.serialization.providers import get_provider_serializer
 
         return get_provider_serializer(self._adapter_type)
+
+    def _thinking_disabled_wire(self, model: str | None) -> str:
+        """How "thinking off" reaches this provider's Chat Completions wire.
+
+        ``effort`` (the default) sends the OpenAI spelling
+        ``reasoning_effort: "none"``. Adapters whose upstream rejects that
+        spelling override this: ``thinking`` sends
+        ``thinking: {"type": "disabled"}``, ``omit`` sends neither (for models
+        that always think).
+        """
+        return "effort"
 
     def _build_chat_context(self, request: Any) -> Any:
         """Build a BuildContext with policies for provider request construction."""
@@ -546,6 +571,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
             # tier (same pattern as the native_passthrough kill switch).
             response_passthrough=bool(self._extra_config.get("response_passthrough", True)),
             reasoning_object=self.REASONING_OBJECT,
+            thinking_disabled_wire=self._thinking_disabled_wire(request.model),
         )
 
     # ------------------------------------------------------------------

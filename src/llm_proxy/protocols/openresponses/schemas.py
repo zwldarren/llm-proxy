@@ -916,6 +916,35 @@ class ResponsesResponse(BaseModel):
     instructions: str | None = Field(None, description="Instructions used")
 
 
+class InputTokensRequest(BaseModel):
+    """Request model for the input-token estimate (/v1/responses/input_tokens).
+
+    The counting-relevant subset of the Responses request: the conversation,
+    the instructions, the tools and the reasoning control. Everything else a
+    generation request carries (sampling, streaming, response storage) does
+    not change the prompt size.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    model: str = Field(..., description="Model the estimate is for")
+    input: str | list[Any] = Field(..., description="Input text or array of items")
+    instructions: str | None = Field(None, description="System instructions")
+    tools: list[dict[str, Any]] | None = Field(None, description="Tool list")
+    tool_choice: str | None = Field(None, description="Tool selection strategy")
+    text: dict[str, Any] | None = Field(None, description="Output format control")
+    reasoning: dict[str, Any] | None = Field(None, description="Reasoning control")
+
+
+class InputTokensResponse(BaseModel):
+    """Response model for the input-token estimate (/v1/responses/input_tokens)."""
+
+    object: Literal["response.input_tokens"] = Field(
+        default="response.input_tokens", description="Object type"
+    )
+    input_tokens: int = Field(..., description="Estimated input token count")
+
+
 __all__ = [
     "ServiceTier",
     "InputTextContent",
@@ -979,4 +1008,6 @@ __all__ = [
     "Error",
     "ResponsesRequest",
     "ResponsesResponse",
+    "InputTokensRequest",
+    "InputTokensResponse",
 ]
