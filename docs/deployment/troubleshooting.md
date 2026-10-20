@@ -38,7 +38,7 @@ container/console logs:
 | `429 rate_limit_exceeded` | Per-key RPM cap or an auth bucket | Raise `rate_limit_rpm`, or wait for the fixed 60 s window |
 | `429 budget_exceeded` / `user_budget_exceeded` | Key or account budget exhausted | Raise the budget or reset it (account budgets only by an admin) |
 | `413 body_size_exceeded` | Body above `max_request_body_size_bytes` (64 MiB default) | Raise the limit or shrink the request |
-| `499 client_disconnected` in logs | Client/CDN gave up mid-request | Usually a CDN timeout — keep keepalive enabled, or stream instead of waiting on a long non-streaming call |
+| `499 client_disconnected` in logs | The socket closed before the response was complete: an SDK/browser read timeout, `proxy_read_timeout` in your own reverse proxy, or a CDN 524 (the message names Cloudflare only as the classic case — any intermediary looks the same) | Raise the client/proxy read timeout, keep keepalive enabled, or stream instead of waiting on a long non-streaming call. A close after the last frame is logged as a success, not a 499 |
 | Response arrives as **200 with an error JSON body** | Keepalive heartbeat mode had already committed 200 before the failure | Expected tradeoff; check the body, and the real error is in the logs. See [Reverse Proxy & TLS](../deployment/reverse-proxy.md) |
 | Browser reports a CORS failure instead of a real status | Auth/body/rate-limit middleware run **outside** CORS | Reproduce with `curl` to see the true status; then fix the underlying error |
 | Streaming request stalls with no data | Upstream silence; the proxy is sending `: keep-alive` comment frames | This is normal. If your reverse proxy buffers responses, disable buffering |

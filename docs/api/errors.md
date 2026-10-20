@@ -67,7 +67,7 @@ server logs.
 | 409 | `conflict` | Duplicate feedback, cancel of a non-cancellable response |
 | 413 | `body_size_exceeded` | Over `max_request_body_size_bytes` (default 64 MiB) |
 | 429 | `rate_limit_exceeded`, `too_many_auth_failures`, `budget_exceeded`, `user_budget_exceeded` | Rate limit, lockout, or budget cap. Rate-limit, per-key RPM, and `/v1/*` lockout 429s carry `Retry-After`; the `/servers/*` MCP lockout 429, the routed `max_cost` cap, and budget rejections do not |
-| 499 | `client_disconnected` | Client/CDN gave up; upstream cancelled (logged as failure) |
+| 499 | `client_disconnected` | Client or intermediary gave up mid-response; upstream cancelled (logged as failure). Every read timeout — SDK, browser, reverse proxy, Cloudflare — looks the same from here; a close after the last frame logs as a success instead |
 | 500 | `configuration_error`, `internal_error` | Bad configuration (e.g. smart routing disabled, missing model), or upstream responses that fail to parse (500 `api_error`) |
 | 502 | `provider_error`, `network_error` | Upstream failed |
 | 503 | `redis_not_available`, `budget_check_unavailable`, `web_search_error`, readiness | Dependency missing/unhealthy; budget checks fail closed |

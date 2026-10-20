@@ -100,14 +100,16 @@ def _experience_counts_as_success(error: Exception | None) -> bool:
 async def check_client_disconnect(
     req: Any,
     chunk_count: int,
-    cancel_token: asyncio.Event | None,
     interval: int = DEFAULT_DISCONNECT_CHECK_INTERVAL,
     watcher: ClientDisconnectWatcher | None = None,
 ) -> bool:
     """Poll the client connection every *interval* chunks (always on the first).
 
-    On disconnect, set *cancel_token* so the provider-side stream loop stops
-    pushing data into a dead connection.
+    Reports the disconnect only; stopping the provider is the caller's job
+    (``StreamLifecycle._poll_disconnect`` signals the cancel token once the
+    abandonment verdict is on record). Signalling here would corrupt that
+    verdict: the provider loops react to the token by breaking out of their
+    read loop, which reaches the pump as a natural end-of-stream.
 
     When *watcher* is supplied the check is a synchronous flag read on a
     background receive task — see :class:`ClientDisconnectWatcher`. Without
@@ -131,9 +133,7 @@ async def check_client_disconnect(
         return False
     if not disconnected:
         return False
-    logger.debug("Client disconnected during stream, signalling cancel_token to stop provider")
-    if cancel_token:
-        cancel_token.set()
+    logger.debug("Client disconnected during stream")
     return True
 
 
@@ -152,11 +152,38 @@ class StreamPumpExhaustion:
     provider_done: bool = False
     # Chunks the pump has queued that the consumer has not handed on yet.
     pending: int = 0
+    # The pump task itself, so a close verdict taken *while* the pump is
+    # finishing can wait for that last step (see :meth:`settle`).
+    task: asyncio.Task[Any] | None = None
 
     @property
     def exhausted(self) -> bool:
         """True once the provider stream is fully pumped and fully drained."""
         return self.provider_done and self.pending == 0
+
+    async def settle(self) -> None:
+        """Give a pump that is at its very end a bounded moment to record it.
+
+        A close verdict can land one task step before the pump records its own
+        exhaustion: the consumer takes the last chunk, and only then does the
+        pump's ``__anext__`` return ``StopAsyncIteration``. Waiting for that
+        step is what keeps a client that hung up on the last chunk from being
+        logged as an abandonment it never was. The task is awaited, never
+        cancelled or interrupted — teardown owns stopping it.
+
+        The wait is bounded on purpose: a provider that idles on its connection
+        for longer than the grace after its last chunk (trailing usage frame,
+        slow ``[DONE]``) reads as an abandonment, because the client is missing
+        frames and nothing here can tell that apart from a genuinely stalled
+        upstream.
+        """
+        task = self.task
+        if self.provider_done or task is None or task.done():
+            return
+        # ``asyncio.wait`` neither raises on timeout nor re-raises the awaited
+        # task's exception (it reports done/pending sets), and CancelledError
+        # is a BaseException that must propagate, so no guard is needed here.
+        await asyncio.wait({task}, timeout=_PUMP_SETTLE_GRACE_SECONDS)
 
 
 async def iterate_chunks_with_comments(
@@ -200,6 +227,7 @@ async def iterate_chunks_with_comments(
             await queue.put(("error", e))
 
     pump_task = asyncio.ensure_future(_pump())
+    exhaustion.task = pump_task
     try:
         while True:
             try:
@@ -312,6 +340,14 @@ class StreamLifecycle:
 
         # Mutable lifecycle state (one instance drives exactly one response).
         self.stream_error: Exception | None = None
+        # The socket is gone: stop pumping and skip the client-facing work only
+        # a live client can use (the finalize frame).
+        self.client_gone = False
+        # The abandonment verdict: a close that actually cost the client output,
+        # recorded as a 499 (see _markable_abandonment). Distinct from
+        # ``client_gone`` on purpose — a client that hangs up holding the whole
+        # answer is gone but not abandoned, and its request keeps the
+        # non-client-facing work (finalize, reasoning cache, persistence).
         self.client_disconnected = False
         self.chunk_count = 0
         self.first_chunk_time: datetime | None = None
@@ -362,7 +398,7 @@ class StreamLifecycle:
                 self.native_streaming
                 and self.protocol_name == "openresponses"
                 and not self._cancel_requested()
-                and not self.client_disconnected
+                and not self.client_gone
             ):
                 # Spec: the terminal event MUST be the literal string
                 # [DONE]. The native Responses upstream ends its stream
@@ -381,11 +417,18 @@ class StreamLifecycle:
                 # is a clean close and the request logs as a success.
                 self._terminal_frames_delivered = True
                 async for frame in self._finalize_and_cache():
-                    yield frame
+                    # The gate above is the verdict; this one is socket
+                    # liveness. A client that hung up holding a complete
+                    # response gets no more bytes, but finalizing (finish
+                    # reason, reasoning cache) is not client-facing work and
+                    # still has to happen for a request logged as a success.
+                    if not self.client_gone:
+                        yield frame
             elif self.native_streaming and not self.client_disconnected:
                 # Native tiers skip _finalize_and_cache, but the transformer
                 # still accumulated the forwarded frames for the request log;
-                # cache the real reasoning from them too.
+                # cache the real reasoning from them too — same rule, a
+                # complete delivery caches even when the client already left.
                 self._cache_native_reasoning()
 
             # Persist store=true streamed responses so follow-up
@@ -424,7 +467,7 @@ class StreamLifecycle:
         drops afterwards (the SDK acting on [DONE]/message_stop, whose FIN
         cancels this task) is a clean close, not a 499 abandonment.
         """
-        if self._terminal_frames_delivered or self.client_disconnected:
+        if self._terminal_frames_delivered or self.client_gone:
             return
         if isinstance(frame, str) and any(
             marker in frame for marker in self._TERMINAL_FRAME_MARKERS
@@ -440,18 +483,31 @@ class StreamLifecycle:
         response and the teardown cancellation its own close caused must not
         be blamed on it as a 499.
         """
-        if self.client_disconnected or self._terminal_frames_delivered:
+        if self._terminal_frames_delivered:
             return False
         return not self._pump_exhaustion.exhausted
 
     def _mark_disconnected(self) -> None:
-        """Record the abandonment (client_disconnected + stream error) once."""
+        """Record the abandonment (client_gone + client_disconnected + error) once."""
+        self.client_gone = True
         self.client_disconnected = True
         if self.stream_error is None:
             self.stream_error = ClientDisconnectedError()
 
     def _cancel_requested(self) -> bool:
         return self.cancel_token is not None and self.cancel_token.is_set()
+
+    def _stop_provider(self) -> None:
+        """Tell the provider-side stream loops to stop pushing data.
+
+        Signalled only once the abandonment verdict is on record: those loops
+        react to the token by breaking out of their read loop, which reaches
+        the pump as a natural end-of-stream and would forge exactly the
+        exhaustion :meth:`_markable_abandonment` reads. A clean close needs no
+        signal at all — the pump is dry, and teardown closes the stream.
+        """
+        if self.cancel_token is not None:
+            self.cancel_token.set()
 
     # -- lifecycle phases ---------------------------------------------
 
@@ -480,7 +536,7 @@ class StreamLifecycle:
             exhaustion=self._pump_exhaustion,
         ):
             if kind == "comment":
-                if not self.client_disconnected and not self._cancel_requested():
+                if not self.client_gone and not self._cancel_requested():
                     yield payload
                 continue
             chunk = payload
@@ -600,21 +656,37 @@ class StreamLifecycle:
         return not can_accumulate_native_frames(self.transformer)
 
     async def _poll_disconnect(self) -> bool:
-        """Check for client disconnect; on hit, record the abandonment.
+        """Check for client disconnect; on a real abandonment, record it.
 
-        Screened by the delivered verdict: once the terminal frame is out, a FIN
-        is a clean close — the pump stops pumping without labelling the request
-        a 499.
+        Screened by the same verdict teardown uses (see
+        :meth:`_markable_abandonment`), not by the terminal frame alone: once
+        every frame the provider sent has been handed to the response, a FIN is
+        a clean close — the pump stops pumping without labelling a complete
+        request a 499. The poll fires on the first chunk and every
+        ``DEFAULT_DISCONNECT_CHECK_INTERVAL`` chunks, so a client that hangs up
+        after the last chunk lands exactly here, one task step before the pump
+        records its exhaustion: :meth:`StreamPumpExhaustion.settle` closes that
+        race before the verdict is taken.
+
+        The provider is stopped only *after* that verdict: the cancel token
+        makes a provider read loop break cleanly, which the pump records as a
+        natural end-of-stream — the very state the verdict reads. Signalling
+        first would let a mid-generation abandonment pass as an exhausted pump.
         """
         disconnected = await check_client_disconnect(
-            self.req, self.chunk_count, self.cancel_token, watcher=self.disconnect_watcher
+            self.req, self.chunk_count, watcher=self.disconnect_watcher
         )
-        if disconnected and not self._terminal_frames_delivered:
+        if not disconnected:
+            return False
+        self.client_gone = True
+        await self._pump_exhaustion.settle()
+        if self._markable_abandonment():
             self._mark_disconnected()
-        return disconnected
+            self._stop_provider()
+        return True
 
     async def _pump_web_search_continuation(self) -> AsyncIterator[str]:
-        if not self.should_intercept_web_search or self.client_disconnected:
+        if not self.should_intercept_web_search or self.client_gone:
             return
         # A continuation round generates MORE provider tokens: a client close
         # from here on is a real abandonment again, until the round's own
@@ -638,8 +710,8 @@ class StreamLifecycle:
         ):
             if kind == "comment":
                 # Same gating as the main loop: comments stop
-                # flowing once the client abandoned the stream.
-                if not self.client_disconnected and not self._cancel_requested():
+                # flowing once the client is gone.
+                if not self.client_gone and not self._cancel_requested():
                     yield payload
                 continue
             if self._cancel_requested():
@@ -706,6 +778,10 @@ class StreamLifecycle:
             )
 
     async def _persist_response(self) -> None:
+        # Gated on the abandonment verdict, not on socket liveness: a response
+        # the client received in full is persisted even when it hung up on the
+        # last frame, so a stored response stays reachable by a follow-up
+        # ``previous_response_id`` continuation.
         if (
             self.response_store is not None
             and not self.client_disconnected

@@ -19,6 +19,7 @@ from llm_proxy.core.exceptions import ClientDisconnectedError
 from llm_proxy.core.processing.stream_lifecycle import (
     GenericStreamLifecycle,
     StreamLifecycle,
+    StreamPumpExhaustion,
     iterate_chunks_with_comments,
 )
 from llm_proxy.models.content_blocks import TextBlock
@@ -398,14 +399,22 @@ class TestStreamLifecycleCancellation:
         transformer = _FakeTransformer()
         response_store = MagicMock()
         token = asyncio.Event()
+        still_generating = asyncio.Event()
 
         async def _receive_disconnect():
             return {"type": "http.disconnect"}
 
+        async def _upstream():
+            # One chunk out, then the provider keeps generating: the close
+            # costs the client real output, so this is an abandonment and not
+            # a client that hung up holding the whole answer.
+            yield {"delta": {"content": "a"}}
+            await still_generating.wait()
+
         req = MagicMock()
         req._receive = _receive_disconnect
         lifecycle = _lifecycle(
-            stream=_stream({"delta": {"content": "a"}}),
+            stream=_upstream(),
             transformer=transformer,
             req=req,
             cancel_token=token,
@@ -414,10 +423,12 @@ class TestStreamLifecycleCancellation:
 
         frames = await _collect(lifecycle.events())
 
-        # Disconnected: no [DONE] finalize, no persistence.
+        # Abandoned: no [DONE] finalize, no persistence, provider told to stop.
         assert "data: [DONE]\n\n" not in frames
         assert transformer.persisted is False
         assert response_store.method_calls == []
+        assert lifecycle.client_disconnected is True
+        assert token.is_set() is True
 
     async def test_persistence_runs_when_client_connected(self) -> None:
         transformer = _FakeTransformer()
@@ -536,6 +547,200 @@ class TestCleanCloseAtStreamEnd:
         assert lifecycle.client_disconnected is True
         error = registry.on_stream_end.call_args.kwargs["error"]
         assert isinstance(error, ClientDisconnectedError)
+
+    async def test_close_on_a_disconnect_poll_boundary_is_clean_success(self) -> None:
+        """A FIN landing with the last provider chunk is not an abandonment.
+
+        The disconnect check runs on chunk 1 and every 10th chunk, so a client
+        that hangs up holding the last chunk meets the poll exactly there. The
+        verdict read "was the terminal frame delivered", which is false at that
+        instant, so the poll logged a complete request as a 499 — whenever the
+        stream length happened to be a multiple of the interval.
+        """
+        gone = asyncio.Event()
+        delivered: list[str] = []
+
+        async def _receive():
+            await gone.wait()
+            return {"type": "http.disconnect"}
+
+        req = MagicMock()
+        req._receive = _receive
+        registry = _registry()
+        lifecycle = _lifecycle(
+            stream=_stream(*[{"delta": {"content": f"c{i}"}} for i in range(10)]),
+            req=req,
+            tracing_registry=registry,
+        )
+
+        async for frame in lifecycle.events():
+            delivered.append(frame)
+            if len(delivered) == 10:
+                gone.set()  # the client holds every frame the provider sent
+
+        assert len(delivered) == 10
+        # Gone (nothing more to send it) but not abandoned: no 499.
+        assert lifecycle.client_gone is True
+        assert lifecycle.client_disconnected is False
+        assert lifecycle.stream_error is None
+        assert registry.on_stream_end.await_args.kwargs["error"] is None
+
+    async def test_close_on_a_poll_boundary_with_frames_pending_is_an_abandonment(self) -> None:
+        """A FIN with provider frames still queued keeps the 499 verdict."""
+        gone = asyncio.Event()
+        delivered: list[str] = []
+
+        async def _receive():
+            await gone.wait()
+            return {"type": "http.disconnect"}
+
+        req = MagicMock()
+        req._receive = _receive
+        registry = _registry()
+        lifecycle = _lifecycle(
+            stream=_stream(*[{"delta": {"content": f"c{i}"}} for i in range(30)]),
+            req=req,
+            tracing_registry=registry,
+        )
+
+        async for frame in lifecycle.events():
+            delivered.append(frame)
+            if len(delivered) == 10:  # a poll boundary, 20 chunks still to come
+                gone.set()
+
+        assert len(delivered) == 10
+        assert lifecycle.client_disconnected is True
+        error = registry.on_stream_end.await_args.kwargs["error"]
+        assert isinstance(error, ClientDisconnectedError)
+
+    async def test_midstream_close_is_not_forged_clean_by_the_stop_token(self) -> None:
+        """The cancel token must not fabricate the exhaustion the verdict reads.
+
+        Provider read loops break cleanly out of their read loop once the
+        token is set, which reaches the pump as a natural end-of-stream. That
+        is the very state ``_markable_abandonment`` reads, so signalling the
+        token at poll time let a client that vanished 10 chunks into a
+        30-chunk answer be logged as a success: the pump read dry because the
+        proxy had just told the provider to stop.
+        """
+        gone = asyncio.Event()
+        token = asyncio.Event()
+        delivered: list[str] = []
+
+        async def _receive():
+            await gone.wait()
+            return {"type": "http.disconnect"}
+
+        async def _upstream():
+            # Token-by-token upstream: the pump sits idle on the next read
+            # with nothing queued, which is exactly when the poll fires.
+            for i in range(30):
+                if token.is_set():
+                    return
+                yield {"delta": {"content": f"c{i}"}}
+                await asyncio.sleep(0.005)
+
+        req = MagicMock()
+        req._receive = _receive
+        registry = _registry()
+        lifecycle = _lifecycle(
+            stream=_upstream(),
+            req=req,
+            cancel_token=token,
+            tracing_registry=registry,
+        )
+
+        async for frame in lifecycle.events():
+            delivered.append(frame)
+            if len(delivered) == 10:  # a poll boundary, 20 chunks still to come
+                gone.set()
+
+        assert len(delivered) < 30  # the response really was truncated
+        assert lifecycle.client_disconnected is True
+        assert token.is_set() is True
+        error = registry.on_stream_end.await_args.kwargs["error"]
+        assert isinstance(error, ClientDisconnectedError)
+
+    async def test_clean_close_still_finalizes_and_persists(self) -> None:
+        """A close holding the whole answer keeps the non-client-facing work.
+
+        The request logs as a success, so the finish reason still has to be
+        read, the output still has to be finalized for the log, and a stored
+        response still has to be persisted — otherwise a later
+        ``previous_response_id`` continuation 404s on a response the proxy
+        billed and called complete, and the next turn loses its cached
+        reasoning.
+        """
+        gone = asyncio.Event()
+        delivered: list[str] = []
+        token = asyncio.Event()
+        transformer = _FakeTransformer()
+        response_store = MagicMock()
+        finalize_calls: list[int] = []
+        transformer.finalize = lambda: finalize_calls.append(1) or "data: [DONE]\n\n"
+
+        async def _receive():
+            await gone.wait()
+            return {"type": "http.disconnect"}
+
+        req = MagicMock()
+        req._receive = _receive
+        lifecycle = _lifecycle(
+            stream=_stream(*[{"delta": {"content": f"c{i}"}} for i in range(10)]),
+            transformer=transformer,
+            req=req,
+            cancel_token=token,
+            response_store=response_store,
+        )
+
+        async for frame in lifecycle.events():
+            delivered.append(frame)
+            if len(delivered) == 10:  # the client holds every frame already
+                gone.set()
+
+        assert lifecycle.client_gone is True
+        assert lifecycle.client_disconnected is False
+        # Finalized for the record, not for the wire: the client is gone.
+        assert finalize_calls
+        assert "data: [DONE]\n\n" not in delivered
+        assert transformer.persisted is True
+        # A clean close never signals the stop token: the pump is already dry,
+        # and the token would cancel work this request still owes its log.
+        assert token.is_set() is False
+
+    async def test_native_clean_close_still_caches_reasoning(self, monkeypatch) -> None:
+        """Native tiers keep the reasoning cache on a clean close too."""
+        from llm_proxy.core.processing import stream_lifecycle as lifecycle_module
+
+        cached: list[Any] = []
+        monkeypatch.setattr(
+            lifecycle_module,
+            "try_cache_reasoning_from_blocks",
+            lambda blocks, response_id: cached.append(blocks),
+        )
+
+        async def _receive():
+            # The client is already gone by the time the stream starts.
+            return {"type": "http.disconnect"}
+
+        req = MagicMock()
+        req._receive = _receive
+        lifecycle = _lifecycle(
+            stream=_stream(
+                'data: {"id":"1","model":"glm-5","choices":[{"delta":{"content":"hi"}}]}\n\n',
+            ),
+            native_streaming=True,
+            protocol_name="openai",
+            stream_request=_request(model="glm-5"),
+            req=req,
+            tracing_registry=_registry(),
+        )
+
+        await _collect(lifecycle.events())
+
+        assert lifecycle.client_gone is True
+        assert lifecycle.client_disconnected is False
+        assert cached, "a fully delivered native stream still caches its reasoning"
 
 
 class TestStreamLifecycleNativePassthrough:
@@ -1029,6 +1234,32 @@ class TestIterateChunksWithComments:
             assert ("chunk", "a") in got
             # The chunk is always the last data frame before exhaustion.
             assert got[-1] == ("chunk", "a")
+
+    async def test_settle_gives_a_pump_on_its_last_step_its_turn(self) -> None:
+        """A pump one task step from its end must be seen as exhausted.
+
+        The consumer takes the last chunk before the pump's own ``__anext__``
+        returns ``StopAsyncIteration``; a close verdict taken in that window
+        would otherwise read ``provider_done=False`` and call a complete
+        delivery an abandonment.
+        """
+
+        async def _pauses_before_ending():
+            yield "only"
+            await asyncio.sleep(0)
+
+        exhaustion = StreamPumpExhaustion()
+        frames = iterate_chunks_with_comments(
+            _pauses_before_ending(), interval=0.01, comment=None, exhaustion=exhaustion
+        )
+
+        assert await anext(frames) == ("chunk", "only")
+        assert exhaustion.provider_done is False  # the pump's last step is pending
+
+        await exhaustion.settle()
+
+        assert exhaustion.exhausted is True
+        await frames.aclose()
 
     async def test_non_positive_interval_falls_back_to_default(self) -> None:
         got = [

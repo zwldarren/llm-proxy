@@ -141,3 +141,15 @@ Configuration and caveats: [Reverse Proxy & TLS](../deployment/reverse-proxy.md#
 
 If the client goes away mid-stream, the upstream call is cancelled and the request is
 logged as **499**; partial usage is still billed and counted.
+
+The proxy only observes that the socket closed, never why: an SDK read timeout, a
+closed browser tab, `proxy_read_timeout` in nginx and a Cloudflare 524 are
+indistinguishable from the origin's side. The error text names Cloudflare because its
+524 is the classic case, not because a CDN is involved.
+
+A close that lands once the response is complete is a clean success, not a 499 — the
+terminal `[DONE]` / `message_stop` frame is out, or the provider's last chunk was
+delivered with nothing left queued. SSE clients routinely drop the connection the
+moment they have what they came for. The response is still finalized for the request
+log and its reasoning cached, and a `store: true` response is still persisted, so a
+follow-up `previous_response_id` continuation keeps working.

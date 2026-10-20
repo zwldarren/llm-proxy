@@ -1549,21 +1549,24 @@ class TestDisconnectIntervalGating:
         monkeypatch.setattr(streaming_handler, "check_client_disconnected", fake_check)
 
         req = _build_mock_request()
-        cancel_token = asyncio.Event()
 
         # Chunk 1 is always checked; interval boundaries (10, 20) are checked;
         # other chunks are skipped.
         for chunk_count in (1, 2, 3, 9, 10, 11, 20, 21):
-            result = await stream_lifecycle.check_client_disconnect(
-                req, chunk_count, cancel_token, interval=10
-            )
+            result = await stream_lifecycle.check_client_disconnect(req, chunk_count, interval=10)
             assert result is False
         assert fake_check.await_count == 3, (
             f"expected checks on chunks 1, 10, 20, got {fake_check.await_count}"
         )
 
     @pytest.mark.asyncio
-    async def test_check_disconnect_sets_cancel_token_when_disconnected(self, monkeypatch) -> None:
+    async def test_check_disconnect_reports_without_signalling(self, monkeypatch) -> None:
+        """The poll reports only; stopping the provider belongs to the verdict.
+
+        Signalling the cancel token here would let a provider read loop break
+        cleanly before ``StreamLifecycle`` decides whether the close cost the
+        client output, forging the pump exhaustion that verdict reads.
+        """
         from llm_proxy.core.processing import stream_lifecycle
         from llm_proxy.streaming import handler as streaming_handler
 
@@ -1571,12 +1574,9 @@ class TestDisconnectIntervalGating:
         monkeypatch.setattr(streaming_handler, "check_client_disconnected", fake_check)
 
         req = _build_mock_request()
-        cancel_token = asyncio.Event()
 
-        result = await stream_lifecycle.check_client_disconnect(req, 1, cancel_token, interval=10)
-
-        assert result is True
-        assert cancel_token.is_set(), "cancel_token must be set on disconnect"
+        assert await stream_lifecycle.check_client_disconnect(req, 1, interval=10) is True
+        assert fake_check.await_count == 1
 
 
 def _sse_payloads(payload: str, event: str) -> list[dict]:
