@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.5.0](https://github.com/zwldarren/llm-proxy/compare/v0.4.1...v0.5.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** one key gate owns the auth sequence
+* **streaming:** one segment accumulator owns canonical block assembly
+
+### Features
+
+* **gemini:** gate request shapes on the model family, cache what the wire cannot carry (ADR-0039) ([bde5fca](https://github.com/zwldarren/llm-proxy/commit/bde5fcaa8d93081e7dbd6543259695edf66c72e2))
+* **minimax:** speak MiniMax's vocabulary on every wire ([fd45080](https://github.com/zwldarren/llm-proxy/commit/fd45080b7bffbe7afc52f06af5c4de0b22c17de3))
+* **providers:** add OpenCode gateway adapters with per-model dialect routing ([24bb8cd](https://github.com/zwldarren/llm-proxy/commit/24bb8cdb822cb648c7eb6f5e8b80f2ec9e6e1a1a))
+* **routing:** a fallback ladder, a corpus export, a cost-quality readout ([e673eee](https://github.com/zwldarren/llm-proxy/commit/e673eeea249d4ea59a47e16761dbafb6078f5a95))
+* **routing:** warm experience store, ask-shaped classifier input, label flywheel ([e060776](https://github.com/zwldarren/llm-proxy/commit/e060776e2b2b45b9fee2579993bc70881b8f64e5))
+* **tools:** a hosted tool is a dialect fact, not a function (ADR-0038) ([7775d82](https://github.com/zwldarren/llm-proxy/commit/7775d827cd8b1d63ca87304a900d8e5520cfe1d5))
+
+
+### Bug Fixes
+
+* address open-code-review findings from the routing/streaming/auth work ([552ff65](https://github.com/zwldarren/llm-proxy/commit/552ff6554530b66464b4bea94a058f00ccbcc400))
+* **anthropic:** clamp the wire onto the official Messages shapes ([2df34ae](https://github.com/zwldarren/llm-proxy/commit/2df34ae57336d1c0c6f0a3b63b7180c26a9a6507))
+* **streaming:** take the 499 verdict before the stop token can forge it ([420754b](https://github.com/zwldarren/llm-proxy/commit/420754b2b7987fe41dda3978034b96855ba55017))
+
+
+### Code Refactoring
+
+* **auth:** one key gate owns the auth sequence ([76e1366](https://github.com/zwldarren/llm-proxy/commit/76e13667b4accbc380fbe44add61b8e4f4fde1d8))
+* **streaming:** one segment accumulator owns canonical block assembly ([1f63d74](https://github.com/zwldarren/llm-proxy/commit/1f63d740fec9cf73724392c830beb892d24a4cf0))
+
 ## [0.4.1](https://github.com/zwldarren/llm-proxy/compare/v0.4.0...v0.4.1) (2026-10-11)
 
 
