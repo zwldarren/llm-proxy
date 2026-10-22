@@ -81,9 +81,10 @@ def _build_openresponses_response(
     usage_none: bool = False,
     error: dict[str, Any] | None = None,
     store: bool = False,
-    # Required (nullable) field in the official Response schema; the
-    # non-streaming formatter always emits it, so the snapshot must too
-    # (test_openresponses_streaming_parity.py compares the two bodies).
+    # Optional (nullable) on the official ``Response`` type — ``openai-python``
+    # models it as ``Optional[AccessPrograms] = None`` — but the non-streaming
+    # formatter always emits the key, and the parity test compares the two
+    # bodies' key sets (test_openresponses_streaming_parity.py).
     access_programs: Any | None = None,
     previous_response_id: str | None = None,
     instructions: str | None = None,
