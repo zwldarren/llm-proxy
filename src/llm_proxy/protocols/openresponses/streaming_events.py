@@ -72,6 +72,7 @@ def _build_openresponses_response(
     incomplete_details: dict[str, Any] | None = None,
     reasoning: dict[str, Any] | None = None,
     cached_tokens: int = 0,
+    cache_write_tokens: int = 0,
     reasoning_tokens: int = 0,
     usage_none: bool = False,
     error: dict[str, Any] | None = None,
@@ -104,7 +105,10 @@ def _build_openresponses_response(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
-            "input_tokens_details": {"cached_tokens": cached_tokens},
+            "input_tokens_details": {
+                "cached_tokens": cached_tokens,
+                "cache_write_tokens": cache_write_tokens,
+            },
             "output_tokens_details": {"reasoning_tokens": reasoning_tokens},
         }
     return {
@@ -902,6 +906,7 @@ class StreamingEventFactory:
             incomplete_details=incomplete_details,
             reasoning=self.state.reasoning,
             cached_tokens=self.state.cached_tokens,
+            cache_write_tokens=self.state.cache_write_tokens,
             reasoning_tokens=self.state.reasoning_tokens,
             store=self.state.store,
             **self._echo_kwargs(),
@@ -993,6 +998,7 @@ class StreamingEventFactory:
             incomplete_details={"reason": reason},
             reasoning=self.state.reasoning,
             cached_tokens=self.state.cached_tokens,
+            cache_write_tokens=self.state.cache_write_tokens,
             reasoning_tokens=self.state.reasoning_tokens,
             store=self.state.store,
             **self._echo_kwargs(),

@@ -1478,6 +1478,11 @@ def _convert_usage(usage: dict[str, Any] | None) -> dict[str, Any]:
         "total_tokens": total_tokens,
         "input_tokens_details": {
             "cached_tokens": 0,
+            # OpenAI's ResponseUsage carries both cache counters on every
+            # response (its SDK model declares both as required); the spec's
+            # InputTokensDetails only names ``cached_tokens``, so the extra key
+            # is a permitted superset for OpenResponses clients.
+            "cache_write_tokens": 0,
         },
     }
     if isinstance(input_details, dict):

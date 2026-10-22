@@ -400,7 +400,7 @@ def test_openresponses_terminal_snapshot_folds_trailing_usage_chunk():
         "input_tokens": 1234,
         "output_tokens": 56,
         "total_tokens": 1290,
-        "input_tokens_details": {"cached_tokens": 1000},
+        "input_tokens_details": {"cached_tokens": 1000, "cache_write_tokens": 0},
         "output_tokens_details": {"reasoning_tokens": 10},
     }
     assert frames.rstrip().endswith("data: [DONE]")
@@ -468,6 +468,6 @@ def test_openresponses_terminal_snapshot_reads_canonical_flat_usage_aliases():
         "input_tokens": 4321,
         "output_tokens": 76,
         "total_tokens": 4397,
-        "input_tokens_details": {"cached_tokens": 4096},
+        "input_tokens_details": {"cached_tokens": 4096, "cache_write_tokens": 0},
         "output_tokens_details": {"reasoning_tokens": 40},
     }

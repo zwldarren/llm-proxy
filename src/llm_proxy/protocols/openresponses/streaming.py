@@ -96,6 +96,7 @@ class OpenResponsesStreamingState:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    cache_write_tokens: int = 0
     audio_input_tokens: int = 0
     audio_output_tokens: int = 0
     reasoning_tokens: int = 0
@@ -744,6 +745,9 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
 
         input_details = usage.get("input_tokens_details") or {}
         self.state.cached_tokens = input_details.get("cached_tokens", self.state.cached_tokens) or 0
+        self.state.cache_write_tokens = (
+            input_details.get("cache_write_tokens", self.state.cache_write_tokens) or 0
+        )
 
         output_details = usage.get("output_tokens_details") or {}
         self.state.reasoning_tokens = (
@@ -838,6 +842,11 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             cached = usage.get("cache_read_input_tokens")
         if cached is not None:
             self.state.cached_tokens = cached or 0
+        cache_write = ptd.get("cache_write_tokens")
+        if cache_write is None:
+            cache_write = usage.get("cache_creation_input_tokens")
+        if cache_write is not None:
+            self.state.cache_write_tokens = cache_write or 0
         audio_input = ptd.get("audio_tokens")
         if audio_input is not None:
             self.state.audio_input_tokens = audio_input or 0

@@ -599,7 +599,7 @@ class TestConvertUsage:
         # their own required inner fields), so zero-value defaults are emitted
         # when the upstream response did not provide them; real values are
         # preserved as-is.
-        assert result["input_tokens_details"] == {"cached_tokens": 0}
+        assert result["input_tokens_details"] == {"cached_tokens": 0, "cache_write_tokens": 0}
         assert result["output_tokens_details"] == {"reasoning_tokens": 0}
 
     def test_token_details_preserved(self):

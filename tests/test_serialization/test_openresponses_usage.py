@@ -24,7 +24,10 @@ class TestConvertUsage:
                 "completion_tokens_details": {"reasoning_tokens": 2},
             }
         )
-        assert usage["input_tokens_details"] == {"cached_tokens": 3}
+        assert usage["input_tokens_details"] == {
+            "cached_tokens": 3,
+            "cache_write_tokens": 0,
+        }
         assert usage["output_tokens_details"] == {"reasoning_tokens": 2}
 
     def test_preserves_all_detail_fields(self):
@@ -59,7 +62,7 @@ class TestConvertUsage:
         # Spec: ResponseResource.usage requires both details objects (with
         # their own required inner fields), so zero-value defaults are emitted
         # when the upstream response did not provide them.
-        assert usage["input_tokens_details"] == {"cached_tokens": 0}
+        assert usage["input_tokens_details"] == {"cached_tokens": 0, "cache_write_tokens": 0}
         assert usage["output_tokens_details"] == {"reasoning_tokens": 0}
 
 
@@ -89,5 +92,8 @@ class TestFormatResponseUsageDetails:
             finish_reason="stop",
         )
         result = serializer.format_response(response)
-        assert result["usage"]["input_tokens_details"] == {"cached_tokens": 3}
+        assert result["usage"]["input_tokens_details"] == {
+            "cached_tokens": 3,
+            "cache_write_tokens": 0,
+        }
         assert result["usage"]["output_tokens_details"] == {"reasoning_tokens": 2}

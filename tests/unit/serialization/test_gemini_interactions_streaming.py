@@ -833,7 +833,7 @@ class TestTerminalStatusEvents:
             "input_tokens": 62,
             "output_tokens": 468,
             "total_tokens": 530,
-            "input_tokens_details": {"cached_tokens": 0},
+            "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
             "output_tokens_details": {"reasoning_tokens": 297},
         }
 
