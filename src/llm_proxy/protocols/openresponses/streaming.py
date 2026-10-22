@@ -333,6 +333,9 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # The last (output_index, content_index) fed to the engine as a
         # text/reasoning delta; a change is a new canonical block boundary.
         self._last_segment_key: tuple[int | None, int] | None = None
+        # The finish_reason whose terminal snapshot is owed to the client, held
+        # until ``finalize`` (see ``_process_finish``).
+        self._pending_terminal_finish: str | None = None
 
     def accumulate_native_frame(self, frame: str | dict[str, Any]) -> None:
         """Accumulate one native Responses frame for the request log.
@@ -520,12 +523,36 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         return self._transform_chunk(data)
 
     def finalize(self) -> str:
-        """Generate stream end marker.
+        """Flush the deferred terminal snapshot, then the [DONE] marker.
 
-        Returns the [DONE] terminal event as required by the OpenResponses spec.
-        The spec states: "The terminal event MUST be the literal string [DONE]."
+        The ``response.completed`` / ``response.incomplete`` snapshot cannot be
+        built on the ``finish_reason`` chunk: Chat Completions upstreams send
+        their usage in a trailing chunk *after* it (forced
+        ``stream_options.include_usage``), so the snapshot would carry all-zero
+        counts — which is exactly what Codex's context meter reads. Holding the
+        snapshot to the end of the stream folds that chunk in first, the way the
+        Anthropic transformer holds its ``message_delta``.
+
+        Returns the terminal events plus the spec-mandated literal ``[DONE]``.
         """
-        return "data: [DONE]\n\n"
+        events = ""
+        finish_reason = self._pending_terminal_finish
+        self._pending_terminal_finish = None
+        if finish_reason is not None:
+            reason = incomplete_reason_from_finish(finish_reason)
+            if reason is not None:
+                events += self._factory._create_response_incomplete_event(
+                    input_tokens=self.state.input_tokens,
+                    output_tokens=self.state.output_tokens,
+                    reason=reason,
+                )
+            else:
+                events += self._factory._create_response_completed_event(
+                    status="completed",
+                    input_tokens=self.state.input_tokens,
+                    output_tokens=self.state.output_tokens,
+                )
+        return events + "data: [DONE]\n\n"
 
     def error_frames(self, exc: Exception) -> list[str]:
         """Emit the spec-required terminal failure sequence.
@@ -955,20 +982,9 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         if self._has_pending_web_search_continuation():
             return events
 
-        reason = incomplete_reason_from_finish(finish_reason)
-        if reason is not None:
-            events += self._factory._create_response_incomplete_event(
-                input_tokens=self.state.input_tokens,
-                output_tokens=self.state.output_tokens,
-                reason=reason,
-            )
-        else:
-            events += self._factory._create_response_completed_event(
-                status="completed",
-                input_tokens=self.state.input_tokens,
-                output_tokens=self.state.output_tokens,
-            )
-
+        # Hold the terminal snapshot for ``finalize``: the trailing usage chunk
+        # has not arrived yet (see ``finalize``).
+        self._pending_terminal_finish = finish_reason
         self.state.is_done = True
 
         return events

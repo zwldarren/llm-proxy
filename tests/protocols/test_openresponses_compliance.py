@@ -1787,6 +1787,9 @@ class TestStreamingEventsCompliance:
                 "choices": [{"delta": {"content": "Hi"}, "finish_reason": "length"}],
             }
         )
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
         assert "response.incomplete" in events
 
 

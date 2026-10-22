@@ -87,6 +87,9 @@ class TestOpenResponsesToolCallStreaming:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
 
         parsed = _parse_events(events)
 
@@ -223,6 +226,9 @@ class TestOpenResponsesToolCallStreaming:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
 
         parsed = _parse_events(events)
         event_types = [e["type"] for e in parsed]
@@ -321,6 +327,7 @@ class TestOpenResponsesToolCallStreaming:
             events = ""
             for chunk in chunks:
                 events += transformer.transform(chunk) or ""
+            events += transformer.finalize()
         finally:
             clear_format_context()
 
@@ -415,6 +422,7 @@ class TestOpenResponsesToolCallStreaming:
             events = ""
             for chunk in chunks:
                 events += transformer.transform(chunk) or ""
+            events += transformer.finalize()
         finally:
             clear_format_context()
 
@@ -541,6 +549,9 @@ class TestOpenResponsesToolCallStreaming:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
 
         parsed = _parse_events(events)
         # No function_call / web_search_call / arguments events for the search
@@ -620,6 +631,9 @@ class TestOpenResponsesToolCallStreaming:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
 
         parsed = _parse_events(events)
 

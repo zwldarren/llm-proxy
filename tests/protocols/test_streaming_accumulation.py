@@ -972,6 +972,7 @@ class TestOpenResponsesAccumulation:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        events += transformer.finalize()
 
         completed_event = None
         for line in events.split("\n\n"):

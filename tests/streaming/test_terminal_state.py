@@ -10,6 +10,8 @@ continuation merge reaches that state only through the public verbs
 (see ADR-0007).
 """
 
+import orjson
+
 from llm_proxy.core.processing.web_search_streaming import merge_continuation_usage
 from llm_proxy.protocols.anthropic.streaming import AnthropicStreamingTransformer
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
@@ -312,3 +314,115 @@ class TestContinuationStateAdoption:
         # The base default is a no-op: the provider-side converter carries no
         # continuation state, and adopting from it must not raise.
         continuation.adopt_continuation_state(AnthropicChunkConverter(model="m"))
+
+
+def _openresponses_events(frames: str) -> list[dict]:
+    """Parse the OpenResponses SSE frames of one turn into event bodies."""
+    events = []
+    for block in frames.split("\n\n"):
+        data_line = next(
+            (line for line in block.strip().splitlines() if line.startswith("data: ")), None
+        )
+        if data_line is None:
+            continue
+        body = data_line[len("data: ") :]
+        if body == "[DONE]":
+            continue
+        events.append(orjson.loads(body))
+    return events
+
+
+def test_openresponses_terminal_snapshot_folds_trailing_usage_chunk():
+    """The trailing usage chunk must land in ``response.completed``.
+
+    OpenAI-style Chat Completions upstreams send ``finish_reason`` first and a
+    separate usage-only chunk last (``stream_options.include_usage``). A
+    terminal snapshot built on the finish chunk would report all-zero usage,
+    and Codex's context meter reads exactly that block.
+    """
+    transformer = OpenResponsesStreamingTransformer(model="gpt-5", request_id="resp_1")
+
+    frames = (
+        transformer.transform(
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }
+        )
+        or ""
+    )
+    frames += (
+        transformer.transform(
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}],
+            }
+        )
+        or ""
+    )
+    frames += (
+        transformer.transform(
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+        )
+        or ""
+    )
+    # Usage arrives after the finish chunk, as OpenAI sends it.
+    frames += (
+        transformer.transform(
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 1234,
+                    "completion_tokens": 56,
+                    "total_tokens": 1290,
+                    "prompt_tokens_details": {"cached_tokens": 1000},
+                    "completion_tokens_details": {"reasoning_tokens": 10},
+                },
+            }
+        )
+        or ""
+    )
+    frames += transformer.finalize()
+
+    completed = [
+        event for event in _openresponses_events(frames) if event["type"] == "response.completed"
+    ]
+    assert len(completed) == 1
+    assert completed[0]["response"]["usage"] == {
+        "input_tokens": 1234,
+        "output_tokens": 56,
+        "total_tokens": 1290,
+        "input_tokens_details": {"cached_tokens": 1000},
+        "output_tokens_details": {"reasoning_tokens": 10},
+    }
+    assert frames.rstrip().endswith("data: [DONE]")
+
+
+def test_openresponses_terminal_snapshot_still_flushes_without_usage():
+    """A stream that ends without a usage chunk still gets its terminal event."""
+    transformer = OpenResponsesStreamingTransformer(model="gpt-5", request_id="resp_1")
+    frames = (
+        transformer.transform(
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}],
+            }
+        )
+        or ""
+    )
+    frames += transformer.finalize()
+
+    completed = [
+        event for event in _openresponses_events(frames) if event["type"] == "response.completed"
+    ]
+    assert len(completed) == 1
+    assert completed[0]["response"]["usage"]["input_tokens"] == 0

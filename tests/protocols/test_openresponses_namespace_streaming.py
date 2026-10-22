@@ -111,6 +111,9 @@ class TestShortNameCustomToolMatching:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
         parsed = _parse_events(events)
 
         added = [e for e in parsed if e["type"] == "response.output_item.added"]
@@ -160,6 +163,9 @@ class TestShortNameCustomToolMatching:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
         parsed = _parse_events(events)
 
         added = [e for e in parsed if e["type"] == "response.output_item.added"]
@@ -214,6 +220,9 @@ class TestShortNameCustomToolMatching:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
         parsed = _parse_events(events)
 
         added = [e for e in parsed if e["type"] == "response.output_item.added"]
@@ -253,6 +262,9 @@ class TestShortNameCustomToolMatching:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        # The terminal snapshot is deferred to finalize() so a trailing usage
+        # chunk can land in it.
+        events += transformer.finalize()
         parsed = _parse_events(events)
 
         added = [e for e in parsed if e["type"] == "response.output_item.added"]
@@ -320,6 +332,7 @@ class TestInterleavedToolCallAndText:
         events = ""
         for chunk in chunks:
             events += transformer.transform(chunk) or ""
+        events += transformer.finalize()
         return _parse_events(events)
 
     def test_text_delta_never_references_tool_call_item(self):

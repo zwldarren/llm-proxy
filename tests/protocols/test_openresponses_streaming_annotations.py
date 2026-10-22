@@ -99,6 +99,7 @@ class TestAnnotationStreamingEvents:
             emitted = transformer.transform(chunk)
             if emitted:
                 out.extend(_parse_events(emitted))
+        out.extend(_parse_events(transformer.finalize()))
         clear_format_context()
         return out
 

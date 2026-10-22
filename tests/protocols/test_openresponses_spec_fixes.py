@@ -1165,6 +1165,9 @@ class TestResponseEchoFields:
                     "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
                 }
             )
+            # The terminal snapshot is deferred to finalize() so a trailing
+            # usage chunk can land in it.
+            events += transformer.finalize()
         finally:
             clear_format_context()
 
