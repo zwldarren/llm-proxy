@@ -152,11 +152,16 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             finish = self._terminal_finish_reason(status)
             usage = interaction.get("usage")
             if self._finished:
-                # A status_update already emitted the finish chunk; keep the
-                # usage so get_usage() reflects the real bill even though the
-                # client-side chunk was emitted without it.
+                # A status_update already emitted the finish chunk. The usage
+                # still has to reach the client: the record below is what the
+                # proxy bills, but a client reading usage off the wire (Codex
+                # reads ``response.completed.usage``) would otherwise see none.
+                # Emit it as the OpenAI trailing usage chunk — empty choices,
+                # usage-only — which every protocol transformer folds into its
+                # own terminal event without opening a second finish.
                 if isinstance(usage, dict):
                     self._usage = self._usage_to_record(usage)
+                    return self._usage_only_chunk(usage)
                 return None
             return self._finish_chunk(finish, usage=usage)
 
@@ -499,6 +504,24 @@ class InteractionsStreamingTransformer(StreamingTransformer):
             total if total is not None else prompt_tokens + completion_tokens
         )
         return openai_usage
+
+    def _usage_only_chunk(self, usage: dict[str, Any]) -> dict[str, Any]:
+        """The OpenAI trailing usage chunk: no choices, usage only.
+
+        Chat Completions upstreams send exactly this shape after the chunk that
+        carries ``finish_reason``; emitting it keeps a late-arriving bill on the
+        client wire instead of only on the canonical usage record.
+        """
+        chunk: dict[str, Any] = {
+            "id": self.response_id or f"chatcmpl-{self._chunk_index}",
+            "object": "chat.completion.chunk",
+            "created": self._created,
+            "model": self.model,
+            "choices": [],
+            "usage": self._usage_to_openai(usage),
+        }
+        self._chunk_index += 1
+        return chunk
 
     def _make_openai_chunk(
         self,

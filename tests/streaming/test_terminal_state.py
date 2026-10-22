@@ -426,3 +426,48 @@ def test_openresponses_terminal_snapshot_still_flushes_without_usage():
     ]
     assert len(completed) == 1
     assert completed[0]["response"]["usage"]["input_tokens"] == 0
+
+
+def test_openresponses_terminal_snapshot_reads_canonical_flat_usage_aliases():
+    """Converters that emit the canonical flat usage keys still reach the snapshot.
+
+    Gemini, Cohere and Gemini Interactions put cache/reasoning counts in the
+    canonical flat fields (``cache_read_input_tokens`` / ``reasoning_tokens``)
+    rather than the OpenAI dialect details objects; the client's
+    ``response.completed`` must carry them either way.
+    """
+    transformer = OpenResponsesStreamingTransformer(model="gemini-3", request_id="resp_1")
+    frames = (
+        transformer.transform(
+            {"choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": "stop"}]}
+        )
+        or ""
+    )
+    frames += (
+        transformer.transform(
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 4321,
+                    "completion_tokens": 76,
+                    "total_tokens": 4397,
+                    "cache_read_input_tokens": 4096,
+                    "reasoning_tokens": 40,
+                },
+            }
+        )
+        or ""
+    )
+    frames += transformer.finalize()
+
+    completed = [
+        event for event in _openresponses_events(frames) if event["type"] == "response.completed"
+    ]
+    assert len(completed) == 1
+    assert completed[0]["response"]["usage"] == {
+        "input_tokens": 4321,
+        "output_tokens": 76,
+        "total_tokens": 4397,
+        "input_tokens_details": {"cached_tokens": 4096},
+        "output_tokens_details": {"reasoning_tokens": 40},
+    }

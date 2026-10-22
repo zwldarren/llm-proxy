@@ -1,6 +1,7 @@
 # tests/unit/serialization/test_gemini_interactions_streaming.py
 """Tests for InteractionsStreamingTransformer (SSE events -> OpenAI chunks)."""
 
+import orjson
 import pytest
 
 from llm_proxy.core.exceptions import ProviderError
@@ -742,7 +743,8 @@ class TestTerminalStatusEvents:
 
     def test_completed_event_after_status_update_keeps_usage(self):
         """A status_update finish followed by interaction.completed must not
-        lose the usage: get_usage() reflects the real bill."""
+        lose the usage: it lands on a usage-only chunk (the OpenAI trailing
+        shape) and on get_usage(), without a second finish chunk."""
         conv = make_transformer()
         conv.convert_chunk(
             {
@@ -751,30 +753,89 @@ class TestTerminalStatusEvents:
                 "status": "completed",
             }
         )
-        assert (
-            conv.convert_chunk(
-                {
-                    "event_type": "interaction.completed",
-                    "interaction": {
-                        "id": "int_1",
-                        "status": "completed",
-                        "usage": {
-                            "total_input_tokens": 62,
-                            "total_output_tokens": 171,
-                            "total_thought_tokens": 297,
-                            "total_tool_use_tokens": 0,
-                            "total_tokens": 530,
-                        },
+        late = conv.convert_chunk(
+            {
+                "event_type": "interaction.completed",
+                "interaction": {
+                    "id": "int_1",
+                    "status": "completed",
+                    "usage": {
+                        "total_input_tokens": 62,
+                        "total_output_tokens": 171,
+                        "total_thought_tokens": 297,
+                        "total_tool_use_tokens": 0,
+                        "total_tokens": 530,
                     },
-                }
-            )
-            is None
-        )  # no double finish chunk
+                },
+            }
+        )
+        # Usage-only chunk: no second finish, but the bill reaches the wire.
+        assert late is not None
+        assert late["choices"] == []
+        assert late["usage"] == {
+            "prompt_tokens": 62,
+            "completion_tokens": 468,
+            "reasoning_tokens": 297,
+            "total_tokens": 530,
+        }
         usage = conv.get_usage()
         assert usage is not None
         assert usage.input_tokens == 62
         assert usage.output_tokens == 468
         assert usage.total_tokens == 530
+
+    def test_late_usage_reaches_openresponses_terminal_snapshot(self):
+        """The late usage chunk must land in ``response.completed.usage``.
+
+        Codex's context meter reads that block; a finish chunk emitted on the
+        status_update (usage-less) followed by the usage on interaction.completed
+        used to leave it all-zero.
+        """
+        from llm_proxy.protocols.openresponses.streaming import (
+            OpenResponsesStreamingTransformer,
+        )
+
+        conv = make_transformer()
+        proto = OpenResponsesStreamingTransformer(model="gemini-3.7-flash", request_id="resp_1")
+        events = ""
+        for native in (
+            # Terminal status first, no usage on it.
+            {"event_type": "interaction.status_update", "status": "completed"},
+            # Usage arrives on the event that follows.
+            {
+                "event_type": "interaction.completed",
+                "interaction": {
+                    "id": "int_1",
+                    "status": "completed",
+                    "usage": {
+                        "total_input_tokens": 62,
+                        "total_output_tokens": 171,
+                        "total_thought_tokens": 297,
+                        "total_tool_use_tokens": 0,
+                        "total_tokens": 530,
+                    },
+                },
+            },
+        ):
+            chunk = conv.convert_chunk(native)
+            if chunk is not None:
+                events += proto.transform(chunk) or ""
+        events += proto.finalize()
+
+        completed = [
+            body
+            for block in events.split("\n\n")
+            if (data := block.partition("data: ")[2]) and "response.completed" in data
+            for body in (orjson.loads(data),)
+        ]
+        assert len(completed) == 1
+        assert completed[0]["response"]["usage"] == {
+            "input_tokens": 62,
+            "output_tokens": 468,
+            "total_tokens": 530,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 297},
+        }
 
     def test_completed_event_budget_exceeded_maps_to_length(self):
         conv = make_transformer()

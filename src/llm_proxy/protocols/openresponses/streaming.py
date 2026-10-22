@@ -825,21 +825,33 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         self.state.output_tokens = usage.get("completion_tokens", self.state.output_tokens)
 
         ptd = usage.get("prompt_tokens_details")
-        if isinstance(ptd, dict):
-            self.state.cached_tokens = ptd.get("cached_tokens", self.state.cached_tokens) or 0
-            self.state.audio_input_tokens = (
-                ptd.get("audio_tokens", self.state.audio_input_tokens) or 0
-            )
-        # Provider converters normalize provider-native counters into the
-        # OpenAI-dialect details objects, so only the dialect keys are read here.
+        ptd = ptd if isinstance(ptd, dict) else {}
+        # Provider converters put provider-native counters into the canonical
+        # record under flat aliases (Gemini, Cohere, Interactions, Ollama all
+        # ride ``cache_read_input_tokens`` / ``reasoning_tokens``); the dialect
+        # details objects below remain the precedence when a converter emits
+        # both (Anthropic normalizes to both). Without the fallback the client's
+        # ``response.completed`` reported zero cached/reasoning tokens on every
+        # one of those providers.
+        cached = ptd.get("cached_tokens")
+        if cached is None:
+            cached = usage.get("cache_read_input_tokens")
+        if cached is not None:
+            self.state.cached_tokens = cached or 0
+        audio_input = ptd.get("audio_tokens")
+        if audio_input is not None:
+            self.state.audio_input_tokens = audio_input or 0
+
         ctd = usage.get("completion_tokens_details")
-        if isinstance(ctd, dict):
-            self.state.audio_output_tokens = (
-                ctd.get("audio_tokens", self.state.audio_output_tokens) or 0
-            )
-            self.state.reasoning_tokens = (
-                ctd.get("reasoning_tokens", self.state.reasoning_tokens) or 0
-            )
+        ctd = ctd if isinstance(ctd, dict) else {}
+        audio_output = ctd.get("audio_tokens")
+        if audio_output is not None:
+            self.state.audio_output_tokens = audio_output or 0
+        reasoning = ctd.get("reasoning_tokens")
+        if reasoning is None:
+            reasoning = usage.get("reasoning_tokens")
+        if reasoning is not None:
+            self.state.reasoning_tokens = reasoning or 0
 
     def _process_delta(self, delta: dict[str, Any]) -> str:
         """Process delta content from OpenAI chunk.
