@@ -255,6 +255,21 @@ async def _build_request_context(
             status_code=400,
         )
 
+    # Rerank is a retrieval capability, not chat: only models explicitly marked
+    # as rerankers may serve /v1/rerank. Without this check a chat model would
+    # resolve to an adapter whose upstream has no rerank route and fail with an
+    # opaque 404/500 instead of a clear 400.
+    if request_type is RequestType.RERANK and not model_config.supports_rerank:
+        raise ValidationError(
+            message=(
+                f"Model '{model_name}' is not marked as a reranker model "
+                "(supports_rerank). Mark it as a reranker in Models "
+                "to serve /v1/rerank."
+            ),
+            code="invalid_request_error",
+            status_code=400,
+        )
+
     # ``get_model_config`` may have refreshed the snapshot when a peer worker
     # added the model (multi-worker deployments). Re-read it so the provider
     # configs and selection/retry settings below match the resolved model.
@@ -384,6 +399,14 @@ async def build_embeddings_request_context(
 ) -> RequestContext:
     """Build RequestContext for embeddings request processing."""
     return await _build_request_context(request, req, request_type=RequestType.EMBEDDING)
+
+
+async def build_rerank_request_context(
+    request: HasModel,
+    req: Request,
+) -> RequestContext:
+    """Build RequestContext for rerank request processing."""
+    return await _build_request_context(request, req, request_type=RequestType.RERANK)
 
 
 async def build_images_request_context(

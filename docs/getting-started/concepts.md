@@ -21,8 +21,9 @@ Your app
 
 ## Protocol in, protocol out
 
-Clients speak one of two protocols — OpenAI (`/v1/chat/completions`, `/v1/responses`,
-plus embeddings/images/audio) or Anthropic (`/v1/messages`). Internally every request
+Clients speak one of the two chat protocols — OpenAI (`/v1/chat/completions`,
+`/v1/responses`, plus embeddings/images/audio) or Anthropic (`/v1/messages`) — or
+the Cohere-compatible `/v1/rerank` retrieval wire. Internally every request
 becomes one normalized model; the **provider serializer** renders it in whatever form
 the target upstream expects, and responses are translated back.
 

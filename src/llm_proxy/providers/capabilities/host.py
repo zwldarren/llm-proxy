@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         InternalDecisionRequest,
         InternalEmbeddingRequest,
         InternalRequest,
+        InternalRerankRequest,
         InternalSpeechRequest,
         InternalSystemOneRequest,
         InternalSystemOneResponse,
@@ -135,6 +136,16 @@ class EmbeddingSelf(CapabilityHost, Protocol):
     def _embeddings_url(self, request: InternalEmbeddingRequest) -> str: ...
 
     def _embeddings_headers(self) -> dict[str, str]: ...
+
+
+class RerankSelf(CapabilityHost, Protocol):
+    """Self-type for ``RerankCapabilityMixin``."""
+
+    RERANK_ENDPOINT: str
+
+    def _rerank_url(self, request: InternalRerankRequest) -> str: ...
+
+    def _rerank_headers(self) -> dict[str, str]: ...
 
 
 class SystemOneSelf(CapabilityHost, Protocol):
@@ -257,5 +268,6 @@ __all__ = [
     "DecisionsSelf",
     "EmbeddingSelf",
     "ImageSelf",
+    "RerankSelf",
     "SystemOneSelf",
 ]

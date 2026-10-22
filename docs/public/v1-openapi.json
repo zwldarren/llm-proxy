@@ -25,6 +25,10 @@
       "description": "Text embeddings."
     },
     {
+      "name": "rerank",
+      "description": "Document reranking."
+    },
+    {
       "name": "systemone",
       "description": "System One evaluation (TypeSafe's Jev; also OpenRouter and Ollama)."
     },
@@ -149,6 +153,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -165,16 +179,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -232,26 +236,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -268,6 +252,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -323,26 +327,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -359,6 +343,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -416,26 +420,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -462,6 +446,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -580,26 +584,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -616,6 +600,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -735,6 +739,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -751,16 +765,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AnthropicErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -817,6 +821,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -833,16 +847,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AnthropicErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -902,6 +906,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -918,16 +932,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1199,6 +1203,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1215,16 +1229,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1281,6 +1285,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1297,16 +1311,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1368,6 +1372,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1384,16 +1398,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1450,6 +1454,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1466,16 +1480,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1502,6 +1506,88 @@
           }
         },
         "description": "Estimates the prompt size of a Responses request without invoking the model. Native upstream count when the provider offers one (MiniMax serves `/v1/responses/input_tokens`), otherwise a local `o200k_base` estimate."
+      }
+    },
+    "/v1/rerank": {
+      "post": {
+        "tags": [
+          "rerank"
+        ],
+        "summary": "Rerank documents",
+        "operationId": "rerank_endpoint_endpoint_v1_rerank_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerankRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The ranked documents.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "description": "Scores a document list against a query and returns the most relevant documents, highest score first. Cohere-compatible: served by OpenRouter's `/api/v1/rerank` and the `openai-compatible` family's `/rerank` route. The named model must carry the `supports_rerank` flag, otherwise `400 invalid_request_error`."
       }
     },
     "/v1/audio/speech": {
@@ -1533,6 +1619,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1549,16 +1645,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1614,6 +1700,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1630,16 +1726,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -6599,7 +6685,7 @@
           },
           "max_tokens": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Max Tokens",
             "description": "Maximum tokens to generate"
           },
@@ -7201,6 +7287,257 @@
         "title": "RefusalContent",
         "description": "Refusal content from the model."
       },
+      "RerankDocumentSchema": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "The document text."
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image",
+            "description": "A remote URL (http/https) or base64 data URI for the document image."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RerankDocumentSchema",
+        "description": "A structured rerank document (multimodal models only).\n\nAt least one of ``text`` or ``image`` must be present."
+      },
+      "RerankRequestSchema": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "The rerank model, e.g. 'cohere/rerank-v3.5'."
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "The search query to rank the documents against."
+          },
+          "documents": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/RerankDocumentSchema"
+                }
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Documents",
+            "description": "The candidate documents: plain strings, or structured objects with 'text' and/or 'image' for multimodal rerankers."
+          },
+          "top_n": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top N",
+            "description": "Number of most relevant documents to return (default: all)."
+          },
+          "return_documents": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Documents",
+            "description": "Whether the response echoes each document. Defaults to true; when false the 'document' field is omitted from every result."
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User",
+            "description": "End-user identifier (OpenRouter only)."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Provider routing preferences (OpenRouter only)."
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Observability grouping id, forwarded only to upstreams that document it (OpenRouter only)."
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace",
+            "description": "Observability/tracing metadata (OpenRouter only)."
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "model",
+          "query",
+          "documents"
+        ],
+        "title": "RerankRequestSchema",
+        "description": "Top-level rerank request body."
+      },
+      "RerankResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Upstream response id, when the provider reports one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": "string",
+            "description": "The rerank model that served the request."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "The provider that served the request, when reported."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "description": "Index of the document in the request's list."
+                },
+                "relevance_score": {
+                  "type": "number",
+                  "description": "Relevance of the document to the query; higher is better."
+                },
+                "document": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "image": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "The ranked document, when the response carries one; omitted when the request set `return_documents: false`."
+                }
+              },
+              "additionalProperties": true,
+              "required": [
+                "index",
+                "relevance_score"
+              ]
+            },
+            "description": "Ranked documents, most relevant first."
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "total_tokens": {
+                "type": "integer"
+              },
+              "search_units": {
+                "type": "integer",
+                "description": "Cohere search units, when reported."
+              },
+              "cost": {
+                "type": "number",
+                "description": "Provider-reported billed cost, when reported."
+              }
+            },
+            "additionalProperties": true,
+            "description": "Re-shaped from the upstream's usage block onto one vocabulary across providers, omitted when the upstream reports none."
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "model",
+          "results"
+        ]
+      },
       "ResponsesDeleted": {
         "type": "object",
         "properties": {
@@ -7463,8 +7800,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 2,
-                "minimum": 0
+                "maximum": 2.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -7477,8 +7814,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 1,
-                "minimum": 0
+                "maximum": 1.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -7491,8 +7828,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 2,
-                "minimum": -2
+                "maximum": 2.0,
+                "minimum": -2.0
               },
               {
                 "type": "null"
@@ -7505,8 +7842,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 2,
-                "minimum": -2
+                "maximum": 2.0,
+                "minimum": -2.0
               },
               {
                 "type": "null"
@@ -7560,7 +7897,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -7573,7 +7910,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -7672,8 +8009,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 20,
-                "minimum": 0
+                "maximum": 20.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -8186,7 +8523,7 @@
             ],
             "title": "Speed",
             "description": "Audio speed (0.25 to 4.0)",
-            "default": 1
+            "default": 1.0
           },
           "stream_format": {
             "anyOf": [
@@ -8441,7 +8778,7 @@
               }
             ],
             "title": "Session Id",
-            "description": "Observability grouping id, never sent to the provider (OpenRouter only)."
+            "description": "Observability grouping id, forwarded only to upstreams that document it (OpenRouter only)."
           },
           "trace": {
             "anyOf": [

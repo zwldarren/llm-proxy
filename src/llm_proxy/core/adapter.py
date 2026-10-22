@@ -15,6 +15,8 @@ from llm_proxy.models import (
     InternalImageRequest,
     InternalImageResponse,
     InternalRequest,
+    InternalRerankRequest,
+    InternalRerankResponse,
     InternalResponse,
     InternalSpeechRequest,
     InternalSpeechResponse,
@@ -251,6 +253,14 @@ class BaseAdapter(ABC):
     ) -> InternalEmbeddingResponse:
         """Generate embeddings for the input text."""
         raise NotImplementedError(f"{self.provider_name} does not support embeddings.")
+
+    async def rerank(
+        self,
+        request: InternalRerankRequest,
+        **kwargs: Any,
+    ) -> InternalRerankResponse:
+        """Rank the request's documents against its query."""
+        raise NotImplementedError(f"{self.provider_name} does not support rerank requests.")
 
     async def systemone(
         self,

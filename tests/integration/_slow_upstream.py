@@ -62,6 +62,31 @@ def _sse_iter(model: str):
     return gen()
 
 
+@app.post("/v1/rerank")
+async def rerank(request: Request):
+    """Cohere-shaped rerank response: reversed document order, descending score."""
+    body = await request.json()
+    documents = body.get("documents") or []
+    ranked = []
+    for rank, index in enumerate(reversed(range(len(documents)))):
+        score = round(1.0 - rank * 0.1, 2)
+        document = documents[index]
+        ranked.append(
+            {
+                "index": index,
+                "relevance_score": score,
+                "document": document if isinstance(document, dict) else {"text": document},
+            }
+        )
+    return {
+        "id": "gen-rerank-mock",
+        "model": body.get("model", "mock-model"),
+        "provider": "MockProvider",
+        "results": ranked,
+        "usage": {"total_tokens": 12, "search_units": 1, "cost": 0.0001},
+    }
+
+
 @app.post("/v1/chat/completions")
 async def chat(request: Request):
     body = await request.json()

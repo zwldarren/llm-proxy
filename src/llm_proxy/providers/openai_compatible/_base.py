@@ -24,6 +24,7 @@ from llm_proxy.providers.capabilities import (
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
     ImageCapabilityMixin,
+    RerankCapabilityMixin,
 )
 from llm_proxy.providers.reasoning import (
     REASONING_ECHO_MODEL_MARKERS,
@@ -44,6 +45,7 @@ from llm_proxy.serialization.usage.folds import fold_top_level_reasoning_tokens
 class OpenAICompatibleBase(
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
+    RerankCapabilityMixin,
     ImageCapabilityMixin,
     AudioCapabilityMixin,
     BaseHttpProvider,
@@ -74,6 +76,7 @@ class OpenAICompatibleBase(
     REASONING_ECHO_MODEL_MARKERS: tuple[str, ...] = REASONING_ECHO_MODEL_MARKERS
     CHAT_ENDPOINT = "/chat/completions"
     EMBEDDINGS_ENDPOINT = "/embeddings"
+    RERANK_ENDPOINT = "/rerank"
     IMAGES_ENDPOINT = "/images/generations"
     IMAGES_EDITS_ENDPOINT = "/images/edits"
     SPEECH_ENDPOINT = "/audio/speech"

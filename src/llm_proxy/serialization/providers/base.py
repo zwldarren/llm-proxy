@@ -18,6 +18,12 @@ from llm_proxy.models.embedding import (
     InternalEmbeddingRequest,
     InternalEmbeddingResponse,
 )
+from llm_proxy.models.rerank import (
+    InternalRerankRequest,
+    InternalRerankResponse,
+    RerankDocument,
+    RerankResult,
+)
 from llm_proxy.models.systemone import (
     InternalSystemOneRequest,
     InternalSystemOneResponse,
@@ -28,7 +34,7 @@ from llm_proxy.serialization.openai.components.request_builder import OpenAIRequ
 from llm_proxy.serialization.providers.field_utils import (
     extract_unknown_response_fields as _extract_unknown_fields,
 )
-from llm_proxy.serialization.providers.field_utils import reported_cost
+from llm_proxy.serialization.providers.field_utils import is_int, reported_cost
 from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 from llm_proxy.streaming.transformer import StreamingTransformer
 
@@ -313,6 +319,93 @@ class ProviderSerializer(ABC):
             usage=usage,
         )
 
+    def build_provider_rerank_request(self, request: InternalRerankRequest) -> dict[str, Any]:
+        """Build a provider-specific rerank request body.
+
+        Default implementation produces the shared ``/v1/rerank`` format
+        (Cohere's, also served by OpenRouter, Jina and the vLLM/SGLang
+        ``/rerank`` route): ``{model, query, documents[, top_n]}``.
+
+        ``return_documents`` is a response projection the proxy applies itself and
+        is never forwarded. ``user`` and OpenRouter's ``session_id``/``trace``
+        ride ``request.extra`` (not this body) and are merged in by the outbound
+        chokepoint, so upstreams that document them still receive them.
+        """
+        documents: list[str | dict[str, Any]] = [
+            document if isinstance(document, str) else document.to_wire()
+            for document in request.documents
+        ]
+        body: dict[str, Any] = {
+            "model": request.model,
+            "query": request.query,
+            "documents": documents,
+        }
+        if request.top_n is not None:
+            body["top_n"] = request.top_n
+        return body
+
+    def parse_provider_rerank_response(
+        self, response: dict[str, Any], model: str = ""
+    ) -> InternalRerankResponse:
+        """Parse a provider rerank response into InternalRerankResponse.
+
+        The shared response shape is ``{results: [{index, relevance_score,
+        document?}], model?, id?, provider?, usage?}``. ``usage`` carries
+        ``total_tokens`` plus, on OpenRouter/Cohere, ``search_units`` and the
+        billed ``cost``; the dialect is :func:`parse_usage`'s ``"rerank"`` and the
+        raw object is re-shaped — not echoed verbatim — onto the three keys the
+        client wire reports, so a provider's private usage fields stay upstream.
+        """
+        raw_usage = response.get("usage")
+        usage_echo = _rerank_usage_echo(raw_usage) if isinstance(raw_usage, dict) else {}
+
+        return InternalRerankResponse(
+            model=response.get("model") or model,
+            results=self._rerank_results(response),
+            id=response.get("id"),
+            provider=response.get("provider"),
+            usage=parse_wire_usage("rerank", response),
+            provider_info=self._rerank_provider_info(usage_echo),
+        )
+
+    @staticmethod
+    def _rerank_results(response: dict[str, Any]) -> list[RerankResult]:
+        """The ranked documents of a rerank response, in the shared shape.
+
+        A score the wire did not report — or reported as something other than a
+        number — reads as ``0.0`` rather than failing the whole response.
+        """
+        results: list[RerankResult] = []
+        for item in response.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            score = item.get("relevance_score", 0.0)
+            results.append(
+                RerankResult(
+                    index=item.get("index", 0),
+                    relevance_score=float(score) if isinstance(score, int | float) else 0.0,
+                    document=RerankDocument.from_wire(item.get("document")),
+                )
+            )
+        return results
+
+    @staticmethod
+    def _rerank_provider_info(usage_echo: dict[str, Any]) -> dict[str, Any]:
+        """The provider-info extra a rerank response carries.
+
+        ``rerank_usage`` is the client-facing echo of the upstream's usage block;
+        the billed cost is mirrored onto ``openrouter_cost``, the extra the
+        billing pipeline reads in preference to a local estimate (the same
+        second route ``nanogpt_cost`` has).
+        """
+        provider_info: dict[str, Any] = {}
+        if usage_echo:
+            provider_info["rerank_usage"] = usage_echo
+        cost = usage_echo.get("cost")
+        if cost is not None:
+            provider_info["openrouter_cost"] = cost
+        return provider_info
+
     def build_provider_systemone_request(self, request: InternalSystemOneRequest) -> dict[str, Any]:
         """Build a provider-specific System One request body.
 
@@ -413,6 +506,28 @@ class ProviderSerializer(ABC):
             provider=response.get("provider"),
             provider_info=provider_info,
         )
+
+
+def _rerank_usage_echo(raw_usage: dict[str, Any]) -> dict[str, Any]:
+    """Project a shared ``/rerank`` usage block onto the client-facing keys.
+
+    The rerank wire reports ``total_tokens``, ``search_units`` and the billed
+    ``cost`` (OpenRouter states all three; Cohere's ``ApiMeta`` is re-shaped onto
+    them by its own serializer). Anything else a provider puts in its usage block
+    is provider-private and never reaches the client, so the echo is built field by
+    field rather than handed through.
+    """
+    echo: dict[str, Any] = {}
+    total_tokens = raw_usage.get("total_tokens")
+    if is_int(total_tokens):
+        echo["total_tokens"] = total_tokens
+    search_units = raw_usage.get("search_units")
+    if is_int(search_units):
+        echo["search_units"] = search_units
+    cost = reported_cost(raw_usage)
+    if cost is not None:
+        echo["cost"] = cost
+    return echo
 
 
 __all__ = ["ProviderSerializer"]

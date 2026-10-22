@@ -44,7 +44,7 @@ Speak any client protocol; the proxy normalizes it to a unified internal model a
 | **OpenAI Chat Completions** | `POST /v1/chat/completions` |
 | **OpenAI Responses API** | `POST /v1/responses` (with `GET`/`DELETE /v1/responses/{id}`) |
 | **Anthropic Messages** | `POST /v1/messages` |
-| **OpenAI-compatible utilities** | `/v1/embeddings` · `/v1/images/generations` · `/v1/images/edits` · `/v1/audio/speech` · `/v1/audio/transcriptions` · `/v1/audio/translations` · `/v1/models` |
+| **OpenAI-compatible utilities** | `/v1/embeddings` · `/v1/rerank` · `/v1/images/generations` · `/v1/images/edits` · `/v1/audio/speech` · `/v1/audio/transcriptions` · `/v1/audio/translations` · `/v1/models` |
 
 ### 🧭 Smart Routing & Resilience
 

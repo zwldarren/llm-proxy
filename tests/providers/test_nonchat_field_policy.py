@@ -9,6 +9,7 @@ from llm_proxy.models import (
     InternalEmbeddingRequest,
     InternalImageEditRequest,
     InternalImageRequest,
+    InternalRerankRequest,
     InternalSpeechRequest,
     InternalTranscriptionRequest,
     InternalTranslationRequest,
@@ -56,6 +57,10 @@ def _image_edit(extra):
         images=[ImageEditSource(file_id="img_123")],
         extra=extra,
     )
+
+
+def _rerank(extra):
+    return InternalRerankRequest(model="rerank-v3.5", query="q", documents=["a"], extra=extra)
 
 
 # ── Embeddings ──────────────────────────────────────────────────────────
@@ -244,6 +249,29 @@ def test_image_edit_dispatch_error_raises():
     a = _adapter("error")
     with pytest.raises(ProviderError, match="unknown request fields"):
         a._build_outbound_body(_image_edit({"custom_edit_param": "val"}), request_type="image_edit")
+
+
+# ── Rerank ────────────────────────────────────────────────────────────
+
+
+def test_rerank_dispatch_passthrough_keeps_extra():
+    a = _adapter("passthrough")
+    outbound = a._build_outbound_body(_rerank({"max_tokens_per_doc": 512}), request_type="rerank")
+    assert outbound.json_body is not None
+    assert outbound.json_body.get("max_tokens_per_doc") == 512
+
+
+def test_rerank_dispatch_ignore_strips_extra():
+    a = _adapter("ignore")
+    outbound = a._build_outbound_body(_rerank({"max_tokens_per_doc": 512}), request_type="rerank")
+    assert outbound.json_body is not None
+    assert "max_tokens_per_doc" not in outbound.json_body
+
+
+def test_rerank_dispatch_error_raises():
+    a = _adapter("error")
+    with pytest.raises(ProviderError, match="unknown request fields"):
+        a._build_outbound_body(_rerank({"max_tokens_per_doc": 512}), request_type="rerank")
 
 
 # ════════════════════════════════════════════════════════════════════════

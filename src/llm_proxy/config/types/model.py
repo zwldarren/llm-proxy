@@ -317,6 +317,10 @@ class ModelConfig(BaseModel):
         default=False,
         description="Whether this is an embedding model",
     )
+    supports_rerank: bool = Field(
+        default=False,
+        description="Whether this is a reranker model (e.g. /v1/rerank)",
+    )
     supports_realtime: bool = Field(
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",

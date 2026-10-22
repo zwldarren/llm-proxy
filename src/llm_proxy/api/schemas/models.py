@@ -182,6 +182,8 @@ def derive_model_capabilities(model: Any) -> list[str]:
         capabilities.append("stt")
     if model.supports_embedding:
         capabilities.append("embedding")
+    if model.supports_rerank:
+        capabilities.append("rerank")
     if model.supports_realtime:
         capabilities.append("realtime")
     if model.supports_systemone:
@@ -314,6 +316,10 @@ class ModelBase(BaseModel, ValidatorMixin):
     supports_embedding: bool = Field(
         default=False,
         description="Whether this is an embedding model (e.g. /v1/embeddings)",
+    )
+    supports_rerank: bool = Field(
+        default=False,
+        description="Whether this is a reranker model (e.g. /v1/rerank)",
     )
     supports_realtime: bool = Field(
         default=False,
@@ -458,6 +464,7 @@ class ModelUpdate(BaseModel):
     supports_tts: bool | None = None
     supports_stt: bool | None = None
     supports_embedding: bool | None = None
+    supports_rerank: bool | None = None
     supports_realtime: bool | None = None
     supports_systemone: bool | None = None
     attachment: bool | None = None
@@ -617,6 +624,10 @@ class ModelRead(BaseModel):
         default=False,
         description="Whether this is an embedding model (e.g. /v1/embeddings)",
     )
+    supports_rerank: bool = Field(
+        default=False,
+        description="Whether this is a reranker model (e.g. /v1/rerank)",
+    )
     supports_realtime: bool = Field(
         default=False,
         description="Whether this model is served through the Realtime WebSocket relay",
@@ -721,8 +732,8 @@ class ModelCatalogEntry(BaseModel):
         default_factory=list,
         description=(
             "Model capabilities configured by an admin: 'vision' (image input), "
-            "'image_generation', 'tts', 'stt', 'embedding', 'realtime', plus informational "
-            "models.dev attributes ('attachment', 'reasoning', 'tool_call', "
+            "'image_generation', 'tts', 'stt', 'embedding', 'rerank', 'realtime', plus "
+            "informational models.dev attributes ('attachment', 'reasoning', 'tool_call', "
             "'structured_output', 'temperature', 'open_weights', 'experimental')."
         ),
     )

@@ -76,6 +76,10 @@ const api = [
     items: [{ text: 'Create embeddings', link: '/api/embeddings' }],
   },
   {
+    text: 'Rerank',
+    items: [{ text: 'Rerank documents', link: '/api/rerank' }],
+  },
+  {
     text: 'Evaluation',
     items: [
       { text: 'System One evaluation', link: '/api/systemone' },

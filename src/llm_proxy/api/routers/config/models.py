@@ -126,6 +126,7 @@ def model_record_to_read(model) -> ModelRead:
         supports_tts=model.supports_tts,
         supports_stt=model.supports_stt,
         supports_embedding=model.supports_embedding,
+        supports_rerank=model.supports_rerank,
         supports_realtime=model.supports_realtime,
         supports_systemone=model.supports_systemone,
         attachment=model.attachment,

@@ -13,7 +13,7 @@ and let fallback and priority decide who answers.
 | Field | Notes |
 | --- | --- |
 | **Name** | Unique identifier, referenced by model mappings. Not the vendor name — e.g. `openai-prod` |
-| **Type** | One of the 23 built-in adapter types (table below) |
+| **Type** | One of the built-in adapter types (table below) |
 | **API key** | Required for most types; not required (and not used) by `ollama`, `vllm`, `sglang` |
 | **Base URL** | Pre-filled per type. **Required** for `openai-compatible`. Trailing slashes are trimmed |
 | **Icon URL** | Optional logo shown next to the provider in the console; must be a public URL (`https:`/`http:`) — private/loopback addresses are rejected by the SSRF guard |
@@ -58,6 +58,7 @@ variable makes stored keys undecryptable.
 | `openrouter` | Chat Completions + native Responses | `https://openrouter.ai/api/v1` |
 | `chutes` | Chat Completions | `https://llm.chutes.ai/v1` |
 | `mistral` | Chat Completions | `https://api.mistral.ai/v1` |
+| `cohere` | Native Cohere v2 (`/v2/chat`, `/v2/embed`, `/v2/rerank`, `/v2/audio/transcriptions`) | `https://api.cohere.com` |
 | `nanogpt` | Chat Completions | `https://nano-gpt.com/api/v1` |
 | `opencode-zen` | Per-model dialect: Chat Completions / Anthropic / Responses / Google / System One (see below) | `https://opencode.ai/zen/v1` |
 | `opencode-go` | Same gateway, subscription lane (own model catalog) | `https://opencode.ai/zen/go/v1` |
@@ -295,6 +296,66 @@ forwarded verbatim, so the client's own fields survive.
   (behind `POST /v1/responses/input_tokens`). Both are forwarded to the
   upstream, so the numbers are MiniMax's own rather than a local estimate.
 
+### Cohere specifics
+
+The `cohere` type speaks Cohere's **native v2 API** from the API root
+(`https://api.cohere.com`): `POST /v2/chat`, `/v2/embed`, `/v2/rerank` and
+`/v2/audio/transcriptions`. Every turn is translated — Cohere publishes no
+Anthropic Messages and no OpenAI Responses endpoint, so this type has no native
+passthrough tier.
+
+Cohere's *compatibility* surface (`https://api.cohere.ai/compatibility/v1`) is
+deliberately not used: it is an OpenAI-shaped projection that drops the
+Cohere-only fields this adapter keeps and rejects OpenAI fields the proxy would
+otherwise forward.
+
+- **Chat messages.** v2 has `system`/`user`/`assistant`/`tool` roles and a single
+  leading system slot, so every system and developer turn (including
+  mid-conversation ones) is folded into that message, joined with blank lines. Tool
+  output becomes its own `role: "tool"` message keyed by `tool_call_id`. Content is
+  a plain string or `text`/`image_url` blocks; an image the client sent as bytes
+  arrives as a `data:` URI.
+- **Sampling.** `top_p` → `p`, `stop` → `stop_sequences` (v2 honours at most five;
+  the rest are dropped with a warning), and `temperature`, `max_tokens`,
+  `frequency_penalty`, `presence_penalty`, `seed` map one to one. **`n > 1` is
+  refused**: v2 returns one completion per request, and fanning out would multiply
+  the billed requests.
+- **Structured output.** OpenAI's `{"type": "json_schema", "json_schema": {name,
+  schema, strict}}` becomes v2's `{"type": "json_object", "json_schema": <schema>}`;
+  Cohere has no strict flag. v2 documents that `response_format` cannot be combined
+  with `documents` or `tools` — ask for one or the other.
+- **Thinking.** The unified `thinking` config becomes v2's
+  `{"type": "enabled"|"disabled", "token_budget": N}`. Reasoning is on by default
+  for models that support it; `disabled` (or an effort of `none`/`minimal`) sends
+  the off spelling rather than omitting the field.
+- **Tools.** Tools are JSON-Schema function entries (`parameters` is required, so a
+  schema-less tool gets `{}`) and a freeform tool bridges to a single-`content`
+  function. `tool_choice` collapses onto v2's `REQUIRED`/`NONE` pair: v2 has no
+  "call *this* tool" mode, so a named choice becomes `REQUIRED`, and `auto` is
+  expressed by omitting the field. A hosted tool has no slot on this wire and is
+  dropped with the reason.
+- **Cohere-only fields.** `documents`, `citation_options`, `safety_mode`,
+  `strict_tools`, `priority`, `k` and `logprobs` pass through `extra` and are exempt
+  from the unknown-fields policy. Citations Cohere returns on a RAG answer ride the
+  text block they cite (`content_index`).
+- **Embeddings.** v2 requires `input_type` — `search_document` by default; pass
+  `extra.input_type` for `search_query`/`classification`/`clustering`/`image` — and
+  answers vectors grouped by embedding type. `dimensions` → `output_dimension`,
+  `encoding_format: "base64"` → `embedding_types: ["base64"]`. A batch over
+  Cohere's 96-input cap is rejected rather than silently split.
+- **Rerank.** v2 takes plain-string documents and echoes none back, so the proxy
+  projects the request's own documents onto the ranked results (unless the client
+  asked for indexes and scores only). An image-only document has no v2
+  representation and is refused. `max_tokens_per_doc`, `relevant_spans` and
+  `priority` pass through `extra`.
+- **Audio.** `/v2/audio/transcriptions` requires `language` (ISO-639-1) — Cohere has
+  no auto-detect — and `prompt`, `response_format`, timestamp granularities and
+  `include` have no v2 equivalent, so they are dropped and the client's own response
+  format is honoured by the proxy. There is no streaming transcription, no TTS and
+  no audio translation.
+- **Model list.** `GET /v1/models` (Cohere documents no `/v2/models`), with its own
+  `page_size`/`page_token` pagination rather than the OpenAI-style page tokens.
+
 ## Web search: native or proxy-side
 
 Two systems can answer a `web_search` tool, and exactly one of them runs per request:
@@ -341,7 +402,7 @@ the per-wire rules.
 | `nanogpt` | Responses `web_search`; Chat body `web_search: {"enabled": true, ...}` (NanoGPT runs the search itself; shape transcribed from NanoGPT's published API notes — not verifiable against a public reference doc) | Responses (verbatim), Chat body field |
 | `moonshot` | Responses `{"type": "web_search"}`; Chat `$web_search` (`type: "builtin_function"`, **deprecated — retires 2026-10-20** in favour of upstream `/v1/tools/search`) | Chat (`$web_search`, legacy) — the Messages endpoint accepts only client tools |
 | `mistral` | none on Chat Completions — `web_search` / `web_search_premium` are documented for the **Agents / Conversations** APIs only, and the docs warn Chat Completions "isn't supported" | proxy-side only |
-| `vllm`, `sglang`, `ollama`, `chutes`, `opencode-zen`, `opencode-go` | none (Ollama's web search is a standalone `POST /api/web_search`, not a chat feature) | proxy-side only |
+| `vllm`, `sglang`, `ollama`, `chutes`, `cohere`, `opencode-zen`, `opencode-go` | none (Ollama's web search is a standalone `POST /api/web_search`, not a chat feature; v2 chat has no connectors) | proxy-side only |
 
 One hosted tool, several spellings: the proxy normalizes Anthropic's
 `web_search_20250305` family, OpenAI's `web_search` / `web_search_preview`, dated

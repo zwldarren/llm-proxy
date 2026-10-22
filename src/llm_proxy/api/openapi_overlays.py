@@ -129,6 +129,7 @@ TAGS: list[dict[str, str]] = [
         "description": "OpenAI Responses API (create, retrieve, cancel, compact).",
     },
     {"name": "embeddings", "description": "Text embeddings."},
+    {"name": "rerank", "description": "Document reranking."},
     {
         "name": "systemone",
         "description": "System One evaluation (TypeSafe's Jev; also OpenRouter and Ollama).",
@@ -296,6 +297,47 @@ COMPONENTS: frozendict[str, Any] = frozendict(
                 ),
             },
             required=["object", "data", "model"],
+        ),
+        "RerankResponse": _passthrough(
+            {
+                "id": _nullable(_str("Upstream response id, when the provider reports one.")),
+                "model": _str("The rerank model that served the request."),
+                "provider": _nullable(_str("The provider that served the request, when reported.")),
+                "results": _array(
+                    _passthrough(
+                        {
+                            "index": _int("Index of the document in the request's list."),
+                            "relevance_score": _num(
+                                "Relevance of the document to the query; higher is better."
+                            ),
+                            "document": _passthrough(
+                                {
+                                    "text": _nullable(_str()),
+                                    "image": _nullable(_str()),
+                                },
+                                description=(
+                                    "The ranked document, when the response carries one; "
+                                    "omitted when the request set `return_documents: false`."
+                                ),
+                            ),
+                        },
+                        required=["index", "relevance_score"],
+                    ),
+                    "Ranked documents, most relevant first.",
+                ),
+                "usage": _passthrough(
+                    {
+                        "total_tokens": _int(),
+                        "search_units": _int("Cohere search units, when reported."),
+                        "cost": _num("Provider-reported billed cost, when reported."),
+                    },
+                    description=(
+                        "Re-shaped from the upstream's usage block onto one vocabulary "
+                        "across providers, omitted when the upstream reports none."
+                    ),
+                ),
+            },
+            required=["model", "results"],
         ),
         "SystemOneResponse": _passthrough(
             {
@@ -678,6 +720,20 @@ OPERATION_OVERLAYS: frozendict[tuple[str, str], dict[str, Any]] = frozendict(
             "tags": ["embeddings"],
             "responses": {
                 "200": json_response("The embeddings.", ref("EmbeddingResponse")),
+            },
+        },
+        ("/v1/rerank", "post"): {
+            "summary": "Rerank documents",
+            "tags": ["rerank"],
+            "description": (
+                "Scores a document list against a query and returns the most relevant "
+                "documents, highest score first. Cohere-compatible: served by OpenRouter's "
+                "`/api/v1/rerank` and the `openai-compatible` family's `/rerank` route. The "
+                "named model must carry the `supports_rerank` flag, otherwise `400 "
+                "invalid_request_error`."
+            ),
+            "responses": {
+                "200": json_response("The ranked documents.", ref("RerankResponse")),
             },
         },
         ("/v1/systemone", "post"): {

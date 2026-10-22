@@ -10,12 +10,14 @@ from llm_proxy.core.processing.strategies.chat import ChatStrategy
 from llm_proxy.core.processing.strategies.decisions import DecisionsStrategy
 from llm_proxy.core.processing.strategies.embedding import EmbeddingStrategy
 from llm_proxy.core.processing.strategies.image import ImageEditStrategy, ImageStrategy
+from llm_proxy.core.processing.strategies.rerank import RerankStrategy
 from llm_proxy.core.processing.strategies.systemone import SystemOneStrategy
 from llm_proxy.core.request_type import RequestType
 
 _STRATEGIES: frozendict[RequestType, type[ProcessingStrategy]] = frozendict(
     {
         RequestType.EMBEDDING: EmbeddingStrategy,
+        RequestType.RERANK: RerankStrategy,
         RequestType.IMAGE_GENERATION: ImageStrategy,
         RequestType.IMAGE_EDIT: ImageEditStrategy,
         RequestType.CHAT: ChatStrategy,

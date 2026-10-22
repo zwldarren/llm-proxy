@@ -8,6 +8,7 @@ HTTP layer appropriate for the endpoint type.
 Endpoints covered:
   - chat (chat_completion)           → mock _post_json_with_retry
   - embedding (embeddings)           → mock _post_json_with_retry
+  - rerank (rerank)                  → mock _post_json_with_retry
   - speech (speech)                  → mock httpx client + retry
   - transcription (transcription)    → mock httpx client + retry
   - translation (translation)        → mock httpx client + retry
@@ -31,6 +32,7 @@ from llm_proxy.models import (
     InternalImageEditRequest,
     InternalImageRequest,
     InternalRequest,
+    InternalRerankRequest,
     InternalSpeechRequest,
     InternalTranscriptionRequest,
     InternalTranslationRequest,
@@ -74,6 +76,15 @@ def _embedding_req() -> InternalEmbeddingRequest:
     return InternalEmbeddingRequest(
         model="text-embedding-3-small",
         input="hi",
+        extra={SENTINEL_KEY: SENTINEL_VAL},
+    )
+
+
+def _rerank_req() -> InternalRerankRequest:
+    return InternalRerankRequest(
+        model="rerank-v3.5",
+        query="hi",
+        documents=["a", "b"],
         extra={SENTINEL_KEY: SENTINEL_VAL},
     )
 
@@ -159,6 +170,7 @@ def _image_response() -> dict:
 _RESPONSES: dict[str, dict] = {
     "chat": _chat_response(),
     "embedding": _embedding_response(),
+    "rerank": {"results": [{"index": 0, "relevance_score": 0.9}], "model": "rerank-v3.5"},
     "image_generation": _image_response(),
     "image_edit": _image_response(),
     # speech/transcription/translation handle responses via mock client
@@ -228,6 +240,7 @@ def _mock_client_transport(adapter: OpenAICompatibleBase, monkeypatch, capture: 
 JSON_ENDPOINTS = [
     ("chat", _chat_req, "chat_completion", "json"),
     ("embedding", _embedding_req, "embeddings", "json"),
+    ("rerank", _rerank_req, "rerank", "json"),
     ("image_generation", _image_gen_req, "image_generation", "json"),
     ("image_edit", _image_edit_req, "image_edit", "json"),
 ]

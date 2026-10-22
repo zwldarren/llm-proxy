@@ -511,6 +511,7 @@ export default {
       tts: "TTS",
       stt: "STT",
       embedding: "向量嵌入",
+      rerank: "重排",
       realtime: "实时语音",
       systemone: "System One / Decisions",
       reasoning: "推理",
@@ -623,6 +624,7 @@ export default {
       tts: "处理语音合成请求（models.dev: modalities.output · audio），控制 /v1/audio/speech 端点。",
       stt: "处理语音转写请求（models.dev: modalities.input · audio），控制 /v1/audio/transcriptions 端点。",
       embedding: "处理向量嵌入请求，控制 /v1/embeddings 端点。",
+      rerank: "处理重排请求：按查询对文档打分并返回最相关的文档，控制 /v1/rerank 端点。",
       realtime: "通过 Realtime WebSocket 中继提供服务（对应 models.dev 的实时语音类模型）。",
       systemone:
         "处理评估请求（证据 + 类型化问题，逐题返回答案）。一个开关同时控制两种报文：/v1/systemone（state + questions）与 /v1/decisions（input + questions），由 provider 桥接到上游实际支持的格式。该标记同时决定模型能否作为路由裁判。",

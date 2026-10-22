@@ -49,6 +49,10 @@ token counting.
 
 - [Create embeddings](embeddings.md) — `POST /v1/embeddings`
 
+## Rerank
+
+- [Rerank documents](rerank.md) — `POST /v1/rerank`
+
 ## Models
 
 - [List models](models.md) — `GET /v1/models`

@@ -137,6 +137,8 @@ interface ModelBase {
   supports_stt?: boolean;
   /** Whether this is an embedding model */
   supports_embedding?: boolean;
+  /** Whether this is a reranker model (e.g. /v1/rerank) */
+  supports_rerank?: boolean;
   /** Whether this model is served through the Realtime WebSocket relay */
   supports_realtime?: boolean;
   /** Whether this model serves System One evaluations (e.g. /v1/systemone) */
@@ -201,6 +203,7 @@ export interface ModelUpdate {
   supports_tts?: boolean | null;
   supports_stt?: boolean | null;
   supports_embedding?: boolean | null;
+  supports_rerank?: boolean | null;
   supports_realtime?: boolean | null;
   supports_systemone?: boolean | null;
   attachment?: boolean | null;
@@ -241,6 +244,7 @@ export type ModelCapability =
   | "tts"
   | "stt"
   | "embedding"
+  | "rerank"
   | "realtime"
   | "systemone"
   | "reasoning"

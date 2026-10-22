@@ -6,6 +6,7 @@ import {
   Eye,
   FlaskConical,
   ImagePlus,
+  ListOrdered,
   LockOpen,
   Mic,
   Paperclip,
@@ -69,6 +70,13 @@ export const CAPABILITY_META: Record<ModelCapability, CapabilityMeta> = {
   embedding: {
     labelKey: "plaza.capability.embedding",
     icon: Binary,
+    badgeClass: "border-action-teal/30 bg-action-teal/5 text-action-teal",
+    iconClass: "text-action-teal",
+    bound: true,
+  },
+  rerank: {
+    labelKey: "plaza.capability.rerank",
+    icon: ListOrdered,
     badgeClass: "border-action-teal/30 bg-action-teal/5 text-action-teal",
     iconClass: "text-action-teal",
     bound: true,

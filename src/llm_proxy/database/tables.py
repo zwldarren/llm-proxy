@@ -157,6 +157,9 @@ class ModelRecord(Base):
     supports_embedding: Mapped[bool] = mapped_column(
         default=False, nullable=False, server_default=false()
     )
+    supports_rerank: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default=false()
+    )
     supports_realtime: Mapped[bool] = mapped_column(
         default=False, nullable=False, server_default=false()
     )

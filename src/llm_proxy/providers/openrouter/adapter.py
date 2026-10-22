@@ -69,6 +69,7 @@ class OpenRouterAdapter(
     _REASONING_FIELD = "reasoning"
     # OpenRouter's dedicated Image API is at /images (not /images/generations).
     IMAGES_ENDPOINT = "/images"
+    RERANK_ENDPOINT = "/rerank"
 
     # OpenRouter exposes native OpenAI Responses and Anthropic Messages
     # endpoints alongside Chat Completions, so ``/v1/responses`` and
@@ -160,6 +161,9 @@ class OpenRouterAdapter(
         # /api/v1/embeddings documents input_type, session_id and trace
         # alongside the shared provider routing block.
         RequestType.EMBEDDING: frozenset({"input_type", "session_id", "trace", "provider", "user"}),
+        # /api/v1/rerank documents the shared provider routing block plus the
+        # session/trace/user observability fields.
+        RequestType.RERANK: frozenset({"provider", "session_id", "trace", "user"}),
         # /api/v1/images documents the normalized resolution/aspect_ratio
         # knobs, seed, reference images and the routing block.
         RequestType.IMAGE_GENERATION: frozenset(

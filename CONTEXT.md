@@ -83,6 +83,20 @@ under its own route, so `/v1/decisions` can reach an upstream route that
 the code differing.
 _Avoid_: adapter translation, protocol conversion (that is the chat path)
 
+### Retrieval endpoints
+
+**Reranker**:
+A model that scores a document list against a query and returns the documents
+most relevant to it as an ordered `(index, relevance_score)` list, never generated
+text. Reached at `/v1/rerank` in the shared Cohere-compatible wire format that
+OpenRouter, Jina and the vLLM/SGLang `/rerank` route speak; `/v2/rerank` answers
+the same handler as an alias because Cohere's official SDK targets that path.
+Unlike an embedding
+model, which maps each document to a vector independently, a reranker compares
+the candidates jointly against the query. The capability flag `supports_rerank`
+gates the endpoint. See ADR-0041.
+_Avoid_: ranker, scoring model, embedding model (that is `/v1/embeddings`)
+
 ### Smart routing
 
 **Virtual model**:
@@ -211,12 +225,12 @@ tool-args JSON fallback
 ### Conversion layer
 
 **Provider serializer**:
-The registered per-provider-key conversion class (`build_provider_request` / `parse_provider_response` / `get_chunk_converter`), living in `serialization/<family>/serializer.py` for the four dialect families (openai, anthropic, gemini, ollama). Adapters obtain it through the registry, never by direct import. Small provider-specific serializers (chutes, nanogpt) stay provider-local.
+The registered per-provider-key conversion class (`build_provider_request` / `parse_provider_response` / `get_chunk_converter`), living in `serialization/<family>/serializer.py` for the four dialect families (openai, anthropic, gemini, ollama). Adapters obtain it through the registry, never by direct import. Provider-local serializers stay next to their adapter: the small ones (chutes, nanogpt) and Cohere, whose native v2 vocabulary is a whole dialect but serves exactly one provider type (`providers/cohere/serializer.py`, ADR-0040).
 _Avoid_: family serializer, provider converter
 
 **Provider declaration**:
-What a provider type *is*, before it has behaviour: the registry name (`@register_adapter`), the catalog branding (`DISPLAY_NAME_EN`/`_ZH`, `LOBE_ICON_ID`/`_VARIANT` — read only by `list_provider_types()`), `DEFAULT_BASE_URL`, and for the Chat-Completions family the upstream's wire facts — `native_protocols`, the Anthropic/Responses endpoint URLs (a fixed root, or one derived from the configured base URL), the `NATIVE_PASSTHROUGH_DEFAULT` opt-in and `DEFAULT_UNKNOWN_FIELDS_POLICY`. It lives in `providers/<type>/adapter.py`, next to any provider-local serializer; a type stays a pure declaration until it grows a method, at which point the method — and a test file for it — are the behaviour, and the declaration is unchanged. The shared half of the contract is asserted once, from one row per type, in `tests/providers/test_declared_providers.py` (the local engines have their own table in `test_local_engine_adapters.py`, whose rows carry extra engine vocabulary).
-_Avoid_: a per-provider test suite restating registration / base URL / branding / native protocols / endpoint derivation; asserting branding by comparing the class attributes to themselves instead of reading the published catalog; a declaration-only provider split across more than one module
+What a provider type *is*, before it has behaviour: the registry name (`@register_adapter`), the catalog branding (`DISPLAY_NAME_EN`/`_ZH`, `LOBE_ICON_ID`/`_VARIANT` — read only by `list_provider_types()`), `DEFAULT_BASE_URL`, and for the Chat-Completions family the upstream's wire facts — `native_protocols`, the Anthropic/Responses endpoint URLs (a fixed root, or one derived from the configured base URL), the `NATIVE_PASSTHROUGH_DEFAULT` opt-in and `DEFAULT_UNKNOWN_FIELDS_POLICY`. It lives in `providers/<type>/adapter.py`, next to any provider-local serializer; a type stays a pure declaration until it grows a method, at which point the method — and a test file for it — are the behaviour, and the declaration is unchanged. The shared half of the contract of the **declaration-only** Chat-Completions types is asserted once, from one row per type, in `tests/providers/test_declared_providers.py` (the local engines have their own table in `test_local_engine_adapters.py`, whose rows carry extra engine vocabulary). A type that never joins that family — a native-dialect behaviour provider such as Cohere, whose adapters are not Chat-Completions-shaped at all, or the OpenCode lanes with their per-model endpoints (ADR-0037) — cannot use a row there: its table asserts the Chat-Completions wire facts a row is made of. Such a type asserts its own declaration facts next to its behaviour, e.g. `tests/providers/cohere/test_cohere_adapter.py`.
+_Avoid_: a per-provider test suite restating registration / base URL / branding / native protocols / endpoint derivation **for a declaration-only type** (the row is where they go); asserting branding by comparing the class attributes to themselves instead of reading the published catalog; a declaration-only provider split across more than one module; asserting an endpoint constant against itself — assert the URL a call actually resolves
 
 **API variant** (Gemini):
 The per-provider upstream dialect switch `metadata.api_variant` — `generate_content` (default, legacy) or `interactions` (Google's GA Interactions API, serializer at `serialization/gemini_interactions/`). The Gemini adapter picks the serializer and endpoint shape from it; embeddings/models are untouched. See ADR-0010.
@@ -244,7 +258,11 @@ The single point where a provider's wire payload becomes the canonical usage rec
 `parse_usage(dialect, payload)` plus a per-dialect accumulator, in
 `llm_proxy.serialization.usage` — one dialect adapter per wire shape
 (chat-completions, responses, anthropic, realtime, ollama, gemini
-`usageMetadata`, audio transcription/translation), keyed by shape and not
+`usageMetadata`, cohere's `ApiMeta` envelope — `tokens` + `billed_units` + `cached_tokens`,
+seen at `usage`, `delta.usage` and `meta`, ADR-0040 — the shared `/rerank` block
+(`total_tokens` + `search_units` + `cost`, whose count is prompt-side because a
+reranker generates nothing, and whose `search_units` is a client-echo fact with no
+canonical field — ADR-0041 — audio transcription/translation), keyed by shape and not
 by provider, because one dialect serves many providers and the native-passthrough
 tier has no provider serializer in play. Every tier reads usage through it:
 provider serializers, streaming converters, protocol transformers and the

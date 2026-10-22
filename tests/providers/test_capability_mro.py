@@ -18,6 +18,7 @@ from llm_proxy.providers.capabilities import (
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
     ImageCapabilityMixin,
+    RerankCapabilityMixin,
     SystemOneCapabilityMixin,
 )
 
@@ -27,6 +28,7 @@ from llm_proxy.providers.capabilities import (
 MIXIN_VERBS: dict[type, tuple[str, ...]] = {
     ChatCapabilityMixin: ("stream_chat_completion",),
     EmbeddingCapabilityMixin: ("embeddings",),
+    RerankCapabilityMixin: ("rerank",),
     ImageCapabilityMixin: (
         "image_generation",
         "stream_image_generation",

@@ -24,6 +24,7 @@ Every route the proxy serves. `X` in the auth column means "API key
 | POST | `/v1/messages` | X | Anthropic | Anthropic Messages |
 | POST | `/v1/messages/count_tokens` | X | Anthropic | Native upstream count when available, otherwise a local o200k_base estimate |
 | POST | `/v1/embeddings` | X | OpenAI | Embeddings |
+| POST | `/v1/rerank` | X | Cohere-compatible | Rerank documents against a query (`/v2/rerank` is an alias for the Cohere SDK). The named model must carry the `supports_rerank` flag, otherwise `400 invalid_request_error` |
 | POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models). The named model must carry the `supports_systemone` flag, otherwise `400 invalid_request_error` |
 | POST | `/v1/decisions` | X | Decisions | OpenAI's Decisions endpoint (`gpt-6-luna`), also served by System One models through the proxy's bridge. Gated by the same `supports_systemone` flag |
 | POST | `/v1/images/generations` | X | OpenAI | JSON body |
@@ -47,10 +48,11 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Capability | Providers |
 | --- | --- |
 | Chat | All types |
-| Embeddings | `openai`, the `openai-compatible` family (including DeepSeek, Kimi, MiniMax, Moonshot, Qwen, xAI, vLLM, SGLang, Chutes, Mistral, NanoGPT, OpenRouter), `gemini`, `ollama` |
+| Embeddings | `openai`, the `openai-compatible` family (including DeepSeek, Kimi, MiniMax, Moonshot, Qwen, xAI, vLLM, SGLang, Chutes, Mistral, NanoGPT, OpenRouter), `gemini`, `ollama`, `cohere` |
+| Rerank | `cohere` (native `/v2/rerank`), `openrouter` (`/api/v1/rerank`, e.g. `cohere/rerank-v3.5`), the `openai-compatible` family whose upstream serves `/rerank` (vLLM, SGLang, Jina). Gated by the `supports_rerank` flag |
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
-| Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `openrouter` (STT) |
-| Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |
+| Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `openrouter` (STT), `cohere` (STT only — v2 has no speech synthesis) |
+| Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter`, `cohere` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |
 | System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold), `ollama` (local models, v0.35+). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
 | Decisions (evaluation) | `openai` (native `/v1/decisions`), plus every System One provider above, which the proxy bridges onto a System One route. Only `openai` accepts inline images |
 
@@ -66,7 +68,10 @@ OpenAI-compatible speech recognition (`qwen3-asr-flash`) is called through
 qwen model are rejected with a `400` `invalid_request_error` naming the
 limitation.
 
-Capability flags are additive: `supports_systemone` marks a model as a decision
+Capability flags are additive: `supports_rerank` marks a model as a reranker —
+without it, `/v1/rerank` naming that model is rejected with a `400
+invalid_request_error`, and it does not restrict the model's chat service.
+`supports_systemone` marks a model as a decision
 model, which gates both `/v1/systemone` and `/v1/decisions` — they are two
 envelopes over the same evaluation primitives, and the provider translates
 between them (see [Decisions](decisions.md#one-endpoint-two-envelopes)). The flag

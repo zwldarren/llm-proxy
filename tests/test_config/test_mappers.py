@@ -86,6 +86,7 @@ def _model_record(mappings, **overrides) -> SimpleNamespace:
         supports_tts=False,
         supports_stt=False,
         supports_embedding=False,
+        supports_rerank=False,
         supports_realtime=False,
         supports_systemone=False,
         context_length=None,

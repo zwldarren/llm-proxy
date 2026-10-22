@@ -143,7 +143,10 @@ class SystemOneRequestSchema(BaseModel):
     session_id: str | None = Field(
         None,
         max_length=256,
-        description="Observability grouping id, never sent to the provider (OpenRouter only).",
+        description=(
+            "Observability grouping id, forwarded only to upstreams that document "
+            "it (OpenRouter only)."
+        ),
     )
     trace: dict[str, Any] | None = Field(
         None, description="Observability/tracing metadata (OpenRouter only)."

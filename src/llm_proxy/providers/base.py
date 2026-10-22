@@ -596,6 +596,12 @@ class BaseHttpProvider(BaseAdapter, ABC):
             "or override _build_embedding_raw"
         )
 
+    def _build_rerank_raw(self, request: Any) -> dict[str, Any]:
+        """Build the raw rerank body. Provided by ``RerankCapabilityMixin``."""
+        raise NotImplementedError(
+            f"{type(self).__name__}: include RerankCapabilityMixin or override _build_rerank_raw"
+        )
+
     def _build_systemone_raw(self, request: Any) -> dict[str, Any]:
         """Build the raw System One body. Provided by ``SystemOneCapabilityMixin``."""
         raise NotImplementedError(
@@ -706,6 +712,8 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
         if rt == RequestType.EMBEDDING:
             return OutboundBody(json_body=_finalize(self._build_embedding_raw(request)))
+        if rt == RequestType.RERANK:
+            return OutboundBody(json_body=_finalize(self._build_rerank_raw(request)))
         if rt == RequestType.SYSTEMONE:
             return OutboundBody(json_body=_finalize(self._build_systemone_raw(request)))
         if rt == RequestType.DECISIONS:

@@ -130,6 +130,7 @@ def map_model_record(record: ModelRecord) -> ModelConfig | None:
         supports_tts=record.supports_tts,
         supports_stt=record.supports_stt,
         supports_embedding=record.supports_embedding,
+        supports_rerank=record.supports_rerank,
         supports_realtime=record.supports_realtime,
         supports_systemone=record.supports_systemone,
         context_length=record.context_length,

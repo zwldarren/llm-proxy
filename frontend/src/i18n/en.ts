@@ -525,6 +525,7 @@ export default {
       tts: "TTS",
       stt: "STT",
       embedding: "Embedding",
+      rerank: "Rerank",
       realtime: "Realtime",
       systemone: "System One / Decisions",
       reasoning: "Reasoning",
@@ -640,6 +641,8 @@ export default {
       tts: "Serves text-to-speech requests (models.dev: modalities.output · audio). Gates the /v1/audio/speech endpoint.",
       stt: "Serves speech-to-text requests (models.dev: modalities.input · audio). Gates the /v1/audio/transcriptions endpoint.",
       embedding: "Serves embedding requests. Gates the /v1/embeddings endpoint.",
+      rerank:
+        "Serves rerank requests: scores documents against a query and returns the most relevant ones. Gates the /v1/rerank endpoint.",
       realtime:
         "Served through the Realtime WebSocket relay (models.dev: realtime-capable models).",
       systemone:

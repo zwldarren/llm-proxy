@@ -596,6 +596,93 @@ class TestGeminiDialect:
         assert usage.web_search_requests == 3
 
 
+class TestCohereDialect:
+    """Cohere's ``ApiMeta``: ``tokens`` counters, a billed mirror, cache hits."""
+
+    def test_chat_body_usage_is_read_from_tokens(self) -> None:
+        usage = parse_usage(
+            "cohere",
+            {
+                "id": "c14c",
+                "usage": {
+                    "billed_units": {"input_tokens": 5, "output_tokens": 9},
+                    "tokens": {"input_tokens": 12, "output_tokens": 9},
+                },
+            },
+        )
+
+        # The token counts are the ones a per-token price applies to; the billed
+        # mirror is only a fallback.
+        assert usage == Usage(input_tokens=12, output_tokens=9, total_tokens=21)
+
+    def test_terminal_stream_event_nests_usage_under_delta(self) -> None:
+        usage = parse_usage(
+            "cohere",
+            {
+                "type": "message-end",
+                "delta": {
+                    "finish_reason": "COMPLETE",
+                    "usage": {"tokens": {"input_tokens": 3, "output_tokens": 1}},
+                },
+            },
+        )
+
+        assert usage is not None
+        assert (usage.input_tokens, usage.output_tokens) == (3, 1)
+
+    def test_embed_and_rerank_carry_the_same_shape_under_meta(self) -> None:
+        usage = parse_usage("cohere", {"meta": {"tokens": {"input_tokens": 4}}})
+
+        assert usage is not None
+        assert usage.input_tokens == 4
+
+    def test_cached_tokens_are_a_clamped_subset_of_the_prompt_count(self) -> None:
+        usage = parse_usage(
+            "cohere",
+            {
+                "usage": {
+                    "tokens": {"input_tokens": 10, "output_tokens": 2},
+                    # A provider breaking the subset invariant yields a sane count.
+                    "cached_tokens": 40,
+                }
+            },
+        )
+
+        assert usage is not None
+        assert usage.cache_read_input_tokens == 10
+        assert usage.prompt_tokens_details is None
+
+    def test_a_block_with_no_counters_is_not_a_zero_usage(self) -> None:
+        assert parse_usage("cohere", {"id": "c14c"}) is None
+
+
+class TestRerankDialect:
+    """The shared ``/rerank`` block: one prompt-side count, search units, cost."""
+
+    def test_total_tokens_is_a_prompt_side_count(self) -> None:
+        usage = parse_usage("rerank", {"usage": {"total_tokens": 150}})
+
+        assert usage == Usage(input_tokens=150, output_tokens=0, total_tokens=150)
+
+    def test_billed_cost_lands_on_the_record(self) -> None:
+        usage = parse_usage(
+            "rerank", {"usage": {"total_tokens": 150, "search_units": 1, "cost": 0.001}}
+        )
+
+        assert usage is not None
+        assert usage.provider_reported_cost == 0.001
+
+    def test_search_units_has_no_canonical_field(self) -> None:
+        """The billed query units are a client-echo fact, not a token fact."""
+        usage = parse_usage("rerank", {"usage": {"total_tokens": 10, "search_units": 3}})
+
+        assert usage == Usage(input_tokens=10, output_tokens=0, total_tokens=10)
+
+    def test_a_non_numeric_total_is_not_a_usage(self) -> None:
+        assert parse_usage("rerank", {"usage": {"total_tokens": "150"}}) is None
+        assert parse_usage("rerank", {"results": []}) is None
+
+
 class TestAudioDialect:
     """The transcription/translation usage block: tokens or duration."""
 

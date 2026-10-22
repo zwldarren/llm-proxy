@@ -8,6 +8,7 @@ class RequestType(StrEnum):
 
     CHAT = "chat"
     EMBEDDING = "embedding"
+    RERANK = "rerank"
     IMAGE_GENERATION = "image_generation"
     IMAGE_EDIT = "image_edit"
     SPEECH = "speech"

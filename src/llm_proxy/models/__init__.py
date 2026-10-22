@@ -68,6 +68,12 @@ from llm_proxy.models.params import (
     OpenAISpecificParams,
 )
 from llm_proxy.models.provider import ProviderModelInfo
+from llm_proxy.models.rerank import (
+    InternalRerankRequest,
+    InternalRerankResponse,
+    RerankDocument,
+    RerankResult,
+)
 from llm_proxy.models.systemone import (
     InternalSystemOneRequest,
     InternalSystemOneResponse,
@@ -145,6 +151,8 @@ __all__ = [
     "InternalImageEditRequest",
     "InternalImageRequest",
     "InternalImageResponse",
+    "InternalRerankRequest",
+    "InternalRerankResponse",
     "InternalRequest",
     "InternalResponse",
     "InternalSpeechRequest",
@@ -162,6 +170,8 @@ __all__ = [
     "RawBlock",
     "RedactedThinkingBlock",
     "RefusalBlock",
+    "RerankDocument",
+    "RerankResult",
     "RequestMetadata",
     "ResponseFormat",
     "ResponseStatus",

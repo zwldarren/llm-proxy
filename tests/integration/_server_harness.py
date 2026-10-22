@@ -83,6 +83,15 @@ def reset_proxy_globals() -> None:
     conn_mod._async_session_factory = None
     os.environ["JWT_SECRET"] = "test-secret-key-for-testing-purposes-32chars"
 
+    # DB-derived process-global caches hold rows from the previous test
+    # database (its API keys, budget spend), so drop them with the engine.
+    try:
+        from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
+
+        invalidate_api_key_cache()
+    except Exception:  # noqa: BLE001 - harness hygiene must never fail setup
+        pass
+
     # Background log writers are process-global singletons bound to whichever
     # event loop started them. A writer left over from an earlier test module
     # would swallow this stack's log writes into a dead loop's queue.

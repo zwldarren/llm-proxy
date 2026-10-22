@@ -34,6 +34,16 @@ def extract_extra_fields(data: dict[str, Any], known_fields: set[str]) -> dict[s
     return {k: v for k, v in data.items() if k not in known_fields}
 
 
+def is_int(value: Any) -> bool:
+    """Whether ``value`` is a real int.
+
+    ``bool`` is an ``int`` subclass, so a wire field carrying ``true`` would
+    otherwise be read as the count ``1``. Shared by the provider serializers
+    that read counters off a usage block.
+    """
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def reported_cost(usage: Any) -> float | None:
     """Return the billed cost reported in an OpenRouter-style ``usage`` object.
 
@@ -72,5 +82,6 @@ __all__ = [
     "INTERNAL_EXTRA_KEYS",
     "extract_extra_fields",
     "extract_unknown_response_fields",
+    "is_int",
     "reported_cost",
 ]

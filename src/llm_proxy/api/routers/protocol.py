@@ -23,6 +23,7 @@ from llm_proxy.api.context import (
     build_embeddings_request_context,
     build_images_request_context,
     build_request_context,
+    build_rerank_request_context,
     build_speech_request_context,
     build_systemone_request_context,
     build_transcription_request_context,
@@ -57,6 +58,7 @@ logger = get_logger(__name__)
 _NON_CHAT_CONTEXT_BUILDERS: frozendict[str, Any] = frozendict(
     {
         "embeddings": build_embeddings_request_context,
+        "rerank": build_rerank_request_context,
         "image_generations": lambda r, fr: build_images_request_context(
             r, fr, request_type=RequestType.IMAGE_GENERATION
         ),

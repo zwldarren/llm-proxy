@@ -37,6 +37,7 @@ vi.mock("@lucide/vue", () => {
     FlaskConical: Stub,
     ImagePlus: Stub,
     List: Stub,
+    ListOrdered: Stub,
     LockOpen: Stub,
     Mic: Stub,
     Paperclip: Stub,

@@ -19,6 +19,7 @@ from llm_proxy.providers.capabilities.decisions import (
 )
 from llm_proxy.providers.capabilities.embedding import EmbeddingCapabilityMixin
 from llm_proxy.providers.capabilities.image import ImageCapabilityMixin
+from llm_proxy.providers.capabilities.rerank import RerankCapabilityMixin
 from llm_proxy.providers.capabilities.systemone import SystemOneCapabilityMixin
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "DecisionsOverSystemOneMixin",
     "EmbeddingCapabilityMixin",
     "ImageCapabilityMixin",
+    "RerankCapabilityMixin",
     "SystemOneCapabilityMixin",
     "SystemOneOverDecisionsMixin",
 ]

@@ -317,6 +317,48 @@ async def test_build_request_context_rejects_non_decision_model_for_decisions():
 
 
 @pytest.mark.asyncio
+async def test_build_request_context_rejects_non_rerank_model():
+    """A model not marked as a reranker cannot serve /v1/rerank (clear 400)."""
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.core.request_type import RequestType
+
+    mock_request = MagicMock()
+    mock_request.model = "chat-only"
+
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.supports_rerank = False
+
+    fastapi_request = _make_context_request(model_config)
+
+    with pytest.raises(ValidationError, match="not marked as a reranker model"):
+        await _build_request_context(mock_request, fastapi_request, request_type=RequestType.RERANK)
+
+
+@pytest.mark.asyncio
+async def test_build_request_context_allows_rerank_model():
+    """A model marked as a reranker passes the gate and builds a context."""
+    from llm_proxy.api.context import _build_request_context
+    from llm_proxy.core.request_type import RequestType
+
+    mock_request = MagicMock()
+    mock_request.model = "cohere/rerank-v3.5"
+
+    model_config = MagicMock()
+    model_config.providers = []
+    model_config.supports_rerank = True
+    model_config.max_retries = None
+
+    fastapi_request = _make_context_request(model_config)
+
+    result = await _build_request_context(
+        mock_request, fastapi_request, request_type=RequestType.RERANK
+    )
+
+    assert result.request_type is RequestType.RERANK
+
+
+@pytest.mark.asyncio
 async def test_build_request_context_allows_systemone_model_for_decisions():
     """A model marked System One may also serve /v1/decisions."""
     from llm_proxy.api.context import _build_request_context

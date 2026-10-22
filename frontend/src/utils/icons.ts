@@ -144,6 +144,7 @@ const PROVIDER_ICON_MAP: Record<string, { id: string; type: "mono" | "color" }> 
   qwen: { id: "qwen", type: "color" },
   "qwen-intl": { id: "qwen", type: "color" },
   mistral: { id: "mistral", type: "color" },
+  cohere: { id: "cohere", type: "color" },
   xai: { id: "xai", type: "mono" },
 };
 

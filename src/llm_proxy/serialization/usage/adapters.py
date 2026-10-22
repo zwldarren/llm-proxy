@@ -30,7 +30,15 @@ from llm_proxy.serialization.usage.folds import (
 )
 
 type UsageDialect = Literal[
-    "chat", "responses", "anthropic", "realtime", "ollama", "gemini", "audio"
+    "chat",
+    "responses",
+    "anthropic",
+    "realtime",
+    "ollama",
+    "gemini",
+    "audio",
+    "cohere",
+    "rerank",
 ]
 
 __all__ = ["UsageDialect", "parse_usage"]
@@ -56,6 +64,13 @@ def _positive_int(value: Any) -> int | None:
     """A count the wire actually reported, and one that is a count (> 0)."""
     count = _int(value)
     return count if count is not None and count > 0 else None
+
+
+def _positive_float(value: Any) -> float | None:
+    """A positive number the wire actually reported; a bool is not a price."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if value > 0 else None
 
 
 def _duration(value: Any) -> float | None:
@@ -505,6 +520,103 @@ def _parse_audio(payload: Mapping[str, Any], turn: Mapping[str, Any] | None = No
 
 
 # ---------------------------------------------------------------------------
+# Cohere
+# ---------------------------------------------------------------------------
+
+
+def _cohere_usage_block(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Cohere's usage block, wherever this endpoint keeps it.
+
+    The chat body states it at ``usage``, the terminal ``message-end`` stream
+    event nests it under ``delta``, and the embed/rerank responses carry the same
+    ``ApiMeta`` shape under ``meta`` (docs.cohere.com/reference/chat, /embed,
+    /rerank) — one wire shape, three positions.
+    """
+    delta = payload.get("delta")
+    candidates = [payload.get("usage"), payload.get("meta")]
+    if isinstance(delta, dict):
+        candidates.append(delta.get("usage"))
+    for candidate in candidates:
+        block = _as_dict(candidate)
+        if block is not None:
+            return block
+    return None
+
+
+def _parse_cohere(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
+    """Cohere's ``ApiMeta``: ``tokens`` counters plus a billed-units mirror.
+
+    ``tokens.input_tokens`` / ``output_tokens`` are the counts the model used and
+    the ones a per-token price applies to; ``billed_units`` mirrors them after
+    cache hits and is only a fallback for a block that states nothing else.
+    ``cached_tokens`` is documented as prompt tokens that hit the inference
+    cache, i.e. a subset of the prompt count — the canonical invariant — so it
+    lands in the flat cache field alone, clamped for a provider that breaks it.
+    """
+    usage = _cohere_usage_block(payload)
+    if usage is None:
+        return None
+
+    tokens = _as_dict(usage.get("tokens")) or {}
+    input_tokens = _int(tokens.get("input_tokens"))
+    output_tokens = _int(tokens.get("output_tokens"))
+    if input_tokens is None and output_tokens is None:
+        billed = _as_dict(usage.get("billed_units")) or {}
+        input_tokens = _int(billed.get("input_tokens"))
+        output_tokens = _int(billed.get("output_tokens"))
+    if input_tokens is None and output_tokens is None:
+        return None
+
+    input_tokens = input_tokens or 0
+    output_tokens = output_tokens or 0
+    cached_tokens = _int(usage.get("cached_tokens"))
+    return Usage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+        cache_read_input_tokens=(
+            max(0, min(cached_tokens, input_tokens)) if cached_tokens is not None else None
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared /rerank usage block
+# ---------------------------------------------------------------------------
+
+
+def _parse_rerank(
+    payload: Mapping[str, Any], turn: Mapping[str, Any] | None = None
+) -> Usage | None:
+    """The shared ``/rerank`` usage block: ``{total_tokens, search_units?, cost?}``.
+
+    OpenRouter's ``/api/v1/rerank`` states it at ``usage``; Cohere's v2 answers the
+    same facts inside ``ApiMeta`` and is read by its own dialect. A reranker scores
+    a query against a fixed document list and generates nothing, so the whole count
+    is a prompt-side count: a per-token price applies to ``input_tokens`` and
+    ``output_tokens`` stays zero.
+
+    ``search_units`` — the billed query units Cohere also reports — is not a token
+    fact and has no canonical field; the client-facing echo renders it from the
+    wire. The ``cost`` *is* a record fact (``provider_reported_cost``), so billing
+    prefers it over the proxy's own estimate without a provider-info extra.
+    """
+    block = _as_dict(payload.get("usage"))
+    if block is None:
+        return None
+    total_tokens = _int(block.get("total_tokens"))
+    if total_tokens is None:
+        return None
+    return Usage(
+        input_tokens=total_tokens,
+        total_tokens=total_tokens,
+        provider_reported_cost=_positive_float(block.get("cost")),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Gemini generateContent
 # ---------------------------------------------------------------------------
 
@@ -689,6 +801,8 @@ _ADAPTERS: frozendict[str, DialectAdapter] = frozendict(
         "ollama": DialectAdapter(_parse_ollama),
         "gemini": DialectAdapter(_parse_gemini, turn_dependent_fields=("input_tokens",)),
         "audio": DialectAdapter(_parse_audio),
+        "cohere": DialectAdapter(_parse_cohere),
+        "rerank": DialectAdapter(_parse_rerank),
     }
 )
 
