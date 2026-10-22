@@ -112,8 +112,17 @@ def check(
             if key in value:
                 check(value[key], sub_schema, f"{path}.{key}", problems, schemas)
         extra = schema.get("additionalProperties")
-        if isinstance(extra, dict):
-            known = schema.get("properties", {})
+        known = schema.get("properties", {})
+        if extra is False:
+            # ``additionalProperties: false`` is the one direction a hand-written
+            # expectation cannot guard: a field the proxy starts emitting is a
+            # hard parse failure for a strict client, however harmless it looks.
+            unknown = sorted(key for key in value if key not in known)
+            if unknown:
+                problems.append(
+                    f"{path}: unexpected field(s) {unknown} (additionalProperties: false)"
+                )
+        elif isinstance(extra, dict):
             for key, item in value.items():
                 if key not in known:
                     check(item, extra, f"{path}.{key}", problems, schemas)

@@ -27,7 +27,11 @@ our own output.**
 - `tests/protocols/schema_validation.py` is the single validator. It walks
   `$ref`, `anyOf`/`oneOf` (picking the branch with the fewest problems),
   `enum`/`const`, `type`, `required`, `properties`, `items` and
-  `additionalProperties`.
+  `additionalProperties` — including `additionalProperties: false`, which is the
+  one direction a hand-written expectation cannot guard: a field the proxy
+  starts emitting is a hard parse failure for a strict client, however harmless
+  it looks. What it still does not check is stated rather than implied: numeric
+  bounds and `format`, and `minLength`/`maxLength`.
 - `tests/protocols/fixtures/trim_schema.py` produces the fixtures: it parses the
   published document (YAML or JSON), keeps the `$ref` closure of named root
   schemas **verbatim**, and records the source URL and commit. The fixtures are
