@@ -189,15 +189,24 @@ class OpenAIFormattingMixin:
             cached_tokens = prompt_details.cached_tokens if prompt_details else None
             if cached_tokens is None:
                 cached_tokens = response.usage.cache_read_input_tokens
+            # Cache writes are the same fact on the other side of the cache: the
+            # canonical record keeps them in ``cache_creation_input_tokens``
+            # (Anthropic/Gemini) and the streaming path already reports them as
+            # ``prompt_tokens_details.cache_write_tokens``. Emit the same split
+            # here so a turn's cache accounting does not depend on the transport.
+            cache_write_tokens = prompt_details.cache_write_tokens if prompt_details else None
+            if cache_write_tokens is None:
+                cache_write_tokens = response.usage.cache_creation_input_tokens
             # Fabricate a details object only when there is something to report:
-            # a provider-sent object, or observed cache reads. A reported zero
+            # a provider-sent object, or observed cache activity. A reported zero
             # stays in the canonical record without an empty dialect object.
-            if prompt_details is not None or cached_tokens:
+            if prompt_details is not None or cached_tokens or cache_write_tokens:
                 usage_dict["prompt_tokens_details"] = {
                     k: v
                     for k, v in [
                         ("audio_tokens", prompt_details.audio_tokens if prompt_details else None),
                         ("cached_tokens", cached_tokens),
+                        ("cache_write_tokens", cache_write_tokens),
                     ]
                     if v is not None
                 }

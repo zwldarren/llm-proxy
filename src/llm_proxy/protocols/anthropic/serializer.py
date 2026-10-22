@@ -219,6 +219,17 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
             result["usage"]["output_tokens_details"] = response.provider_info[
                 "output_tokens_details"
             ]
+        elif response.usage is not None:
+            # The canonical record keeps thinking tokens flat
+            # (``reasoning_tokens``); the Anthropic wire names them
+            # ``output_tokens_details.thinking_tokens``, which the streaming
+            # ``message_delta`` already emits. Fold it here too, or the same
+            # turn reports its reasoning only when streamed.
+            thinking = response.usage.reasoning_tokens
+            if thinking is None and response.usage.completion_tokens_details is not None:
+                thinking = response.usage.completion_tokens_details.reasoning_tokens
+            if thinking is not None:
+                result["usage"]["output_tokens_details"] = {"thinking_tokens": thinking}
         if response.provider_info.get("service_tier"):
             # Normalize onto the official response enum: OpenAI upstreams report
             # their own tiers (auto/default/flex/scale) that have no place in

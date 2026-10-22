@@ -57,6 +57,18 @@ the published schema.**
   `sequence_number`, exactly one terminal event and it last, and the `usage`
   shape Codex deserializes (`cached_tokens` and `reasoning_tokens` are required
   in its struct).
+- **The same comparison exists across protocols, on the amounts.** Each
+  protocol expresses the bill differently (OpenAI's `prompt_tokens` are
+  inclusive, Anthropic's `input_tokens` are exclusive and its input/output
+  arrive on different events), so `tests/protocols/
+  test_protocol_streaming_parity.py` compares the canonical amounts read from
+  each protocol's own wire shape — input total, output, cache read, cache
+  write, reasoning — plus the text. It registers OpenAI Chat Completions,
+  Anthropic Messages and OpenResponses; a protocol with both a streaming and a
+  non-streaming body that is not registered there is a gap, not a covered path.
+  It immediately found two non-streaming losses: OpenAI Chat dropped
+  `cache_write_tokens`, Anthropic dropped `output_tokens_details.
+  thinking_tokens`, both of which the streaming path already reported.
 - **The terminal snapshot is deferred to `finalize()`.** A `finish_reason` chunk
   only records the pending terminal; the snapshot is built after the stream
   ends, so any trailing usage chunk is folded in first. This mirrors the
@@ -92,3 +104,7 @@ the published schema.**
   spec, prefixed per the spec's extension rule).
 - Native Responses passthrough is out of scope: it forwards the upstream's own
   snapshot verbatim, so the upstream's usage fidelity is what the client sees.
+- Endpoints with no streaming twin (embeddings, rerank, images, audio) have no
+  parity axis; only a schema contract can guard those, and none is vendored yet.
+- The cross-protocol test compares amounts, not field names: a protocol may
+  legitimately name the same fact differently, but it may not lose it.
