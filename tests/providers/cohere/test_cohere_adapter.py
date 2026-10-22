@@ -238,6 +238,28 @@ class TestRerank:
         assert result.results[0].document is None
 
     @pytest.mark.asyncio
+    async def test_relevant_spans_survive_the_document_projection(self, adapter, mock_response_cls):
+        # The spans are the upstream's answer to a request field the adapter
+        # forwards; projecting the documents back must not take them with it,
+        # and ``return_documents: false`` must not either (spans are not
+        # documents).
+        spans = [{"start": 0, "end": 5, "score": 0.9}]
+        upstream = {"results": [{"index": 0, "relevance_score": 0.9, "relevant_spans": spans}]}
+        client = MagicMock()
+        client.post = AsyncMock(return_value=mock_response_cls(json_data=upstream))
+
+        for return_documents in (None, False):
+            request = InternalRerankRequest(
+                model="rerank-v5.0-pro",
+                query="q",
+                documents=["paris"],
+                return_documents=return_documents,
+            )
+            with patch.object(adapter, "_get_client", return_value=client):
+                result = await adapter.rerank(request)
+            assert result.results[0].relevant_spans == spans
+
+    @pytest.mark.asyncio
     async def test_meta_is_projected_onto_the_shared_usage_echo(self, adapter, mock_response_cls):
         # v2 answers ``meta.tokens``/``billed_units``; the client-facing rerank
         # wire reports ``total_tokens``/``search_units``/``cost`` (see

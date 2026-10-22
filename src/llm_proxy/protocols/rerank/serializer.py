@@ -87,9 +87,12 @@ class RerankProtocolSerializer(ProtocolSerializer):
 
         ``results`` always carries ``index``, ``relevance_score`` and the
         upstream's echoed ``document`` (dropped earlier by the adapter when the
-        client asked for ``return_documents: false``). ``usage`` is echoed when the
-        upstream reports one, in the normalized vocabulary every rerank provider is
-        projected onto: ``total_tokens``, ``search_units`` and the billed ``cost``.
+        client asked for ``return_documents: false``). ``relevant_spans`` rides
+        the result when the upstream reports them, so a client that enabled
+        ``relevant_spans`` on the request receives the spans it asked for.
+        ``usage`` is echoed when the upstream reports one, in the normalized
+        vocabulary every rerank provider is projected onto: ``total_tokens``,
+        ``search_units`` and the billed ``cost``.
         """
         if isinstance(response, InternalRerankResponse):
             results: list[dict[str, Any]] = []
@@ -100,6 +103,8 @@ class RerankProtocolSerializer(ProtocolSerializer):
                 }
                 if item.document is not None:
                     result["document"] = item.document.to_wire()
+                if item.relevant_spans is not None:
+                    result["relevant_spans"] = item.relevant_spans
                 results.append(result)
 
             body: dict[str, Any] = {"model": response.model, "results": results}

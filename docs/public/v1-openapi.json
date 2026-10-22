@@ -7314,10 +7314,50 @@
             "description": "A remote URL (http/https) or base64 data URI for the document image."
           }
         },
-        "additionalProperties": false,
+        "additionalProperties": true,
         "type": "object",
         "title": "RerankDocumentSchema",
-        "description": "A structured rerank document (multimodal models only).\n\nAt least one of ``text`` or ``image`` must be present."
+        "description": "A structured rerank document (multimodal models only).\n\nAt least one of ``text`` or ``image`` must be present; any other key is\ncarried through unchanged (see the module docstring)."
+      },
+      "RerankRelevantSpansSchema": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "pattern": "^(enabled|disabled)$",
+            "title": "Mode",
+            "description": "Whether spans are returned for each ranked document.",
+            "default": "enabled"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold",
+            "description": "Only spans scoring above this threshold are returned (default 0.1)."
+          },
+          "max_spans": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Spans",
+            "description": "Maximum spans per document; all when omitted."
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "RerankRelevantSpansSchema",
+        "description": "Cohere's ``relevant_spans`` request block (Rerank 5 and newer).\n\nTurned on, the upstream also reports, per result, the spans of the document\nthat drove its score; the protocol formatter passes them through on\n``results[].relevant_spans``."
       },
       "RerankRequestSchema": {
         "properties": {
@@ -7423,6 +7463,42 @@
             ],
             "title": "Trace",
             "description": "Observability/tracing metadata (OpenRouter only)."
+          },
+          "max_tokens_per_doc": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens Per Doc",
+            "description": "Long documents are truncated to this many tokens (Cohere only, default 4096)."
+          },
+          "relevant_spans": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankRelevantSpansSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ask the upstream for the document spans that drove each score (Cohere Rerank 5+ only). Returned on `results[].relevant_spans`."
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "Admission priority; lower is handled sooner (Cohere only)."
           }
         },
         "additionalProperties": true,
@@ -7503,6 +7579,29 @@
                   },
                   "additionalProperties": true,
                   "description": "The ranked document, when the response carries one; omitted when the request set `return_documents: false`."
+                },
+                "relevant_spans": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer",
+                        "description": "Position of the span's first character (codepoints)."
+                      },
+                      "end": {
+                        "type": "integer",
+                        "description": "Position just past the span's last character."
+                      },
+                      "score": {
+                        "type": "number",
+                        "description": "How relevant the span is, in the range [0, 1]."
+                      }
+                    },
+                    "additionalProperties": true,
+                    "description": "An upstream-reported span of the document that drove its score (Cohere Rerank 5+). Passed through verbatim."
+                  },
+                  "description": "The document's relevant spans, present only when the request enabled `relevant_spans` and the upstream returned any."
                 }
               },
               "additionalProperties": true,

@@ -73,6 +73,40 @@ class TestSchema:
         schema = RerankRequestSchema(model="m", query="q", documents=["a"], rank_fields=["title"])
         assert schema.model_dump(exclude_none=True)["rank_fields"] == ["title"]
 
+    def test_unmodeled_document_key_is_not_a_client_error(self):
+        # OpenRouter's document schema sets no ``additionalProperties: false``,
+        # so a document key this proxy does not model must not 422 the request.
+        schema = RerankRequestSchema(
+            model="m",
+            query="q",
+            documents=[{"text": "a", "image_detail": "high"}],
+        )
+        assert schema.model_dump(exclude_none=True)["documents"] == [
+            {"text": "a", "image_detail": "high"}
+        ]
+
+    def test_cohere_v2_knobs_are_declared(self):
+        # Cohere documents these on POST /v2/rerank; declaring them keeps them
+        # validated, documented and forwarded instead of opaque extras.
+        schema = RerankRequestSchema(
+            model="rerank-v5.0-pro",
+            query="q",
+            documents=["a"],
+            max_tokens_per_doc=512,
+            priority=1,
+            relevant_spans={"mode": "enabled", "threshold": 0.2, "max_spans": 3},
+        )
+        assert schema.max_tokens_per_doc == 512
+        assert schema.priority == 1
+        assert schema.relevant_spans is not None
+        assert schema.relevant_spans.max_spans == 3
+
+    def test_relevant_spans_mode_is_the_documented_enum(self):
+        with pytest.raises(ValidationError):
+            RerankRequestSchema(
+                model="m", query="q", documents=["a"], relevant_spans={"mode": "ENABLED"}
+            )
+
 
 # ---------------------------------------------------------------------------
 # parse_request
@@ -100,6 +134,21 @@ class TestParseRequest:
         ]
         assert request.top_n == 2
         assert request.return_documents is False
+
+    def test_document_extras_ride_the_internal_document(self, serializer):
+        # An unmodeled document key is carried, not dropped: an upstream that
+        # documents it still receives it (``RerankDocument.extra``).
+        request = serializer.parse_request(
+            {
+                "model": "m",
+                "query": "q",
+                "documents": [{"text": "a", "image_detail": "high"}],
+            }
+        )
+        document = request.documents[0]
+        assert isinstance(document, RerankDocument)
+        assert document.extra == {"image_detail": "high"}
+        assert document.to_wire() == {"text": "a", "image_detail": "high"}
 
     def test_provider_extension_fields_ride_extra(self, serializer):
         request = serializer.parse_request(
@@ -202,6 +251,27 @@ class TestFormatResponse:
             model="m", results=[RerankResult(index=0, relevance_score=1.0)]
         )
         assert "usage" not in serializer.format_response(response)
+
+    def test_relevant_spans_ride_the_result(self, serializer):
+        # A client that enabled ``relevant_spans`` asked for the spans; dropping
+        # them on the way back would make the request field a no-op (Cohere's SDK
+        # types ``V2RerankResponseResultsItem.relevant_spans``).
+        spans = [{"start": 0, "end": 42, "score": 0.99}]
+        response = InternalRerankResponse(
+            model="m",
+            results=[RerankResult(index=0, relevance_score=0.9, relevant_spans=spans)],
+        )
+
+        body = serializer.format_response(response)
+
+        assert body["results"][0]["relevant_spans"] == spans
+
+    def test_relevant_spans_are_omitted_when_not_reported(self, serializer):
+        response = InternalRerankResponse(
+            model="m", results=[RerankResult(index=0, relevance_score=0.9)]
+        )
+
+        assert "relevant_spans" not in serializer.format_response(response)["results"][0]
 
     def test_passes_dict_through(self, serializer):
         assert serializer.format_response({"results": []}) == {"results": []}

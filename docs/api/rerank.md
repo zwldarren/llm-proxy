@@ -72,8 +72,10 @@ print(res.results[0].index, res.results[0].relevance_score)
   `image` (a remote URL or base64 data URI) for multimodal rerankers. A document
   object without either is rejected with a `422`.
 - `top_n` (`≥ 1`) caps how many documents come back. A value larger than the
-  document count is clamped to it, the way Cohere and the vLLM/SGLang `/rerank`
-  route behave. Omitted, the upstream's own default applies.
+  document count is clamped to it at the proxy edge — Cohere documents only that
+  an omitted `top_n` returns every document, so clamping keeps a client that
+  over-asks working instead of relying on an unstated upstream behaviour.
+  Omitted, the upstream's own default applies.
 - `return_documents` (default `true`): when `false`, the `document` field is
   omitted from every result — indexes and scores only. The projection is applied
   by the proxy; it is not forwarded upstream.
@@ -84,12 +86,24 @@ OpenRouter also documents `provider` (its routing block), `session_id` and
 `trace`. They are accepted here and forwarded only to providers that document
 them.
 
+Cohere's v2-only knobs are accepted and forwarded to a `cohere` provider:
+`max_tokens_per_doc` (truncate long documents), `priority` (admission order) and
+`relevant_spans` (`{mode: enabled|disabled, threshold?, max_spans?}`, Rerank 5
+and newer — turn it on to get the spans that drove each score back on
+`results[].relevant_spans`).
+
+A structured document is open-ended: a key the proxy does not model is carried
+through to an upstream that documents it, not rejected.
+
 ## Response
 
 `results` carries `index` (position in the request's `documents` list),
 `relevance_score` (higher is better) and, unless suppressed, the `document`
-echoed by the upstream. `id` appears when the upstream reports one, and
-`provider` when a router (OpenRouter) names the provider that answered.
+echoed by the upstream. When the request enabled `relevant_spans` and the
+upstream reported them, `relevant_spans` rides the result verbatim — the
+upstream's own `{start, end, score}` objects. `id` appears when the upstream
+reports one, and `provider` when a router (OpenRouter) names the provider that
+answered.
 `usage` is reported when the upstream sends one, in one vocabulary across
 providers: `total_tokens`, `search_units` and, on a provider that reports it,
 the billed `cost`. OpenRouter states those keys itself; Cohere's `meta.tokens`

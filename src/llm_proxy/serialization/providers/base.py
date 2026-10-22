@@ -374,6 +374,9 @@ class ProviderSerializer(ABC):
 
         A score the wire did not report — or reported as something other than a
         number — reads as ``0.0`` rather than failing the whole response.
+        ``relevant_spans`` (Cohere Rerank 5+, requested through ``extra``) is
+        carried through verbatim: the client asked for the spans, so dropping
+        them would make the request field a no-op.
         """
         results: list[RerankResult] = []
         for item in response.get("results") or []:
@@ -385,6 +388,7 @@ class ProviderSerializer(ABC):
                     index=item.get("index", 0),
                     relevance_score=float(score) if isinstance(score, int | float) else 0.0,
                     document=RerankDocument.from_wire(item.get("document")),
+                    relevant_spans=_reported_spans(item.get("relevant_spans")),
                 )
             )
         return results
@@ -506,6 +510,20 @@ class ProviderSerializer(ABC):
             provider=response.get("provider"),
             provider_info=provider_info,
         )
+
+
+def _reported_spans(value: Any) -> list[dict[str, Any]] | None:
+    """The span objects a rerank upstream reported, when it reported any.
+
+    Spans are the upstream's own ``{start, end, score}`` objects (Cohere's
+    ``RerankRelevantSpanResponse``), so they are passed through verbatim rather
+    than re-modelled — this proxy has no opinion on their contents. A payload
+    that is not a list of objects reads as "not reported".
+    """
+    if not isinstance(value, list):
+        return None
+    spans = [span for span in value if isinstance(span, dict)]
+    return spans or None
 
 
 def _rerank_usage_echo(raw_usage: dict[str, Any]) -> dict[str, Any]:

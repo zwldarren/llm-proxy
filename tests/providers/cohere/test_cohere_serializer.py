@@ -586,6 +586,20 @@ class TestRerank:
         assert result.results[0].document is None
         assert result.usage.input_tokens == 12
 
+    def test_relevant_spans_are_read_through(self):
+        # ``relevant_spans`` is a documented v2 request field (Rerank 5+) and a
+        # documented response field of the same result item, so it is carried
+        # rather than dropped.
+        serializer = _serializer()
+        spans = [{"start": 0, "end": 12, "score": 0.98}]
+        response = {
+            "results": [{"index": 0, "relevance_score": 0.9, "relevant_spans": spans}],
+        }
+
+        result = serializer.parse_provider_rerank_response(response, model="rerank-v5.0-pro")
+
+        assert result.results[0].relevant_spans == spans
+
 
 class TestResponseContentForms:
     def test_a_bare_string_content_is_read_as_one_text_block(self):

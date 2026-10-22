@@ -50,11 +50,22 @@ only where their vendor does.**
   chat-only model naming `/v1/rerank` gets a `400 invalid_request_error` instead
   of an upstream 404; the flag does not restrict the model's chat service.
 - **The shape is deliberately small.** No streaming (one query, one scored
-  list); `top_n` above the document count is clamped (the behaviour of the
-  upstreams that define the wire); `return_documents` is a response projection
-  the proxy applies itself and is never forwarded; `user`, `provider`,
-  `session_id` and `trace` ride `extra` and reach only upstreams that document
-  them, through the existing unknown-field policy.
+  list); `top_n` above the document count is clamped at the proxy edge — Cohere
+  documents only that an omitted `top_n` returns every document, so clamping
+  keeps a client that over-asks working without depending on an upstream
+  behaviour nobody states; `return_documents` is a response projection the proxy
+  applies itself and is never forwarded; `user`, `provider`, `session_id` and
+  `trace` ride `extra` and reach only upstreams that document them, through the
+  existing unknown-field policy.
+- **A request field the proxy forwards is a response field it carries back.**
+  Cohere's v2-only knobs (`max_tokens_per_doc`, `relevant_spans`, `priority`)
+  are declared on the request schema and forwarded through `extra`, and
+  `results[].relevant_spans` is passed through verbatim on the way back: a
+  client that enabled the feature upstream would otherwise get an empty list.
+  Spans are the upstream's own `{start, end, score}` objects, so the proxy
+  re-models nothing. A structured document is open for the same reason — a
+  document key the proxy does not model (`RerankDocument.extra`) rides through
+  to the upstream that documents it rather than being rejected.
 - **Usage lands in the intake seam.** The client-facing usage echo is normalized
   to `total_tokens` / `search_units` / `cost`, which is what OpenRouter states
   verbatim and what Cohere's `ApiMeta` is re-shaped onto.

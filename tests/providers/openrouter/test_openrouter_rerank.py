@@ -49,6 +49,16 @@ class TestOpenRouterRerank:
             "top_n": 1,
         }
 
+    def test_body_carries_unmodeled_document_keys(self, adapter):
+        # OpenRouter's document schema is open, so a key this proxy does not
+        # model is forwarded with the document instead of being rejected at the
+        # edge or dropped on the way out.
+        outbound = adapter._build_outbound_body(
+            _request(documents=[RerankDocument(text="Paris", extra={"image_detail": "high"})]),
+            request_type="rerank",
+        )
+        assert outbound.json_body["documents"] == [{"image_detail": "high", "text": "Paris"}]
+
     def test_body_forwards_openrouter_only_fields(self, adapter):
         outbound = adapter._build_outbound_body(
             _request(

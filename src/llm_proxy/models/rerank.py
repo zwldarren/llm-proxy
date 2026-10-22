@@ -9,6 +9,11 @@ from llm_proxy.models.params import GenerationParams
 from llm_proxy.models.tools import ToolDefinition
 from llm_proxy.models.types import Usage
 
+#: The document keys this proxy models; everything else a document object carries
+#: rides ``RerankDocument.extra`` so an upstream that documents a new key still
+#: receives it.
+_DOCUMENT_FIELDS: frozenset[str] = frozenset({"text", "image"})
+
 
 @dataclass
 class RerankDocument:
@@ -20,10 +25,15 @@ class RerankDocument:
     Attributes:
         text: The document text.
         image: A remote URL or base64 data URI for the document image.
+        extra: Any other key the client sent on the document object. OpenRouter's
+            document schema sets no ``additionalProperties: false``, so a key
+            this proxy does not model is carried through instead of rejected or
+            dropped (the upstream that documents it decides what it means).
     """
 
     text: str | None = None
     image: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_wire(cls, value: object) -> RerankDocument | None:
@@ -39,11 +49,12 @@ class RerankDocument:
         return cls(
             text=text if isinstance(text, str) else None,
             image=image if isinstance(image, str) else None,
+            extra={k: v for k, v in value.items() if k not in _DOCUMENT_FIELDS},
         )
 
     def to_wire(self) -> dict[str, Any]:
         """Render the document as the shared wire object, dropping unset keys."""
-        body: dict[str, Any] = {}
+        body: dict[str, Any] = dict(self.extra)
         if self.text is not None:
             body["text"] = self.text
         if self.image is not None:
@@ -59,11 +70,16 @@ class RerankResult:
         index: Index of the document in the request's ``documents`` list.
         relevance_score: Relevance of the document to the query, higher is better.
         document: The document echoed back by the upstream, when it returns one.
+        relevant_spans: The spans of the document that drove its score, when the
+            upstream reports them (Cohere Rerank 5+ with ``relevant_spans``
+            enabled). Passed through verbatim: they are the upstream's own
+            ``{start, end, score}`` objects and the client asked for them.
     """
 
     index: int
     relevance_score: float
     document: RerankDocument | None = None
+    relevant_spans: list[dict[str, Any]] | None = None
 
 
 @dataclass

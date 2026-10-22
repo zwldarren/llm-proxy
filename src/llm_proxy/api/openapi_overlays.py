@@ -320,6 +320,30 @@ COMPONENTS: frozendict[str, Any] = frozendict(
                                     "omitted when the request set `return_documents: false`."
                                 ),
                             ),
+                            "relevant_spans": _array(
+                                _passthrough(
+                                    {
+                                        "start": _int(
+                                            "Position of the span's first character (codepoints)."
+                                        ),
+                                        "end": _int(
+                                            "Position just past the span's last character."
+                                        ),
+                                        "score": _num(
+                                            "How relevant the span is, in the range [0, 1]."
+                                        ),
+                                    },
+                                    description=(
+                                        "An upstream-reported span of the document that drove "
+                                        "its score (Cohere Rerank 5+). Passed through verbatim."
+                                    ),
+                                ),
+                                description=(
+                                    "The document's relevant spans, present only when the "
+                                    "request enabled `relevant_spans` and the upstream "
+                                    "returned any."
+                                ),
+                            ),
                         },
                         required=["index", "relevance_score"],
                     ),
