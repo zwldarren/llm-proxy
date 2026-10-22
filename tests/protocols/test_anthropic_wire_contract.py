@@ -168,6 +168,15 @@ def test_stream_start_message_and_delta_usage_satisfy_the_nested_schemas() -> No
     # Anthropic splits the bill: input on ``message_start``, output on
     # ``message_delta``. Both halves must be present or a client's context/usage
     # display is wrong.
+    #
+    # ``message_start`` reports zero input here because this composition is the
+    # *converted* tier: the transformer emits ``message_start`` on the first
+    # content chunk, and the upstream's usage chunk only arrives after it. An
+    # Anthropic-speaking upstream that states the count at ``message_start`` is
+    # served verbatim (every such adapter lists ``anthropic`` in
+    # ``native_protocols``), so the real wire keeps it. Do not "fix" the zero by
+    # hoisting usage onto the first chunk: that leaks a premature usage block
+    # onto every other protocol's stream.
     assert events["message_start"]["message"]["usage"]["input_tokens"] == 0
     delta = events["message_delta"]["usage"]
     assert delta["output_tokens"] == 44

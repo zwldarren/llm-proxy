@@ -18,6 +18,7 @@ import pytest
 from schema_validation import check, load_contract, parse_sse
 
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
+from llm_proxy.protocols.openresponses.usage_payload import build_usage_payload
 
 CONTRACT = load_contract("openresponses_schema_contract")
 SCHEMAS = CONTRACT["schemas"]
@@ -195,3 +196,27 @@ def test_terminal_usage_matches_the_published_usage_schema() -> None:
     assert terminal["usage"]["total_tokens"] == (
         terminal["usage"]["input_tokens"] + terminal["usage"]["output_tokens"]
     )
+
+
+def test_detail_keys_with_no_schema_field_are_a_permitted_superset() -> None:
+    """The audio/image splits ride the details objects without violating the schema.
+
+    ``InputTokensDetails`` names only ``cached_tokens`` and does not set
+    ``additionalProperties: false``, which is what ``build_usage_payload`` relies
+    on when it merges a provider's other detail keys verbatim. Pin it: a spec
+    revision that closed the object would turn every audio turn into an invalid
+    body, and the parity test comparing two locally-built dicts could not see it.
+    """
+    usage = build_usage_payload(
+        input_tokens=210,
+        output_tokens=60,
+        input_details={"audio_tokens": 150, "image_tokens": 20},
+        output_details={"audio_tokens": 40},
+    )
+
+    problems: list[str] = []
+    check(usage, {"$ref": "#/components/schemas/Usage"}, "usage", problems, SCHEMAS)
+    assert not problems, "\n".join(problems)
+    assert usage["input_tokens_details"]["audio_tokens"] == 150
+    assert usage["input_tokens_details"]["image_tokens"] == 20
+    assert usage["output_tokens_details"]["audio_tokens"] == 40

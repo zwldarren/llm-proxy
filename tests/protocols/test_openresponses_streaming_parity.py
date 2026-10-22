@@ -65,6 +65,9 @@ def _usage(
     cached_tokens: int = 0,
     cache_write_tokens: int = 0,
     reasoning_tokens: int = 0,
+    audio_input_tokens: int = 0,
+    audio_output_tokens: int = 0,
+    image_input_tokens: int = 0,
 ) -> Usage:
     return Usage(
         input_tokens=input_tokens,
@@ -72,8 +75,15 @@ def _usage(
         total_tokens=total_tokens if total_tokens is not None else input_tokens + output_tokens,
         cache_read_input_tokens=cached_tokens,
         cache_creation_input_tokens=cache_write_tokens,
-        prompt_tokens_details=PromptTokensDetails(cached_tokens=cached_tokens),
-        completion_tokens_details=CompletionTokensDetails(reasoning_tokens=reasoning_tokens),
+        prompt_tokens_details=PromptTokensDetails(
+            cached_tokens=cached_tokens,
+            audio_tokens=audio_input_tokens or None,
+            image_tokens=image_input_tokens or None,
+        ),
+        completion_tokens_details=CompletionTokensDetails(
+            reasoning_tokens=reasoning_tokens,
+            audio_tokens=audio_output_tokens or None,
+        ),
     )
 
 
@@ -85,16 +95,27 @@ def _chat_usage(
     cached_tokens: int = 0,
     cache_write_tokens: int = 0,
     reasoning_tokens: int = 0,
+    audio_input_tokens: int = 0,
+    audio_output_tokens: int = 0,
+    image_input_tokens: int = 0,
 ) -> dict[str, Any]:
+    prompt_details: dict[str, Any] = {
+        "cached_tokens": cached_tokens,
+        "cache_write_tokens": cache_write_tokens,
+    }
+    if audio_input_tokens:
+        prompt_details["audio_tokens"] = audio_input_tokens
+    if image_input_tokens:
+        prompt_details["image_tokens"] = image_input_tokens
+    completion_details: dict[str, Any] = {"reasoning_tokens": reasoning_tokens}
+    if audio_output_tokens:
+        completion_details["audio_tokens"] = audio_output_tokens
     return {
         "prompt_tokens": input_tokens,
         "completion_tokens": output_tokens,
         "total_tokens": total_tokens,
-        "prompt_tokens_details": {
-            "cached_tokens": cached_tokens,
-            "cache_write_tokens": cache_write_tokens,
-        },
-        "completion_tokens_details": {"reasoning_tokens": reasoning_tokens},
+        "prompt_tokens_details": prompt_details,
+        "completion_tokens_details": completion_details,
     }
 
 
@@ -327,9 +348,67 @@ def _chat_completions_incomplete() -> Wire:
     )
 
 
+def _chat_completions_audio_details() -> Wire:
+    """An audio-capable model reports detail splits the canonical record keeps nested.
+
+    ``audio_tokens`` and ``image_tokens`` have no flat canonical scalar, so the
+    non-streaming body gets them from ``PromptTokensDetails`` while the streaming
+    snapshot has to fold them out of the wire's details block. Nothing carried
+    them across before, so one turn reported two different breakdowns.
+    """
+    return Wire(
+        frames=[
+            {
+                "id": "chatcmpl-4",
+                "model": MODEL,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": "Hello"},
+                        "finish_reason": None,
+                    }
+                ],
+            },
+            {
+                "id": "chatcmpl-4",
+                "model": MODEL,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            },
+            {
+                "id": "chatcmpl-4",
+                "model": MODEL,
+                "choices": [],
+                "usage": _chat_usage(
+                    input_tokens=210,
+                    output_tokens=60,
+                    total_tokens=270,
+                    audio_input_tokens=150,
+                    image_input_tokens=20,
+                    audio_output_tokens=40,
+                ),
+            },
+        ],
+        internal=InternalResponse(
+            id=RESPONSE_ID,
+            model=MODEL,
+            output=[TextBlock(text="Hello")],
+            finish_reason="stop",
+            usage=_usage(
+                input_tokens=210,
+                output_tokens=60,
+                total_tokens=270,
+                audio_input_tokens=150,
+                image_input_tokens=20,
+                audio_output_tokens=40,
+            ),
+        ),
+    )
+
+
 CASES = {
     "chat_completions_text": _chat_completions_text,
     "chat_completions_tool_call": _chat_completions_tool_call,
+    "chat_completions_audio_details": _chat_completions_audio_details,
     "gemini_text": _gemini_text,
     "anthropic_text": _anthropic_text,
     "chat_completions_incomplete": _chat_completions_incomplete,
@@ -431,3 +510,18 @@ def test_usage_totals_are_self_consistent(case: str) -> None:
             "cache_write_tokens",
         }
         assert "reasoning_tokens" in usage["output_tokens_details"]
+
+
+def test_detail_splits_without_a_canonical_scalar_reach_the_snapshot() -> None:
+    """``audio_tokens``/``image_tokens`` have no flat field on the canonical record.
+
+    They ride ``PromptTokensDetails``/``CompletionTokensDetails``, which only the
+    non-streaming formatter reads directly; the snapshot has to fold them out of
+    the wire's details block. Both effects are named here rather than left to the
+    equality assertion above, so a future reader can see what the case is for.
+    """
+    body = _terminal_snapshot(_chat_completions_audio_details())
+
+    assert body["usage"]["input_tokens_details"]["audio_tokens"] == 150
+    assert body["usage"]["input_tokens_details"]["image_tokens"] == 20
+    assert body["usage"]["output_tokens_details"]["audio_tokens"] == 40

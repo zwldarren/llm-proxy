@@ -17,6 +17,15 @@ This module is the cross-protocol counterpart to
 ``test_openresponses_streaming_parity.py``. Every protocol that has both a
 streaming and a non-streaming body should register a case here: a new protocol
 without one is a guarantee gap, not a covered path.
+
+What this module does **not** guarantee: it compares amounts, not field names,
+so a non-usage field that one path drops (a ``finish_reason`` mapping, an
+echoed ``stop_sequence``) passes here if both paths happen to lose it
+identically. Those are guarded by the wire-contract tests
+(``test_openai_wire_contract.py`` / ``test_anthropic_wire_contract.py``), which
+check the emitted body against the published schema instead of against another
+locally-built dict. Keep the two layers: this one for "both paths agree", the
+contracts for "the shape is the published one".
 """
 
 from collections.abc import Callable
