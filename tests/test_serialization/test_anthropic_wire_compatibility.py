@@ -429,8 +429,10 @@ def test_stream_stop_sequence_and_usage_details():
     assert '"stop_sequence":"STOP"' in sse
     assert '"thinking_tokens":3' in sse
     # service_tier belongs to the full Usage object (message_start), not to
-    # the terminal MessageDeltaUsage — it must not reach the stream here.
-    assert '"service_tier"' not in sse
+    # the terminal MessageDeltaUsage — it must not reach the terminal delta.
+    terminal = [block for block in sse.split("\n\n") if "message_delta" in block]
+    assert terminal
+    assert '"service_tier"' not in "".join(terminal)
     # cache keys ride the terminal message_delta usage (MessageDeltaUsage)
     assert '"cache_read_input_tokens":5' in sse
 

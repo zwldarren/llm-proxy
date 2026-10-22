@@ -10,99 +10,19 @@ The fixture is the schema closure of the events this endpoint emits, copied
 verbatim from the Open Responses OpenAPI (`tests/protocols/fixtures/
 openresponses_schema_contract.json` records the source URL and commit).
 
-Regenerate after a spec release::
-
-    curl -sSL <source URL from the fixture> > openapi.json
-
-then re-run the trim described by the fixture's ``note`` (walk ``$ref`` from the
-``*StreamingEvent`` schemas plus ``ResponseResource``/``Usage``/``ItemField``).
+Regenerate after a spec release with ``tests/protocols/fixtures/trim_schema.py``
+(the fixture records the source URL and commit it was trimmed from).
 """
 
-import json
-from pathlib import Path
-from typing import Any
-
-import orjson
 import pytest
+from schema_validation import check, load_contract, parse_sse
 
 from llm_proxy.protocols.openresponses.streaming import OpenResponsesStreamingTransformer
 
-FIXTURE = Path(__file__).parent / "fixtures" / "openresponses_schema_contract.json"
-CONTRACT = json.loads(FIXTURE.read_text(encoding="utf-8"))
-SCHEMAS: dict[str, Any] = CONTRACT["schemas"]
+CONTRACT = load_contract("openresponses_schema_contract")
+SCHEMAS = CONTRACT["schemas"]
 
-#: JSON type name -> Python types that satisfy it (``bool`` is an ``int``).
-_JSON_TYPES: dict[str, tuple[type, ...]] = {
-    "string": (str,),
-    "integer": (int,),
-    "number": (int, float),
-    "boolean": (bool,),
-    "array": (list,),
-    "object": (dict,),
-    "null": (type(None),),
-}
-
-
-def _events(stream: str) -> list[dict[str, Any]]:
-    parsed: list[dict[str, Any]] = []
-    for block in stream.split("\n\n"):
-        lines = block.split("\n")
-        data = [line[6:] for line in lines if line.startswith("data: ")]
-        if not data or data[0] == "[DONE]":
-            continue
-        event_type = [line[7:] for line in lines if line.startswith("event: ")]
-        parsed.append(
-            {"event": event_type[0] if event_type else None, "data": orjson.loads(data[0])}
-        )
-    return parsed
-
-
-def _check(value: Any, schema: dict[str, Any], path: str, problems: list[str]) -> None:
-    """Validate ``value`` against one schema node, collecting every mismatch."""
-    if not schema:
-        return
-    if "$ref" in schema:
-        _check(value, SCHEMAS[schema["$ref"].rsplit("/", 1)[-1]], path, problems)
-        return
-    for union in ("anyOf", "oneOf"):
-        branches = schema.get(union)
-        if branches:
-            best: list[str] | None = None
-            for branch in branches:
-                trial: list[str] = []
-                _check(value, branch, path, trial)
-                if not trial:
-                    return
-                if best is None or len(trial) < len(best):
-                    best = trial
-            problems.extend(best or [])
-            return
-    if "enum" in schema and value not in schema["enum"]:
-        problems.append(f"{path}: {value!r} not in {schema['enum']}")
-        return
-    expected = schema.get("type")
-    if expected is not None:
-        names = expected if isinstance(expected, list) else [expected]
-        allowed: tuple[type, ...] = ()
-        for name in names:
-            allowed += _JSON_TYPES[name]
-        # ``bool`` is an ``int`` subclass, but never a valid integer field.
-        if isinstance(value, bool) and "boolean" not in names:
-            problems.append(f"{path}: boolean where {names} expected")
-            return
-        if not isinstance(value, allowed):
-            problems.append(f"{path}: {type(value).__name__} where {names} expected")
-            return
-    if isinstance(value, dict):
-        for required in schema.get("required", []):
-            if required not in value:
-                problems.append(f"{path}: missing required field {required!r}")
-        for key, sub_schema in schema.get("properties", {}).items():
-            if key in value:
-                _check(value[key], sub_schema, f"{path}.{key}", problems)
-    if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        for index, item in enumerate(value):
-            _check(item, schema["items"], f"{path}[{index}]", problems)
+_events = parse_sse
 
 
 def _emit_completed_stream() -> str:
@@ -233,7 +153,7 @@ def test_emitted_events_satisfy_the_published_schema(stream_name: str) -> None:
         if schema is None:
             problems.append(f"event[{index}]: {payload.get('type')!r} is not a spec event")
             continue
-        _check(payload, schema, f"event[{index}]", problems)
+        check(payload, schema, f"event[{index}]", problems, SCHEMAS)
 
     assert not problems, "\n".join(problems)
 
@@ -263,7 +183,7 @@ def test_terminal_usage_matches_the_published_usage_schema() -> None:
     events = _events(_emit_completed_stream())
     terminal = events[-1]["data"]["response"]
     problems: list[str] = []
-    _check(terminal["usage"], {"$ref": "#/components/schemas/Usage"}, "usage", problems)
+    check(terminal["usage"], {"$ref": "#/components/schemas/Usage"}, "usage", problems, SCHEMAS)
     assert not problems, "\n".join(problems)
     # The OpenAI ResponseUsage carries both cache counters; Codex deserializes
     # ``cached_tokens`` and ``reasoning_tokens`` as required fields.

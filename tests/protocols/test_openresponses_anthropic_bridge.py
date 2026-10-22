@@ -94,9 +94,25 @@ class TestAnthropicFinalizeMessageDelta:
         assert deltas == [
             {
                 "type": "message_delta",
-                # Official terminal deltas always carry ``stop_sequence``.
-                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                "usage": {"output_tokens": 9},
+                # Official terminal deltas always carry ``stop_sequence``, and
+                # ``MessageDelta`` declares ``stop_details``/``container``
+                # required-nullable, so the keys are present as ``null``.
+                "delta": {
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "stop_details": None,
+                    "container": None,
+                },
+                # ``MessageDeltaUsage`` declares every counter; unknown ones are
+                # ``null`` rather than an omitted key.
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 9,
+                    "cache_creation_input_tokens": None,
+                    "cache_read_input_tokens": None,
+                    "output_tokens_details": None,
+                    "server_tool_use": None,
+                },
             }
         ]
 
@@ -108,7 +124,12 @@ class TestAnthropicFinalizeMessageDelta:
         transformer.capture_usage({"output_tokens": 3})
         events = _parse_sse_blocks(transformer.finalize())
         deltas = [d for name, d in events if name == "message_delta"]
-        assert deltas[0]["delta"] == {"stop_reason": "max_tokens", "stop_sequence": None}
+        assert deltas[0]["delta"] == {
+            "stop_reason": "max_tokens",
+            "stop_sequence": None,
+            "stop_details": None,
+            "container": None,
+        }
 
 
 # ---------------------------------------------------------------------------

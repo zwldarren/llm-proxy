@@ -16,14 +16,13 @@ from llm_proxy.models.content_blocks import ContentBlock
 from llm_proxy.models.finish_reasons import to_anthropic_stop_reason
 from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.models.types import Usage
+from llm_proxy.protocols.anthropic.usage_payload import build_usage_payload
 from llm_proxy.serialization.anthropic import (
     ANTHROPIC_USAGE_EXTENSION_KEYS,
-    normalize_service_tier_for_anthropic,
     parse_usage_and_provider_extras,
 )
 from llm_proxy.serialization.content_parsers import REDACTED_THINKING_TEXT
 from llm_proxy.serialization.usage import UsageAccumulator
-from llm_proxy.serialization.usage.folds import fold_deepseek_cache_hits
 from llm_proxy.streaming.accumulation import (
     CanonicalDelta,
     Coexistence,
@@ -42,47 +41,6 @@ from llm_proxy.streaming.transformer import (
 )
 
 
-def _cache_counters(usage: dict[str, Any]) -> tuple[int | None, int | None]:
-    """Read the canonical cache counters, tolerating the nested OpenAI dialect.
-
-    Canonical usage carries cache reads in the flat ``cache_read_input_tokens``;
-    OpenAI-family providers express the same fact as
-    ``prompt_tokens_details.cached_tokens`` (DeepSeek additionally uses the
-    top-level ``prompt_cache_hit_tokens``). Either expression has to become the
-    Anthropic wire's flat ``cache_read_input_tokens`` so ``input_tokens`` can be
-    emitted exclusive of it (see :func:`_exclusive_input_tokens`).
-    """
-    cache_read = usage.get("cache_read_input_tokens")
-    if cache_read is None:
-        details = usage.get("prompt_tokens_details")
-        cached = details.get("cached_tokens") if isinstance(details, dict) else None
-        cache_read = fold_deepseek_cache_hits(cached, usage.get("prompt_cache_hit_tokens"))
-    cache_creation = usage.get("cache_creation_input_tokens")
-    return cache_read, cache_creation
-
-
-#: Keys the official ``MessageDeltaUsage`` object defines (plus the beta
-#: counters that ride it). Anything else a canonical usage dict may carry — the
-#: OpenAI-dialect ``prompt_tokens_details``/``completion_tokens_details`` nested
-#: objects, ``total_tokens``, ``prompt_tokens``, … — has no field on the
-#: Anthropic wire and is dropped rather than leaked to strict clients.
-_MESSAGE_DELTA_USAGE_KEYS: frozenset[str] = frozenset(
-    {
-        "input_tokens",
-        "output_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_input_tokens",
-        "output_tokens_details",
-        "server_tool_use",
-        # Beta counters: fast-mode ``speed`` and compaction/server-side-fallback
-        # ``iterations``. Top-level token counts exclude compaction iterations,
-        # so dropping them would break per-iteration cost accounting.
-        "speed",
-        "iterations",
-    }
-)
-
-
 def _thinking_block_start() -> dict[str, Any]:
     """The official ``thinking`` block-start shape.
 
@@ -93,43 +51,15 @@ def _thinking_block_start() -> dict[str, Any]:
     return {"type": "thinking", "thinking": "", "signature": ""}
 
 
-def _exclusive_input_tokens(usage: dict[str, Any]) -> int:
-    """Canonical inclusive ``input_tokens`` → Anthropic's exclusive count.
-
-    The internal invariant makes ``input_tokens`` INCLUDE cache reads/writes
-    (the Anthropic wire reports them separately). Emitting the inclusive value
-    next to the cache counters makes any client that sums the three — Claude
-    Code does — count the cached prompt twice, inflating its usage display far
-    beyond the real total. Clamped at 0 so a provider violating the invariant
-    yields 0 instead of a negative count.
-    """
-    cache_read, cache_creation = _cache_counters(usage)
-    return max(0, (usage.get("input_tokens") or 0) - (cache_read or 0) - (cache_creation or 0))
-
-
 def _message_delta_usage(usage: dict) -> dict:
     """Shape the terminal ``message_delta`` usage block.
 
-    Only the keys the official ``MessageDeltaUsage`` defines are emitted
-    (``_MESSAGE_DELTA_USAGE_KEYS``): ``service_tier`` is valid on the full
-    ``Usage`` object alone (emitted in ``message_start``), and the canonical
-    channel's OpenAI-dialect members (``prompt_tokens_details``,
-    ``completion_tokens_details``, ``total_tokens``) have no field on the
-    Anthropic wire.
-
-    ``input_tokens`` is rewritten to the exclusive count: the delta usage
-    repeats the cumulative prompt accounting, and the wire invariant for that
-    field excludes the cache counters reported beside it.
+    Delegates to the single Anthropic usage builder, which emits the exclusive
+    ``input_tokens`` and every ``MessageDeltaUsage`` field (unknown counters as
+    ``null``). ``service_tier`` belongs to the full ``Usage`` object alone,
+    emitted on ``message_start``.
     """
-    result = {k: v for k, v in usage.items() if k in _MESSAGE_DELTA_USAGE_KEYS}
-    cache_read, cache_creation = _cache_counters(usage)
-    if cache_read is not None:
-        result["cache_read_input_tokens"] = cache_read
-    if cache_creation is not None:
-        result["cache_creation_input_tokens"] = cache_creation
-    if "input_tokens" in result:
-        result["input_tokens"] = _exclusive_input_tokens(usage)
-    return result
+    return build_usage_payload(usage, delta=True)
 
 
 class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
@@ -725,33 +655,13 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
 
     def _message_start(self, input_tokens: int = 0, output_tokens: int = 0) -> str:
         """Generate message_start event."""
-        # Anthropic's message_start.usage carries the full usage shape; fold
-        # in cache/server-tool keys already accumulated from the first chunk.
-        pending = self._pending_usage or {}
-        start_usage: dict[str, Any] = {"output_tokens": output_tokens}
-        for key in (
-            *ANTHROPIC_USAGE_EXTENSION_KEYS,
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-            "server_tool_use",
-        ):
-            value = pending.get(key)
-            if key == "service_tier":
-                # Official response enum only; OpenAI tiers fold or drop.
-                value = normalize_service_tier_for_anthropic(value)
-            if value is not None:
-                start_usage[key] = value
-        # Surface the nested OpenAI-dialect cache read on the wire too, then
-        # emit ``input_tokens`` exclusive of the cache counters (the internal
-        # count includes them; see _exclusive_input_tokens).
-        cache_read, cache_creation = _cache_counters(pending)
-        if cache_read is not None:
-            start_usage["cache_read_input_tokens"] = cache_read
-        if cache_creation is not None:
-            start_usage["cache_creation_input_tokens"] = cache_creation
-        start_usage["input_tokens"] = max(
-            0, input_tokens - (cache_read or 0) - (cache_creation or 0)
-        )
+        # Anthropic's message_start.usage carries the full usage shape. The
+        # builder owns the required-nullable fields, so what is not known yet
+        # (cache counters, thinking tokens, server-tool use) is ``null`` rather
+        # than an omitted key a client's generated type declares required.
+        pending = dict(self._pending_usage or {})
+        pending["input_tokens"] = input_tokens
+        pending["output_tokens"] = output_tokens
         message: dict[str, Any] = {
             "id": self.response_id,
             "type": "message",
@@ -760,7 +670,9 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             "content": [],
             "stop_reason": None,
             "stop_sequence": None,
-            "usage": start_usage,
+            "stop_details": None,
+            "container": None,
+            "usage": build_usage_payload(pending),
         }
         if self._pending_diagnostics is not None:
             # Cache-diagnostics beta: official streams attach ``diagnostics``
@@ -770,7 +682,17 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         return self._sse_event("message_start", {"type": "message_start", "message": message})
 
     def _content_block_start(self, index: int, block: dict[str, Any]) -> str:
-        """Generate content_block_start event."""
+        """Generate content_block_start event.
+
+        ``citations`` is required-nullable on a text block (a
+        ``citations_delta`` later fills the list in place), so the key is
+        always emitted. ``caller`` on a tool_use block defaults to
+        ``{"type": "direct"}`` and is *not* nullable, so it is only emitted when
+        the upstream reported one.
+        """
+        block = dict(block)
+        if block.get("type") == "text":
+            block.setdefault("citations", None)
         return self._sse_event(
             "content_block_start",
             {"type": "content_block_start", "index": index, "content_block": block},
@@ -796,12 +718,12 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
         # when one matched.
         delta["stop_sequence"] = self._pending_stop_sequence
         self._pending_stop_sequence = None
-        if self._pending_stop_details is not None:
-            delta["stop_details"] = self._pending_stop_details
-            self._pending_stop_details = None
-        if self._pending_container is not None:
-            delta["container"] = self._pending_container
-            self._pending_container = None
+        # ``MessageDelta`` declares both required-nullable: emit ``null`` when
+        # the upstream reported nothing instead of dropping the key.
+        delta["stop_details"] = self._pending_stop_details
+        self._pending_stop_details = None
+        delta["container"] = self._pending_container
+        self._pending_container = None
         if self._pending_safeguard_results is not None:
             # Server-side auto mode: Claude Code reads the classifier results
             # from the terminal message_delta's delta.
@@ -822,7 +744,7 @@ class AnthropicStreamingTransformer(PendingTerminalState, StreamingTransformer):
             "message_delta",
             {
                 "type": "message_delta",
-                "delta": {},
+                "delta": {"stop_details": None, "container": None},
                 "usage": usage,
             },
         )

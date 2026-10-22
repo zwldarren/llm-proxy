@@ -125,6 +125,10 @@ class OpenAIFormattingMixin:
             choice_entry: dict[str, Any] = {
                 "index": i,
                 "message": message,
+                # ``logprobs`` is required (nullable) on a Chat Completions
+                # choice. The spec defaults it to ``null``, but real OpenAI
+                # emits the key on every choice; match the upstream body.
+                "logprobs": None,
                 "finish_reason": finish_reason,
             }
             choices.append(choice_entry)

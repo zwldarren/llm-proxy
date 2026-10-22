@@ -105,6 +105,8 @@ the published schema.**
 - Native Responses passthrough is out of scope: it forwards the upstream's own
   snapshot verbatim, so the upstream's usage fidelity is what the client sees.
 - Endpoints with no streaming twin (embeddings, rerank, images, audio) have no
-  parity axis; only a schema contract can guard those, and none is vendored yet.
+  parity axis; their bodies are guarded by the wire-contract tests in
+  ADR-0043 instead. The custom ``rerank`` protocol has no external published
+  schema and stays covered by hand-written assertions.
 - The cross-protocol test compares amounts, not field names: a protocol may
   legitimately name the same fact differently, but it may not lose it.

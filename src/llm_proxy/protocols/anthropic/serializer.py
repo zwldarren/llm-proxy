@@ -10,9 +10,9 @@ from llm_proxy.models import (
     SystemMessage,
     ToolResultBlock,
 )
+from llm_proxy.protocols.anthropic.usage_payload import build_usage_payload, canonical_usage
 from llm_proxy.protocols.registry import register_protocol_serializer
 from llm_proxy.protocols.serializer_base import ProtocolSerializer
-from llm_proxy.serialization.anthropic import normalize_service_tier_for_anthropic
 from llm_proxy.serialization.anthropic.mixin import AnthropicContentMixin
 from llm_proxy.serialization.content_parsers import parse_reasoning_blocks
 
@@ -178,71 +178,23 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
             else "end_turn",
         }
 
-        usage_dict: dict[str, Any] = {}
-        if response.usage:
-            # Invariant: Usage.input_tokens INCLUDES cache tokens (the
-            # Anthropic wire format reports them separately). Clamp at 0
-            # so a provider violating the invariant yields 0 instead of a
-            # negative token count.
-            cache_read = response.usage.cache_read_input_tokens
-            # OpenAI-family providers express the cache-read fact only in the
-            # nested dialect; lift it so the wire reports the same split as the
-            # streaming formatter instead of folding it into ``input_tokens``.
-            if cache_read is None and response.usage.prompt_tokens_details is not None:
-                cache_read = response.usage.prompt_tokens_details.cached_tokens
-            cache_creation = response.usage.cache_creation_input_tokens
-            input_tokens = max(
-                0, response.usage.input_tokens - (cache_read or 0) - (cache_creation or 0)
-            )
-            usage_dict["input_tokens"] = input_tokens
-            usage_dict["output_tokens"] = response.usage.output_tokens
-            if cache_read is not None:
-                usage_dict["cache_read_input_tokens"] = cache_read
-            if cache_creation is not None:
-                usage_dict["cache_creation_input_tokens"] = cache_creation
-        else:
-            usage_dict["input_tokens"] = 0
-            usage_dict["output_tokens"] = 0
-        result["usage"] = usage_dict
-
-        if response.provider_info.get("cache_creation"):
-            result["usage"]["cache_creation"] = response.provider_info["cache_creation"]
-
-        if response.provider_info.get("inference_geo"):
-            result["usage"]["inference_geo"] = response.provider_info["inference_geo"]
-
-        if response.provider_info.get("server_tool_use"):
-            result["usage"]["server_tool_use"] = response.provider_info["server_tool_use"]
-
-        # Anthropic reports these inside ``usage`` (not top-level).
-        if response.provider_info.get("output_tokens_details"):
-            result["usage"]["output_tokens_details"] = response.provider_info[
-                "output_tokens_details"
-            ]
-        elif response.usage is not None:
-            # The canonical record keeps thinking tokens flat
-            # (``reasoning_tokens``); the Anthropic wire names them
-            # ``output_tokens_details.thinking_tokens``, which the streaming
-            # ``message_delta`` already emits. Fold it here too, or the same
-            # turn reports its reasoning only when streamed.
-            thinking = response.usage.reasoning_tokens
-            if thinking is None and response.usage.completion_tokens_details is not None:
-                thinking = response.usage.completion_tokens_details.reasoning_tokens
-            if thinking is not None:
-                result["usage"]["output_tokens_details"] = {"thinking_tokens": thinking}
-        if response.provider_info.get("service_tier"):
-            # Normalize onto the official response enum: OpenAI upstreams report
-            # their own tiers (auto/default/flex/scale) that have no place in
-            # the Anthropic usage object.
-            tier = normalize_service_tier_for_anthropic(response.provider_info["service_tier"])
-            if tier is not None:
-                result["usage"]["service_tier"] = tier
-
-        # Beta usage extensions (fast-mode, compaction/server-side-fallback).
-        if response.provider_info.get("speed") is not None:
-            result["usage"]["speed"] = response.provider_info["speed"]
-        if response.provider_info.get("iterations") is not None:
-            result["usage"]["iterations"] = response.provider_info["iterations"]
+        # One builder owns the Anthropic usage shape (see
+        # ``protocols/anthropic/usage_payload.py``): exclusive ``input_tokens``,
+        # the cache split, thinking tokens, and the required-nullable fields a
+        # client's generated types expect to be present.
+        usage_source: dict[str, Any] = canonical_usage(response.usage) if response.usage else {}
+        for key in (
+            "cache_creation",
+            "inference_geo",
+            "server_tool_use",
+            "output_tokens_details",
+            "service_tier",
+            "speed",
+            "iterations",
+        ):
+            if response.provider_info.get(key) is not None:
+                usage_source[key] = response.provider_info[key]
+        result["usage"] = build_usage_payload(usage_source)
 
         stop_seq = response.provider_info.get("stop_sequence")
         # Official messages always carry ``stop_sequence`` — ``null`` when no
@@ -250,11 +202,10 @@ class AnthropicProtocolSerializer(AnthropicContentMixin, ProtocolSerializer):
         # instead of only when one matched.
         result["stop_sequence"] = stop_seq
 
-        if response.provider_info.get("stop_details"):
-            result["stop_details"] = response.provider_info["stop_details"]
-
-        if response.provider_info.get("container"):
-            result["container"] = response.provider_info["container"]
+        # Both are required-nullable on ``Message``: the key must be present,
+        # so an unreported value is ``null``, never an omitted field.
+        result["stop_details"] = response.provider_info.get("stop_details")
+        result["container"] = response.provider_info.get("container")
 
         # Cache-diagnostics beta: meaningful ``null`` must survive, so key on
         # presence rather than truthiness.
