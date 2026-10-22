@@ -31,10 +31,10 @@ from llm_proxy.models.systemone import (
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
+from llm_proxy.serialization.providers.field_utils import as_count, reported_cost
 from llm_proxy.serialization.providers.field_utils import (
     extract_unknown_response_fields as _extract_unknown_fields,
 )
-from llm_proxy.serialization.providers.field_utils import is_int, reported_cost
 from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 from llm_proxy.streaming.transformer import StreamingTransformer
 
@@ -536,11 +536,11 @@ def _rerank_usage_echo(raw_usage: dict[str, Any]) -> dict[str, Any]:
     field rather than handed through.
     """
     echo: dict[str, Any] = {}
-    total_tokens = raw_usage.get("total_tokens")
-    if is_int(total_tokens):
+    total_tokens = as_count(raw_usage.get("total_tokens"))
+    if total_tokens is not None:
         echo["total_tokens"] = total_tokens
-    search_units = raw_usage.get("search_units")
-    if is_int(search_units):
+    search_units = as_count(raw_usage.get("search_units"))
+    if search_units is not None:
         echo["search_units"] = search_units
     cost = reported_cost(raw_usage)
     if cost is not None:

@@ -600,6 +600,25 @@ class TestRerank:
 
         assert result.results[0].relevant_spans == spans
 
+    def test_double_typed_counters_are_still_counts(self):
+        # Cohere declares ``ApiMeta`` counters as doubles, so a body may carry
+        # ``12.0``; the whole number is the count 12, not a reason to drop the
+        # usage record (which would bill the turn as zero tokens).
+        serializer = _serializer()
+        response = {
+            "results": [{"index": 0, "relevance_score": 0.9}],
+            "meta": {
+                "tokens": {"input_tokens": 12.0, "output_tokens": 0.0},
+                "billed_units": {"search_units": 1.0},
+            },
+        }
+
+        result = serializer.parse_provider_rerank_response(response, model="rerank-v5.0-pro")
+
+        assert result.usage is not None
+        assert result.usage.input_tokens == 12
+        assert result.provider_info["rerank_usage"] == {"total_tokens": 12, "search_units": 1}
+
 
 class TestResponseContentForms:
     def test_a_bare_string_content_is_read_as_one_text_block(self):

@@ -44,6 +44,25 @@ def is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def as_count(value: Any) -> int | None:
+    """A wire-reported count as an int, or ``None`` when it is not one.
+
+    Cohere declares its ``ApiMeta`` counters as *doubles*
+    (``tokens.input_tokens``, ``billed_units.search_units``), so a JSON body may
+    carry ``192.0`` where every other provider sends ``192``. A whole float is
+    the same count and is accepted; a fractional one is not a token count and is
+    rejected, as is a ``bool`` (an ``int`` subclass that would otherwise read as
+    ``1``).
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
 def reported_cost(usage: Any) -> float | None:
     """Return the billed cost reported in an OpenRouter-style ``usage`` object.
 
@@ -80,6 +99,7 @@ def extract_unknown_response_fields(
 
 __all__ = [
     "INTERNAL_EXTRA_KEYS",
+    "as_count",
     "extract_extra_fields",
     "extract_unknown_response_fields",
     "is_int",

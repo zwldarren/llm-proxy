@@ -655,6 +655,18 @@ class TestCohereDialect:
     def test_a_block_with_no_counters_is_not_a_zero_usage(self) -> None:
         assert parse_usage("cohere", {"id": "c14c"}) is None
 
+    def test_double_typed_counters_are_still_counts(self) -> None:
+        # ``ApiMetaTokens.input_tokens``/``output_tokens`` are declared as
+        # *doubles* (docs.cohere.com/reference/chat), so a body may carry
+        # ``12.0``. Reading only ints would drop the whole record and bill the
+        # turn as zero tokens; a fractional number is still not a count.
+        usage = parse_usage(
+            "cohere", {"meta": {"tokens": {"input_tokens": 12.0, "output_tokens": 9.0}}}
+        )
+
+        assert usage == Usage(input_tokens=12, output_tokens=9, total_tokens=21)
+        assert parse_usage("cohere", {"meta": {"tokens": {"input_tokens": 1.5}}}) is None
+
 
 class TestRerankDialect:
     """The shared ``/rerank`` block: one prompt-side count, search units, cost."""

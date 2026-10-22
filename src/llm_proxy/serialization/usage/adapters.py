@@ -66,6 +66,27 @@ def _positive_int(value: Any) -> int | None:
     return count if count is not None and count > 0 else None
 
 
+def _count(value: Any) -> int | None:
+    """A count, tolerating the whole *floats* a double-typed counter produces.
+
+    Cohere declares its ``ApiMeta`` counters as doubles
+    (``tokens.input_tokens``, ``billed_units.search_units``), so a JSON body may
+    carry ``192.0`` where every other dialect sends ``192``; without this a
+    Cohere turn's whole usage record would be dropped. A fractional number is
+    not a token count.
+
+    The provider-side echo of the same block reads it with
+    ``serialization.providers.field_utils.as_count``; this is the usage-intake
+    copy, kept beside ``_int`` so this module needs no provider-layer import.
+    """
+    count = _int(value)
+    if count is not None:
+        return count
+    if isinstance(value, float) and not isinstance(value, bool) and value.is_integer():
+        return int(value)
+    return None
+
+
 def _positive_float(value: Any) -> float | None:
     """A positive number the wire actually reported; a bool is not a price."""
     if isinstance(value, bool) or not isinstance(value, int | float):
@@ -560,18 +581,18 @@ def _parse_cohere(
         return None
 
     tokens = _as_dict(usage.get("tokens")) or {}
-    input_tokens = _int(tokens.get("input_tokens"))
-    output_tokens = _int(tokens.get("output_tokens"))
+    input_tokens = _count(tokens.get("input_tokens"))
+    output_tokens = _count(tokens.get("output_tokens"))
     if input_tokens is None and output_tokens is None:
         billed = _as_dict(usage.get("billed_units")) or {}
-        input_tokens = _int(billed.get("input_tokens"))
-        output_tokens = _int(billed.get("output_tokens"))
+        input_tokens = _count(billed.get("input_tokens"))
+        output_tokens = _count(billed.get("output_tokens"))
     if input_tokens is None and output_tokens is None:
         return None
 
     input_tokens = input_tokens or 0
     output_tokens = output_tokens or 0
-    cached_tokens = _int(usage.get("cached_tokens"))
+    cached_tokens = _count(usage.get("cached_tokens"))
     return Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -606,7 +627,7 @@ def _parse_rerank(
     block = _as_dict(payload.get("usage"))
     if block is None:
         return None
-    total_tokens = _int(block.get("total_tokens"))
+    total_tokens = _count(block.get("total_tokens"))
     if total_tokens is None:
         return None
     return Usage(

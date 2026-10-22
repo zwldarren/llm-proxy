@@ -45,7 +45,7 @@ from llm_proxy.providers.cohere.conversation import CohereConversationMixin
 from llm_proxy.providers.cohere.response_parser import CohereResponseParserMixin
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.providers.base import ProviderSerializer
-from llm_proxy.serialization.providers.field_utils import is_int, reported_cost
+from llm_proxy.serialization.providers.field_utils import as_count, reported_cost
 from llm_proxy.serialization.providers.registry import register_provider_serializer
 from llm_proxy.serialization.usage import parse_usage as parse_wire_usage
 
@@ -439,15 +439,18 @@ def _cohere_usage_echo(meta: dict[str, Any]) -> dict[str, Any]:
     echo: dict[str, Any] = {}
     tokens = meta.get("tokens")
     if isinstance(tokens, dict):
-        input_tokens = tokens.get("input_tokens")
-        output_tokens = tokens.get("output_tokens")
-        if is_int(input_tokens) and is_int(output_tokens):
+        # Cohere declares both counters as *doubles*, so a body may carry
+        # ``192.0``; ``as_count`` reads a whole float as the same count.
+        input_tokens = as_count(tokens.get("input_tokens"))
+        output_tokens = as_count(tokens.get("output_tokens"))
+        if input_tokens is not None and output_tokens is not None:
             echo["total_tokens"] = input_tokens + output_tokens
-        elif is_int(input_tokens):
+        elif input_tokens is not None:
             echo["total_tokens"] = input_tokens
     billed = meta.get("billed_units")
-    if isinstance(billed, dict) and is_int(billed.get("search_units")):
-        echo["search_units"] = billed["search_units"]
+    search_units = as_count(billed.get("search_units")) if isinstance(billed, dict) else None
+    if search_units is not None:
+        echo["search_units"] = search_units
     cost = reported_cost(meta)
     if cost is not None:
         echo["cost"] = cost
