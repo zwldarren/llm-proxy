@@ -916,10 +916,27 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         """
         events = ""
 
+        # A truncated turn's last open item ends in the terminal ``incomplete``
+        # state; the spec requires such an item to be the last item emitted and
+        # the response to be incomplete. The non-streaming formatter applies the
+        # same rule, and the two bodies must agree for the same response
+        # (tests/protocols/test_openresponses_streaming_parity.py).
+        truncation_reason = incomplete_reason_from_finish(finish_reason)
+        open_indices = [
+            idx for idx in self.state.pending_items if idx not in self.state.closed_items
+        ]
+        last_open_index = max(open_indices) if open_indices else None
+        done_status = "completed"
+
         for item_idx, item in sorted(self.state.pending_items.items()):
             if item_idx in self.state.closed_items:
                 continue
 
+            done_status = (
+                "incomplete"
+                if truncation_reason is not None and item_idx == last_open_index
+                else "completed"
+            )
             item_id = item["id"]
             item_type = item["type"]
 
@@ -939,7 +956,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     item_id=item_id,
                     item_index=item_idx,
                     item_type=item_type,
-                    status="completed",
+                    status=done_status,
                 )
             elif item_type in ("custom_tool_call", "tool_search_call"):
                 if item_idx in self.state.web_search_tool_indices:
@@ -948,7 +965,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     item_id=item_id,
                     item_index=item_idx,
                     item_type=item_type,
-                    status="completed",
+                    status=done_status,
                 )
             elif item_type == "web_search_call":
                 if "action" not in item:
@@ -967,7 +984,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     item_id=item_id,
                     item_index=item_idx,
                     item_type=item_type,
-                    status="completed",
+                    status=done_status,
                 )
             else:
                 accumulated = self.state.accumulated_text.get(key, "")
@@ -994,7 +1011,7 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
                     item_id=item_id,
                     item_index=item_idx,
                     item_type=item_type,
-                    status="completed",
+                    status=done_status,
                     content_type=content_type,
                     text=accumulated,
                     annotations=self.state.accumulated_annotations.get(key),

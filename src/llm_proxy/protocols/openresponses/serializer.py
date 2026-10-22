@@ -55,6 +55,7 @@ from llm_proxy.models.params import GenerationParams, OpenAISpecificParams
 from llm_proxy.models.tools import is_web_search_tool_name
 from llm_proxy.models.types import ResponseFormat
 from llm_proxy.protocols.openresponses.schemas import ResponsesRequest
+from llm_proxy.protocols.openresponses.usage_payload import build_usage_payload
 from llm_proxy.protocols.registry import register_protocol_serializer
 from llm_proxy.protocols.serializer_base import ProtocolSerializer
 from llm_proxy.routing.message_extract import function_call_output_to_text
@@ -1464,40 +1465,18 @@ def _convert_usage(usage: dict[str, Any] | None) -> dict[str, Any]:
     if not usage:
         usage = {}
 
-    input_tokens = usage.get("prompt_tokens", 0)
-    output_tokens = usage.get("completion_tokens", 0)
-    total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
-
     # Spec: all five fields are required on ResponseResource.usage, including
-    # both details objects (with their own required inner fields), so always
-    # emit them with zero-value defaults when the provider did not supply them.
+    # both details objects (with their own required inner fields), so the
+    # builder supplies zero-value defaults the provider details then override.
     input_details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
-    result: dict[str, Any] = {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-        "input_tokens_details": {
-            "cached_tokens": 0,
-            # OpenAI's ResponseUsage carries both cache counters on every
-            # response (its SDK model declares both as required); the spec's
-            # InputTokensDetails only names ``cached_tokens``, so the extra key
-            # is a permitted superset for OpenResponses clients.
-            "cache_write_tokens": 0,
-        },
-    }
-    if isinstance(input_details, dict):
-        filtered = {k: v for k, v in input_details.items() if v is not None}
-        result["input_tokens_details"].update(filtered)
-
     output_details = usage.get("completion_tokens_details") or usage.get("output_tokens_details")
-    result["output_tokens_details"] = {
-        "reasoning_tokens": 0,
-    }
-    if isinstance(output_details, dict):
-        filtered = {k: v for k, v in output_details.items() if v is not None}
-        result["output_tokens_details"].update(filtered)
-
-    return result
+    return build_usage_payload(
+        input_tokens=usage.get("prompt_tokens") or 0,
+        output_tokens=usage.get("completion_tokens") or 0,
+        total_tokens=usage.get("total_tokens"),
+        input_details=input_details if isinstance(input_details, dict) else None,
+        output_details=output_details if isinstance(output_details, dict) else None,
+    )
 
 
 def _content_blocks_to_text(blocks: list[Any]) -> str:

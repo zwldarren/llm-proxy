@@ -16,6 +16,8 @@ import secrets
 import time
 from typing import Any
 
+from llm_proxy.protocols.openresponses.usage_payload import build_usage_payload
+
 _COMPACTION_MARKER = "llm-proxy-compaction:v1:"
 
 
@@ -71,13 +73,7 @@ def build_compaction_response(
         "object": "response.compaction",
         "output": [compaction_item],
         "created_at": created_at or int(time.time()),
-        "usage": {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
-            "output_tokens_details": {"reasoning_tokens": 0},
-        },
+        "usage": build_usage_payload(),
     }
 
 

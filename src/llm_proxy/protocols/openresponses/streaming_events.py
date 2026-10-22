@@ -12,6 +12,7 @@ import orjson
 
 from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_output
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.protocols.openresponses.usage_payload import build_usage_payload
 
 logger = get_logger(__name__)
 
@@ -77,6 +78,10 @@ def _build_openresponses_response(
     usage_none: bool = False,
     error: dict[str, Any] | None = None,
     store: bool = False,
+    # Required (nullable) field in the official Response schema; the
+    # non-streaming formatter always emits it, so the snapshot must too
+    # (test_openresponses_streaming_parity.py compares the two bodies).
+    access_programs: Any | None = None,
     previous_response_id: str | None = None,
     instructions: str | None = None,
     tools: list[dict[str, Any]] | None = None,
@@ -101,16 +106,13 @@ def _build_openresponses_response(
     if usage_none:
         usage: dict[str, Any] | None = None
     else:
-        usage = {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "input_tokens_details": {
-                "cached_tokens": cached_tokens,
-                "cache_write_tokens": cache_write_tokens,
-            },
-            "output_tokens_details": {"reasoning_tokens": reasoning_tokens},
-        }
+        usage = build_usage_payload(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
+            reasoning_tokens=reasoning_tokens,
+        )
     return {
         "id": response_id,
         "object": "response",
@@ -137,6 +139,7 @@ def _build_openresponses_response(
         "max_output_tokens": max_output_tokens,
         "max_tool_calls": max_tool_calls,
         "store": store,
+        "access_programs": access_programs,
         "background": background,
         "service_tier": service_tier,
         "metadata": metadata or {},
@@ -986,13 +989,20 @@ class StreamingEventFactory:
         Returns:
             SSE event string
         """
+        output = self._build_final_output()
+        if output:
+            # Spec: an item that ends in a terminal incomplete state MUST be the
+            # last item emitted, and the containing response MUST be incomplete.
+            # ``serializer.format_response`` applies the same rule to the
+            # non-streaming body; the snapshot must agree with it.
+            output[-1]["status"] = "incomplete"
         response_payload = _build_openresponses_response(
             response_id=self.response_id,
             created_at=self.state.created_at,
             completed_at=int(time.time()),
             status="incomplete",
             model=self.model,
-            output=self._build_final_output(),
+            output=output,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             incomplete_details={"reason": reason},
