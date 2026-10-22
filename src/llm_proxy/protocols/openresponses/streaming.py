@@ -4,6 +4,7 @@ Converts OpenAI streaming chunks to OpenResponses semantic events.
 """
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,6 +81,45 @@ def _web_search_error_fields(results: list[dict[str, Any] | str]) -> tuple[str, 
     return WEB_SEARCH_ERROR_FALLBACK
 
 
+#: Input-detail keys the snapshot emits from their own canonical scalar on the
+#: state. Every other key a provider reports is carried verbatim, because
+#: ``serializer._build_usage`` hands the provider's whole details block to the
+#: non-streaming client body and ``build_usage_payload`` merges it as-is.
+_CANONICAL_INPUT_DETAILS: frozenset[str] = frozenset({"cached_tokens", "cache_write_tokens"})
+_CANONICAL_OUTPUT_DETAILS: frozenset[str] = frozenset({"reasoning_tokens"})
+
+
+def _reported_count(value: Any) -> int | None:
+    """A count the wire actually reported; a bool is not a count.
+
+    The non-streaming body gets its details from ``asdict(PromptTokensDetails)``
+    (typed ints), so a wire field carrying ``true`` must not become the count 1
+    on the streaming side alone.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _extra_details(block: Any, canonical: frozenset[str]) -> dict[str, int]:
+    """The detail keys ``block`` reports that have no canonical scalar of their own.
+
+    ``audio_tokens``, ``image_tokens``, ``text_tokens``, ``video_tokens`` and the
+    prediction-token counters are facts the non-streaming formatter emits inside
+    the client's details object; they have no scalar on the canonical ``Usage``
+    record, so nothing else carries them to the streaming snapshot. Dropping them
+    here is the stream/non-stream drift this state exists to prevent.
+    """
+    if not isinstance(block, Mapping):
+        return {}
+    extra: dict[str, int] = {}
+    for key, value in block.items():
+        count = _reported_count(value)
+        if key not in canonical and count is not None:
+            extra[key] = count
+    return extra
+
+
 @dataclass
 class OpenResponsesStreamingState:
     """Stateful context for OpenResponses streaming transformations."""
@@ -97,8 +137,12 @@ class OpenResponsesStreamingState:
     output_tokens: int = 0
     cached_tokens: int = 0
     cache_write_tokens: int = 0
-    audio_input_tokens: int = 0
-    audio_output_tokens: int = 0
+    # Provider detail keys with no canonical scalar (the audio/image/text/video
+    # token splits, the prediction-token counters). Merged into the snapshot's
+    # ``input_tokens_details`` / ``output_tokens_details`` so both paths report
+    # the same breakdown (``build_usage_payload``).
+    input_details: dict[str, int] = field(default_factory=dict)
+    output_details: dict[str, int] = field(default_factory=dict)
     reasoning_tokens: int = 0
     is_done: bool = False
     pending_items: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -748,11 +792,13 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         self.state.cache_write_tokens = (
             input_details.get("cache_write_tokens", self.state.cache_write_tokens) or 0
         )
+        self.state.input_details.update(_extra_details(input_details, _CANONICAL_INPUT_DETAILS))
 
         output_details = usage.get("output_tokens_details") or {}
         self.state.reasoning_tokens = (
             output_details.get("reasoning_tokens", self.state.reasoning_tokens) or 0
         )
+        self.state.output_details.update(_extra_details(output_details, _CANONICAL_OUTPUT_DETAILS))
 
     def _transform_chat_completions_chunk(self, data: dict[str, Any]) -> str:
         """Handle a Chat Completions format chunk."""
@@ -847,15 +893,13 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             cache_write = usage.get("cache_creation_input_tokens")
         if cache_write is not None:
             self.state.cache_write_tokens = cache_write or 0
-        audio_input = ptd.get("audio_tokens")
-        if audio_input is not None:
-            self.state.audio_input_tokens = audio_input or 0
+        # Detail facts with no canonical scalar (audio/image/text/video splits)
+        # are emitted by the non-streaming body, so they must reach the snapshot.
+        self.state.input_details.update(_extra_details(ptd, _CANONICAL_INPUT_DETAILS))
 
         ctd = usage.get("completion_tokens_details")
         ctd = ctd if isinstance(ctd, dict) else {}
-        audio_output = ctd.get("audio_tokens")
-        if audio_output is not None:
-            self.state.audio_output_tokens = audio_output or 0
+        self.state.output_details.update(_extra_details(ctd, _CANONICAL_OUTPUT_DETAILS))
         reasoning = ctd.get("reasoning_tokens")
         if reasoning is None:
             reasoning = usage.get("reasoning_tokens")

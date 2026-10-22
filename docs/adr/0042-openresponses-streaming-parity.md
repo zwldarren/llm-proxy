@@ -97,6 +97,15 @@ the published schema.**
 
 - A new usage counter, a renamed echo field, or a terminal-status change is a
   two-path change now, and the parity test fails if only one path was edited.
+- The snapshot carries every detail key the wire reports, not only the three
+  counters that have a canonical scalar. `audio_tokens`, `image_tokens`,
+  `text_tokens` and the prediction counters ride
+  `PromptTokensDetails`/`CompletionTokensDetails`, which only the non-streaming
+  formatter reads directly; the transformer folds them out of the wire's
+  details block into `state.input_details`/`output_details` and the builder
+  merges them. Before that an audio turn reported two different breakdowns
+depending on the transport — the same drift this ADR is about, and invisible
+  because no parity case carried a detail key.
 - The parity test compares semantics, not bytes: item ids, `created_at`,
   `completed_at` and empty `logprobs` legitimately differ.
 - The contract test only covers the event families the proxy emits. A new

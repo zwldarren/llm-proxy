@@ -6,6 +6,7 @@ concerns from streaming orchestration.
 """
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
 import orjson
@@ -75,6 +76,8 @@ def _build_openresponses_response(
     cached_tokens: int = 0,
     cache_write_tokens: int = 0,
     reasoning_tokens: int = 0,
+    input_details: Mapping[str, Any] | None = None,
+    output_details: Mapping[str, Any] | None = None,
     usage_none: bool = False,
     error: dict[str, Any] | None = None,
     store: bool = False,
@@ -112,6 +115,8 @@ def _build_openresponses_response(
             cached_tokens=cached_tokens,
             cache_write_tokens=cache_write_tokens,
             reasoning_tokens=reasoning_tokens,
+            input_details=input_details,
+            output_details=output_details,
         )
     return {
         "id": response_id,
@@ -911,6 +916,8 @@ class StreamingEventFactory:
             cached_tokens=self.state.cached_tokens,
             cache_write_tokens=self.state.cache_write_tokens,
             reasoning_tokens=self.state.reasoning_tokens,
+            input_details=self.state.input_details,
+            output_details=self.state.output_details,
             store=self.state.store,
             **self._echo_kwargs(),
         )
@@ -1010,6 +1017,8 @@ class StreamingEventFactory:
             cached_tokens=self.state.cached_tokens,
             cache_write_tokens=self.state.cache_write_tokens,
             reasoning_tokens=self.state.reasoning_tokens,
+            input_details=self.state.input_details,
+            output_details=self.state.output_details,
             store=self.state.store,
             **self._echo_kwargs(),
         )
