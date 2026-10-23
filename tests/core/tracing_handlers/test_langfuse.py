@@ -5,6 +5,28 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm_proxy.core.request_type import RequestType
+from llm_proxy.models import (
+    ImageData,
+    ImageEditSource,
+    ImageSize,
+    InternalDecisionRequest,
+    InternalDecisionResponse,
+    InternalImageEditRequest,
+    InternalImageRequest,
+    InternalImageResponse,
+    InternalRerankRequest,
+    InternalRerankResponse,
+    InternalSpeechRequest,
+    InternalSpeechResponse,
+    InternalSystemOneRequest,
+    InternalSystemOneResponse,
+    InternalTranscriptionRequest,
+    InternalTranscriptionResponse,
+    InternalTranslationRequest,
+    InternalTranslationResponse,
+    RerankDocument,
+    RerankResult,
+)
 from llm_proxy.models.types import (
     CompletionTokensDetails,
     PromptTokensDetails,
@@ -13,12 +35,29 @@ from llm_proxy.models.types import (
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.tracing.handlers.providers.langfuse import LangfuseTracingHandler
 from llm_proxy.observability.tracing.handlers.providers.langfuse.attributes import (
+    _endpoint_display_name,
+    build_audio_transcript_input_data,
+    build_audio_transcript_output_data,
     build_cost_details,
+    build_decisions_input_data,
+    build_decisions_output_data,
+    build_embedding_input_data,
+    build_embedding_output_data,
+    build_embedding_usage_details,
+    build_image_input_data,
+    build_image_output_data,
     build_metadata,
     build_request_input_data,
+    build_rerank_input_data,
+    build_rerank_output_data,
     build_response_output_data,
+    build_speech_input_data,
+    build_speech_output_data,
+    build_systemone_input_data,
+    build_systemone_output_data,
     build_usage_details,
     extract_tool_uses,
+    observation_profile,
 )
 
 
@@ -87,6 +126,35 @@ def _make_streaming_request():
     request = _make_request_with_conversation()
     request.stream = True
     return request
+
+
+def _make_embedding_request(texts: str | list[str] | None = None):
+    """Build a mock InternalEmbeddingRequest: no conversation, input is the text."""
+    request = MagicMock()
+    request.conversation = None
+    request.model = "gemini-embedding-001"
+    request.request_type = RequestType.EMBEDDING
+    request.stream = False
+    request.tools = None
+    # ``None`` keeps ``build_model_parameters`` from reading MagicMock fields.
+    request.params = None
+    request.input = ["hello world"] if texts is None else texts
+    return request
+
+
+def _make_embedding_response(count: int = 2, dimensions: int = 768):
+    """Build a mock InternalEmbeddingResponse carrying ``count`` vectors."""
+    response = MagicMock()
+    response.output = []
+    response.model = "gemini-embedding-001"
+    data = []
+    for index in range(count):
+        item = MagicMock()
+        item.index = index
+        item.embedding = [float(index * 1000 + offset) for offset in range(dimensions)]
+        data.append(item)
+    response.data = data
+    return response
 
 
 class TestLangfuseTracingHandler:
@@ -441,6 +509,394 @@ class TestLangfuseTracingHandler:
         assert handler.enabled is False
 
 
+class TestLangfuseEmbeddingObservations:
+    """Embedding requests are their own observation type, with content.
+
+    A Langfuse ``embedding`` observation carries the embedded text as input and
+    the response shape as output; without that the trace of a retrieval
+    pipeline shows a generation with no content at all.
+    """
+
+    async def test_embedding_request_opens_embedding_observation(self, mock_client, mock_propagate):
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_embedding_request(["hello world", "second text"])
+        context = EventContext(
+            request_id="req-emb-1",
+            trace_id="trace-1",
+            model="gemini-embedding-001",
+            request_type=RequestType.EMBEDDING,
+            metadata={"endpoint": "/v1/embeddings"},
+        )
+
+        await handler.on_request_start(request, context)
+
+        call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
+        assert call_kwargs["as_type"] == "embedding"
+        assert call_kwargs["name"] == "embeddings"
+        assert call_kwargs["model"] == "gemini-embedding-001"
+        assert call_kwargs["input"] == ["hello world", "second text"]
+        assert call_kwargs["end_on_exit"] is False
+
+    async def test_chat_request_keeps_generation_type(self, mock_client, mock_propagate):
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_request_with_conversation()
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            request_type=RequestType.CHAT,
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(request, context)
+
+        assert mock_client.start_as_current_observation.call_args.kwargs["as_type"] == "generation"
+
+    async def test_request_type_falls_back_to_the_request(self, mock_client, mock_propagate):
+        """A bare event context (defaults to CHAT) must not hide an embedding."""
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_embedding_request("single text")
+        context = EventContext(
+            request_id="req-emb-2",
+            trace_id="trace-1",
+            model="gemini-embedding-001",
+            metadata={"endpoint": "/v1/embeddings"},
+        )
+
+        await handler.on_request_start(request, context)
+
+        call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
+        assert call_kwargs["as_type"] == "embedding"
+        assert call_kwargs["input"] == "single text"
+
+    async def test_on_request_end_records_embedding_output(self, mock_client):
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_embedding_request()
+        response = _make_embedding_response(count=12, dimensions=768)
+        context = EventContext(
+            request_id="req-emb-3",
+            trace_id="trace-1",
+            model="gemini-embedding-001",
+            request_type=RequestType.EMBEDDING,
+            # Gemini embeddings bill input tokens only: no output bucket.
+            usage=Usage(input_tokens=9),
+            metadata={"endpoint": "/v1/embeddings"},
+        )
+
+        await handler.on_request_start(request, context)
+        await handler.on_request_end(request, response, context)
+
+        last_update_kwargs = gen.update.call_args_list[-1].kwargs
+        output = last_update_kwargs["output"]
+        assert output["count"] == 12
+        assert output["dimensions"] == 768
+        assert output["model"] == "gemini-embedding-001"
+        assert output["preview_truncated"] is True
+        assert len(output["embeddings"]) == 5
+        assert output["embeddings"][0]["preview"] == [float(i) for i in range(8)]
+        assert last_update_kwargs["usage_details"] == {"input": 9, "total": 9}
+        # Embeddings never produce tool observations.
+        gen.start_observation.assert_not_called()
+        gen.end.assert_called_once()
+
+
+class TestLangfuseObservationProfiles:
+    """Every request type the pipeline serves has a profile with content."""
+
+    def test_every_request_type_has_a_profile(self):
+        for request_type in RequestType:
+            profile = observation_profile(request_type)
+            assert profile.build_input is not None
+            assert profile.build_output is not None
+
+    def test_only_embedding_uses_its_own_observation_type(self):
+        assert observation_profile(RequestType.EMBEDDING).as_type == "embedding"
+        for request_type in RequestType:
+            if request_type is not RequestType.EMBEDDING:
+                # Langfuse prices usage/cost on generation and embedding only.
+                assert observation_profile(request_type).as_type == "generation"
+
+    def test_unknown_or_missing_type_falls_back_to_a_metadata_only_profile(self):
+        default = observation_profile(None)
+        assert observation_profile("not-a-request-type") is default
+        assert observation_profile(object()) is default
+        assert default.as_type == "generation"
+        assert default.build_input(MagicMock()) is None
+        assert default.build_output(MagicMock()) is None
+
+    def test_wire_strings_resolve_like_enum_members(self):
+        assert observation_profile("rerank") is observation_profile(RequestType.RERANK)
+
+    def test_endpoint_display_name_ignores_version_and_alias_segments(self):
+        assert _endpoint_display_name("/v1/rerank") == "rerank"
+        assert _endpoint_display_name("/v2/rerank") == "rerank"
+        assert _endpoint_display_name("/v1/v1/chat/completions") == "chat completions"
+        assert _endpoint_display_name("/v1/v1/decisions") == "decisions"
+        assert _endpoint_display_name("/v1/audio/transcriptions") == "audio transcriptions"
+
+
+class TestLangfuseNonConversationPayloads:
+    """Rerank, images, audio, systemone and decisions carry their own content."""
+
+    def test_rerank_input_carries_query_and_documents(self):
+        request = InternalRerankRequest(
+            model="rerank-v3.5",
+            query="what is a proxy?",
+            documents=["a", RerankDocument(text="b", image="data:image/png;base64,AAAA")],
+            top_n=1,
+        )
+        data = build_rerank_input_data(request)
+        assert data["query"] == "what is a proxy?"
+        assert data["documents"][0] == "a"
+        # A structured document keeps its keys; an inline image becomes a marker.
+        assert data["documents"][1]["text"] == "b"
+        assert data["documents"][1]["image"] == "<data-uri 26 chars>"
+        assert data["top_n"] == 1
+
+    def test_rerank_input_caps_and_truncates_documents(self):
+        request = InternalRerankRequest(model="rerank-v3.5", query="q", documents=["x" * 5000] * 50)
+        data = build_rerank_input_data(request)
+        assert len(data["documents"]) == 20
+        assert data["document_count"] == 50
+        assert data["documents_truncated"] is True
+        assert data["documents"][0].startswith("x" * 100)
+        assert "truncated" in data["documents"][0]
+
+    def test_rerank_output_reports_the_ranking(self):
+        response = InternalRerankResponse(
+            model="rerank-v3.5",
+            results=[RerankResult(index=1, relevance_score=0.93)],
+            id="resp_1",
+        )
+        data = build_rerank_output_data(response)
+        assert data["results"] == [{"index": 1, "relevance_score": 0.93}]
+        assert data["count"] == 1
+        assert data["model"] == "rerank-v3.5"
+        assert data["id"] == "resp_1"
+        assert "preview_truncated" not in data
+
+    def test_rerank_output_none_without_results(self):
+        assert build_rerank_output_data(InternalRerankResponse(model="m", results=[])) is None
+
+    def test_image_input_carries_prompt_and_parameters(self):
+        request = InternalImageRequest(
+            model="gpt-image-1", prompt="a cat", n=2, size=ImageSize(1024, 768)
+        )
+        data = build_image_input_data(request)
+        assert data["prompt"] == "a cat"
+        assert data["n"] == 2
+        assert data["size"] == "1024x768"
+
+    def test_image_edit_input_never_carries_image_bytes(self):
+        request = InternalImageEditRequest(
+            model="gpt-image-1",
+            prompt="add a hat",
+            images=[ImageEditSource(file=b"PNGDATA", filename="a.png", content_type="image/png")],
+            mask=ImageEditSource(image_url="data:image/png;base64,BBBB"),
+        )
+        data = build_image_input_data(request)
+        assert data["images"] == [{"filename": "a.png", "content_type": "image/png", "bytes": 7}]
+        assert data["mask"] == {"image_url": "<data-uri 26 chars>"}
+
+    def test_image_output_keeps_urls_and_summarizes_base64(self):
+        response = InternalImageResponse(
+            created=1700000000,
+            model="gpt-image-1",
+            data=[ImageData(url="https://x/y.png"), ImageData(b64_json="QUJD")],
+        )
+        data = build_image_output_data(response)
+        assert data["count"] == 2
+        assert data["images"][0] == {"url": "https://x/y.png"}
+        assert data["images"][1] == {"b64_json_length": 4}
+        assert data["created"] == 1700000000
+
+    def test_speech_payload_keeps_the_script_not_the_audio(self):
+        request = InternalSpeechRequest(model="tts-1", input="hello there", voice="alloy")
+        assert build_speech_input_data(request) == {
+            "input": "hello there",
+            "voice": "alloy",
+            "response_format": "mp3",
+            "speed": 1.0,
+        }
+        response = InternalSpeechResponse(content=b"ID3audio", content_type="audio/mpeg")
+        assert build_speech_output_data(response) == {
+            "content_type": "audio/mpeg",
+            "bytes": 8,
+        }
+
+    def test_audio_transcript_payloads_describe_the_upload(self):
+        request = InternalTranscriptionRequest(
+            model="whisper-1", file=b"RIFFdata", filename="meeting.mp3", language="de"
+        )
+        data = build_audio_transcript_input_data(request)
+        assert data["filename"] == "meeting.mp3"
+        assert data["bytes"] == 8
+        assert data["language"] == "de"
+
+        response = InternalTranscriptionResponse(
+            text="hallo", language="de", duration=12.5, segments=[{"text": "hallo"}]
+        )
+        assert build_audio_transcript_output_data(response) == {
+            "text": "hallo",
+            "language": "de",
+            "duration": 12.5,
+            "segment_count": 1,
+        }
+
+    def test_translation_shares_the_transcript_builders(self):
+        request = InternalTranslationRequest(model="whisper-1", file=b"RIFF", filename="a.mp3")
+        assert build_audio_transcript_input_data(request)["filename"] == "a.mp3"
+        assert build_audio_transcript_output_data(InternalTranslationResponse(text="hello")) == {
+            "text": "hello",
+            "language": "english",
+        }
+
+    def test_systemone_payloads(self):
+        request = InternalSystemOneRequest(
+            model="jev-latest", state={"context": "x"}, questions={"q1": {"type": "bool"}}
+        )
+        assert build_systemone_input_data(request) == {
+            "state": {"context": "x"},
+            "questions": {"q1": {"type": "bool"}},
+        }
+        response = InternalSystemOneResponse(model="jev-latest", answers={"q1": True})
+        assert build_systemone_output_data(response) == {
+            "answers": {"q1": True},
+            "model": "jev-latest",
+        }
+
+    def test_decisions_payloads(self):
+        request = InternalDecisionRequest(
+            model="m", input=[{"role": "user", "content": "evidence"}], questions=[{"name": "q"}]
+        )
+        data = build_decisions_input_data(request)
+        assert data["input"][0]["content"] == "evidence"
+        assert data["questions"] == [{"name": "q"}]
+
+        response = InternalDecisionResponse(model="m", answers=[{"name": "q", "answer": True}])
+        assert build_decisions_output_data(response) == {
+            "answers": [{"name": "q", "answer": True}],
+            "model": "m",
+        }
+
+    def test_decisions_input_summarizes_inline_images_and_bounds_text(self):
+        # ``input`` is raw client JSON: an ``input_image`` part carries a base64
+        # data URL, which must never reach the trace.
+        request = InternalDecisionRequest(
+            model="m",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "x" * 5000},
+                        {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                    ],
+                }
+            ],
+            questions={"instructions": "y" * 5000},
+        )
+        data = build_decisions_input_data(request)
+        parts = data["input"][0]["content"]
+        assert parts[0]["text"].endswith("…<truncated 3000 chars>")
+        assert parts[1]["image_url"] == "<data-uri 26 chars>"
+        assert data["questions"]["instructions"].endswith("…<truncated 3000 chars>")
+
+    def test_rerank_input_bounds_extra_document_keys(self):
+        document = RerankDocument(text="b", extra={"meta": "z" * 5000, "thumb": "data:x"})
+        request = InternalRerankRequest(model="m", query="q", documents=[document])
+        rendered = build_rerank_input_data(request)["documents"][0]
+        # Every leaf is bounded, not just the modelled ``text``/``image`` keys.
+        assert rendered["meta"].endswith("…<truncated 3000 chars>")
+        assert rendered["thumb"] == "<data-uri 6 chars>"
+
+    def test_decisions_output_none_without_answers(self):
+        assert build_decisions_output_data(InternalDecisionResponse(model="m", answers=[])) is None
+
+    async def test_rerank_request_opens_a_generation_with_content(
+        self, mock_client, mock_propagate
+    ):
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = InternalRerankRequest(model="rerank-v3.5", query="q", documents=["a", "b"])
+        context = EventContext(
+            request_id="req-rerank",
+            trace_id="trace-1",
+            model="rerank-v3.5",
+            request_type=RequestType.RERANK,
+            usage=Usage(input_tokens=12),
+            metadata={"endpoint": "/v1/rerank"},
+        )
+        response = InternalRerankResponse(
+            model="rerank-v3.5", results=[RerankResult(index=0, relevance_score=0.8)]
+        )
+
+        await handler.on_request_start(request, context)
+        await handler.on_request_end(request, response, context)
+
+        start_kwargs = mock_client.start_as_current_observation.call_args.kwargs
+        assert start_kwargs["as_type"] == "generation"
+        assert start_kwargs["name"] == "rerank"
+        assert start_kwargs["input"] == {"query": "q", "documents": ["a", "b"]}
+
+        last_update_kwargs = gen.update.call_args_list[-1].kwargs
+        assert last_update_kwargs["output"]["count"] == 1
+        assert last_update_kwargs["usage_details"] == {"input": 12, "output": 0, "total": 12}
+        gen.end.assert_called_once()
+
+    async def test_image_request_opens_a_generation_with_the_prompt(
+        self, mock_client, mock_propagate
+    ):
+        settings = {"public_key": "pk-test", "secret_key": "sk-test"}
+        handler = LangfuseTracingHandler.create_handler(settings)
+
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = InternalImageRequest(model="gpt-image-1", prompt="a cat")
+        context = EventContext(
+            request_id="req-img",
+            trace_id="trace-1",
+            model="gpt-image-1",
+            request_type=RequestType.IMAGE_GENERATION,
+            metadata={"endpoint": "/v1/images/generations"},
+        )
+        response = InternalImageResponse(created=1, data=[ImageData(url="https://x/y.png")])
+
+        await handler.on_request_start(request, context)
+        await handler.on_request_end(request, response, context)
+
+        assert (
+            mock_client.start_as_current_observation.call_args.kwargs["input"]["prompt"] == "a cat"
+        )
+        assert gen.update.call_args_list[-1].kwargs["output"]["images"] == [
+            {"url": "https://x/y.png"}
+        ]
+
+
 class TestLangfuseSDKDataBuilders:
     def test_build_request_input_data_returns_messages(self):
         msg = MagicMock()
@@ -465,6 +921,60 @@ class TestLangfuseSDKDataBuilders:
         request = MagicMock()
         request.conversation = None
         assert build_request_input_data(request) is None
+
+    def test_build_embedding_input_data_passes_text_through(self):
+        assert build_embedding_input_data(_make_embedding_request("hello")) == "hello"
+        assert build_embedding_input_data(_make_embedding_request(["a", "b"])) == ["a", "b"]
+
+    def test_build_embedding_input_data_bounds_a_retrieval_batch(self):
+        data = build_embedding_input_data(_make_embedding_request(["x" * 5000] + ["t"] * 40))
+        assert data[0].endswith("…<truncated 3000 chars>")
+        # The head of the batch plus a marker, so the span stays bounded.
+        assert len(data) == 21
+        assert data[-1] == "<truncated 21 texts>"
+
+    def test_build_embedding_input_data_none_when_empty(self):
+        assert build_embedding_input_data(_make_embedding_request("")) is None
+        assert build_embedding_input_data(_make_embedding_request([])) is None
+        # Token-id inputs are not text: nothing readable to show.
+        assert build_embedding_input_data(_make_embedding_request([1, 2, 3])) is None
+
+    def test_build_embedding_output_data_keeps_shape_and_preview(self):
+        data = build_embedding_output_data(_make_embedding_response(count=2, dimensions=768))
+        assert data["object"] == "list"
+        assert data["count"] == 2
+        assert data["dimensions"] == 768
+        assert "preview_truncated" not in data
+        first = data["embeddings"][0]
+        assert first["index"] == 0
+        assert first["dimensions"] == 768
+        assert first["preview"] == [float(i) for i in range(8)]
+
+    def test_build_embedding_output_data_truncates_large_batches(self):
+        """Full vectors would dwarf the span: only the leading ones are previewed."""
+        data = build_embedding_output_data(_make_embedding_response(count=100, dimensions=3072))
+        assert data["count"] == 100
+        assert data["preview_truncated"] is True
+        assert len(data["embeddings"]) == 5
+
+    def test_build_embedding_output_data_reports_base64_without_vectors(self):
+        item = MagicMock()
+        item.index = 0
+        item.embedding = "AAECAwQFBgc="
+        response = MagicMock()
+        response.model = "gemini-embedding-001"
+        response.data = [item]
+
+        data = build_embedding_output_data(response)
+        assert "dimensions" not in data
+        assert data["embeddings"] == [
+            {"index": 0, "encoding": "base64", "encoded_length": len("AAECAwQFBgc=")}
+        ]
+
+    def test_build_embedding_output_data_none_without_vectors(self):
+        response = MagicMock()
+        response.data = []
+        assert build_embedding_output_data(response) is None
 
     def test_build_response_output_data(self):
         response = MagicMock()
@@ -549,6 +1059,21 @@ class TestLangfuseSDKDataBuilders:
     def test_build_usage_details_none_without_token_data(self):
         context = EventContext(request_id="req-1", trace_id="trace-1", model="gpt-4")
         assert build_usage_details(context) is None
+
+    def test_build_embedding_usage_details_drops_output_buckets(self):
+        """An embedding bills input only; a zero ``output`` row prices nothing."""
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gemini-embedding-001",
+            usage=Usage(input_tokens=9),
+        )
+        assert build_embedding_usage_details(context) == {"input": 9, "total": 9}
+        assert build_usage_details(context) == {"input": 9, "output": 0, "total": 9}
+
+    def test_build_embedding_usage_details_none_without_usage(self):
+        context = EventContext(request_id="req-1", trace_id="trace-1", model="m")
+        assert build_embedding_usage_details(context) is None
 
     def test_build_cost_details(self):
         context = EventContext(

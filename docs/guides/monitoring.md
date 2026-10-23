@@ -61,7 +61,7 @@ curl -s "http://localhost:8080/api/logs/audit/verify-integrity" \
 
 | System | Integration |
 | --- | --- |
-| **Langfuse** | Per-user tracing (Settings → General → Tracing). One generation per request: messages in, assistant message out, usage and cost details, user/session ids |
+| **Langfuse** | Per-user tracing (Settings → General → Tracing). One observation per request, carrying that type's own content: messages in / assistant message out for chat, texts in / response shape for `/v1/embeddings` (an `embedding` observation), query+documents in / ranking out for rerank, prompt in / image URLs out for images, script or audio file in / text or media summary out for audio, plus usage and cost details and user/session ids |
 | **Log aggregation** | The proxy does not push logs anywhere (Redis log shipping is not implemented in v0.2.3). Pull from `GET /api/logs`, or scrape the application log output |
 | **Application logs** | `LOG_LEVEL` (startup), `--log-file`, container stdout |
 | **OTLP/OpenTelemetry** | Not implemented in v0.2.3 (only `langfuse` and the internal `audit_log` handlers exist) |

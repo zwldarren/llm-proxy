@@ -1,10 +1,11 @@
 """Langfuse tracing handler.
 
-Exports traces to Langfuse using the official Langfuse Python SDK. Each request
-is recorded as a ``generation`` observation with structured input, output,
-usage, and metadata. Per-request state is stored on the handler instance keyed
-by ``context.request_id`` (not in ``ContextVar``s: the streaming request
-lifecycle spans several asyncio tasks — see ``_RequestState``).
+Exports traces to Langfuse using the official Langfuse Python SDK. Each request is
+recorded as one observation — a ``generation``, or an ``embedding`` for embedding
+requests — whose input, output and usage come from that request type's profile
+(``OBSERVATION_PROFILES`` in ``attributes.py``). Per-request state is stored on the
+handler instance keyed by ``context.request_id`` (not in ``ContextVar``s: the
+streaming request lifecycle spans several asyncio tasks — see ``_RequestState``).
 """
 
 import asyncio
@@ -20,25 +21,71 @@ lazy from langfuse.types import TraceContext
 lazy from opentelemetry.sdk.trace import TracerProvider
 lazy from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
-from llm_proxy.core.request_type import RequestType
+from llm_proxy.core.request_type import RequestType, coerce_request_type
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.tracing.handlers.base import TracingHandler
 from llm_proxy.observability.tracing.handlers.providers.langfuse.attributes import (
+    ObservationProfile,
     _endpoint_display_name,
     _format_output_for_langfuse,
     build_cost_details,
     build_metadata,
     build_model_parameters,
-    build_request_input_data,
-    build_response_output_data,
-    build_usage_details,
     extract_tool_uses,
+    observation_profile,
 )
 
 if TYPE_CHECKING:
     from llm_proxy.config.manager import DatabaseConfigManager
-    from llm_proxy.models import InternalRequest, InternalResponse
+    from llm_proxy.models import (
+        InternalDecisionRequest,
+        InternalDecisionResponse,
+        InternalEmbeddingRequest,
+        InternalEmbeddingResponse,
+        InternalImageEditRequest,
+        InternalImageRequest,
+        InternalImageResponse,
+        InternalRequest,
+        InternalRerankRequest,
+        InternalRerankResponse,
+        InternalResponse,
+        InternalSpeechRequest,
+        InternalSpeechResponse,
+        InternalSystemOneRequest,
+        InternalSystemOneResponse,
+        InternalTranscriptionRequest,
+        InternalTranscriptionResponse,
+        InternalTranslationRequest,
+        InternalTranslationResponse,
+    )
     from llm_proxy.observability.event_context import EventContext
+
+    #: What the tracing hooks actually receive: the pipeline hands over the
+    #: strategy's own request and response objects, and only chat uses the
+    #: conversation-shaped pair.
+    type ObservedRequest = (
+        InternalRequest
+        | InternalEmbeddingRequest
+        | InternalRerankRequest
+        | InternalImageRequest
+        | InternalImageEditRequest
+        | InternalSpeechRequest
+        | InternalTranscriptionRequest
+        | InternalTranslationRequest
+        | InternalSystemOneRequest
+        | InternalDecisionRequest
+    )
+    type ObservedResponse = (
+        InternalResponse
+        | InternalEmbeddingResponse
+        | InternalRerankResponse
+        | InternalImageResponse
+        | InternalSpeechResponse
+        | InternalTranscriptionResponse
+        | InternalTranslationResponse
+        | InternalSystemOneResponse
+        | InternalDecisionResponse
+    )
 
 logger = get_logger(__name__)
 
@@ -77,6 +124,17 @@ def _langfuse_trace_context(trace_id: str | None) -> TraceContext | None:
     return None
 
 
+def _profile_for(request: Any, context: EventContext) -> ObservationProfile:
+    """Resolve the Langfuse observation profile for this request.
+
+    The request's own ``request_type`` is authoritative; ``context.request_type``
+    is the copy the pipeline stamps before it runs, so it covers callers that
+    hand over a request object without the field.
+    """
+    request_type = getattr(request, "request_type", None) or context.request_type
+    return observation_profile(request_type)
+
+
 @dataclass
 class _RequestState:
     """Per-request Langfuse state stored on the handler instance.
@@ -92,7 +150,7 @@ class _RequestState:
     between ``await``s on a single event loop is atomic.
     """
 
-    generation: Any
+    observation: Any
     ttft_recorded: bool = False
 
 
@@ -299,20 +357,20 @@ class LangfuseTracingHandler(TracingHandler):
     def _set_state_for_request(self, request_id: str, state: _RequestState) -> None:
         self._request_states[request_id] = state
 
-    def _pop_generation_for_request(self, request_id: str) -> Any | None:
-        """Remove a request's state and return its generation (``None`` if absent)."""
+    def _pop_observation_for_request(self, request_id: str) -> Any | None:
+        """Remove a request's state and return its observation (``None`` if absent)."""
         state = self._request_states.pop(request_id, None)
-        return state.generation if state else None
+        return state.observation if state else None
 
-    def _fail_update(self, stage: str, error: Exception, generation: Any) -> None:
-        """Log a failed observation update and still end the generation.
+    def _fail_update(self, stage: str, error: Exception, observation: Any) -> None:
+        """Log a failed observation update and still end the observation.
 
         A second failure while ending must not mask the original error, so it is
         suppressed after the log.
         """
         logger.error(f"Langfuse handler failed to {stage}: {error}", exc_info=True)
         with contextlib.suppress(Exception):
-            generation.end()
+            observation.end()
 
     def _set_trace_ids_for_request(
         self, request_id: str, trace_id: str, observation_id: str
@@ -339,7 +397,7 @@ class LangfuseTracingHandler(TracingHandler):
 
     async def on_request_start(
         self,
-        request: InternalRequest,
+        request: ObservedRequest,
         context: EventContext,
     ) -> None:
         if not self._enabled:
@@ -350,60 +408,78 @@ class LangfuseTracingHandler(TracingHandler):
             return
         try:
             span_name = self._build_span_name(request, context)
-            input_data = build_request_input_data(request)
+            # One observation profile per request type (see
+            # ``OBSERVATION_PROFILES``): which Langfuse observation type to open
+            # and how to render this request's input. Embedding calls are the
+            # one type with its own observation type; ``generation`` semantics
+            # (prompt/completion tokens) do not apply to them.
+            profile = _profile_for(request, context)
+            is_embedding = profile.as_type == "embedding"
+            input_data = profile.build_input(request)
             model = getattr(request, "model", None)
             model_parameters = build_model_parameters(getattr(request, "params", None))
+
+            observation_kwargs: dict[str, Any] = {
+                "name": span_name,
+                "input": input_data,
+                "model": model,
+                "model_parameters": model_parameters,
+                "version": self._version,
+                "end_on_exit": False,
+                "trace_context": _langfuse_trace_context(context.trace_id),
+            }
 
             # Trace-level attributes (name, user, session) are not accepted by
             # ``observation.update()`` in SDK v4 — it swallows unknown keyword
             # arguments — so they must be propagated when the span is created.
             #
-            # Create a generation that persists across async lifecycle calls.
+            # Create an observation that persists across async lifecycle calls.
             # ``end_on_exit=False`` keeps the observation open after the context
             # manager exits; we end it explicitly in on_request_end/on_stream_end.
+            # The two ``as_type`` call sites are kept literal on purpose: the
+            # SDK's overloads are keyed on the literal, and a variable or ternary
+            # there matches no overload at all.
+            start_observation = client.start_as_current_observation
+            if is_embedding:
+                observation = start_observation(as_type="embedding", **observation_kwargs)
+            else:
+                observation = start_observation(as_type="generation", **observation_kwargs)
+
             with (
                 propagate_attributes(
                     trace_name=span_name,
                     user_id=_sanitize_propagated_attribute(context.user_id),
                     session_id=_sanitize_propagated_attribute(context.session_id),
                 ),
-                client.start_as_current_observation(
-                    as_type="generation",
-                    name=span_name,
-                    input=input_data,
-                    model=model,
-                    model_parameters=model_parameters,
-                    version=self._version,
-                    end_on_exit=False,
-                    trace_context=_langfuse_trace_context(context.trace_id),
-                ) as generation,
+                observation as observation,
             ):
-                self._set_state_for_request(context.request_id, _RequestState(generation))
+                self._set_state_for_request(context.request_id, _RequestState(observation))
                 self._set_trace_ids_for_request(
-                    context.request_id, generation.trace_id, generation.id
+                    context.request_id, observation.trace_id, observation.id
                 )
         except Exception as e:
-            self._pop_generation_for_request(context.request_id)
+            self._pop_observation_for_request(context.request_id)
             self._discard_trace_ids_for_request(context.request_id)
             logger.error(f"Langfuse handler failed to start generation: {e}", exc_info=True)
 
     async def on_request_end(
         self,
-        request: InternalRequest,
-        response: InternalResponse,
+        request: ObservedRequest,
+        response: ObservedResponse,
         context: EventContext,
     ) -> None:
         self._set_active_request_id(context)
         request_id = context.request_id
         # Deliberately not gated on ``self._enabled``: a handler that was released
-        # while this request was in flight must still end the generation it
+        # while this request was in flight must still end the observation it
         # already created, or the trace is never exported.
-        generation = self._pop_generation_for_request(request_id)
-        if generation is None:
+        observation = self._pop_observation_for_request(request_id)
+        if observation is None:
             return
         try:
-            output_data = build_response_output_data(response)
-            usage_details = build_usage_details(context)
+            profile = _profile_for(request, context)
+            output_data = profile.build_output(response)
+            usage_details = profile.build_usage(context)
             cost_details = build_cost_details(context)
             metadata = build_metadata(context)
 
@@ -421,40 +497,40 @@ class LangfuseTracingHandler(TracingHandler):
             if model:
                 update_kwargs["model"] = model
 
-            generation.update(**update_kwargs)
+            observation.update(**update_kwargs)
             self._record_tool_observations(
-                generation, extract_tool_uses(getattr(response, "output", None))
+                observation, extract_tool_uses(getattr(response, "output", None))
             )
-            generation.end()
+            observation.end()
         except Exception as e:
-            self._fail_update("end generation", e, generation)
+            self._fail_update("end observation", e, observation)
 
     async def on_error(
         self,
-        request: InternalRequest,
+        request: ObservedRequest,
         error: Exception,
         context: EventContext,
     ) -> None:
         self._set_active_request_id(context)
         request_id = context.request_id
-        generation = self._pop_generation_for_request(request_id)
-        if generation is None:
+        observation = self._pop_observation_for_request(request_id)
+        if observation is None:
             return
         try:
             metadata = build_metadata(context)
             metadata["error_type"] = type(error).__name__
-            generation.update(
+            observation.update(
                 level="ERROR",
                 status_message=str(error),
                 metadata=metadata,
             )
-            generation.end()
+            observation.end()
         except Exception as e:
-            self._fail_update("record error", e, generation)
+            self._fail_update("record error", e, observation)
 
     async def on_stream_start(
         self,
-        request: InternalRequest,
+        request: ObservedRequest,
         context: EventContext,
     ) -> None:
         self._set_active_request_id(context)
@@ -464,13 +540,13 @@ class LangfuseTracingHandler(TracingHandler):
         try:
             metadata = build_metadata(context)
             metadata["streaming"] = True
-            state.generation.update(metadata=metadata)
+            state.observation.update(metadata=metadata)
         except Exception as e:
             logger.error(f"Langfuse handler failed to mark stream start: {e}", exc_info=True)
 
     async def on_stream_chunk(
         self,
-        request: InternalRequest,
+        request: ObservedRequest,
         chunk: str,
         context: EventContext,
     ) -> None:
@@ -486,7 +562,7 @@ class LangfuseTracingHandler(TracingHandler):
             ):
                 metadata = build_metadata(context)
                 metadata["ttft_ms"] = context.ttft_ms
-                state.generation.update(
+                state.observation.update(
                     metadata=metadata,
                     completion_start_time=context.first_chunk_time,
                 )
@@ -496,28 +572,28 @@ class LangfuseTracingHandler(TracingHandler):
 
     async def on_stream_end(
         self,
-        request: InternalRequest,
+        request: ObservedRequest,
         context: EventContext,
         error: Exception | None = None,
     ) -> None:
         self._set_active_request_id(context)
         request_id = context.request_id
         # As in ``on_request_end``: a released handler must still close the
-        # generation it created so the trace reaches Langfuse.
-        generation = self._pop_generation_for_request(request_id)
-        if generation is None:
+        # observation it created so the trace reaches Langfuse.
+        observation = self._pop_observation_for_request(request_id)
+        if observation is None:
             return
         try:
             if error is not None:
                 metadata = build_metadata(context)
                 metadata["error_type"] = type(error).__name__
                 metadata["streaming"] = True
-                generation.update(
+                observation.update(
                     level="ERROR",
                     status_message=str(error),
                     metadata=metadata,
                 )
-                generation.end()
+                observation.end()
                 return
 
             update_kwargs: dict[str, Any] = {}
@@ -525,7 +601,7 @@ class LangfuseTracingHandler(TracingHandler):
             if output is not None:
                 update_kwargs["output"] = output
 
-            usage_details = build_usage_details(context)
+            usage_details = _profile_for(request, context).build_usage(context)
             if usage_details is not None:
                 update_kwargs["usage_details"] = usage_details
 
@@ -537,15 +613,19 @@ class LangfuseTracingHandler(TracingHandler):
             metadata["streaming"] = True
             update_kwargs["metadata"] = metadata
 
-            generation.update(**update_kwargs)
+            observation.update(**update_kwargs)
             self._record_tool_observations(
-                generation, extract_tool_uses(self._extract_stream_output_blocks(context))
+                observation, extract_tool_uses(self._extract_stream_output_blocks(context))
             )
-            generation.end()
+            observation.end()
         except Exception as e:
-            self._fail_update("end stream generation", e, generation)
+            self._fail_update("end stream observation", e, observation)
 
-    def _build_span_name(self, request: InternalRequest, context: EventContext) -> str:
+    def _build_span_name(
+        self,
+        request: ObservedRequest,
+        context: EventContext,
+    ) -> str:
         """Build a span name from the requested endpoint path.
 
         Falls back to the operation name and model if the endpoint is unknown.
@@ -553,14 +633,8 @@ class LangfuseTracingHandler(TracingHandler):
         endpoint_name = _endpoint_display_name(context.metadata.get("endpoint"))
         if endpoint_name:
             return endpoint_name
-        request_type = getattr(request, "request_type", RequestType.CHAT)
-        if isinstance(request_type, RequestType):
-            operation = request_type.value
-        else:
-            try:
-                operation = RequestType(request_type).value
-            except ValueError:
-                operation = str(request_type)
+        request_type = coerce_request_type(getattr(request, "request_type", RequestType.CHAT))
+        operation = request_type.value if request_type is not None else "request"
         model = getattr(request, "model", None)
         return f"{operation} {model or 'unknown'}"
 
@@ -594,7 +668,7 @@ class LangfuseTracingHandler(TracingHandler):
 
     def _record_tool_observations(
         self,
-        generation: Any,
+        observation: Any,
         tool_uses: list[dict[str, Any]],
     ) -> None:
         """Emit one Langfuse ``tool`` observation per tool call in the response.
@@ -603,14 +677,14 @@ class LangfuseTracingHandler(TracingHandler):
         tool *invocations* (name + arguments), not the client-side execution
         results. Recording these as dedicated ``tool`` observations makes them
         appear in the Langfuse trace tree / agent graph and tool filtering
-        instead of being buried inside the generation output.
+        instead of being buried inside the observation output.
         """
         if not tool_uses:
             return
         for tool_use in tool_uses:
             name = tool_use.get("name") or "tool"
             try:
-                tool = generation.start_observation(
+                tool = observation.start_observation(
                     name=name,
                     as_type="tool",
                     input=tool_use.get("input"),

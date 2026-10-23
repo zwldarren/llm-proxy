@@ -188,11 +188,40 @@ Tracing is **per user** (Settings → General → Tracing) and currently support
 **Langfuse** plus the always-on internal audit handler. There is no global tracing
 configuration and no OTLP exporter in v0.2.3.
 
-When enabled, each request exports one generation observation:
+When enabled, each request exports one observation, named after its endpoint and
+carrying that request type's own content:
 
-- Name and model from the request, with model parameters.
-- `input` = messages (or `{tools, messages}` when tools are present); `output` = the
+- **chat** (OpenAI, Anthropic and Responses wire): a `generation` whose `input` is the
+  messages (or `{tools, messages}` when tools are present) and whose `output` is the
   assistant message with tool calls separated out.
+- **embeddings** (`/v1/embeddings`): an **`embedding`** observation. `input` is the
+  text (or list of texts) being embedded; `output` is the response shape (`count`,
+  `dimensions`, `model` and a preview of the first vectors) rather than the vectors
+  themselves — a single vector is 768–3072 floats and a batch is unbounded, so
+  exporting them whole would dwarf the span. `usage_details` carries the `input`
+  bucket only, since an embedding bills no output tokens.
+- **rerank** (`/v1/rerank`, `/v2/rerank`): `input` is `{query, documents}` (documents
+  capped at the first 20, long ones cut at 2000 characters, with the true count
+  reported); `output` is the ranking — `index`, `relevance_score`, and the echoed
+  document when the upstream returns one.
+- **images** (`/v1/images/generations`, `/v1/images/edits`): `input` is the prompt plus
+  the image parameters, and an edit's source images and mask are summarized by
+  filename, content type, size or URL. `output` keeps the result URLs; base64 image
+  data appears as a length.
+- **audio** (`/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations`):
+  a speech request's `input` is the script and its `output` the media type and byte
+  count; a transcription or translation `input` is the uploaded file's name and size
+  and its `output` the transcribed text (segments are counted, not repeated).
+- **systemone**/**decisions**: `input` is the evaluation's `state`/`input` plus its
+  `questions`, and `output` is its `answers`.
+- No binary payload ever reaches a trace: audio, image bytes, inline data URIs and
+  base64 vectors are reported by media type, length or URL. Every text leaf of a
+  client-supplied payload (embedding texts, documents, decisions evidence, System One
+  state, a rerank document's extra keys) is cut at 2000 characters, and a long list
+  keeps its first 20 items plus a truncation marker.
+- A **streaming** image, speech or transcription request ends with `input`, usage,
+  cost and metadata but no `output`: a generic stream has no assembled result object
+  (chat streams do, and their accumulated assistant message is exported).
 - `usage_details` as **mutually exclusive** buckets: `input`/`output` exclude the
   cache, audio and reasoning detail counts, which are emitted under their own
   buckets (`cache_read_input_tokens`, `cache_creation_input_tokens`,
@@ -204,6 +233,12 @@ When enabled, each request exports one generation observation:
   **session id**. Metadata carries the request id, trace id, provider, endpoint,
   latency, TTFT, token details not used as buckets, cache savings, and fallback/retry
   information.
+
+The observation type is `generation` for every request type except embeddings:
+Langfuse records usage and cost on `generation` and `embedding` observations only, so a
+billed call keeps its priced home. Version segments are stripped from the name, so
+`/v1/rerank` and `/v2/rerank` both read `rerank`, and the double-version aliases
+(`/v1/v1/chat/completions`) collapse to the canonical name as well.
 
 Correlate a trace with a request by sending `x-langfuse-trace-id` (or `x-trace-id`);
 when it is a canonical 32-character hex Langfuse trace id the proxy's generation is
