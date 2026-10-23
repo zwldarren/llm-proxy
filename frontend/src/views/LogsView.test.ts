@@ -16,9 +16,12 @@ vi.mock("vue-i18n", () => {
   };
 });
 
+// Mutable so a test can present a deep link (e.g. ?trace_id=...) to the view.
+const { routeQuery } = vi.hoisted(() => ({ routeQuery: {} as Record<string, string> }));
+
 vi.mock("vue-router", () => {
   return {
-    useRoute: () => ({ name: "logs", query: {} }),
+    useRoute: () => ({ name: "logs", query: routeQuery }),
     useRouter: () => ({ replace: vi.fn() }),
     createRouter: vi.fn(() => ({
       beforeEach: vi.fn(),
@@ -209,6 +212,36 @@ describe("LogsView", () => {
 
     expect(logsApi.getLogs).toHaveBeenCalled();
     expect(wrapper.text()).toContain("logs.noLogs");
+  });
+
+  it("applies a ?trace_id= deep link before the first fetch", async () => {
+    const { logsApi } = await import("@/services/api/logs");
+    vi.clearAllMocks();
+    routeQuery.trace_id = "trace-from-the-url";
+
+    try {
+      mount(LogsView, {
+        global: {
+          stubs: {
+            AppLayout: AppLayoutStub,
+            Card: CardStub,
+            Button: ButtonStub,
+            Input: InputStub,
+            Tooltip: TooltipStub,
+            TooltipTrigger: TooltipTriggerStub,
+            TooltipContent: TooltipContentStub,
+          },
+        },
+      });
+
+      await flushPromises();
+
+      // The trace filter is not in the filter panel, so the only way it can reach
+      // the request is the deep link — and it must be there on the first call.
+      expect(vi.mocked(logsApi.getLogs).mock.calls[0]?.[0]?.trace_id).toBe("trace-from-the-url");
+    } finally {
+      delete routeQuery.trace_id;
+    }
   });
 
   it("only calls getLogs once when switching tabs and does not trigger duplicate queries", async () => {

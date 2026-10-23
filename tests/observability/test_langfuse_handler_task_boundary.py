@@ -84,7 +84,7 @@ async def test_stream_end_in_another_task_still_ends_the_generation(
     # pipeline never sees otherwise; propagate_attributes touches OTel context,
     # which behaves identically with no active span.
     monkeypatch.setattr(
-        "llm_proxy.observability.tracing.handlers.providers.langfuse.handler.propagate_attributes",
+        "llm_proxy.observability.sinks.langfuse.propagate_attributes",
         lambda **kwargs: _noop_cm(),
     )
 
@@ -101,7 +101,7 @@ async def test_stream_end_in_another_task_still_ends_the_generation(
     # on_request_start: pipeline task
     await handler.on_request_start(request, context)
     assert client.generation is not None
-    assert handler._get_state_for_request("rid-cross-task") is not None
+    assert handler._exporter._request_states.get("rid-cross-task") is not None
 
     # on_stream_end: a task that never saw the ContextVar write — the exact
     # shape of the Starlette-streamed-response failure mode.
@@ -112,7 +112,7 @@ async def test_stream_end_in_another_task_still_ends_the_generation(
     await task
 
     assert client.generation.ended, "generation must be ended from the stream task"
-    assert handler._get_state_for_request("rid-cross-task") is None
+    assert handler._exporter._request_states.get("rid-cross-task") is None
 
 
 def _noop_cm():
@@ -126,7 +126,7 @@ async def test_error_end_in_another_task_still_ends_the_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "llm_proxy.observability.tracing.handlers.providers.langfuse.handler.propagate_attributes",
+        "llm_proxy.observability.sinks.langfuse.propagate_attributes",
         lambda **kwargs: _noop_cm(),
     )
     handler, client = _handler()

@@ -75,6 +75,16 @@ describe("logsApi", () => {
     expect(unfiltered.searchParams.has("had_fallback")).toBe(false);
   });
 
+  it("getLogs sends the trace id, and omits it when unset", async () => {
+    await logsApi.getLogs({ trace_id: "4bf92f3577b34da6a3ce929d0e0e4736" });
+    const filtered = parseUrl(getCallUrl(http.get as Mock, 5));
+    expect(filtered.searchParams.get("trace_id")).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
+
+    await logsApi.getLogs({});
+    const unfiltered = parseUrl(getCallUrl(http.get as Mock, 6));
+    expect(unfiltered.searchParams.has("trace_id")).toBe(false);
+  });
+
   it("deleteOldLogs calls the purge endpoint with older_than_days", async () => {
     await logsApi.deleteOldLogs(30);
 

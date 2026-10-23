@@ -71,6 +71,7 @@ class LogRepository(BaseUsageRepository):
         "id",
         "timestamp",
         "request_id",
+        "trace_id",
         "endpoint",
         "log_type",
         "method",
@@ -176,6 +177,7 @@ class LogRepository(BaseUsageRepository):
 
         return {
             "request_id": log.request_id,
+            "trace_id": log.trace_id,
             "timestamp": log.timestamp,
             "endpoint": log.endpoint,
             "log_type": log.log_type,
@@ -583,6 +585,7 @@ class LogRepository(BaseUsageRepository):
         endpoint: str | None = None,
         log_type: str | None = None,
         search: str | None = None,
+        trace_id: str | None = None,
         user_id: int | None = None,
         had_fallback: bool | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -617,6 +620,8 @@ class LogRepository(BaseUsageRepository):
             filters.append(RequestLog.endpoint.like(f"{endpoint}%"))
         if log_type:
             filters.append(RequestLog.log_type == log_type)
+        if trace_id:
+            filters.append(RequestLog.trace_id == trace_id)
         filters = self._apply_user_id_filter(filters, user_id)
         filters = self._apply_fallback_filter(filters, had_fallback)
         if search:
@@ -658,6 +663,7 @@ class LogRepository(BaseUsageRepository):
         "id",
         "timestamp",
         "request_id",
+        "trace_id",
         "endpoint",
         "log_type",
         "method",
@@ -714,6 +720,7 @@ class LogRepository(BaseUsageRepository):
         endpoint: str | None = None,
         log_type: str | None = None,
         search: str | None = None,
+        trace_id: str | None = None,
         include_count: bool = True,
         user_id: int | None = None,
         had_fallback: bool | None = None,
@@ -747,6 +754,8 @@ class LogRepository(BaseUsageRepository):
             filters.append(table.c.endpoint.like(f"{endpoint}%"))
         if log_type:
             filters.append(table.c.log_type == log_type)
+        if trace_id:
+            filters.append(table.c.trace_id == trace_id)
         filters = self._apply_user_id_filter(filters, user_id)
         filters = self._apply_fallback_filter(filters, had_fallback)
         if search:

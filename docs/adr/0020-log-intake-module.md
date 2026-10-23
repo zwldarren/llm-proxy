@@ -152,3 +152,18 @@ the turn has a usage record at all and NULL only when it has none
 ``TokenUsage`` cannot distinguish the two (every field defaults to ``0``), so the
 record's presence is the signal; readers that aggregate coalesce NULL, so no
 caller loses the "unreported" case.
+
+## Amendment (2026-10): the endpoint builders moved behind the observation seam
+
+ADR-0044 replaced the endpoint lifecycle's three row builders
+(`_build_success_row` / `_build_error_row` / `_build_stream_row`), its
+`_build_log_base` adapter and `_build_usage_record` with one observation
+captured by `observability/observation/collector.py` and projected by the
+request-log and usage sinks. `record_request_end` and friends now finalize the
+capture and emit that observation on the database bus; the row shape those verbs
+and the sinks share lives in `observability/store.py`, which the remaining
+situation verbs still assemble through, so the single construction point and the
+contract test described above still hold for them.
+The pre-seam builders are frozen in `tests/observability/legacy_row_reference.py`
+as the parity contract, not as production code. `store.token_column` still serves
+`build_usage_record`; the log sink shares it.

@@ -55,8 +55,8 @@ def _record(request: Request, mask: bool = True) -> MagicMock:
     log_intake.configure(config=LoggingConfig(mask_sensitive_data=mask, log_input_output=True))
     service = MagicMock()
     with (
-        patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service),
-        patch("llm_proxy.observability.log_intake.UsageService"),
+        patch("llm_proxy.observability.store.RequestLogService", return_value=service),
+        patch("llm_proxy.observability.store.UsageService"),
     ):
         record_early_failure(request, ValueError("boom"), status_code=500)
     return service
@@ -179,8 +179,8 @@ def test_body_is_scrubbed_when_body_logging_is_off():
     log_intake.configure(config=LoggingConfig(log_input_output=False))
     service = MagicMock()
     with (
-        patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service),
-        patch("llm_proxy.observability.log_intake.UsageService"),
+        patch("llm_proxy.observability.store.RequestLogService", return_value=service),
+        patch("llm_proxy.observability.store.UsageService"),
     ):
         record_early_failure(request, ValueError("boom"), status_code=500)
 

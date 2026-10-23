@@ -80,6 +80,11 @@ class EventContext:
     # === Sampling decision (made once at creation) ===
     should_capture_full_body: bool = True
     should_log_input_output: bool = True
+    # The deployment's masking switch and the key names it masks. Captured here
+    # so every sink (the log store, the tracing exporters) resolves the same
+    # :class:`ContentPolicy` instead of re-reading configuration on its own.
+    mask_sensitive_data: bool = True
+    sensitive_keys: frozenset[str] = frozenset()
     # Raw SSE capture is opt-in (``logging.log_raw_stream``); ``x-log-full``
     # forces it for a single request. When off, the stream lifecycle assembles
     # ``assembled_response_body`` instead of buffering every chunk.

@@ -33,6 +33,9 @@ function buildLogFilterParams(filter: LogFilter): URLSearchParams {
   if (filter.api_key) params.append("api_key", filter.api_key);
   if (filter.endpoint) params.append("endpoint", filter.endpoint);
   if (filter.log_type) params.append("log_type", filter.log_type);
+  // The trace id is the join key to an exported trace: filtering on it is how an
+  // operator collects every row one trace produced (ADR-0044).
+  if (filter.trace_id) params.append("trace_id", filter.trace_id);
   if (filter.had_fallback !== undefined)
     params.append("had_fallback", filter.had_fallback ? "true" : "false");
   return params;

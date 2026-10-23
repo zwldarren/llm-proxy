@@ -1573,6 +1573,9 @@ export default {
     cacheReadTokens: "缓存击中 (读)",
     cacheCreationTokens: "缓存创建 (写)",
     activeFilters: "{count} 个筛选条件",
+    filterByTrace: "按此追踪 ID 筛选",
+    traceFilterChip: "追踪: {id}",
+    clearTraceFilter: "清除追踪 ID 筛选",
     // MCP logs specific
     mcpDescription: "监控 MCP 服务器工具调用和资源访问",
     mcpServer: "服务器",
@@ -1605,6 +1608,7 @@ export default {
     requestTypeTranslation: "语音翻译",
     // Log detail sheet labels
     requestId: "请求 ID",
+    traceId: "追踪 ID",
     saved: "节省",
     type: "类型",
     queryString: "查询字符串",

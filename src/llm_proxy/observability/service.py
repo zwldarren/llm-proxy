@@ -13,7 +13,6 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
-import orjson
 from sqlalchemy.exc import IntegrityError
 
 from llm_proxy.config.manager import resolve_logging_config
@@ -28,6 +27,7 @@ from llm_proxy.database import RequestLog, UsageRecord, get_async_session_contex
 from llm_proxy.database.connection import reclaim_sqlite_space
 from llm_proxy.database.repositories import LogRepository, UsageRepository
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.observation.policy import cap_payload
 from llm_proxy.observability.redaction import BODIES_DISABLED_MARKER, scrub_log_metadata
 from llm_proxy.observability.types import LogType
 
@@ -532,6 +532,10 @@ class RequestLogCreate:
     timestamp: float
     endpoint: str
     method: str
+    #: The trace id the tracing backends were handed for this request. It is
+    #: what joins a stored row to an exported trace, so it is a first-class
+    #: field of the row rather than a ``log_metadata`` entry.
+    trace_id: str | None = None
     status_code: int | None = None
     response_time_ms: int | None = None
     user_identity: str | None = None
@@ -636,31 +640,6 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-def _cap_logged_body(body: Any, max_bytes: int) -> Any:
-    """Replace a body whose serialized size exceeds ``max_bytes`` with a marker.
-
-    The cap bounds one row's payload, not the exact byte count the dialect ends
-    up writing: the size is measured on the compact ``orjson`` form (and, for a
-    raw SSE string, on its UTF-8 byte length). ``0`` disables the cap, and a
-    payload that is neither a dict, list nor string (or that cannot be dumped)
-    is passed through untouched.
-    """
-    if max_bytes <= 0:
-        return body
-    if isinstance(body, str):
-        size = len(body.encode("utf-8"))
-    elif isinstance(body, (dict, list)):
-        try:
-            size = len(orjson.dumps(body, option=orjson.OPT_NON_STR_KEYS))
-        except TypeError:
-            return body
-    else:
-        return body
-    if size <= max_bytes:
-        return body
-    return {"_truncated": True, "size": size}
-
-
 def _request_log_from_create(
     data: RequestLogCreate, *, config: LoggingConfig | None = None
 ) -> RequestLog:
@@ -702,13 +681,14 @@ def _request_log_from_create(
         response_body = dict(BODIES_DISABLED_MARKER)
         log_metadata = _json_safe(scrub_log_metadata(data.log_metadata))
     else:
-        request_body = _cap_logged_body(_json_safe(data.request_body), max_body_bytes)
-        response_body = _cap_logged_body(_json_safe(data.response_body), max_body_bytes)
+        request_body = cap_payload(_json_safe(data.request_body), max_bytes=max_body_bytes)
+        response_body = cap_payload(_json_safe(data.response_body), max_bytes=max_body_bytes)
         log_metadata = _json_safe(data.log_metadata)
 
     return RequestLog(
         user_id=data.user_id,
         request_id=data.request_id,
+        trace_id=data.trace_id,
         timestamp=data.timestamp,
         endpoint=data.endpoint,
         log_type=data.log_type.value,

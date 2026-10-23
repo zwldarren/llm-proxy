@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useClipboard } from "@vueuse/core";
-import { Activity, Check, Clock, Copy, Globe, Shield, Wrench } from "@lucide/vue";
+import { Activity, Check, Clock, Copy, Filter, Globe, Shield, Wrench } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import LogDetailsIO from "@/components/common/LogDetailsIO.vue";
@@ -16,10 +16,14 @@ const props = defineProps<{
   open: boolean;
 }>();
 
-const emit = defineEmits<(e: "update:open", value: boolean) => void>();
+const emit = defineEmits<{
+  "update:open": [value: boolean];
+  "filter-trace": [traceId: string];
+}>();
 
 const { t } = useI18n();
 const { copy, copied: copiedId } = useClipboard({ legacy: true });
+const { copy: copyTrace, copied: copiedTraceId } = useClipboard({ legacy: true });
 
 const isAuditLog = computed(() => props.log?.log_type === "audit");
 const isMcpLog = computed(() => props.log?.log_type === "mcp");
@@ -29,6 +33,19 @@ const isToolLog = computed(() => isMcpLog.value || isWebSearchLog.value);
 const copyId = async () => {
   if (!props.log?.request_id) return;
   await copy(props.log.request_id);
+};
+
+const copyTraceId = async () => {
+  if (!props.log?.trace_id) return;
+  await copyTrace(props.log.trace_id);
+};
+
+// The trace id is only useful if the operator can walk from one row to the rest
+// of its trace, so the badge doubles as the way into the list's trace filter.
+const applyTraceFilter = () => {
+  const traceId = props.log?.trace_id;
+  if (!traceId) return;
+  emit("filter-trace", traceId);
 };
 
 // The sheet's default auto-focus lands on the first tabbable element, which is
@@ -102,7 +119,11 @@ const handleOpenAutoFocus = (event: Event) => {
                 <button
                   @click="copyId"
                   class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
-                  :aria-label="copiedId ? t('common.copied') : t('common.copy')"
+                  :aria-label="
+                    copiedId
+                      ? `${t('logs.requestId')}: ${t('common.copied')}`
+                      : `${t('logs.requestId')}: ${t('common.copy')}`
+                  "
                 >
                   <Check v-if="copiedId" class="w-3.5 h-3.5 text-status-success" />
                   <Copy v-else class="w-3.5 h-3.5" />
@@ -111,6 +132,47 @@ const handleOpenAutoFocus = (event: Event) => {
               <TooltipContent>{{
                 copiedId ? t("common.copied") : t("common.copy")
               }}</TooltipContent>
+            </Tooltip>
+          </Badge>
+
+          <!-- Trace id: the join key to the exported trace, when the row has one -->
+          <Badge
+            v-if="log?.trace_id"
+            variant="outline"
+            class="font-mono text-xs bg-background text-muted-foreground py-1 sm:py-0.5 px-2.5 flex items-center gap-2 hover:border-muted-foreground/30 transition-colors border-border/70 min-h-8 sm:min-h-0 truncate max-w-full"
+          >
+            <span class="text-muted-foreground/70 shrink-0">{{ t("logs.traceId") }}:</span>
+            <span class="truncate">{{ log.trace_id }}</span>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  @click="copyTraceId"
+                  class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
+                  :aria-label="
+                    copiedTraceId
+                      ? `${t('logs.traceId')}: ${t('common.copied')}`
+                      : `${t('logs.traceId')}: ${t('common.copy')}`
+                  "
+                >
+                  <Check v-if="copiedTraceId" class="w-3.5 h-3.5 text-status-success" />
+                  <Copy v-else class="w-3.5 h-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{
+                copiedTraceId ? t("common.copied") : t("common.copy")
+              }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  @click="applyTraceFilter"
+                  class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
+                  :aria-label="t('logs.filterByTrace')"
+                >
+                  <Filter class="w-3.5 h-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t("logs.filterByTrace") }}</TooltipContent>
             </Tooltip>
           </Badge>
 

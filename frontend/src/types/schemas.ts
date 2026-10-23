@@ -693,6 +693,11 @@ export interface LogRead {
   id: number;
   timestamp: number;
   request_id: string;
+  /**
+   * Trace id handed to the tracing backends (the join key between this row and
+   * an exported trace). `null` on rows written before the column existed.
+   */
+  trace_id?: string | null;
   endpoint: string;
   log_type?: string | null;
   method: string;
@@ -749,6 +754,7 @@ export interface LogListItem {
   id: number;
   timestamp: number;
   request_id: string;
+  trace_id?: string | null;
   endpoint: string;
   log_type?: string | null;
   method: string;
@@ -799,6 +805,8 @@ export interface LogFilter {
   search?: string;
   endpoint?: string;
   log_type?: string;
+  /** Exact trace id, to collect every row of one trace. */
+  trace_id?: string;
   /** true = at least one provider failed first, false = explicitly none. */
   had_fallback?: boolean;
   cursor?: string | null;

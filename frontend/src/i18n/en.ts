@@ -1514,6 +1514,9 @@ export default {
     cacheReadTokens: "Cache Hits",
     cacheCreationTokens: "Cache Writes",
     activeFilters: "{count} filter|{count} filters",
+    filterByTrace: "Filter by this trace",
+    traceFilterChip: "Trace: {id}",
+    clearTraceFilter: "Clear the trace filter",
     // MCP logs specific
     mcpDescription: "Monitor MCP server tool calls and resource access",
     mcpServer: "Server",
@@ -1546,6 +1549,7 @@ export default {
     requestTypeTranslation: "Translate",
     // Log detail sheet labels
     requestId: "Request ID",
+    traceId: "Trace ID",
     saved: "Saved",
     type: "Type",
     queryString: "Query String",

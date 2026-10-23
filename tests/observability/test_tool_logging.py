@@ -24,7 +24,7 @@ QUERY = "site:github.com pi-web-access nicobailon and a very long tail for good 
 def _record(entry: WebSearchLogEntry, **attribution) -> MagicMock:
     log_intake.configure(config=LoggingConfig())
     service = MagicMock()
-    with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+    with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
         record_web_search(entry, **attribution)
     return service
 

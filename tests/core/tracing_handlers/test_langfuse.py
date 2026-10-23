@@ -32,21 +32,16 @@ from llm_proxy.models.types import (
     PromptTokensDetails,
     Usage,
 )
-from llm_proxy.observability.event_context import EventContext
-from llm_proxy.observability.tracing.handlers.providers.langfuse import LangfuseTracingHandler
-from llm_proxy.observability.tracing.handlers.providers.langfuse.attributes import (
+from llm_proxy.observability.content.registry import (
     _endpoint_display_name,
     build_audio_transcript_input_data,
     build_audio_transcript_output_data,
-    build_cost_details,
     build_decisions_input_data,
     build_decisions_output_data,
     build_embedding_input_data,
     build_embedding_output_data,
-    build_embedding_usage_details,
     build_image_input_data,
     build_image_output_data,
-    build_metadata,
     build_request_input_data,
     build_rerank_input_data,
     build_rerank_output_data,
@@ -55,10 +50,18 @@ from llm_proxy.observability.tracing.handlers.providers.langfuse.attributes impo
     build_speech_output_data,
     build_systemone_input_data,
     build_systemone_output_data,
-    build_usage_details,
     extract_tool_uses,
     observation_profile,
 )
+from llm_proxy.observability.event_context import EventContext
+from llm_proxy.observability.observation.collector import collect
+from llm_proxy.observability.sinks.langfuse import (
+    build_cost_details,
+    build_embedding_usage_details,
+    build_metadata,
+    build_usage_details,
+)
+from llm_proxy.observability.tracing.handlers.providers.langfuse import LangfuseTracingHandler
 
 
 @pytest.fixture
@@ -78,9 +81,7 @@ def mock_propagate():
     span; the handler passes user/session/trace-name through it instead of the
     (silently ignored) ``observation.update(trace_user_id=...)`` kwargs.
     """
-    with patch(
-        "llm_proxy.observability.tracing.handlers.providers.langfuse.handler.propagate_attributes"
-    ) as propagate:
+    with patch("llm_proxy.observability.sinks.langfuse.propagate_attributes") as propagate:
         yield propagate
 
 
@@ -279,11 +280,13 @@ class TestLangfuseTracingHandler:
             "timeout",
             "sample_rate",
             "version",
+            "send_content",
         }
         field_names = {f["name"] for f in LangfuseTracingHandler.field_metadata}
         assert "base_url" in field_names
         assert "sample_rate" in field_names
         assert "version" in field_names
+        assert "send_content" in field_names
         assert "region" not in field_names
 
     def test_name_from_settings(self, mock_client, mock_langfuse_cls):
@@ -1003,7 +1006,7 @@ class TestLangfuseSDKDataBuilders:
                 total_tokens=15,
             ),
         )
-        details = build_usage_details(context)
+        details = build_usage_details(collect(context))
         assert details == {"input": 5, "output": 10, "total": 15}
 
     def test_build_usage_details_are_exclusive_buckets(self):
@@ -1028,7 +1031,7 @@ class TestLangfuseSDKDataBuilders:
                 completion_tokens_details=CompletionTokensDetails(audio_tokens=4),
             ),
         )
-        details = build_usage_details(context)
+        details = build_usage_details(collect(context))
         assert details["input"] == 55  # 100 - 30 - 10 - 5
         assert details["output"] == 26  # 50 - 4 - 20
         assert details["total"] == 150
@@ -1052,13 +1055,13 @@ class TestLangfuseSDKDataBuilders:
                 cache_read_input_tokens=25,
             ),
         )
-        details = build_usage_details(context)
+        details = build_usage_details(collect(context))
         assert details["cache_read_input_tokens"] == 25
         assert details["input"] == 75
 
     def test_build_usage_details_none_without_token_data(self):
         context = EventContext(request_id="req-1", trace_id="trace-1", model="gpt-4")
-        assert build_usage_details(context) is None
+        assert build_usage_details(collect(context)) is None
 
     def test_build_embedding_usage_details_drops_output_buckets(self):
         """An embedding bills input only; a zero ``output`` row prices nothing."""
@@ -1068,12 +1071,12 @@ class TestLangfuseSDKDataBuilders:
             model="gemini-embedding-001",
             usage=Usage(input_tokens=9),
         )
-        assert build_embedding_usage_details(context) == {"input": 9, "total": 9}
-        assert build_usage_details(context) == {"input": 9, "output": 0, "total": 9}
+        assert build_embedding_usage_details(collect(context)) == {"input": 9, "total": 9}
+        assert build_usage_details(collect(context)) == {"input": 9, "output": 0, "total": 9}
 
     def test_build_embedding_usage_details_none_without_usage(self):
         context = EventContext(request_id="req-1", trace_id="trace-1", model="m")
-        assert build_embedding_usage_details(context) is None
+        assert build_embedding_usage_details(collect(context)) is None
 
     def test_build_cost_details(self):
         context = EventContext(
@@ -1083,14 +1086,14 @@ class TestLangfuseSDKDataBuilders:
             cost_usd=0.002,
             provider_reported_cost=0.0015,
         )
-        details = build_cost_details(context)
+        details = build_cost_details(collect(context))
         # Only the proxy-computed total is a real cost bucket; the
         # provider-reported cost rides in metadata (see build_metadata).
         assert details == {"total": 0.002}
 
     def test_build_cost_details_none_without_cost(self):
         context = EventContext(request_id="req-1", trace_id="trace-1", model="gpt-4")
-        assert build_cost_details(context) is None
+        assert build_cost_details(collect(context)) is None
 
     def test_build_metadata(self):
         context = EventContext(
@@ -1103,7 +1106,7 @@ class TestLangfuseSDKDataBuilders:
             request_type=RequestType.CHAT,
             metadata={"endpoint": "/v1/chat/completions"},
         )
-        metadata = build_metadata(context)
+        metadata = build_metadata(collect(context))
         assert metadata["request_id"] == "req-1"
         assert metadata["provider"] == "openai"
         assert metadata["endpoint"] == "/v1/chat/completions"
@@ -1173,3 +1176,137 @@ class TestLangfuseSDKDataBuilders:
     def test_extract_tool_uses_empty_for_no_output(self):
         assert extract_tool_uses(None) == []
         assert extract_tool_uses([]) == []
+
+
+class TestLangfuseContentPolicy:
+    """The tracing exporter obeys the same privacy policy as the database log.
+
+    ``send_content`` defaults to ``inherit``: no prompt/completion content when
+    ``log_input_output`` is off, masked content when ``mask_sensitive_data`` is
+    on. ``full`` is the explicit opt-in that bypasses the log switches.
+    """
+
+    def _handler(self, mock_client, **settings):
+        base = {"public_key": "pk-test", "secret_key": "sk-test"}
+        base.update(settings)
+        return LangfuseTracingHandler.create_handler(base)
+
+    def test_send_content_defaults_to_inherit(self, mock_client, mock_langfuse_cls):
+        handler = self._handler(mock_client)
+        assert handler._exporter.send_content == "inherit"
+
+    def test_rejects_an_unknown_send_content_value(self, mock_langfuse_cls):
+        with pytest.raises(ValueError, match="send_content"):
+            LangfuseTracingHandler.create_handler(
+                {
+                    "public_key": "pk-test",
+                    "secret_key": "sk-test",
+                    "send_content": "everything",
+                }
+            )
+
+    async def test_bodies_off_exports_no_content(self, mock_client, mock_propagate):
+        handler = self._handler(mock_client)
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            should_log_input_output=False,
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(_make_request_with_conversation(), context)
+
+        call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
+        assert call_kwargs["input"] is None, "the log privacy switch must gate prompt export"
+
+    async def test_masking_is_shared_with_the_log_store(self, mock_client, mock_propagate):
+        handler = self._handler(mock_client)
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_request_with_conversation()
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            should_log_input_output=True,
+            mask_sensitive_data=True,
+            sensitive_keys=frozenset({"api_key"}),
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(request, context)
+
+        exported = mock_client.start_as_current_observation.call_args.kwargs["input"]
+        # The masked value keeps a short prefix/suffix, never the whole secret.
+        assert "secret-value" not in str(exported)
+
+    async def test_masking_off_exports_verbatim_content(self, mock_client, mock_propagate):
+        handler = self._handler(mock_client)
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_request_with_conversation()
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            should_log_input_output=True,
+            mask_sensitive_data=False,
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(request, context)
+
+        exported = mock_client.start_as_current_observation.call_args.kwargs["input"]
+        assert exported, "masking off should keep the rendered prompt"
+
+    async def test_explicit_full_bypasses_the_log_switches(self, mock_client, mock_propagate):
+        handler = self._handler(mock_client, send_content="full")
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            should_log_input_output=False,
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(_make_request_with_conversation(), context)
+
+        exported = mock_client.start_as_current_observation.call_args.kwargs["input"]
+        assert exported, "'full' is the documented, explicit opt-in"
+
+    async def test_explicit_none_gates_tool_observations_too(self, mock_client):
+        handler = self._handler(mock_client, send_content="none")
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        request = _make_request_with_conversation()
+        response = MagicMock()
+        tool_block = MagicMock()
+        tool_block.type = "tool_use"
+        tool_block.id = "call_1"
+        tool_block.name = "get_weather"
+        tool_block.input = {"location": "NYC"}
+        response.output = [tool_block]
+        response.finish_reason = "tool_calls"
+        response.model = "gpt-4"
+
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(request, context)
+        await handler.on_request_end(request, response, context)
+
+        gen.start_observation.assert_not_called()

@@ -1,15 +1,22 @@
-"""Langfuse SDK-specific data builders.
-
-These helpers convert internal request/response/context data into native Python
-dicts that the Langfuse Python SDK accepts for ``input``, ``output``,
-``usage_details``, ``cost_details``, and ``metadata``.
+"""What a request type carries, rendered for an observability backend.
 
 Every request type the pipeline serves has its own input/output pair here: a
 ``conversation`` request renders its messages, an embedding renders its texts,
 and the non-conversation types (rerank, images, audio, systemone, decisions)
 render the fields that actually identify the call. Binary payloads — audio,
-image bytes, base64 vectors — never reach the trace; they are summarized by
-size, URL or a bounded preview.
+image bytes, base64 vectors — never reach a trace; they are summarized by size,
+URL or a bounded preview. ``OBSERVATION_PROFILES`` maps each type to the pair
+and to the observation type a billed backend records it as.
+
+This module owns request-type *semantics*, not a backend's wire shape: the
+Langfuse exporter (``observability/sinks/langfuse.py``) turns the rendered value
+into SDK payloads, applies the content policy, and owns ``usage_details`` /
+``cost_details`` / metadata. The split is ADR-0044's: one place decides what a
+request *is*, another decides where it goes.
+
+The renderers take the typed internal request/response (not the observation's
+captured bodies) because they answer per-type questions — rerank documents,
+attachment summaries, tool-call extraction — that the raw JSON does not model.
 """
 
 import re
@@ -44,9 +51,6 @@ if TYPE_CHECKING:
         InternalTranslationRequest,
         InternalTranslationResponse,
     )
-    from llm_proxy.models.params import GenerationParams
-    from llm_proxy.observability.event_context import EventContext
-
 from llm_proxy.observability.logger import get_logger
 
 #: How many vectors of an embedding response the trace keeps. One vector is
@@ -721,167 +725,6 @@ def build_decisions_output_data(response: InternalDecisionResponse) -> dict[str,
     return payload
 
 
-def build_usage_details(context: EventContext) -> dict[str, int] | None:
-    """Build Langfuse ``usage_details`` as mutually exclusive buckets.
-
-    Langfuse treats every key as a non-overlapping bucket: ``input`` must exclude
-    ``input_*`` values and ``output`` must exclude ``output_*`` values, or the
-    tokens are counted (and priced) twice. The proxy's own token counts are
-    inclusive — ``prompt_tokens`` already contains cache reads/writes and audio
-    tokens, ``completion_tokens`` already contains reasoning and audio tokens —
-    so each detail is subtracted from ``input``/``output`` before being emitted
-    under its own bucket (see the Langfuse token & cost tracking contract).
-
-    Image tokens stay inside ``input``: Langfuse's image usage key varies by
-    model definition, so carving them out could silently price them at zero.
-    """
-    usage = context.usage
-    if not context.has_token_data() or usage is None:
-        return None
-
-    # Canonical fields only (CONTEXT.md "Canonical usage record"): the record holds
-    # one field per fact, and its own counters already include the detail tokens.
-    prompt_details = usage.prompt_tokens_details
-    completion_details = usage.completion_tokens_details
-    cache_read = usage.cache_read_input_tokens or (
-        prompt_details.cached_tokens if prompt_details is not None else None
-    )
-    cache_write = usage.cache_creation_input_tokens
-    audio_in = prompt_details.audio_tokens if prompt_details is not None else None
-    audio_out = completion_details.audio_tokens if completion_details is not None else None
-    reasoning = usage.reasoning_tokens
-
-    details: dict[str, int] = {}
-    if usage.input_tokens is not None:
-        exclusive_input = usage.input_tokens - (
-            (cache_read or 0) + (cache_write or 0) + (audio_in or 0)
-        )
-        details["input"] = max(exclusive_input, 0)
-    if usage.output_tokens is not None:
-        exclusive_output = usage.output_tokens - ((audio_out or 0) + (reasoning or 0))
-        details["output"] = max(exclusive_output, 0)
-    if usage.total_tokens is not None:
-        details["total"] = usage.total_tokens
-
-    if cache_read:
-        details["cache_read_input_tokens"] = cache_read
-    if cache_write:
-        details["cache_creation_input_tokens"] = cache_write
-    if audio_in:
-        details["input_audio_tokens"] = audio_in
-    if audio_out:
-        details["output_audio_tokens"] = audio_out
-    if reasoning:
-        details["output_reasoning_tokens"] = reasoning
-
-    return details if details else None
-
-
-def build_cost_details(context: EventContext) -> dict[str, float] | None:
-    """Build Langfuse ``cost_details`` from cost data in the event context.
-
-    Only ``total`` is emitted: the proxy computes a single USD total and does not
-    split it per usage bucket. The provider-reported cost is informational (it is
-    the same total when it wins cost precedence) and is carried in metadata
-    instead of as a phantom cost bucket.
-    """
-    if context.cost_usd is None:
-        return None
-    return {"total": context.cost_usd}
-
-
-def build_embedding_usage_details(context: EventContext) -> dict[str, int] | None:
-    """Build Langfuse ``usage_details`` for an embedding observation.
-
-    An embedding call bills input tokens only, so the ``output`` buckets a
-    ``generation`` reports would show up as zero rows that price nothing (and
-    that the call never produced).
-    """
-    details = build_usage_details(context)
-    if details is None:
-        return None
-    return {key: value for key, value in details.items() if not key.startswith("output")}
-
-
-def build_metadata(context: EventContext) -> dict[str, Any]:
-    """Build Langfuse observation metadata from the event context."""
-    metadata: dict[str, Any] = {
-        "request_id": context.request_id,
-        "trace_id": context.trace_id,
-    }
-    if context.provider:
-        metadata["provider"] = context.provider
-    if context.model:
-        metadata["model"] = context.model
-    if context.request_type is not None:
-        metadata["request_type"] = context.request_type.value
-
-    endpoint = context.metadata.get("endpoint")
-    if endpoint:
-        metadata["endpoint"] = endpoint
-        endpoint_name = _endpoint_display_name(endpoint)
-        if endpoint_name:
-            metadata["endpoint_name"] = endpoint_name
-
-    if context.is_streaming:
-        metadata["stream"] = True
-    if context.ttft_ms is not None:
-        metadata["ttft_ms"] = context.ttft_ms
-    if context.latency_ms is not None:
-        metadata["latency_ms"] = round(context.latency_ms, 3)
-    if context.error_message:
-        metadata["error_message"] = context.error_message
-
-    # Token/usage facts that are not emitted as ``usage_details`` buckets (see
-    # ``build_usage_details``) stay visible here.
-    usage = context.usage
-    image_input = (
-        usage.prompt_tokens_details.image_tokens
-        if usage is not None and usage.prompt_tokens_details is not None
-        else None
-    )
-    if image_input is not None:
-        metadata["image_input_tokens"] = image_input
-    if context.cache_savings_usd is not None:
-        metadata["cache_savings_usd"] = context.cache_savings_usd
-    if context.provider_reported_cost is not None:
-        metadata["provider_reported_cost"] = context.provider_reported_cost
-    if context.provider_model_name:
-        metadata["provider_model_name"] = context.provider_model_name
-
-    return metadata
-
-
-def build_model_parameters(params: GenerationParams | None) -> dict[str, Any] | None:
-    """Build model parameters dict for Langfuse generation.
-
-    Extracts common generation parameters (temperature, max_tokens, top_p,
-    stop sequences, etc.) from the GenerationParams object.
-    """
-    if params is None:
-        return None
-
-    common = params.common
-    if common is None:
-        return None
-
-    result: dict[str, Any] = {}
-    for key in (
-        "temperature",
-        "top_p",
-        "max_tokens",
-        "stop",
-        "frequency_penalty",
-        "presence_penalty",
-        "seed",
-    ):
-        val = getattr(common, key, None)
-        if val is not None:
-            result[key] = val
-
-    return result if result else None
-
-
 @dataclass(frozen=True)
 class ObservationProfile:
     """How one request type is shaped into a Langfuse observation.
@@ -891,14 +734,13 @@ class ObservationProfile:
     this proxy serves is billed — so only the embedding call gets its own
     observation type, with its own token semantics. Rerank, image and audio
     calls stay ``generation`` so their usage keeps a priced home.
+
+    Usage details are not part of the profile: the bucket arithmetic is
+    Langfuse's contract and lives with the exporter.
     """
 
     build_input: Callable[[Any], Any]
     build_output: Callable[[Any], Any]
-    # String annotation on purpose: ``EventContext`` is imported for type
-    # checking only, and a dataclass field annotation is evaluated when the
-    # class is created.
-    build_usage: Callable[[EventContext], dict[str, int] | None] = build_usage_details
     as_type: str = "generation"
 
 
@@ -929,7 +771,6 @@ OBSERVATION_PROFILES: Final[Mapping[RequestType, ObservationProfile]] = frozendi
         RequestType.EMBEDDING: ObservationProfile(
             build_input=build_embedding_input_data,
             build_output=build_embedding_output_data,
-            build_usage=build_embedding_usage_details,
             as_type="embedding",
         ),
         RequestType.RERANK: ObservationProfile(

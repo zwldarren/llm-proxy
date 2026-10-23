@@ -371,7 +371,7 @@ def _breakdown_from_usage(
     from cache, a turn that had produced no output yet) and must survive as
     ``0``; without one the count is unknown and stays ``None``. This is the same
     rule log intake applies to the request-log token columns
-    (``log_intake._token_column``), so a Realtime turn's row and the breakdown it
+    (``store.token_column``), so a Realtime turn's row and the breakdown it
     is written from cannot disagree about "reported nothing" vs "reported zero".
 
     The proxy's own dimensions (images generated, characters synthesized,

@@ -1,26 +1,26 @@
 """The row-assembly contract, driven across every Log intake situation.
 
-The intake has one seam: a situation declares what it knows, ``_assemble_row``
-builds the row, and the background writer receives it. These tests walk every
-situation through that seam and assert the invariants the assembler owns —
-deployment constants, the timestamp, and the rule that classification is only
-what a situation declares. The per-situation tests next door keep covering the
-values each situation declares; this file covers what they all share, so a new
-situation inherits the contract by being added to the table.
+The intake has one seam: a situation declares what it knows,
+``store.assemble_row`` builds the row, and the background writer receives it.
+These tests walk every situation through that seam and assert the invariants the
+assembler owns — deployment constants, the timestamp, and the rule that
+classification is only what a situation declares. The per-situation tests next
+door keep covering the values each situation declares; this file covers what they
+all share, so a new situation inherits the contract by being added to the table.
 """
 
 import ast
 import asyncio
 import inspect
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.core.request_facts import RequestIdentity, facts_for, set_request_identity
-from llm_proxy.observability import log_intake
+from llm_proxy.observability import log_intake, store
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.log_intake import (
     InternalCallLogEntry,
@@ -72,8 +72,8 @@ class _Writers:
 
     def __enter__(self):
         self._patchers = (
-            patch.object(log_intake, "RequestLogService", self._log_service_cls),
-            patch.object(log_intake, "UsageService", self._usage_service_cls),
+            patch.object(store, "RequestLogService", self._log_service_cls),
+            patch.object(store, "UsageService", self._usage_service_cls),
         )
         for patcher in self._patchers:
             patcher.start()
@@ -334,17 +334,19 @@ def test_payload_defaults_distinguish_nothing_passed_from_passed_none():
 
 def test_the_assembler_is_the_only_construction_point():
     """The seam claim: one place builds a row, so one place owns the constants."""
-    tree = ast.parse(inspect.getsource(log_intake))
-    constructions = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "RequestLogCreate"
-    ]
-    assert len(constructions) == 1, (
-        f"{len(constructions)} construction sites; every row must come from the assembler"
-    )
+
+    def constructions(module: ModuleType) -> int:
+        tree = ast.parse(inspect.getsource(module))
+        return sum(
+            1
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "RequestLogCreate"
+        )
+
+    assert constructions(store) == 1, "every row must come from the store's assembler"
+    assert constructions(log_intake) == 0, "a verb must not build a row itself"
 
 
 @pytest.mark.parametrize(

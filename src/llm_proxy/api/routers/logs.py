@@ -192,6 +192,17 @@ async def list_logs(
     api_key: str | None = Query(None, description="Filter by API key name"),
     endpoint: str | None = Query(None),
     log_type: str | None = Query(None, description="Filter by log type (audit, endpoint)"),
+    trace_id: str | None = Query(
+        None,
+        description=(
+            "Filter by trace id — the correlation id handed to the tracing "
+            "backends. Use it to collect every row a trace produced. It is "
+            "also the exported trace's id when it is a canonical 32-char hex "
+            "id (the proxy's own, or a caller-supplied Langfuse id); for any "
+            "other caller-supplied header the backend carries its own id, so "
+            "the row is still found here but the export is not."
+        ),
+    ),
     had_fallback: bool | None = Query(
         None,
         description=(
@@ -237,6 +248,7 @@ async def list_logs(
             endpoint=endpoint,
             log_type=log_type,
             search=search,
+            trace_id=trace_id,
             include_count=include_count,
             user_id=user_filter,
             had_fallback=had_fallback,
@@ -267,6 +279,7 @@ async def list_logs(
         endpoint=endpoint,
         log_type=log_type,
         search=search,
+        trace_id=trace_id,
         user_id=user_filter,
         had_fallback=had_fallback,
     )

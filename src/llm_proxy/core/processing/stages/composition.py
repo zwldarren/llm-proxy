@@ -89,6 +89,14 @@ async def rerun_per_provider_stages(
     if event_context is None:
         # Direct-adapter/test paths may lack an EventContext; the stages
         # re-run here never read it, but PipelineState requires the field.
+        #
+        # This object is deliberately NOT written back to ``context.event_context``,
+        # which is what keeps it away from request-end capture: it leaves
+        # ``mask_sensitive_data``/``sensitive_keys`` at their defaults, and those
+        # defaults are load-bearing on the observation path (the collector resolves
+        # the content policy from them, ADR-0044). Capture only ever reads the
+        # context the pipeline created, so the built-in-only key set here can never
+        # widen a stored body.
         event_context = EventContext(
             request_id=facts_for(req).request_id,
             trace_id="",

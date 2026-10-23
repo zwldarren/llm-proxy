@@ -1,10 +1,10 @@
-"""Audit log handler for database logging via the unified capture layer.
+"""Audit log handler for database logging via the observation pipeline.
 
-This handler connects the pipeline's lifecycle events to the Log intake module
+This handler connects the pipeline's lifecycle events to the Log intake verbs
 (ADR-0020). It owns only the capture that needs the live stream — arming the
 ``EventContext`` for streaming and buffering raw chunks when the operator asked
-for raw capture — and hands finished situations to the intake verbs, which own
-classification, masking, dispatch and the usage-record fan-out.
+for raw capture — and hands finished requests to the intake verbs, which finalize
+the capture and emit one observation to the database sinks (ADR-0044).
 """
 
 from typing import TYPE_CHECKING

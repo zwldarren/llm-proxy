@@ -65,6 +65,7 @@ apply **only to your own requests** — there is no global tracing switch.
 | **Public key / Secret key** | Required; secrets are masked in API responses |
 | **Base URL** | Default `https://cloud.langfuse.com`; self-hosted instances are allowed |
 | **Sample rate** | 0.0–1.0 |
+| **Send content** | `inherit` (default) follows the log privacy switches — no content when body logging is off, masked content when masking is on; `none` never exports content; `full` exports verbatim content (explicit opt-in that bypasses the log switches) |
 | **Timeout, version** | Optional tuning |
 
 Correlate traces with requests using the `x-langfuse-trace-id` request header; the

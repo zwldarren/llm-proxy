@@ -21,6 +21,7 @@ from llm_proxy.core.internal_call import build_provider_adapter
 from llm_proxy.core.provider_selector import ProviderSelectionResult
 from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.database import UserRecord, UserRepository, get_async_session
+from llm_proxy.database.tables import TRACE_ID_MAX_LENGTH
 from llm_proxy.http.client import AsyncSession, ProviderHTTPClientManager
 from llm_proxy.services import runtime_services
 
@@ -28,7 +29,19 @@ get_async_session_dep = Depends(get_async_session)
 
 
 def extract_trace_id(request: Request) -> str | None:
-    return request.headers.get("x-langfuse-trace-id") or request.headers.get("x-trace-id")
+    """The caller's correlation id, when it is one this proxy can store.
+
+    Only meaningful for a trusted peer (``api.context`` gates it on
+    ``peer_trusted``). A value longer than the log column is dropped rather than
+    truncated: a truncated id joins nothing, and letting it through would make
+    PostgreSQL reject the request's log row. Dropping it falls back to the
+    proxy-minted ``uuid4().hex`` in the pipeline, so the request still gets a
+    traceable id.
+    """
+    trace_id = request.headers.get("x-langfuse-trace-id") or request.headers.get("x-trace-id")
+    if trace_id is None or len(trace_id) > TRACE_ID_MAX_LENGTH:
+        return None
+    return trace_id
 
 
 def extract_session_id(request: Request) -> str | None:

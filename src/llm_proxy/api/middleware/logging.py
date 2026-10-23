@@ -17,10 +17,10 @@ from llm_proxy.api.middleware.asgi_utils import (
     merge_response_headers,
 )
 from llm_proxy.core.request_facts import facts_from_scope
-from llm_proxy.observability.log_intake import record_admin_request
+from llm_proxy.observability.log_intake import mask_for_storage, record_admin_request
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.sampling import should_exclude_from_logging
-from llm_proxy.security.passwords import SENSITIVE_KEYS, mask_headers, mask_sensitive
+from llm_proxy.security.passwords import mask_headers
 
 logger = get_logger(__name__)
 
@@ -72,16 +72,13 @@ _MAX_CAPTURED_BYTES = 10 * 1024 * 1024
 
 
 def _capture_and_mask_body(body_bytes: bytes) -> Any:
-    """Parse JSON body and mask sensitive fields."""
+    """Parse a JSON body and mask sensitive fields with the deployment's keys."""
     if not body_bytes:
         return {}
     import orjson
 
     try:
-        body_data = orjson.loads(body_bytes)
-        if isinstance(body_data, dict):
-            body_data = mask_sensitive(body_data, SENSITIVE_KEYS)
-        return body_data
+        return mask_for_storage(orjson.loads(body_bytes))
     except Exception:
         return body_bytes.decode("utf-8", errors="replace")
 
@@ -160,9 +157,9 @@ class HttpLoggingMiddleware:
             facts.response_headers = captured_headers
             if method == "GET":
                 # Read-only audits record the access event only. Do not persist
-                # the response body: list-valued responses (e.g. /api/api-keys)
-                # are not masked by _capture_and_mask_body and may contain
-                # secrets.
+                # the response body: a read audit's payload is a page of
+                # records the operator never asked to store, and the marker says
+                # exactly that without depending on what masking can walk.
                 facts.response_body = {"_read_audit": True}
             else:
                 facts.response_body = _capture_and_mask_body(bytes(captured_body or b""))

@@ -8,11 +8,12 @@ before; these tests pin enforcement at ``_request_log_from_create`` so a new
 writer is covered automatically.
 """
 
+from sink_rows import sink_row
+
 from llm_proxy.config.types import ProxyConfig
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.config.types.server import ServerParams
-from llm_proxy.observability import log_intake
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.redaction import (
     BODIES_DISABLED_MARKER,
@@ -233,7 +234,7 @@ class TestHandlerMarkers:
             metadata={},
         )
 
-        log = log_intake._build_success_row(context, LoggingConfig(log_input_output=False))
+        log = sink_row(context, LoggingConfig(log_input_output=False))
 
         assert log.request_body == {"_bodies_disabled": True}
         assert log.response_body == {"_bodies_disabled": True}
@@ -250,7 +251,7 @@ class TestHandlerMarkers:
             metadata={},
         )
 
-        log = log_intake._build_success_row(context, LoggingConfig(log_input_output=True))
+        log = sink_row(context, LoggingConfig(log_input_output=True))
 
         assert log.request_body == {"_sampled_out": True}
         assert log.response_body == {"_sampled_out": True}
@@ -265,7 +266,7 @@ class TestHandlerMarkers:
             metadata={},
         )
 
-        log = log_intake._build_stream_row(context, LoggingConfig(log_input_output=True))
+        log = sink_row(context, LoggingConfig(log_input_output=True))
 
         assert log.request_body == {"_sampled_out": True}
         assert log.response_body == {"_sampled_out": True}
@@ -282,7 +283,7 @@ class TestHandlerMarkers:
             "original_error": {"message": "UPSTREAM SECRET"},
         }
 
-        log = log_intake._build_error_row(context, LoggingConfig(log_input_output=False))
+        log = sink_row(context, LoggingConfig(log_input_output=False), error=ValueError("boom"))
 
         assert log.log_metadata["error_details"]["response_body"] == {"_bodies_disabled": True}
         assert log.log_metadata["error_details"]["original_error"] == {"_bodies_disabled": True}

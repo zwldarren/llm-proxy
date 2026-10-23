@@ -117,7 +117,7 @@ def _build_app(monkeypatch, *, provider_configs, model_configs):
     # Recording log service (the real one would write to the database).
     recorded_logs = []
     monkeypatch.setattr(
-        "llm_proxy.observability.log_intake.RequestLogService",
+        "llm_proxy.observability.store.RequestLogService",
         lambda config: SimpleNamespace(create_log_background=recorded_logs.append),
     )
     app.state._realtime_logs = recorded_logs

@@ -240,6 +240,11 @@ const buildFilter = (): LogFilter => {
     filter.had_fallback = undefined;
   }
 
+  // The trace id is set from outside this panel (the trace badge in the log
+  // detail sheet, or a deep link), so it has to survive every rebuild this panel
+  // does — otherwise changing any other field would silently drop it.
+  filter.trace_id = props.filters.trace_id;
+
   if (statusFilter.value === "2xx") {
     filter.status_code_from = 200;
     filter.status_code_to = 299;
@@ -284,6 +289,7 @@ const isFilterEqual = (a: LogFilter, b: LogFilter) => {
     "start_date",
     "end_date",
     "had_fallback",
+    "trace_id",
   ];
   return keys.every((k) => String(a[k] ?? "") === String(b[k] ?? ""));
 };
@@ -386,6 +392,12 @@ const clearDateRange = () => {
   tempDateRange.value = { start: undefined, end: undefined };
 };
 
+const hasTraceFilter = computed(() => Boolean(props.filters.trace_id));
+
+const clearTraceFilter = () => {
+  emit("update:filters", { ...props.filters, trace_id: undefined });
+};
+
 // Count active filters
 const activeFilterCount = computed(() => {
   let count = 0;
@@ -396,6 +408,7 @@ const activeFilterCount = computed(() => {
   if (userText.value?.trim()) count++;
   if (apiKeyText.value?.trim()) count++;
   if (fallbackFilter.value !== "all") count++;
+  if (hasTraceFilter.value) count++;
   if (startDateInput.value) count++;
   if (endDateInput.value) count++;
   return count;
@@ -411,8 +424,9 @@ const clearAllFilters = () => {
   statusFilter.value = "all";
   fallbackFilter.value = "all";
   clearDateRange();
-  // Emit the update so parent knows filters were cleared
-  emit("update:filters", buildFilter());
+  // Emit the update so parent knows filters were cleared (the trace id is the
+  // parent's, not this panel's local state, so it is cleared here too).
+  emit("update:filters", { ...buildFilter(), trace_id: undefined });
 };
 
 defineExpose({ activeFilterCount, clearAllFilters });
@@ -444,6 +458,26 @@ onUnmounted(() => {
       >
         {{ t("common.clearFilters") }}
       </Button>
+    </div>
+    <!-- Trace chip: set from the detail sheet's trace badge or a deep link -->
+    <div
+      v-if="hasTraceFilter"
+      class="flex flex-wrap items-center gap-2 pb-2 border-b border-border/40"
+    >
+      <span class="text-xs font-medium text-muted-foreground">{{ t("logs.traceId") }}:</span>
+      <span
+        class="inline-flex items-center gap-1.5 h-8 max-w-full rounded-md border border-border/60 bg-muted/40 pl-2.5 pr-1 font-mono text-xs text-foreground"
+      >
+        <span class="truncate">{{ filters.trace_id }}</span>
+        <button
+          type="button"
+          class="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
+          :aria-label="t('logs.clearTraceFilter')"
+          @click="clearTraceFilter"
+        >
+          <X class="size-3.5" aria-hidden="true" />
+        </button>
+      </span>
     </div>
     <div
       class="filters-grid gap-3 sm:gap-4"

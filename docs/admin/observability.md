@@ -15,6 +15,7 @@ the routing decision.
 | Field | Notes |
 | --- | --- |
 | `status_code` | Upstream or proxy status. `499` means the client disconnected mid-request and the upstream call was cancelled |
+| `trace_id` | The correlation id handed to the tracing backend — the join key between a row and an exported trace when it is a canonical 32-character hex id (see *Tracing* below for the other case). `NULL` on rows written before the column existed and on rows that carry no trace. The list filter matches it exactly |
 | `ttft_ms` | Time to first token (streaming) |
 | `response_time_ms` | Total duration |
 | Token counts | Prompt, completion, total; cache creation/read; cached prompt; audio in/out |
@@ -37,10 +38,16 @@ before this rule existed may carry `0` for a measurement that only lives in
 
 **Filtering** (`GET /api/logs`): page or cursor pagination (max 200 per page), free-text
 `search`, date range, exact status or status range, model, provider, user, API key,
-endpoint, log type, and `had_fallback` (`true` = at least one provider failed before
+endpoint, log type, `trace_id` (collect every row of one trace), and `had_fallback`
+(`true` = at least one provider failed before
 another served the request, `false` = no fallback recorded; rows written before
 `fallback_count` existed are `NULL` and match neither). Non-admins are automatically
 scoped to their own rows.
+
+In the dashboard, the `trace_id` filter is not in the filter panel: open a row and use the
+filter action on its trace badge to list every row of that trace, or link to
+`/logs?trace_id=<id>`. The active filter is then shown (and cleared) from the chip above
+the filter panel.
 
 ### Privacy controls
 
@@ -65,6 +72,12 @@ Configured in [Settings → Log Management](settings.md#log-management):
   `error_message` column is empty, so the attempt timeline is the *only* place the
   failure is recorded. The upstream payload those messages can echo lives in
   `log_metadata.error_details`, which *is* scrubbed.
+- **Tracing content** obeys these switches too. The Langfuse exporter's `send_content`
+  setting defaults to `inherit`: with bodies off it exports **no** prompt/completion
+  content (usage, cost, identity, timing and metadata are still exported), and with
+  masking on it exports the same masked values the log row stores. `full` is an
+  explicit opt-in that exports verbatim content regardless of the logging switches;
+  `none` never exports content. See [Tracing](#tracing).
 - **Sampling** (`sampling_rate`, default 1.0) limits **body capture** for requests that
   do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` (a
   distinct marker, so the UI never reports "sampled out" when bodies are simply disabled)
@@ -76,7 +89,11 @@ Configured in [Settings → Log Management](settings.md#log-management):
   the reassembled body is an order of magnitude smaller, and unlike the SSE text it is
   maskable and searchable. Measured on representative streams: ~45× smaller for Chat
   Completions, ~20× for Anthropic. On, the raw SSE frames are stored verbatim as a
-  string. `x-log-full: true` forces raw for one request.
+  string. `x-log-full: true` forces raw for one request. A raw capture is stored
+  **verbatim**, which is what makes it replayable — it is therefore not key-masked
+  (the session masker works on JSON keys, and rewriting the frames would break the
+  byte-exact replay it exists for); it is only bounded by the body size cap. Leave
+  raw capture off if the streamed content itself must not be stored unmasked.
   The **native-passthrough** tier (the default for OpenAI-compatible providers on the
   `openai` protocol, and for Anthropic/OpenResponses-native providers) forwards
   upstream frames without running the content transformer. It still logs the
@@ -96,6 +113,10 @@ Configured in [Settings → Log Management](settings.md#log-management):
 - **Masking** (`mask_sensitive_data`, default on) replaces credentials in headers,
   bodies, and MCP/tool arguments. Values ≤ 8 chars become `***`; longer values keep
   their first 3 and last 4 characters. Add your own field names via **Extra Sensitive Keys**.
+  One policy applies to every row that stores content: ordinary requests, requests that
+  failed before the pipeline started (backfilled from the request), admin/audit payloads,
+  and MCP arguments. Admin payloads are masked even when `mask_sensitive_data` is off,
+  because they carry credentials.
 - **Retention** (`log_retention_days`, default 30; `0` = forever) is enforced by a
   sweep per log type that runs once a day. The sweep deletes in bounded
   batches, looping until exhausted — including request logs and usage
@@ -240,12 +261,19 @@ billed call keeps its priced home. Version segments are stripped from the name, 
 `/v1/rerank` and `/v2/rerank` both read `rerank`, and the double-version aliases
 (`/v1/v1/chat/completions`) collapse to the canonical name as well.
 
+**Content policy.** The exporter does not bypass the log privacy switches. Its
+`send_content` setting defaults to `inherit`: `log_input_output` off means no
+prompt/completion content is sent (usage, cost, model, identity, timing and metadata
+still are), and `mask_sensitive_data` on means the same masked payload the log row
+stores is sent. `full` is the explicit operator opt-in that sends verbatim content,
+`none` never sends content. Tool observations follow the same decision.
+
 Correlate a trace with a request by sending `x-langfuse-trace-id` (or `x-trace-id`);
 when it is a canonical 32-character hex Langfuse trace id the proxy's generation is
 nested inside that trace, otherwise the proxy starts its own trace. The proxy echoes a
 trace id header on responses and both headers are CORS-exposed. A generated trace id is
-also a 32-character hex id, so the `trace_id` in the request logs matches the Langfuse
-trace id exactly.
+also a 32-character hex id and is stored on the log row as `trace_id`, so a row and its
+Langfuse trace can be found from either side (the logs API filters on `trace_id`).
 
 ## Related
 

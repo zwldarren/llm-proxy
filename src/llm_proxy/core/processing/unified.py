@@ -43,6 +43,7 @@ from llm_proxy.core.request_utils import get_client_ip
 from llm_proxy.models import InternalRequest
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.logger import get_logger
+from llm_proxy.observability.observation.policy import ContentPolicy
 from llm_proxy.observability.sampling import make_sampling_decision
 from llm_proxy.observability.tracing.handlers import get_tracing_registry
 from llm_proxy.protocols.registry import get_protocol_serializer
@@ -146,6 +147,9 @@ class UnifiedProcessor:
         )
 
         should_log_input_output = logging_config.log_input_output
+        # The one content policy every observability sink reads (ADR-0044):
+        # the master switch plus the masking switch and the key set to mask.
+        content_policy = ContentPolicy.resolve(logging_config)
 
         # Headers are metadata, not content: always snapshot them (credentials
         # are masked by the handler) so a body-less row — bodies off, or this
@@ -169,6 +173,8 @@ class UnifiedProcessor:
             should_capture_full_body=sampling.should_capture_full_body,
             should_capture_raw_stream=sampling.should_capture_raw_stream,
             should_log_input_output=should_log_input_output,
+            mask_sensitive_data=logging_config.mask_sensitive_data,
+            sensitive_keys=content_policy.sensitive_keys,
             start_time=time.perf_counter(),
             start_timestamp=time.time(),
             request_headers=request_headers,

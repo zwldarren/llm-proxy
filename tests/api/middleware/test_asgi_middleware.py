@@ -340,8 +340,8 @@ class TestLoggingRunsAsPureASGI:
             return {"name": "new-provider", "api_key": "sk-secret"}
 
         with (
-            patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service),
-            patch("llm_proxy.observability.log_intake.UsageService"),
+            patch("llm_proxy.observability.store.RequestLogService", return_value=service),
+            patch("llm_proxy.observability.store.UsageService"),
         ):
             response = TestClient(app).post(
                 "/api/providers",

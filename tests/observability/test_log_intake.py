@@ -10,8 +10,10 @@ tests/observability/test_log_intake_verbs.py.
 import socket
 from unittest.mock import MagicMock, patch
 
+from sink_rows import context_log_metadata, sink_row, sink_stream_body
+
 from llm_proxy.config.types.logging_config import LoggingConfig
-from llm_proxy.observability import log_intake
+from llm_proxy.observability import log_intake, store
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.log_intake import (
     determine_action_category,
@@ -21,6 +23,7 @@ from llm_proxy.observability.log_intake import (
     determine_resource_type,
     get_server_hostname,
 )
+from llm_proxy.observability.observation.policy import sensitive_keys_for
 from llm_proxy.observability.types import ActionCategory, EventType, Outcome, ResourceType
 
 
@@ -257,7 +260,7 @@ class TestDetermineOutcome:
 
 
 class TestExtractRoutingMetadataVerbose:
-    """Tests for _extract_routing_metadata with verbose_routing_logs toggle."""
+    """Tests for the routing summary with the verbose_routing_logs toggle."""
 
     def test_includes_scorecards_when_toggle_enabled(self):
         context = MagicMock()
@@ -270,7 +273,7 @@ class TestExtractRoutingMetadataVerbose:
                 "signal_votes": {"metadata": {"tier_id": 1, "confidence": 0.8}},
             }
         }
-        result = log_intake._extract_routing_metadata(context)
+        result = store.routing_metadata_from(context.metadata)
         # Flat verbose keys are no longer emitted; data lives in the nested routing dict.
         assert "routing_candidate_scores" not in result
         assert "routing_weights" not in result
@@ -287,7 +290,7 @@ class TestExtractRoutingMetadataVerbose:
                 "candidate_scorecards": [{"model": "m1", "total": 0.9}],
             }
         }
-        result = log_intake._extract_routing_metadata(context)
+        result = store.routing_metadata_from(context.metadata)
         assert "routing_candidate_scores" not in result
         assert result["routing_complexity"] == 0.5
 
@@ -331,7 +334,7 @@ class TestVerboseRoutingNestedLogLeak:
         )
 
     def _assert_compact_only(self, log_metadata: dict) -> None:
-        # Flat verbose keys are gated off by _extract_routing_metadata.
+        # Flat verbose keys are never emitted; the nested dict carries the data.
         assert "routing_candidate_scores" not in log_metadata
         assert "routing_weights" not in log_metadata
         assert "routing_guardrails" not in log_metadata
@@ -350,7 +353,7 @@ class TestVerboseRoutingNestedLogLeak:
         context = self._make_context()
         original_routing = dict(context.metadata["routing"])
 
-        log = log_intake._build_success_row(context, LoggingConfig())
+        log = sink_row(context, LoggingConfig())
 
         self._assert_compact_only(log.log_metadata)
         # The original context metadata must not be mutated.
@@ -361,7 +364,7 @@ class TestVerboseRoutingNestedLogLeak:
         context = self._make_context()
         original_routing = dict(context.metadata["routing"])
 
-        log = log_intake._build_success_row(context, LoggingConfig(verbose_routing_logs=False))
+        log = sink_row(context, LoggingConfig(verbose_routing_logs=False))
 
         self._assert_compact_only(log.log_metadata)
         # The original context metadata must not be mutated.
@@ -371,7 +374,7 @@ class TestVerboseRoutingNestedLogLeak:
     def test_build_streaming_log_create_strips_verbose_routing_when_disabled(self):
         context = self._make_context()
 
-        log = log_intake._build_stream_row(context, LoggingConfig(verbose_routing_logs=False))
+        log = sink_row(context, LoggingConfig(verbose_routing_logs=False))
 
         self._assert_compact_only(log.log_metadata)
         assert "candidate_scorecards" in context.metadata["routing"]
@@ -379,7 +382,7 @@ class TestVerboseRoutingNestedLogLeak:
     def test_build_log_create_preserves_verbose_routing_when_enabled(self):
         context = self._make_context()
 
-        log = log_intake._build_success_row(context, LoggingConfig(verbose_routing_logs=True))
+        log = sink_row(context, LoggingConfig(verbose_routing_logs=True))
 
         routing = log.log_metadata["routing"]
         # When enabled, nested verbose data is retained.
@@ -441,7 +444,7 @@ class TestRetryMetadata:
             ]
         )
 
-        log_metadata = log_intake._build_log_metadata(context, LoggingConfig())
+        log_metadata = context_log_metadata(context, LoggingConfig())
 
         assert len(log_metadata["retry_attempts"]) == 3
         # retry_count counts only retried attempts (the first two).
@@ -450,9 +453,7 @@ class TestRetryMetadata:
     def test_add_retry_metadata_noop_without_attempts(self):
         context = self._make_context([])
 
-        log_metadata = log_intake._build_log_metadata(
-            context, LoggingConfig(verbose_routing_logs=True)
-        )
+        log_metadata = context_log_metadata(context, LoggingConfig(verbose_routing_logs=True))
 
         assert "retry_attempts" not in log_metadata
         assert "retry_count" not in log_metadata
@@ -473,7 +474,7 @@ class TestRetryMetadata:
             ]
         )
 
-        log_metadata = log_intake._build_log_metadata(context, LoggingConfig())
+        log_metadata = context_log_metadata(context, LoggingConfig())
 
         assert "retry_attempts" in log_metadata
         assert log_metadata["retry_count"] == 1
@@ -509,7 +510,7 @@ class TestFallbackCountColumn:
             ]
         )
 
-        log = log_intake._build_success_row(context, LoggingConfig(log_input_output=False))
+        log = sink_row(context, LoggingConfig(log_input_output=False))
 
         assert log.status_code == 200
         assert log.error_message is None
@@ -518,13 +519,13 @@ class TestFallbackCountColumn:
     def test_no_fallback_is_zero_not_null(self):
         context = self._make_context([])
 
-        log = log_intake._build_success_row(context, LoggingConfig())
+        log = sink_row(context, LoggingConfig())
 
         assert log.fallback_count == 0
 
     def test_assembler_defaults_tool_and_middleware_rows_to_zero(self):
         """Rows that cannot fall back still record the fact, not NULL."""
-        log = log_intake._assemble_row(
+        log = store.assemble_row(
             log_type=log_intake.LogType.MCP,
             request_id="req-tool",
             endpoint="/api/mcp/tools/call",
@@ -549,7 +550,7 @@ class TestLoggedStreamBody:
         context = self._make_context()
         context.assembled_response_body = {"object": "chat.completion", "choices": []}
 
-        assert log_intake._logged_stream_body(context) == {
+        assert sink_stream_body(context) == {
             "object": "chat.completion",
             "choices": [],
         }
@@ -558,7 +559,7 @@ class TestLoggedStreamBody:
         """Generic binary streams cannot be reassembled; say so instead of {}."""
         context = self._make_context()
 
-        assert log_intake._logged_stream_body(context) == {
+        assert sink_stream_body(context) == {
             "streaming": True,
             "_assembled": False,
         }
@@ -568,7 +569,7 @@ class TestLoggedStreamBody:
         context.should_capture_raw_stream = True
         context.capture_streaming_chunk('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n')
 
-        body = log_intake._logged_stream_body(context)
+        body = sink_stream_body(context)
 
         assert isinstance(body, str)
         assert body.startswith("data: ")
@@ -577,38 +578,40 @@ class TestLoggedStreamBody:
         context = self._make_context()
         context.should_capture_raw_stream = True
 
-        assert log_intake._logged_stream_body(context) is None
+        assert sink_stream_body(context) is None
 
     def test_non_utf8_raw_capture_falls_back_to_base64(self):
         context = self._make_context()
         context.should_capture_raw_stream = True
         context.capture_streaming_chunk(b"\xff\xfe\x00binary")
 
-        body = log_intake._logged_stream_body(context)
+        body = sink_stream_body(context)
 
         assert body["encoding"] == "base64"
         assert body["data"]
 
 
 class TestSensitiveKeysCache:
-    """The masking hot path lowers the key set once per config object."""
+    """The masking hot path resolves the key set once per config object."""
 
     def test_memoises_per_config_object(self):
         config = LoggingConfig(sensitive_keys=["Custom_Key"])
 
-        first = log_intake._sensitive_keys(config)
+        first = sensitive_keys_for(config)
 
-        assert first == frozenset({"custom_key"})
-        assert log_intake._sensitive_keys(config) is first
+        assert "custom_key" in first
+        assert sensitive_keys_for(config) is first
 
     def test_a_refreshed_config_object_is_picked_up(self):
         stale = LoggingConfig(sensitive_keys=["a"])
-        assert log_intake._sensitive_keys(stale) == frozenset({"a"})
+        assert "a" in sensitive_keys_for(stale)
         refreshed = LoggingConfig(sensitive_keys=["b"])
 
-        assert log_intake._sensitive_keys(refreshed) == frozenset({"b"})
+        fresh = sensitive_keys_for(refreshed)
+        assert "b" in fresh
+        assert "a" not in fresh
         # The entry the refresh displaced is rebuilt, never served stale.
-        assert log_intake._sensitive_keys(stale) == frozenset({"a"})
+        assert "a" in sensitive_keys_for(stale)
 
 
 class TestStreamingRawCaptureGate:

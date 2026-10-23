@@ -62,7 +62,7 @@ def _reject(
 ):
     """Simulate one rejected request and return its (patched) writer service."""
     service = MagicMock()
-    with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+    with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
         record_rejection(
             _request(path=path, api_key_name=api_key_name),
             status_code=status_code,
@@ -78,7 +78,7 @@ def test_writes_a_bodyless_endpoint_row():
     request = _request()
     service = MagicMock()
 
-    with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+    with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
         record_rejection(
             request,
             status_code=429,
@@ -117,7 +117,7 @@ def test_failure_is_swallowed():
     service = MagicMock()
     service.create_log_background.side_effect = RuntimeError("db down")
 
-    with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+    with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
         record_rejection(
             _request(),
             status_code=403,
@@ -133,7 +133,7 @@ class TestRejectionDedupe:
         log_intake.configure(config=LoggingConfig())
         service = MagicMock()
 
-        with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+        with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
             for _ in range(5):
                 record_rejection(
                     _request(),
@@ -152,7 +152,7 @@ class TestRejectionDedupe:
         clock = {"t": 1000.0}
         monkeypatch.setattr(log_intake, "time", SimpleNamespace(time=lambda: clock["t"]))
 
-        with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+        with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
             for i in range(50):
                 record_rejection(
                     _request(api_key_name=f"key-{i}"),
@@ -167,7 +167,7 @@ class TestRejectionDedupe:
         log_intake.configure(config=LoggingConfig())
         service = MagicMock()
 
-        with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+        with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
             record_rejection(
                 _request(),
                 status_code=429,
@@ -187,7 +187,7 @@ class TestRejectionDedupe:
         clock = {"t": 1000.0}
         monkeypatch.setattr(log_intake, "time", SimpleNamespace(time=lambda: clock["t"]))
 
-        with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+        with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
             record_rejection(
                 _request(),
                 status_code=429,
@@ -229,7 +229,7 @@ class TestRejectionDedupe:
         service = MagicMock()
         service.create_log_background.side_effect = [RuntimeError("db down"), None]
 
-        with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+        with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
             record_rejection(
                 _request(),
                 status_code=429,
@@ -255,7 +255,7 @@ class TestAuthFailureWriter:
         log_intake.configure(config=LoggingConfig())
         service = MagicMock()
 
-        with patch("llm_proxy.observability.log_intake.RequestLogService", return_value=service):
+        with patch("llm_proxy.observability.store.RequestLogService", return_value=service):
             for _ in range(3):
                 record_failed_auth(
                     _request(),

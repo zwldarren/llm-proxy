@@ -165,6 +165,7 @@ const filters = reactive<LogFilter>({
   start_date: undefined,
   end_date: undefined,
   had_fallback: undefined,
+  trace_id: undefined,
 });
 
 const showFilters = ref(false);
@@ -233,6 +234,9 @@ const activeFilterCount = computed(() => {
   if (filters.user?.trim()) count++;
   if (filters.api_key?.trim()) count++;
   if (filters.had_fallback !== undefined) count++;
+  // The trace filter is set from outside the filter panel (the trace badge in the
+  // detail sheet, or a deep link), so it counts like any other active filter.
+  if (filters.trace_id) count++;
   if (filters.start_date) count++;
   if (filters.end_date) count++;
   return count;
@@ -371,6 +375,7 @@ watch(
     () => filters.start_date,
     () => filters.end_date,
     () => filters.had_fallback,
+    () => filters.trace_id,
   ],
   () => {
     if (isSwitchingTab.value) return;
@@ -426,6 +431,9 @@ watch(activeTab, async (newTab) => {
     // Only endpoint-shaped rows can fall back; a stale fallback filter on a
     // tool tab would be both meaningless and misleading.
     filters.had_fallback = undefined;
+    // Audit and tool rows carry no trace id, so a kept trace filter would hide
+    // every row on those tabs.
+    filters.trace_id = undefined;
   } else {
     filters.user = "";
   }
@@ -468,6 +476,7 @@ const hasAnyActiveFilter = computed(() => {
     filters.user?.trim() ||
     filters.api_key?.trim() ||
     filters.had_fallback !== undefined ||
+    filters.trace_id ||
     filters.start_date ||
     filters.end_date
   );
@@ -493,11 +502,19 @@ const applyStatusFromQuery = (status: unknown): boolean => {
   return true;
 };
 
+const applyTraceFromQuery = (value: unknown): boolean => {
+  if (typeof value !== "string" || !value.trim()) return false;
+  filters.trace_id = value.trim();
+  showFilters.value = true;
+  return true;
+};
+
 onMounted(() => {
   if (isComponentActive.value) {
     // Apply a dashboard deep-link (e.g. ?status=5xx) before the first fetch so
     // the initial result set already reflects the error filter.
     applyStatusFromQuery(route.query.status);
+    applyTraceFromQuery(route.query.trace_id);
     fetchLogs(true);
     startAutoRefresh();
   }
@@ -509,6 +526,13 @@ watch(
   () => route.query.status,
   (status) => {
     if (status !== undefined) applyStatusFromQuery(status);
+  }
+);
+
+watch(
+  () => route.query.trace_id,
+  (traceId) => {
+    if (traceId !== undefined) applyTraceFromQuery(traceId);
   }
 );
 
@@ -539,6 +563,15 @@ watch(showDetailDialog, (isOpen) => {
     startAutoRefresh();
   }
 });
+
+// "Show me the rest of this trace": the detail sheet's trace badge sets the list
+// filter, so the row's siblings (every request of the same trace) are one click
+// away instead of a copy-paste into a filter field.
+const handleFilterTrace = (traceId: string) => {
+  showDetailDialog.value = false;
+  filters.trace_id = traceId;
+  showFilters.value = true;
+};
 
 const handleViewDetails = async (log: LogListItemType) => {
   if (isLoadingDetail.value) return;
@@ -1405,7 +1438,11 @@ const auditListAction = (log: LogListItemType): string => {
       </footer>
     </div>
 
-    <LogDetailsSheet v-model:open="showDetailDialog" :log="selectedLog" />
+    <LogDetailsSheet
+      v-model:open="showDetailDialog"
+      :log="selectedLog"
+      @filter-trace="handleFilterTrace"
+    />
     <AuditIntegrityDialog v-model:open="showIntegrityDialog" />
   </AppLayout>
 </template>

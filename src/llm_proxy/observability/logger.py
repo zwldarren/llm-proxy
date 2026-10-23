@@ -58,9 +58,20 @@ class StructuredLogger:
         self._context: dict[str, Any] = {}
 
     def _log_with_context(
-        self, level: int, message: str, extra: dict[str, Any] | None = None, **kwargs
+        self,
+        level: int,
+        message: str,
+        extra: dict[str, Any] | None = None,
+        exc_info: BaseException | bool | tuple | None = None,
+        **kwargs,
     ) -> None:
-        """Log with context and additional fields."""
+        """Log with context and additional fields.
+
+        ``exc_info`` is the one keyword that does not become a structured field:
+        the stdlib log record owns the traceback, and both formatters render it
+        from there. Turning it into a field instead would put an exception object
+        into the payload a formatter has to serialize.
+        """
         log_data = {
             "timestamp": time.time(),
             "message": message,
@@ -69,7 +80,7 @@ class StructuredLogger:
             **kwargs,
         }
 
-        self.logger.log(level, log_data)
+        self.logger.log(level, log_data, exc_info=exc_info)
 
     def log(self, level: int, message: str, **kwargs) -> None:
         """Log at specified level with context."""

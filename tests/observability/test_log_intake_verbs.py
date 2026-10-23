@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.models.types import Usage
-from llm_proxy.observability import log_intake
+from llm_proxy.observability import log_intake, store
 from llm_proxy.observability.event_context import EventContext
 from llm_proxy.observability.log_intake import (
     record_request_end,
@@ -63,8 +63,8 @@ class _Capture:
         """Run one verb coroutine with the writers replaced by this capture."""
         log_intake.configure(config=LoggingConfig(log_input_output=True))
         with (
-            patch.object(log_intake, "RequestLogService", self._log_service_cls),
-            patch.object(log_intake, "UsageService", self._usage_service_cls),
+            patch.object(store, "RequestLogService", self._log_service_cls),
+            patch.object(store, "UsageService", self._usage_service_cls),
         ):
             asyncio.run(coro)
 
@@ -79,6 +79,7 @@ def test_request_end_writes_one_classified_row_and_one_usage_record():
     assert len(capture.usage) == 1
     row = capture.logs[0]
     assert row.status_code == 200
+    assert row.trace_id == "trace-1", "the row must carry the trace the backends recorded"
     assert row.endpoint == "/v1/chat/completions"
     assert row.method == "POST"
     assert row.event_type == "data_access"

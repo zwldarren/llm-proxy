@@ -390,6 +390,13 @@ class McpServerRecord(Base):
         return f"<McpServerRecord(id={self.id}, name='{self.name}', type='{self.type}')>"
 
 
+#: Longest trace id the log can store. A caller-supplied ``x-trace-id`` /
+#: ``x-langfuse-trace-id`` header reaches this column verbatim, so the width is a
+#: limit on somebody else's value, not on ours: ``api.dependencies.extract_trace_id``
+#: drops anything longer instead of letting PostgreSQL reject the row insert.
+TRACE_ID_MAX_LENGTH = 255
+
+
 class RequestLog(Base):
     """Database model for request/response logs."""
 
@@ -398,6 +405,7 @@ class RequestLog(Base):
     __table_args__ = (
         Index("ix_request_logs_timestamp", "timestamp"),
         Index("ix_request_logs_request_id", "request_id"),
+        Index("ix_request_logs_trace_id", "trace_id"),
         Index("ix_request_logs_status_code", "status_code"),
         Index("ix_request_logs_model", "model"),
         Index("ix_request_logs_provider", "provider"),
@@ -418,6 +426,14 @@ class RequestLog(Base):
     timestamp: Mapped[float] = mapped_column(Float, nullable=False)
 
     request_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # The correlation id the tracing backends use as their trace id. It is the
+    # only link between a stored row and an exported trace: Langfuse carries
+    # the request id in its metadata, but the reverse lookup (row -> trace, or
+    # "show me every row of this trace") needs SQL, hence a column and an index
+    # rather than a ``log_metadata`` key. NULL on rows written before it existed.
+    # Deliberately wider than the proxy's own ``uuid4().hex``: a trusted peer may
+    # hand us its own correlation id (see ``TRACE_ID_MAX_LENGTH``).
+    trace_id: Mapped[str | None] = mapped_column(String(TRACE_ID_MAX_LENGTH), nullable=True)
     endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
     log_type: Mapped[str] = mapped_column(String(20), nullable=True, default="endpoint")
     method: Mapped[str] = mapped_column(String(16), nullable=False)

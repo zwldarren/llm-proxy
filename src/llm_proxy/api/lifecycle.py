@@ -467,6 +467,7 @@ def _schedule_judge_warmup(app: FastAPI, *, config: ProxyConfig | None = None) -
 
 async def shutdown_services(app: FastAPI) -> None:
     from llm_proxy.database import get_async_session_context
+    from llm_proxy.observability.observation.database import database_bus
     from llm_proxy.observability.tracing.handlers.registry import get_tracing_registry
 
     tracing_registry = get_tracing_registry()
@@ -476,6 +477,14 @@ async def shutdown_services(app: FastAPI) -> None:
     from llm_proxy.observability.user_tracing import get_user_tracing_manager
 
     await get_user_tracing_manager().shutdown_all()
+
+    # The database sinks are the stores' own writers, so the bus closes before
+    # the writers stop: a sink added later gets its teardown here. Flush first, as
+    # the sink contract (`ObservationSink.flush`) promises for shutdown — the two
+    # current database sinks no-op it, but a buffering sink would lose its tail
+    # otherwise.
+    await database_bus().flush()
+    await database_bus().close()
 
     await stop_background_log_writer()
     await stop_background_usage_writer()

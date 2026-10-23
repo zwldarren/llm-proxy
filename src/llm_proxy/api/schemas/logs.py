@@ -11,6 +11,13 @@ class LogRead(BaseModel):
     id: int
     timestamp: float
     request_id: str
+    #: Trace id handed to the tracing backends. The join key between a stored row
+    #: and an exported trace — for as long as the id is a canonical 32-char hex id
+    #: (the proxy's own ``uuid4().hex``, or a caller-supplied Langfuse id). Any
+    #: other caller-supplied ``x-trace-id`` value is stored here, while the
+    #: exported trace carries its own SDK-minted id. ``None`` on rows written
+    #: before the column existed and on situations that carry no trace.
+    trace_id: str | None = None
 
     endpoint: str
     log_type: str | None = None
@@ -80,6 +87,7 @@ class LogListItem(BaseModel):
     id: int
     timestamp: float
     request_id: str
+    trace_id: str | None = None
 
     endpoint: str
     log_type: str | None = None

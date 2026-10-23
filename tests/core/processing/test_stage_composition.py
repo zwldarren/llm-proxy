@@ -153,6 +153,40 @@ async def test_fallback_rerun_order_follows_composition(monkeypatch) -> None:
     assert ran == ["previous-response", "web-search", "appended"]
 
 
+@pytest.mark.asyncio
+async def test_fallback_rerun_never_installs_a_capture_blind_context() -> None:
+    """The re-run's stand-in ``EventContext`` stays local to the stage.
+
+    A path without a request context gets one here, but it leaves
+    ``mask_sensitive_data``/``sensitive_keys`` at their dataclass defaults — and
+    those defaults are load-bearing on the observation path, where the collector
+    resolves the content policy from them (ADR-0044). Installing it on
+    ``context.event_context`` would let request-end capture mask with the built-in
+    key set instead of the deployment's.
+    """
+    service = _openai_override_service()
+    context = _build_context(role_transformed=False)
+    assert context.event_context is None
+    req = _build_mock_request()
+    raw = {
+        "model": "fast",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+    }
+
+    result = await setup_fallback_provider(
+        _build_selection(),
+        req,
+        get_protocol_serializer("openai").parse_request(raw),
+        raw,
+        context,
+        service,
+    )
+
+    assert result is not None
+    assert context.event_context is None
+
+
 def test_unified_processor_pipeline_consumes_composition(monkeypatch) -> None:
     """UnifiedProcessor splices the composition owner's stage list into its
     pipeline, so a stage added there appears in the main pipeline too."""

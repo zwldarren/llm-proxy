@@ -26,8 +26,8 @@ def observer(monkeypatch):
         def create_usage_background(self, data):
             usage_recorded.append(data)
 
-    monkeypatch.setattr("llm_proxy.observability.log_intake.RequestLogService", FakeLogService)
-    monkeypatch.setattr("llm_proxy.observability.log_intake.UsageService", FakeUsageService)
+    monkeypatch.setattr("llm_proxy.observability.store.RequestLogService", FakeLogService)
+    monkeypatch.setattr("llm_proxy.observability.store.UsageService", FakeUsageService)
     log_intake.configure(config=LoggingConfig())
 
     async def fake_calculate_cost(

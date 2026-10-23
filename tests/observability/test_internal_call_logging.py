@@ -26,8 +26,8 @@ def _record(entry: InternalCallLogEntry, **attribution) -> tuple[MagicMock, Magi
     log_service = MagicMock()
     usage_service = MagicMock()
     with (
-        patch("llm_proxy.observability.log_intake.RequestLogService", return_value=log_service),
-        patch("llm_proxy.observability.log_intake.UsageService", return_value=usage_service),
+        patch("llm_proxy.observability.store.RequestLogService", return_value=log_service),
+        patch("llm_proxy.observability.store.UsageService", return_value=usage_service),
     ):
         record_internal_call(entry, **attribution)
     return log_service, usage_service
