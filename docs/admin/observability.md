@@ -34,15 +34,21 @@ Configured in [Settings → Log Management](settings.md#log-management):
 - **Bodies** (`log_input_output`, default **off**) is the master switch for persisting
   request/response bodies. Off, every row is still written (status, tokens, cost,
   routing, audit metadata, and headers) but every content payload is replaced by
-  `{"_bodies_disabled": true}`: the request and response bodies, **upstream error bodies**
-  and messages (`error_details.response_body` / `original_error` / `detail`, plus the
-  error text recorded in each **fallback/retry attempt**), and **MCP arguments/results**
-  and **web-search queries/results** in `log_metadata`. It is the master switch, not a sampling
+  `{"_bodies_disabled": true}`: the request and response bodies, **upstream error
+  bodies** and messages (`error_details.response_body` / `original_error` / `detail`),
+  and **MCP arguments/results** and **web-search queries/results** in `log_metadata`.
+  It is the master switch, not a sampling
   knob: `x-log-full: true` cannot re-enable bodies for one request — turn it on in
   Settings → Log Management (and back off when done) to inspect payloads.
-  The row's free-text `error_message` and `error_stack_trace` columns are kept: they
-  are the diagnostic reason (rate limit vs budget vs upstream failure) and the rejection
-  rows below depend on that text. The upstream error payload they can echo lives in
+  Diagnostic *reasons* are never scrubbed: the row's free-text `error_message` and
+  `error_stack_trace` columns (the reason a request was rejected — rate limit vs
+  budget vs upstream failure — which the rejection rows below depend on), the
+  `error_type` / `status_code` / `provider` / `attempt` / `retried` fields of each
+  fallback and retry attempt, and each attempt's own `error_message` (e.g.
+  `429 rate limit exceeded`). That last one matters: when a provider fails and a
+  fallback provider serves the request, the row's status is `2xx` and its
+  `error_message` column is empty, so the attempt timeline is the *only* place the
+  failure is recorded. The upstream payload those messages can echo lives in
   `log_metadata.error_details`, which *is* scrubbed.
 - **Sampling** (`sampling_rate`, default 1.0) limits **body capture** for requests that
   do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` (a

@@ -23,8 +23,18 @@ Masked request/response headers are deliberately retained — they are diagnosti
 metadata, not free-form content. The scalar ``error_message`` /
 ``error_stack_trace`` columns are kept on purpose — they are the diagnostic
 reason (rate limit, budget, upstream status) that rejection rows and operators
-rely on; the content-bearing upstream error text lives in
+rely on; the content-bearing upstream payload lives in
 ``log_metadata["error_details"]`` and is scrubbed.
+
+The same split applies inside ``log_metadata``: the per-attempt ``error_message``
+in ``fallback_attempts`` / ``retry_attempts`` is the *reason* a provider failed
+(``429 rate limit exceeded``, ``invalid api key``), so it survives — a fallback
+whose final attempt succeeded has no error row at all, and that text is the only
+record of what went wrong. It is also the same class of text already kept in the
+scalar ``error_message`` column (the composite failure message embeds it
+verbatim), so scrubbing it there would hide the reason without protecting
+anything. Classification fields on those entries (provider, attempt, error_type,
+status_code, retried) are metadata and always survive.
 """
 
 from typing import Any
@@ -64,34 +74,6 @@ _ERROR_DETAILS_CONTENT_KEYS: frozenset[str] = frozenset(
     }
 )
 
-#: Keys inside each entry of ``log_metadata["fallback_attempts"]`` /
-#: ``log_metadata["retry_attempts"]`` that carry the upstream error text. The
-#: classification fields (provider, attempt, error_type, status_code, retried)
-#: are kept so the retry/fallback timeline stays readable.
-_ATTEMPT_ENTRY_CONTENT_KEYS: frozenset[str] = frozenset({"error_message"})
-
-#: Attempt lists written by the audit handler (per failed fallback provider and
-#: per same-provider retry).
-_ATTEMPT_LIST_KEYS: frozenset[str] = frozenset({"fallback_attempts", "retry_attempts"})
-
-
-def _scrub_attempt_entries(entries: Any) -> Any:
-    """Replace the error text inside recorded fallback/retry attempts."""
-    if not isinstance(entries, list):
-        return entries
-    scrubbed: list[Any] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            scrubbed.append(entry)
-            continue
-        scrubbed.append(
-            {
-                key: dict(BODIES_DISABLED_MARKER) if key in _ATTEMPT_ENTRY_CONTENT_KEYS else value
-                for key, value in entry.items()
-            }
-        )
-    return scrubbed
-
 
 def body_marker(*, bodies_enabled: bool) -> dict[str, Any]:
     """Return the marker stored in place of an unavailable body.
@@ -115,8 +97,11 @@ def scrub_log_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     :data:`BODIES_DISABLED_MARKER` so the row keeps a visible, explained
     placeholder instead of silently losing the key. Covered: MCP
     arguments/results, web-search queries/results, ``error_details`` (upstream
-    body, original error, message), and the ``error_message`` recorded inside
-    each fallback/retry attempt.
+    body, original error, message).
+
+    Fallback/retry attempt entries are *not* scrubbed: their ``error_message``
+    is the diagnostic reason a provider failed, not a body — see the module
+    docstring.
 
     Rows with nothing to scrub return the input unchanged (no copy): this runs
     on every row while body logging is off, and most rows carry no content.
@@ -125,23 +110,19 @@ def scrub_log_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
         return {}
 
     content_keys = CONTENT_METADATA_KEYS.intersection(metadata)
-    attempt_keys = _ATTEMPT_LIST_KEYS.intersection(metadata)
     error_details = metadata.get("error_details")
     error_detail_keys = (
         _ERROR_DETAILS_CONTENT_KEYS.intersection(error_details)
         if isinstance(error_details, dict)
         else frozenset()
     )
-    if not content_keys and not attempt_keys and not error_detail_keys:
+    if not content_keys and not error_detail_keys:
         return metadata
 
     scrubbed = dict(metadata)
 
     for key in content_keys:
         scrubbed[key] = dict(BODIES_DISABLED_MARKER)
-
-    for key in attempt_keys:
-        scrubbed[key] = _scrub_attempt_entries(scrubbed[key])
 
     if error_detail_keys and isinstance(error_details, dict):
         scrubbed["error_details"] = {

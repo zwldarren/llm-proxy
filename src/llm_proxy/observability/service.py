@@ -693,7 +693,10 @@ def _request_log_from_create(
         # are the diagnostic reason (rate limit vs budget vs upstream failure)
         # and the rejection rows depend on that text, while the content-bearing
         # upstream error payload lives in ``log_metadata["error_details"]``,
-        # which ``scrub_log_metadata`` replaces above.
+        # which ``scrub_log_metadata`` replaces above. For the same reason the
+        # per-attempt ``error_message`` in ``fallback_attempts`` /
+        # ``retry_attempts`` survives — it is the only record of why an earlier
+        # provider failed when a later one served the request.
         request_body = dict(BODIES_DISABLED_MARKER)
         response_body = dict(BODIES_DISABLED_MARKER)
         log_metadata = _json_safe(scrub_log_metadata(data.log_metadata))

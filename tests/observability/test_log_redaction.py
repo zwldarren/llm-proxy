@@ -125,8 +125,13 @@ class TestStoreEnforcesMasterSwitch:
         assert meta["mcp_server"] == "github"
         assert meta["web_search_result_count"] == 7
 
-    def test_attempt_error_text_is_scrubbed_but_timeline_survives(self):
-        """Fallback/retry entries keep their shape; only the upstream text goes."""
+    def test_attempt_error_text_survives_but_content_does_not(self):
+        """A failed provider's reason is diagnostic, not content: it is kept.
+
+        When a fallback provider serves the request the row is a ``2xx`` with an
+        empty ``error_message`` column, so the attempt timeline is the only
+        record of what broke; scrubbing it left the operator with nothing.
+        """
         data = _log_create(
             log_metadata={
                 "fallback_attempts": [
@@ -134,7 +139,7 @@ class TestStoreEnforcesMasterSwitch:
                         "provider": "p1",
                         "status_code": 500,
                         "error_type": "api_error",
-                        "error_message": "UPSTREAM SECRET",
+                        "error_message": "upstream exploded",
                     }
                 ],
                 "retry_attempts": [
@@ -142,7 +147,7 @@ class TestStoreEnforcesMasterSwitch:
                         "provider": "p1",
                         "attempt": 1,
                         "error_type": "api_error",
-                        "error_message": "UPSTREAM SECRET",
+                        "error_message": "429 rate limit exceeded",
                         "retried": False,
                     }
                 ],
@@ -152,9 +157,8 @@ class TestStoreEnforcesMasterSwitch:
         log = _request_log_from_create(data, config=LoggingConfig(log_input_output=False))
         meta = log.log_metadata
 
-        assert meta["fallback_attempts"][0]["error_message"] == {"_bodies_disabled": True}
-        assert meta["retry_attempts"][0]["error_message"] == {"_bodies_disabled": True}
-        # The timeline still reads: provider, status and retry flags survive.
+        assert meta["fallback_attempts"][0]["error_message"] == "upstream exploded"
+        assert meta["retry_attempts"][0]["error_message"] == "429 rate limit exceeded"
         assert meta["fallback_attempts"][0]["provider"] == "p1"
         assert meta["fallback_attempts"][0]["status_code"] == 500
         assert meta["retry_attempts"][0]["attempt"] == 1
@@ -162,10 +166,10 @@ class TestStoreEnforcesMasterSwitch:
 
     def test_attempt_metadata_is_not_mutated(self):
         metadata = {
-            "retry_attempts": [{"provider": "p1", "error_message": "secret"}],
+            "retry_attempts": [{"provider": "p1", "error_message": "reason"}],
         }
         scrub_log_metadata(metadata)
-        assert metadata["retry_attempts"][0]["error_message"] == "secret"
+        assert metadata["retry_attempts"][0]["error_message"] == "reason"
 
     def test_content_metadata_kept_when_enabled(self):
         data = _log_create(log_metadata={"mcp_arguments": {"q": "x"}})
