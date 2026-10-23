@@ -123,6 +123,49 @@ vi.mock("@lucide/vue", () => {
   };
 });
 
+// The view mounts all three of these through `defineAsyncComponent`, so every mount
+// starts a module transform that can still be running once the test has finished. CI
+// failed the run with `EnvironmentTeardownError: Cannot load
+// '.../range-calendar/RangeCalendarHeadCell.vue' ... after the environment was torn
+// down`: the `?trace_id` deep link opens the filter panel, and the panel imports the
+// range calendar. A view test does not need its lazy children, so mocking them keeps
+// this file's module graph to what the view itself imports.
+vi.mock("@/components/common/LogsFilters.vue", () => ({
+  __esModule: true,
+  default: defineComponent({
+    name: "LogsFilters",
+    props: ["filters", "activeTab"],
+    emits: ["update:filters"],
+    setup() {
+      return () => h("div", { class: "logs-filters" });
+    },
+  }),
+}));
+
+vi.mock("@/components/common/LogDetailsSheet.vue", () => ({
+  __esModule: true,
+  default: defineComponent({
+    name: "LogDetailsSheet",
+    props: ["open", "log"],
+    emits: ["update:open", "filter-trace"],
+    setup() {
+      return () => null;
+    },
+  }),
+}));
+
+vi.mock("@/components/common/AuditIntegrityDialog.vue", () => ({
+  __esModule: true,
+  default: defineComponent({
+    name: "AuditIntegrityDialog",
+    props: ["open"],
+    emits: ["update:open"],
+    setup() {
+      return () => null;
+    },
+  }),
+}));
+
 import LogsView from "./LogsView.vue";
 
 const AppLayoutStub = defineComponent({
@@ -220,7 +263,7 @@ describe("LogsView", () => {
     routeQuery.trace_id = "trace-from-the-url";
 
     try {
-      mount(LogsView, {
+      const wrapper = mount(LogsView, {
         global: {
           stubs: {
             AppLayout: AppLayoutStub,
@@ -239,6 +282,10 @@ describe("LogsView", () => {
       // The trace filter is not in the filter panel, so the only way it can reach
       // the request is the deep link — and it must be there on the first call.
       expect(vi.mocked(logsApi.getLogs).mock.calls[0]?.[0]?.trace_id).toBe("trace-from-the-url");
+
+      // The deep link also reveals the filter panel, so the chip it applied stays
+      // visible with the rest of the active filters.
+      expect(wrapper.findComponent({ name: "LogsFilters" }).exists()).toBe(true);
     } finally {
       delete routeQuery.trace_id;
     }

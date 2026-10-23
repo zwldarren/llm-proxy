@@ -34,6 +34,16 @@
 - **Error handling**: Use Vue's error boundaries and try/catch for async operations
 - **Naming**: PascalCase for components, camelCase for variables/functions
 
+## Tests
+
+- **Run**: `bun run test` (Vitest + happy-dom)
+- Views mount their children through `defineAsyncComponent`, so mounting one in a test
+  starts module transforms that can still be running when the test ends. CI fails the
+  whole run for that, even when every test passed:
+  `EnvironmentTeardownError: Cannot load '…' … after the environment was torn down`.
+  Mock the lazy children (`vi.mock` with `__esModule: true`, otherwise Vue keeps the
+  mocked namespace as the component) so a view test only loads what the view imports.
+
 ## Development Guidelines
 
 - Use shadcn-vue for component library (Radix Vue + Reka UI)
