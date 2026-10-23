@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.1](https://github.com/zwldarren/llm-proxy/compare/v0.5.0...v0.5.1) (2026-10-23)
+
+
+### Features
+
+* **logs:** record fallbacks and reported zeros as queryable log facts ([3b362fe](https://github.com/zwldarren/llm-proxy/commit/3b362fe275540a6fb8cab2624945896155e1776c))
+* **observability:** one observation per request, projected to each sink ([e49c1a2](https://github.com/zwldarren/llm-proxy/commit/e49c1a2a146c907f9ffb70cb7f41d7c419a4a1dd))
+* **rerank:** a retrieval protocol, and a provider that speaks its own dialect (ADR-0040, ADR-0041) ([8507e40](https://github.com/zwldarren/llm-proxy/commit/8507e40d0d8428228aa62780a277100cae8a3ddf))
+* **tracing:** trace every request type with its own Langfuse content ([605dc43](https://github.com/zwldarren/llm-proxy/commit/605dc43657ace42abc6aad40520d3b73d3f5381c))
+
+
+### Bug Fixes
+
+* **cohere:** read the double-typed ApiMeta counters as counts ([d4b19bf](https://github.com/zwldarren/llm-proxy/commit/d4b19bf5811d77b3bbe9e3ef834b8929ba773d7a))
+* **frontend:** keep LogsView's lazy children out of the test's imports ([dbaca80](https://github.com/zwldarren/llm-proxy/commit/dbaca80aaf303685949f57bc5bcf8107e6eadbeb))
+* **logging:** keep the reason a provider failed when bodies are off ([f084677](https://github.com/zwldarren/llm-proxy/commit/f08467766b3123a9ffc3cde01cd3f483b6abda70))
+* **openresponses:** carry cache_write_tokens in every usage payload ([a78e2da](https://github.com/zwldarren/llm-proxy/commit/a78e2da2358c241690514db0eab22fb5ad3cdcf0))
+* **openresponses:** carry every detail counter into the terminal snapshot ([52e6ec9](https://github.com/zwldarren/llm-proxy/commit/52e6ec9b98f5a6fa74cdf798c9cf4a4d40ed3aa8))
+* **openresponses:** fold every provider's usage shape into the terminal snapshot ([01d7c31](https://github.com/zwldarren/llm-proxy/commit/01d7c31829118f01d5125afc8d28f828dfa5f850))
+* **openresponses:** hold the terminal snapshot until the trailing usage lands ([26c5c66](https://github.com/zwldarren/llm-proxy/commit/26c5c665fd181e7031a1b5ca718abce19bc25f13))
+* **rerank:** carry relevant_spans back and keep document objects open ([9a3cbe9](https://github.com/zwldarren/llm-proxy/commit/9a3cbe92ec3423680fcc5ad8f55ee449c858c9c2))
+
+
+### Documentation
+
+* **openresponses:** correct the access_programs rationale ([68512c6](https://github.com/zwldarren/llm-proxy/commit/68512c6e4cea1f7397b72258e9b53d36cf21704b))
+
 ## [0.5.0](https://github.com/zwldarren/llm-proxy/compare/v0.4.1...v0.5.0) (2026-10-20)
 
 
