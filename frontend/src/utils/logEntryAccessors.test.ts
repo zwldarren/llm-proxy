@@ -14,10 +14,11 @@ import {
 } from "./logEntryAccessors";
 
 /**
- * Pins the single priority rule for log-entry usage fields: flat column
- * first, `log_metadata` as fallback, with 0 / null / non-number counting as
- * "not recorded" for counts but not for money. These are the boundary cases
- * that made the four consumer components disagree before this module existed.
+ * Pins the single priority rule for log-entry usage fields: flat column first,
+ * `log_metadata` as fallback, and — since the backend stores a reported zero as
+ * `0` and an unreported count as `NULL` — "recorded as zero" must stay distinct
+ * from "not recorded". These are the boundary cases that made the four consumer
+ * components disagree before this module existed.
  */
 
 const log = (fields: Partial<LogUsageSource>): LogUsageSource => fields;
@@ -35,9 +36,9 @@ describe("count accessors (prompt/completion/total)", () => {
     expect(totalTokens(entry)).toBe(150);
   });
 
-  it("falls back to log_metadata when the flat column is 0 (unrecorded)", () => {
-    // The reported bug: the same entry rendered 2500 in list rows but 0 in
-    // the response view. Now every surface resolves 2500.
+  it("lets a positive metadata value win over a legacy flat 0", () => {
+    // Legacy rows defaulted the flat column to 0 while log_metadata carried the
+    // measurement; they must keep rendering that measurement.
     const entry = log({
       prompt_tokens: 0,
       completion_tokens: 0,
@@ -49,6 +50,15 @@ describe("count accessors (prompt/completion/total)", () => {
     expect(totalTokens(entry)).toBe(3400);
   });
 
+  it("honours a reported zero when nothing contradicts it", () => {
+    // The backend stores "provider reported 0" as 0 and "provider reported
+    // nothing" as NULL; collapsing the two is the bug this rule prevents.
+    expect(promptTokens(log({ prompt_tokens: 0 }))).toBe(0);
+    expect(completionTokens(log({ completion_tokens: 0 }))).toBe(0);
+    expect(totalTokens(log({ total_tokens: 0 }))).toBe(0);
+    expect(promptTokens(log({ prompt_tokens: 0, log_metadata: { prompt_tokens: 0 } }))).toBe(0);
+  });
+
   it("falls back to log_metadata when the flat column is missing or null", () => {
     const missing = log({ log_metadata: { prompt_tokens: 2500 } });
     expect(promptTokens(missing)).toBe(2500);
@@ -57,12 +67,7 @@ describe("count accessors (prompt/completion/total)", () => {
     expect(promptTokens(nulled)).toBe(2500);
 
     const noMetadata = log({ prompt_tokens: null });
-    expect(promptTokens(noMetadata)).toBe(0);
-  });
-
-  it("treats a metadata 0 as unrecorded too", () => {
-    expect(promptTokens(log({ prompt_tokens: 100, log_metadata: { prompt_tokens: 0 } }))).toBe(100);
-    expect(promptTokens(log({ prompt_tokens: 0, log_metadata: { prompt_tokens: 0 } }))).toBe(0);
+    expect(promptTokens(noMetadata)).toBeNull();
   });
 
   it("ignores non-numeric, NaN, infinite and negative values", () => {
@@ -76,16 +81,16 @@ describe("count accessors (prompt/completion/total)", () => {
         total_tokens: undefined,
       },
     });
-    expect(promptTokens(entry)).toBe(0);
-    expect(completionTokens(entry)).toBe(0);
-    expect(totalTokens(entry)).toBe(0);
+    expect(promptTokens(entry)).toBeNull();
+    expect(completionTokens(entry)).toBeNull();
+    expect(totalTokens(entry)).toBeNull();
   });
 
-  it("returns 0 when nothing is recorded anywhere", () => {
+  it("returns null when nothing is recorded anywhere", () => {
     const entry = log({});
-    expect(promptTokens(entry)).toBe(0);
-    expect(completionTokens(entry)).toBe(0);
-    expect(totalTokens(entry)).toBe(0);
+    expect(promptTokens(entry)).toBeNull();
+    expect(completionTokens(entry)).toBeNull();
+    expect(totalTokens(entry)).toBeNull();
   });
 });
 
@@ -100,6 +105,11 @@ describe("cache token accessors", () => {
     expect(cacheReadTokens(entry)).toBe(800);
     expect(cachedPromptTokens(entry)).toBe(120);
     expect(cacheCreationTokens(entry)).toBe(60);
+  });
+
+  it("keeps a reported zero cache write distinct from an unrecorded one", () => {
+    expect(cacheCreationTokens(log({ cache_creation_input_tokens: 0 }))).toBe(0);
+    expect(cacheCreationTokens(log({ cache_creation_input_tokens: null }))).toBeNull();
   });
 
   it("merges dialects in cachedTokens with flat cached_prompt first", () => {
@@ -119,7 +129,10 @@ describe("cache token accessors", () => {
 
     expect(cachedTokens(log({ log_metadata: { cached_prompt_tokens: 300 } }))).toBe(300);
     expect(cachedTokens(log({ log_metadata: { cache_read_input_tokens: 700 } }))).toBe(700);
-    expect(cachedTokens(log({}))).toBe(0);
+    // Both dialects reported zero: that is "no cache hit", not "unknown".
+    expect(cachedTokens(log({ cached_prompt_tokens: 0, cache_read_input_tokens: 0 }))).toBe(0);
+    // Neither dialect reported anything.
+    expect(cachedTokens(log({}))).toBeNull();
   });
 });
 
@@ -131,6 +144,7 @@ describe("ttftMs", () => {
   });
 
   it("treats 0 as unrecorded and returns null when nothing is recorded", () => {
+    // A first token cannot arrive before the request; 0ms is not a measurement.
     expect(ttftMs(log({ ttft_ms: 0, log_metadata: { ttft_ms: 180 } }))).toBe(180);
     expect(ttftMs(log({ ttft_ms: 0 }))).toBeNull();
     expect(ttftMs(log({}))).toBeNull();
@@ -162,15 +176,19 @@ describe("tokenBreakdown", () => {
     );
   });
 
-  it("omits a missing side instead of rendering a zero", () => {
-    expect(tokenBreakdown(log({ prompt_tokens: 31, completion_tokens: 0 }))).toBe("31");
-    expect(tokenBreakdown(log({ prompt_tokens: 0, completion_tokens: 820 }))).toBe("820");
+  it("renders a reported zero instead of hiding it", () => {
+    expect(tokenBreakdown(log({ prompt_tokens: 31, completion_tokens: 0 }))).toBe("31 → 0");
+    expect(tokenBreakdown(log({ prompt_tokens: 0, completion_tokens: 820 }))).toBe("0 → 820");
   });
 
-  it('renders "-" when nothing was recorded', () => {
+  it("omits a side that was never recorded", () => {
+    expect(tokenBreakdown(log({ prompt_tokens: 31 }))).toBe("31");
+    expect(tokenBreakdown(log({ completion_tokens: 820 }))).toBe("820");
+    expect(tokenBreakdown(log({ total_tokens: 900 }))).toBe("900");
+  });
+
+  it('renders "-" only when nothing was recorded', () => {
     expect(tokenBreakdown(log({}))).toBe("-");
-    expect(tokenBreakdown(log({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }))).toBe(
-      "-"
-    );
+    expect(tokenBreakdown(log({ prompt_tokens: null, completion_tokens: null }))).toBe("-");
   });
 });

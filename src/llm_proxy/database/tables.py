@@ -448,6 +448,14 @@ class RequestLog(Base):
     cached_prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cache_savings_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Number of provider switches (fallbacks) this request needed before it was
+    # served. Three states, and they are not interchangeable: NULL means the row
+    # predates this column and the fact is unknown, 0 means no fallback was
+    # recorded, >0 is the count. A successful fallback row is otherwise a plain
+    # ``2xx`` with an empty ``error_message``, so this is the only column that
+    # can answer "which requests had a provider fail?" in SQL.
+    fallback_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Audio tokens (Realtime / audio-capable models)
     audio_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

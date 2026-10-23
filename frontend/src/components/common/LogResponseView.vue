@@ -177,7 +177,9 @@ const logUsage = computed(() => {
     cache_read_tokens: cacheReadTokens(props.log),
     cached_prompt_tokens: cachedPromptTokens(props.log),
     cache_creation_tokens: cacheCreationTokens(props.log),
-    has_usage: prompt > 0 || completion > 0 || total > 0,
+    // "Any recorded" rather than "any positive": a reported zero is a fact the
+    // strip should be able to show, while an all-NULL row has no usage at all.
+    has_usage: prompt != null || completion != null || total != null,
   };
 });
 
@@ -196,11 +198,11 @@ const statsTags = computed<StatsTag[]>(() => {
       { label: t("logs.completionTokens"), value: formatTokens(usage.completion_tokens) },
       { label: t("logs.totalTokens"), value: formatTokens(usage.total_tokens) }
     );
-    if (usage.cached_prompt_tokens > 0)
+    if ((usage.cached_prompt_tokens ?? 0) > 0)
       tags.push({ label: t("logs.cachedTokens"), value: formatTokens(usage.cached_prompt_tokens) });
-    if (usage.cache_read_tokens > 0)
+    if ((usage.cache_read_tokens ?? 0) > 0)
       tags.push({ label: t("logs.cacheReadTokens"), value: formatTokens(usage.cache_read_tokens) });
-    if (usage.cache_creation_tokens > 0)
+    if ((usage.cache_creation_tokens ?? 0) > 0)
       tags.push({
         label: t("logs.cacheCreationTokens"),
         value: formatTokens(usage.cache_creation_tokens),

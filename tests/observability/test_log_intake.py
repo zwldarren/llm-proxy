@@ -479,6 +479,61 @@ class TestRetryMetadata:
         assert log_metadata["retry_count"] == 1
 
 
+class TestFallbackCountColumn:
+    """``fallback_count`` is the SQL-visible record of a provider switch.
+
+    A fallback that eventually succeeded is a plain 2xx row with no
+    ``error_message``; before this column nothing outside ``log_metadata`` said
+    a provider had failed, so "which requests needed a fallback?" was not
+    answerable by a query. The count is recorded whether or not bodies are
+    stored, and 0 is a fact, not a missing measurement.
+    """
+
+    def _make_context(self, attempts: list[dict]) -> EventContext:
+        return EventContext(
+            request_id="req-fallback",
+            trace_id="trace-fallback",
+            model="fast",
+            log_type="endpoint",
+            should_capture_full_body=False,
+            should_log_input_output=False,
+            metadata={},
+            fallback_attempts=attempts,
+        )
+
+    def test_success_after_fallback_still_records_the_count(self):
+        context = self._make_context(
+            [
+                {"provider": "p1", "status_code": 503, "error_message": "down"},
+                {"provider": "p2", "status_code": 429, "error_message": "slow down"},
+            ]
+        )
+
+        log = log_intake._build_success_row(context, LoggingConfig(log_input_output=False))
+
+        assert log.status_code == 200
+        assert log.error_message is None
+        assert log.fallback_count == 2
+
+    def test_no_fallback_is_zero_not_null(self):
+        context = self._make_context([])
+
+        log = log_intake._build_success_row(context, LoggingConfig())
+
+        assert log.fallback_count == 0
+
+    def test_assembler_defaults_tool_and_middleware_rows_to_zero(self):
+        """Rows that cannot fall back still record the fact, not NULL."""
+        log = log_intake._assemble_row(
+            log_type=log_intake.LogType.MCP,
+            request_id="req-tool",
+            endpoint="/api/mcp/tools/call",
+            method="POST",
+        )
+
+        assert log.fallback_count == 0
+
+
 class TestLoggedStreamBody:
     """Which response body a finished stream stores in the request log."""
 

@@ -358,22 +358,48 @@ def _has_billable_data(token_usage: TokenUsage) -> bool:
     )
 
 
-def _breakdown_from_usage(token_usage: TokenUsage, cost_usd: float | None) -> CostBreakdown:
-    """Build a CostBreakdown from extracted usage with the given total cost."""
+def _breakdown_from_usage(
+    token_usage: TokenUsage,
+    cost_usd: float | None,
+    *,
+    usage_reported: bool,
+) -> CostBreakdown:
+    """Build a CostBreakdown from extracted usage with the given total cost.
+
+    ``usage_reported`` decides what a zero means for the usage-derived counts.
+    With a record in hand, ``0`` is a reported zero (a prompt served entirely
+    from cache, a turn that had produced no output yet) and must survive as
+    ``0``; without one the count is unknown and stays ``None``. This is the same
+    rule log intake applies to the request-log token columns
+    (``log_intake._token_column``), so a Realtime turn's row and the breakdown it
+    is written from cannot disagree about "reported nothing" vs "reported zero".
+
+    The proxy's own dimensions (images generated, characters synthesized,
+    searches executed) are not provider facts and are known for every priced
+    request, so they keep their previous treatment: a zero there is stored as
+    ``None`` because the request-log columns they feed are not usage measurements.
+    """
+
+    def reported(value: int) -> int | None:
+        return value if usage_reported else None
+
+    def reported_seconds(value: float) -> float | None:
+        return value if usage_reported else None
+
     return CostBreakdown(
         cost_usd=cost_usd,
-        prompt_tokens=token_usage.prompt_tokens or None,
-        completion_tokens=token_usage.completion_tokens or None,
-        total_tokens=token_usage.total_tokens or None,
-        cache_creation_input_tokens=token_usage.cache_creation_input_tokens or None,
-        cache_read_input_tokens=token_usage.cache_read_input_tokens or None,
-        cached_prompt_tokens=token_usage.cached_prompt_tokens or None,
+        prompt_tokens=reported(token_usage.prompt_tokens),
+        completion_tokens=reported(token_usage.completion_tokens),
+        total_tokens=reported(token_usage.total_tokens),
+        cache_creation_input_tokens=reported(token_usage.cache_creation_input_tokens),
+        cache_read_input_tokens=reported(token_usage.cache_read_input_tokens),
+        cached_prompt_tokens=reported(token_usage.cached_prompt_tokens),
         cache_savings_usd=None,
-        audio_input_tokens=token_usage.audio_input_tokens or None,
-        audio_output_tokens=token_usage.audio_output_tokens or None,
-        image_input_tokens=token_usage.image_input_tokens or None,
+        audio_input_tokens=reported(token_usage.audio_input_tokens),
+        audio_output_tokens=reported(token_usage.audio_output_tokens),
+        image_input_tokens=reported(token_usage.image_input_tokens),
         images_generated=token_usage.images_generated or None,
-        audio_duration_seconds=token_usage.audio_duration_seconds or None,
+        audio_duration_seconds=reported_seconds(token_usage.audio_duration_seconds),
         tts_characters=token_usage.tts_characters or None,
         web_search_requests=token_usage.web_search_requests or None,
     )
@@ -396,9 +422,14 @@ async def calculate_cost(
     itself produced, which the record does not hold (ADR-0025).
 
     Returns a CostBreakdown; ``cost_usd`` is None when the cost cannot be
-    determined.
+    determined. A count the provider reported as zero stays ``0`` — only the
+    counts of a turn with no usage record at all are ``None``.
     """
     token_usage = token_usage_from(usage, dimensions)
+    # A record means the provider answered with its own counters, so its zeros
+    # are measurements. An estimate we compute in its absence is a value we
+    # produced, and is stored as one.
+    usage_reported = usage is not None
 
     if (
         token_usage.prompt_tokens == 0
@@ -411,17 +442,18 @@ async def calculate_cost(
         token_usage.prompt_tokens = estimated["prompt_tokens"]
         token_usage.completion_tokens = estimated["completion_tokens"]
         token_usage.total_tokens = estimated["total_tokens"]
+        usage_reported = True
 
     if not _has_billable_data(token_usage):
-        return _breakdown_from_usage(token_usage, None)
+        return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
     if not model_name or config_manager is None:
-        return _breakdown_from_usage(token_usage, None)
+        return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
     try:
         model_config = await config_manager.get_model_config(model_name)
         if not model_config:
-            return _breakdown_from_usage(token_usage, None)
+            return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
         # Get all pricing rates with provider-specific fallback
         rates = _get_provider_pricing(model_config, provider_name)
@@ -431,7 +463,7 @@ async def calculate_cost(
         # ("unknown") rather than a fake $0.00 that silently under-reports
         # spend in usage stats.
         if not tiers and all(getattr(rates, field) is None for field in _PRICING_FIELDS):
-            return _breakdown_from_usage(token_usage, None)
+            return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
         input_cost = 0.0
         output_cost = 0.0
@@ -451,7 +483,7 @@ async def calculate_cost(
         # audio/image token carve-outs below shrink the billable text input.
         rates = _select_tier_rates(rates, tiers, effective_prompt_tokens)
         if all(getattr(rates, field) is None for field in _PRICING_FIELDS):
-            return _breakdown_from_usage(token_usage, None)
+            return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
         # Audio tokens are already in prompt_tokens (OpenAI gpt-4o-audio-preview).
         # Subtract them so they are charged at the audio rate only, not double-charged
@@ -495,11 +527,11 @@ async def calculate_cost(
         unit_cost = _calculate_unit_costs(token_usage, rates)
 
         cost_usd = input_cost + output_cost + cache_cost + audio_cost + image_token_cost + unit_cost
-        breakdown = _breakdown_from_usage(token_usage, cost_usd)
+        breakdown = _breakdown_from_usage(token_usage, cost_usd, usage_reported=usage_reported)
         breakdown.cache_savings_usd = cache_savings_usd
         return breakdown
     except Exception as e:
         logger.warning(
             f"Cost calculation failed for model={model_name}, provider={provider_name}: {e}"
         )
-        return _breakdown_from_usage(token_usage, None)
+        return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)

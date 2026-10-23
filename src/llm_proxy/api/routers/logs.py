@@ -192,6 +192,15 @@ async def list_logs(
     api_key: str | None = Query(None, description="Filter by API key name"),
     endpoint: str | None = Query(None),
     log_type: str | None = Query(None, description="Filter by log type (audit, endpoint)"),
+    had_fallback: bool | None = Query(
+        None,
+        description=(
+            "Filter by whether the request needed a provider fallback: true = at least "
+            "one provider failed before another served the request, false = no fallback "
+            "recorded. Rows written before the fallback_count column existed are NULL "
+            "(unknown) and match neither value."
+        ),
+    ),
 ) -> LogListResponse:
     user_filter = await _get_user_filter(request, session)
     repo = LogRepository(session)
@@ -230,6 +239,7 @@ async def list_logs(
             search=search,
             include_count=include_count,
             user_id=user_filter,
+            had_fallback=had_fallback,
         )
 
         has_more = next_cursor is not None and len(items) >= limit
@@ -258,6 +268,7 @@ async def list_logs(
         log_type=log_type,
         search=search,
         user_id=user_filter,
+        had_fallback=had_fallback,
     )
 
     return LogListResponse(

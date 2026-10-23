@@ -569,3 +569,29 @@ class TestLogRepository:
 
         assert total == 0
         assert result == []
+
+
+class TestFallbackFilter:
+    """``had_fallback`` filters on the three-state ``fallback_count`` column."""
+
+    @staticmethod
+    def _sql(had_fallback: bool | None) -> str:
+        from sqlalchemy import select
+        from sqlalchemy.dialects import sqlite
+
+        filters = LogRepository._apply_fallback_filter([], had_fallback)
+        if not filters:
+            return ""
+        stmt = select(RequestLog.id).where(*filters)
+        return str(stmt.compile(dialect=sqlite.dialect()))
+
+    def test_true_matches_only_requests_that_fell_back(self):
+        assert "fallback_count >" in self._sql(True)
+
+    def test_false_matches_the_explicit_zero_only(self):
+        # Legacy NULL rows are "unknown", not "no fallback": they match neither.
+        assert "fallback_count =" in self._sql(False)
+        assert ">" not in self._sql(False)
+
+    def test_unset_adds_no_filter(self):
+        assert self._sql(None) == ""

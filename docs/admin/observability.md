@@ -19,13 +19,28 @@ the routing decision.
 | `response_time_ms` | Total duration |
 | Token counts | Prompt, completion, total; cache creation/read; cached prompt; audio in/out |
 | `cost_usd` / `cache_savings_usd` | Billed cost and the estimated saving from cache reads |
+| `fallback_count` | Provider switches this request needed. `0` = none, `>0` = that many providers failed before one served the request, `NULL` = row written before the column existed (unknown) — the list filter and the retries badge read it; the same count stays in `log_metadata` |
 | `log_metadata` | `fallback_attempts`/`fallback_count`/`fallback_providers`, `retry_attempts`/`retry_count`, routing fields, `provider_model_name` |
 | `client_ip`, `user_agent`, `auth_method` | Attribution, computed through trusted-proxy resolution |
 | Bodies | JSON, or `{"$binary": true, "size": N}` for binary payloads. Streaming responses are reassembled into the protocol's non-streaming JSON unless **Log Raw Stream** is on |
 
+**Zero is not "missing".** The token and cost columns keep a reported `0` distinct
+from a value nobody reported: `0` is stored when the provider reported zero (the
+whole prompt served from cache, an empty completion, a free request), `NULL` when
+there is no measurement at all. The UI renders the latter as `-` with a "Not
+reported" tooltip instead of a zero, so the two are never confused. Realtime turns
+follow the same rule: a `response.done` that carried no usage stores `NULL` tokens
+(and sets `usage_missing` in the metadata), while a usage block that reports zero
+is stored as `0`. Rows written
+before this rule existed may carry `0` for a measurement that only lives in
+`log_metadata`; readers prefer a positive metadata value in that case.
+
 **Filtering** (`GET /api/logs`): page or cursor pagination (max 200 per page), free-text
 `search`, date range, exact status or status range, model, provider, user, API key,
-endpoint, and log type. Non-admins are automatically scoped to their own rows.
+endpoint, log type, and `had_fallback` (`true` = at least one provider failed before
+another served the request, `false` = no fallback recorded; rows written before
+`fallback_count` existed are `NULL` and match neither). Non-admins are automatically
+scoped to their own rows.
 
 ### Privacy controls
 

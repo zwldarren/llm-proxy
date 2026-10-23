@@ -555,6 +555,7 @@ class RequestLogCreate:
     audio_output_tokens: int | None = None
     cost_usd: float | None = None
     cache_savings_usd: float | None = None
+    fallback_count: int | None = None
     log_metadata: dict[str, Any] = field(default_factory=dict)
     api_key_name: str | None = None
     ttft_ms: int | None = None
@@ -733,6 +734,7 @@ def _request_log_from_create(
         audio_output_tokens=data.audio_output_tokens,
         cost_usd=data.cost_usd,
         cache_savings_usd=data.cache_savings_usd,
+        fallback_count=data.fallback_count,
         log_metadata=log_metadata,
         api_key_name=data.api_key_name,
         ttft_ms=data.ttft_ms,

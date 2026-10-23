@@ -33,6 +33,8 @@ function buildLogFilterParams(filter: LogFilter): URLSearchParams {
   if (filter.api_key) params.append("api_key", filter.api_key);
   if (filter.endpoint) params.append("endpoint", filter.endpoint);
   if (filter.log_type) params.append("log_type", filter.log_type);
+  if (filter.had_fallback !== undefined)
+    params.append("had_fallback", filter.had_fallback ? "true" : "false");
   return params;
 }
 

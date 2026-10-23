@@ -61,6 +61,20 @@ describe("logsApi", () => {
     expect(parsed.searchParams.has("status_code")).toBe(false);
   });
 
+  it("getLogs sends had_fallback only when the operator picked a side", async () => {
+    await logsApi.getLogs({ had_fallback: true });
+    const filtered = parseUrl(getCallUrl(http.get as Mock, 2));
+    expect(filtered.searchParams.get("had_fallback")).toBe("true");
+
+    await logsApi.getLogs({ had_fallback: false });
+    const none = parseUrl(getCallUrl(http.get as Mock, 3));
+    expect(none.searchParams.get("had_fallback")).toBe("false");
+
+    await logsApi.getLogs({});
+    const unfiltered = parseUrl(getCallUrl(http.get as Mock, 4));
+    expect(unfiltered.searchParams.has("had_fallback")).toBe(false);
+  });
+
   it("deleteOldLogs calls the purge endpoint with older_than_days", async () => {
     await logsApi.deleteOldLogs(30);
 

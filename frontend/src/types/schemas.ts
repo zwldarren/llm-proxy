@@ -716,6 +716,13 @@ export interface LogRead {
   cache_creation_input_tokens?: number | null;
   cache_read_input_tokens?: number | null;
   cached_prompt_tokens?: number | null;
+  /**
+   * Provider switches this request needed before it was served.
+   * `null` = written before the column existed (unknown), `0` = no fallback,
+   * `>0` = the count. Unlike the metadata copy, this survives metadata
+   * scrubbing and is what SQL can filter on.
+   */
+  fallback_count?: number | null;
   ttft_ms?: number | null;
   // Audit fields - Who
   client_ip?: string | null;
@@ -760,6 +767,7 @@ export interface LogListItem {
   cache_creation_input_tokens?: number | null;
   cache_read_input_tokens?: number | null;
   cached_prompt_tokens?: number | null;
+  fallback_count?: number | null;
   auth_method?: string | null;
   client_ip?: string | null;
   event_type?: string | null;
@@ -791,6 +799,8 @@ export interface LogFilter {
   search?: string;
   endpoint?: string;
   log_type?: string;
+  /** true = at least one provider failed first, false = explicitly none. */
+  had_fallback?: boolean;
   cursor?: string | null;
   before_cursor?: string | null;
   limit?: number;

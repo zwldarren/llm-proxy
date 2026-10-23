@@ -36,6 +36,8 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 type StatusFilter = "all" | "2xx" | "4xx" | "5xx";
+/** Fallback filter: any request / only those that fell back / only those that did not. */
+type FallbackFilter = "all" | "had" | "none";
 
 const getLocalDateString = (isoString: string | undefined): string => {
   if (!isoString) return "";
@@ -182,6 +184,17 @@ const selectedApiKey = computed({
 // Status filter chips
 const statusFilter = ref<StatusFilter>(getInitialStatusFilter(props.filters));
 
+// Fallback filter: a fallback row that succeeded is a plain 2xx with no error
+// text in the row, so this is the only way to list "requests where a provider
+// failed first". Rows written before the column existed are unknown and match
+// neither side (the backend keeps NULL distinct from 0).
+const getInitialFallbackFilter = (filters: LogFilter): FallbackFilter => {
+  if (filters.had_fallback === true) return "had";
+  if (filters.had_fallback === false) return "none";
+  return "all";
+};
+const fallbackFilter = ref<FallbackFilter>(getInitialFallbackFilter(props.filters));
+
 const statusFilterOptions = [
   {
     label: "logs.filterAll",
@@ -218,6 +231,14 @@ const buildFilter = (): LogFilter => {
   filter.provider = providerText.value || undefined;
   filter.user = userText.value || undefined;
   filter.api_key = apiKeyText.value || undefined;
+
+  // Only endpoint-shaped rows (proxy/judge) can fall back; a stale selection
+  // must not leak into the tool tabs' filters.
+  if (usesProxyFilters.value && fallbackFilter.value !== "all") {
+    filter.had_fallback = fallbackFilter.value === "had";
+  } else {
+    filter.had_fallback = undefined;
+  }
 
   if (statusFilter.value === "2xx") {
     filter.status_code_from = 200;
@@ -262,6 +283,7 @@ const isFilterEqual = (a: LogFilter, b: LogFilter) => {
     "status_code_to",
     "start_date",
     "end_date",
+    "had_fallback",
   ];
   return keys.every((k) => String(a[k] ?? "") === String(b[k] ?? ""));
 };
@@ -300,6 +322,7 @@ watch(userText, emitDebounced);
 // Selects, status chips and date fields trigger immediately (deliberate action)
 watch(apiKeyText, emitImmediate);
 watch(statusFilter, emitImmediate);
+watch(fallbackFilter, emitImmediate);
 watch([startDateInput, endDateInput], emitImmediate);
 
 // Sync from parent when filters are changed outside this panel (e.g. the
@@ -318,6 +341,7 @@ watch(
     props.filters.status_code_to,
     props.filters.start_date,
     props.filters.end_date,
+    props.filters.had_fallback,
   ],
   () => {
     const newFilters = props.filters;
@@ -337,6 +361,10 @@ watch(
       else statusFilter.value = "all";
     } else if (newFilters.status_code === undefined) {
       statusFilter.value = "all";
+    }
+
+    if (getInitialFallbackFilter(newFilters) !== fallbackFilter.value) {
+      fallbackFilter.value = getInitialFallbackFilter(newFilters);
     }
 
     const nextStart = getLocalDateString(newFilters.start_date);
@@ -367,6 +395,7 @@ const activeFilterCount = computed(() => {
   if (providerText.value?.trim()) count++;
   if (userText.value?.trim()) count++;
   if (apiKeyText.value?.trim()) count++;
+  if (fallbackFilter.value !== "all") count++;
   if (startDateInput.value) count++;
   if (endDateInput.value) count++;
   return count;
@@ -380,6 +409,7 @@ const clearAllFilters = () => {
   userText.value = "";
   apiKeyText.value = "";
   statusFilter.value = "all";
+  fallbackFilter.value = "all";
   clearDateRange();
   // Emit the update so parent knows filters were cleared
   emit("update:filters", buildFilter());
@@ -417,7 +447,7 @@ onUnmounted(() => {
     </div>
     <div
       class="filters-grid gap-3 sm:gap-4"
-      :class="usesProxyFilters ? 'filters-grid-6col' : 'filters-grid-4col'"
+      :class="usesProxyFilters ? 'filters-grid-7col' : 'filters-grid-4col'"
     >
       <!-- Search -->
       <div class="flex flex-col">
@@ -573,6 +603,23 @@ onUnmounted(() => {
             </SelectContent>
           </Select>
         </div>
+        <!-- Fallback filter: a successful fallback row is a 2xx with no error
+             message, so this is the only way to list "a provider failed first". -->
+        <div class="flex flex-col">
+          <label for="filter-fallback" class="text-xs font-medium text-muted-foreground mb-1.5">{{
+            t("logs.fallbackFilter")
+          }}</label>
+          <Select v-model="fallbackFilter">
+            <SelectTrigger id="filter-fallback" class="w-full h-10 border-border/60 cursor-pointer">
+              <SelectValue :placeholder="t('logs.filterAll')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{{ t("logs.filterAll") }}</SelectItem>
+              <SelectItem value="had">{{ t("logs.fallbackHad") }}</SelectItem>
+              <SelectItem value="none">{{ t("logs.fallbackNone") }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </template>
 
       <!-- Audit-specific filters -->
@@ -636,10 +683,11 @@ onUnmounted(() => {
   }
 }
 
-/* Widest: 6 columns (proxy tab has 6 filter fields) */
-@container (min-width: 1250px) {
-  .filters-grid-6col {
-    grid-template-columns: repeat(6, 1fr);
+/* Widest: 7 columns (proxy tab has 7 filter fields: search, status, date,
+ * model, provider, API key, fallback) */
+@container (min-width: 1350px) {
+  .filters-grid-7col {
+    grid-template-columns: repeat(7, 1fr);
   }
 }
 

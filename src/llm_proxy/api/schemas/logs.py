@@ -45,6 +45,10 @@ class LogRead(BaseModel):
     cache_read_input_tokens: int | None = None
     cached_prompt_tokens: int | None = None
 
+    #: Provider switches this request needed. NULL on rows written before the
+    #: column existed (unknown); 0 is "no fallback" and >0 is the count.
+    fallback_count: int | None = None
+
     # Audit fields - Who
     client_ip: str | None = None
     user_agent: str | None = None
@@ -103,6 +107,7 @@ class LogListItem(BaseModel):
     cache_creation_input_tokens: int | None = None
     cache_read_input_tokens: int | None = None
     cached_prompt_tokens: int | None = None
+    fallback_count: int | None = None
 
     event_type: str | None = None
     action_category: str | None = None

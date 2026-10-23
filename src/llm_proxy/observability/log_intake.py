@@ -492,6 +492,11 @@ def _assemble_row(
     cost_usd: float | None = None,
     cache_savings_usd: float | None = None,
     ttft_ms: int | None = None,
+    #: Provider switches (fallbacks) this request needed. The assembler defaults
+    #: to 0 — every situation it assembles either cannot fall back (tool,
+    #: judge, middleware rows) or declares the count — while ``None`` is
+    #: reserved for rows written before the column existed (unknown).
+    fallback_count: int | None = 0,
     error_message: str | None = None,
     error_stack_trace: str | None = None,
     log_metadata: Any = _UNSET,
@@ -540,6 +545,7 @@ def _assemble_row(
         "cost_usd": cost_usd,
         "cache_savings_usd": cache_savings_usd,
         "ttft_ms": ttft_ms,
+        "fallback_count": fallback_count,
         "error_message": error_message,
         "error_stack_trace": error_stack_trace,
         "event_type": event_type,
@@ -812,6 +818,10 @@ def _build_log_base(
         "cost_usd": context.cost_usd,
         "cache_savings_usd": context.cache_savings_usd,
         "ttft_ms": safe_int(context.ttft_ms) if context.ttft_ms is not None else None,
+        # Always a number here, never NULL: the endpoint lifecycle knows exactly
+        # how many providers it tried, and 0 is a fact ("no fallback"), not a
+        # missing measurement. Only pre-column rows are NULL.
+        "fallback_count": len(context.fallback_attempts),
         "api_key_name": context.api_key_name,
         "client_ip": context.client_ip,
         "user_agent": context.user_agent,

@@ -10,14 +10,21 @@
  * LogListItem, LogsView, LogResponseView and LogDetailsMetrics, so the same
  * log could show different token counts on different UI surfaces.
  *
- * The priority rule is decided ONCE, here:
+ * The priority rule is decided ONCE, here, and it keeps "recorded as zero"
+ * distinct from "not recorded" — the backend stores NULL when the provider
+ * reported no usage and 0 when it reported a real zero, and the UI must not
+ * collapse the two:
  *
- * - Counts (tokens, TTFT): the first POSITIVE finite number in
- *   [flat field, log_metadata field] wins. 0 / null / undefined / non-number
- *   all mean "not recorded" — a request that really ran never consumed 0
- *   prompt tokens, so a flat 0 with a nonzero metadata value means the flat
- *   column was never populated and the metadata value is the measurement.
- *   Token accessors return 0 and `ttftMs` returns null when unrecorded.
+ * - Counts (tokens, cache): a finite flat value is the measurement, including
+ *   a real 0. A null / undefined / non-numeric / negative flat value means
+ *   the column has nothing, so `log_metadata` is consulted next (legacy rows
+ *   predate the flat columns). One exception remains for legacy rows whose
+ *   flat column was defaulted to 0 while `log_metadata` carried the
+ *   measurement: there a positive metadata value wins. Returns null when
+ *   nothing was recorded, and 0 when zero was reported.
+ *
+ * - TTFT: 0ms is not a measurement (it would mean the first byte arrived
+ *   before the request), so only a positive value counts.
  *
  * - Money (cost_usd): 0 is a genuine measurement (a free request), so only
  *   null / undefined / non-number fall through. Returns null when unrecorded.
@@ -47,7 +54,7 @@ const asFiniteNumber = (value: unknown): number | null =>
 const metadataNumber = (log: LogUsageSource, key: string): number | null =>
   asFiniteNumber(log.log_metadata?.[key]);
 
-/** First positive finite value wins; 0 / negative / non-number mean "not recorded". */
+/** First positive finite value wins; 0 / negative / non-number are skipped. */
 const firstPositive = (...values: Array<number | null | undefined>): number | null => {
   for (const value of values) {
     if (value != null && Number.isFinite(value) && value > 0) return value;
@@ -55,46 +62,68 @@ const firstPositive = (...values: Array<number | null | undefined>): number | nu
   return null;
 };
 
-/** Flat-first count resolution with metadata fallback; 0 when unrecorded. */
-const count = (flat: number | null | undefined, meta: number | null): number =>
-  firstPositive(flat, meta) ?? 0;
+/**
+ * Flat-first count resolution with metadata fallback.
+ *
+ * Returns the recorded count — `0` included, because the backend stores a
+ * reported zero as `0` and an unreported count as `NULL` — or `null` when
+ * neither source recorded anything. A positive metadata value still wins over
+ * a flat `0`, which is how legacy rows (flat column defaulted, metadata the
+ * real measurement) keep rendering correctly.
+ */
+const count = (flat: number | null | undefined, meta: number | null): number | null => {
+  const recorded = asFiniteNumber(flat);
+  if (recorded != null && recorded >= 0) {
+    if (recorded === 0 && meta != null && meta > 0) return meta;
+    return recorded;
+  }
+  return meta != null && meta > 0 ? meta : null;
+};
 
-/** Input (prompt) tokens, including cache-read/creation tokens. */
-export const promptTokens = (log: LogUsageSource): number =>
+/** Input (prompt) tokens, including cache-read/creation tokens; null if unrecorded. */
+export const promptTokens = (log: LogUsageSource): number | null =>
   count(log.prompt_tokens, metadataNumber(log, "prompt_tokens"));
 
-/** Output (completion) tokens. */
-export const completionTokens = (log: LogUsageSource): number =>
+/** Output (completion) tokens; null if unrecorded. */
+export const completionTokens = (log: LogUsageSource): number | null =>
   count(log.completion_tokens, metadataNumber(log, "completion_tokens"));
 
-/** Total tokens as recorded (not derived from prompt + completion). */
-export const totalTokens = (log: LogUsageSource): number =>
+/** Total tokens as recorded (not derived from prompt + completion); null if unrecorded. */
+export const totalTokens = (log: LogUsageSource): number | null =>
   count(log.total_tokens, metadataNumber(log, "total_tokens"));
 
 /** OpenAI-dialect cache reads (`prompt_tokens_details.cached_tokens`). */
-export const cachedPromptTokens = (log: LogUsageSource): number =>
+export const cachedPromptTokens = (log: LogUsageSource): number | null =>
   count(log.cached_prompt_tokens, metadataNumber(log, "cached_prompt_tokens"));
 
 /** Anthropic/Gemini-dialect cache reads (`cache_read_input_tokens`). */
-export const cacheReadTokens = (log: LogUsageSource): number =>
+export const cacheReadTokens = (log: LogUsageSource): number | null =>
   count(log.cache_read_input_tokens, metadataNumber(log, "cache_read_input_tokens"));
 
 /** Anthropic-dialect cache writes (`cache_creation_input_tokens`). */
-export const cacheCreationTokens = (log: LogUsageSource): number =>
+export const cacheCreationTokens = (log: LogUsageSource): number | null =>
   count(log.cache_creation_input_tokens, metadataNumber(log, "cache_creation_input_tokens"));
 
 /**
  * Tokens served from cache, merging the two dialects into one figure. The
  * backend never reports both dialects for one request (they express the same
- * billable fact), so a single precedence order is unambiguous.
+ * billable fact), so a single precedence order is unambiguous: the first
+ * positive value wins, and if every dialect was reported as 0 the result is a
+ * recorded 0. Null when no dialect reported anything.
  */
-export const cachedTokens = (log: LogUsageSource): number =>
-  firstPositive(
-    log.cached_prompt_tokens,
-    log.cache_read_input_tokens,
+export const cachedTokens = (log: LogUsageSource): number | null => {
+  // Order matters: both flat dialects before either metadata copy, so a legacy
+  // metadata value can never outrank a real flat measurement.
+  const values = [
+    asFiniteNumber(log.cached_prompt_tokens),
+    asFiniteNumber(log.cache_read_input_tokens),
     metadataNumber(log, "cached_prompt_tokens"),
-    metadataNumber(log, "cache_read_input_tokens")
-  ) ?? 0;
+    metadataNumber(log, "cache_read_input_tokens"),
+  ];
+  const positive = firstPositive(...values);
+  if (positive != null) return positive;
+  return values.some((value) => value === 0) ? 0 : null;
+};
 
 /** Time to first token in milliseconds; null when unrecorded. */
 export const ttftMs = (log: LogUsageSource): number | null =>
@@ -109,14 +138,20 @@ export const costUsd = (log: LogUsageSource): number | null =>
  * row, the mobile card and the details panel can never disagree about which
  * token counts a request consumed.
  *
- * Returns "-" when nothing was recorded, and a single figure when only one
- * side was recorded — "12,500 → 0" would read as an empty completion rather
- * than as a missing measurement.
+ * Returns "-" only when nothing was recorded. A recorded zero is rendered as
+ * "0" — the whole prompt served from cache and an empty completion are facts,
+ * not missing measurements — and when just one side is recorded only that
+ * figure is shown ("12,500 → 0" would read as an empty completion even though
+ * the backend reported nothing for it).
  */
 export const tokenBreakdown = (log: LogUsageSource): string => {
   const input = promptTokens(log);
   const output = completionTokens(log);
-  if (input === 0 && output === 0 && totalTokens(log) === 0) return "-";
-  if (input === 0 || output === 0) return (input || output).toLocaleString();
+  const total = totalTokens(log);
+  if (input == null && output == null && total == null) return "-";
+  if (input == null || output == null) {
+    const recorded = input ?? output ?? total;
+    return recorded == null ? "-" : recorded.toLocaleString();
+  }
   return `${input.toLocaleString()} → ${output.toLocaleString()}`;
 };

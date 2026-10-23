@@ -69,13 +69,17 @@ const { t } = useI18n();
 
 // Token breakdown wording lives in logEntryAccessors so the table row, this
 // card and the details panel always render the same figures.
+const tokenLabel = (value: number | null): string =>
+  value == null ? t("logs.notReported") : formatTokens(value);
+
 const getTokenTooltip = (log: LogItem): string => {
   const parts = [
-    `${t("logs.inputTokens")}: ${formatTokens(promptTokens(log))}`,
-    `${t("logs.outputTokens")}: ${formatTokens(completionTokens(log))}`,
+    `${t("logs.inputTokens")}: ${tokenLabel(promptTokens(log))}`,
+    `${t("logs.outputTokens")}: ${tokenLabel(completionTokens(log))}`,
   ];
   const cached = cachedTokens(log);
-  if (cached > 0) parts.push(`${t("logs.cachedTokens")}: ${formatTokens(cached)}`);
+  if (cached != null && cached > 0)
+    parts.push(`${t("logs.cachedTokens")}: ${formatTokens(cached)}`);
   return parts.join(" | ");
 };
 
@@ -208,7 +212,7 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
         mono: true,
         title: getTokenTooltip(props.log),
       });
-      if (cachedTokens(props.log) > 0) {
+      if ((cachedTokens(props.log) ?? 0) > 0) {
         metrics.push({
           icon: DatabaseZap,
           label: t("logs.cachedShort"),
@@ -296,16 +300,19 @@ const handleViewDetails = () => {
 };
 
 // Retry attempts count for the retries badge: same-provider retries +
-// fallback (provider-switch) attempts. Both are surfaced in log_metadata.
+// fallback (provider-switch) attempts. The fallback count comes from the
+// dedicated column when present (it survives metadata scrubbing and is what
+// the list filter uses); legacy rows only have the metadata list.
 const totalRetryCount = computed(() => {
   const meta = props.log.log_metadata;
   let count = 0;
   if (Array.isArray(meta?.retry_attempts)) {
     count += meta.retry_attempts.filter(({ retried }: { retried?: boolean }) => retried).length;
   }
-  if (Array.isArray(meta?.fallback_attempts)) {
-    count += meta.fallback_attempts.length;
-  }
+  const fallbacks =
+    props.log.fallback_count ??
+    (Array.isArray(meta?.fallback_attempts) ? meta.fallback_attempts.length : 0);
+  count += fallbacks;
   return count;
 });
 </script>

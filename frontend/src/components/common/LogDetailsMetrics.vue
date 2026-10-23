@@ -73,8 +73,20 @@ const providerModelName = computed(() => {
 });
 
 // TTFT, token chips and TPS all resolve through logEntryAccessors so the
-// metrics panel agrees with the list rows and the response view.
-//
+// metrics panel agrees with the list rows and the response view. A missing
+// count renders "-" (formatTokens) and the tooltip says it was not reported,
+// so a provider-reported zero is never mistaken for an absent measurement.
+const tokenLabel = (value: number | null): string =>
+  value == null ? t("logs.notReported") : formatTokens(value);
+
+const tokenTitle = computed(
+  () =>
+    `${t("logs.inputTokens")}: ${tokenLabel(promptTokens(props.log))} | ` +
+    `${t("logs.outputTokens")}: ${tokenLabel(completionTokens(props.log))}`
+);
+
+const costTitle = computed(() => (costUsd(props.log) == null ? t("logs.notReported") : undefined));
+
 // Calculate TPS (tokens per second)
 const tps = computed(() => {
   const completion = completionTokens(props.log);
@@ -248,14 +260,11 @@ const statusColorClass = computed(() => {
         <MetricCell :label="t('logs.cost')">
           <template #icon><Coins class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1">
-            <span class="text-metric text-foreground">
+            <span class="text-metric text-foreground" :title="costTitle">
               {{ formatCost(costUsd(log)) }}
             </span>
             <div class="flex items-center gap-1.5 flex-wrap">
-              <span
-                class="text-[11px] text-muted-foreground font-mono"
-                :title="`${t('logs.inputTokens')}: ${formatTokens(promptTokens(log))} | ${t('logs.outputTokens')}: ${formatTokens(completionTokens(log))}`"
-              >
+              <span class="text-[11px] text-muted-foreground font-mono" :title="tokenTitle">
                 {{ formatTokens(promptTokens(log)) }} → {{ formatTokens(completionTokens(log)) }}
               </span>
               <span
@@ -266,7 +275,7 @@ const statusColorClass = computed(() => {
                 {{ t("logs.saved") }} {{ formatCost(cacheSavings) }}
               </span>
               <span
-                v-if="cachedTokens(log) > 0"
+                v-if="(cachedTokens(log) ?? 0) > 0"
                 class="text-[11px] font-semibold bg-action-blue/15 border border-action-blue/30 text-action-blue px-1.5 py-0.5 rounded"
                 :title="`${t('logs.cachedTokens')}: ${formatTokens(cachedTokens(log))}`"
               >

@@ -164,6 +164,7 @@ const filters = reactive<LogFilter>({
   endpoint: "",
   start_date: undefined,
   end_date: undefined,
+  had_fallback: undefined,
 });
 
 const showFilters = ref(false);
@@ -231,6 +232,7 @@ const activeFilterCount = computed(() => {
   if (filters.provider?.trim()) count++;
   if (filters.user?.trim()) count++;
   if (filters.api_key?.trim()) count++;
+  if (filters.had_fallback !== undefined) count++;
   if (filters.start_date) count++;
   if (filters.end_date) count++;
   return count;
@@ -368,6 +370,7 @@ watch(
     () => filters.status_code_to,
     () => filters.start_date,
     () => filters.end_date,
+    () => filters.had_fallback,
   ],
   () => {
     if (isSwitchingTab.value) return;
@@ -420,6 +423,9 @@ watch(activeTab, async (newTab) => {
     // tool logs may carry a null api_key_name, and a stale key filter would
     // silently hide them.
     filters.api_key = "";
+    // Only endpoint-shaped rows can fall back; a stale fallback filter on a
+    // tool tab would be both meaningless and misleading.
+    filters.had_fallback = undefined;
   } else {
     filters.user = "";
   }
@@ -461,6 +467,7 @@ const hasAnyActiveFilter = computed(() => {
     filters.provider?.trim() ||
     filters.user?.trim() ||
     filters.api_key?.trim() ||
+    filters.had_fallback !== undefined ||
     filters.start_date ||
     filters.end_date
   );
@@ -683,12 +690,15 @@ const submitFeedback = async (log: LogListItemType, signal: FeedbackSignal) => {
 // Token helpers — value resolution lives in logEntryAccessors; only the
 // tooltip wording stays here.
 const getTokenTooltip = (log: LogListItemType): string => {
+  const tokenLabel = (value: number | null): string =>
+    value == null ? t("logs.notReported") : formatTokens(value);
   const parts = [
-    `${t("logs.inputTokens")}: ${formatTokens(promptTokens(log))}`,
-    `${t("logs.outputTokens")}: ${formatTokens(completionTokens(log))}`,
+    `${t("logs.inputTokens")}: ${tokenLabel(promptTokens(log))}`,
+    `${t("logs.outputTokens")}: ${tokenLabel(completionTokens(log))}`,
   ];
   const cached = cachedTokens(log);
-  if (cached > 0) parts.push(`${t("logs.cachedTokens")}: ${formatTokens(cached)}`);
+  if (cached != null && cached > 0)
+    parts.push(`${t("logs.cachedTokens")}: ${formatTokens(cached)}`);
   return parts.join(" | ");
 };
 
@@ -1028,7 +1038,7 @@ const auditListAction = (log: LogListItemType): string => {
                       <!-- Cache hits are a first-class usage signal, so they are
                            visible on the row instead of only in the detail panel. -->
                       <span
-                        v-if="cachedTokens(log) > 0"
+                        v-if="(cachedTokens(log) ?? 0) > 0"
                         class="text-[10px] font-medium text-action-blue bg-action-blue/15 border border-action-blue/25 rounded px-1 py-px"
                         :title="`${t('logs.cachedTokens')}: ${formatTokens(cachedTokens(log))}`"
                       >

@@ -557,6 +557,42 @@ class TestCalculateCostPublicAPI:
         assert result.prompt_tokens is None
 
     @pytest.mark.asyncio
+    async def test_reported_zero_stays_zero_and_empty_usage_is_unknown(self):
+        """A record means zeros are measurements; no record means unknown.
+
+        Same rule log intake applies to the request-log token columns, so a
+        Realtime turn's row cannot claim "not reported" for a count its own
+        breakdown recorded as zero.
+        """
+        reported = await calculate_cost(
+            usage=Usage(),
+            model_name="gpt-4",
+            config_manager=None,
+        )
+
+        assert reported.prompt_tokens == 0
+        assert reported.completion_tokens == 0
+        assert reported.total_tokens == 0
+        assert reported.cache_read_input_tokens == 0
+        assert reported.cache_creation_input_tokens == 0
+        assert reported.cached_prompt_tokens == 0
+        assert reported.audio_input_tokens == 0
+        assert reported.audio_output_tokens == 0
+
+        unknown = await calculate_cost(
+            usage=None,
+            model_name="gpt-4",
+            config_manager=None,
+        )
+
+        assert unknown.prompt_tokens is None
+        assert unknown.completion_tokens is None
+        assert unknown.total_tokens is None
+        assert unknown.cache_read_input_tokens is None
+        assert unknown.audio_input_tokens is None
+        assert unknown.audio_output_tokens is None
+
+    @pytest.mark.asyncio
     async def test_calculate_cost_no_model_name(self):
         """Returns None cost when model_name is None."""
         usage = Usage(input_tokens=1000, output_tokens=500)
@@ -1066,7 +1102,9 @@ class TestCalculateCostUnitBased:
     @pytest.mark.asyncio
     async def test_image_generation_per_image_only(self):
         """gpt-image billed per image with no token pricing configured."""
-        usage = Usage()
+        # Image generation reports no token usage at all; the count of images is
+        # a proxy dimension, not a provider fact.
+        usage = None
         mock_config_manager = MagicMock()
         mock_model_config = ModelConfig(
             providers=[

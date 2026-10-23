@@ -100,6 +100,7 @@ class LogRepository(BaseUsageRepository):
         "cache_creation_input_tokens",
         "cache_read_input_tokens",
         "cached_prompt_tokens",
+        "fallback_count",
         # Audit fields - Where
         "server_hostname",
         "service_name",
@@ -195,6 +196,7 @@ class LogRepository(BaseUsageRepository):
             "completion_tokens": log.completion_tokens,
             "total_tokens": log.total_tokens,
             "cost_usd": log.cost_usd,
+            "fallback_count": log.fallback_count,
             "log_metadata": log.log_metadata,
             "api_key_name": log.api_key_name,
             "ttft_ms": log.ttft_ms,
@@ -548,6 +550,22 @@ class LogRepository(BaseUsageRepository):
             filters.append(RequestLog.user_id == user_id)
         return filters
 
+    @staticmethod
+    def _apply_fallback_filter(filters: list[Any], had_fallback: bool | None) -> list[Any]:
+        """Filter on whether the request needed a provider fallback.
+
+        ``fallback_count`` is three-state: NULL for rows written before the
+        column existed (the fact is unknown), 0 for a request no provider
+        failure touched, and >0 for the number of switches. ``True`` matches
+        only >0 and ``False`` only the explicit 0 — legacy NULL rows match
+        neither, because pretending they had no fallback would be a guess.
+        """
+        if had_fallback is True:
+            filters.append(RequestLog.fallback_count > 0)
+        elif had_fallback is False:
+            filters.append(RequestLog.fallback_count == 0)
+        return filters
+
     async def get_logs_for_api(
         self,
         *,
@@ -566,6 +584,7 @@ class LogRepository(BaseUsageRepository):
         log_type: str | None = None,
         search: str | None = None,
         user_id: int | None = None,
+        had_fallback: bool | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """Get logs for API responses using column projection."""
         if page < 1:
@@ -599,6 +618,7 @@ class LogRepository(BaseUsageRepository):
         if log_type:
             filters.append(RequestLog.log_type == log_type)
         filters = self._apply_user_id_filter(filters, user_id)
+        filters = self._apply_fallback_filter(filters, had_fallback)
         if search:
             pattern = f"%{search}%"
             filters.append(
@@ -658,6 +678,7 @@ class LogRepository(BaseUsageRepository):
         "cache_creation_input_tokens",
         "cache_read_input_tokens",
         "cached_prompt_tokens",
+        "fallback_count",
         "event_type",
         "action_category",
     )
@@ -695,6 +716,7 @@ class LogRepository(BaseUsageRepository):
         search: str | None = None,
         include_count: bool = True,
         user_id: int | None = None,
+        had_fallback: bool | None = None,
     ) -> tuple[list[dict[str, Any]], int | None, str | None]:
         if limit < 1:
             limit = 1
@@ -726,6 +748,7 @@ class LogRepository(BaseUsageRepository):
         if log_type:
             filters.append(table.c.log_type == log_type)
         filters = self._apply_user_id_filter(filters, user_id)
+        filters = self._apply_fallback_filter(filters, had_fallback)
         if search:
             pattern = f"%{search}%"
             filters.append(
