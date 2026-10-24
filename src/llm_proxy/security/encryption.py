@@ -86,6 +86,11 @@ def _get_fernet() -> Fernet | None:
     return _fernet_instance if _encryption_enabled else None
 
 
+def is_encryption_enabled() -> bool:
+    """Whether API-key encryption is active for this process."""
+    return bool(_encryption_enabled and _fernet_instance is not None)
+
+
 def encrypt_api_key(api_key: str | None) -> str | None:
     """Encrypt an API key for secure storage.
 

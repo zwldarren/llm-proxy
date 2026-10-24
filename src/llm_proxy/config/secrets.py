@@ -113,6 +113,86 @@ async def _load_or_generate(db_key: str, description: str) -> str:
         return generated
 
 
+async def _reencrypt_provider_key(session: Any, name: str, plaintext: str) -> bool:
+    """Encrypt one provider key with a compare-and-swap update.
+
+    The CAS conditions the write on the exact plaintext that was read. An
+    administrator updating the provider while the startup pass is running
+    therefore wins: the stale write affects zero rows instead of overwriting
+    the newer credential. A savepoint keeps a single row's failure (for
+    example a database constraint) from aborting the whole batch.
+    """
+    from sqlalchemy import update
+
+    from llm_proxy.database.tables import ProviderRecord
+    from llm_proxy.security.encryption import encrypt_api_key
+
+    encrypted = encrypt_api_key(plaintext)
+    if encrypted is None:
+        return False
+    async with session.begin_nested():
+        result = await session.execute(
+            update(ProviderRecord)
+            .where(
+                ProviderRecord.name == name,
+                ProviderRecord.api_key == plaintext,
+            )
+            .values(api_key=encrypted)
+        )
+    return bool(result.rowcount)
+
+
+async def reencrypt_plaintext_provider_keys() -> int:
+    """Re-encrypt provider keys that were stored in plaintext.
+
+    Older versions decrypted provider keys in place on read; the session's
+    auto-commit then overwrote the encrypted column with plaintext. This
+    idempotent pass restores the at-rest invariant. It is a no-op when
+    encryption is disabled (the documented plaintext mode).
+
+    Each row is rewritten with a compare-and-swap so a concurrent admin edit
+    is never overwritten. A row that cannot be rewritten is logged and skipped
+    rather than aborting startup; the next boot retries it.
+
+    Returns the number of rows actually rewritten.
+    """
+    from sqlalchemy import select
+
+    from llm_proxy.database.connection import get_async_session_context
+    from llm_proxy.database.tables import ProviderRecord
+    from llm_proxy.security.encryption import is_encryption_enabled
+
+    if not is_encryption_enabled():
+        return 0
+
+    changed = 0
+    failed = 0
+    async with get_async_session_context() as session:
+        rows = (await session.execute(select(ProviderRecord.name, ProviderRecord.api_key))).all()
+        for name, key in rows:
+            if not key or key.startswith("enc:"):
+                continue
+            try:
+                if await _reencrypt_provider_key(session, name, key):
+                    changed += 1
+                else:
+                    logger.debug(
+                        f"Provider '{name}' API key changed during re-encryption; skipping"
+                    )
+            except Exception as exc:  # noqa: BLE001 - one row must not abort startup
+                failed += 1
+                logger.error(f"Failed to re-encrypt provider '{name}' API key: {exc}")
+
+    if changed:
+        logger.info(f"Re-encrypted {changed} provider API key(s) at rest")
+    if failed:
+        logger.error(
+            f"{failed} provider API key(s) remain in plaintext after re-encryption; "
+            "check the database error above"
+        )
+    return changed
+
+
 async def ensure_secrets() -> None:
     """Resolve JWT and encryption secrets once at startup.
 
@@ -186,5 +266,6 @@ __all__ = [
     "ensure_secrets",
     "get_encryption_key",
     "get_jwt_secret",
+    "reencrypt_plaintext_provider_keys",
     "reset_secrets",
 ]

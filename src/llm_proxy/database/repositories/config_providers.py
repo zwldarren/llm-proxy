@@ -3,11 +3,24 @@
 from typing import Any
 
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql import select
 
 from llm_proxy.database.repositories.base import BaseRepository
 from llm_proxy.database.tables import ProviderRecord
 from llm_proxy.security.encryption import decrypt_api_key, decrypt_api_keys, encrypt_api_key
+
+
+def _set_decrypted_key(provider: ProviderRecord, decrypted: str) -> None:
+    """Install a decrypted key without marking the row dirty.
+
+    Real ORM instances get ``set_committed_value``; test doubles without
+    SQLAlchemy state fall back to a plain assignment (they never commit).
+    """
+    if hasattr(provider, "_sa_instance_state"):
+        set_committed_value(provider, "api_key", decrypted)
+    else:
+        provider.api_key = decrypted
 
 
 class ProviderRepository(BaseRepository):
@@ -43,18 +56,24 @@ class ProviderRepository(BaseRepository):
         return data
 
     def _decrypt_provider_key(self, provider: ProviderRecord) -> None:
-        """Decrypt the API key for a provider in place."""
+        """Decrypt the API key for a provider in place.
+
+        The decrypted value is installed as the ORM instance's *committed*
+        value: a plain assignment marks the row dirty, and the session's
+        auto-commit would then write the plaintext back over the encrypted
+        column at rest.
+        """
         decrypted = decrypt_api_key(provider.api_key)
         assert decrypted is not None
-        provider.api_key = decrypted
+        _set_decrypted_key(provider, decrypted)
 
     def _decrypt_providers(self, providers: list[ProviderRecord]) -> None:
-        """Decrypt API keys for multiple providers in place."""
+        """Decrypt API keys for multiple providers in place (see above)."""
         encrypted_keys: list[str | None] = [p.api_key for p in providers]
         decrypted_keys = decrypt_api_keys(encrypted_keys)
         for provider, decrypted_key in zip(providers, decrypted_keys, strict=True):
             if decrypted_key is not None:
-                provider.api_key = decrypted_key
+                _set_decrypted_key(provider, decrypted_key)
 
     async def create_provider(
         self,

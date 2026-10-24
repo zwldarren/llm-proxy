@@ -4,6 +4,7 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -318,6 +319,24 @@ async def init_db() -> None:
             _migrations_run = True
 
     _db_initialized = True
+
+    if is_sqlite():
+        _restrict_sqlite_permissions()
+
+
+def _restrict_sqlite_permissions() -> None:
+    """Best-effort ``0600`` on the SQLite file (secrets live in this database)."""
+    try:
+        from sqlalchemy.engine import make_url
+
+        database = make_url(get_db_url()).database
+        if not database or database == ":memory:":
+            return
+        path = Path(database)
+        if path.exists():
+            path.chmod(0o600)
+    except Exception as e:  # noqa: BLE001 - permissions are defence in depth
+        logger.debug(f"Could not restrict SQLite file permissions: {e}")
 
 
 async def close_db() -> None:

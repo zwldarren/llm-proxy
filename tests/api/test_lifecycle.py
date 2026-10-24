@@ -62,10 +62,15 @@ class TestStartupConfig:
             ),
             patch.object(lifecycle, "init_encryption", MagicMock()) as init_encryption,
             patch.object(lifecycle, "DatabaseConfigManager", return_value=config_manager),
+            patch(
+                "llm_proxy.config.secrets.reencrypt_plaintext_provider_keys",
+                AsyncMock(),
+            ) as reencrypt,
         ):
             result = await lifecycle.startup_config(app)
 
         init_encryption.assert_called_once_with("test-encryption-key")
+        reencrypt.assert_awaited_once()
         config_manager.load.assert_awaited_once()
         assert app.state.config_manager is config_manager
         assert result is config_manager

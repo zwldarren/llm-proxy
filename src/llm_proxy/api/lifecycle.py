@@ -51,11 +51,15 @@ async def startup_http_client(app: FastAPI) -> None:
 
 async def startup_config(app: FastAPI) -> DatabaseConfigManager:
     from llm_proxy.config import ensure_secrets, get_encryption_key
+    from llm_proxy.config.secrets import reencrypt_plaintext_provider_keys
 
     await ensure_secrets()
 
     # Initialize encryption module with the resolved key
     init_encryption(get_encryption_key())
+
+    # Repair plaintext provider keys written by the old read-then-commit path.
+    await reencrypt_plaintext_provider_keys()
 
     config_manager = DatabaseConfigManager()
     await config_manager.load()

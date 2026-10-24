@@ -30,7 +30,9 @@ class ProviderRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     type: Mapped[str] = mapped_column(String(50))
-    api_key: Mapped[str] = mapped_column(String(500))
+    # Text, not String(500): Fernet adds ~190 characters of overhead, so a
+    # legacy 500-character plaintext key would not fit after re-encryption.
+    api_key: Mapped[str] = mapped_column(Text)
     base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     api_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     timeout: Mapped[float] = mapped_column(default=300.0)
