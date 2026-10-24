@@ -45,7 +45,9 @@ def extract_trace_id(request: Request) -> str | None:
 
 
 def extract_session_id(request: Request) -> str | None:
-    return request.headers.get("x-session-id")
+    """Client correlation id, clipped to the ``request_logs.session_id`` width."""
+    value = request.headers.get("x-session-id")
+    return value[:64] if isinstance(value, str) else None
 
 
 def extract_user_id(request: Request) -> str | None:

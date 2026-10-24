@@ -585,3 +585,13 @@ class TestMCPConnectionError:
         with pytest.raises(MCPConnectionError) as exc_info:
             await backend.call_tool("test_tool", {})
         assert exc_info.value.server_name == "http://localhost:8080"
+
+
+def test_safe_mcp_url_preserves_ipv6_brackets() -> None:
+    """Log rendering keeps a valid bracketed IPv6 endpoint and drops secrets."""
+    from llm_proxy.mcp.backend import _safe_mcp_url
+
+    assert (
+        _safe_mcp_url("https://user:pass@[2001:db8::1]:8080/mcp?token=secret")
+        == "https://[2001:db8::1]:8080/mcp"
+    )

@@ -142,6 +142,19 @@ def dispatch_row(
 _UNSET = sentinel("_UNSET")
 
 
+def _truncate(value: str | None, limit: int) -> str | None:
+    """Clip a client-controlled string to its database column width.
+
+    PostgreSQL enforces ``VARCHAR(n)``; one overlong value would fail the
+    whole executemany batch (including unrelated tenants' rows) and trip the
+    writer circuit breaker. SQLite ignores the width, so clipping is invisible
+    there and harmless everywhere.
+    """
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit]
+    return value
+
+
 def assemble_row(
     *,
     log_type: LogType,
@@ -207,20 +220,20 @@ def assemble_row(
         "request_id": request_id,
         "trace_id": trace_id,
         "timestamp": time.time() if timestamp is None else timestamp,
-        "endpoint": endpoint,
+        "endpoint": _truncate(endpoint, 500),
         "method": method,
         "log_type": log_type,
         "status_code": status_code,
         "response_time_ms": response_time_ms,
-        "user_identity": user_identity,
+        "user_identity": _truncate(user_identity, 200),
         "user_id": user_id,
-        "model": model,
-        "provider": provider,
-        "api_key_name": api_key_name,
-        "auth_method": auth_method,
-        "client_ip": client_ip,
-        "user_agent": user_agent,
-        "session_id": session_id,
+        "model": _truncate(model, 200),
+        "provider": _truncate(provider, 100),
+        "api_key_name": _truncate(api_key_name, 255),
+        "auth_method": _truncate(auth_method, 20),
+        "client_ip": _truncate(client_ip, 45),
+        "user_agent": _truncate(user_agent, 500),
+        "session_id": _truncate(session_id, 64),
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
@@ -413,8 +426,8 @@ def build_usage_record(
     return UsageRecordCreate(
         timestamp=timestamp,
         request_id=request_id,
-        model=model,
-        provider=provider,
+        model=_truncate(model, 200),
+        provider=_truncate(provider, 100),
         user_id=user_id,
         prompt_tokens=token_column(tokens.prompt_tokens, usage),
         completion_tokens=token_column(tokens.completion_tokens, usage),
@@ -428,8 +441,8 @@ def build_usage_record(
         audio_output_tokens=token_column(tokens.audio_output_tokens, usage),
         response_time_ms=response_time_ms,
         status_code=status_code,
-        user_identity=user_identity,
-        api_key_name=api_key_name,
+        user_identity=_truncate(user_identity, 200),
+        api_key_name=_truncate(api_key_name, 255),
         is_streaming=is_streaming,
         ttft_ms=ttft_ms,
         log_type=log_type,

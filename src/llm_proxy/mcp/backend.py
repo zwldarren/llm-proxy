@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypeVar
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
 lazy from mcp import ClientSession
@@ -31,6 +32,23 @@ if TYPE_CHECKING:
     from mcp import ClientSession as _ClientSessionType
 
 logger = get_logger(__name__)
+
+
+def _safe_mcp_url(url: str) -> str:
+    """Render an MCP URL without userinfo, query, or fragment (credentials)."""
+    try:
+        parsed = urlsplit(url)
+        if not parsed.hostname:
+            return "<mcp>"
+        netloc = parsed.hostname
+        if ":" in netloc:
+            netloc = f"[{netloc}]"
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+    except Exception:
+        return "<mcp>"
+
 
 T = TypeVar("T")
 
@@ -150,7 +168,9 @@ class StdioBackend(BackendConnection):
 
     async def connect(self) -> None:
         """Establish connection and initialize session."""
-        logger.debug(f"Connecting to stdio backend: {self.command} {' '.join(self.args)}")
+        # Args routinely carry provider tokens (``--token=...``); log only the
+        # executable name.
+        logger.debug(f"Connecting to stdio backend: {self.command}")
 
         self._exit_stack = AsyncExitStack()
 
@@ -296,22 +316,25 @@ class HTTPBackend(BackendConnection):
         try:
             return await operation()
         except (ConnectionError, BrokenPipeError, ConnectionResetError) as e:
-            logger.warning(f"Connection lost to HTTP backend {self.url}: {e}")
+            logger.warning(f"Connection lost to HTTP backend {_safe_mcp_url(self.url)}: {e}")
             self._session = None
             await self.disconnect()
 
-            logger.info(f"Attempting to reconnect to HTTP backend: {self.url}")
+            logger.info(f"Attempting to reconnect to HTTP backend: {_safe_mcp_url(self.url)}")
             try:
                 await self.connect()
             except Exception as reconnect_error:
-                logger.error(f"Failed to reconnect to HTTP backend {self.url}: {reconnect_error}")
+                logger.error(
+                    f"Failed to reconnect to HTTP backend {_safe_mcp_url(self.url)}: "
+                    f"{reconnect_error}"
+                )
                 raise
 
             return await operation()
 
     async def connect(self) -> None:
         """Establish connection and initialize session."""
-        logger.info(f"Connecting to HTTP backend: {self.url}")
+        logger.info(f"Connecting to HTTP backend: {_safe_mcp_url(self.url)}")
 
         self._exit_stack = AsyncExitStack()
 
@@ -330,14 +353,14 @@ class HTTPBackend(BackendConnection):
             self._session = await self._exit_stack.enter_async_context(session)
             await self._session.initialize()
 
-            logger.info(f"Connected to HTTP backend: {self.url}")
+            logger.info(f"Connected to HTTP backend: {_safe_mcp_url(self.url)}")
         except Exception:
             await self.disconnect()
             raise
 
     async def disconnect(self) -> None:
         """Close connection and cleanup resources."""
-        logger.info(f"Disconnecting from HTTP backend: {self.url}")
+        logger.info(f"Disconnecting from HTTP backend: {_safe_mcp_url(self.url)}")
 
         if self._exit_stack is not None:
             await self._exit_stack.aclose()
@@ -350,7 +373,7 @@ class HTTPBackend(BackendConnection):
         if self._session is None:
             raise MCPConnectionError(
                 message="Not connected to backend. Call connect() first.",
-                server_name=self.url,
+                server_name=_safe_mcp_url(self.url),
             )
         return self._session
 

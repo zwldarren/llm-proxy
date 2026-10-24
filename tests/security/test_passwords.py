@@ -270,6 +270,25 @@ class TestMaskSensitive:
         # password is in SENSITIVE_KEYS, value is masked
         assert masked["password"] != "my-very-long-secret-value-12345"
 
+    def test_prefixed_credential_keys_are_masked(self):
+        """current_password/new_password and prefixed env keys are masked."""
+        data = {
+            "current_password": "Old@pass123",
+            "new_password": "New@pass123!",
+            "OPENAI_API_KEY": "sk-live-secret",
+            "client_secret": "secret-value",
+        }
+        masked = mask_sensitive(data, SENSITIVE_KEYS)
+        assert masked["current_password"] != "Old@pass123"
+        assert masked["new_password"] != "New@pass123!"
+        assert masked["OPENAI_API_KEY"] != "sk-live-secret"
+        assert masked["client_secret"] != "secret-value"
+
+    def test_usage_counter_keys_stay_readable(self):
+        """Usage counters are not credentials and must remain visible."""
+        data = {"prompt_tokens": 10, "max_tokens": 20, "token_count": 3}
+        assert mask_sensitive(data, SENSITIVE_KEYS) == data
+
     def test_empty_data(self):
         """Empty data should be returned as-is."""
         assert mask_sensitive({}, SENSITIVE_KEYS) == {}

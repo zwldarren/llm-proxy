@@ -164,6 +164,13 @@ class DetailedFormatter(logging.Formatter):
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
+    @staticmethod
+    def _escape_control(value: Any) -> Any:
+        """Keep user-controlled CR/LF from forging lines in plain-text logs."""
+        if isinstance(value, str):
+            return value.replace("\r", "\\r").replace("\n", "\\n")
+        return value
+
     def format(self, record: logging.LogRecord) -> str:
         msg = record.msg
         if isinstance(msg, dict):
@@ -176,7 +183,24 @@ class DetailedFormatter(logging.Formatter):
                 record.msg = message + extra_str
             else:
                 record.msg = message
-        return super().format(record)
+
+        original_msg = record.msg
+        original_args = record.args
+        record.msg = self._escape_control(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._escape_control(arg) for arg in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: self._escape_control(v) for k, v in record.args.items()}
+        try:
+            formatted = super().format(record)
+            # Escape after interpolation: exception objects and formatted
+            # tracebacks are appended by super().format() and can carry CR/LF
+            # from upstream-controlled messages. Plain-text logs must stay one
+            # record per line.
+            return formatted.replace("\r", "\\r").replace("\n", "\\n")
+        finally:
+            record.msg = original_msg
+            record.args = original_args
 
 
 class SimpleFormatter(logging.Formatter):

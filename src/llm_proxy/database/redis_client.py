@@ -1,6 +1,7 @@
 """Redis client for LLM Proxy."""
 
 from typing import Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
 # Until first use these names are lazy proxies — do not isinstance()/introspect
 # them (e.g. the exception classes) before a redis call has resolved them.
@@ -13,6 +14,22 @@ from llm_proxy.core.exceptions import ConfigurationError
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _redact_redis_url(url: str) -> str:
+    """Render a Redis URL without credentials or query string."""
+    try:
+        parsed = urlsplit(url)
+        if not parsed.hostname:
+            return "<redis>"
+        netloc = parsed.hostname
+        if ":" in netloc:
+            netloc = f"[{netloc}]"
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+    except Exception:
+        return "<redis>"
 
 
 class RedisClient:
@@ -61,7 +78,7 @@ class RedisClient:
 
             try:
                 await cast(Any, self._client.ping())
-                logger.info(f"Redis connected to {self.config.url}")
+                logger.info(f"Redis connected to {_redact_redis_url(self.config.url)}")
             except Exception as ping_error:
                 raise ConfigurationError(f"Redis ping failed: {ping_error}") from ping_error
 

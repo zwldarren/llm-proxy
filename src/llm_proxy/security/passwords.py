@@ -78,6 +78,31 @@ _SENSITIVE_HEADER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Payload keys are matched exactly for the set above (so benign fields such as
+# ``prompt_tokens`` stay readable) plus these suffixes, which catch prefixed
+# credentials like ``current_password``, ``new_password`` and
+# ``OPENAI_API_KEY`` without masking usage counters (``token_count``,
+# ``max_tokens``).
+_SENSITIVE_KEY_SUFFIXES: tuple[str, ...] = (
+    "_password",
+    "_passwd",
+    "_secret",
+    "_token",
+    "_api_key",
+    "_apikey",
+    "_access_key",
+    "_private_key",
+    "_credentials",
+)
+
+
+def _is_sensitive_dict_key(key: str, sensitive_keys: frozenset[str]) -> bool:
+    lowered = key.lower()
+    if lowered in sensitive_keys:
+        return True
+    normalized = lowered.replace("-", "_")
+    return normalized.endswith(_SENSITIVE_KEY_SUFFIXES)
+
 
 def mask_headers(headers: dict[str, str]) -> dict[str, str]:
     return {
@@ -126,7 +151,7 @@ def mask_sensitive(data: Any, sensitive_keys: frozenset[str]) -> Any:
 
             for key in reversed(list(current.keys())):
                 value = current[key]
-                if isinstance(key, str) and key.lower() in sensitive_keys:
+                if isinstance(key, str) and _is_sensitive_dict_key(key, sensitive_keys):
                     new_dict[key] = _mask_value(value)
                 elif isinstance(value, (dict, list)) and value:
                     stack.append((value, new_dict, key))
