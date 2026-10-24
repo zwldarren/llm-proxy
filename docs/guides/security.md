@@ -35,6 +35,7 @@ reviewing before exposing it to the internet.
 | Login lockout | **Off by default.** When enabled: 5 failures / 15 min, keyed by username | Off because a hard per-account lockout lets anyone who knows the username lock the account out. The per-IP `auth.login` limit and the auth failure delay apply regardless |
 | API-key IP lockout | **Off by default.** When enabled: 10 failures / 5 min, keyed by **client IP** | Off because the lockout is keyed by IP: one client with bad credentials locks out everyone sharing that address (NAT, corporate egress — and in development, every request is `127.0.0.1`). Turn it on for instances reachable from untrusted networks. Applies to `/v1/*` and `/servers/*`; the auth failure delay applies regardless |
 | Model allowlist rejection | 403, not counted as an auth failure | The key is already authenticated, so requesting a disallowed model neither feeds the IP lockout nor pays the failure delay |
+| WebSocket quotas | Budget checked before each billable turn | `/v1/responses` re-runs the key gate before every `response.create`; `/v1/realtime` checks before forwarding each `response.create` and again after a completed turn. Enforcement is best-effort: spend is cached for 15 s and usage rows are written asynchronously, so a burst or an in-flight turn can overshoot the cap |
 | Auth failure delay | 100 ms ±10% jitter | Slows brute force; keep enabled on public instances |
 | Console auth buckets | `auth.login` 5/min, `auth.setup` 5/min, `auth.setup_status` 10/min | Tunable per bucket |
 
@@ -49,6 +50,10 @@ reviewing before exposing it to the internet.
 - **Isolation guarantees**: viewers see only their own logs/usage; API keys are
   owner-scoped even for admins; stored Responses are namespaced per key so tenants
   cannot read or delete each other's.
+- **Personal tracing**: a non-admin's `base_url` must be a public host; internal
+  collectors must be listed in `HTTP_ALLOWED_HOSTS`. Admins keep the permissive
+  self-hosted check. Demoting an admin to viewer clears their personal tracing
+  configuration; they can re-add a public collector afterwards.
 
 ## MCP
 
@@ -60,6 +65,8 @@ MCP servers run commands and reach the network, so the policy is deny-by-default
   link-local, cloud metadata, CGNAT) — including DNS-rebinding tricks.
 - Keep `require_key_mcp_permissions=true` so every MCP server is explicitly granted per
   API key.
+- Session slots are bounded per configured MCP server per worker (1000 sessions,
+  10 min idle) so a key holder cannot exhaust an endpoint with an `initialize` loop.
 - Remote (`streamableHttp`) servers cannot be given custom auth headers in v0.2.3 —
   prefer stdio, or a network path you control.
 - Every MCP call is logged with masked arguments in Logs → MCP Calls.
