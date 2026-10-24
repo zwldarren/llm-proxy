@@ -607,10 +607,13 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         is the literal string [DONE]. The generic chat-completions error frame
         is not part of the OpenResponses wire format, so it is not emitted.
         """
-        from llm_proxy.protocols.openresponses.errors import openresponses_error_code
+        from llm_proxy.protocols.openresponses.errors import (
+            client_error_message,
+            openresponses_error_code,
+        )
 
         code = openresponses_error_code(getattr(exc, "error_type", None))
-        message = str(exc) or "An error occurred during response generation"
+        message = client_error_message(exc)
         return [
             self._factory._create_response_failed_event(error_code=code, error_message=message),
             "data: [DONE]\n\n",
@@ -778,6 +781,22 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # (``response.reasoning_summary_text.delta|done``) whose names are
         # identical in both specs.
         emitted_type = _normalize_reasoning_event(data, chunk_type)
+        # The event name is spliced into the SSE frame, not JSON-encoded: an
+        # upstream-controlled type containing CR/LF could inject a forged
+        # ``data:``/``event:`` line. Fall back to a protocol-known error event.
+        if (
+            not isinstance(emitted_type, str)
+            or not emitted_type
+            or "\r" in emitted_type
+            or "\n" in emitted_type
+        ):
+            # The event name is spliced into the SSE frame, not JSON-encoded.
+            # Do not substitute a different name while leaving the body's
+            # ``type`` untouched (that would break the spec's
+            # event/body-consistency rule and emit a non-event name). Drop the
+            # malformed chunk; valid chunks continue the stream.
+            logger.warning("Dropping upstream stream chunk with invalid event type")
+            return ""
         serialized = orjson.dumps(data).decode()
         # Spec: the event field MUST match the type in the event body.
         return f"event: {emitted_type}\ndata: {serialized}\n\n"

@@ -81,6 +81,23 @@ class TestSseEventField:
         assert events[0][0] == "response.output_text.delta"
         assert events[0][1]["type"] == "response.output_text.delta"
 
+    def test_invalid_event_name_is_dropped_not_retargeted(self):
+        """An invalid upstream type must not emit a mismatched event/body pair."""
+        from llm_proxy.protocols.openresponses.streaming import (
+            OpenResponsesStreamingTransformer,
+        )
+
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5.2", request_id="r1")
+        out = transformer._transform_responses_api_chunk(
+            {
+                "type": "response.output_text.delta\r\nX-Injected: 1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "Hi",
+            }
+        )
+        assert out == ""
+
 
 class TestStreamingErrorFailedEvent:
     """Errors while streaming emit an error event then response.failed."""
@@ -1362,3 +1379,33 @@ class TestWebSearchFailureReporting:
 
         assert action["error_code"] == "unavailable"
         assert action["error_message"] == "Web search failed"
+
+
+class TestStreamingErrorSanitization:
+    """Streamed failures use the same client-safe text policy as the WS path."""
+
+    def test_server_error_text_is_generic(self):
+        from llm_proxy.protocols.openresponses.streaming import (
+            OpenResponsesStreamingTransformer,
+        )
+
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5.2", request_id="r1")
+        frames = transformer.error_frames(RuntimeError("upstream sk-secret at 10.0.0.1"))
+        events = _parse_sse_events(frames[0])
+        message = events[1][1]["response"]["error"]["message"]
+        assert message == "Internal server error"
+        assert "sk-secret" not in "".join(frames)
+
+    def test_client_error_text_is_preserved(self):
+        from llm_proxy.protocols.openresponses.streaming import (
+            OpenResponsesStreamingTransformer,
+        )
+
+        class _BadInput(Exception):
+            status_code = 400
+
+        transformer = OpenResponsesStreamingTransformer(model="gpt-5.2", request_id="r1")
+        frames = transformer.error_frames(_BadInput("model is required"))
+        events = _parse_sse_events(frames[0])
+        message = events[1][1]["response"]["error"]["message"]
+        assert message == "model is required"

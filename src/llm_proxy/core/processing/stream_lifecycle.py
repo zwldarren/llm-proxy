@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import orjson
+
 from llm_proxy.core.constants import DEFAULT_DISCONNECT_CHECK_INTERVAL
 from llm_proxy.core.context import RequestUserContext
 from llm_proxy.core.conversion import NativePassthroughHandler
@@ -457,7 +459,40 @@ class StreamLifecycle:
 
     # -- state helpers ------------------------------------------------
 
-    _TERMINAL_FRAME_MARKERS = ("data: [DONE]", "message_stop", '"response.completed"')
+    @staticmethod
+    def _is_terminal_frame(frame: str) -> bool:
+        """Whether an SSE frame is a protocol terminal, not model text.
+
+        A plain substring search over the whole frame lets a model-author's
+        content delta containing ``data: [DONE]`` (or ``message_stop``) fake a
+        clean completion and suppress the 499/abandonment accounting. Match
+        SSE field lines and the parsed event type instead.
+        """
+        for raw_line in frame.splitlines():
+            line = raw_line.strip()
+            if not line.startswith("data:") and not line.startswith("event:"):
+                continue
+            field, _, value = line.partition(":")
+            value = value.strip()
+            if field == "event":
+                if value == "message_stop":
+                    return True
+                continue
+            if value == "[DONE]":
+                return True
+            if not value.startswith("{"):
+                continue
+            try:
+                parsed = orjson.loads(value)
+            except orjson.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and parsed.get("type") in (
+                "response.completed",
+                "response.done",
+                "message_stop",
+            ):
+                return True
+        return False
 
     def _note_terminal_frame(self, frame: Any) -> None:
         """Arm the delivered verdict when the frame about to yield is terminal.
@@ -469,9 +504,7 @@ class StreamLifecycle:
         """
         if self._terminal_frames_delivered or self.client_gone:
             return
-        if isinstance(frame, str) and any(
-            marker in frame for marker in self._TERMINAL_FRAME_MARKERS
-        ):
+        if isinstance(frame, str) and self._is_terminal_frame(frame):
             self._terminal_frames_delivered = True
 
     def _markable_abandonment(self) -> bool:

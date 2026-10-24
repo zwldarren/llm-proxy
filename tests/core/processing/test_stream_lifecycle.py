@@ -2005,3 +2005,26 @@ class TestStreamLifecycleLoggedBody:
         )
         assert streamed["system_fingerprint"] == non_streaming["system_fingerprint"]
         assert streamed["service_tier"] == non_streaming["service_tier"]
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+        'event:message_stop\ndata:{"type":"message_stop"}\n\n',
+        'data: {"type":"message_stop"}\n\n',
+        "data:[DONE]\n\n",
+        "data: [DONE]\n\n",
+    ],
+)
+def test_terminal_frame_recognizes_spec_spellings(frame: str) -> None:
+    """Terminal detection accepts spaced/no-space fields and data-only stops."""
+    assert StreamLifecycle._is_terminal_frame(frame) is True
+
+
+def test_terminal_frame_ignores_model_text() -> None:
+    """Text that merely mentions a terminal marker is not a terminal frame."""
+    frame = (
+        'data: {"type":"response.output_text.delta","delta":"event: message_stop data: [DONE]"}\n\n'
+    )
+    assert StreamLifecycle._is_terminal_frame(frame) is False
