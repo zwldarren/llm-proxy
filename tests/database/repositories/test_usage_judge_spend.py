@@ -65,3 +65,21 @@ async def test_key_spend_summary_adds_judge_cost_but_not_judge_requests() -> Non
     # ...while the request count is a CASE over endpoint rows only: a judge call
     # must not inflate the key's request volume.
     assert "CASE WHEN (usage_records.log_type = 'endpoint') THEN 1 ELSE 0 END" in sql
+
+
+async def test_key_budget_spend_is_scoped_to_the_owner() -> None:
+    """A recycled key name must not inherit a previous owner's spend."""
+    session = _StubSession()
+
+    await UsageRepository(session).get_key_spend_since("key-1", 0.0, user_id=7)
+
+    assert "usage_records.user_id = 7" in _literal_sql(session)
+
+
+async def test_key_spend_summary_is_scoped_to_the_owner() -> None:
+    """The grouped summary query applies the same owner scope."""
+    session = _StubSession()
+
+    await UsageRepository(session).get_spend_since_by_api_key({"key-1": 0.0}, user_id=7)
+
+    assert "usage_records.user_id = 7" in _literal_sql(session)

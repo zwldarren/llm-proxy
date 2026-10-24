@@ -5,6 +5,7 @@ unified capture layer in UnifiedProcessor. Admin API audit logging
 (/api/*) is handled by the middleware below.
 """
 
+import asyncio
 import time
 from typing import Any
 
@@ -17,7 +18,11 @@ from llm_proxy.api.middleware.asgi_utils import (
     merge_response_headers,
 )
 from llm_proxy.core.request_facts import facts_from_scope
-from llm_proxy.observability.log_intake import mask_for_storage, record_admin_request
+from llm_proxy.observability.log_intake import (
+    mask_for_storage,
+    record_admin_request,
+    record_rejection,
+)
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.sampling import should_exclude_from_logging
 from llm_proxy.security.passwords import mask_headers
@@ -150,7 +155,22 @@ class HttpLoggingMiddleware:
                     captured_body.extend(message.get("body", b"")[:remaining])
             await send(message)
 
-        await self.app(scope, body, send_with_request_id)
+        try:
+            await self.app(scope, body, send_with_request_id)
+        except asyncio.CancelledError:
+            # A client can give up before the endpoint starts (e.g. during
+            # authentication or body parsing). No endpoint row will be written
+            # for that request; record the abandonment here. record_rejection
+            # is idempotent, so an endpoint that already logged its own 499 is
+            # not duplicated.
+            if path.startswith(("/v1/", "/api/")):
+                record_rejection(
+                    Request(scope, body),
+                    status_code=499,
+                    error_message="Client disconnected before the request completed",
+                    error_type="client_error",
+                )
+            raise
 
         if should_audit:
             response_time_ms = int((time.perf_counter() - start_time) * 1000)

@@ -12,6 +12,7 @@ from llm_proxy.api.dependencies import (
     publish_config_generation,
     require_authenticated,
 )
+from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
 from llm_proxy.api.routers.logs import invalidate_user_role_cache
 from llm_proxy.api.schemas.me import (
     MeBudget,
@@ -70,6 +71,7 @@ async def get_my_budget(
 @router.put("/password", response_model=dict)
 async def change_password(
     data: MePasswordChange,
+    request: Request,
     session: AsyncSession = get_async_session_dep,
     user: UserRecord = Depends(get_current_user),
 ):
@@ -88,6 +90,10 @@ async def change_password(
     session_repo = UserSessionRepository(session)
     await session_repo.deactivate_user_sessions(user.id)
     await session.commit()
+    # The key cache snapshots must_change_password; refresh it so the user's
+    # regular API keys become usable immediately instead of after the TTL.
+    invalidate_api_key_cache()
+    await publish_config_generation(request)
     return {"message": "Password changed successfully. Please log in again."}
 
 

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, MultipleResultsFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.database.repositories.users import UserRepository
@@ -46,10 +46,21 @@ class TestUserRepository:
         result = await repo.get_by_username("admin")
 
         assert result == mock_user
-        # Verify the query uses ilike for case-insensitive lookup
+        # Verify the query uses a literal case-insensitive comparison, not
+        # ILIKE (wildcards in the submitted name must not match other rows).
         call_stmt = mock_session.execute.call_args[0][0]
-        stmt_str = str(call_stmt)
-        assert "lower" in stmt_str.lower() and "like" in stmt_str.lower()
+        stmt_str = str(call_stmt).lower()
+        assert "lower" in stmt_str
+        assert "ilike" not in stmt_str
+
+    @pytest.mark.asyncio
+    async def test_get_by_username_ambiguous_returns_none(self, repo, mock_session):
+        """Legacy case-variant duplicates fail closed instead of raising 500."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.side_effect = MultipleResultsFound()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        assert await repo.get_by_username("admin") is None
 
     @pytest.mark.asyncio
     async def test_get_by_username_not_found(self, repo, mock_session):
@@ -92,7 +103,7 @@ class TestUserRepository:
         password_hash = "$2b$12$" + "x" * 53
         # Mock get_by_username to return None (no duplicate)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_result.first.return_value = None
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         result = await repo.create_user(
@@ -126,7 +137,7 @@ class TestUserRepository:
         """Creating a user with an existing username should raise ValueError."""
         # First call returns existing user, second call would be the duplicate check
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_result.first.return_value = mock_user
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match="already exists"):
@@ -196,6 +207,7 @@ class TestUpdateUsername:
     def _result(value):
         result = MagicMock()
         result.scalar_one_or_none.return_value = value
+        result.first.return_value = value
         return result
 
     @pytest.mark.asyncio

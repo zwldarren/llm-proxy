@@ -191,3 +191,87 @@ async def test_expired_key_is_evicted_even_when_verified_entry_is_stale():
     assert auth is None
     bcrypt.assert_not_called()
     assert cache.get_verified_key(sha, allow_stale=True) is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_invalid_keys_run_one_bcrypt_scan():
+    """The negative cache is re-checked under the verification lock."""
+    cache = get_api_key_cache()
+    record = _cached_key(name="k", key_hash="hash123")
+    sha = hash_api_key_for_cache("sk-bogus")
+
+    with (
+        patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=False) as bcrypt,
+        patch.object(mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)),
+    ):
+        results = await asyncio.gather(*(verify_api_key("sk-bogus") for _ in range(20)))
+
+    assert results == [None] * 20
+    assert bcrypt.call_count == 1
+    assert cache.is_negative_key(sha)
+
+
+@pytest.mark.asyncio
+async def test_must_change_password_blocks_regular_keys():
+    """A forced password change applies to sk- keys, not only session keys."""
+    record = _cached_key(name="k", key_hash="hash123", user_must_change_password=True)
+
+    with (
+        patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=True),
+        patch.object(mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)),
+    ):
+        assert await verify_api_key("sk-secret") is None
+
+
+@pytest.mark.asyncio
+async def test_must_change_password_blocks_fresh_verified_entry():
+    """A cached verified entry cannot bypass the forced-change flag."""
+    cache = get_api_key_cache()
+    sha = hash_api_key_for_cache("sk-secret")
+    cache.set_verified_key(sha, "k", None, must_change_password=True)
+
+    with patch.object(
+        mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)
+    ):
+        assert await verify_api_key("sk-secret") is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_verification_keeps_lock_until_scan_finishes():
+    """Cancellation must not let a second request start an overlapping scan."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+    scans = 0
+    record = _cached_key(name="k", key_hash="hash123")
+
+    async def fake_get_cached_api_keys():
+        nonlocal scans
+        scans += 1
+        started.set()
+        await release.wait()
+        return [record]
+
+    with (
+        patch.object(
+            mcp_proxy_module,
+            "get_cached_api_keys",
+            new=AsyncMock(side_effect=fake_get_cached_api_keys),
+        ),
+        patch.object(mcp_proxy_module, "key_matches_hash", return_value=False),
+        patch.object(mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)),
+    ):
+        first = asyncio.create_task(verify_api_key("sk-bogus"))
+        await started.wait()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        second = asyncio.create_task(verify_api_key("sk-bogus"))
+        await asyncio.sleep(0)
+        assert scans == 1  # second request is queued behind the shielded scan
+
+        release.set()
+        assert await second is None
+        assert scans == 1

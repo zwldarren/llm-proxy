@@ -61,10 +61,11 @@ async def login(
 
     lockout_manager = get_lockout_manager()
     client_ip = get_client_ip(request)
-    # Lockout is keyed by username only: an attacker rotating source IPs must
-    # not be able to bypass the per-account lockout. IP-level throttling is
-    # handled separately by the rate limiter.
-    lockout_key = credentials.username
+    # Lockout is keyed by the normalized username only: an attacker rotating
+    # source IPs (or spellings that resolve to the same account) must not be
+    # able to bypass the per-account lockout. IP-level throttling is handled
+    # separately by the rate limiter.
+    lockout_key = credentials.username.strip().lower()
 
     if lockout_manager.is_locked_out(lockout_key):
         remaining = lockout_manager.get_lockout_remaining(lockout_key)
@@ -87,9 +88,10 @@ async def login(
         verify_admin_password(credentials.password, _dummy_password_hash())
         auth_failed = True
     else:
-        auth_failed = not user.is_active or not verify_admin_password(
-            credentials.password, user.password_hash
-        )
+        # Always run bcrypt, even for a deactivated account: short-circuiting
+        # would make account state observable through response timing.
+        password_ok = verify_admin_password(credentials.password, user.password_hash)
+        auth_failed = not user.is_active or not password_ok
 
     if auth_failed:
         lockout_manager.record_failed_attempt(lockout_key)
@@ -206,6 +208,9 @@ async def logout(
     repo = UserRepository(session)
     user = await repo.get_by_username(identity.user)
     if user:
+        # Revoke the JWT as well as the session keys: otherwise a captured
+        # bearer token stays valid for its full 24-hour lifetime after logout.
+        await repo.increment_token_version(user.id)
         session_repo = UserSessionRepository(session)
         await session_repo.deactivate_user_sessions(user.id)
         await session.commit()

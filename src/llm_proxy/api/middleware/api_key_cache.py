@@ -19,6 +19,13 @@ from llm_proxy.core.constants import API_KEY_CACHE_TTL_SECONDS
 # real (asynchronously written) usage.
 BUDGET_SPEND_CACHE_TTL_SECONDS = 15.0
 
+# Short-lived negative cache for keys that failed verification. Repeating the
+# same bogus key (the cheap form of an auth-flood) must not re-run bcrypt over
+# every stored key each time. Kept deliberately short so a newly created key
+# is never locked out for long even if a cache invalidation is missed.
+NEGATIVE_KEY_CACHE_TTL_SECONDS = 10.0
+NEGATIVE_KEY_CACHE_MAX = 4096
+
 # ``last_used_at`` is purely informational (the admin UI's "last used" column).
 # Persisting it on every authenticated request cost one pooled DB connection
 # per request and, under sustained load, let connection-checkout waiters pile
@@ -117,6 +124,9 @@ class CachedApiKey:
     # constraints at request time without a per-request database join.
     user_allowed_models: list[str] | None = None
     user_is_active: bool = True
+    # A forced password change blocks every credential owned by the user,
+    # including regular ``sk-`` keys, until the user sets a new password.
+    user_must_change_password: bool = False
     # Expiry and budget configuration, enforced at request time.
     expires_at: datetime | None = None
     budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
@@ -142,6 +152,8 @@ class VerifiedKeyInfo:
     # Account-level budget envelope of the key's owner (empty = unlimited).
     user_budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
     rate_limit_rpm: int | None = None
+    # Snapshot of the owner's forced-password-change flag at verification.
+    must_change_password: bool = False
     verified_at: float = field(default_factory=time.time)
     # bcrypt hash of the key that matched. Retained so an expired entry can be
     # re-validated by looking the hash up in the refreshed key snapshot
@@ -161,6 +173,7 @@ class ApiKeyCache:
     ttl: float = API_KEY_CACHE_TTL_SECONDS
     _all_keys: list[CachedApiKey] = field(default_factory=list)
     _verified_keys: dict[str, VerifiedKeyInfo] = field(default_factory=dict)
+    _negative_keys: dict[str, float] = field(default_factory=dict)
     _last_refresh: float = 0.0
     _lock: Lock = field(default_factory=Lock)
 
@@ -213,6 +226,7 @@ class ApiKeyCache:
         user_budget: BudgetEnvelope | None = None,
         rate_limit_rpm: int | None = None,
         key_hash: str | None = None,
+        must_change_password: bool = False,
     ) -> None:
         """Cache a verified API key for fast future lookups."""
         with self._lock:
@@ -226,6 +240,7 @@ class ApiKeyCache:
                 user_budget=BudgetEnvelope() if user_budget is None else user_budget,
                 rate_limit_rpm=rate_limit_rpm,
                 key_hash=key_hash,
+                must_change_password=must_change_password,
             )
 
     def evict_verified_key(self, api_key_sha256: str) -> None:
@@ -233,11 +248,31 @@ class ApiKeyCache:
         with self._lock:
             self._verified_keys.pop(api_key_sha256, None)
 
+    def is_negative_key(self, api_key_sha256: str) -> bool:
+        """Whether this digest recently failed verification."""
+        now = time.monotonic()
+        with self._lock:
+            expires_at = self._negative_keys.get(api_key_sha256)
+            if expires_at is None:
+                return False
+            if expires_at <= now:
+                del self._negative_keys[api_key_sha256]
+                return False
+            return True
+
+    def set_negative_key(self, api_key_sha256: str) -> None:
+        """Remember a failed verification for a short window."""
+        with self._lock:
+            if len(self._negative_keys) >= NEGATIVE_KEY_CACHE_MAX:
+                self._negative_keys.clear()
+            self._negative_keys[api_key_sha256] = time.monotonic() + NEGATIVE_KEY_CACHE_TTL_SECONDS
+
     def invalidate(self) -> None:
         """Invalidate the cache."""
         with self._lock:
             self._all_keys = []
             self._verified_keys = {}
+            self._negative_keys = {}
             self._last_refresh = 0.0
 
 
@@ -276,6 +311,7 @@ class UserSnapshot:
     is_active: bool = True
     # Admin-set account-level budget envelope (empty = unlimited).
     budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
+    must_change_password: bool = False
 
 
 def _user_snapshot(user_map: dict[int, UserSnapshot], user_id: int | None) -> UserSnapshot:
@@ -325,6 +361,7 @@ async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
                 UserRecord.id,
                 UserRecord.allowed_models,
                 UserRecord.is_active,
+                UserRecord.must_change_password,
                 UserRecord.budget_usd,
                 UserRecord.budget_period,
                 UserRecord.budget_reset_day,
@@ -336,6 +373,7 @@ async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
                 row.allowed_models,
                 row.is_active,
                 BudgetEnvelope.from_orm_fields(row),
+                must_change_password=row.must_change_password,
             )
             for row in result
         }
@@ -353,6 +391,7 @@ async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
                     user_id=k.user_id,
                     user_allowed_models=snapshot.allowed_models,
                     user_is_active=snapshot.is_active,
+                    user_must_change_password=snapshot.must_change_password,
                     expires_at=k.expires_at,
                     budget=BudgetEnvelope.from_orm_fields(k),
                     user_budget=snapshot.budget,

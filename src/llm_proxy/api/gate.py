@@ -58,6 +58,7 @@ from llm_proxy.core.budget import BudgetEnvelope
 from llm_proxy.core.request_facts import (
     RequestIdentity,
     facts_for,
+    get_request_identity,
     set_request_identity,
 )
 from llm_proxy.core.request_utils import get_client_ip
@@ -210,7 +211,9 @@ async def _verify_session_api_key(api_key: str) -> VerifiedKeyAuth | None:
             stmt = select(UserRecord).where(UserRecord.id == session_record.user_id)
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
-            if user is None or not user.is_active:
+            if user is None or not user.is_active or user.must_change_password:
+                # A temporary/admin-set password must not grant model API
+                # access through the session key before it is changed.
                 return None
 
             return VerifiedKeyAuth(
@@ -281,6 +284,7 @@ def _cache_verified_key(
         user_budget=key_record.user_budget,
         rate_limit_rpm=key_record.rate_limit_rpm,
         key_hash=key_record.key_hash,
+        must_change_password=key_record.user_must_change_password,
     )
 
 
@@ -300,6 +304,8 @@ async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> VerifiedKe
         if _is_key_expired(entry.expires_at):
             cache.evict_verified_key(api_key_sha256)
             return None
+        if entry.must_change_password:
+            return None
         if time.time() - entry.verified_at <= cache.ttl:
             return _verified_auth_from_key_record(entry, entry.allowed_models)
         # else: the verified TTL lapsed — fall through to cheap revalidation.
@@ -318,6 +324,7 @@ async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> VerifiedKe
             match is not None
             and match.is_active
             and match.user_is_active
+            and not match.user_must_change_password
             and not _is_key_expired(match.expires_at)
         ):
             effective_models = intersect_model_lists(
@@ -328,22 +335,31 @@ async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> VerifiedKe
         # The recorded hash is gone or now invalid (key rotated/deactivated):
         # fall through to a full verification against the current snapshot.
 
-    for key_record in cached_keys:
-        # Keys owned by a disabled user are rejected alongside inactive keys;
-        # expired keys are rejected as well.
-        if (
-            key_record.is_active
-            and key_record.user_is_active
-            and not _is_key_expired(key_record.expires_at)
-            and key_matches_hash(api_key, key_record.key_hash)
-        ):
-            # The effective model allowlist is the key's list intersected with
-            # the owning user's constraint (user constraint always wins).
-            effective_models = intersect_model_lists(
-                key_record.allowed_models, key_record.user_allowed_models
-            )
-            _cache_verified_key(cache, api_key_sha256, key_record, effective_models)
-            return _verified_auth_from_key_record(key_record, effective_models)
+    def _find_matching_key() -> CachedApiKey | None:
+        for key_record in cached_keys:
+            # Keys owned by a disabled user are rejected alongside inactive
+            # keys; expired keys are rejected as well.
+            if (
+                key_record.is_active
+                and key_record.user_is_active
+                and not key_record.user_must_change_password
+                and not _is_key_expired(key_record.expires_at)
+                and key_matches_hash(api_key, key_record.key_hash)
+            ):
+                return key_record
+        return None
+
+    # bcrypt is CPU-bound and deliberately slow: run the scan off the event
+    # loop so an unknown key cannot stall every other request on the worker.
+    key_record = await asyncio.to_thread(_find_matching_key)
+    if key_record is not None:
+        # The effective model allowlist is the key's list intersected with
+        # the owning user's constraint (user constraint always wins).
+        effective_models = intersect_model_lists(
+            key_record.allowed_models, key_record.user_allowed_models
+        )
+        _cache_verified_key(cache, api_key_sha256, key_record, effective_models)
+        return _verified_auth_from_key_record(key_record, effective_models)
 
     session_auth = await _verify_session_api_key(api_key)
     if session_auth is not None:
@@ -352,32 +368,79 @@ async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> VerifiedKe
     return None
 
 
+def _consume_verify_task_exception(task: asyncio.Task[VerifiedKeyAuth | None]) -> None:
+    """Retrieve a detached verification task's exception.
+
+    The task is shielded so cancellation of the request cannot release the
+    verification lock while a worker thread is still scanning. If the request
+    was cancelled, nobody awaits the task; retrieving the exception here keeps
+    asyncio from logging an unhandled task error.
+    """
+    if not task.cancelled():
+        task.exception()
+
+
+async def _verify_locked(api_key: str, api_key_sha256: str) -> VerifiedKeyAuth | None:
+    """Resolve a key under the process-wide verification lock.
+
+    The negative cache is re-checked *after* acquiring the lock: concurrent
+    requests for the same bogus key all pass the lock-free check before the
+    first one records the failure, so without this re-check each waiter would
+    still run a full bcrypt scan. The failure is recorded before the lock is
+    released, making the cache useful to every subsequent waiter.
+    """
+    cache = get_api_key_cache()
+    async with get_key_verification_lock():
+        if cache.is_negative_key(api_key_sha256):
+            return None
+        result = await _resolve_verified_key(api_key, api_key_sha256)
+        if result is None:
+            cache.set_negative_key(api_key_sha256)
+        return result
+
+
 async def verify_api_key(api_key: str) -> VerifiedKeyAuth | None:
     """Verify an API key string and return the verified key's record.
 
-    Returns ``None`` when the key is invalid, inactive, or expired. The
-    returned :class:`VerifiedKeyAuth` carries the key's allowlists, owner,
-    expiry, budget envelopes, and rate-limit configuration so the caller can
-    enforce them.
+    Returns ``None`` when the key is invalid, inactive, expired, or belongs to
+    a user who must change their password. The returned
+    :class:`VerifiedKeyAuth` carries the key's allowlists, owner, expiry,
+    budget envelopes, and rate-limit configuration so the caller can enforce
+    them.
 
     Verification is single-flight: a *fresh* verified-cache entry is served
     without locking; everything else (stale, missing, or invalid) is resolved
     under one lock so a burst of concurrent requests cannot multiply the
     bcrypt + DB cost by the concurrency level.
+
+    The locked work runs in a shielded task. A request cancellation therefore
+    cannot release the lock while a bcrypt scan continues in its worker
+    thread; later requests still serialize behind that scan instead of
+    starting overlapping ones.
     """
+    if not api_key:
+        return None
     api_key_sha256 = hash_api_key_for_cache(api_key)
     cache = get_api_key_cache()
 
-    # Lock-free fast path, but only for an entry that is still fresh: a stale
-    # entry must go through _resolve_verified_key under the lock so it can be
-    # revalidated (or verified once, for an invalid key) without a second
-    # unlocked bcrypt attempt racing it.
+    # Cheap rejection for a key that just failed: an auth flood that repeats
+    # the same string must not pay a full bcrypt scan every time.
+    if cache.is_negative_key(api_key_sha256):
+        return None
+
+    # Lock-free fast path, but only for an entry that is still fresh and
+    # usable. Expired and forced-password-change entries fall through to the
+    # locked path, which owns the negative-cache bookkeeping.
     entry = cache.get_verified_key(api_key_sha256, allow_stale=True)
     if entry is not None and time.time() - entry.verified_at <= cache.ttl:
-        return await _resolve_verified_key(api_key, api_key_sha256)
+        if _is_key_expired(entry.expires_at):
+            cache.evict_verified_key(api_key_sha256)
+        elif not entry.must_change_password:
+            return _verified_auth_from_key_record(entry, entry.allowed_models)
 
-    async with get_key_verification_lock():
-        return await _resolve_verified_key(api_key, api_key_sha256)
+    task = asyncio.ensure_future(_verify_locked(api_key, api_key_sha256))
+    task.add_done_callback(_consume_verify_task_exception)
+    return await asyncio.shield(task)
 
 
 # ── Budget ───────────────────────────────────────────────────────────────
@@ -465,7 +528,9 @@ async def is_key_budget_exceeded(auth: VerifiedKeyAuth) -> bool:
         auth.budget or BudgetEnvelope(),
         cache_key=f"key:{key_name}",
         subject=f"API key '{key_name}'",
-        query=lambda repo, since_ts: repo.get_key_spend_since(str(key_name), since_ts),
+        query=lambda repo, since_ts: repo.get_key_spend_since(
+            str(key_name), since_ts, user_id=auth.user_id
+        ),
     )
 
 
@@ -664,6 +729,27 @@ async def _auth_failure(
 async def gate_request(request: Request, policy: GatePolicy) -> GateRejection | None:
     """Run the gate sequence for one request; ``None`` means allowed.
 
+    Any client disconnect while the gate is running is recorded as a 499
+    before the cancellation propagates: the endpoint never runs for such a
+    request, so this is the only place its abandonment can be logged.
+    """
+    try:
+        return await _gate_request_impl(request, policy)
+    except asyncio.CancelledError:
+        identity = get_request_identity(request)
+        _log_rejection(
+            request,
+            status_code=499,
+            error_message="Client disconnected during authentication",
+            error_type="client_error",
+            resource_id=identity.api_key_name or "unverified",
+        )
+        raise
+
+
+async def _gate_request_impl(request: Request, policy: GatePolicy) -> GateRejection | None:
+    """Run the gate sequence for one request; ``None`` means allowed.
+
     The transport declares its :class:`GatePolicy` and renders the returned
     :class:`GateRejection` in its own wire form. Everything else — lockout
     accounting, verification, identity stamping, quota checks, the rejection
@@ -784,11 +870,11 @@ async def gate_request(request: Request, policy: GatePolicy) -> GateRejection | 
 
     # The allowlists are facts of the request, read by the model-restriction
     # middleware, the post-routing re-check, and the mounted MCP app.
-    # Note: an empty list is a valid (deny-all) restriction and must be kept.
-    if auth.allowed_models is not None:
-        facts_for(request).allowed_models = auth.allowed_models
-    if auth.allowed_mcp_servers is not None:
-        facts_for(request).allowed_mcp_servers = auth.allowed_mcp_servers
+    # Overwrite unconditionally: a long-lived WebSocket re-runs this gate, and
+    # an administrator may have *removed* a restriction since the previous
+    # turn. An empty list is a valid (deny-all) restriction and is kept.
+    facts_for(request).allowed_models = auth.allowed_models
+    facts_for(request).allowed_mcp_servers = auth.allowed_mcp_servers
 
     return None
 

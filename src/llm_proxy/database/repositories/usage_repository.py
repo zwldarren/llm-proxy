@@ -242,13 +242,15 @@ class UsageRepository(BaseUsageRepository):
             for row in result.all()
         ]
 
-    async def get_key_spend_since(self, api_key_name: str, since_ts: float) -> float:
+    async def get_key_spend_since(
+        self, api_key_name: str, since_ts: float, *, user_id: int | None = None
+    ) -> float:
         """Return total billable spend (USD) for one key at or after ``since_ts``.
 
         Used for budget enforcement; hits the ``ix_usage_records_api_key`` index.
         Endpoint and judge rows both count: a judge call is spend the key caused,
         so a budget must see it. Returns 0.0 when the key has no recorded usage in
-        the window.
+        the window. ``user_id`` scopes recycled key names to their current owner.
         """
         from sqlalchemy import func, select
 
@@ -257,10 +259,14 @@ class UsageRepository(BaseUsageRepository):
             self.model.log_type.in_(BILLABLE_SPEND_LOG_TYPES),
             self.model.timestamp >= since_ts,
         )
+        if user_id is not None:
+            stmt = stmt.where(self.model.user_id == user_id)
         result = await self.session.execute(stmt)
         return float(result.scalar_one())
 
-    async def get_spend_since_by_api_key(self, windows: dict[str, float]) -> dict[str, float]:
+    async def get_spend_since_by_api_key(
+        self, windows: dict[str, float], *, user_id: int | None = None
+    ) -> dict[str, float]:
         """Return per-key billable spend (USD) at or after each key's own window start.
 
         ``windows`` maps API key name -> window start unix timestamp. All keys
@@ -295,6 +301,8 @@ class UsageRepository(BaseUsageRepository):
             )
             .group_by(self.model.api_key_name)
         )
+        if user_id is not None:
+            stmt = stmt.where(self.model.user_id == user_id)
         result = await self.session.execute(stmt)
         return {str(row[0]): float(row[1] or 0.0) for row in result.all()}
 

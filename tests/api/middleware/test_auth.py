@@ -548,6 +548,7 @@ def _mock_config_manager():
     mock_config = MagicMock()
     mock_config.server_params.auth = _make_auth_config()
     mock_manager.get_config = AsyncMock(return_value=mock_config)
+    mock_manager.publish_generation = AsyncMock()
     return mock_manager
 
 

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, MultipleResultsFound
 
 from llm_proxy.core.budget import effective_budget_window
 from llm_proxy.database.repositories.base import BaseRepository
@@ -22,10 +22,36 @@ class UserRepository(BaseRepository):
     """Repository for user account management."""
 
     async def get_by_username(self, username: str) -> UserRecord | None:
-        """Get a user by username (case-insensitive)."""
-        stmt = select(UserRecord).where(UserRecord.username.ilike(username))
+        """Get a user by username (case-insensitive, literal match).
+
+        ``ILIKE`` treats ``%``/``_`` in the submitted name as wildcards, which
+        both defeats the per-account lockout (each spelling is a distinct
+        bucket) and makes an ambiguous pattern raise ``MultipleResultsFound``
+        as an unauthenticated 500. Compare the normalized value instead.
+        """
+        stmt = select(UserRecord).where(func.lower(UserRecord.username) == username.strip().lower())
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        try:
+            return result.scalar_one_or_none()
+        except MultipleResultsFound:
+            # Legacy rows differing only by case: refuse the ambiguous login
+            # rather than choosing an account arbitrarily.
+            return None
+
+    async def _username_taken(self, username: str, *, exclude_user_id: int | None = None) -> bool:
+        """Whether any account already uses *username* case-insensitively.
+
+        Unlike :meth:`get_by_username`, this distinguishes "ambiguous legacy
+        rows" from "absent": it only asks whether at least one row exists, so
+        creation and rename cannot add a third case variant to a set that
+        already fails to authenticate.
+        """
+        stmt = select(UserRecord.id).where(func.lower(UserRecord.username) == username)
+        if exclude_user_id is not None:
+            stmt = stmt.where(UserRecord.id != exclude_user_id)
+        stmt = stmt.limit(1)
+        result = await self.session.execute(stmt)
+        return result.first() is not None
 
     async def has_admin(self) -> bool:
         """Return True if at least one active admin user exists.
@@ -144,8 +170,7 @@ class UserRepository(BaseRepository):
 
         normalized = new_username.strip().lower()
         if normalized != user.username:
-            existing = await self.get_by_username(normalized)
-            if existing is not None and existing.id != user_id:
+            if await self._username_taken(normalized, exclude_user_id=user_id):
                 raise ValueError(f"User '{normalized}' already exists")
             user.username = normalized
             try:
@@ -331,8 +356,7 @@ class UserRepository(BaseRepository):
 
         normalized = username.strip().lower()
 
-        existing = await self.get_by_username(normalized)
-        if existing is not None:
+        if await self._username_taken(normalized):
             raise ValueError(f"User '{normalized}' already exists")
 
         user = UserRecord(

@@ -32,6 +32,7 @@ def _mock_user(user_id: int, username: str, role: str = "viewer") -> MagicMock:
     user.budget_period = None
     user.budget_reset_day = None
     user.budget_reset_at = None
+    user.tracing_config = None
     # Response-computed enrichment fields (not record fields); without explicit
     # values a bare MagicMock would coerce to 1.0 under pydantic validation.
     user.budget_spend_usd = None
@@ -290,6 +291,41 @@ class TestUpdateMemberRole:
 
         assert response.status_code == 200
         mock_repo.set_role.assert_awaited_once_with(2, "viewer")
+
+    def test_demote_clears_private_tracing_config(self, team_client):
+        """A demoted viewer cannot retain a private collector configuration."""
+        client, _, mock_repo = team_client
+        target = _mock_user(2, "second-admin", role="admin")
+        target.tracing_config = {
+            "enabled": True,
+            "providers": [
+                {
+                    "provider": "langfuse",
+                    "name": "internal",
+                    "enabled": True,
+                    "settings": {"base_url": "http://127.0.0.1:3000"},
+                }
+            ],
+        }
+        mock_repo.get_by_id = AsyncMock(return_value=target)
+        mock_repo.count_active_admins = AsyncMock(return_value=2)
+        mock_repo.set_role = AsyncMock(return_value=_mock_user(2, "second-admin"))
+        mock_repo.set_tracing_config = AsyncMock(return_value=True)
+
+        sessions_patch, _ = _patch_sessions_and_keys()
+        with (
+            sessions_patch as session_repo_cls,
+            patch(
+                "llm_proxy.observability.user_tracing.get_user_tracing_manager"
+            ) as manager_factory,
+        ):
+            session_repo_cls.return_value.deactivate_user_sessions = AsyncMock()
+            manager_factory.return_value.publish_invalidation = AsyncMock()
+            response = client.put("/api/team/members/2/role", json={"role": "viewer"})
+
+        assert response.status_code == 200
+        mock_repo.set_tracing_config.assert_awaited_once_with(2, None)
+        manager_factory.return_value.publish_invalidation.assert_awaited_once_with(2)
 
     def test_demote_last_active_admin_rejected(self, team_client):
         client, _, mock_repo = team_client

@@ -11,7 +11,7 @@ from llm_proxy.security.passwords import validate_password_strength
 class LoginRequest(BaseModel):
     """Schema for admin login request."""
 
-    username: str = Field(..., description="Admin username")
+    username: str = Field(..., min_length=1, max_length=100, description="Admin username")
     password: str = Field(..., description="Admin password")
 
 

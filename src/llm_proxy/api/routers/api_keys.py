@@ -241,7 +241,9 @@ async def get_api_key_spend_summary(
         if key.budget_usd is not None:
             window_starts[key.name] = BudgetEnvelope.from_orm_fields(key).effective_start_ts()
     period_spend_by_name = (
-        await usage_repo.get_spend_since_by_api_key(window_starts) if window_starts else {}
+        await usage_repo.get_spend_since_by_api_key(window_starts, user_id=user_filter)
+        if window_starts
+        else {}
     )
 
     summaries: list[ApiKeySpendSummary] = []
@@ -284,7 +286,7 @@ async def get_api_key_usage(
     from llm_proxy.api.routers.logs import _parse_iso_datetime_to_ts
 
     repo = get_api_key_repository(session)
-    await _check_key_ownership(name, request, session, repo)
+    api_key = await _check_key_ownership(name, request, session, repo)
 
     start_ts = _parse_iso_datetime_to_ts(start_date)
     end_ts = _parse_iso_datetime_to_ts(end_date, is_end_date=True)
@@ -294,18 +296,30 @@ async def get_api_key_usage(
     # for a key spans everything billed on its behalf — endpoint requests and the
     # routing judge's own call rows — so its cost matches the key's spend and budget
     # figures, and the judge model shows up in the by-model breakdown.
+    # Scope by the key's owner as well as its name: key names are reusable after
+    # rename/delete, and the old rows still carry the name.
+    owner_id = api_key.user_id
     summary = await usage_repo.get_usage_stats(
-        start_ts=start_ts, end_ts=end_ts, log_type=BILLABLE_SPEND_LOG_TYPES, api_key_name=name
+        start_ts=start_ts,
+        end_ts=end_ts,
+        log_type=BILLABLE_SPEND_LOG_TYPES,
+        user_id=owner_id,
+        api_key_name=name,
     )
     by_model = await usage_repo.get_usage_by_model(
         start_ts=start_ts,
         end_ts=end_ts,
         log_type=BILLABLE_SPEND_LOG_TYPES,
         include_ttft=False,
+        user_id=owner_id,
         api_key_name=name,
     )
     daily_usage = await usage_repo.get_daily_usage(
-        start_ts=start_ts, end_ts=end_ts, log_type=BILLABLE_SPEND_LOG_TYPES, api_key_name=name
+        start_ts=start_ts,
+        end_ts=end_ts,
+        log_type=BILLABLE_SPEND_LOG_TYPES,
+        user_id=owner_id,
+        api_key_name=name,
     )
 
     return ApiKeyUsageResponse(

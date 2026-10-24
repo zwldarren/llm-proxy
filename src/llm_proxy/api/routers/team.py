@@ -260,6 +260,14 @@ async def update_member_role(
     if data.role == "viewer":
         await _guard_last_active_admin(repo, target, "demote")
 
+    # A demoted viewer must obey the public-host tracing rule. Re-running DNS
+    # validation during a role change is slow and can fail on transient
+    # resolution; drop the personal config instead. The user can re-add a
+    # public collector after the demotion.
+    had_tracing_config = target.tracing_config is not None
+    if data.role == "viewer" and had_tracing_config:
+        await repo.set_tracing_config(user_id, None)
+
     updated = await repo.set_role(user_id, data.role)
     assert updated is not None  # existence checked above
     await repo.increment_token_version(user_id)
@@ -267,13 +275,22 @@ async def update_member_role(
     await session_repo.deactivate_user_sessions(user_id)
     await session.commit()
 
+    if data.role == "viewer" and had_tracing_config:
+        from llm_proxy.observability.user_tracing import get_user_tracing_manager
+
+        await get_user_tracing_manager().publish_invalidation(user_id)
+
     await _commit_member_operation(
         request,
         MemberOperation(
             actor=admin.username,
             action=ActionCategory.UPDATE,
             target_user=updated.username,
-            extra={"operation": "role", "old_role": target.role, "new_role": data.role},
+            extra={
+                "operation": "role",
+                "old_role": target.role,
+                "new_role": data.role,
+            },
             log_message="Admin changed a member's role",
             log_fields={
                 "admin_username": admin.username,
@@ -626,6 +643,9 @@ async def reset_member_password(
             action=ActionCategory.UPDATE,
             target_user=target.username,
             extra={"operation": "password_reset"},
+            # The forced-change flag is read from the key-cache snapshot;
+            # drop it so regular API keys are rejected immediately.
+            invalidate_api_keys=True,
         ),
     )
     return {"message": f"Password reset for user {user_id}"}

@@ -283,7 +283,7 @@ class TestBudgetExceeded:
             ),
         ):
             assert await is_key_budget_exceeded(auth_info) is True
-        usage_repo.get_key_spend_since.assert_called_once_with("user:7", 0.0)
+        usage_repo.get_key_spend_since.assert_called_once_with("user:7", 0.0, user_id=1)
 
     @pytest.mark.asyncio
     async def test_db_lookup_on_cache_miss_and_cached(self):
