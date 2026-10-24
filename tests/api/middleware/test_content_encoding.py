@@ -210,3 +210,102 @@ def test_compressed_form_encoded_body_is_converted():
     # The echo endpoint is not mounted at /v1/responses here; a 404/405/422 all
     # prove the body passed both middlewares without a 400 decompression error.
     assert response.status_code != 400
+
+
+@pytest.mark.asyncio
+async def test_admission_precedes_body_read(monkeypatch):
+    """A request must not buffer its body before it owns a decode slot."""
+    import asyncio
+
+    from llm_proxy.api.middleware import content_encoding as encoding_module
+
+    events: list[str] = []
+
+    class FakeLimiter:
+        async def acquire(self) -> None:
+            events.append("acquire")
+
+        def release(self) -> None:
+            events.append("release")
+
+    class FakeBody:
+        async def read_limited(self, _cap: int) -> bytes:
+            events.append("read")
+            return b"compressed"
+
+        def replace(self, data: bytes) -> None:
+            events.append(f"replace:{data.decode()}")
+
+    app = MagicMock()
+    app.state.config_manager = MagicMock()
+    app.state.config_manager.get_cached_config.return_value = ProxyConfig(
+        server_params=ServerParams(auth=_TEST_AUTH)
+    )
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "path": "/echo",
+        "raw_path": b"/echo",
+        "query_string": b"",
+        "headers": [(b"content-encoding", b"gzip")],
+        "client": ("127.0.0.1", 1234),
+        "server": ("test", 80),
+        "scheme": "http",
+        "app": app,
+    }
+
+    def fake_decode(_data: bytes, _cap: int) -> bytes:
+        events.append("decode")
+        return b"plain"
+
+    monkeypatch.setattr(encoding_module, "_get_decompress_limiter", lambda: FakeLimiter())
+    monkeypatch.setattr(
+        encoding_module, "_DECODERS", {**encoding_module._DECODERS, "gzip": fake_decode}
+    )
+
+    response = await encoding_module._dispatch(Request(scope), FakeBody())
+    assert response is None
+    await asyncio.sleep(0)  # let the future's done callback release
+    assert events[:3] == ["acquire", "read", "decode"]
+    assert set(events[3:]) == {"replace:plain", "release"}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_decode_keeps_admission_until_worker_finishes():
+    """Cancellation must not release the slot while the decoder thread runs."""
+    import asyncio
+    import threading
+
+    from llm_proxy.api.middleware.content_encoding import _run_decompression
+
+    started = threading.Event()
+    finish = threading.Event()
+
+    class FakeLimiter:
+        released = False
+
+        def release(self) -> None:
+            self.released = True
+
+    def blocking_decode() -> bytes:
+        started.set()
+        finish.wait(timeout=5)
+        return b"done"
+
+    limiter = FakeLimiter()
+    task = asyncio.create_task(_run_decompression(limiter, blocking_decode))
+    while not started.is_set():
+        await asyncio.sleep(0.01)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert limiter.released is False
+
+    finish.set()
+    for _ in range(100):
+        if limiter.released:
+            break
+        await asyncio.sleep(0.01)
+    assert limiter.released is True

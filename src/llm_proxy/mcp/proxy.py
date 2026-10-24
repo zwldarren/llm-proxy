@@ -26,6 +26,12 @@ from llm_proxy.observability.types import McpOperationType, McpResourceType
 
 logger = get_logger(__name__)
 
+# The SDK defaults (10 000 sessions, 30 min idle) let one key holder exhaust a
+# worker's MCP slots with a trivial initialize loop. Keep the limits generous
+# enough for normal multi-client use while bounding the per-worker footprint.
+MCP_MAX_SESSIONS = 1000
+MCP_SESSION_IDLE_TIMEOUT_SECONDS = 600.0
+
 
 class MCPServerProxy:
     """MCP server proxy that forwards requests to a backend connection.
@@ -350,6 +356,8 @@ class MCPServerProxy:
         self._session_manager = StreamableHTTPSessionManager(
             self._server,
             json_response=True,
+            max_sessions=MCP_MAX_SESSIONS,
+            session_idle_timeout=MCP_SESSION_IDLE_TIMEOUT_SECONDS,
         )
         return self._session_manager
 

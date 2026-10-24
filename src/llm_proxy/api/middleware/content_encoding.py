@@ -20,6 +20,7 @@ applies to the decompressed body, and before ``FormEncodedMiddleware``
 so a compressed form-encoded body is still converted.
 """
 
+import asyncio
 import zlib
 from collections.abc import Callable
 
@@ -44,6 +45,29 @@ _IDENTITY = "identity"
 # Fallback cap when the configured body limit is disabled (0); still guards
 # against zip bombs.
 _MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024  # 64 MiB
+
+# The decoder runs before authentication (the auth gates only look at
+# headers), so an unauthenticated client can otherwise start arbitrarily many
+# simultaneous decompressions. A small per-worker admission limit bounds peak
+# memory without rejecting legitimate requests: excess requests wait for a
+# slot, they are not refused.
+_MAX_CONCURRENT_DECOMPRESSIONS = 4
+_decompress_limiter: asyncio.Semaphore | None = None
+_decompress_limiter_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_decompress_limiter() -> asyncio.Semaphore:
+    """Return the per-event-loop decompression semaphore."""
+    global _decompress_limiter, _decompress_limiter_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _decompress_limiter is None or _decompress_limiter_loop is not loop:
+        _decompress_limiter = asyncio.Semaphore(_MAX_CONCURRENT_DECOMPRESSIONS)
+        _decompress_limiter_loop = loop
+    return _decompress_limiter
+
 
 # Entity headers made inaccurate by decompression; stripped from the scope so
 # downstream (and any upstream forwarding) regenerates them from the plain body.
@@ -147,6 +171,26 @@ def _error_response(status: int, message: str, type_: str, code: str) -> JSONRes
     )
 
 
+async def _run_decompression(limiter: asyncio.Semaphore, decode: Callable[[], bytes]) -> bytes:
+    """Run a native decoder off-loop while holding its admission permit.
+
+    ``asyncio.to_thread`` cancellation cannot stop a decoder already running
+    in its worker thread. Releasing the semaphore in a ``finally`` would let a
+    new decoder start while that thread still holds its input/output buffers.
+    Hand release to the executor future's completion callback instead, and
+    shield the future so cancellation of this coroutine does not cancel the
+    future (which would release the permit immediately).
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        future = loop.run_in_executor(None, decode)
+    except BaseException:
+        limiter.release()
+        raise
+    future.add_done_callback(lambda _: limiter.release())
+    return await asyncio.shield(future)
+
+
 async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     """Decompress request bodies carrying a Content-Encoding header.
 
@@ -179,48 +223,71 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     ).max_request_body_size_bytes
     cap = max_size if max_size > 0 else _MAX_DECOMPRESSED_BYTES
 
-    try:
-        # Bounded read: the compressed stream is dropped as soon as it crosses
-        # the cap rather than being materialised in full first.
-        body_bytes = await body.read_limited(cap)
-    except BodyTooLargeError:
-        return _error_response(
-            413,
-            f"Request body exceeds maximum size of {cap} bytes",
-            "request_too_large",
-            "body_size_exceeded",
-        )
-    except Exception:
-        return _error_response(
-            400, "Failed to read request body.", "invalid_request", "invalid_body"
-        )
+    needs_decode = any(encoding != _IDENTITY for encoding in encodings)
+    limiter: asyncio.Semaphore | None = None
+    if needs_decode:
+        # Admit before reading: otherwise every queued request first buffers
+        # up to ``cap`` compressed bytes while waiting for a decode slot.
+        limiter = _get_decompress_limiter()
+        await limiter.acquire()
 
-    data = body_bytes
     try:
-        for encoding in reversed(encodings):
-            if encoding == _IDENTITY:
-                continue
-            data = _DECODERS[encoding](data, cap)
-    except _DecompressedTooLargeError:
-        return _error_response(
-            413,
-            f"Decompressed request body exceeds maximum size of {cap} bytes",
-            "request_too_large",
-            "body_size_exceeded",
-        )
-    except _DecompressionError as exc:
-        logger.warning(
-            "Request body decompression failed",
-            encodings=",".join(encodings),
-            path=request.url.path,
-            error=str(exc),
-        )
-        return _error_response(
-            400,
-            f"Failed to decompress request body ({', '.join(encodings)}): {exc}",
-            "invalid_request",
-            "invalid_content_encoding",
-        )
+        try:
+            # Bounded read: the compressed stream is dropped as soon as it
+            # crosses the cap rather than being materialised in full first.
+            body_bytes = await body.read_limited(cap)
+        except BodyTooLargeError:
+            return _error_response(
+                413,
+                f"Request body exceeds maximum size of {cap} bytes",
+                "request_too_large",
+                "body_size_exceeded",
+            )
+        except Exception:
+            return _error_response(
+                400, "Failed to read request body.", "invalid_request", "invalid_body"
+            )
+
+        def _decode_all() -> bytes:
+            current = body_bytes
+            for encoding in reversed(encodings):
+                if encoding == _IDENTITY:
+                    continue
+                current = _DECODERS[encoding](current, cap)
+            return current
+
+        try:
+            if limiter is not None:
+                # Ownership of the permit moves to the worker-completion
+                # callback; do not release it in the outer finally.
+                owned_limiter = limiter
+                limiter = None
+                data = await _run_decompression(owned_limiter, _decode_all)
+            else:
+                data = body_bytes
+        except _DecompressedTooLargeError:
+            return _error_response(
+                413,
+                f"Decompressed request body exceeds maximum size of {cap} bytes",
+                "request_too_large",
+                "body_size_exceeded",
+            )
+        except _DecompressionError as exc:
+            logger.warning(
+                "Request body decompression failed",
+                encodings=",".join(encodings),
+                path=request.url.path,
+                error=str(exc),
+            )
+            return _error_response(
+                400,
+                f"Failed to decompress request body ({', '.join(encodings)}): {exc}",
+                "invalid_request",
+                "invalid_content_encoding",
+            )
+    finally:
+        if limiter is not None:
+            limiter.release()
 
     logger.debug(
         "Decompressed request body",
