@@ -153,6 +153,45 @@ class TestOpenResponsesWebSocket:
             ]
             assert events[0]["response"]["id"] == "resp_ws1"
 
+    def test_model_allowlist_is_enforced_per_turn(self, app, monkeypatch):
+        """A restricted key cannot use a disallowed model over the WS transport."""
+        from llm_proxy.api.gate import VerifiedKeyAuth
+
+        async def restricted_verify(api_key: str):
+            return VerifiedKeyAuth(
+                principal_id="test-key",
+                allowed_models=["allowed-model"],
+                allowed_mcp_servers=None,
+                user_id=None,
+            )
+
+        monkeypatch.setattr("llm_proxy.api.gate.verify_api_key", restricted_verify)
+        with _client_for(app) as client, _ws_connect(client) as ws:
+            ws.send_json({"type": "response.create", "model": "forbidden-model", "input": "hi"})
+            event = ws.receive_json()
+            assert event["type"] == "error"
+            assert event["status"] == 403
+            assert event["error"]["code"] == "forbidden"
+
+    def test_budget_is_rechecked_before_each_turn(self, app, monkeypatch):
+        """A socket opened under budget stops at the next over-budget turn."""
+        from llm_proxy.api.gate import BudgetCheckStatus
+
+        checks = 0
+
+        async def budget_status(auth):
+            nonlocal checks
+            checks += 1
+            return BudgetCheckStatus.OK if checks == 1 else BudgetCheckStatus.EXCEEDED
+
+        monkeypatch.setattr("llm_proxy.api.gate.check_key_budget", budget_status)
+        with _client_for(app) as client, _ws_connect(client) as ws:
+            ws.send_json({"type": "response.create", "model": "gpt-5.2", "input": "hi"})
+            event = ws.receive_json()
+            assert event["type"] == "error"
+            assert event["status"] == 429
+            assert event["error"]["code"] == "rate_limit_exceeded"
+
     def test_sequential_response_create_messages(self, client):
         """Multiple response.create messages are processed sequentially."""
         with _ws_connect(client) as ws:
@@ -378,3 +417,59 @@ class TestOpenResponsesWebSocket:
             # The server closes the connection after the error envelope.
             with pytest.raises(WebSocketDisconnect):
                 ws.receive_json()
+
+
+class TestOpenResponsesTurnState:
+    """Connection-scoped state that must be reset for every billable turn."""
+
+    def test_audit_latch_is_reset_before_each_turn(self, app, monkeypatch):
+        """A rejection in an earlier turn must not suppress the next row."""
+        from llm_proxy.api.routers import openresponses as router_module
+        from llm_proxy.core.request_facts import facts_for
+
+        original_build = router_module.build_ws_request
+
+        def build_with_logged_turn(websocket):
+            request = original_build(websocket)
+            # Simulate an earlier turn whose row was already written.
+            facts_for(request).audit_log_written = True
+            return request
+
+        monkeypatch.setattr(router_module, "build_ws_request", build_with_logged_turn)
+        observed: list[bool] = []
+
+        def fake_record_rejection(request, **_kwargs):
+            observed.append(facts_for(request).audit_log_written)
+
+        monkeypatch.setattr(router_module, "record_rejection", fake_record_rejection)
+
+        async def restricted_verify(api_key: str):
+            return VerifiedKeyAuth(
+                principal_id="test-key",
+                allowed_models=["allowed-model"],
+                allowed_mcp_servers=None,
+                user_id=None,
+            )
+
+        monkeypatch.setattr("llm_proxy.api.gate.verify_api_key", restricted_verify)
+        with _client_for(app) as client, _ws_connect(client) as ws:
+            ws.send_json({"type": "response.create", "model": "forbidden-model", "input": "hi"})
+            event = ws.receive_json()
+            assert event["status"] == 403
+
+        assert observed == [False]
+
+    def test_budget_unavailable_handshake_closes_with_upstream_failure(self, client, monkeypatch):
+        """A 503 budget outage is a server failure, not a forbidden request."""
+        from llm_proxy.api.gate import BudgetCheckStatus
+
+        monkeypatch.setattr(
+            "llm_proxy.api.gate.check_key_budget",
+            AsyncMock(return_value=BudgetCheckStatus.UNAVAILABLE),
+        )
+        with _ws_connect(client) as ws:
+            error = ws.receive_json()
+            assert error["error"]["code"] == "server_error"
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                ws.receive_json()
+            assert exc_info.value.code == 1011

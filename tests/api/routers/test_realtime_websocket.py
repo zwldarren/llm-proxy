@@ -293,6 +293,55 @@ class TestRealtimeWebSocket:
             assert error["error"]["code"] == "budget_unavailable"
             _expect_close(ws, 1011)
 
+    def test_response_create_is_gated_before_forwarding(self, app, client, monkeypatch):
+        """A turn is re-authorized before the upstream sees response.create."""
+        from llm_proxy.api.gate import BudgetCheckStatus
+
+        checks = 0
+
+        async def budget_status(auth):
+            nonlocal checks
+            checks += 1
+            return BudgetCheckStatus.OK if checks == 1 else BudgetCheckStatus.EXCEEDED
+
+        monkeypatch.setattr("llm_proxy.api.gate.check_key_budget", budget_status)
+        upstream = FakeUpstream(messages=[])
+        app.state._realtime_captured["upstream"] = upstream
+
+        with _connect(client) as ws:
+            ws.send_json({"type": "response.create"})
+            error = ws.receive_json()
+            assert error["error"]["code"] == "budget_exceeded"
+            _expect_close(ws, 4007)
+
+        assert checks == 2
+        assert upstream.sent == []
+
+    def test_post_turn_budget_rejection_uses_handshake_contract(self, app, client, monkeypatch):
+        """Budget exhaustion after a turn keeps budget_exceeded/4007 semantics."""
+        from llm_proxy.api.gate import BudgetCheckStatus
+
+        checks = 0
+
+        async def budget_status(auth):
+            nonlocal checks
+            checks += 1
+            return BudgetCheckStatus.OK if checks == 1 else BudgetCheckStatus.EXCEEDED
+
+        monkeypatch.setattr("llm_proxy.api.gate.check_key_budget", budget_status)
+        upstream = FakeUpstream(messages=[_session_created(), _response_done()])
+        app.state._realtime_captured["upstream"] = upstream
+
+        with _connect(client) as ws:
+            assert ws.receive_json()["type"] == "session.created"
+            assert ws.receive_json()["type"] == "response.done"
+            error = ws.receive_json()
+            assert error["error"]["type"] == "invalid_request_error"
+            assert error["error"]["code"] == "budget_exceeded"
+            _expect_close(ws, 4007)
+
+        assert checks == 2
+
     def test_relay_roundtrip_and_usage_log(self, app, client):
         """Messages relay both ways; response.done writes a usage log."""
         upstream = FakeUpstream(messages=[_session_created(), _response_done()])

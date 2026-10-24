@@ -15,6 +15,7 @@ from llm_proxy.api import gate
 from llm_proxy.api.context import HasModel, build_request_context
 from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
 from llm_proxy.api.gate import GatePolicy, KeyExtraction
+from llm_proxy.api.middleware.model_restriction import check_model_restriction
 from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
     ConfigurationError,
@@ -22,15 +23,21 @@ from llm_proxy.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
+from llm_proxy.core.request_facts import facts_for, mint_request_id
 from llm_proxy.core.ws_common import (
     WS_CLOSE_AUTH_FAILED,
+    WS_CLOSE_FORBIDDEN,
+    WS_CLOSE_UPSTREAM_FAILURE,
     WS_MAX_CONNECTION_SECONDS,
     WS_MAX_MESSAGE_BYTES,
     WebSocketConnectionLimitError,
     build_ws_request,
     receive_with_connection_cap,
 )
+from llm_proxy.observability.log_intake import record_rejection
+from llm_proxy.observability.types import EventType, ResourceType
 from llm_proxy.protocols.openresponses.compaction import build_compaction_response
+from llm_proxy.protocols.openresponses.errors import client_error_message
 from llm_proxy.protocols.openresponses.schemas import (
     ReasoningParam,
     ResponsesResponse,
@@ -58,21 +65,23 @@ router = APIRouter(tags=["responses"], dependencies=[Depends(require_any_auth)])
 
 # WebSocket transport router: no router-level HTTP auth dependency (the
 # WebSocket endpoint authenticates the connection itself after accept).
-#: The OpenResponses WebSocket transport's gate policy: auth only. The
-#: handshake enforces no lockout, no per-key rate limit, and no budget
-#: (matching this transport's pre-gate behavior).
+#: The OpenResponses WebSocket transport's gate policy: auth + budget. The
+#: budget check runs on the handshake and again before every
+#: ``response.create`` turn, so an already-exhausted key cannot keep spending
+#: through the long-lived transport. Per-key RPM/lockout stay off: turns on a
+#: socket are not HTTP request-rate units, and the pre-gate transport was
+#: deliberately permissive there.
 OPENRESPONSES_WS_POLICY = GatePolicy(
     extraction=KeyExtraction.WEBSOCKET,
     lockout=False,
     auth_failure_penalty=False,
     rate_limit=False,
-    budget=False,
+    budget=True,
     claim_last_used=False,
 )
-#: The rejection kinds this transport's policy can produce. Every check but
-#: auth is disabled, so the renderer below speaks only the auth-failure event
-#: type — if the policy ever gains a check, its rendering must be taught here
-#: (the contract test in ``test_key_gate_contract.py`` pins the policy).
+#: The rejection kinds this transport's policy can produce: auth failure and
+#: budget (429/503). The renderer below maps both; the contract test in
+#: ``test_key_gate_contract.py`` pins the policy.
 
 ws_router = APIRouter(tags=["responses"])
 
@@ -653,11 +662,62 @@ async def _ws_handle_response_create(
     api_key_name: str,
 ) -> None:
     """Process a single response.create turn over the WebSocket."""
+    # Each turn is a distinct billable request: mint a fresh row id (the
+    # connection id is reused for the socket's lifetime) and re-run the gate
+    # so a key that exhausts its budget mid-session stops spending.
+    facts = facts_for(request)
+    facts.request_id = mint_request_id("ws_")
+    # The latch is connection-scoped; without clearing it a rejection from an
+    # earlier turn suppresses every later turn's row.
+    facts.audit_log_written = False
+    rejection = await gate.gate_request(request, OPENRESPONSES_WS_POLICY)
+    if rejection is not None:
+        if rejection.status_code == 401:
+            code = "authentication_failed"
+            close_code: int | None = WS_CLOSE_AUTH_FAILED
+        elif rejection.status_code == 429:
+            code = "rate_limit_exceeded"
+            close_code = WS_CLOSE_FORBIDDEN
+        else:
+            # Budget check unavailable: reject this turn but keep the socket,
+            # matching the HTTP 503 semantics (the next turn may succeed).
+            code = "server_error"
+            close_code = None
+        await _ws_send_error(websocket, rejection.status_code, code, rejection.message)
+        if close_code is not None:
+            with suppress(Exception):
+                await websocket.close(code=close_code)
+        return
+
     # HTTP/SSE transport-specific fields MUST NOT be sent on WebSocket requests.
     body = {
         k: v for k, v in msg.items() if k not in ("type", "stream", "stream_options", "background")
     }
     body["stream"] = True
+
+    # Enforce the effective per-key/user model allowlist on every turn. The
+    # HTTP path does this in middleware, which never sees WebSocket scopes.
+    allowed_models = facts.allowed_models
+    if isinstance(allowed_models, list):
+        identity = get_request_identity(request)
+        allowed, error_message = check_model_restriction(
+            identity.api_key_name or api_key_name or "unknown",
+            allowed_models,
+            str(body.get("model") or ""),
+        )
+        if not allowed:
+            requested_model = str(body.get("model") or "")
+            record_rejection(
+                request,
+                status_code=403,
+                error_message=error_message or "Model not allowed",
+                error_type="forbidden",
+                event_type=EventType.AUTHORIZATION,
+                resource_type=ResourceType.MODEL,
+                resource_id=requested_model or identity.api_key_name or "unknown",
+            )
+            await _ws_send_error(websocket, 403, "forbidden", error_message or "Model not allowed")
+            return
 
     # Spec: a continuation turn that fails with a 4xx/5xx error MUST evict the
     # referenced previous_response_id from the connection-local cache.
@@ -674,11 +734,15 @@ async def _ws_handle_response_create(
     except Exception as exc:
         if referenced_previous_id:
             local_state.pop(referenced_previous_id, None)
+        if _exception_status_code(exc) >= 500:
+            # Keep the route-level diagnostic even though the client only
+            # receives the generic message.
+            logger.warning("WebSocket response setup failed", exc_info=exc)
         await _ws_send_error(
             websocket,
             _exception_status_code(exc),
             _exception_error_code(exc),
-            str(exc),
+            client_error_message(exc),
         )
         return
 
@@ -706,7 +770,7 @@ async def _ws_handle_response_create(
         return
     except Exception as exc:
         logger.warning("WebSocket stream error: %s", exc)
-        await _ws_send_error(websocket, 500, "server_error", str(exc))
+        await _ws_send_error(websocket, 500, "server_error", "Internal server error")
         return
 
     # Keep the most recent previous-response state in connection-local memory
@@ -734,12 +798,17 @@ async def responses_websocket(websocket: WebSocket) -> None:
     request = build_ws_request(websocket)
     rejection = await gate.gate_request(request, OPENRESPONSES_WS_POLICY)
     if rejection is not None:
-        # Only AUTH_FAILED is reachable under this transport's policy (see
-        # the kinds note on OPENRESPONSES_WS_POLICY).
-        await _ws_send_error(
-            websocket, rejection.status_code, "authentication_failed", rejection.message
-        )
-        await websocket.close(code=WS_CLOSE_AUTH_FAILED)
+        if rejection.status_code == 401:
+            code = "authentication_failed"
+            close_code = WS_CLOSE_AUTH_FAILED
+        elif rejection.status_code == 429:
+            code = "rate_limit_exceeded"
+            close_code = WS_CLOSE_FORBIDDEN
+        else:
+            code = "server_error"
+            close_code = WS_CLOSE_UPSTREAM_FAILURE
+        await _ws_send_error(websocket, rejection.status_code, code, rejection.message)
+        await websocket.close(code=close_code)
         return
     identity = get_request_identity(request)
 
@@ -814,7 +883,7 @@ async def responses_websocket(websocket: WebSocket) -> None:
         pass
     except Exception as exc:
         logger.warning("WebSocket error: %s", exc)
-        await _ws_send_error(websocket, 500, "server_error", str(exc))
+        await _ws_send_error(websocket, 500, "server_error", "Internal server error")
     finally:
         with suppress(Exception):
             await websocket.close()

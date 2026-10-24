@@ -10,8 +10,9 @@ per-turn usage logging (see :mod:`llm_proxy.realtime`).
 import time
 import uuid
 from contextlib import suppress
-from typing import Any
+from typing import Any, Literal
 
+import orjson
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from llm_proxy.api import gate
@@ -285,7 +286,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         logger.warning(f"Upstream Realtime connection failed: {exc}")
         await _ws_fail(
             websocket,
-            f"Upstream connection failed: {exc}",
+            "Upstream connection failed",
             close_code=WS_CLOSE_UPSTREAM_FAILURE,
             error_type="server_error",
             code="upstream_connection_failed",
@@ -309,11 +310,56 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         config_manager=config_manager,
     )
 
+    turn_completed = False
+
+    async def _on_upstream(kind: Any, data: str | bytes) -> None:
+        nonlocal turn_completed
+        turn_completed = await observer.on_upstream_message(kind, data)
+
+    async def _should_stop() -> bool:
+        """Re-check the budget after a completed turn, before the next one."""
+        nonlocal turn_completed
+        if not turn_completed:
+            return False
+        turn_completed = False
+        rejection = await gate.gate_request(request, REALTIME_GATE_POLICY)
+        if rejection is None:
+            return False
+        # Render the same kind→code contract as the handshake. Budget
+        # exhaustion must not switch to rate_limit semantics just because it
+        # was observed after a turn.
+        await _render_gate_rejection(websocket, rejection)
+        return True
+
+    async def _authorize_client_message(kind: Literal["text", "binary"], data: str | bytes) -> bool:
+        """Gate a client ``response.create`` before it reaches the provider.
+
+        The post-turn check alone cannot prevent a pipelined next turn: the
+        client pump runs independently and may forward the message while the
+        gate is still querying spend. Authorizing here makes every billable
+        turn pay the same check the handshake does.
+        """
+        if kind != "text" or not isinstance(data, str):
+            return True
+        try:
+            message = orjson.loads(data)
+        except orjson.JSONDecodeError:
+            return True
+        if not isinstance(message, dict) or message.get("type") != "response.create":
+            return True
+        rejection = await gate.gate_request(request, REALTIME_GATE_POLICY)
+        if rejection is None:
+            return True
+        await _render_gate_rejection(websocket, rejection)
+        return False
+
     relay = RealtimeRelay(
         client=StarletteWebSocketAdapter(websocket),
         upstream=WebsocketsClientAdapter(upstream_conn),
-        on_upstream_message=observer.on_upstream_message,
+        on_upstream_message=_on_upstream,
         on_client_error=lambda code, message: _ws_send_error(websocket, message, code=code),
+        should_stop=_should_stop,
+        before_client_send=_authorize_client_message,
     )
     session_started_at = time.monotonic()
     try:

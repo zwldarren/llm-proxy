@@ -77,16 +77,20 @@ class RealtimeUsageObserver:
         """Session id for log correlation (provider-issued once known)."""
         return self._context.session_id
 
-    async def on_upstream_message(self, kind: Literal["text", "binary"], data: str | bytes) -> None:
-        """Relay hook: record a log entry for each ``response.done`` event."""
+    async def on_upstream_message(self, kind: Literal["text", "binary"], data: str | bytes) -> bool:
+        """Relay hook: record a log entry for each ``response.done`` event.
+
+        Returns True when the message completed a billable turn, so the relay
+        can re-check the key's budget before the next client turn.
+        """
         if kind != KIND_TEXT or not isinstance(data, str):
-            return
+            return False
         try:
             event = orjson.loads(data)
         except orjson.JSONDecodeError:
-            return
+            return False
         if not isinstance(event, dict):
-            return
+            return False
         event_type = event.get("type")
         if event_type == _SESSION_CREATED:
             # Correlate the connection with the upstream session: the
@@ -95,15 +99,16 @@ class RealtimeUsageObserver:
             session = event.get("session")
             if isinstance(session, dict) and session.get("id"):
                 self._context.session_id = session["id"]
-            return
+            return False
         if event_type != _RESPONSE_DONE:
-            return
+            return False
         response = event.get("response")
         if not isinstance(response, dict):
-            return
+            return False
         # The turn's usage is the realtime dialect's (``response.usage``, nested
         # singular ``*_token_details``); the intake seam owns that shape (ADR-0025).
         await self._record_turn(response, parse_wire_usage("realtime", event))
+        return True
 
     async def _record_turn(self, response: dict[str, Any], usage: Usage | None) -> None:
         """Calculate cost and write the background request log for one turn.

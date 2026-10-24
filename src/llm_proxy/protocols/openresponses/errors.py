@@ -59,8 +59,23 @@ def openresponses_error_code(error_type: str | None) -> str:
     return _ERROR_TYPE_TO_SPEC_CODE.get(error_type, error_type)
 
 
+def client_error_message(exc: Exception, *, fallback: str = "Internal server error") -> str:
+    """Return client-safe error text for a 4xx, generic text for a 5xx.
+
+    Validation errors carry actionable text and are safe to echo. Server-side
+    failures may embed upstream URLs, credentials, or stack details, so the
+    streaming ``response.failed`` path and the WebSocket envelope must share
+    one redaction policy instead of each choosing its own.
+    """
+    status = getattr(exc, "status_code", None) or 500
+    if status >= 500:
+        return fallback
+    return str(exc) or fallback
+
+
 __all__ = [
     "OPENRESPONSES_PATH_PREFIXES",
+    "client_error_message",
     "is_openresponses_path",
     "openresponses_error_code",
 ]

@@ -149,12 +149,18 @@ class RealtimeRelay:
             Callable[[Literal["text", "binary"], str | bytes], Awaitable[None]] | None
         ) = None,
         on_client_error: Callable[[str, str], Awaitable[None]] | None = None,
+        should_stop: Callable[[], Awaitable[bool]] | None = None,
+        before_client_send: (
+            Callable[[Literal["text", "binary"], str | bytes], Awaitable[bool]] | None
+        ) = None,
     ):
         self._client = client
         self._upstream = upstream
         self._config = config or RealtimeRelayConfig()
         self._on_upstream_message = on_upstream_message
         self._on_client_error = on_client_error
+        self._should_stop = should_stop
+        self._before_client_send = before_client_send
         self._started_at = time.monotonic()
 
     async def run(self) -> None:
@@ -209,6 +215,16 @@ class RealtimeRelay:
                         "WebSocket message exceeds the 64 MiB size limit.",
                     )
                     continue
+                # A long-lived socket must re-authorize every billable turn
+                # *before* the provider sees it. Doing this only after
+                # response.done races a pipelined response.create.
+                if self._before_client_send is not None:
+                    try:
+                        if not await self._before_client_send(kind, data):
+                            continue
+                    except Exception as exc:  # noqa: BLE001 - authorization is fail-closed
+                        logger.warning(f"Realtime client-message authorization failed: {exc}")
+                        break
                 await self._upstream.send(kind, data)
         except Exception as exc:
             logger.warning(f"Realtime client→upstream pump error: {exc}")
@@ -231,6 +247,10 @@ class RealtimeRelay:
                     except Exception as exc:  # noqa: BLE001 - observation must not break the relay
                         logger.warning(f"Realtime observation hook failed: {exc}")
                 await self._client.send(kind, data)
+                # Deliver the final frame first, then let the router decide
+                # whether the session may start another turn (budget/quota).
+                if self._should_stop is not None and await self._should_stop():
+                    break
         except Exception as exc:
             logger.warning(f"Realtime upstream→client pump error: {exc}")
         finally:

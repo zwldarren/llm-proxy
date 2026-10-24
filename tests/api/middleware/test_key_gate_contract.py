@@ -48,10 +48,17 @@ EXPECTED_STEPS: frozendict[str, dict[str, bool]] = frozendict(
             "budget": True,
             "claim_last_used": True,
         },
-        # openresponses runs auth only; extraction and verification are not
-        # policy rows (they are always on for every transport that reaches the
-        # gate), so they have no columns in this table.
-        "openresponses": dict.fromkeys(STEPS, False),
+        # openresponses runs auth + budget. The budget step runs on the
+        # handshake and before every response.create turn; RPM/lockout stay
+        # off because turns on one socket are not HTTP request-rate units.
+        # Extraction and verification are always on, so they have no columns.
+        "openresponses": {
+            "lockout": False,
+            "auth_failure_penalty": False,
+            "rate_limit": False,
+            "budget": True,
+            "claim_last_used": False,
+        },
     }
 )
 
