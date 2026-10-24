@@ -90,8 +90,12 @@ async def update_my_tracing(
         config_dict = build_persisted_tracing_dict(config_data, existing_config)
         config = TracingConfig.from_dict(config_dict)
 
-        # Validate provider URLs before persisting to prevent SSRF.
-        await _validate_tracing_provider_urls_async(config.providers)
+        # Validate provider URLs before persisting to prevent SSRF. Admins keep
+        # the permissive format-only check (they can already configure
+        # providers); every other user is restricted to non-private hosts.
+        await _validate_tracing_provider_urls_async(
+            config.providers, allow_private_hosts=user.role == "admin"
+        )
 
         async with get_async_session_context() as session:
             repo = UserRepository(session)

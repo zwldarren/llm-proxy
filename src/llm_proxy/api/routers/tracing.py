@@ -8,6 +8,8 @@ validation) shared by the self-service router and tests.
 """
 
 import asyncio
+import functools
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from llm_proxy.api.schemas.tracing import (
@@ -16,11 +18,19 @@ from llm_proxy.api.schemas.tracing import (
     TracingProviderRead,
     _mask_settings,
 )
-from llm_proxy.http.client import validate_url_format
+from llm_proxy.http.client import validate_server_url, validate_url_format
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.tracing_config import TracingConfig, TracingProviderConfig
 
 logger = get_logger(__name__)
+
+#: DNS validation is blocking and reachable by any authenticated viewer.
+#: Keeping it on a small dedicated pool prevents unique-hostname DNS timeouts
+#: from occupying every default-executor thread that also serves API-key
+#: verification and other gateway work.
+_TRACING_URL_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="tracing-url-check"
+)
 
 
 def _is_masked_key(value: Any) -> bool:
@@ -91,24 +101,40 @@ def _build_config_read(config_dict: dict) -> TracingConfigRead:
     return TracingConfigRead(enabled=config.enabled, providers=providers)
 
 
-def _validate_tracing_provider_urls(providers: list[TracingProviderConfig]) -> None:
+def _validate_tracing_provider_urls(
+    providers: list[TracingProviderConfig], *, allow_private_hosts: bool = True
+) -> None:
     """Validate tracing provider settings for SSRF (currently Langfuse base_url).
 
-    Tracing base URLs are user-controlled outbound endpoints, so we only
-    enforce format (http/https, no credentials, host present) and allow
-    private/self-hosted hosts.
+    Admin-managed tracing may point at a private/self-hosted collector, so the
+    default stays format-only. Self-service configs (any logged-in user) pass
+    ``allow_private_hosts=False``: a viewer must not be able to turn the
+    exporter into a blind SSRF primitive. Operators can still permit specific
+    internal hosts through ``HTTP_ALLOWED_HOSTS``.
     """
     for provider in providers:
         base_url = provider.settings.get("base_url")
         if base_url and isinstance(base_url, str):
-            validate_url_format(base_url, label=f"tracing provider '{provider.name}' base_url")
+            label = f"tracing provider '{provider.name}' base_url"
+            if allow_private_hosts:
+                validate_url_format(base_url, label=label)
+            else:
+                validate_server_url(base_url, label=label, fail_closed=True)
 
 
 async def _validate_tracing_provider_urls_async(
-    providers: list[TracingProviderConfig],
+    providers: list[TracingProviderConfig], *, allow_private_hosts: bool = True
 ) -> None:
-    """Async wrapper for tracing URL validation (blocking DNS resolution)."""
-    await asyncio.to_thread(_validate_tracing_provider_urls, providers)
+    """Async wrapper for tracing URL validation (bounded blocking DNS)."""
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _TRACING_URL_VALIDATION_EXECUTOR,
+        functools.partial(
+            _validate_tracing_provider_urls,
+            providers,
+            allow_private_hosts=allow_private_hosts,
+        ),
+    )
 
 
 def build_persisted_tracing_dict(

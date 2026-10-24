@@ -29,6 +29,7 @@ import {
 import { asString, bodySentinel, isRecord, parseToolArgs, safeStringify } from "@/utils/logFormat";
 import type { BodySentinel } from "@/utils/logFormat";
 import { formatProbability } from "@/utils/format";
+import { safeImageUrl } from "@/utils/safeUrl";
 
 /**
  * Reduce a Responses `web_search_call` item to its query — either the single
@@ -241,7 +242,13 @@ function imageMimeType(format?: string): string {
 
 /** Build a data: URL for a base64 image. Returns undefined when no b64 payload. */
 export function buildImageDataUrl(img: ImageInfo): string | undefined {
-  if (img.url) return img.url;
+  // The url comes from the provider response; drop non-image/non-navigable
+  // schemes before it reaches an <img>, anchor, or window.open sink. If the
+  // URL is rejected, a base64 payload is still usable.
+  if (img.url) {
+    const safeUrl = safeImageUrl(img.url);
+    if (safeUrl) return safeUrl;
+  }
   if (!img.b64Json) return undefined;
   return `data:${imageMimeType(img.outputFormat)};base64,${img.b64Json}`;
 }

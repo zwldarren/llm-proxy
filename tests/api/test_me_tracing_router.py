@@ -13,6 +13,17 @@ from llm_proxy.database.tables import UserRecord
 from llm_proxy.observability.user_tracing import UserTracingManager
 
 
+@pytest.fixture(autouse=True)
+def _no_live_dns(monkeypatch):
+    """Keep router tests deterministic: public hosts resolve to a public IP."""
+    import socket
+
+    def resolve(host, _port, *_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+
+
 @pytest.fixture
 def app():
     """Create a test FastAPI app with the me_tracing router, auth stubbed."""
@@ -487,3 +498,45 @@ class TestUserTracingManager:
         assert second is None
         # The DB-backed repository was constructed only once (cached negative).
         assert call_count == 1
+
+
+class TestTracingURLValidation:
+    """Self-service tracing URLs are validated fail-closed; admins stay permissive."""
+
+    def test_viewer_private_host_is_rejected(self):
+        from llm_proxy.api.routers.tracing import _validate_tracing_provider_urls
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.observability.tracing_config import TracingProviderConfig
+
+        provider = TracingProviderConfig(
+            name="internal", settings={"base_url": "http://127.0.0.1:3000"}
+        )
+        with pytest.raises(ValidationError):
+            _validate_tracing_provider_urls([provider], allow_private_hosts=False)
+
+    def test_viewer_dns_failure_fails_closed(self, monkeypatch):
+        import socket
+
+        from llm_proxy.api.routers.tracing import _validate_tracing_provider_urls
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.observability.tracing_config import TracingProviderConfig
+
+        def fail_resolution(*_args, **_kwargs):
+            raise socket.gaierror("NXDOMAIN")
+
+        monkeypatch.setattr(socket, "getaddrinfo", fail_resolution)
+        provider = TracingProviderConfig(
+            name="unresolvable",
+            settings={"base_url": "https://does-not-resolve.example"},
+        )
+        with pytest.raises(ValidationError):
+            _validate_tracing_provider_urls([provider], allow_private_hosts=False)
+
+    def test_admin_private_host_is_allowed(self):
+        from llm_proxy.api.routers.tracing import _validate_tracing_provider_urls
+        from llm_proxy.observability.tracing_config import TracingProviderConfig
+
+        provider = TracingProviderConfig(
+            name="internal", settings={"base_url": "http://127.0.0.1:3000"}
+        )
+        _validate_tracing_provider_urls([provider], allow_private_hosts=True)

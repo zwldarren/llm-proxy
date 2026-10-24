@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatSystemOneAnswerValue, parseLogResponse } from "./logResponseParser";
+import {
+  buildImageDataUrl,
+  formatSystemOneAnswerValue,
+  parseLogResponse,
+} from "./logResponseParser";
 
 /**
  * Verifies tool-call parsing across all three inbound chat protocols, both
@@ -518,5 +522,23 @@ describe("parseLogResponse — Decisions", () => {
 
   it("falls back to shape detection when request_type is absent", () => {
     expect(parseLogResponse(body).protocol).toBe("openai-decisions");
+  });
+});
+
+describe("buildImageDataUrl", () => {
+  it("keeps a safe provider URL", () => {
+    expect(buildImageDataUrl({ url: "https://cdn.example/a.png" })).toBe(
+      "https://cdn.example/a.png"
+    );
+  });
+
+  it("falls back to the base64 payload when the URL scheme is unsafe", () => {
+    expect(
+      buildImageDataUrl({ url: "javascript:alert(1)", b64Json: "AAAA", outputFormat: "png" })
+    ).toBe("data:image/png;base64,AAAA");
+  });
+
+  it("drops an unsafe URL with no base64 payload", () => {
+    expect(buildImageDataUrl({ url: "javascript:alert(1)" })).toBeUndefined();
   });
 });

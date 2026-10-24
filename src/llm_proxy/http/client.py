@@ -37,6 +37,7 @@ DEFAULT_USER_AGENT: Final[str] = f"llm-proxy/{_LLM_PROXY_VERSION}"
 
 # RFC 1918 + loopback + link-local + multicast + reserved blocks
 _BANNED_NETWORKS: Final[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]] = (
+    ipaddress.ip_network("0.0.0.0/8"),  # "this host"; 0.0.0.0 routes to loopback
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -50,9 +51,11 @@ _BANNED_NETWORKS: Final[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...
     ipaddress.ip_network("203.0.113.0/24"),  # TEST-NET-3
     ipaddress.ip_network("224.0.0.0/4"),  # multicast
     ipaddress.ip_network("240.0.0.0/4"),  # reserved
+    ipaddress.ip_network("::/128"),  # unspecified; connects to loopback on Linux
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),  # unique local
     ipaddress.ip_network("fe80::/10"),  # link-local
+    ipaddress.ip_network("::ffff:0.0.0.0/104"),  # IPv4-mapped unspecified
     ipaddress.ip_network("::ffff:127.0.0.0/104"),  # IPv4-mapped loopback
     ipaddress.ip_network("::ffff:10.0.0.0/104"),  # IPv4-mapped private
     ipaddress.ip_network("::ffff:172.16.0.0/108"),  # IPv4-mapped private
@@ -149,21 +152,26 @@ def _validate_url_common(url: str, label: str = "URL") -> tuple[str, str]:
     return url, host
 
 
-def _is_banned_resolved_ip(host: str) -> bool:
+def _is_banned_resolved_ip(host: str, *, fail_closed: bool = False) -> bool:
     """Resolve a hostname and check whether any resolved IP is banned.
 
     This is synchronous DNS resolution intended for infrequent configuration
     validation, not for the hot request path. Returns True if any A/AAAA record
-    falls into a banned network. Returns False when resolution fails, logging a
-    warning so that the URL is not rejected merely because DNS is unavailable.
+    falls into a banned network. When resolution fails, admin configuration
+    validation stays fail-open (DNS can be transiently unavailable), while
+    user-supplied download URLs pass ``fail_closed=True``: their fetch would
+    fail anyway, so allowing them only widens the SSRF window.
     """
     import socket
 
     try:
         addrinfo = socket.getaddrinfo(host, None)
     except OSError as e:
-        logger.warning(f"Could not resolve host '{host}' for SSRF validation; allowing URL: {e}")
-        return False
+        logger.warning(
+            f"Could not resolve host '{host}' for SSRF validation; "
+            f"{'rejecting' if fail_closed else 'allowing'} URL: {e}"
+        )
+        return fail_closed
 
     seen_ips: set[str] = set()
     for _, _, _, _, sockaddr in addrinfo:
@@ -182,7 +190,13 @@ def _allowed_hosts() -> frozenset[str]:
     return frozenset(h.strip().lower().rstrip(".") for h in raw.split(",") if h.strip())
 
 
-def validate_server_url(url: str, *, label: str = "URL", resolve_dns: bool = True) -> None:
+def validate_server_url(
+    url: str,
+    *,
+    label: str = "URL",
+    resolve_dns: bool = True,
+    fail_closed: bool = False,
+) -> None:
     """Validate a server-side outbound URL before storing or fetching.
 
     Rejects non-http(s) schemes, URLs containing credentials, literal banned
@@ -205,7 +219,7 @@ def validate_server_url(url: str, *, label: str = "URL", resolve_dns: bool = Tru
             validate_url_format(url, label=label)
             return
     _, host = _validate_url_common(url, label=label)
-    if resolve_dns and _is_banned_resolved_ip(host):
+    if resolve_dns and _is_banned_resolved_ip(host, fail_closed=fail_closed):
         raise ValidationError(
             message=f"{label.capitalize()} '{url}' resolves to a private or internal address"
         )
@@ -611,7 +625,7 @@ async def download_image_as_base64(
     The URL is validated before the request to prevent server-side request
     forgery (SSRF) via user-supplied image/file URLs.
     """
-    validate_server_url(url, label="download URL")
+    validate_server_url(url, label="download URL", fail_closed=True)
 
     response = await client.get(url, timeout=timeout, follow_redirects=False)
     response.raise_for_status()

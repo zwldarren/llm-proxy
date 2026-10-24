@@ -27,6 +27,8 @@ def test_is_banned_host_blocks_private_and_localhost() -> None:
         "http://169.254.169.254/latest/meta-data/",
         "http://localhost:8080/v1/chat/completions",
         "http://127.0.0.1:8080/v1",
+        "http://0.0.0.0:8080/v1",
+        "http://[::]:8080/v1",
         "http://user:pass@example.com/v1",
         "ftp://example.com/v1",
     ],

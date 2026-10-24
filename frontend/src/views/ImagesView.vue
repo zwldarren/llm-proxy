@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { imagesApi } from "@/services/api/images";
 import { getErrorMessage } from "@/utils/error";
+import { safeImageUrl } from "@/utils/safeUrl";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { formatLatency, makeRunId } from "@/utils/runs";
 import { useAuthStore } from "@/stores/auth";
@@ -278,7 +279,9 @@ async function handleSubmit() {
 }
 
 function getImageSource(image: ImageData): string | null {
-  if (image.url) return image.url;
+  // Provider-controlled URL: never hand a javascript:/data:text scheme to
+  // window.open or fetch.
+  if (image.url) return safeImageUrl(image.url) ?? null;
   if (image.b64_json) return `data:image/png;base64,${image.b64_json}`;
   return null;
 }
@@ -291,7 +294,9 @@ async function downloadImage(image: ImageData, index: number) {
       const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
       blob = new Blob([bytes], { type: "image/png" });
     } else if (image.url) {
-      const response = await fetch(image.url);
+      const source = safeImageUrl(image.url);
+      if (!source) return;
+      const response = await fetch(source);
       blob = await response.blob();
     } else {
       return;
@@ -311,7 +316,7 @@ async function downloadImage(image: ImageData, index: number) {
 
 function openInNewTab(image: ImageData) {
   const src = getImageSource(image);
-  if (src) window.open(src, "_blank");
+  if (src) window.open(src, "_blank", "noopener,noreferrer");
 }
 
 const isFirstLoad = ref(true);
@@ -748,8 +753,8 @@ onActivated(async () => {
                   class="group relative rounded-md border border-border/60 overflow-hidden bg-card/75 shadow-xs"
                 >
                   <img
-                    v-if="image.url"
-                    :src="image.url"
+                    v-if="safeImageUrl(image.url)"
+                    :src="safeImageUrl(image.url)"
                     :alt="`Generated image: ${currentRun.prompt}`"
                     loading="lazy"
                     class="w-full aspect-square object-cover"
