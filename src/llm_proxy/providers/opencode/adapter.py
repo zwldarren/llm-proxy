@@ -50,7 +50,10 @@ from llm_proxy.core.exceptions import ProviderError, ValidationError
 from llm_proxy.models import ConversionTier, InternalRequest, InternalResponse
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import extract_rate_limit_headers
-from llm_proxy.providers.capabilities import SystemOneCapabilityMixin
+from llm_proxy.providers.capabilities import (
+    DecisionsOverSystemOneMixin,
+    SystemOneCapabilityMixin,
+)
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
 from llm_proxy.providers.opencode import catalog
 from llm_proxy.providers.opencode.dialect import (
@@ -196,7 +199,9 @@ def _raise_systemone_chat_error(model: str | None) -> None:
     )
 
 
-class OpenCodeGatewayAdapter(SystemOneCapabilityMixin, NativePassthroughChatBase):
+class OpenCodeGatewayAdapter(
+    DecisionsOverSystemOneMixin, SystemOneCapabilityMixin, NativePassthroughChatBase
+):
     """OpenCode gateway adapter with per-model dialect inference.
 
     Unregistered shared base: the registered types are the lanes
@@ -209,6 +214,11 @@ class OpenCodeGatewayAdapter(SystemOneCapabilityMixin, NativePassthroughChatBase
     async — it may fetch the catalog) and then read synchronously everywhere
     else (``_active_dialect``); adapter instances are created per request, so
     the attribute is request-scoped by construction.
+
+    ``/v1/decisions`` is bridged onto the System One route like every other
+    System One upstream (``DecisionsOverSystemOneMixin``). No image channel is
+    declared, because the gateway documents none for this envelope: a bridged
+    request's images are dropped rather than sent as a field it might reject.
     """
 
     _DEFAULT_PROVIDER_NAME = ""

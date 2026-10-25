@@ -8,6 +8,7 @@ httpx2 (default) or aiohttp, selected by ``HTTP_CLIENT_BACKEND``. See
 import asyncio
 import base64
 import ipaddress
+import json as _json
 import time
 from importlib.metadata import version as _distribution_version
 from types import MappingProxyType
@@ -19,6 +20,14 @@ import httpx2
 from llm_proxy.config.settings import get_settings
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.core.utils import quiet_aclose
+from llm_proxy.http.errors import UpstreamResponseTooLarge
+from llm_proxy.http.limits import (
+    check_line_length,
+    flush_lines,
+    max_response_bytes,
+    read_capped,
+    split_lines,
+)
 from llm_proxy.http.upstream_timing import current_upstream_timer
 from llm_proxy.observability.logger import get_logger
 
@@ -265,9 +274,10 @@ _IMAGE_EXTENSION_TO_MIME: Final[MappingProxyType[str, str]] = MappingProxyType(
 
 
 class Response:
-    def __init__(self, httpx2_response, context_manager=None):
+    def __init__(self, httpx2_response, context_manager=None, url: str = ""):
         self._resp = httpx2_response
         self._ctx = context_manager
+        self._url = url
         self._content_read = False
         self._content = b""
 
@@ -281,36 +291,61 @@ class Response:
 
     @property
     def content(self):
-        return self._resp.content
+        return self._content if self._content_read else self._resp.content
 
     async def aread(self):
+        """Read the whole body, refusing to buffer more than the configured cap."""
         if not self._content_read:
-            self._content = await self._resp.aread()
+            self._content = await read_capped(self._resp, max_response_bytes(), self._url)
             self._content_read = True
         return self._content
 
     @property
     def text(self):
-        return self._resp.text
+        if not self._content_read:
+            return self._resp.text
+        charset = self._resp.charset or "utf-8"
+        try:
+            return self._content.decode(charset)
+        except LookupError, UnicodeDecodeError:
+            return self._content.decode("utf-8", errors="replace")
 
     def json(self):
-        return self._resp.json()
+        if not self._content_read:
+            return self._resp.json()
+        return _json.loads(self._content)
 
     def raise_for_status(self):
         self._resp.raise_for_status()
 
     async def iter_lines(self):
-        lines = self._resp.aiter_lines()
+        """Yield response lines as bytes without the line terminator.
+
+        Lines are split on CR, LF and CRLF (the SSE rule) from the byte stream, so
+        the pending line can be length-checked: a stream that never sends a
+        newline would otherwise grow this buffer until the worker died.
+        """
+        pending = b""
+        async for chunk in self.aiter_bytes():
+            lines, pending = split_lines(pending + chunk)
+            for line in lines:
+                check_line_length(line, self._url)
+                yield line
+            check_line_length(pending, self._url)
+        for line in flush_lines(pending):
+            check_line_length(line, self._url)
+            yield line
+
+    async def aiter_bytes(self):
+        """Yield the body in chunks without buffering all of it."""
+        chunks = self._resp.aiter_bytes()
         try:
-            async for line in lines:
-                if isinstance(line, str):
-                    yield line.encode("utf-8")
-                else:
-                    yield line
+            async for chunk in chunks:
+                yield chunk
         finally:
             # Close the inner iterator explicitly instead of abandoning it to
             # asyncio's async-gen GC finalizer (see quiet_aclose).
-            await quiet_aclose(lines)
+            await quiet_aclose(chunks)
 
     async def close(self):
         if self._ctx is not None:
@@ -326,14 +361,20 @@ class Response:
 
 
 async def _on_redirect(response: httpx2.Response) -> None:
-    """Validate redirect targets to prevent SSRF via Location headers."""
+    """Validate redirect targets to prevent SSRF via Location headers.
+
+    The target's hostname is resolved, not just pattern-matched: a redirect to a
+    public name that maps to a private address is the same SSRF as one to a
+    literal IP, and the OS resolver runs a moment later for the real connection.
+    ``getaddrinfo`` blocks, so it runs in a worker thread.
+    """
     if not response.has_redirect_location:
         return
     location = response.headers.get("location")
     if not location:
         return
     target = urljoin(str(response.request.url), location)
-    validate_server_url(target, label="redirect target", resolve_dns=False)
+    await asyncio.to_thread(validate_server_url, target, label="redirect target", fail_closed=True)
 
 
 class _HttpxSession:
@@ -390,10 +431,24 @@ class _HttpxSession:
             if stream:
                 ctx = self._client.stream(method, url, timeout=timeout, **kwargs)
                 resp = await ctx.__aenter__()
-                return Response(resp, context_manager=ctx)
-            else:
-                resp = await self._client.request(method, url, timeout=timeout, **kwargs)
-                return Response(resp)
+                return Response(resp, context_manager=ctx, url=str(url))
+            # A buffered read goes through the streaming API so the body can be
+            # measured while it arrives; httpx2's own buffering would already
+            # have the whole thing in memory before a cap could apply.
+            async with self._client.stream(method, url, timeout=timeout, **kwargs) as response:
+                content = await read_capped(response, max_response_bytes(), str(url))
+                status_code = response.status_code
+                headers = response.headers
+                request = response.request
+            return Response(
+                httpx2.Response(
+                    status_code,
+                    headers=headers,
+                    content=content,
+                    request=request,
+                ),
+                url=str(url),
+            )
         finally:
             if timer is not None:
                 timer.add((time.perf_counter() - started) * 1000.0)
@@ -614,32 +669,109 @@ async def fetch_json(
 
 DEFAULT_IMAGE_DOWNLOAD_TIMEOUT = 30.0
 
+#: Redirect hops a user-supplied download may take. Every hop is validated like
+#: the original URL, so the budget only bounds latency and redirect loops.
+MAX_DOWNLOAD_REDIRECTS = 5
+
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+def max_download_bytes() -> int:
+    """Largest body a user-supplied image URL may make the proxy buffer."""
+    return get_settings().http.max_download_bytes
+
+
+async def _read_capped_body(response: Any, url: str, limit: int) -> bytes:
+    """Read a response body, refusing to buffer more than ``limit`` bytes.
+
+    A declared ``Content-Length`` over the limit fails before the body travels;
+    the streaming check catches a chunked response or a lying length header, so
+    a URL pointing at an arbitrarily large file cannot exhaust proxy memory.
+    """
+    declared = response.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise ValidationError(
+            message=(
+                f"File at '{url}' is {int(declared)} bytes, over the {limit}-byte "
+                "download limit (HTTP_MAX_DOWNLOAD_BYTES)"
+            )
+        )
+    try:
+        return await read_capped(response, limit, url)
+    except UpstreamResponseTooLarge as exc:
+        raise ValidationError(
+            message=(
+                f"File at '{url}' exceeds the {limit}-byte download limit (HTTP_MAX_DOWNLOAD_BYTES)"
+            )
+        ) from exc
+
 
 async def download_image_as_base64(
     client: AsyncSession,
     url: str,
     timeout: float = DEFAULT_IMAGE_DOWNLOAD_TIMEOUT,
+    max_bytes: int | None = None,
 ) -> tuple[str, str] | None:
     """Download a file from ``url`` and return it as a base64 data URL.
 
-    The URL is validated before the request to prevent server-side request
-    forgery (SSRF) via user-supplied image/file URLs.
+    Each hop is validated before it is fetched to prevent server-side request
+    forgery (SSRF) via user-supplied image/file URLs — the URL itself, and every
+    redirect target with the same rules, since a redirect the client follows is
+    just as attacker-controlled as the URL that started it.
+
+    Redirects are followed here rather than by the HTTP client so that a
+    redirecting image host — an http→https upgrade, a CDN's signing hop, a link
+    shortener — is served like any other image instead of failing the request.
+
+    The body is read as a stream and capped at ``max_bytes`` (default:
+    ``HTTP_MAX_DOWNLOAD_BYTES``), so a URL pointing at a huge file costs a
+    rejected request instead of the proxy's memory.
     """
-    validate_server_url(url, label="download URL", fail_closed=True)
+    limit = max_download_bytes() if max_bytes is None else max_bytes
+    response = None
+    current = url
+    try:
+        for _ in range(MAX_DOWNLOAD_REDIRECTS + 1):
+            validate_server_url(current, label="download URL", fail_closed=True)
+            response = await client.get(
+                current, timeout=timeout, follow_redirects=False, stream=True
+            )
+            if response.status_code not in _REDIRECT_STATUSES:
+                response.raise_for_status()
+                break
+            location = response.headers.get("location")
+            if not location:
+                raise ValidationError(
+                    message=(
+                        f"Download URL '{current}' answered with a redirect and no Location header"
+                    )
+                )
+            current = urljoin(current, location)
+            await response.close()
+            response = None
+        if response is None:
+            raise ValidationError(
+                message=(
+                    f"Download URL '{url}' redirected more than {MAX_DOWNLOAD_REDIRECTS} "
+                    "times; point the request at the final image URL instead."
+                )
+            )
+        image_data = await _read_capped_body(response, current, limit)
+        content_type = response.headers.get("content-type", "")
+    finally:
+        if response is not None:
+            await response.close()
 
-    response = await client.get(url, timeout=timeout, follow_redirects=False)
-    response.raise_for_status()
-
-    image_data = response.content
-    if image_data is None:
+    if not image_data:
         return None
 
-    content_type = response.headers.get("content-type", "")
     # Strip any charset suffix (e.g. "application/pdf; charset=utf-8")
     if ";" in content_type:
         content_type = content_type.split(";")[0].strip()
     if not content_type or "/" not in content_type:
-        path = url.split("?")[0].split("#")[0]
+        # A redirected URL may point at a path with no extension; the URL that
+        # was finally fetched is the one whose name is meaningful.
+        path = current.split("?")[0].split("#")[0]
         extension = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         content_type = _IMAGE_EXTENSION_TO_MIME.get(extension) or "image/jpeg"
 

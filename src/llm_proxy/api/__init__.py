@@ -29,6 +29,7 @@ from llm_proxy.api.lifecycle import (
     startup_provider_stats,
     startup_redis,
     startup_tracing,
+    startup_url_validation,
     startup_web_search,
 )
 from llm_proxy.api.middleware.api_key_auth import ApiKeyAuthMiddleware
@@ -109,6 +110,7 @@ async def lifespan(app: FastAPI):
         config_manager = await startup_config(app)
 
         await startup_protocols(app, config_manager)
+        await startup_url_validation(app)
         await startup_tracing(app, config_manager)
         await startup_redis(app, config_manager)
         await startup_derived_caches(config_manager)

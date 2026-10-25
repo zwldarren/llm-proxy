@@ -110,11 +110,14 @@ class OpenAIAdapter(
     # ``SystemOneOverDecisionsMixin`` bridges that envelope onto this one.
     DECISIONS_ENDPOINT = "/decisions"
 
-    #: The upstream documents ``safety_identifier`` on this request type, so it
-    #: must survive the unknown-fields policy that would otherwise strip it as
-    #: an unrecognized extra (OpenAI's other request types document no extras).
+    #: The upstream documents ``safety_identifier`` and the prompt-cache
+    #: controls on this request type, so they must survive the unknown-fields
+    #: policy that would otherwise strip them as unrecognized extras (OpenAI's
+    #: other request types document no extras).
     EXEMPT_EXTRA_KEYS = {
-        RequestType.DECISIONS: frozenset({"safety_identifier"}),
+        RequestType.DECISIONS: frozenset(
+            {"safety_identifier", "prompt_cache_key", "prompt_cache_options"}
+        ),
     }
 
     def _target_endpoint(self) -> str:

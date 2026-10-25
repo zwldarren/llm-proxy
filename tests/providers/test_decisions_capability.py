@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.decisions import InternalDecisionRequest
 from llm_proxy.models.systemone import InternalSystemOneRequest
 from llm_proxy.providers.ollama.adapter import OllamaAdapter
@@ -144,6 +145,21 @@ class TestOpenAIDecisions:
             request_type="decisions",
         )
         assert outbound.json_body["safety_identifier"] == "end-user-1"
+
+    def test_prompt_cache_controls_survive_the_field_policy(self, adapter):
+        # GA added both; a stripped cache key would silently disable the cache
+        # partitioning the client asked for.
+        outbound = adapter._build_outbound_body(
+            _decision_request(
+                extra={
+                    "prompt_cache_key": "tenant-1",
+                    "prompt_cache_options": {"mode": "explicit"},
+                }
+            ),
+            request_type="decisions",
+        )
+        assert outbound.json_body["prompt_cache_key"] == "tenant-1"
+        assert outbound.json_body["prompt_cache_options"] == {"mode": "explicit"}
 
     async def test_posts_and_parses(self, adapter, mock_response_cls, monkeypatch):
         captured = await _capture_post(
@@ -336,7 +352,39 @@ class TestSystemOneBridgeImages:
         # Ollama documents raw base64 and rejects data URLs.
         assert captured["json"]["images"] == [PNG_B64]
 
-    async def test_typesafe_strips_images_it_does_not_document(
+    async def test_openrouter_receives_state_image_parts(self, mock_response_cls, monkeypatch):
+        # OpenRouter documents no ``images`` field (it answers it with a 400) but
+        # does read ``image_url`` parts inside ``state``.
+        adapter = OpenRouterAdapter(api_key="k")
+        captured = await _capture_post(
+            adapter, monkeypatch, _systemone_response_body(), mock_response_cls
+        )
+
+        await adapter.decisions(
+            _decision_request(
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect this photo."},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                        ],
+                    }
+                ]
+            )
+        )
+
+        assert captured["json"]["state"] == [
+            "Inspect this photo.",
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG_B64}"}},
+        ]
+        assert "images" not in captured["json"]
+        assert "assets" not in captured["json"]
+
+    async def test_typesafe_receives_assets_and_the_danger_zone_header(
         self, mock_response_cls, monkeypatch
     ):
         adapter = TypeSafeAdapter(api_key="k")
@@ -361,9 +409,111 @@ class TestSystemOneBridgeImages:
             )
         )
 
-        # TypeSafe documents no image channel, so the unknown-fields policy
-        # drops it rather than sending a field the upstream would reject.
-        assert "images" not in captured["json"]
+        # TypeSafe's channel is a placeholder map substituted into the text.
+        assert captured["json"]["state"] == ["Inspect this photo.", "llm-proxy-image-1"]
+        assert captured["json"]["assets"] == {
+            "llm-proxy-image-1": {"type": "image", "format": "png", "data_base64": PNG_B64}
+        }
+        # Its image features are gated behind an opt-in header.
+        assert captured["headers"]["TypeSafe-Danger-Zone-Images"] == "true"
+
+    async def test_hosted_image_url_is_downloaded_and_inlined(self, mock_response_cls, monkeypatch):
+        # No System One upstream fetches a remote image, so the bridge downloads
+        # it once and inlines it instead of dropping the evidence.
+        async def fake_download(client, url, **kwargs):
+            return f"data:image/png;base64,{PNG_B64}", "image/png"
+
+        monkeypatch.setattr(
+            "llm_proxy.http.media.download_image_as_base64",
+            fake_download,
+        )
+        adapter = OllamaAdapter()
+        captured = await _capture_post(
+            adapter, monkeypatch, _systemone_response_body(), mock_response_cls
+        )
+
+        await adapter.decisions(
+            _decision_request(
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect this photo."},
+                            {"type": "input_image", "image_url": "https://example.com/a.png"},
+                        ],
+                    }
+                ]
+            )
+        )
+
+        assert captured["json"]["images"] == [PNG_B64]
+
+    async def test_failed_download_is_a_client_error(self, mock_response_cls, monkeypatch):
+        async def failing_download(client, url, **kwargs):
+            raise RuntimeError("blocked")
+
+        monkeypatch.setattr(
+            "llm_proxy.http.media.download_image_as_base64",
+            failing_download,
+        )
+        adapter = OllamaAdapter()
+        await _capture_post(adapter, monkeypatch, _systemone_response_body(), mock_response_cls)
+
+        with pytest.raises(ValidationError, match="Could not download the image"):
+            await adapter.decisions(
+                _decision_request(
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_image", "image_url": "https://example.com/a.png"}
+                            ],
+                        }
+                    ]
+                )
+            )
+
+    async def test_images_over_the_request_total_are_a_client_error(
+        self, mock_response_cls, monkeypatch
+    ):
+        """The request-wide budget, not just the per-image cap, fails the call.
+
+        Two images that each fit on their own must not add up to more than the
+        proxy is willing to hold for one request (see HTTP_MAX_REQUEST_DOWNLOAD_BYTES).
+        """
+        from types import SimpleNamespace
+
+        async def fake_download(client, url, **kwargs):
+            return f"data:image/png;base64,{PNG_B64}", "image/png"
+
+        monkeypatch.setattr("llm_proxy.http.media.download_image_as_base64", fake_download)
+        one_image = len(f"data:image/png;base64,{PNG_B64}")
+        monkeypatch.setattr(
+            "llm_proxy.http.media.get_settings",
+            lambda: SimpleNamespace(
+                http=SimpleNamespace(
+                    max_request_download_bytes=one_image + 1,
+                    max_download_bytes=one_image,
+                )
+            ),
+        )
+        adapter = OllamaAdapter()
+        await _capture_post(adapter, monkeypatch, _systemone_response_body(), mock_response_cls)
+
+        with pytest.raises(ValidationError, match="HTTP_MAX_REQUEST_DOWNLOAD_BYTES"):
+            await adapter.decisions(
+                _decision_request(
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_image", "image_url": "https://example.com/a.png"},
+                                {"type": "input_image", "image_url": "https://example.com/b.png"},
+                            ],
+                        }
+                    ]
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -378,10 +528,17 @@ class TestCapabilityWiring:
             DecisionsOverSystemOneMixin,
             SystemOneOverDecisionsMixin,
         )
+        from llm_proxy.providers.opencode.adapter import OpenCodeGatewayAdapter
 
         # OpenAI speaks Decisions and bridges System One onto it.
         assert OpenAIAdapter.decisions is DecisionsCapabilityMixin.decisions
         assert OpenAIAdapter.systemone is SystemOneOverDecisionsMixin.systemone
-        # The System One providers do the reverse.
-        for adapter in (TypeSafeAdapter, OpenRouterAdapter, OllamaAdapter):
+        # Every System One adapter does the reverse — including the OpenCode
+        # gateway lanes, which used to fall through to the unimplemented stub.
+        for adapter in (
+            TypeSafeAdapter,
+            OpenRouterAdapter,
+            OllamaAdapter,
+            OpenCodeGatewayAdapter,
+        ):
             assert adapter.decisions is DecisionsOverSystemOneMixin.decisions

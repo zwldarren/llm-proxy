@@ -95,6 +95,33 @@ class TestTypeSafeAdapter:
         outbound = adapter._build_outbound_body(request, request_type="systemone")
         assert outbound.json_body["model"] == "jev-1.13"
 
+    def test_text_only_request_takes_no_danger_zone_header(self, adapter):
+        assert "TypeSafe-Danger-Zone-Images" not in adapter._systemone_headers(_request())
+
+    def test_box_question_opts_into_the_danger_zone(self, adapter):
+        # TypeSafe gates box questions and image assets behind one opt-in header;
+        # a client asking for a box gets it sent for that request only.
+        request = _request()
+        request.questions = {"target": {"type": "box", "instructions": "the product in the photo"}}
+        assert adapter._systemone_headers(request)["TypeSafe-Danger-Zone-Images"] == "true"
+
+    def test_assets_opts_into_the_danger_zone(self, adapter):
+        request = _request(assets={"p": {"type": "image", "format": "png", "data_base64": "AA"}})
+        assert adapter._systemone_headers(request)["TypeSafe-Danger-Zone-Images"] == "true"
+
+    def test_client_assets_survive_the_field_policy(self, adapter):
+        # ``assets`` is TypeSafe's own image channel, so a client holding a
+        # TypeSafe SDK request keeps it instead of losing it to the policy.
+        assets = {
+            "llm-proxy-image-1": {
+                "type": "image",
+                "format": "png",
+                "data_base64": "iVBORw0KGgo=",
+            }
+        }
+        outbound = adapter._build_outbound_body(_request(assets=assets), request_type="systemone")
+        assert outbound.json_body["assets"] == assets
+
     async def test_upstream_error_status_propagates(self, adapter, mock_response_cls, monkeypatch):
         async def mock_post(url, **kwargs):
             return mock_response_cls(

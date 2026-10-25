@@ -153,6 +153,26 @@ def _validate_rate_limits(payload: BaseModel) -> None:
     validate_rate_limit_overrides(payload.limits)
 
 
+def _validate_web_search_urls(payload: BaseModel) -> None:
+    """Pre-persist validation for the web_search_config key (mapped to HTTP 422).
+
+    The proxy calls the configured search endpoint itself, so a URL pointing at
+    a literal internal address is refused here, like every other
+    operator-configured URL. Hostnames are not resolved at save time — ADR-0047
+    leaves that to the connect-time check — and ``HTTP_ALLOWED_HOSTS`` still
+    admits a deliberately local instance, which is the documented way to run one.
+    """
+    from llm_proxy.http.client import validate_server_url
+
+    assert isinstance(payload, WebSearchConfig)
+    for label, url in (
+        ("SearXNG url", payload.searxng.url if payload.searxng else None),
+        ("Ollama base_url", payload.ollama.base_url if payload.ollama else None),
+    ):
+        if url:
+            validate_server_url(url, label=label, resolve_dns=False, fail_closed=True)
+
+
 #: The registry. Order matches the settings UI's section order.
 SERVER_SETTINGS: tuple[ServerSetting, ...] = (
     ServerSetting(
@@ -172,6 +192,7 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
         verbs=("GET", "PUT", "DELETE"),
         write=WriteMode.REPLACE_EXCLUDE_NONE,
         read=ReadMode.RAW_OR_DEFAULT,
+        validate=_validate_web_search_urls,
         default_doc={"enabled": False, "provider": "searxng", "searxng": None, "ollama": None},
         delete_message="Web search configuration deleted",
     ),

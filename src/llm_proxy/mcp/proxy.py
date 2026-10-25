@@ -4,6 +4,7 @@ import asyncio
 import time
 from typing import Any
 
+from pydantic import BaseModel
 lazy from mcp.server import Server, ServerRequestContext
 lazy from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 lazy from mcp.types import (
@@ -31,6 +32,63 @@ logger = get_logger(__name__)
 # enough for normal multi-client use while bounding the per-worker footprint.
 MCP_MAX_SESSIONS = 1000
 MCP_SESSION_IDLE_TIMEOUT_SECONDS = 600.0
+
+#: Largest result the proxy forwards from an MCP server in one answer, summed over
+#: its content blocks. A tool call is model-driven and can repeat, so an unbounded
+#: result lets a loose or hostile server hand the worker hundreds of megabytes per
+#: turn — memory the proxy holds and then re-sends upstream. The cut is marked in
+#: the payload so the model can tell a complete answer from a truncated one.
+MCP_MAX_RESULT_BYTES = 8 * 1024 * 1024
+
+#: Fields that carry the payload of an MCP content block (text, base64 image/audio,
+#: binary resource). Only these are truncated: the surrounding ``type``, ``uri``
+#: and ``mimeType`` members must stay intact for the result to remain parseable.
+_MCP_CAPPABLE_FIELDS: frozenset[str] = frozenset({"text", "data", "blob"})
+_TRUNCATION_MARK = "\n[llm-proxy: truncated at the MCP result size limit]"
+
+
+def _cap_payload(value: Any, remaining: list[int]) -> tuple[Any, bool]:
+    """Cut an MCP result's payload fields down to ``remaining`` bytes.
+
+    Walks the result's pydantic models and lists, truncating only the fields that
+    carry a payload (text, base64 image/audio, binary resource) and leaving the
+    rest — ``type``, ``uri``, ``mimeType`` — untouched so the result stays a valid
+    MCP value. Returns the value and whether anything was cut.
+    """
+    if isinstance(value, str):
+        # The cap is a byte budget (``MCP_MAX_RESULT_BYTES``), so measure the
+        # encoded form: a CJK text block is three bytes per character and would
+        # pass a character check at three times the limit. ``errors="ignore"``
+        # drops the partial codepoint the slice can cut in half.
+        encoded = value.encode("utf-8")
+        if len(encoded) <= remaining[0]:
+            remaining[0] -= len(encoded)
+            return value, False
+        cut = encoded[: max(0, remaining[0])].decode("utf-8", "ignore")
+        remaining[0] = 0
+        return cut + _TRUNCATION_MARK, True
+    if isinstance(value, BaseModel):
+        updates: dict[str, Any] = {}
+        truncated = False
+        for field in type(value).model_fields:
+            current = getattr(value, field, None)
+            if field in _MCP_CAPPABLE_FIELDS or isinstance(current, BaseModel | list):
+                capped, cut = _cap_payload(current, remaining)
+            else:
+                continue
+            if cut:
+                updates[field] = capped
+                truncated = True
+        return (value.model_copy(update=updates) if truncated else value), truncated
+    if isinstance(value, list):
+        items: list[Any] = []
+        truncated = False
+        for item in value:
+            capped, cut = _cap_payload(item, remaining)
+            items.append(capped)
+            truncated = truncated or cut
+        return (items if truncated else value), truncated
+    return value, False
 
 
 class MCPServerProxy:
@@ -122,11 +180,17 @@ class MCPServerProxy:
 
         try:
             result = await self._backend.call_tool(name, arguments)
+            result, truncated = _cap_payload(result, [MCP_MAX_RESULT_BYTES])
             # Summarize result (don't log full content)
             result_summary = {
-                "is_error": result.isError if hasattr(result, "isError") else False,
+                # pydantic exposes the field as ``is_error``; the camelCase
+                # wire alias is not an attribute, so ``hasattr(result, "isError")``
+                # was always False and every call was logged as successful.
+                "is_error": bool(getattr(result, "is_error", False)),
                 "content_count": len(result.content) if result.content else 0,
             }
+            if truncated:
+                result_summary["truncated"] = True
             return result
         except Exception as e:
             status_code = 500
@@ -181,9 +245,13 @@ class MCPServerProxy:
         start_time = time.time()
         error_msg = None
         status_code = 200
+        result_summary: dict = {}
 
         try:
             result = await self._backend.read_resource(uri)
+            result, truncated = _cap_payload(result, [MCP_MAX_RESULT_BYTES])
+            if truncated:
+                result_summary["truncated"] = True
             return result
         except Exception as e:
             status_code = 500
@@ -196,6 +264,7 @@ class MCPServerProxy:
                 resource_name=uri,
                 start_time=start_time,
                 status_code=status_code,
+                result_summary=result_summary,
                 error_message=error_msg,
             )
 
@@ -237,9 +306,13 @@ class MCPServerProxy:
         start_time = time.time()
         error_msg = None
         status_code = 200
+        result_summary: dict = {}
 
         try:
             result = await self._backend.get_prompt(name, arguments)
+            result, truncated = _cap_payload(result, [MCP_MAX_RESULT_BYTES])
+            if truncated:
+                result_summary["truncated"] = True
             return result
         except Exception as e:
             status_code = 500
@@ -253,6 +326,7 @@ class MCPServerProxy:
                 arguments=arguments,
                 start_time=start_time,
                 status_code=status_code,
+                result_summary=result_summary,
                 error_message=error_msg,
             )
 

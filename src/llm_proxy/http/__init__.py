@@ -12,11 +12,14 @@ lazy from llm_proxy.http.client import (
     download_image_as_base64,
     fetch_json,
 )
+lazy from llm_proxy.http.media import DEFAULT_DOWNLOAD_CONCURRENCY, RequestDownloads
 
 __all__ = [
+    "DEFAULT_DOWNLOAD_CONCURRENCY",
     "DEFAULT_IMAGE_DOWNLOAD_TIMEOUT",
     "HTTPClient",
     "ProviderHTTPClientManager",
+    "RequestDownloads",
     "download_image_as_base64",
     "fetch_json",
 ]

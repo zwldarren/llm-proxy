@@ -53,6 +53,8 @@ from starlette.datastructures import State
 from llm_proxy.core.exceptions import ConfigurationError
 
 if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
+
     from fastapi import FastAPI, Request, WebSocket
     from redis.asyncio import Redis
 
@@ -230,6 +232,15 @@ class RuntimeServices:
         """Record the in-flight judge warm-up task (at most one at a time)."""
         self._state.judge_warmup_task = task
 
+    def url_validation_executor(self) -> ThreadPoolExecutor | None:
+        """The bounded pool for blocking URL/DNS validation, or ``None``.
+
+        Optional: a path that runs before the lifespan (tests, early startup)
+        resolves on the loop's default executor instead. When it is installed,
+        shutdown joins it, so a reload cannot leak the pool.
+        """
+        return self._read("url_validation_executor")
+
     # ── Installation: the only writers of these slots ─────────────────────
     # Called by the lifespan, except ``install_web_search_interceptor``, which the
     # web-search runtime calls from the request path when it swaps a rebuilt
@@ -242,6 +253,10 @@ class RuntimeServices:
     def install_http_client(self, manager: ProviderHTTPClientManager) -> None:
         """Install the pooled HTTP client manager (``startup_http_client``)."""
         self._state.http_client = manager
+
+    def install_url_validation_executor(self, executor: ThreadPoolExecutor | None) -> None:
+        """Install (or clear) the URL-validation pool (``startup_url_validation``)."""
+        self._state.url_validation_executor = executor
 
     def install_redis(self, connection: RedisClient | None) -> None:
         """Install Redis, or record that Redis is disabled (``startup_redis``)."""

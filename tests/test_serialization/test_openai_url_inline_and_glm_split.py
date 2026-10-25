@@ -24,7 +24,6 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.types import ImageSource
 from llm_proxy.serialization.context import BuildContext
-from llm_proxy.serialization.openai import url_inline
 from llm_proxy.serialization.openai.url_inline import inline_chat_document_urls
 
 # ---------------------------------------------------------------------------
@@ -122,7 +121,7 @@ def fake_download(monkeypatch):
             )
         return "data:application/pdf;base64,JVBERi0=", "application/pdf"
 
-    monkeypatch.setattr(url_inline, "download_image_as_base64", _download)
+    monkeypatch.setattr("llm_proxy.http.media.download_image_as_base64", _download)
     return calls
 
 

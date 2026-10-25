@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI
 
@@ -98,6 +99,19 @@ async def startup_protocols(app: FastAPI, config_manager: DatabaseConfigManager)
                 f"Failed to initialize processor for protocol '{protocol_name}': {e}",
                 exc_info=e,
             )
+
+
+async def startup_url_validation(app: FastAPI) -> None:
+    """Install the bounded pool that keeps blocking DNS off the event loop.
+
+    ``validate_server_url`` resolves a hostname, which blocks. A viewer-reachable
+    route (a self-service tracing collector) must not be able to occupy every
+    default-executor thread that API-key verification also uses, so the pool is
+    small, owned by the lifespan, and joined at shutdown.
+    """
+    runtime_services(app).install_url_validation_executor(
+        ThreadPoolExecutor(max_workers=2, thread_name_prefix="tracing-url-check")
+    )
 
 
 async def startup_tracing(app: FastAPI, config_manager: DatabaseConfigManager) -> None:
@@ -494,6 +508,10 @@ async def shutdown_services(app: FastAPI) -> None:
     await stop_background_usage_writer()
 
     services = runtime_services(app)
+
+    if executor := services.url_validation_executor():
+        executor.shutdown(wait=False, cancel_futures=True)
+        services.install_url_validation_executor(None)
 
     if http_client := services.http_client_or_none():
         await http_client.close()

@@ -243,24 +243,186 @@ class TestSchema:
         assert isinstance(schema.input, list)
         assert schema.input[0].role == "user"
 
-    def test_non_user_role_rejected(self):
-        with pytest.raises(ValidationError):
+    def test_developer_system_and_assistant_roles_accepted(self):
+        # A Decisions ``input`` may be a whole conversation, not only user
+        # messages: developer/system instructions and assistant output are
+        # evidence like any other item.
+        schema = DecisionsRequestSchema(
+            model="m",
+            input=[
+                {"role": "developer", "content": "Classify support tickets."},
+                {"role": "system", "content": [{"type": "input_text", "text": "Be terse."}]},
+                _message("My export fails."),
+                {"role": "assistant", "content": [{"type": "output_text", "text": "Noted."}]},
+                {"role": "assistant", "content": [{"type": "refusal", "refusal": "No."}]},
+            ],
+            questions=[_question()],
+        )
+        assert [item.role for item in schema.input] == [
+            "developer",
+            "system",
+            "user",
+            "assistant",
+            "assistant",
+        ]
+
+    def test_message_parts_must_match_the_role(self):
+        # An assistant message holds output text, a user message input parts; a
+        # part the role cannot carry is an upstream 400, so name it here.
+        with pytest.raises(ValidationError, match="assistant message takes output_text"):
             DecisionsRequestSchema(
                 model="m",
-                input=[{"role": "assistant", "content": "hi"}],
+                input=[{"role": "assistant", "content": [{"type": "input_text", "text": "x"}]}],
+                questions=[_question()],
+            )
+        with pytest.raises(ValidationError, match="got output_text"):
+            DecisionsRequestSchema(
+                model="m",
+                input=[_message([{"type": "output_text", "text": "x"}])],
                 questions=[_question()],
             )
 
-    def test_hosted_image_url_rejected(self):
-        # Decisions takes inline base64 data URLs only; a hosted URL is an
-        # opaque upstream 400, so name the mistake here instead.
-        for entry in ("https://example.com/a.png", "file-abc123"):
-            with pytest.raises(ValidationError, match="inline base64 data URL"):
-                DecisionsRequestSchema(
-                    model="m",
-                    input=[_message([{"type": "input_image", "image_url": entry}])],
-                    questions=[_question()],
+    def test_tool_calls_and_outputs_accepted(self):
+        schema = DecisionsRequestSchema(
+            model="m",
+            input=[
+                _message("Check the order."),
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "lookup_order",
+                    "arguments": '{"id": 7}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": [{"type": "input_text", "text": '{"charges": [49, 49]}'}],
+                },
+                {"type": "custom_tool_call", "call_id": "call_2", "name": "t", "input": "x"},
+                {"type": "custom_tool_call_output", "call_id": "call_2", "output": "y"},
+            ],
+            questions=[_question()],
+        )
+        assert isinstance(schema.input, list)
+        assert len(schema.input) == 5
+
+    def test_incomplete_tool_item_rejected(self):
+        with pytest.raises(ValidationError, match="requires call_id, arguments"):
+            DecisionsRequestSchema(
+                model="m",
+                input=[{"type": "function_call", "name": "lookup"}],
+                questions=[_question()],
+            )
+
+    def test_hosted_image_url_accepted(self):
+        # OpenAI fetches a public HTTP(S) image itself, beside the inline data
+        # URLs it also takes.
+        schema = DecisionsRequestSchema(
+            model="m",
+            input=[
+                _message(
+                    [
+                        {
+                            "type": "input_image",
+                            "image_url": "https://example.com/a.png",
+                            "detail": "original",
+                        }
+                    ]
                 )
+            ],
+            questions=[_question()],
+        )
+        assert isinstance(schema.input, list)
+
+    def test_file_id_image_rejected(self):
+        # A file id is neither a data URL nor a URL the endpoint fetches; the
+        # upstream has no file store for this request type.
+        with pytest.raises(ValidationError, match="file ids are not supported"):
+            DecisionsRequestSchema(
+                model="m",
+                input=[_message([{"type": "input_image", "image_url": "file-abc123"}])],
+                questions=[_question()],
+            )
+
+    def test_input_json_part_accepted(self):
+        schema = DecisionsRequestSchema(
+            model="m",
+            input=[
+                _message(
+                    [
+                        {"type": "input_text", "text": "Evaluate the ticket."},
+                        {"type": "input_json", "data": {"charges": [49, 49]}},
+                    ]
+                )
+            ],
+            questions=[_question()],
+        )
+        assert isinstance(schema.input, list)
+
+    def test_instruction_parts_accepted(self):
+        # A question may carry its own image next to its text (GA), so the
+        # instructions field takes the same part array a message does.
+        schema = DecisionsRequestSchema(
+            model="m",
+            input="shared reference",
+            questions=[
+                _question(
+                    instructions=[
+                        {"type": "input_text", "text": "Is the candidate a variant?"},
+                        {"type": "input_image", "image_url": "https://example.com/b.png"},
+                    ]
+                )
+            ],
+        )
+        assert isinstance(schema.questions[0].instructions, list)
+
+    def test_prompt_cache_controls_accepted(self):
+        # GA added the cache key and options; the breakpoint rides a part.
+        schema = DecisionsRequestSchema(
+            model="m",
+            input=[
+                _message(
+                    [
+                        {
+                            "type": "input_text",
+                            "text": "shared document",
+                            "prompt_cache_breakpoint": {"mode": "explicit"},
+                        }
+                    ]
+                )
+            ],
+            questions=[_question()],
+            prompt_cache_key="tenant-1",
+            prompt_cache_options={"mode": "explicit", "ttl": "30m"},
+        )
+        assert schema.prompt_cache_key == "tenant-1"
+        assert schema.prompt_cache_options is not None
+        assert schema.prompt_cache_options.mode == "explicit"
+
+    def test_question_count_capped(self):
+        with pytest.raises(ValidationError, match="at most 400 questions"):
+            DecisionsRequestSchema(
+                model="m", input="x", questions=[_question(name=f"q{i}") for i in range(401)]
+            )
+
+    def test_choice_requires_two_options(self):
+        # OpenAI documents 2-255 choices; one option is a classification with
+        # nothing to classify against.
+        with pytest.raises(ValidationError, match="at least 2 options"):
+            DecisionsRequestSchema(
+                model="m",
+                input="x",
+                questions=[_question("choice", choices=[{"value": "only"}])],
+            )
+
+    def test_question_images_count_against_the_cap(self):
+        image = {"type": "input_image", "image_url": PNG_DATA_URL}
+        with pytest.raises(ValidationError, match="at most 128 inline image parts"):
+            DecisionsRequestSchema(
+                model="m",
+                input=[_message([image] * 128)],
+                questions=[_question(instructions=[image])],
+            )
 
     def test_image_part_count_capped(self):
         parts = [{"type": "input_image", "image_url": PNG_DATA_URL}] * 129

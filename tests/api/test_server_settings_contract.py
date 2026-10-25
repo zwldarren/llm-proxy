@@ -244,14 +244,14 @@ def test_web_search_put_dumps_provided_sub_config_in_full(client, repo):
     payload = {
         "enabled": True,
         "provider": "searxng",
-        "searxng": {"url": "http://localhost:8080"},
+        "searxng": {"url": "https://search.example.com"},
         "ollama": None,
     }
     res = client.put(f"{BASE}/web-search", json=payload)
     assert res.status_code == 200
     stored = repo.rows["web_search_config"]
     assert stored["searxng"] == {
-        "url": "http://localhost:8080",
+        "url": "https://search.example.com",
         "api_key": None,
         "basic_auth_username": None,
         "basic_auth_password": None,
@@ -261,6 +261,18 @@ def test_web_search_put_dumps_provided_sub_config_in_full(client, repo):
     }
     # RAW_OR_DEFAULT echoes the stored row verbatim, nulls included.
     assert client.get(f"{BASE}/web-search").json() == stored
+
+
+def test_web_search_put_refuses_an_internal_endpoint(client):
+    """The proxy calls the search endpoint itself, so a literal metadata IP is a 422."""
+    payload = {
+        "enabled": True,
+        "provider": "searxng",
+        "searxng": {"url": "http://169.254.169.254/latest/meta-data"},
+        "ollama": None,
+    }
+    res = client.put(f"{BASE}/web-search", json=payload)
+    assert res.status_code == 422
 
 
 def test_load_server_settings_repairs_out_of_range_web_search_values(repo):

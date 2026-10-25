@@ -126,6 +126,27 @@ class HTTPSettings(BaseSettings):
     # docker-compose network). Off by default: every entry weakens SSRF
     # protection, so list only what you control.
     allowed_hosts: str = Field(default="", alias="HTTP_ALLOWED_HOSTS")
+    # Largest body a client-supplied image URL may make the proxy buffer.
+    # 20 MiB is the per-image ceiling of the largest mainstream vision APIs
+    # (OpenAI 20 MB, Gemini 20 MB for an inline request; Anthropic is 5 MB), so
+    # the cap never cuts a picture an upstream would have accepted, while a URL
+    # pointing at a huge file cannot exhaust proxy memory. Enforced while
+    # streaming, so an oversized download costs a rejected request.
+    max_download_bytes: int = Field(default=20 * 1024 * 1024, alias="HTTP_MAX_DOWNLOAD_BYTES", ge=1)
+    # Largest upstream response the proxy will buffer. A buffered (non-streaming)
+    # provider call is read through the streaming API and measured on the way in,
+    # so a broken or hostile endpoint cannot exhaust a worker's memory; a failed
+    # read answers 502. 64 MiB leaves room for a base64 image response while
+    # staying at the same order as the request body the proxy accepts.
+    max_response_bytes: int = Field(default=64 * 1024 * 1024, alias="HTTP_MAX_RESPONSE_BYTES", ge=1)
+    # Total inlined media one request may retain, across all the URLs it names.
+    # Same figure as the request body the proxy accepts (64 MiB by default), on
+    # the reasoning that a request must not grow by inlining pictures into
+    # something far larger than the body it arrived as. See
+    # llm_proxy.http.media.RequestDownloads for how it is enforced.
+    max_request_download_bytes: int = Field(
+        default=64 * 1024 * 1024, alias="HTTP_MAX_REQUEST_DOWNLOAD_BYTES", ge=1
+    )
 
     def effective_client_backend(self) -> Literal["httpx2", "aiohttp"]:
         """Resolve the backend to use, applying the ``auto`` policy.

@@ -70,6 +70,12 @@ class OpenRouterAdapter(
     # OpenRouter's dedicated Image API is at /images (not /images/generations).
     IMAGES_ENDPOINT = "/images"
     RERANK_ENDPOINT = "/rerank"
+    #: OpenRouter carries images in the System One envelope as ``image_url``
+    #: parts inside ``state`` (and inside a question's instructions), the same
+    #: part shape its Chat Completions route uses. Its own remote-image rule
+    #: applies unchanged: a part's URL must be a base64 data URL, since OpenRouter
+    #: does not fetch hosted ones — which is why the bridge inlines them first.
+    SYSTEMONE_IMAGE_CHANNEL = "state_parts"
 
     # OpenRouter exposes native OpenAI Responses and Anthropic Messages
     # endpoints alongside Chat Completions, so ``/v1/responses`` and

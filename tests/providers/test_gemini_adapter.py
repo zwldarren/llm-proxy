@@ -625,6 +625,11 @@ class TestParseDataUrl:
         assert data == ""
 
 
+async def _stream(body: bytes):
+    """Yield a download body once, the way a streamed response would."""
+    yield body
+
+
 class TestDownloadImagesMimeType:
     """Tests that non-image HTTP URLs keep their correct MIME type."""
 
@@ -632,8 +637,9 @@ class TestDownloadImagesMimeType:
     async def test_preserves_audio_content_type(self):
         mock_client = AsyncMock()
         mock_response = MagicMock()
-        mock_response.content = b"audio data"
         mock_response.headers = {"content-type": "audio/mpeg"}
+        mock_response.aiter_bytes = lambda: _stream(b"audio data")
+        mock_response.close = AsyncMock()
         mock_client.get.return_value = mock_response
 
         result = await download_image_as_base64(mock_client, "https://example.com/audio.mp3")
@@ -646,8 +652,9 @@ class TestDownloadImagesMimeType:
     async def test_infers_mime_from_extension_when_no_header(self):
         mock_client = AsyncMock()
         mock_response = MagicMock()
-        mock_response.content = b"pdf data"
         mock_response.headers = {}
+        mock_response.aiter_bytes = lambda: _stream(b"pdf data")
+        mock_response.close = AsyncMock()
         mock_client.get.return_value = mock_response
 
         result = await download_image_as_base64(mock_client, "https://example.com/doc.pdf")
@@ -660,8 +667,9 @@ class TestDownloadImagesMimeType:
     async def test_strips_charset_from_content_type(self):
         mock_client = AsyncMock()
         mock_response = MagicMock()
-        mock_response.content = b"pdf data"
         mock_response.headers = {"content-type": "application/pdf; charset=utf-8"}
+        mock_response.aiter_bytes = lambda: _stream(b"pdf data")
+        mock_response.close = AsyncMock()
         mock_client.get.return_value = mock_response
 
         result = await download_image_as_base64(mock_client, "https://example.com/doc.pdf")

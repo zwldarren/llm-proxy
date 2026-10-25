@@ -769,3 +769,124 @@ class TestMcpHttpEndToEnd:
         result = body.get("result", {})
         assert result.get("isError") is False, f"Expected isError=False in: {body}"
         backend.call_tool.assert_called_once()
+
+
+# ── Result size cap ────────────────────────────────────────────────────────
+
+
+class TestMcpResultSizeCap:
+    """One answer from a server cannot hand the proxy an unbounded payload."""
+
+    @pytest.fixture
+    def small_cap(self, monkeypatch):
+        import llm_proxy.mcp.proxy as proxy_module
+
+        monkeypatch.setattr(proxy_module, "MCP_MAX_RESULT_BYTES", 64)
+
+    async def test_small_result_is_returned_untouched(self) -> None:
+        from mcp.server import ServerRequestContext
+        from mcp.types import CallToolRequestParams, CallToolResult, TextContent
+
+        original = CallToolResult(content=[TextContent(type="text", text="short")])
+        backend = AsyncMock()
+        backend.call_tool = AsyncMock(return_value=original)
+        proxy = MCPServerProxy(backend=backend, name="test-server")
+        entry = proxy.server.get_request_handler("tools/call")
+
+        result = await entry.handler(
+            MagicMock(spec=ServerRequestContext),
+            CallToolRequestParams(name="read-repo", arguments={}),
+        )
+
+        assert result is original
+
+    async def test_large_text_result_is_truncated(self, small_cap) -> None:
+        from mcp.server import ServerRequestContext
+        from mcp.types import CallToolRequestParams, CallToolResult, TextContent
+
+        original = CallToolResult(content=[TextContent(type="text", text="x" * 1000)])
+        backend = AsyncMock()
+        backend.call_tool = AsyncMock(return_value=original)
+        proxy = MCPServerProxy(backend=backend, name="test-server")
+        entry = proxy.server.get_request_handler("tools/call")
+
+        result = await entry.handler(
+            MagicMock(spec=ServerRequestContext),
+            CallToolRequestParams(name="read-repo", arguments={}),
+        )
+
+        text = result.content[0].text
+        assert len(text) < 1000
+        assert "truncated at the MCP result size limit" in text
+        assert result.is_error is False
+
+    async def test_base64_payload_is_truncated_but_keeps_its_media_type(self, small_cap) -> None:
+        from mcp.server import ServerRequestContext
+        from mcp.types import CallToolRequestParams, CallToolResult, ImageContent
+
+        original = CallToolResult(
+            content=[ImageContent(type="image", data="A" * 1000, mimeType="image/png")]
+        )
+        backend = AsyncMock()
+        backend.call_tool = AsyncMock(return_value=original)
+        proxy = MCPServerProxy(backend=backend, name="test-server")
+        entry = proxy.server.get_request_handler("tools/call")
+
+        result = await entry.handler(
+            MagicMock(spec=ServerRequestContext),
+            CallToolRequestParams(name="read-repo", arguments={}),
+        )
+
+        block = result.content[0]
+        assert len(block.data) < 1000
+        assert block.mime_type == "image/png"
+
+    async def test_read_resource_is_capped(self, small_cap) -> None:
+        from mcp.server import ServerRequestContext
+        from mcp.types import ReadResourceRequestParams, ReadResourceResult, TextResourceContents
+
+        backend = AsyncMock()
+        backend.read_resource = AsyncMock(
+            return_value=ReadResourceResult(
+                contents=[
+                    TextResourceContents(uri="file:///big", text="y" * 1000, mimeType="text/plain")
+                ]
+            )
+        )
+        proxy = MCPServerProxy(backend=backend, name="test-server")
+        entry = proxy.server.get_request_handler("resources/read")
+
+        result = await entry.handler(
+            MagicMock(spec=ServerRequestContext),
+            ReadResourceRequestParams(uri="file:///big"),
+        )
+
+        assert len(result.contents[0].text) < 1000
+        assert result.contents[0].uri == "file:///big"
+
+    async def test_get_prompt_is_capped(self, small_cap) -> None:
+        from mcp.server import ServerRequestContext
+        from mcp.types import (
+            GetPromptRequestParams,
+            GetPromptResult,
+            PromptMessage,
+            TextContent,
+        )
+
+        backend = AsyncMock()
+        backend.get_prompt = AsyncMock(
+            return_value=GetPromptResult(
+                messages=[
+                    PromptMessage(role="user", content=TextContent(type="text", text="z" * 1000))
+                ]
+            )
+        )
+        proxy = MCPServerProxy(backend=backend, name="test-server")
+        entry = proxy.server.get_request_handler("prompts/get")
+
+        result = await entry.handler(
+            MagicMock(spec=ServerRequestContext),
+            GetPromptRequestParams(name="big-prompt", arguments={}),
+        )
+
+        assert len(result.messages[0].content.text) < 1000

@@ -55,6 +55,67 @@ reviewing before exposing it to the internet.
   self-hosted check. Demoting an admin to viewer clears their personal tracing
   configuration; they can re-add a public collector afterwards.
 
+## Outbound media downloads
+
+A client-supplied image URL reaches the network in two places: a chat message's
+`image_url` on a provider that fetches it (Ollama downloads it into base64), and a
+Decisions request's `input_image` when it is bridged onto a System One upstream
+(none of them fetch a remote image, so the proxy does). Both use the same
+SSRF-validated fetch:
+
+- Loopback, RFC1918, link-local, CGNAT, multicast, the cloud metadata hosts, and
+  URLs carrying credentials are refused outright.
+- A hostname is resolved and every returned address is checked, so a public name
+  pointing at a private IP is refused too.
+- Redirects are followed (at most five), and **each hop is validated like the
+  first** — an http→https upgrade or a CDN's signing hop still works, a redirect to
+  `127.0.0.1` or to a name that resolves there does not.
+- The body is read as a stream and capped at `HTTP_MAX_DOWNLOAD_BYTES` (20 MiB by
+  default), so a URL pointing at a multi-gigabyte file costs one rejected request
+  instead of the worker's memory. 20 MiB is the per-image ceiling of the largest
+  mainstream vision APIs, so the cap never cuts an image an upstream would take.
+- Downloads for one request are also bounded as a group: at most four run at once,
+  and the inlined payloads may total `HTTP_MAX_REQUEST_DOWNLOAD_BYTES` (64 MiB by
+  default, the same figure the proxy accepts in a request body). A request naming
+  many URLs therefore cannot make the proxy hold hundreds of megabytes; peak
+  memory is the total plus the in-flight downloads.
+- On the bridged Decisions path, a refused or failed download is a `400` naming
+  the URL: the request would otherwise be answered about evidence the model never
+  saw. Chat media takes the other rule from ADR-0046 — the part is dropped and the
+  request goes through.
+
+The false positives this can produce are internal image hosts and hosts whose DNS
+resolves into a private range (split-horizon DNS). List those hosts in
+`HTTP_ALLOWED_HOSTS` to exempt them from the ban — the scheme and credential rules
+still apply.
+
+## Outbound requests
+
+Every URL the proxy itself fetches — provider `base_url`, a personal tracing
+collector, an MCP remote server, a web-search endpoint, a client's media URL — is
+SSRF-checked when it is configured. Requests made through the proxy's shared
+outbound session are checked again **when the connection is made**: the default
+backend's DNS resolver refuses an answer in a banned network, so a hostname that
+points at a public address when the settings row is saved and a private one later
+(DNS rebinding) cannot be reached. Redirect targets are resolved and checked in both
+backends. Literal addresses and `localhost` are only checked up front;
+`HTTP_ALLOWED_HOSTS` exempts a host in both places. Forcing
+`HTTP_CLIENT_BACKEND=httpx2` keeps the up-front and redirect checks but not the
+connect-time resolver, and the MCP server client, the smart-routing judge/flywheel
+clients and the Langfuse exporter keep their own HTTP clients, so they are covered
+by the configured-URL check only. See ADR-0047.
+
+What the proxy reads back is bounded too:
+
+- A buffered provider response is read until `HTTP_MAX_RESPONSE_BYTES` (64 MiB by
+  default) and then refused with a `502`, so a broken or hostile endpoint cannot
+  exhaust a worker's memory by answering with a huge body.
+- One line of a streamed response is capped at 8 MiB. An endpoint that never sends
+  a newline would otherwise grow the SSE read buffer without limit.
+- An MCP tool call, prompt or resource is capped at 8 MiB across its content
+  blocks (`MCP_MAX_RESULT_BYTES`); a cut payload is marked so the model can tell a
+  truncated answer from a complete one.
+
 ## MCP
 
 MCP servers run commands and reach the network, so the policy is deny-by-default:
@@ -62,7 +123,9 @@ MCP servers run commands and reach the network, so the policy is deny-by-default
 - Allowlist the exact **commands** and **environment variables** each server needs.
   Shell metacharacters in arguments are rejected outright.
 - SSRF protection resolves hostnames and rejects blocked IPs (loopback, RFC1918,
-  link-local, cloud metadata, CGNAT) — including DNS-rebinding tricks.
+  link-local, cloud metadata, CGNAT) when a server is created or updated. The MCP
+  SDK owns its HTTP client, so this check runs at configuration time rather than at
+  connect time — see [Outbound requests](#outbound-requests).
 - Keep `require_key_mcp_permissions=true` so every MCP server is explicitly granted per
   API key.
 - Session slots are bounded per configured MCP server per worker (1000 sessions,

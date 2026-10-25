@@ -16,7 +16,7 @@ from providers.helpers import (
 )
 
 from llm_proxy.core.conversion import plan_conversion
-from llm_proxy.models import ConversionTier, InternalSystemOneRequest
+from llm_proxy.models import ConversionTier, InternalDecisionRequest, InternalSystemOneRequest
 from llm_proxy.providers.opencode import adapter as adapter_module
 from llm_proxy.providers.opencode.adapter import OpenCodeGatewayAdapter
 from llm_proxy.providers.opencode.catalog import CatalogModel
@@ -321,6 +321,84 @@ class TestSystemOneModels:
 
         assert post_url(adapter) == SYSTEMONE_URL
         assert post_headers(adapter)["Authorization"] == "Bearer sk-test"
+
+    async def test_decisions_request_is_bridged_onto_the_same_route(
+        self, mock_response_cls, make_mock_client
+    ):
+        """``/v1/decisions`` reaches the gateway's System One dialect like every
+        other System One upstream, instead of falling through to the
+        unimplemented stub."""
+        adapter = make_adapter(
+            mock_response_cls,
+            make_mock_client(
+                mock_response_cls(
+                    json_data={
+                        "model": "jev-1.13",
+                        "answers": {"urgent": {"type": "noul", "noul": 0.9}},
+                        "usage": {"input_tokens": 2, "output_tokens": 1},
+                    }
+                )
+            ),
+        )
+        request = InternalDecisionRequest(
+            model="jev-1.13",
+            input="payments failing",
+            questions=[{"type": "predicate", "name": "urgent", "instructions": "urgent?"}],
+        )
+
+        result = await adapter.decisions(request)
+
+        assert post_url(adapter) == SYSTEMONE_URL
+        assert post_body(adapter)["questions"] == {
+            "urgent": {"type": "noul", "instructions": "urgent?"}
+        }
+        assert result.answers == [{"type": "predicate", "probability": 0.9, "name": "urgent"}]
+
+    async def test_hosted_image_is_not_downloaded_for_a_channel_less_upstream(
+        self, mock_response_cls, make_mock_client, monkeypatch
+    ):
+        """The gateway documents no image channel, so a bridged image is dropped
+        without a download that could fail the request over evidence the model
+        could not have received anyway."""
+
+        async def failing_download(*args, **kwargs):
+            raise AssertionError("must not download for a channel-less upstream")
+
+        monkeypatch.setattr(
+            "llm_proxy.http.media.download_image_as_base64",
+            failing_download,
+        )
+        adapter = make_adapter(
+            mock_response_cls,
+            make_mock_client(
+                mock_response_cls(
+                    json_data={
+                        "model": "jev-1.13",
+                        "answers": {"urgent": {"type": "noul", "noul": 0.9}},
+                        "usage": {"input_tokens": 2, "output_tokens": 1},
+                    }
+                )
+            ),
+        )
+        request = InternalDecisionRequest(
+            model="jev-1.13",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Inspect this photo."},
+                        {"type": "input_image", "image_url": "https://example.com/a.png"},
+                    ],
+                }
+            ],
+            questions=[{"type": "predicate", "name": "urgent", "instructions": "urgent?"}],
+        )
+
+        await adapter.decisions(request)
+
+        assert post_body(adapter)["state"] == "Inspect this photo."
+        assert "images" not in post_body(adapter)
+        assert "assets" not in post_body(adapter)
 
 
 class TestNativePassthrough:

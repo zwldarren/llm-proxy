@@ -1,6 +1,5 @@
 """Gemini provider implementation using native HTTP calls."""
 
-import asyncio
 import base64
 import math
 import time
@@ -14,7 +13,8 @@ import orjson
 from llm_proxy.core.adapter import AdapterConfig, register_adapter
 from llm_proxy.core.errors import get_error_type_for_status
 from llm_proxy.core.exceptions import ProviderError
-from llm_proxy.http.client import AsyncSession, download_image_as_base64
+from llm_proxy.http.client import AsyncSession
+from llm_proxy.http.media import RequestDownloads
 from llm_proxy.models import (
     CustomToolUseBlock,
     InternalEmbeddingRequest,
@@ -300,16 +300,10 @@ class GeminiAdapter(
         if not download_tasks:
             return contents
 
-        async def download_one(url: str) -> str | None:
-            try:
-                result = await download_image_as_base64(client, url)
-                return result[0] if result else None
-            except Exception:
-                return None
-
-        results = await asyncio.gather(*[download_one(url) for _, _, url, _ in download_tasks])
+        outcomes = await RequestDownloads().gather(client, [url for _, _, url, _ in download_tasks])
         url_to_data: dict[str, str | None] = {
-            url: data_url for (_, _, url, _), data_url in zip(download_tasks, results, strict=True)
+            url: (outcome[0] if isinstance(outcome, tuple) else None)
+            for url, outcome in outcomes.items()
         }
 
         new_contents = []
@@ -320,13 +314,16 @@ class GeminiAdapter(
                 file_data = part.get("file_data")
                 if isinstance(file_data, dict):
                     file_uri = file_data.get("file_uri", "")
-                    if (
-                        isinstance(file_uri, str)
-                        and file_uri in url_to_data
-                        and url_to_data[file_uri] is not None
-                    ):
+                    if isinstance(file_uri, str) and file_uri in url_to_data:
+                        data_url = url_to_data[file_uri]
+                        if data_url is None:
+                            # The download failed: drop this one part and let the
+                            # request through (ADR-0046). Forwarding the URL would
+                            # hand the upstream a reference the proxy already
+                            # refused to fetch.
+                            needs_copy = True
+                            continue
                         needs_copy = True
-                        data_url: str = url_to_data[file_uri] or ""
                         mime_type, data = self._parse_data_url(data_url)
                         new_parts.append({"inline_data": {"mime_type": mime_type, "data": data}})
                         continue
@@ -368,16 +365,10 @@ class GeminiAdapter(
         if not download_tasks:
             return input_items
 
-        async def download_one(url: str) -> str | None:
-            try:
-                result = await download_image_as_base64(client, url)
-                return result[0] if result else None
-            except Exception:
-                return None
-
-        results = await asyncio.gather(*[download_one(url) for _, _, url, _ in download_tasks])
+        outcomes = await RequestDownloads().gather(client, [url for _, _, url, _ in download_tasks])
         url_to_data: dict[str, str | None] = {
-            url: data_url for (_, _, url, _), data_url in zip(download_tasks, results, strict=True)
+            url: (outcome[0] if isinstance(outcome, tuple) else None)
+            for url, outcome in outcomes.items()
         }
 
         new_input = []
@@ -393,9 +384,14 @@ class GeminiAdapter(
                     new_content.append(item)
                     continue
                 uri = item.get("uri")
-                if isinstance(uri, str) and uri in url_to_data and url_to_data[uri] is not None:
+                if isinstance(uri, str) and uri in url_to_data:
+                    data_url = url_to_data[uri]
+                    if data_url is None:
+                        # The download failed: drop this one item and let the
+                        # request through (ADR-0046), never forward the URL.
+                        needs_copy = True
+                        continue
                     needs_copy = True
-                    data_url: str = url_to_data[uri] or ""
                     mime_type, data = self._parse_data_url(data_url)
                     new_item = {
                         "type": item.get("type", "image"),

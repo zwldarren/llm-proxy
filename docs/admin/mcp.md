@@ -108,6 +108,12 @@ proxy is deny-by-default. Configure in **Settings → Advanced → MCP Security*
 | Blocked URL hosts | *(empty)* | Hostname denylist for `streamableHttp` |
 | Blocked URL IPs | loopback, RFC1918, link-local, `169.254.169.254`, CGNAT, IPv6 equivalents | SSRF protection; hostnames are DNS-resolved and rejected if **any** resolved address is blocked (DNS-rebinding mitigation) |
 
+A tool call, prompt or resource answer is capped at 8 MiB across its content blocks
+(`MCP_MAX_RESULT_BYTES`); text and binary payloads past the cap are truncated and
+marked, and the call is logged with `truncated: true`. A model can call a tool every
+turn, so an unbounded result would let a loose server decide how much memory the
+proxy holds.
+
 Enforcement happens when a server is created or updated (HTTP 422) and again when the
 backend starts. Environment keys that are not allowed are dropped rather than
 rejected — the stored config shows only what survived.

@@ -133,13 +133,15 @@ class MockResponse:
         text_data: str | None = None,
         content_data: bytes | None = None,
         stream_chunks: list[bytes | str] | None = None,
+        headers: dict[str, str] | None = None,
     ):
         self.status_code = status_code
         self._json_data = json_data
         self._text_data = text_data
         self._content_data = content_data
         self._stream_chunks = stream_chunks
-        self.headers: dict[str, str] = {}
+        self.headers: dict[str, str] = dict(headers or {})
+        self.closed = False
 
     def json(self) -> dict[str, Any]:
         """Return JSON data (synchronous in httpx2)."""
@@ -173,6 +175,15 @@ class MockResponse:
     def iter_bytes(self) -> AsyncIterator[bytes]:
         """Iterate over bytes in the response (async iterator)."""
         return self.iter_lines()
+
+    async def aiter_bytes(self) -> AsyncIterator[bytes]:
+        """Stream the body the way the media download helper reads it."""
+        async for chunk in self.iter_bytes():
+            yield chunk
+
+    async def close(self) -> None:
+        """Mark the response closed (every download caller closes what it read)."""
+        self.closed = True
 
     def raise_for_status(self) -> None:
         """Raise an exception if status code indicates an error."""

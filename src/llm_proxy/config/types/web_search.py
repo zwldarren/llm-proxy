@@ -10,7 +10,13 @@ DEFAULT_OLLAMA_BASE_URL = "https://ollama.com"
 class SearXNGConfig(BaseModel):
     """SearXNG search provider configuration."""
 
-    url: str = Field(..., description="SearXNG instance URL (e.g., http://localhost:8080)")
+    url: str = Field(
+        ...,
+        description=(
+            "SearXNG instance URL (e.g., https://search.example.com). A local or "
+            "private instance must be listed in HTTP_ALLOWED_HOSTS."
+        ),
+    )
     api_key: str | None = Field(None, description="API key if required by the SearXNG instance")
     basic_auth_username: str | None = Field(
         None, description="Basic auth username for SearXNG instance"

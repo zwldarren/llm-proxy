@@ -53,8 +53,8 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
 | Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `openrouter` (STT), `cohere` (STT only — v2 has no speech synthesis) |
 | Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter`, `cohere` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |
-| System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold), `ollama` (local models, v0.35+). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
-| Decisions (evaluation) | `openai` (native `/v1/decisions`), plus every System One provider above, which the proxy bridges onto a System One route. Only `openai` accepts inline images |
+| System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold, plus its other decision models), `ollama` (local and cloud models, v0.35+), the `opencode-zen`/`opencode-go` gateway lanes (per-model dialect). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
+| Decisions (evaluation) | `openai` (native `/v1/decisions`), plus every System One provider above, which the proxy bridges onto a System One route. Images reach an upstream through the channel it documents (`assets`, `state` parts, or `images`); a hosted image URL is downloaded and inlined first |
 
 The dedicated `anthropic` provider type is chat-only. The `typesafe` provider
 type is System One-only — assign it to models that serve `/v1/systemone`, and
@@ -74,7 +74,8 @@ invalid_request_error`, and it does not restrict the model's chat service.
 `supports_systemone` marks a model as a decision
 model, which gates both `/v1/systemone` and `/v1/decisions` — they are two
 envelopes over the same evaluation primitives, and the provider translates
-between them (see [Decisions](decisions.md#one-endpoint-two-envelopes)). The flag
+between them (see [Decisions](decisions.md#one-endpoint-two-envelopes)). Every
+provider that serves `/v1/systemone` also serves `/v1/decisions`. The flag
 does not restrict the model's chat service, so a model can serve both when its
 providers support both. A request to either evaluation endpoint naming a model
 without the flag is rejected with a `400 invalid_request_error` before any

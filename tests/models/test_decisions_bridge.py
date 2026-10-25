@@ -97,12 +97,196 @@ class TestDecisionsToSystemOneRequest:
                         ],
                     }
                 ]
-            )
+            ),
+            image_channel="images",
         )
         assert request.state == "Inspect this photo."
         # Ollama documents raw base64 and rejects data URLs, so the prefix is
-        # stripped; the other System One upstreams drop the field entirely.
+        # stripped into its shared array.
         assert request.extra == {"images": [PNG_B64]}
+
+    def test_no_image_channel_drops_the_images_and_keeps_the_text(self):
+        # An upstream that documents no image channel must not receive one as an
+        # unknown field; the text evidence still reaches it.
+        request = decisions_to_systemone_request(
+            _decision_request(
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect this photo."},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                        ],
+                    }
+                ]
+            )
+        )
+        assert request.state == "Inspect this photo."
+        assert request.extra == {}
+
+    def test_state_parts_channel_keeps_image_order(self):
+        # OpenRouter reads ``image_url`` parts inside ``state``, and the text
+        # between them is a plain string item.
+        request = decisions_to_systemone_request(
+            _decision_request(
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "before"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                            {"type": "input_text", "text": "after"},
+                        ],
+                    }
+                ]
+            ),
+            image_channel="state_parts",
+        )
+        assert request.state == [
+            "before",
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG_B64}"}},
+            "after",
+        ]
+        assert request.extra == {}
+
+    def test_assets_channel_replaces_images_with_placeholders(self):
+        # TypeSafe substitutes an asset wherever its placeholder appears in the
+        # text, so the image stays where the client put it.
+        request = decisions_to_systemone_request(
+            _decision_request(
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "before"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                        ],
+                    }
+                ]
+            ),
+            image_channel="assets",
+        )
+        assert request.state == ["before", "llm-proxy-image-1"]
+        assert request.extra == {
+            "assets": {
+                "llm-proxy-image-1": {
+                    "type": "image",
+                    "format": "png",
+                    "data_base64": PNG_B64,
+                }
+            }
+        }
+
+    def test_assets_channel_rejects_a_format_typesafe_cannot_take(self):
+        # TypeSafe's asset format enum is png/jpg/jpeg. Declaring a WebP as PNG
+        # would hand the model bytes it cannot decode, so the request fails
+        # loudly instead.
+        webp = base64.b64encode(b"RIFFWEBP").decode()
+        with pytest.raises(ValidationError, match="accept PNG and JPEG only"):
+            decisions_to_systemone_request(
+                _decision_request(
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_image",
+                                    "image_url": f"data:image/webp;base64,{webp}",
+                                }
+                            ],
+                        }
+                    ]
+                ),
+                image_channel="assets",
+            )
+
+    def test_instruction_images_share_the_channel(self):
+        # A question that carries its own image keeps it on a channel that
+        # places images inline, and lands in the shared array otherwise.
+        inline = decisions_to_systemone_request(
+            _decision_request(
+                questions=[
+                    {
+                        "type": "predicate",
+                        "name": "match",
+                        "instructions": [
+                            {"type": "input_text", "text": "Is it a variant?"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                        ],
+                    }
+                ]
+            ),
+            image_channel="state_parts",
+        )
+        assert inline.questions["match"]["instructions"] == [
+            "Is it a variant?",
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG_B64}"}},
+        ]
+
+        shared = decisions_to_systemone_request(
+            _decision_request(
+                questions=[
+                    {
+                        "type": "predicate",
+                        "name": "match",
+                        "instructions": [
+                            {"type": "input_text", "text": "Is it a variant?"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                        ],
+                    }
+                ]
+            ),
+            image_channel="images",
+        )
+        assert shared.questions["match"]["instructions"] == "Is it a variant?"
+        assert shared.extra == {"images": [PNG_B64]}
+
+    def test_json_and_conversation_items_become_text(self):
+        # System One evaluates one state: roles, JSON evidence and tool items are
+        # rendered as text in request order.
+        request = decisions_to_systemone_request(
+            _decision_request(
+                input=[
+                    {"role": "developer", "content": "Classify tickets."},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Order record:"},
+                            {"type": "input_json", "data": {"charges": [49, 49]}},
+                        ],
+                    },
+                    {"role": "assistant", "content": [{"type": "output_text", "text": "Noted."}]},
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "lookup",
+                        "arguments": '{"id": 7}',
+                    },
+                ]
+            ),
+            image_channel="state_parts",
+        )
+        assert request.state.startswith(
+            'Classify tickets.\n\nOrder record:\n\n{"charges":[49,49]}\n\nNoted.\n\n'
+        )
+        # The tool item has no System One field, so it rides as its own JSON.
+        assert '"type":"function_call"' in request.state
+        assert '"call_id":"call_1"' in request.state
 
     def test_multiple_messages_join_in_order(self):
         request = decisions_to_systemone_request(
@@ -114,6 +298,20 @@ class TestDecisionsToSystemOneRequest:
             )
         )
         assert request.state == "first\n\nsecond"
+
+    def test_decisions_only_extras_are_dropped(self):
+        # ``safety_identifier`` and the prompt-cache controls have no System One
+        # counterpart, so a bridged request carries none of them upstream.
+        request = decisions_to_systemone_request(
+            _decision_request(
+                extra={
+                    "safety_identifier": "end-user-1",
+                    "prompt_cache_key": "tenant-1",
+                    "prompt_cache_options": {"mode": "explicit"},
+                }
+            )
+        )
+        assert request.extra == {}
 
     def test_predicate_becomes_noul(self):
         request = decisions_to_systemone_request(_decision_request())
@@ -617,9 +815,9 @@ class TestSystemOneToDecisionsRequest:
     def test_unexpressible_question_type_is_rejected_loudly(self):
         # Decisions cannot express it, and dropping the question would silently
         # change the answer envelope the client asked for.
-        with pytest.raises(ValidationError, match="cannot express"):
+        with pytest.raises(ValidationError, match="no counterpart"):
             systemone_to_decisions_request(
-                _systemone_request(questions={"x": {"type": "ranking", "instructions": "Rank."}})
+                _systemone_request(questions={"x": {"type": "box", "instructions": "Find it."}})
             )
 
     def test_upstream_only_extras_are_dropped(self):

@@ -5,6 +5,7 @@ from typing import Any
 from llm_proxy.models.systemone import (
     InternalSystemOneRequest,
     InternalSystemOneResponse,
+    SystemOneImageChannel,
 )
 from llm_proxy.providers.base import extract_rate_limit_headers
 from llm_proxy.providers.capabilities.host import SystemOneSelf
@@ -16,14 +17,23 @@ class SystemOneCapabilityMixin:
     Adapters using this mixin: TypeSafe (direct), OpenRouter and Ollama
     (local models, v0.35+). All upstreams share the same ``/systemone`` wire
     format, so the endpoint URL, auth headers and body/response conversion are
-    identical — only the base URL, the optional-field exemptions and the extra
-    response fields differ, and each adapter supplies those through its own
-    config and serializer. An upstream that also serves the format on a
-    Decisions-named route points ``_systemone_decisions_url`` at it for the
-    bridged ``/v1/decisions`` direction.
+    identical — only the base URL, the image channel, the optional-field
+    exemptions and the extra response fields differ, and each adapter supplies
+    those through its own config and serializer. An upstream that also serves
+    the format on a Decisions-named route points ``_systemone_decisions_url`` at
+    it for the bridged ``/v1/decisions`` direction.
     """
 
     SYSTEMONE_ENDPOINT: str = "/systemone"
+
+    #: How this upstream carries images (see
+    #: :data:`~llm_proxy.models.systemone.SystemOneImageChannel`). The wire
+    #: format has no image field of its own, so a bridged Decisions request's
+    #: pictures reach the upstream through the channel it documents — ``images``
+    #: for Ollama, ``state_parts`` for OpenRouter, ``assets`` for TypeSafe — and
+    #: an adapter that documents none leaves it unset, which sends the text
+    #: alone.
+    SYSTEMONE_IMAGE_CHANNEL: SystemOneImageChannel | None = None
 
     def _build_systemone_raw(self: SystemOneSelf, request: Any) -> dict[str, Any]:
         """Build the raw System One body via the provider serializer."""
@@ -46,7 +56,15 @@ class SystemOneCapabilityMixin:
         """
         return self._systemone_url(request)
 
-    def _systemone_headers(self: SystemOneSelf) -> dict[str, str]:
+    def _systemone_headers(
+        self: SystemOneSelf, request: InternalSystemOneRequest
+    ) -> dict[str, str]:
+        """Upstream headers for one System One request.
+
+        Takes the request so an adapter can add a header the body makes necessary
+        (TypeSafe's danger-zone opt-in for images and box questions) without
+        rebuilding the body to find out.
+        """
         return self._build_headers()
 
     async def _post_systemone(
@@ -61,7 +79,7 @@ class SystemOneCapabilityMixin:
         envelope by another route (``DecisionsOverSystemOneMixin``) reuses the retry
         policy, usage echo and rate-limit capture instead of restating them.
         """
-        headers = self._systemone_headers()
+        headers = self._systemone_headers(request)
         outbound = self._build_outbound_body(request, request_type="systemone")
         if outbound.json_body is None:
             raise ValueError("Expected json_body for System One request, got None")

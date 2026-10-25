@@ -77,6 +77,7 @@ from llm_proxy.models.rerank import (
 from llm_proxy.models.systemone import (
     InternalSystemOneRequest,
     InternalSystemOneResponse,
+    SystemOneImageChannel,
 )
 from llm_proxy.models.tools.core import (
     AllowedToolsConfig,
@@ -179,6 +180,7 @@ __all__ = [
     "ServerToolUseBlock",
     "StreamOptions",
     "SystemMessage",
+    "SystemOneImageChannel",
     "TextBlock",
     "ThinkingBlock",
     "ThinkingConfig",

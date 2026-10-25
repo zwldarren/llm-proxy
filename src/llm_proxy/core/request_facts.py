@@ -80,6 +80,11 @@ def mint_request_id(prefix: str = "") -> str:
     return f"{prefix}{uuid4().hex}"
 
 
+#: Prefix for a websocket's ids — the connection's, and every turn's it mints
+#: through :meth:`RequestFacts.begin_new_turn`.
+MINT_PREFIX_WS = "ws_"
+
+
 @dataclass
 class RequestFacts:
     """What the proxy has learned about one in-flight request.
@@ -110,6 +115,21 @@ class RequestFacts:
     request_body: Any = None
     response_headers: dict[str, Any] = field(default_factory=dict)
     response_body: Any = None
+
+    def begin_new_turn(self, prefix: str = "") -> None:
+        """Make this record stand for a new request on a multiplexed connection.
+
+        A WebSocket connection serves many turns and each one is a distinct
+        billable request: it gets its own correlation id and its own audit
+        latch, so a rejection recorded in one turn cannot suppress the next
+        turn's row. Everything else stays — identity, allowlists and headers
+        are connection-scoped.
+
+        This is the one sanctioned re-mint. Everywhere else the id is minted
+        once, by the first toucher, and a request owns exactly one record.
+        """
+        self.request_id = mint_request_id(prefix)
+        self.audit_log_written = False
 
 
 def facts_from_scope(scope: Any) -> RequestFacts:

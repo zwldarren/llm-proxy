@@ -26,16 +26,23 @@ envelopes allow, and every lossy step is marked ``# lossy`` with the reason:
   ``label`` *and* a description, so the descriptions are folded into the
   instructions as a numbered rubric and the labels stay the level strings — the
   answer labels the client sees are still exactly the ones it sent.
-* Decisions ``input`` may hold ``input_image`` parts, but System One has no
-  image channel except Ollama's raw-base64 ``images`` field. Images are moved
-  there (data URL prefix stripped, since Ollama rejects data URLs); the
-  upstreams that do not document ``images`` drop them under the unknown-fields
-  policy, exactly as a client-sent ``images`` field would be dropped.
+* Decisions ``input`` may hold ``input_image`` parts, and how those reach a
+  System One upstream depends on the channel that upstream documents: Ollama
+  takes a raw-base64 ``images`` array shared by every question, OpenRouter takes
+  ``image_url`` parts inside ``state`` (and inside a question's instructions),
+  and TypeSafe takes an ``assets`` map whose placeholder strings sit in the
+  ``state`` and instruction text. An upstream that documents no channel gets the
+  text alone.
+* Decisions ``input`` may also be a conversation — developer and system messages,
+  assistant output and refusals, function and custom tool calls with their
+  outputs — while System One evaluates one ``state``. Conversation items are
+  rendered as text in request order; tool items become their own JSON.
 * System One ``state`` may be an object or array, while Decisions ``input`` is
-  a string or a list of user messages: the object is serialized to JSON text.
+  a string or a list of messages: the object is serialized to JSON text.
 * The optional fields each envelope has and the other does not
-  (``safety_identifier``; ``provider``/``session_id``/``trace``/``user``/
-  ``keep_alive``) have no counterpart and are dropped.
+  (``safety_identifier``/``prompt_cache_key``/``prompt_cache_options``;
+  ``provider``/``session_id``/``trace``/``user``/``keep_alive``) have no
+  counterpart and are dropped.
 
 Both conversions preserve ``model``, the pipeline's shared fields and the
 override markers so a bridged request is still field-policy-correct.
@@ -53,6 +60,7 @@ from llm_proxy.models.decisions import (
 from llm_proxy.models.systemone import (
     InternalSystemOneRequest,
     InternalSystemOneResponse,
+    SystemOneImageChannel,
 )
 
 #: System One keys named questions in a map, so a Decisions question without a
@@ -94,14 +102,8 @@ def choice_key(value: Any) -> str:
 
 def _base64_from_data_url(value: Any) -> str | None:
     """Extract the base64 payload of an inline ``data:`` image URL."""
-    if not isinstance(value, str) or not value.startswith("data:"):
-        return None
-    marker = ";base64,"
-    position = value.find(marker)
-    if position == -1:
-        return None
-    payload = value[position + len(marker) :]
-    return payload or None
+    split = _split_data_url(value)
+    return split[1] if split else None
 
 
 # --------------------------------------------------------------------------- #
@@ -109,40 +111,204 @@ def _base64_from_data_url(value: Any) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
-def _render_decision_input(payload: Any) -> tuple[Any, list[str]]:
-    """Render Decisions ``input`` into a System One ``state`` plus base64 images.
+#: Prefix of the placeholder strings TypeSafe substitutes for an image asset.
+#: TypeSafe recommends an opaque per-image id; a fixed prefix keeps the body
+#: deterministic (and therefore testable) while staying clear of ordinary text.
+ASSET_PLACEHOLDER_PREFIX = "llm-proxy-image-"
 
-    A string input is the state verbatim. A message array is flattened to one
-    text block — every message is a user message, so joining them preserves the
-    evidence in order — with its inline images returned separately for the
-    upstream's own image channel.
+#: TypeSafe's asset format enum. Its image channel accepts PNG and JPEG only.
+_ASSET_FORMATS: frozendict[str, str] = frozendict({"image/png": "png", "image/jpeg": "jpeg"})
+
+#: One rendered piece of Decisions content: ``("text", text)`` or
+#: ``("image", url)``, in request order.
+_Segment = tuple[str, str]
+
+
+class _ImageSink:
+    """Collect the images of one bridged request for a System One image channel.
+
+    The channel decides where an image goes, not whether it survives:
+    ``state_parts`` and ``assets`` place it inline (so its position relative to
+    the text is kept), ``images`` collects it in the shared array Ollama reads,
+    and ``None`` drops it because the upstream documents no channel at all.
+    """
+
+    def __init__(self, channel: SystemOneImageChannel | None) -> None:
+        self.channel = channel
+        self.images: list[str] = []
+        self.assets: dict[str, Any] = {}
+
+    def takes_inline(self) -> bool:
+        """Whether this channel places an image where it appears in the text."""
+        return self.channel in ("state_parts", "assets")
+
+    def inline(self, data_url: str) -> Any:
+        """Take one image, returning the element to place inline for it.
+
+        Returns ``None`` for the channels that do not carry images inline: the
+        shared-array channel has collected the payload already, and a channel-less
+        upstream drops it.
+        """
+        if self.channel == "state_parts":
+            return {"type": "image_url", "image_url": {"url": data_url}}
+        if self.channel == "assets":
+            placeholder, asset = _asset_for(data_url, len(self.assets) + 1)
+            self.assets[placeholder] = asset
+            return placeholder
+        if self.channel == "images":
+            payload = _base64_from_data_url(data_url)
+            if payload is not None:
+                self.images.append(payload)
+        return None
+
+
+def _asset_for(data_url: str, index: int) -> tuple[str, dict[str, Any]]:
+    """Build one TypeSafe asset plus the placeholder that stands in for it."""
+    split = _split_data_url(data_url)
+    if split is None:
+        raise ValidationError(
+            message=(
+                "TypeSafe image assets take inline base64 data URLs; "
+                f"got '{data_url[:32]}'. Inline the image or use a provider with "
+                "a wider image channel."
+            ),
+            code="invalid_request_error",
+            status_code=400,
+        )
+    media_type, payload = split
+    asset_format = _ASSET_FORMATS.get(media_type)
+    if asset_format is None:
+        raise ValidationError(
+            message=(
+                f"TypeSafe image assets accept PNG and JPEG only; got '{media_type}'. "
+                "Re-encode the image or use a provider with a wider image channel."
+            ),
+            code="invalid_request_error",
+            status_code=400,
+        )
+    return f"{ASSET_PLACEHOLDER_PREFIX}{index}", {
+        "type": "image",
+        "format": asset_format,
+        "data_base64": payload,
+    }
+
+
+def _split_data_url(value: Any) -> tuple[str, str] | None:
+    """Split an inline base64 data URL into its media type and payload."""
+    if not isinstance(value, str) or not value.startswith("data:"):
+        return None
+    header, separator, payload = value.partition(",")
+    if not separator or ";base64" not in header or not payload:
+        return None
+    media_type = header.removeprefix("data:").split(";", 1)[0]
+    return media_type or "image/png", payload
+
+
+def _content_segments(parts: Any) -> list[_Segment]:
+    """Render one content-part array (a message's, or an output's) into segments."""
+    if not isinstance(parts, list):
+        return []
+    segments: list[_Segment] = []
+    for part in parts:
+        if isinstance(part, str):
+            segments.append(("text", part))
+            continue
+        if not isinstance(part, dict):
+            segments.append(("text", _json_text(part)))
+            continue
+        kind = part.get("type")
+        match kind:
+            case "input_text" | "output_text" if isinstance(part.get("text"), str):
+                segments.append(("text", part["text"]))
+            case "refusal" if isinstance(part.get("refusal"), str):
+                segments.append(("text", part["refusal"]))
+            case "input_json":
+                segments.append(("text", _json_text(part.get("data"))))
+            case "input_image" if isinstance(part.get("image_url"), str):
+                segments.append(("image", part["image_url"]))
+            case _:
+                segments.append(("text", _json_text(part)))
+    return segments
+
+
+def _decision_input_segments(payload: Any) -> list[_Segment]:
+    """Flatten Decisions ``input`` into ordered text and image segments.
+
+    A string input is the evidence verbatim. A conversation is rendered in
+    request order: message content as its parts read, and tool calls and their
+    outputs as their own JSON — ``# lossy``, since System One evaluates one
+    ``state`` and has no field for a call or an output.
     """
     if isinstance(payload, str):
-        return payload, []
+        return [("text", payload)]
     if not isinstance(payload, list):
-        # The schema admits a string or a message array only; anything else is
-        # passed through as the state rather than silently dropped.
-        return payload, []
+        # The schema admits a string or a conversation only; anything else is
+        # rendered as its JSON rather than dropped.
+        return [("text", _json_text(payload))]
 
-    texts: list[str] = []
-    images: list[str] = []
-    for message in payload:
-        content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(content, str):
-            texts.append(content)
+    segments: list[_Segment] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            segments.append(("text", _json_text(item)))
             continue
-        if not isinstance(content, list):
-            continue
-        for part in content:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") == "input_text" and isinstance(part.get("text"), str):
-                texts.append(part["text"])
-            elif part.get("type") == "input_image":
-                image = _base64_from_data_url(part.get("image_url"))
-                if image is not None:
-                    images.append(image)
-    return "\n\n".join(texts), images
+        content = item.get("content")
+        if isinstance(content, str | list):
+            segments.extend(
+                [("text", content)] if isinstance(content, str) else _content_segments(content)
+            )
+        elif isinstance(item.get("output"), str | list):
+            output = item["output"]
+            segments.extend(
+                [("text", output)] if isinstance(output, str) else _content_segments(output)
+            )
+        else:
+            segments.append(("text", _json_text(item)))
+    return segments
+
+
+def _render_segments(segments: list[_Segment], sink: _ImageSink) -> Any:
+    """Render segments for the upstream's channel.
+
+    Text-only content stays a string, which every upstream accepts. When the
+    content carries images and the channel places them inline, the result is an
+    array with the text as plain strings and the images between them, in request
+    order.
+    """
+    texts = [value for kind, value in segments if kind == "text"]
+    if not any(kind == "image" for kind, _ in segments):
+        return "\n\n".join(texts)
+    if not sink.takes_inline():
+        # The shared-array and channel-less upstreams keep the text alone; the
+        # former still needs each image offered to the sink for collection.
+        for kind, value in segments:
+            if kind == "image":
+                sink.inline(value)
+        return "\n\n".join(texts)
+    rendered: list[Any] = []
+    for kind, value in segments:
+        if kind == "text":
+            if value:
+                rendered.append(value)
+        else:
+            rendered.append(sink.inline(value))
+    return rendered
+
+
+def _render_instructions(instructions: Any, sink: _ImageSink) -> Any:
+    """Render a question's instructions for the upstream's channel.
+
+    A string passes through. A part array — the form that lets one question carry
+    its own image — is rendered like message content: text joins into one string
+    on a text-only channel, and stays an array with the images in place on a
+    channel that carries them inline.
+    """
+    if isinstance(instructions, str):
+        return instructions
+    if not isinstance(instructions, list):
+        # The schema admits a string or a part array; anything else is passed
+        # through rather than dropped.
+        return instructions
+    return _render_segments(_content_segments(instructions), sink)
 
 
 def _score_instructions(instructions: Any, levels: list[dict[str, Any]]) -> Any:
@@ -165,13 +331,18 @@ def _score_instructions(instructions: Any, levels: list[dict[str, Any]]) -> Any:
             lines.append(f"{index}. {label} — {description}")
         else:
             lines.append(f"{index}. {label}")
-    return f"{instructions}\n\nLevels, lowest to highest:\n" + "\n".join(lines)
+    rubric = "Levels, lowest to highest:\n" + "\n".join(lines)
+    if isinstance(instructions, list):
+        # Instructions that carry their own image stay an array; the rubric is
+        # one more text block at the end.
+        return [*instructions, rubric]
+    return f"{instructions}\n\n{rubric}"
 
 
-def _decision_question_to_systemone(question: dict[str, Any]) -> dict[str, Any]:
+def _decision_question_to_systemone(question: dict[str, Any], sink: _ImageSink) -> dict[str, Any]:
     """Convert one Decisions question into its System One form."""
     kind = question.get("type")
-    instructions = question.get("instructions")
+    instructions = _render_instructions(question.get("instructions"), sink)
     if kind == "predicate":
         # lossy: Decisions predicates carry no rubric, so the ``noul`` criteria
         # map is omitted rather than invented.
@@ -195,20 +366,35 @@ def _decision_question_to_systemone(question: dict[str, Any]) -> dict[str, Any]:
     return dict(question)
 
 
-def decisions_to_systemone_request(request: InternalDecisionRequest) -> InternalSystemOneRequest:
-    """Convert a Decisions request into the System One request that answers it."""
-    state, images = _render_decision_input(request.input)
+def decisions_to_systemone_request(
+    request: InternalDecisionRequest,
+    image_channel: SystemOneImageChannel | None = None,
+) -> InternalSystemOneRequest:
+    """Convert a Decisions request into the System One request that answers it.
+
+    ``image_channel`` is the target upstream's own declaration (see
+    :data:`~llm_proxy.models.systemone.SystemOneImageChannel`): it decides whether
+    an image rides ``images``, ``state`` parts or ``assets``, and a channel-less
+    upstream receives the text alone.
+    """
+    sink = _ImageSink(image_channel)
+    state = _render_segments(_decision_input_segments(request.input), sink)
     questions: dict[str, Any] = {}
     for index, question in enumerate(request.questions):
         if not isinstance(question, dict):
             continue
         name = _question_name(question)
-        questions[name or _unnamed_key(index)] = _decision_question_to_systemone(question)
+        questions[name or _unnamed_key(index)] = _decision_question_to_systemone(question, sink)
+    extra: dict[str, Any] = {}
+    if sink.images:
+        extra["images"] = sink.images
+    if sink.assets:
+        extra["assets"] = sink.assets
     return InternalSystemOneRequest(
         model=request.model,
         state=state,
         questions=questions,
-        extra={"images": images} if images else {},
+        extra=extra,
         metadata=request.metadata,
         params=request.params,
         _override_injected_keys=set(request._override_injected_keys),
@@ -418,7 +604,9 @@ def _level_from_systemone(entry: Any) -> dict[str, Any]:
     return {"label": _json_text(entry)}
 
 
-def _systemone_question_to_decision(question: dict[str, Any], name: str) -> dict[str, Any]:
+def _systemone_question_to_decision(
+    question: dict[str, Any], name: str, model: str
+) -> dict[str, Any]:
     """Convert one System One question into its Decisions form."""
     instructions = question.get("instructions")
     if not isinstance(instructions, str):
@@ -461,8 +649,10 @@ def _systemone_question_to_decision(question: dict[str, Any], name: str) -> dict
         }
     raise ValidationError(
         message=(
-            f"Question '{name}' uses System One type '{kind}', which the Decisions "
-            "endpoint cannot express. Send the request to /v1/systemone instead."
+            f"Question '{name}' uses the System One '{kind}' type, which the Decisions "
+            f"endpoint has no counterpart for, so model '{model}' cannot answer it "
+            "through /v1/decisions. Send it to /v1/systemone on a provider that serves "
+            "that question type."
         ),
         code="invalid_request_error",
         status_code=400,
@@ -472,9 +662,10 @@ def _systemone_question_to_decision(question: dict[str, Any], name: str) -> dict
 def _image_part(base64_data: str) -> dict[str, Any]:
     """Build an ``input_image`` part from raw base64.
 
-    Decisions requires a data URL and rejects hosted URLs, so the media type is
-    sniffed from the payload's magic bytes. ``# lossy``: an unrecognized format
-    is declared PNG, which is what System One's own image channel assumes.
+    The source is raw base64, which Decisions cannot take as-is, so the media
+    type is sniffed from the payload's magic bytes and a data URL is built.
+    ``# lossy``: an unrecognized format is declared PNG, which is what System
+    One's own image channel assumes.
     """
     media_type = _sniff_image_media_type(base64_data)
     return {
@@ -525,7 +716,7 @@ def systemone_to_decisions_request(request: InternalSystemOneRequest) -> Interna
         else state
     )
     questions = [
-        _systemone_question_to_decision(question, key)
+        _systemone_question_to_decision(question, key, request.model)
         for key, question in request.questions.items()
         if isinstance(question, dict)
     ]
@@ -618,6 +809,7 @@ def decisions_to_systemone_response(
 
 
 __all__ = [
+    "ASSET_PLACEHOLDER_PREFIX",
     "UNNAMED_KEY_PREFIX",
     "choice_key",
     "decisions_to_systemone_request",

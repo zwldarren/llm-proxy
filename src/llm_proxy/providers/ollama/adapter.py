@@ -1,6 +1,5 @@
 """Ollama provider implementation."""
 
-import asyncio
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
@@ -58,8 +57,8 @@ class OllamaAdapter(
 
     ``/v1/decisions`` is served by bridging onto that same endpoint
     (``DecisionsOverSystemOneMixin``); a Decisions request's inline images
-    become the local ``images`` field this upstream documents, and the other
-    two System One upstreams drop them instead.
+    become the local ``images`` field this upstream documents, and upstreams
+    that document no image channel drop them instead.
     """
 
     #: Branding for the admin provider catalog (GET /api/config/provider-types).
@@ -80,6 +79,11 @@ class OllamaAdapter(
     #: resolves to ``http://localhost:11434/v1/systemone``.
     SYSTEMONE_ENDPOINT = "/v1/systemone"
 
+    #: Ollama takes images as one raw-base64 array shared by every question, and
+    #: rejects data URLs — so the bridge collects the payloads into ``images``
+    #: and leaves the text in ``state``.
+    SYSTEMONE_IMAGE_CHANNEL = "images"
+
     #: Extra keys the upstream documents as supported, per request type; exempt
     #: from the unknown-fields policy so they survive the merge into the body.
     #: Embeddings: native /api/embed parameters. System One: the base64
@@ -97,7 +101,7 @@ class OllamaAdapter(
         """Download HTTP(S) image URLs in ConversationContext, converting to base64."""
         import dataclasses
 
-        from llm_proxy.http.client import download_image_as_base64
+        from llm_proxy.http.media import RequestDownloads
         from llm_proxy.models.types import ImageSource
 
         download_tasks: list[tuple[int, int, str]] = []
@@ -112,24 +116,19 @@ class OllamaAdapter(
         if not download_tasks:
             return
 
-        async def _download_one(url: str) -> tuple[str | None, str | None]:
-            try:
-                result = await download_image_as_base64(client, url)
-                if result:
-                    data_url, media_type = result
-                    # Extract base64 data from data URL (data:media_type;base64,DATA)
-                    base64_data = data_url.split(",", 1)[1] if "," in data_url else data_url
-                    return base64_data, media_type or "image/png"
-            except Exception:
-                logger.debug("Failed to download image URL for Ollama", exc_info=True)
-            return None, None
-
-        results = await asyncio.gather(*[_download_one(url) for _, _, url in download_tasks])
+        outcomes = await RequestDownloads().gather(client, [url for _, _, url in download_tasks])
         url_to_result: dict[str, tuple[str, str]] = {}
-        for (_, _, url), result in zip(download_tasks, results, strict=True):
-            base64_data, media_type = result
-            if base64_data is not None:
-                url_to_result[url] = (base64_data, media_type or "image/png")
+        for url, outcome in outcomes.items():
+            if isinstance(outcome, BaseException) or outcome is None:
+                logger.debug(f"Failed to download image URL for Ollama: {outcome}")
+                continue
+            data_url, media_type = outcome
+            # ``data_url`` is ``data:media_type;base64,DATA``; the upstream takes
+            # the payload alone.
+            url_to_result[url] = (
+                data_url.split(",", 1)[1] if "," in data_url else data_url,
+                media_type or "image/png",
+            )
 
         for msg_idx, block_idx, url in download_tasks:
             if url in url_to_result:

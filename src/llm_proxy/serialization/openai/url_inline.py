@@ -8,16 +8,16 @@ internal request's URL sources into base64 in place.
 
 Only providers flagged by :func:`chat_document_url_needs_download` are touched;
 providers with a native URL field keep the URL and providers with no document
-part at all cannot be helped by inlining. Downloads are SSRF-protected inside
-:func:`~llm_proxy.http.client.download_image_as_base64`.
+part at all cannot be helped by inlining. Downloads go through
+:class:`~llm_proxy.http.media.RequestDownloads`, which SSRF-validates every hop
+and bounds the request's download count, concurrency and total size.
 """
 
-import asyncio
 import dataclasses
 from typing import Any
 
 from llm_proxy.core.utils import as_http_url
-from llm_proxy.http.client import download_image_as_base64
+from llm_proxy.http.media import RequestDownloads
 from llm_proxy.models import DocumentBlock, FileBlock, InternalRequest
 from llm_proxy.models.types import DocumentSource
 from llm_proxy.observability.logger import get_logger
@@ -71,12 +71,9 @@ async def inline_chat_document_urls(
         return 0
 
     unique_urls = list(dict.fromkeys(url for _, _, _, url in targets))
-    results = await asyncio.gather(
-        *(download_image_as_base64(client, url) for url in unique_urls),
-        return_exceptions=True,
-    )
+    outcomes = await RequestDownloads().gather(client, unique_urls)
     downloaded: dict[str, tuple[str, str]] = {}
-    for url, result in zip(unique_urls, results, strict=True):
+    for url, result in outcomes.items():
         if isinstance(result, BaseException):
             logger.debug(f"Could not download document URL {url}: {result}")
             continue

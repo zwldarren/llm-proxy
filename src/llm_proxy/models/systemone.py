@@ -16,13 +16,29 @@ either provider.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from llm_proxy.models.conversation import ConversationContext
 from llm_proxy.models.internal import RequestMetadata
 from llm_proxy.models.params import GenerationParams
 from llm_proxy.models.tools import ToolDefinition
 from llm_proxy.models.types import Usage
+
+#: How a System One upstream carries images in the envelope. The wire format has
+#: no image field of its own, so each upstream names its own channel:
+#:
+#: ``images``
+#:     Ollama's top-level array of raw base64 strings, shared by every question.
+#: ``state_parts``
+#:     OpenRouter's ``image_url`` parts inside ``state`` (and inside a question's
+#:     instructions), the same part shape Chat Completions uses.
+#: ``assets``
+#:     TypeSafe's ``assets`` map: an image per placeholder string, which the
+#:     upstream substitutes wherever it appears in ``state`` or instructions.
+#:
+#: An adapter that documents none of them leaves the channel unset, and a bridged
+#: Decisions request reaches it as text alone.
+SystemOneImageChannel = Literal["images", "state_parts", "assets"]
 
 
 @dataclass
@@ -91,4 +107,4 @@ class InternalSystemOneResponse:
     provider_info: dict[str, Any] = field(default_factory=dict)
 
 
-__all__ = ["InternalSystemOneRequest", "InternalSystemOneResponse"]
+__all__ = ["InternalSystemOneRequest", "InternalSystemOneResponse", "SystemOneImageChannel"]

@@ -441,7 +441,9 @@ class TestOpenResponsesTurnState:
         def fake_record_rejection(request, **_kwargs):
             observed.append(facts_for(request).audit_log_written)
 
-        monkeypatch.setattr(router_module, "record_rejection", fake_record_rejection)
+        from llm_proxy.api.middleware import model_restriction as restriction_module
+
+        monkeypatch.setattr(restriction_module, "record_rejection", fake_record_rejection)
 
         async def restricted_verify(api_key: str):
             return VerifiedKeyAuth(

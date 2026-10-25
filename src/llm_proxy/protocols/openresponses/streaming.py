@@ -780,6 +780,11 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
         # ``response.reasoning_text.delta|done``) to the summary event family
         # (``response.reasoning_summary_text.delta|done``) whose names are
         # identical in both specs.
+        # A malformed ``type`` (array or object) is unhashable: looking it up in
+        # the frozen mapping would raise before the drop rule below can apply.
+        if not isinstance(chunk_type, str):
+            logger.warning("Dropping upstream stream chunk with invalid event type")
+            return ""
         emitted_type = _normalize_reasoning_event(data, chunk_type)
         # The event name is spliced into the SSE frame, not JSON-encoded: an
         # upstream-controlled type containing CR/LF could inject a forged

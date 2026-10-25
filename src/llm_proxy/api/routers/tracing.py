@@ -24,14 +24,6 @@ from llm_proxy.observability.tracing_config import TracingConfig, TracingProvide
 
 logger = get_logger(__name__)
 
-#: DNS validation is blocking and reachable by any authenticated viewer.
-#: Keeping it on a small dedicated pool prevents unique-hostname DNS timeouts
-#: from occupying every default-executor thread that also serves API-key
-#: verification and other gateway work.
-_TRACING_URL_VALIDATION_EXECUTOR = ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="tracing-url-check"
-)
-
 
 def _is_masked_key(value: Any) -> bool:
     """Check if a value is masked (contains **** from backend response)."""
@@ -123,12 +115,19 @@ def _validate_tracing_provider_urls(
 
 
 async def _validate_tracing_provider_urls_async(
-    providers: list[TracingProviderConfig], *, allow_private_hosts: bool = True
+    providers: list[TracingProviderConfig],
+    *,
+    allow_private_hosts: bool = True,
+    executor: ThreadPoolExecutor | None = None,
 ) -> None:
-    """Async wrapper for tracing URL validation (bounded blocking DNS)."""
+    """Async wrapper for tracing URL validation (bounded blocking DNS).
+
+    ``executor`` is the lifespan-owned pool; a caller without one (tests, early
+    startup) resolves on the loop's default executor.
+    """
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
-        _TRACING_URL_VALIDATION_EXECUTOR,
+        executor,
         functools.partial(
             _validate_tracing_provider_urls,
             providers,

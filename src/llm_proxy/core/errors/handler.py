@@ -12,6 +12,7 @@ from llm_proxy.core.errors.classification import (
 from llm_proxy.core.errors.protocols import ErrorFormatter, ErrorProtocol
 from llm_proxy.core.errors.utils import extract_retry_after, get_error_type_for_status
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.http.errors import UpstreamResponseTooLarge
 from llm_proxy.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -228,6 +229,16 @@ class ErrorHandler:
                     provider_name=provider_name,
                     original_error=original_error,
                 )
+
+        if isinstance(error, UpstreamResponseTooLarge):
+            # The proxy's own read cap, not the provider's answer: 502 with the
+            # limit named, and no retry (the same bytes would come back).
+            return self.create_provider_error(
+                message=f"{provider_name} response exceeded the proxy's read limit: {error}",
+                error_type="api_error",
+                status_code=502,
+                provider_name=provider_name,
+            )
 
         if isinstance(error, httpx2.RemoteProtocolError):
             return self.create_provider_error(

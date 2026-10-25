@@ -153,6 +153,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -169,16 +179,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -236,26 +236,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -272,6 +252,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -327,26 +327,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -363,6 +343,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -420,26 +420,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -466,6 +446,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -584,26 +584,6 @@
               }
             }
           },
-          "400": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Unknown or expired response id.",
             "content": {
@@ -620,6 +600,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -739,6 +739,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -755,16 +765,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AnthropicErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -821,6 +821,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -837,16 +847,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AnthropicErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -906,6 +906,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -922,16 +932,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1203,6 +1203,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1219,16 +1229,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1285,6 +1285,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1301,16 +1311,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1372,6 +1372,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1388,16 +1398,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1454,6 +1454,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1470,16 +1480,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1536,6 +1536,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1552,16 +1562,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1619,6 +1619,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1635,16 +1645,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1700,6 +1700,16 @@
               }
             }
           },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Error",
             "content": {
@@ -1716,16 +1726,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -4117,7 +4117,8 @@
           },
           "image_url": {
             "type": "string",
-            "title": "Image Url"
+            "title": "Image Url",
+            "description": "An inline base64 data URL, or a publicly accessible HTTP(S) URL."
           },
           "detail": {
             "anyOf": [
@@ -4136,6 +4137,17 @@
             ],
             "title": "Detail",
             "description": "Image detail level; defaults to 'auto'."
+          },
+          "prompt_cache_breakpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionPromptCacheBreakpoint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Marks the end of a reusable prompt prefix at this part."
           }
         },
         "additionalProperties": true,
@@ -4145,15 +4157,44 @@
           "image_url"
         ],
         "title": "DecisionInputImageSchema",
-        "description": "An inline image part of a user message."
+        "description": "An image part of a message or of a question's instructions."
       },
-      "DecisionInputMessageSchema": {
+      "DecisionInputItemSchema": {
         "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "message",
+                  "function_call",
+                  "function_call_output",
+                  "custom_tool_call",
+                  "custom_tool_call_output"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
           "role": {
-            "type": "string",
-            "const": "user",
-            "title": "Role",
-            "description": "Only user messages are supported by this endpoint."
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "developer",
+                  "system",
+                  "assistant"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           },
           "content": {
             "anyOf": [
@@ -4168,42 +4209,180 @@
                     },
                     {
                       "$ref": "#/components/schemas/DecisionInputImageSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DecisionInputJSONSchema"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "type",
                     "mapping": {
                       "input_image": "#/components/schemas/DecisionInputImageSchema",
+                      "input_json": "#/components/schemas/DecisionInputJSONSchema",
                       "input_text": "#/components/schemas/DecisionInputTextSchema"
                     }
                   }
                 },
                 "type": "array"
-              }
-            ],
-            "title": "Content"
-          },
-          "type": {
-            "anyOf": [
+              },
               {
-                "type": "string",
-                "const": "message"
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DecisionOutputTextSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DecisionRefusalSchema"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "output_text": "#/components/schemas/DecisionOutputTextSchema",
+                      "refusal": "#/components/schemas/DecisionRefusalSchema"
+                    }
+                  }
+                },
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
+            "title": "Content",
+            "description": "A message's text or ordered content parts."
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "commentary",
+                  "final_answer"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase",
+            "description": "The phase of an assistant message."
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DecisionInputTextSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DecisionInputImageSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DecisionInputJSONSchema"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "input_image": "#/components/schemas/DecisionInputImageSchema",
+                      "input_json": "#/components/schemas/DecisionInputJSONSchema",
+                      "input_text": "#/components/schemas/DecisionInputTextSchema"
+                    }
+                  }
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "DecisionInputItemSchema",
+        "description": "One conversation item: a message, or a tool call/output.\n\nA message carries a ``role`` and ``content``; a tool item carries a ``type``,\na ``call_id`` and the fields that type requires. The two shapes are mutually\nexclusive, and a message's content parts have to match its role — an\nassistant message holds ``output_text``/``refusal`` parts, while a user\nmessage holds text, image and JSON parts."
+      },
+      "DecisionInputJSONSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "input_json",
             "title": "Type"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Data",
+            "description": "Structured evidence; nested values may be any JSON value."
           }
         },
         "additionalProperties": true,
         "type": "object",
         "required": [
-          "role",
-          "content"
+          "type",
+          "data"
         ],
-        "title": "DecisionInputMessageSchema",
-        "description": "A user message carrying the evidence to evaluate."
+        "title": "DecisionInputJSONSchema",
+        "description": "A JSON object, or an array of objects, rendered as text evidence."
       },
       "DecisionInputTextSchema": {
         "properties": {
@@ -4215,6 +4394,17 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "prompt_cache_breakpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionPromptCacheBreakpoint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Marks the end of a reusable prompt prefix at this part."
           }
         },
         "additionalProperties": true,
@@ -4224,7 +4414,7 @@
           "text"
         ],
         "title": "DecisionInputTextSchema",
-        "description": "A text part of a user message."
+        "description": "A text part of a message or of a question's instructions."
       },
       "DecisionLevelSchema": {
         "properties": {
@@ -4253,6 +4443,78 @@
         "title": "DecisionLevelSchema",
         "description": "One ordered level of a ``score`` question's rubric."
       },
+      "DecisionOutputTextSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "output_text",
+            "title": "Type"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "DecisionOutputTextSchema",
+        "description": "An assistant message's output text."
+      },
+      "DecisionPromptCacheBreakpoint": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "explicit",
+            "title": "Mode",
+            "description": "The breakpoint mode.",
+            "default": "explicit"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "DecisionPromptCacheBreakpoint",
+        "description": "Marks the exact end of a reusable prompt prefix at one content part."
+      },
+      "DecisionPromptCacheOptionsSchema": {
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "implicit",
+                  "explicit"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode",
+            "description": "Whether the upstream creates an implicit cache breakpoint."
+          },
+          "ttl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl",
+            "description": "Lifetime of every breakpoint the request writes."
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "DecisionPromptCacheOptionsSchema",
+        "description": "Options for the Decisions request's prompt cache."
+      },
       "DecisionQuestionSchema": {
         "properties": {
           "type": {
@@ -4265,7 +4527,35 @@
             "title": "Type"
           },
           "instructions": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DecisionInputTextSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DecisionInputImageSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DecisionInputJSONSchema"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "input_image": "#/components/schemas/DecisionInputImageSchema",
+                      "input_json": "#/components/schemas/DecisionInputJSONSchema",
+                      "input_text": "#/components/schemas/DecisionInputTextSchema"
+                    }
+                  }
+                },
+                "type": "array"
+              }
+            ],
             "title": "Instructions"
           },
           "name": {
@@ -4318,7 +4608,28 @@
           "instructions"
         ],
         "title": "DecisionQuestionSchema",
-        "description": "A typed Decisions question.\n\n``predicate`` asks whether a condition holds, ``choice`` picks one of the\nsupplied options, and ``score`` rates the evidence across an ordered\n``levels`` rubric."
+        "description": "A typed Decisions question.\n\n``predicate`` asks whether a condition holds, ``choice`` picks one of the\nsupplied options, and ``score`` rates the evidence across an ordered\n``levels`` rubric. ``instructions`` may also be a list of content parts, so a\nquestion can carry its own image next to text."
+      },
+      "DecisionRefusalSchema": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "refusal",
+            "title": "Type"
+          },
+          "refusal": {
+            "type": "string",
+            "title": "Refusal"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type",
+          "refusal"
+        ],
+        "title": "DecisionRefusalSchema",
+        "description": "An assistant message's refusal, carried as conversation evidence."
       },
       "DecisionsRequestSchema": {
         "properties": {
@@ -4329,13 +4640,13 @@
               },
               {
                 "items": {
-                  "$ref": "#/components/schemas/DecisionInputMessageSchema"
+                  "$ref": "#/components/schemas/DecisionInputItemSchema"
                 },
                 "type": "array"
               }
             ],
             "title": "Input",
-            "description": "Shared evidence for every question: a plain string, or user messages holding text and inline base64 images."
+            "description": "Shared evidence for every question: a plain string, or an ordered list of conversation items holding text, images, JSON, tool calls and tool outputs."
           },
           "model": {
             "type": "string",
@@ -4362,6 +4673,30 @@
             ],
             "title": "Safety Identifier",
             "description": "Opaque caller-provided end-user identifier, scoped by the verified org. Forwarded only to upstreams that document it."
+          },
+          "prompt_cache_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Key",
+            "description": "Partitions prompt cache reuse by a caller-provided key. Forwarded only to upstreams that document it."
+          },
+          "prompt_cache_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionPromptCacheOptionsSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prompt cache controls (mode and TTL). Forwarded only to upstreams that document them."
           }
         },
         "additionalProperties": false,
@@ -6685,7 +7020,7 @@
           },
           "max_tokens": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Max Tokens",
             "description": "Maximum tokens to generate"
           },
@@ -7344,7 +7679,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -7391,7 +7726,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -7468,7 +7803,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -7899,8 +8234,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 2,
-                "minimum": 0
+                "maximum": 2.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -7913,8 +8248,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 1,
-                "minimum": 0
+                "maximum": 1.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -7927,8 +8262,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 2,
-                "minimum": -2
+                "maximum": 2.0,
+                "minimum": -2.0
               },
               {
                 "type": "null"
@@ -7941,8 +8276,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 2,
-                "minimum": -2
+                "maximum": 2.0,
+                "minimum": -2.0
               },
               {
                 "type": "null"
@@ -7996,7 +8331,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -8009,7 +8344,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -8108,8 +8443,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 20,
-                "minimum": 0
+                "maximum": 20.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -8622,7 +8957,7 @@
             ],
             "title": "Speed",
             "description": "Audio speed (0.25 to 4.0)",
-            "default": 1
+            "default": 1.0
           },
           "stream_format": {
             "anyOf": [
@@ -8742,7 +9077,8 @@
             "enum": [
               "noul",
               "choice",
-              "score"
+              "score",
+              "box"
             ],
             "title": "Type"
           },
@@ -8786,7 +9122,7 @@
           "instructions"
         ],
         "title": "SystemOneQuestionSchema",
-        "description": "A typed System One question.\n\n``noul`` is a yes/no question, ``choice`` picks one option from a map, and\n``score`` rates the state across an ordered array of levels. Unknown keys\nare allowed so a future upstream field is not rejected client-side."
+        "description": "A typed System One question.\n\n``noul`` is a yes/no question, ``choice`` picks one option from a map,\n``score`` rates the state across an ordered array of levels, and ``box``\nlocates what its instructions describe in an image (Jev 1.14 and, through\nOpenRouter, nothing else — TypeSafe serves it behind its danger-zone\nheader). Unknown keys are allowed so a future upstream field is not rejected\nclient-side."
       },
       "SystemOneRequestSchema": {
         "properties": {
@@ -8852,6 +9188,19 @@
             ],
             "title": "Keep Alive",
             "description": "How long to keep the model loaded after the request, as a duration string such as '5m' or seconds (Ollama only)."
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets",
+            "description": "Images keyed by a placeholder string, which the upstream substitutes wherever it appears in 'state' or a question's instructions (TypeSafe only; needs a vision-capable model)."
           },
           "provider": {
             "anyOf": [

@@ -397,6 +397,11 @@ class McpServerRecord(Base):
 #: limit on somebody else's value, not on ours: ``api.dependencies.extract_trace_id``
 #: drops anything longer instead of letting PostgreSQL reject the row insert.
 TRACE_ID_MAX_LENGTH = 255
+#: ``request_logs.session_id`` width. Shared with the clip at the intake edge so
+#: the column and the truncation cannot drift apart.
+SESSION_ID_MAX_LENGTH = 64
+#: ``request_logs.resource_id`` width — a path or model name, never a body.
+RESOURCE_ID_MAX_LENGTH = 255
 
 
 class RequestLog(Base):
@@ -487,7 +492,7 @@ class RequestLog(Base):
     # Audit fields - Who (user/client identification)
     client_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv6 max length
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(SESSION_ID_MAX_LENGTH), nullable=True)
     auth_method: Mapped[str | None] = mapped_column(String(20), nullable=True)  # api_key, jwt, none
 
     # Audit fields - Where (service identification)

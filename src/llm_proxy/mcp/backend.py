@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypeVar
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
 lazy from mcp import ClientSession
@@ -22,6 +21,7 @@ lazy from mcp.types import (
 )
 
 from llm_proxy.core.exceptions import MCPConnectionError, MCPTimeoutError
+from llm_proxy.core.url_redaction import redact_url
 from llm_proxy.observability.logger import get_logger
 
 if TYPE_CHECKING:
@@ -36,18 +36,7 @@ logger = get_logger(__name__)
 
 def _safe_mcp_url(url: str) -> str:
     """Render an MCP URL without userinfo, query, or fragment (credentials)."""
-    try:
-        parsed = urlsplit(url)
-        if not parsed.hostname:
-            return "<mcp>"
-        netloc = parsed.hostname
-        if ":" in netloc:
-            netloc = f"[{netloc}]"
-        if parsed.port:
-            netloc = f"{netloc}:{parsed.port}"
-        return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
-    except Exception:
-        return "<mcp>"
+    return redact_url(url, empty_host="<mcp>")
 
 
 T = TypeVar("T")

@@ -41,9 +41,34 @@ class TestSchema:
                 "n": _question("noul"),
                 "c": _question("choice"),
                 "s": _question("score"),
+                "b": _question("box"),
             },
         )
-        assert set(schema.questions) == {"n", "c", "s"}
+        assert set(schema.questions) == {"n", "c", "s", "b"}
+
+    def test_box_takes_no_criteria(self):
+        # A box question describes its target in the instructions and answers
+        # with coordinates; a rubric has nowhere to go.
+        with pytest.raises(ValidationError, match="box takes no criteria"):
+            SystemOneRequestSchema(
+                state="x", model="m", questions={"b": _question("box", criteria=["a"])}
+            )
+
+    def test_assets_are_accepted_for_typesafe(self):
+        schema = SystemOneRequestSchema(
+            state=["inspect", "llm-proxy-image-1"],
+            model="jev-latest",
+            questions={"n": _question("noul")},
+            assets={
+                "llm-proxy-image-1": {
+                    "type": "image",
+                    "format": "png",
+                    "data_base64": "iVBORw0KGgo=",
+                }
+            },
+        )
+        assert schema.assets is not None
+        assert "llm-proxy-image-1" in schema.assets
 
     def test_choice_requires_criteria_map(self):
         with pytest.raises(ValidationError, match="choice requires criteria"):

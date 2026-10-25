@@ -18,6 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 #: the question plus the data it references.
 Instructions = str | dict[str, Any] | list[Any]
 
+#: The fields one TypeSafe image asset may carry; anything else is a client bug
+#: the upstream would reject after the proxy forwarded it.
+TYPESAFE_ASSET_FIELDS: frozenset[str] = frozenset({"type", "format", "data_base64"})
+#: Formats the TypeSafe image channel documents.
+TYPESAFE_ASSET_FORMATS: frozenset[str] = frozenset({"png", "jpeg"})
+
 
 #: Upstream-documented limits, mirrored here so an invalid request fails at the
 #: proxy with a 422 naming the offending question instead of at the provider
@@ -34,19 +40,24 @@ _MAX_SCORE_LEVELS = 26
 class SystemOneQuestionSchema(BaseModel):
     """A typed System One question.
 
-    ``noul`` is a yes/no question, ``choice`` picks one option from a map, and
-    ``score`` rates the state across an ordered array of levels. Unknown keys
-    are allowed so a future upstream field is not rejected client-side.
+    ``noul`` is a yes/no question, ``choice`` picks one option from a map,
+    ``score`` rates the state across an ordered array of levels, and ``box``
+    locates what its instructions describe in an image (Jev 1.14 and, through
+    OpenRouter, nothing else — TypeSafe serves it behind its danger-zone
+    header). Unknown keys are allowed so a future upstream field is not rejected
+    client-side.
     """
 
     model_config = ConfigDict(extra="allow")
 
-    type: Literal["noul", "choice", "score"]
+    type: Literal["noul", "choice", "score", "box"]
     instructions: Instructions
     criteria: dict[str, Any] | list[Any] | None = None
 
     @model_validator(mode="after")
     def _validate_criteria(self) -> SystemOneQuestionSchema:
+        if self.type == "box" and self.criteria is not None:
+            raise ValueError("box takes no criteria; describe the target in its instructions")
         if self.type == "noul" and self.criteria is not None:
             if not isinstance(self.criteria, dict):
                 raise ValueError("noul criteria must be an object with 'true'/'false' descriptions")
@@ -110,6 +121,46 @@ class SystemOneRequestSchema(BaseModel):
             "string such as '5m' or seconds (Ollama only)."
         ),
     )
+
+    # TypeSafe-only optional field. Declared so it is validated and documented;
+    # forwarded upstream only where documented (see EXEMPT_EXTRA_KEYS on the
+    # TypeSafe adapter).
+    assets: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Images keyed by a placeholder string, which the upstream substitutes "
+            "wherever it appears in 'state' or a question's instructions "
+            "(TypeSafe only; needs a vision-capable model)."
+        ),
+    )
+
+    @field_validator("assets")
+    @classmethod
+    def _validate_assets(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Refuse an asset the TypeSafe channel cannot carry.
+
+        ``assets`` is also a client field — a TypeSafe SDK request can send one
+        directly — so its shape is checked at the edge rather than at the
+        adapter: every value is one image and nothing else.
+        """
+        if value is None:
+            return None
+        for placeholder, asset in value.items():
+            if not isinstance(placeholder, str) or not placeholder:
+                raise ValueError("asset keys must be non-empty placeholder strings")
+            if not isinstance(asset, dict):
+                raise ValueError(f"asset '{placeholder}' must be an object")
+            unknown = set(asset) - TYPESAFE_ASSET_FIELDS
+            if unknown:
+                raise ValueError(f"asset '{placeholder}' has unknown fields: {sorted(unknown)}")
+            if asset.get("type") != "image":
+                raise ValueError(f"asset '{placeholder}' must have type 'image'")
+            if asset.get("format") not in TYPESAFE_ASSET_FORMATS:
+                raise ValueError(f"asset '{placeholder}' format must be 'png' or 'jpeg'")
+            payload = asset.get("data_base64")
+            if not isinstance(payload, str) or not payload:
+                raise ValueError(f"asset '{placeholder}' needs a non-empty 'data_base64' string")
+        return value
 
     @field_validator("images")
     @classmethod

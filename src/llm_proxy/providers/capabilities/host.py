@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         InternalTranscriptionResponse,
         InternalTranslationRequest,
         InternalTranslationResponse,
+        SystemOneImageChannel,
     )
     from llm_proxy.providers.base import BaseHttpProvider, OutboundBody
     from llm_proxy.serialization.providers.base import ProviderSerializer
@@ -153,16 +154,17 @@ class SystemOneSelf(CapabilityHost, Protocol):
 
     ``DecisionsOverSystemOneMixin`` also annotates its ``self`` with this: the
     decisions direction it adds asks the System One transport for its route and
-    posts through it.
+    its image channel, and posts through it.
     """
 
     SYSTEMONE_ENDPOINT: str
+    SYSTEMONE_IMAGE_CHANNEL: SystemOneImageChannel | None
 
     def _systemone_url(self, request: InternalSystemOneRequest) -> str: ...
 
     def _systemone_decisions_url(self, request: InternalSystemOneRequest) -> str: ...
 
-    def _systemone_headers(self) -> dict[str, str]: ...
+    def _systemone_headers(self, request: InternalSystemOneRequest) -> dict[str, str]: ...
 
     async def _post_systemone(
         self, url: str, request: InternalSystemOneRequest, **kwargs: Any

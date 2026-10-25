@@ -21,7 +21,7 @@ from llm_proxy.core.internal_call import build_provider_adapter
 from llm_proxy.core.provider_selector import ProviderSelectionResult
 from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.database import UserRecord, UserRepository, get_async_session
-from llm_proxy.database.tables import TRACE_ID_MAX_LENGTH
+from llm_proxy.database.tables import SESSION_ID_MAX_LENGTH, TRACE_ID_MAX_LENGTH
 from llm_proxy.http.client import AsyncSession, ProviderHTTPClientManager
 from llm_proxy.services import runtime_services
 
@@ -47,7 +47,7 @@ def extract_trace_id(request: Request) -> str | None:
 def extract_session_id(request: Request) -> str | None:
     """Client correlation id, clipped to the ``request_logs.session_id`` width."""
     value = request.headers.get("x-session-id")
-    return value[:64] if isinstance(value, str) else None
+    return value[:SESSION_ID_MAX_LENGTH] if isinstance(value, str) else None
 
 
 def extract_user_id(request: Request) -> str | None:

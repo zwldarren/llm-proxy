@@ -450,11 +450,11 @@ class TestUrlDownload:
     ):
         """HTTP image URIs in input items are downloaded and replaced inline."""
 
-        async def fake_download(client, url):
+        async def fake_download(client, url, **kwargs):
             return ("data:image/png;base64,REPLACED", "image/png")
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("llm_proxy.providers.gemini.adapter.download_image_as_base64", fake_download)
+            mp.setattr("llm_proxy.http.media.download_image_as_base64", fake_download)
             client = MagicMock()
             input_items = [
                 {"type": "user_input", "content": [{"type": "text", "text": "look"}]},

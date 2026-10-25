@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from llm_proxy.api.middleware.content_encoding import content_encoding_middleware
 from llm_proxy.api.middleware.form_encoded import form_encoded_middleware
 from llm_proxy.config.types import ProxyAuthConfig, ProxyConfig, SecurityParams, ServerParams
+from llm_proxy.services import runtime_services
 
 _TEST_AUTH = ProxyAuthConfig(jwt_secret="a" * 32)
 
@@ -27,7 +28,7 @@ def _build_app(max_bytes: int = 10 * 1024 * 1024, *, with_form: bool = False) ->
             security=SecurityParams(max_request_body_size_bytes=max_bytes),
         )
     )
-    app.state.config_manager = config_manager
+    runtime_services(app).install_config_manager(config_manager)
     if with_form:
         # Registered after content_encoding so form conversion runs after
         # decompression (same relative order as the real app).
@@ -236,11 +237,12 @@ async def test_admission_precedes_body_read(monkeypatch):
         def replace(self, data: bytes) -> None:
             events.append(f"replace:{data.decode()}")
 
-    app = MagicMock()
-    app.state.config_manager = MagicMock()
-    app.state.config_manager.get_cached_config.return_value = ProxyConfig(
+    app = FastAPI()
+    config_manager = MagicMock()
+    config_manager.get_cached_config.return_value = ProxyConfig(
         server_params=ServerParams(auth=_TEST_AUTH)
     )
+    runtime_services(app).install_config_manager(config_manager)
     scope = {
         "type": "http",
         "http_version": "1.1",

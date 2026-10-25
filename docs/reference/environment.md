@@ -34,6 +34,10 @@ Pool sizes, timeouts, and background writer tuning. Change only if you know why.
 | `HTTP_MAX_KEEPALIVE` | `200` | httpx keep-alive pool size |
 | `HTTP_DISABLE_HTTP2` | `true` | HTTP/2 is disabled by default |
 | `HTTP_CLIENT_BACKEND` | `auto` | Outbound HTTP backend: `auto`, `httpx2` or `aiohttp`. `auto` selects `aiohttp` (measured ~1.6x the throughput at ~45% lower CPU per request on the gateway hot path) unless an outbound proxy is configured, in which case it keeps `httpx2` because aiohttp does not honour `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` |
+| `HTTP_ALLOWED_HOSTS` | *empty* | Comma-separated hosts exempt from the SSRF private-address ban, for self-hosted providers on private networks and internal image hosts. Every entry weakens SSRF protection |
+| `HTTP_MAX_DOWNLOAD_BYTES` | `20971520` (20 MiB) | Largest body the proxy buffers for a client-supplied image/file URL, enforced while streaming. 20 MiB is the per-image ceiling of the largest mainstream vision APIs (OpenAI 20 MB, Gemini 20 MB for an inline request; Anthropic is 5 MB), so the cap never rejects a picture an upstream would have accepted |
+| `HTTP_MAX_REQUEST_DOWNLOAD_BYTES` | `67108864` (64 MiB) | Total inlined media one request may retain across all the URLs it names; the same figure as the request body limit. Peak memory per request is this total plus at most four in-flight downloads |
+| `HTTP_MAX_RESPONSE_BYTES` | `67108864` (64 MiB) | Largest upstream response the proxy buffers. A response over it is refused with a `502` instead of being read into memory |
 | `DB_POOL_SIZE` | `min((cpu_count * 2 + 1) / workers, 80 / (2 * workers))`, min 1 | PostgreSQL pool size per worker process (ignored for SQLite). The second bound caps the total at ~80 connections (overflow defaults to the pool size) so N workers don't overrun `max_connections`. The `DB_POOL_SIZE=10` / `DB_MAX_OVERFLOW=10` lines in `.env.example` are examples, not the defaults |
 | `DB_MAX_OVERFLOW` | same as pool size | PostgreSQL overflow |
 | `DB_POOL_RECYCLE_SECONDS` | `3600` (min 60) | PostgreSQL connection recycle |

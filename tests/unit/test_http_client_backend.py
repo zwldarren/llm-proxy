@@ -52,3 +52,20 @@ def test_invalid_backend_is_rejected() -> None:
 
     with pytest.raises(ValidationError):
         HTTPSettings(HTTP_CLIENT_BACKEND="requests")
+
+
+def test_max_download_bytes_defaults_to_the_vision_image_ceiling() -> None:
+    """The download cap defaults to 20 MiB, the largest per-image inline limit.
+
+    See docs/guides/security.md#outbound-media-downloads: the point is to never
+    cut an image an upstream would accept, while still bounding proxy memory.
+    """
+    assert HTTPSettings().max_download_bytes == 20 * 1024 * 1024
+    assert HTTPSettings(HTTP_MAX_DOWNLOAD_BYTES="1024").max_download_bytes == 1024
+
+
+def test_max_download_bytes_must_be_positive() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        HTTPSettings(HTTP_MAX_DOWNLOAD_BYTES="0")

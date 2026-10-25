@@ -182,14 +182,13 @@ class TestDownloadImageAsBase64:
     """Tests for download_image_as_base64 MIME type handling."""
 
     @pytest.mark.asyncio
-    async def test_preserves_non_image_content_type(self):
+    async def test_preserves_non_image_content_type(self, mock_response_cls):
         from llm_proxy.http.client import download_image_as_base64
 
         mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.content = b"audio data"
-        mock_response.headers = {"content-type": "audio/mpeg"}
-        mock_client.get.return_value = mock_response
+        mock_client.get.return_value = mock_response_cls(
+            stream_chunks=[b"audio data"], headers={"content-type": "audio/mpeg"}
+        )
 
         result = await download_image_as_base64(mock_client, "https://example.com/audio.mp3")
         assert result is not None
@@ -198,14 +197,11 @@ class TestDownloadImageAsBase64:
         assert data_url.startswith("data:audio/mpeg;base64,")
 
     @pytest.mark.asyncio
-    async def test_infers_mime_from_extension_when_no_header(self):
+    async def test_infers_mime_from_extension_when_no_header(self, mock_response_cls):
         from llm_proxy.http.client import download_image_as_base64
 
         mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.content = b"pdf data"
-        mock_response.headers = {}
-        mock_client.get.return_value = mock_response
+        mock_client.get.return_value = mock_response_cls(stream_chunks=[b"pdf data"])
 
         result = await download_image_as_base64(mock_client, "https://example.com/doc.pdf")
         assert result is not None
@@ -214,16 +210,31 @@ class TestDownloadImageAsBase64:
         assert data_url.startswith("data:application/pdf;base64,")
 
     @pytest.mark.asyncio
-    async def test_strips_charset_from_content_type(self):
+    async def test_strips_charset_from_content_type(self, mock_response_cls):
         from llm_proxy.http.client import download_image_as_base64
 
         mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.content = b"pdf data"
-        mock_response.headers = {"content-type": "application/pdf; charset=utf-8"}
-        mock_client.get.return_value = mock_response
+        mock_client.get.return_value = mock_response_cls(
+            stream_chunks=[b"pdf data"],
+            headers={"content-type": "application/pdf; charset=utf-8"},
+        )
 
         result = await download_image_as_base64(mock_client, "https://example.com/doc.pdf")
         assert result is not None
         data_url, mime = result
         assert mime == "application/pdf"
+
+    @pytest.mark.asyncio
+    async def test_reads_the_body_as_a_stream(self, mock_response_cls):
+        """The body must not be buffered whole by the HTTP client: the cap is
+        enforced while it streams, so an oversized file is never fully read."""
+        from llm_proxy.http.client import download_image_as_base64
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response_cls(
+            stream_chunks=[b"data"], headers={"content-type": "image/png"}
+        )
+
+        await download_image_as_base64(mock_client, "https://example.com/image.png")
+
+        assert mock_client.get.await_args.kwargs["stream"] is True

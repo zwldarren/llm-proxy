@@ -16,7 +16,7 @@ from typing import Any
 
 from starlette.requests import Request as StarletteRequest
 
-from llm_proxy.core.request_facts import facts_for, mint_request_id
+from llm_proxy.core.request_facts import MINT_PREFIX_WS, facts_for, mint_request_id
 
 # Connection age cap shared by both WebSocket transports (60 minutes).
 WS_MAX_CONNECTION_SECONDS = 60 * 60
@@ -52,8 +52,23 @@ def build_ws_request(websocket: Any) -> StarletteRequest:
     scope["method"] = "GET"
     scope.setdefault("http_version", "1.1")
     request = StarletteRequest(scope)
-    facts_for(request).request_id = mint_request_id("ws_")
+    facts_for(request).request_id = mint_request_id(MINT_PREFIX_WS)
     return request
+
+
+def ws_rejection_close(status_code: int, *, unavailable: int | None) -> tuple[str, int | None]:
+    """Map a gate rejection to the error code and close code the client sees.
+
+    ``unavailable`` is the close code for a gate that could not reach its
+    accounting (503): the accept path closes the socket with an upstream-failure
+    code, while a turn keeps the socket open — the next turn may succeed — and
+    passes ``None``.
+    """
+    if status_code == 401:
+        return "authentication_failed", WS_CLOSE_AUTH_FAILED
+    if status_code == 429:
+        return "rate_limit_exceeded", WS_CLOSE_FORBIDDEN
+    return "server_error", unavailable
 
 
 async def receive_with_connection_cap[T](

@@ -10,7 +10,7 @@ and write the requesting user's ``users.tracing_config`` column. They require
 only ``require_authenticated`` (any logged-in user), not the admin role.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from llm_proxy.api.dependencies import get_current_user, require_authenticated
 from llm_proxy.api.routers.tracing import (
@@ -35,6 +35,7 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.tracing.handlers import list_handler_types
 from llm_proxy.observability.tracing_config import TracingConfig
 from llm_proxy.observability.user_tracing import get_user_tracing_manager
+from llm_proxy.services import runtime_services
 
 logger = get_logger(__name__)
 
@@ -78,6 +79,7 @@ async def get_my_tracing(user: UserRecord = Depends(get_current_user)) -> Tracin
 
 @router.put("/", response_model=TracingUpdateResponse)
 async def update_my_tracing(
+    request: Request,
     config_data: TracingConfigWrite,
     user: UserRecord = Depends(get_current_user),
 ) -> TracingUpdateResponse:
@@ -94,7 +96,9 @@ async def update_my_tracing(
         # the permissive format-only check (they can already configure
         # providers); every other user is restricted to non-private hosts.
         await _validate_tracing_provider_urls_async(
-            config.providers, allow_private_hosts=user.role == "admin"
+            config.providers,
+            allow_private_hosts=user.role == "admin",
+            executor=runtime_services(request).url_validation_executor(),
         )
 
         async with get_async_session_context() as session:

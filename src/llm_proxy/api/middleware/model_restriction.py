@@ -68,6 +68,38 @@ def check_model_restriction(
     )
 
 
+def check_and_record_model_restriction(
+    request: Request,
+    *,
+    api_key_name: str,
+    allowed_models: list[str],
+    requested_model: str | None,
+    resource_fallback: str,
+) -> str | None:
+    """Check the allowlist and record the rejection row when the model is denied.
+
+    Returns the operator-facing message on a miss and ``None`` when the model is
+    allowed. The HTTP transport renders the miss as a 403 body and the WebSocket
+    transport as an error frame, but the decision and the audit row are the same
+    on both, so the check and the row live here and the callers only render.
+    ``resource_fallback`` names the row's ``resource_id`` when no model was sent.
+    """
+    allowed, error_message = check_model_restriction(api_key_name, allowed_models, requested_model)
+    if allowed:
+        return None
+    message = error_message or "Model not allowed for this API key"
+    record_rejection(
+        request,
+        status_code=403,
+        error_message=message,
+        error_type="forbidden",
+        event_type=EventType.AUTHORIZATION,
+        resource_type=ResourceType.MODEL,
+        resource_id=requested_model or resource_fallback,
+    )
+    return message
+
+
 async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     """Check API key model restrictions.
 
@@ -118,35 +150,25 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
             requested_model = None
     else:
         requested_model = get_model_from_request_body(raw_body)
-    is_allowed, error_msg = check_model_restriction(
-        api_key_name,
-        allowed_models,
-        requested_model,
+    # An authorization miss, not an authentication failure: this key has already
+    # been verified, so requesting a disallowed model must not consume the client
+    # IP's auth-failure budget (that is how one misconfigured allowlist gets the
+    # whole address locked out) and must not make the client pay the auth failure
+    # delay. Short-circuited here means no endpoint row is written later, so the
+    # rejection itself is the only record the operator will see.
+    rejection_message = check_and_record_model_restriction(
+        request,
+        api_key_name=api_key_name,
+        allowed_models=allowed_models,
+        requested_model=requested_model,
+        resource_fallback=api_key_name,
     )
-    if not is_allowed:
-        # An authorization miss, not an authentication failure: this key has
-        # already been verified, so requesting a disallowed model must not
-        # consume the client IP's auth-failure budget (that is how one
-        # misconfigured allowlist gets the whole address locked out) and must
-        # not make the client pay the auth failure delay.
-
-        # Short-circuited here means no endpoint row is written later, so the
-        # rejection itself is the only record the operator will see.
-        record_rejection(
-            request,
-            status_code=403,
-            error_message=error_msg or "Model not allowed for this API key",
-            error_type="forbidden",
-            event_type=EventType.AUTHORIZATION,
-            resource_type=ResourceType.MODEL,
-            resource_id=requested_model or api_key_name,
-        )
-
+    if rejection_message is not None:
         return JSONResponse(
             status_code=403,
             content={
                 "error": {
-                    "message": error_msg,
+                    "message": rejection_message,
                     "type": "forbidden",
                     "code": "model_not_allowed",
                 }

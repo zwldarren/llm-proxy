@@ -257,7 +257,10 @@ DECISIONS_BODY = {
             "type": "choice",
             "name": "department",
             "instructions": "Which department?",
-            "choices": [{"value": "billing", "description": "Payments."}],
+            "choices": [
+                {"value": "billing", "description": "Payments."},
+                {"value": "technical", "description": "Bugs."},
+            ],
         },
     ],
 }

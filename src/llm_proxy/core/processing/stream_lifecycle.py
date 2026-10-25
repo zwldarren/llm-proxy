@@ -490,6 +490,11 @@ class StreamLifecycle:
                 "response.completed",
                 "response.done",
                 "message_stop",
+                # A truncated or failed turn still arrives complete as a frame:
+                # the client holds the whole answer (or the whole error), so a
+                # socket dropped after it is a clean close, not an abandonment.
+                "response.incomplete",
+                "response.failed",
             ):
                 return True
         return False

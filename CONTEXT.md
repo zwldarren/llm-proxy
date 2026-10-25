@@ -66,8 +66,9 @@ consumer of one), decision endpoint (that is the route, not the model)
 
 **Envelope**:
 One of the two wire formats over the same three evaluation primitives. System One
-(`state` + `questions` map, kinds `noul`/`choice`/`score`) and Decisions (`input`
-+ ordered `questions`, kinds `predicate`/`choice`/`score`). A request names one
+(`state` + `questions` map, kinds `noul`/`choice`/`score`, plus `box` for the
+image-locating question only System One has) and Decisions (`input` + ordered
+`questions`, kinds `predicate`/`choice`/`score`). A request names one
 by its endpoint — `/v1/systemone` or `/v1/decisions`. See ADR-0019.
 _Avoid_: protocol, dialect, format (it is a payload shape, not a client-facing
 API)
@@ -82,6 +83,30 @@ under its own route, so `/v1/decisions` can reach an upstream route that
 `/v1/systemone` does not — one upstream route can serve both, or two can, without
 the code differing.
 _Avoid_: adapter translation, protocol conversion (that is the chat path)
+
+**Image channel**:
+How one System One upstream carries an image, since the envelope has no image
+field of its own: `images` (Ollama's shared base64 array), `state_parts`
+(OpenRouter's `image_url` parts in `state`), or `assets` (TypeSafe's placeholder
+map). Each adapter declares its own (`SYSTEMONE_IMAGE_CHANNEL`); the bridge
+renders a Decisions request's images into that channel, and an adapter that
+declares none receives the text alone — the hosted-image download is skipped for
+it, since there is nothing to inline into. Where the upstream has a channel, a
+hosted image URL is downloaded and inlined before the bridge runs, because no
+System One upstream fetches one. See ADR-0045.
+_Avoid_: image field, attachment (an image is not a first-class envelope field)
+
+**Media download budget**:
+The bounds on how much client-supplied media one request may make the proxy
+fetch. `llm_proxy.http.media.RequestDownloads` is the single chokepoint — every
+chat image/document URL and every bridged Decisions image goes through it. It
+runs at most four downloads at once and charges each inlined payload to a
+request-wide total (`HTTP_MAX_REQUEST_DOWNLOAD_BYTES`, 64 MiB), on top of the
+per-URL SSRF check and size cap (`HTTP_MAX_DOWNLOAD_BYTES`). A failed download is
+an outcome, not an exception, so the caller decides whether it fails the request
+(bridged Decisions) or drops that one part (chat media). See ADR-0046.
+_Avoid_: image cache, download pool (it bounds one request, it does not pool
+anything)
 
 ### Retrieval endpoints
 

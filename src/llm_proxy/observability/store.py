@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.billing.tokens import ProxyBillableDimensions, token_usage_from
+from llm_proxy.database.tables import RESOURCE_ID_MAX_LENGTH, SESSION_ID_MAX_LENGTH
 from llm_proxy.observability.classification import get_server_hostname
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.service import (
@@ -233,7 +234,7 @@ def assemble_row(
         "auth_method": _truncate(auth_method, 20),
         "client_ip": _truncate(client_ip, 45),
         "user_agent": _truncate(user_agent, 500),
-        "session_id": _truncate(session_id, 64),
+        "session_id": _truncate(session_id, SESSION_ID_MAX_LENGTH),
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
@@ -251,7 +252,7 @@ def assemble_row(
         "event_type": event_type,
         "action_category": action_category,
         "resource_type": resource_type,
-        "resource_id": resource_id,
+        "resource_id": _truncate(resource_id, RESOURCE_ID_MAX_LENGTH),
         "outcome": outcome,
         "server_hostname": get_server_hostname(),
         "service_name": "llm-proxy",
