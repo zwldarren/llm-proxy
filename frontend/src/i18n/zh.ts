@@ -1856,6 +1856,14 @@ export default {
     secretKey: "密钥",
     publicKeyPlaceholder: "pk-...",
     secretKeyPlaceholder: "sk-...",
+    sendContent: "内容导出",
+    sendContentHelp:
+      "“完整内容”原样导出提示词与回复；“跟随日志设置”遵循“记录输入/输出”和“敏感数据脱敏”开关；“仅元数据”不导出任何内容（用量、费用和元数据仍会发送）。",
+    sendContentOptions: {
+      full: "完整内容",
+      inherit: "跟随日志设置",
+      none: "仅元数据",
+    },
     timeout: "超时时间（秒）",
     timeoutPlaceholder: "可选",
     status: {

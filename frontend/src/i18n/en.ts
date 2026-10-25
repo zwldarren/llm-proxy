@@ -1926,6 +1926,14 @@ export default {
     secretKey: "Secret Key",
     publicKeyPlaceholder: "pk-...",
     secretKeyPlaceholder: "sk-...",
+    sendContent: "Send Content",
+    sendContentHelp:
+      "Full exports prompts and completions verbatim. Follow log settings obeys Log Input/Output and Mask Sensitive Data. Metadata only exports no content (usage, cost and metadata are still sent).",
+    sendContentOptions: {
+      full: "Full content",
+      inherit: "Follow log settings",
+      none: "Metadata only",
+    },
     timeout: "Timeout (seconds)",
     timeoutPlaceholder: "Optional",
     status: {

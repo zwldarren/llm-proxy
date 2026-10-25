@@ -4,6 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SheetHeader from "@/components/ui/sheet/SheetHeader.vue";
 import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
@@ -16,7 +23,7 @@ import type { TracingProvider } from "@/types/schemas";
  * Kept out of the settings card so the page stays compact no matter how many
  * providers are configured.
  */
-defineProps<{
+const props = defineProps<{
   provider: TracingProvider | null;
   editor: TracingProviderEditor;
 }>();
@@ -26,6 +33,26 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+type SendContent = "full" | "inherit" | "none";
+
+function isSendContent(value: unknown): value is SendContent {
+  return value === "full" || value === "inherit" || value === "none";
+}
+
+/**
+ * The value the select shows. A provider saved before `send_content` existed
+ * (or whose key was removed) uses the backend default, `full`.
+ */
+function sendContentValue(provider: TracingProvider): SendContent {
+  const value = props.editor.getProviderFieldValue(provider, "send_content");
+  return isSendContent(value) ? value : "full";
+}
+
+function updateSendContent(provider: TracingProvider, value: unknown): void {
+  if (!provider.id || !isSendContent(value)) return;
+  props.editor.updateProviderField(provider.id, "send_content", value);
+}
 </script>
 
 <template>
@@ -114,6 +141,31 @@ const { t } = useI18n();
               "
             />
           </div>
+        </div>
+
+        <!-- Content export (Langfuse) -->
+        <div v-if="provider.provider === 'langfuse'" class="space-y-1.5">
+          <Label class="text-xs font-semibold text-muted-foreground">
+            {{ t("tracing.sendContent") }}
+          </Label>
+          <Select
+            :model-value="sendContentValue(provider)"
+            @update:model-value="(value) => updateSendContent(provider!, value)"
+          >
+            <SelectTrigger
+              class="w-full bg-background"
+              :aria-label="t('tracing.sendContent')"
+              data-testid="send-content"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="full">{{ t("tracing.sendContentOptions.full") }}</SelectItem>
+              <SelectItem value="inherit">{{ t("tracing.sendContentOptions.inherit") }}</SelectItem>
+              <SelectItem value="none">{{ t("tracing.sendContentOptions.none") }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground">{{ t("tracing.sendContentHelp") }}</p>
         </div>
 
         <!-- Timeout -->
