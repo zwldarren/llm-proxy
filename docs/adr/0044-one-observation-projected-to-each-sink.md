@@ -129,7 +129,8 @@ pipeline / middleware / MCP / web search
    prompt/completion content, with `mask_sensitive_data` on it exports the same
    masked values the log row stores. `full` is the documented, explicit operator
    opt-in that bypasses the switches; `none` never exports content. Tool
-   observations follow the same decision.
+   observations follow the same decision. **Amended (2026-10): the default is now
+   `full`; see the amendment at the end of this document.**
 
 ## Consequences
 
@@ -238,3 +239,22 @@ pipeline / middleware / MCP / web search
   explicit and reviewable.
 - Database logs, audit entries and traces are not forced into one schema. They
   share the observation, not the row.
+
+## Amendment (2026-10): Langfuse content defaults to `full`
+
+The Langfuse exporter's `send_content` default is `full`, not `inherit`. 0.5.1
+made tracing content follow the log switches, and because `log_input_output`
+defaults to off, every deployment that upgraded saw traces with metadata but no
+`input`/`output` — a silent regression from 0.5.0 that the release notes did not
+flag. Tracing is per-user and explicitly enabled, and an operator who enables a
+trace backend expects to see the prompt and completion, so the backend now
+exports content unless the user chooses otherwise.
+
+The choices themselves are unchanged: `inherit` makes `log_input_output` and
+`mask_sensitive_data` govern tracing too (no content when body logging is off,
+masked content when masking is on), and `none` never exports content. The
+privacy rule this ADR introduced also stands — a sink's registration still only
+narrows the request's mode; the backend's own setting is the one documented
+place where an operator may widen it. The difference is only which value that
+setting starts at.
+

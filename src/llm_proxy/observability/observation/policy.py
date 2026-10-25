@@ -22,11 +22,12 @@ Three content modes, ordered by how much they expose:
 - ``masked`` — content is delivered with every sensitive key's value masked.
 - ``full`` — content is delivered verbatim.
 
-A sink cannot escalate: :func:`effective_mode` returns the *narrower* of the
-request's mode and the sink's requested mode. The only way to send full content
-when the deployment masks it is the sink's own explicit opt-in setting (for
-Langfuse, ``send_content="full"``), which is a deliberate, documented operator
-decision rather than a silent default.
+A sink's registration narrows the request's mode and never widens it; the one
+exception is a backend's own content setting, which is the operator's documented
+choice (for Langfuse, ``send_content``: ``full``, ``inherit`` or ``none``). It
+defaults to ``full``, so enabling tracing keeps exporting the prompt and
+completion; ``inherit`` makes the log switches govern tracing too, and ``none``
+withholds content entirely.
 
 See ADR-0044.
 """

@@ -132,14 +132,13 @@ class LangfuseTracingHandler(TracingHandler):
             "name": "send_content",
             "type": "select",
             "required": False,
-            "default": "inherit",
+            "default": "full",
             "choices": ["inherit", "none", "full"],
             "description": (
-                "Which prompt/completion content to export. 'inherit' (default) follows "
-                "the logging settings: no content when log_input_output is off, masked "
-                "content when mask_sensitive_data is on. 'none' never exports content. "
-                "'full' exports verbatim content regardless of the logging settings — "
-                "an explicit opt-in that bypasses the log privacy switches."
+                "Which prompt/completion content to export. 'full' (default) exports "
+                "verbatim content. 'inherit' follows the logging settings: no content "
+                "when log_input_output is off, masked content when mask_sensitive_data "
+                "is on. 'none' never exports content."
             ),
         },
     ]
@@ -200,7 +199,7 @@ class LangfuseTracingHandler(TracingHandler):
         base_url = cls._resolve_host(settings)
         timeout = settings.get("timeout")
         sample_rate = settings.get("sample_rate")
-        send_content = str(settings.get("send_content") or "inherit").strip().lower()
+        send_content = str(settings.get("send_content") or "full").strip().lower()
         if send_content not in cls._SEND_CONTENT_CHOICES:
             raise ValueError("send_content must be one of: inherit, none, full")
 
@@ -249,7 +248,7 @@ class LangfuseTracingHandler(TracingHandler):
         client: Langfuse,
         base_url: str,
         version: str = "1.0",
-        send_content: SendContent = "inherit",
+        send_content: SendContent = "full",
     ) -> None:
         super().__init__(enabled=enabled)
         self.name = name

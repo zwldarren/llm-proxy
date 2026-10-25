@@ -1179,11 +1179,12 @@ class TestLangfuseSDKDataBuilders:
 
 
 class TestLangfuseContentPolicy:
-    """The tracing exporter obeys the same privacy policy as the database log.
+    """The tracing exporter's content setting and its relation to the log policy.
 
-    ``send_content`` defaults to ``inherit``: no prompt/completion content when
+    ``send_content`` defaults to ``full``: enabling tracing exports the prompt and
+    completion. ``inherit`` follows the log switches (no content when
     ``log_input_output`` is off, masked content when ``mask_sensitive_data`` is
-    on. ``full`` is the explicit opt-in that bypasses the log switches.
+    on), and ``none`` never exports content.
     """
 
     def _handler(self, mock_client, **settings):
@@ -1191,9 +1192,9 @@ class TestLangfuseContentPolicy:
         base.update(settings)
         return LangfuseTracingHandler.create_handler(base)
 
-    def test_send_content_defaults_to_inherit(self, mock_client, mock_langfuse_cls):
+    def test_send_content_defaults_to_full(self, mock_client, mock_langfuse_cls):
         handler = self._handler(mock_client)
-        assert handler._exporter.send_content == "inherit"
+        assert handler._exporter.send_content == "full"
 
     def test_rejects_an_unknown_send_content_value(self, mock_langfuse_cls):
         with pytest.raises(ValueError, match="send_content"):
@@ -1205,7 +1206,7 @@ class TestLangfuseContentPolicy:
                 }
             )
 
-    async def test_bodies_off_exports_no_content(self, mock_client, mock_propagate):
+    async def test_default_exports_content_with_bodies_off(self, mock_client, mock_propagate):
         handler = self._handler(mock_client)
         gen = _make_generation()
         mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
@@ -1221,10 +1222,28 @@ class TestLangfuseContentPolicy:
         await handler.on_request_start(_make_request_with_conversation(), context)
 
         call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
-        assert call_kwargs["input"] is None, "the log privacy switch must gate prompt export"
+        assert call_kwargs["input"], "the default must keep exporting the prompt"
+
+    async def test_inherit_with_bodies_off_exports_no_content(self, mock_client, mock_propagate):
+        handler = self._handler(mock_client, send_content="inherit")
+        gen = _make_generation()
+        mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
+
+        context = EventContext(
+            request_id="req-1",
+            trace_id="trace-1",
+            model="gpt-4",
+            should_log_input_output=False,
+            metadata={"endpoint": "/v1/chat/completions"},
+        )
+
+        await handler.on_request_start(_make_request_with_conversation(), context)
+
+        call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
+        assert call_kwargs["input"] is None, "inherit must obey the log privacy switch"
 
     async def test_masking_is_shared_with_the_log_store(self, mock_client, mock_propagate):
-        handler = self._handler(mock_client)
+        handler = self._handler(mock_client, send_content="inherit")
         gen = _make_generation()
         mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
 
@@ -1246,7 +1265,7 @@ class TestLangfuseContentPolicy:
         assert "secret-value" not in str(exported)
 
     async def test_masking_off_exports_verbatim_content(self, mock_client, mock_propagate):
-        handler = self._handler(mock_client)
+        handler = self._handler(mock_client, send_content="inherit")
         gen = _make_generation()
         mock_client.start_as_current_observation.return_value.__enter__.return_value = gen
 

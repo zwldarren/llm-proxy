@@ -72,12 +72,12 @@ Configured in [Settings → Log Management](settings.md#log-management):
   `error_message` column is empty, so the attempt timeline is the *only* place the
   failure is recorded. The upstream payload those messages can echo lives in
   `log_metadata.error_details`, which *is* scrubbed.
-- **Tracing content** obeys these switches too. The Langfuse exporter's `send_content`
-  setting defaults to `inherit`: with bodies off it exports **no** prompt/completion
-  content (usage, cost, identity, timing and metadata are still exported), and with
-  masking on it exports the same masked values the log row stores. `full` is an
-  explicit opt-in that exports verbatim content regardless of the logging switches;
-  `none` never exports content. See [Tracing](#tracing).
+- **Tracing content** is configured separately on the tracing provider. The Langfuse
+  exporter's `send_content` setting defaults to `full`, so traces carry the prompt and
+  completion. `inherit` instead makes these switches govern tracing too: with bodies
+  off it exports **no** prompt/completion content (usage, cost, identity, timing and
+  metadata are still exported), and with masking on it exports the same masked values
+  the log row stores. `none` never exports content. See [Tracing](#tracing).
 - **Sampling** (`sampling_rate`, default 1.0) limits **body capture** for requests that
   do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` (a
   distinct marker, so the UI never reports "sampled out" when bodies are simply disabled)
@@ -261,12 +261,13 @@ billed call keeps its priced home. Version segments are stripped from the name, 
 `/v1/rerank` and `/v2/rerank` both read `rerank`, and the double-version aliases
 (`/v1/v1/chat/completions`) collapse to the canonical name as well.
 
-**Content policy.** The exporter does not bypass the log privacy switches. Its
-`send_content` setting defaults to `inherit`: `log_input_output` off means no
-prompt/completion content is sent (usage, cost, model, identity, timing and metadata
-still are), and `mask_sensitive_data` on means the same masked payload the log row
-stores is sent. `full` is the explicit operator opt-in that sends verbatim content,
-`none` never sends content. Tool observations follow the same decision.
+**Content policy.** The exporter exports the prompt and completion by default: its
+`send_content` setting is `full`, so enabling tracing keeps the input/output that
+previous releases recorded. `inherit` instead follows the log privacy switches —
+`log_input_output` off means no prompt/completion content is sent (usage, cost, model,
+identity, timing and metadata still are), and `mask_sensitive_data` on means the same
+masked payload the log row stores is sent. `none` never sends content. Tool
+observations follow the same decision.
 
 Correlate a trace with a request by sending `x-langfuse-trace-id` (or `x-trace-id`);
 when it is a canonical 32-character hex Langfuse trace id the proxy's generation is

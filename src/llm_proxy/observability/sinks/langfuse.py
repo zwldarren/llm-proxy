@@ -298,8 +298,8 @@ def sampled_tracer_provider(public_key: str, sample_rate: float) -> TracerProvid
 class LangfuseExporter:
     """Shape observations and drive the Langfuse SDK for one handler instance."""
 
-    #: The operator's content choice: ``inherit`` follows the request's policy,
-    #: ``none`` never exports content, ``full`` is the explicit opt-in bypass.
+    #: The operator's content choice: ``full`` exports verbatim content,
+    #: ``inherit`` follows the request's policy, ``none`` never exports content.
     send_content: SendContent
 
     def __init__(
@@ -308,7 +308,7 @@ class LangfuseExporter:
         client: Langfuse,
         base_url: str,
         version: str = "1.0",
-        send_content: SendContent = "inherit",
+        send_content: SendContent = "full",
         name: str = "langfuse",
     ) -> None:
         self.name = name
@@ -330,11 +330,10 @@ class LangfuseExporter:
     def _effective_mode(self, record: RequestObservation) -> ContentMode:
         """What this exporter may export for this request.
 
-        ``inherit`` follows the request's captured logging policy — the same one
-        the database log obeys — so a deployment with body logging off no longer
-        ships prompts to Langfuse. ``none``/``full`` are the operator's explicit
-        choice; ``full`` deliberately widens the request's mode, which only an
-        explicit setting may do.
+        ``full`` (the default) exports verbatim content. ``inherit`` follows the
+        request's captured logging policy — the same one the database log obeys —
+        so a deployment that wants the body switches to govern tracing too can
+        choose it. ``none`` never exports content.
         """
         if self.send_content == "none":
             return "none"
