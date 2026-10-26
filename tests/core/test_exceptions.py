@@ -269,6 +269,12 @@ class TestErrorResponseBuilder:
 class TestExceptionHierarchy:
     """Test suite for exception hierarchy."""
 
+    def test_validation_error_uses_client_error_code(self):
+        """Input validation must not surface as the base class's internal_error."""
+        error = ValidationError("bad input")
+
+        assert error.code == "invalid_request_error"
+
     def test_llm_proxy_error_is_base(self):
         """Test that all exceptions inherit from LLMProxyError."""
         exceptions = [

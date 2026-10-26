@@ -15,10 +15,13 @@ class TeamMemberCreate(BaseModel):
     role: Literal["admin", "viewer"] = Field(default="viewer", description="User role")
     allowed_models: list[str] | None = Field(
         default=None,
-        description="Model allowlist for this user (null = unrestricted)",
+        description="Model allowlist for this user (null = unrestricted, [] = deny all)",
     )
 
     _validate_password = field_validator("password")(validate_password_strength)
+    # Creation uses the same format as rename/self-rename: the UI documents
+    # letters, digits, underscores and hyphens only.
+    _validate_username = field_validator("username")(validate_username_format)
 
 
 class TeamMemberModelsUpdate(BaseModel):
@@ -62,6 +65,16 @@ class TeamMemberBudgetUpdate(BaseModel):
     )
 
 
+class TeamMemberRateLimitUpdate(BaseModel):
+    """Set or clear a member's account-level requests-per-minute cap."""
+
+    rate_limit_rpm: int | None = Field(
+        ...,
+        gt=0,
+        description="Requests per minute across all of the member's keys. Null clears the cap.",
+    )
+
+
 class TeamMemberRead(BaseModel):
     id: int
     username: str
@@ -69,6 +82,9 @@ class TeamMemberRead(BaseModel):
     is_active: bool
     must_change_password: bool = False
     allowed_models: list[str] | None = None
+    rate_limit_rpm: int | None = Field(
+        None, description="Account-level requests-per-minute cap. Null means unlimited."
+    )
     budget_usd: float | None = Field(
         None, description="Account-level spending cap in USD. Null means unlimited."
     )
@@ -88,6 +104,13 @@ class TeamMemberRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TeamMemberListResponse(BaseModel):
+    """A page of members plus the total matching the current search."""
+
+    items: list[TeamMemberRead]
+    total: int
 
 
 class TeamMemberPasswordReset(BaseModel):

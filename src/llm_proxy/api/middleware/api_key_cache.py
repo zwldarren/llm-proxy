@@ -136,6 +136,9 @@ class CachedApiKey:
     # Per-key requests-per-minute cap (None = unlimited), enforced at
     # request-auth time from this snapshot.
     rate_limit_rpm: int | None = None
+    # Admin-set account-level requests-per-minute cap for the key's owner,
+    # enforced across every key the owner has (None = unlimited).
+    user_rate_limit_rpm: int | None = None
     cached_at: float = field(default_factory=time.time)
 
 
@@ -152,6 +155,7 @@ class VerifiedKeyInfo:
     # Account-level budget envelope of the key's owner (empty = unlimited).
     user_budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
     rate_limit_rpm: int | None = None
+    user_rate_limit_rpm: int | None = None
     # Snapshot of the owner's forced-password-change flag at verification.
     must_change_password: bool = False
     verified_at: float = field(default_factory=time.time)
@@ -225,6 +229,7 @@ class ApiKeyCache:
         budget: BudgetEnvelope | None = None,
         user_budget: BudgetEnvelope | None = None,
         rate_limit_rpm: int | None = None,
+        user_rate_limit_rpm: int | None = None,
         key_hash: str | None = None,
         must_change_password: bool = False,
     ) -> None:
@@ -239,6 +244,7 @@ class ApiKeyCache:
                 budget=BudgetEnvelope() if budget is None else budget,
                 user_budget=BudgetEnvelope() if user_budget is None else user_budget,
                 rate_limit_rpm=rate_limit_rpm,
+                user_rate_limit_rpm=user_rate_limit_rpm,
                 key_hash=key_hash,
                 must_change_password=must_change_password,
             )
@@ -311,6 +317,8 @@ class UserSnapshot:
     is_active: bool = True
     # Admin-set account-level budget envelope (empty = unlimited).
     budget: BudgetEnvelope = field(default_factory=BudgetEnvelope)
+    # Admin-set account-level requests-per-minute cap (None = unlimited).
+    rate_limit_rpm: int | None = None
     must_change_password: bool = False
 
 
@@ -362,6 +370,7 @@ async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
                 UserRecord.allowed_models,
                 UserRecord.is_active,
                 UserRecord.must_change_password,
+                UserRecord.rate_limit_rpm,
                 UserRecord.budget_usd,
                 UserRecord.budget_period,
                 UserRecord.budget_reset_day,
@@ -373,6 +382,7 @@ async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
                 row.allowed_models,
                 row.is_active,
                 BudgetEnvelope.from_orm_fields(row),
+                rate_limit_rpm=row.rate_limit_rpm,
                 must_change_password=row.must_change_password,
             )
             for row in result
@@ -396,6 +406,7 @@ async def _refresh_cached_api_keys(cache: ApiKeyCache) -> list[CachedApiKey]:
                     budget=BudgetEnvelope.from_orm_fields(k),
                     user_budget=snapshot.budget,
                     rate_limit_rpm=k.rate_limit_rpm,
+                    user_rate_limit_rpm=snapshot.rate_limit_rpm,
                 )
             )
         cache.set_all_keys(cached_keys)

@@ -13,6 +13,9 @@ export type TeamMember = {
   must_change_password: boolean;
   // Per-user model allowlist. null = unrestricted, [] = deny all.
   allowed_models: string[] | null;
+  // Admin-set account-level requests-per-minute cap across all of the
+  // member's keys. null = unlimited.
+  rate_limit_rpm: number | null;
   // Admin-set account-level budget envelope (caps total spend across all of
   // the member's keys). null = unlimited.
   budget_usd: number | null;
@@ -30,13 +33,43 @@ export type TeamMemberBudgetUpdate = {
   budget_reset_day?: number | null;
 };
 
+export type TeamSortField = "username" | "role" | "status" | "created";
+
+export type TeamMemberListParams = {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  sort_by?: TeamSortField;
+  sort_dir?: "asc" | "desc";
+};
+
+export type TeamMemberListResponse = {
+  items: TeamMember[];
+  total: number;
+};
+
+export type TeamMemberCreate = {
+  username: string;
+  password: string;
+  role?: TeamRole;
+  allowed_models?: string[] | null;
+};
+
 const BASE_URL = "/api/team";
 
 export const teamApi = {
-  listMembers: () => http.get<TeamMember[]>(`${BASE_URL}/members`),
+  listMembers: (params: TeamMemberListParams = {}) => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    if (params.offset !== undefined) query.set("offset", String(params.offset));
+    if (params.search) query.set("search", params.search);
+    if (params.sort_by) query.set("sort_by", params.sort_by);
+    if (params.sort_dir) query.set("sort_dir", params.sort_dir);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return http.get<TeamMemberListResponse>(`${BASE_URL}/members${suffix}`);
+  },
 
-  createMember: (data: { username: string; password: string }) =>
-    http.post<TeamMember>(`${BASE_URL}/members`, data),
+  createMember: (data: TeamMemberCreate) => http.post<TeamMember>(`${BASE_URL}/members`, data),
 
   deleteMember: (userId: number) =>
     http.delete<{ message: string }>(`${BASE_URL}/members/${userId}`),
@@ -69,6 +102,13 @@ export const teamApi = {
 
   reactivateMember: (userId: number) =>
     http.post<TeamMember>(`${BASE_URL}/members/${userId}/reactivate`, {}),
+
+  // Set or clear a member's account-level requests-per-minute cap. Explicit
+  // null clears it.
+  updateMemberRateLimit: (userId: number, rateLimitRpm: number | null) =>
+    http.put<TeamMember>(`${BASE_URL}/members/${userId}/rate-limit`, {
+      rate_limit_rpm: rateLimitRpm,
+    }),
 
   // Set or clear a member's account-level budget. Explicit null on
   // budget_usd clears the budget and its window configuration.

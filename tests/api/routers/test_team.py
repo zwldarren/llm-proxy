@@ -570,6 +570,19 @@ class TestCreateMemberFlags:
         assert call.kwargs["must_change_password"] is True
         assert response.json()["must_change_password"] is True
 
+    def test_create_rejects_invalid_username_format(self, team_client):
+        """Creation applies the same username rule as rename."""
+        client, _, mock_repo = team_client
+        mock_repo.create_user = AsyncMock()
+
+        response = client.post(
+            "/api/team/members",
+            json={"username": "bad user", "password": "Temporary-pass-123!"},
+        )
+
+        assert response.status_code == 422, response.text
+        mock_repo.create_user.assert_not_awaited()
+
 
 class TestResetMemberPasswordFlags:
     """Admin password resets also force the member to choose their own password."""
@@ -622,11 +635,13 @@ class TestMemberAuditLog:
         mock_repo.count_active_admins = AsyncMock(return_value=2)
 
         sessions_patch, keys_patch = _patch_sessions_and_keys()
-        with sessions_patch, keys_patch as key_repo_cls:
+        with sessions_patch as session_repo_cls, keys_patch as key_repo_cls:
+            session_repo_cls.return_value.deactivate_user_sessions = AsyncMock()
             key_repo_cls.return_value.delete_api_keys_by_user = AsyncMock()
             response = client.delete("/api/team/members/2")
 
         assert response.status_code == 200, response.text
+        session_repo_cls.return_value.deactivate_user_sessions.assert_awaited_once_with(2)
         audit_patch.assert_called_once()
         kwargs = audit_patch.call_args.kwargs
         assert kwargs["actor"] == "admin"
@@ -805,6 +820,45 @@ class TestUpdateMemberBudget:
         mock_repo.set_budget.assert_not_awaited()
 
 
+class TestUpdateMemberRateLimit:
+    """Admin-managed account-level rate limit (/members/{id}/rate-limit)."""
+
+    def test_set_rate_limit(self, team_client):
+        client, _, mock_repo = team_client
+        mock_repo.get_by_id = AsyncMock(return_value=_mock_user(2, "member"))
+        updated = _mock_user(2, "member")
+        updated.rate_limit_rpm = 120
+        mock_repo.set_rate_limit = AsyncMock(return_value=updated)
+
+        response = client.put("/api/team/members/2/rate-limit", json={"rate_limit_rpm": 120})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["rate_limit_rpm"] == 120
+        mock_repo.set_rate_limit.assert_awaited_once_with(2, 120)
+
+    def test_clear_rate_limit(self, team_client):
+        client, _, mock_repo = team_client
+        mock_repo.get_by_id = AsyncMock(return_value=_mock_user(2, "member"))
+        updated = _mock_user(2, "member")
+        updated.rate_limit_rpm = None
+        mock_repo.set_rate_limit = AsyncMock(return_value=updated)
+
+        response = client.put("/api/team/members/2/rate-limit", json={"rate_limit_rpm": None})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["rate_limit_rpm"] is None
+        mock_repo.set_rate_limit.assert_awaited_once_with(2, None)
+
+    def test_non_positive_rate_limit_rejected(self, team_client):
+        client, _, mock_repo = team_client
+        mock_repo.set_rate_limit = AsyncMock()
+
+        response = client.put("/api/team/members/2/rate-limit", json={"rate_limit_rpm": 0})
+
+        assert response.status_code == 422, response.text
+        mock_repo.set_rate_limit.assert_not_awaited()
+
+
 class TestResetMemberBudget:
     """POST /members/{id}/budget/reset restarts the account budget window."""
 
@@ -897,6 +951,7 @@ class TestListMembersBudgetSpend:
         budgeted.budget_period = "monthly"
         plain = _mock_user(3, "plain")
         mock_repo.list_users = AsyncMock(return_value=[budgeted, plain])
+        mock_repo.count_users = AsyncMock(return_value=2)
 
         usage_repo = AsyncMock()
         usage_repo.get_spend_since_by_user = AsyncMock(return_value={2: 42.0})
@@ -904,7 +959,9 @@ class TestListMembersBudgetSpend:
             response = client.get("/api/team/members")
 
         assert response.status_code == 200, response.text
-        rows = {m["username"]: m for m in response.json()}
+        body = response.json()
+        rows = {m["username"]: m for m in body["items"]}
+        assert body["total"] == 2
         assert rows["budgeted"]["budget_spend_usd"] == 42.0
         assert rows["budgeted"]["budget_period_start"] is not None
         assert rows["plain"]["budget_spend_usd"] is None
@@ -914,9 +971,30 @@ class TestListMembersBudgetSpend:
         windows = usage_repo.get_spend_since_by_user.await_args.args[0]
         assert list(windows) == [2]
 
+    def test_list_forwards_search_sort_and_pagination(self, team_client):
+        client, _, mock_repo = team_client
+        mock_repo.list_users = AsyncMock(return_value=[])
+        mock_repo.count_users = AsyncMock(return_value=7)
+
+        response = client.get(
+            "/api/team/members?limit=10&offset=20&search=adm&sort_by=created&sort_dir=desc"
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"items": [], "total": 7}
+        mock_repo.list_users.assert_awaited_once_with(
+            limit=10,
+            offset=20,
+            search="adm",
+            sort_by="created",
+            sort_dir="desc",
+        )
+        mock_repo.count_users.assert_awaited_once_with(search="adm")
+
     def test_no_budgeted_members_skips_spend_query(self, team_client):
         client, _, mock_repo = team_client
         mock_repo.list_users = AsyncMock(return_value=[_mock_user(2, "plain")])
+        mock_repo.count_users = AsyncMock(return_value=1)
 
         with patch("llm_proxy.api.routers.team.UsageRepository") as usage_cls:
             response = client.get("/api/team/members")

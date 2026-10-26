@@ -12,7 +12,8 @@ their own logs, and optionally their own model allowlist and spending cap.
 | Usage & logs | All users | Own usage and logs only |
 | Audit log | View + verify integrity | No access |
 | Providers / Models management / MCP Servers / Team / server settings | Full | No access (403) |
-| API keys | Own keys; may set MCP allowlist and rate limits | Own keys; MCP allowlist forced to "all", no rate limit |
+| API keys | Own keys; may set MCP allowlist and per-key rate limits | Own keys; may set the MCP allowlist; no per-key rate limit |
+| Account rate limit | Set any member's cap in Team | Read-only (enforced on every key) |
 | Playgrounds | Yes | Yes |
 
 Promote a member by changing their role in **Team**. A role change revokes all of
@@ -63,6 +64,19 @@ keys in the same UTC calendar windows.
 - Only an admin can reset it: **Team → member → Reset budget**.
 - The member can see their own status at `GET /api/me/budget`.
 
+## Account rate limits
+
+Per-key rate limits are owner-managed and admin-only to set, so an admin cannot
+apply one to a member's key. The member-wide control is an **account rate limit**,
+set from **Team → member → Manage rate limit** (or
+`PUT /api/team/members/{id}/rate-limit`).
+
+- It is a sliding 60-second window across **all** of the member's keys, including
+  the UI session key; `null` means unlimited.
+- It is enforced independently of any per-key limit: either cap can reject with
+  **429** and code `rate_limit_exceeded`.
+- Key-level limits remain available on the admin's own keys in **API Keys**.
+
 ## Member lifecycle
 
 | Action | Effect |
@@ -71,7 +85,7 @@ keys in the same UTC calendar windows.
 | **Change role** | Sessions revoked, token version bumped |
 | **Deactivate** | Signs the member out and stops their keys; keys and usage history are preserved |
 | **Reactivate** | Restores sign-in and key usage |
-| **Delete** | Permanently removes the member **and their API keys**; usage history remains |
+| **Delete** | Revokes active sessions, permanently removes the member **and their API keys**; usage history remains |
 
 Safety rules enforced by the proxy:
 

@@ -85,6 +85,40 @@ class TestPerKeyRateLimit:
         assert "Retry-After" in response.headers
 
     @pytest.mark.asyncio
+    async def test_account_limit_applies_without_a_key_limit(self, app, make_auth_info):
+        """A member-wide cap throttles a key that has no per-key limit."""
+        p1, p2, p3 = self._patchers(make_auth_info(rate_limit_rpm=None, user_rate_limit_rpm=2))
+        with p1, p2, p3:
+            transport = ASGITransport(app=app, raise_app_exceptions=False)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                headers = {"Authorization": "Bearer sk-test"}
+                assert (await client.get("/v1/models", headers=headers)).status_code == 200
+                assert (await client.get("/v1/models", headers=headers)).status_code == 200
+                response = await client.get("/v1/models", headers=headers)
+
+        assert response.status_code == 429
+        assert response.json()["error"]["code"] == "rate_limit_exceeded"
+        assert "Retry-After" in response.headers
+
+    @pytest.mark.asyncio
+    async def test_account_limit_counts_across_keys(self, app, make_auth_info):
+        """Two different keys owned by one member share the account window."""
+        first = make_auth_info(principal_id="key-a", user_id=7, user_rate_limit_rpm=1)
+        second = make_auth_info(principal_id="key-b", user_id=7, user_rate_limit_rpm=1)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        statuses = []
+        for auth, token in ((first, "sk-a"), (second, "sk-b")):
+            p1, p2, p3 = self._patchers(auth)
+            with p1, p2, p3:
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    response = await client.get(
+                        "/v1/models", headers={"Authorization": f"Bearer {token}"}
+                    )
+            statuses.append(response.status_code)
+
+        assert statuses == [200, 429]
+
+    @pytest.mark.asyncio
     async def test_rejection_row_is_attributed_to_the_key(self, app, make_auth_info):
         """A capped key's rejection row must carry its api_key_name.
 

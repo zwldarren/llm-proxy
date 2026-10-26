@@ -34,7 +34,8 @@ that is created at sign-in. Real client traffic uses the API keys you create in
 | Logs | All rows, **Audit Logs** tab, integrity verification | Only their own rows |
 | Models screen | Model management | Read-only catalog |
 | Providers, MCP Servers, Team | Full control | Hidden (403 on the API) |
-| API keys | Own keys, all fields | Own keys, but no MCP allowlist and no rate limit |
+| API keys | Own keys, all fields | Own keys; MCP allowlist allowed, no per-key rate limit |
+| Account rate limit | Set per member in Team | Enforced, read-only |
 | Settings | All sections | Preference and Tracing only |
 | Playgrounds (Chat, Images) | Yes | Yes |
 
@@ -48,7 +49,7 @@ that is created at sign-in. Real client traffic uses the API keys you create in
 | **Providers** (`/config/providers`) | Add and edit upstream providers, API keys, base URLs, custom headers, endpoint overrides |
 | **API Keys** (`/config/api-keys`) | Create and manage keys for your clients: budgets, limits, allowlists, expiry |
 | **MCP Servers** (`/config/mcp-servers`) | Attach MCP servers (stdio or HTTP) and expose their tools to models |
-| **Team** (`/team`) | Create members, assign roles, per-user model allowlists and account budgets |
+| **Team** (`/team`) | Create members, assign roles, per-user model allowlists, account budgets, and account rate limits |
 | **Chat** (`/chat`) | Playground: test any model with streaming, tools, vision, and reasoning |
 | **Images** (`/images`) | Playground: image generation and edits |
 | **Settings** (`/config/settings`) | Theme and language, logging, web search, tracing, and all server-wide policy sections |

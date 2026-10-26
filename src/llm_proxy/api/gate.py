@@ -179,6 +179,8 @@ class VerifiedKeyAuth:
     budget: BudgetEnvelope | None = None
     user_budget: BudgetEnvelope | None = None
     rate_limit_rpm: int | None = None
+    #: Admin-set account-level rpm cap for the key's owner (None = unlimited).
+    user_rate_limit_rpm: int | None = None
     #: Session keys (``sk-ui-``) authenticate through the session store: they
     #: carry no key-level budget or rate limit, and their identity includes
     #: the owning user's name.
@@ -227,6 +229,8 @@ async def _verify_session_api_key(api_key: str) -> VerifiedKeyAuth | None:
                 # otherwise it would be trivially bypassable via the UI
                 # session key.
                 user_budget=BudgetEnvelope.from_orm_fields(user),
+                # The UI session key must not bypass the account-level cap.
+                user_rate_limit_rpm=user.rate_limit_rpm,
                 is_session=True,
                 username=user.username,
             )
@@ -258,6 +262,7 @@ def _verified_auth_from_key_record(
         budget=key_record.budget,
         user_budget=key_record.user_budget,
         rate_limit_rpm=key_record.rate_limit_rpm,
+        user_rate_limit_rpm=key_record.user_rate_limit_rpm,
     )
 
 
@@ -283,6 +288,7 @@ def _cache_verified_key(
         budget=key_record.budget,
         user_budget=key_record.user_budget,
         rate_limit_rpm=key_record.rate_limit_rpm,
+        user_rate_limit_rpm=key_record.user_rate_limit_rpm,
         key_hash=key_record.key_hash,
         must_change_password=key_record.user_must_change_password,
     )
@@ -634,22 +640,30 @@ def budget_status_rejection(
 
 
 async def check_key_rate_limit(auth: VerifiedKeyAuth) -> tuple[int, int] | None:
-    """Check a verified key's per-minute rate limit.
+    """Check the key-level and account-level per-minute caps.
 
-    Session keys carry no rate-limit configuration, so this only applies to
-    regular API keys. Returns ``(limit_rpm, retry_after)`` when the key is
-    over its cap, else ``None``.
+    The per-key cap is admin-only and settable only on the admin's own keys;
+    the account cap is admin-managed in the Team view and spans every key the
+    member owns (including the UI session key). Both are sliding 60-second
+    windows and either can reject.
+    Returns ``(limit_rpm, retry_after)`` for the first cap exceeded.
     """
-    if auth.rate_limit_rpm is None:
-        return None
-    is_limited, limit_meta = await get_rate_limiter().check_rate_limit(
-        identifier=f"apikey:{auth.principal_id}",
-        limit=auth.rate_limit_rpm,
-        window_size=60,
-    )
-    if not is_limited:
-        return None
-    return auth.rate_limit_rpm, max(1, int(limit_meta["reset_time"] - time.time()))
+    checks: list[tuple[str, int]] = []
+    if auth.rate_limit_rpm is not None:
+        checks.append((f"apikey:{auth.principal_id}", auth.rate_limit_rpm))
+    if auth.user_rate_limit_rpm is not None and auth.user_id is not None:
+        checks.append((f"user:{auth.user_id}", auth.user_rate_limit_rpm))
+
+    limiter = get_rate_limiter()
+    for identifier, limit in checks:
+        is_limited, limit_meta = await limiter.check_rate_limit(
+            identifier=identifier,
+            limit=limit,
+            window_size=60,
+        )
+        if is_limited:
+            return limit, max(1, int(limit_meta["reset_time"] - time.time()))
+    return None
 
 
 # ── The gate sequence ────────────────────────────────────────────────────

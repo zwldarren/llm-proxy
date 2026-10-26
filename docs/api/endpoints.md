@@ -118,7 +118,7 @@ All under `/api`, all requiring a JWT unless noted. Groups:
 | `/api/logs*` | Log query/detail/stats, usage stats, audit verification, cleanup |
 | `/api/routing/*` | Training-data export: feedback labels and judge verdicts as JSONL (`/api/routing/export/dataset`) |
 | `/api/mcp/*` | MCP server CRUD, status, capabilities |
-| `/api/team/members*` | Member CRUD, roles, model allowlists, account budgets, password resets |
+| `/api/team/members*` | Member CRUD, roles, model allowlists, account budgets, account rate limits, password resets |
 | `/api/me/*` | Profile, budget, password, username, tracing, feedback |
 | `/api/catalog/models` | Display catalog (any authenticated user) |
 | `/api/system/info` | Version and update check (admin) |

@@ -1229,6 +1229,17 @@ export default {
     resetSpendHint: "Restart the current budget window from now.",
     resetSpendSuccess: "Budget window reset for {username}",
     currentWindowSpend: "Current window spend",
+    roleHelp: "Admins can manage providers, models, MCP servers, users, and server settings.",
+    rateLimit: "Rate limit",
+    rateLimitUnlimited: "Unlimited",
+    manageRateLimit: "Manage rate limit",
+    manageRateLimitDescription: "Cap this member's request rate across all of their API keys",
+    rateLimitPlaceholder: "Requests per minute",
+    rateLimitHelp:
+      "Combined requests per minute across all of the member's keys, including the UI session key.",
+    rateLimitEmptyHint: "Leave empty for no limit.",
+    rateLimitMustBePositive: "Rate limit must be a positive number.",
+    rateLimitSaved: "Rate limit updated for {username}",
   },
 
   // Profile

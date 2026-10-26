@@ -115,8 +115,14 @@ class TestKeyExpiry:
             expires_at=datetime.now(UTC) - timedelta(minutes=1),
         )
 
-        with patch.object(
-            mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)
+        with (
+            patch.object(
+                mcp_proxy_module, "_verify_session_api_key", new=AsyncMock(return_value=None)
+            ),
+            # The expired entry falls through to the snapshot refresh; keep it
+            # off the developer's real database so schema drift cannot fail a
+            # cache unit test.
+            patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[])),
         ):
             assert await verify_api_key("sk-secret") is None
         assert cache.get_verified_key(sha) is None

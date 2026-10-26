@@ -102,7 +102,20 @@ class ProviderError(RequestError):
 
 
 class ValidationError(LLMProxyError, ValueError):
-    """Raised when request/response validation fails."""
+    """Raised when request/response validation fails.
+
+    Client-input validation is a 4xx, so the default code must not be the
+    base class's ``internal_error`` (that made self-action guards such as
+    "cannot delete your own account" look like a server fault).
+    """
+
+    def __init__(
+        self,
+        message: str = "Validation error",
+        code: str | None = None,
+        status_code: int | None = None,
+    ):
+        super().__init__(message, code=code or "invalid_request_error", status_code=status_code)
 
 
 class NotFoundError(LLMProxyError):

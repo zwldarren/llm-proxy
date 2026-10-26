@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +18,10 @@ from llm_proxy.api.routers.logs import invalidate_user_role_cache
 from llm_proxy.api.schemas.team import (
     TeamMemberBudgetUpdate,
     TeamMemberCreate,
+    TeamMemberListResponse,
     TeamMemberModelsUpdate,
     TeamMemberPasswordReset,
+    TeamMemberRateLimitUpdate,
     TeamMemberRead,
     TeamMemberRoleUpdate,
     TeamMemberUsernameUpdate,
@@ -55,7 +57,11 @@ async def _guard_last_active_admin(repo: UserRepository, target: UserRecord, act
     but never the final active one, or the deployment would be left without a
     usable admin account.
     """
-    if target.role == "admin" and target.is_active and await repo.count_active_admins() <= 1:
+    if (
+        target.role == "admin"
+        and target.is_active
+        and await repo.count_active_admins(for_update=True) <= 1
+    ):
         raise ValidationError(message=f"Cannot {action} the last active admin")
 
 
@@ -139,15 +145,27 @@ async def _member_with_spend(session: AsyncSession, user: UserRecord) -> TeamMem
     return (await _with_budget_spend(session, [user]))[0]
 
 
-@router.get("/members", response_model=list[TeamMemberRead])
+@router.get("/members", response_model=TeamMemberListResponse)
 async def list_members(
     session: AsyncSession = get_async_session_dep,
     limit: int = Query(50, ge=1, le=200, description="Maximum number of members to return"),
     offset: int = Query(0, ge=0, description="Number of members to skip"),
+    search: str | None = Query(None, max_length=100, description="Username substring filter"),
+    sort_by: Literal["username", "role", "status", "created"] = Query("username"),
+    sort_dir: Literal["asc", "desc"] = Query("asc"),
 ):
     repo = UserRepository(session)
-    users = await repo.list_users(limit=limit, offset=offset)
-    return await _with_budget_spend(session, users)
+    users = await repo.list_users(
+        limit=limit,
+        offset=offset,
+        search=search,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+    )
+    return TeamMemberListResponse(
+        items=await _with_budget_spend(session, users),
+        total=await repo.count_users(search=search),
+    )
 
 
 @router.post("/members", response_model=TeamMemberRead, status_code=201)
@@ -210,7 +228,14 @@ async def delete_member(
     api_key_repo = ApiKeyRepository(session)
     await api_key_repo.delete_api_keys_by_user(user_id)
 
-    # Delete the user (sessions are cascadingly deleted)
+    # A hard delete is refused while the user still has an active console
+    # session (UserRepository.delete_user guards it). Revoke sessions first:
+    # "delete member" means delete, not "delete after the admin discovers the
+    # two-step deactivate-then-delete workaround".
+    session_repo = UserSessionRepository(session)
+    await session_repo.deactivate_user_sessions(user_id)
+
+    # Delete the user (deactivated sessions are cascadingly deleted)
     await repo.delete_user(user_id)
 
     await session.commit()
@@ -536,6 +561,46 @@ async def reset_member_budget(
                 "admin_username": admin.username,
                 "target_user_id": user_id,
                 "target_username": updated.username,
+            },
+            invalidate_api_keys=True,
+        ),
+    )
+    return await _member_with_spend(session, updated)
+
+
+@router.put("/members/{user_id}/rate-limit", response_model=TeamMemberRead)
+async def update_member_rate_limit(
+    user_id: int,
+    data: TeamMemberRateLimitUpdate,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    admin: UserRecord = Depends(require_admin_role),
+):
+    """Set or clear a member's account-level rate limit (admin-only).
+
+    The cap applies across every key the member owns, including the UI
+    session key. Per-key limits are owner-scoped and admin-only, so they
+    cannot target a member's key; this is the member-level quota control the
+    Team view can actually apply.
+    """
+    repo = UserRepository(session)
+    await _get_member_or_404(repo, user_id)
+    updated = await repo.set_rate_limit(user_id, data.rate_limit_rpm)
+    assert updated is not None  # existence checked above
+    await session.commit()
+    await _commit_member_operation(
+        request,
+        MemberOperation(
+            actor=admin.username,
+            action=ActionCategory.UPDATE,
+            target_user=updated.username,
+            extra={"operation": "rate_limit", "rate_limit_rpm": updated.rate_limit_rpm},
+            log_message="Admin set a member's account rate limit",
+            log_fields={
+                "admin_username": admin.username,
+                "target_user_id": user_id,
+                "target_username": updated.username,
+                "rate_limit_rpm": updated.rate_limit_rpm,
             },
             invalidate_api_keys=True,
         ),

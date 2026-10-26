@@ -60,17 +60,26 @@ class UserRepository(BaseRepository):
         """
         return await self.count_active_admins() > 0
 
-    async def count_active_admins(self) -> int:
+    async def count_active_admins(self, *, for_update: bool = False) -> int:
         """Return the number of active admin users.
 
         Backs the last-active-admin guards on delete / demote / deactivate so
         a deployment can never be left without any usable admin account.
+
+        ``for_update`` locks the admin rows for the rest of the transaction.
+        The count alone is not enough under concurrent admin removal: two
+        transactions can each observe two admins and then remove one, leaving
+        zero. Locking the rows serializes those transactions (a no-op on
+        SQLite, which serializes writers anyway).
         """
-        stmt = (
-            select(func.count())
-            .select_from(UserRecord)
-            .where(UserRecord.role == "admin", UserRecord.is_active.is_(True))
-        )
+        condition = (UserRecord.role == "admin", UserRecord.is_active.is_(True))
+        if for_update:
+            # PostgreSQL rejects FOR UPDATE on an aggregate, so lock the rows
+            # and count them in Python.
+            stmt = select(UserRecord.id).where(*condition).with_for_update()
+            result = await self.session.execute(stmt)
+            return len(result.scalars().all())
+        stmt = select(func.count()).select_from(UserRecord).where(*condition)
         result = await self.session.execute(stmt)
         return result.scalar() or 0
 
@@ -112,24 +121,54 @@ class UserRepository(BaseRepository):
         return user
 
     async def list_users(
-        self, limit: int | None = None, offset: int | None = None
+        self,
+        limit: int | None = None,
+        offset: int | None = None,
+        *,
+        search: str | None = None,
+        sort_by: str = "username",
+        sort_dir: str = "asc",
     ) -> list[UserRecord]:
-        """List all users with optional pagination.
+        """List users with optional search, sorting, and pagination.
 
         Args:
             limit: Maximum number of users to return.
             offset: Number of users to skip.
+            search: Case-insensitive username substring filter.
+            sort_by: ``username``, ``role``, ``status`` (active first in asc),
+                or ``created``.
+            sort_dir: ``asc`` or ``desc``.
 
         Returns:
             List of UserRecord instances.
         """
-        stmt = select(UserRecord).order_by(UserRecord.created_at.asc())
+        stmt = select(UserRecord)
+        if search:
+            stmt = stmt.where(func.lower(UserRecord.username).contains(search.strip().lower()))
+        order_column = {
+            "username": UserRecord.username,
+            "role": UserRecord.role,
+            "status": UserRecord.is_active,
+            "created": UserRecord.created_at,
+        }.get(sort_by, UserRecord.username)
+        order = order_column.asc() if sort_dir == "asc" else order_column.desc()
+        # id is the tie-breaker: a page boundary must not drop or repeat rows
+        # when several users share the sort value.
+        stmt = stmt.order_by(order, UserRecord.id.asc())
         if limit is not None:
             stmt = stmt.limit(limit)
         if offset is not None:
             stmt = stmt.offset(offset)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count_users(self, *, search: str | None = None) -> int:
+        """Count users, applying the same search filter as :meth:`list_users`."""
+        stmt = select(func.count()).select_from(UserRecord)
+        if search:
+            stmt = stmt.where(func.lower(UserRecord.username).contains(search.strip().lower()))
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
 
     async def get_by_id(self, user_id: int) -> UserRecord | None:
         stmt = select(UserRecord).where(UserRecord.id == user_id)
@@ -201,6 +240,16 @@ class UserRepository(BaseRepository):
         user.allowed_models = allowed_models
         await self.session.flush()
         return True
+
+    async def set_rate_limit(self, user_id: int, rate_limit_rpm: int | None) -> UserRecord | None:
+        """Set the account-level requests-per-minute cap (None = unlimited)."""
+        user = await self.get_by_id(user_id)
+        if not user:
+            return None
+        user.rate_limit_rpm = rate_limit_rpm
+        await self.session.flush()
+        await self.session.refresh(user)
+        return user
 
     async def set_budget(
         self,

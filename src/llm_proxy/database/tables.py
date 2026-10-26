@@ -310,6 +310,11 @@ class UserRecord(Base):
     # only create API keys within this set, and the effective permission of
     # any of their keys is intersected with it at request time.
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Admin-set account-level requests-per-minute cap, aggregated across all
+    # of the user's keys (including the UI session key). NULL means unlimited.
+    # This is the member-level quota control. Per-key limits are admin-only
+    # and can only be applied to the admin's own keys (keys are owner-scoped).
+    rate_limit_rpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Admin-set account-level spending cap in USD, aggregated across all of
     # the user's API keys. NULL means unlimited. When the current-period spend
     # reaches the cap, all of the user's keys are rejected (429) until the

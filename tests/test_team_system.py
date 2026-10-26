@@ -359,6 +359,19 @@ class TestAdminCreatesMember:
         )
         assert resp2.status_code == 409
 
+    @pytest.mark.asyncio
+    async def test_create_member_rejects_invalid_username(self, app_and_db, client):
+        await _seed_user(app_and_db, "admin", role="admin")
+        token = _make_token("admin")
+
+        resp = await client.post(
+            "/api/team/members",
+            json={"username": "bad user", "password": "Strong@pass12"},
+            headers=_auth_header(token),
+        )
+
+        assert resp.status_code == 422, resp.text
+
 
 class TestMemberLogin:
     """Member can log in and receive a JWT token."""
@@ -771,15 +784,8 @@ class TestDeleteMemberCascade:
             sessions_before = result.scalars().all()
             assert len(sessions_before) > 0
 
-        # Deactivate sessions first (required before user deletion)
-        from llm_proxy.database.repositories.user_sessions import UserSessionRepository
-
-        async with session_factory() as s:
-            session_repo = UserSessionRepository(s)
-            await session_repo.deactivate_user_sessions(member_id)
-            await s.commit()
-
-        # Admin deletes the member (now that sessions are deactivated)
+        # The router revokes the member's active session itself: a delete must
+        # not require the admin to discover a deactivate-then-delete dance.
         admin_token = _make_token("admin")
         resp = await client.delete(
             f"/api/team/members/{member_id}",
@@ -850,7 +856,7 @@ class TestExistingAdminUnaffected:
 
         resp = await client.get("/api/team/members", headers=_auth_header(token))
         assert resp.status_code == 200, resp.text
-        members = resp.json()
+        members = resp.json()["items"]
         # Should include the admin
         usernames = {m["username"] for m in members}
         assert "admin" in usernames
@@ -883,8 +889,10 @@ class TestTeamMemberList:
         admin_token = _make_token("admin")
         resp = await client.get("/api/team/members", headers=_auth_header(admin_token))
         assert resp.status_code == 200, resp.text
-        members = resp.json()
+        body = resp.json()
+        members = body["items"]
         usernames = {m["username"] for m in members}
+        assert body["total"] == 3
         assert "admin" in usernames
         assert "viewer1" in usernames
         assert "viewer2" in usernames

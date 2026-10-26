@@ -2,6 +2,7 @@
 import {
   Boxes,
   Check,
+  Gauge,
   KeyRound,
   Loader2,
   Plus,
@@ -29,6 +30,7 @@ import FilterBar from "@/components/common/FilterBar.vue";
 import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import MemberBudgetCell from "@/components/common/MemberBudgetCell.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import PaginationBar from "@/components/common/PaginationBar.vue";
 import SortableHead from "@/components/common/SortableHead.vue";
 import TableCellActions from "@/components/common/TableCellActions.vue";
 import TableCellName from "@/components/common/TableCellName.vue";
@@ -60,7 +62,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useTableFilter } from "@/composables/useTableFilter";
 import {
   teamApi,
   type TeamBudgetPeriod,
@@ -86,6 +87,9 @@ const showCreateDialog = ref(false);
 const createUsername = ref("");
 const createPassword = ref("");
 const createConfirmPassword = ref("");
+const createRole = ref<TeamRole>("viewer");
+// null = unrestricted (all models), [] = deny all.
+const createModels = ref<string[] | null>(null);
 const createError = ref<string | null>(null);
 const isCreating = ref(false);
 
@@ -140,6 +144,12 @@ const budgetResetDay = ref(1);
 const isSavingBudget = ref(false);
 const isResettingBudget = ref(false);
 
+// Manage account rate limit dialog (admin sets the member-wide rpm cap).
+const showRateLimitDialog = ref(false);
+const rateLimitMember = ref<TeamMember | null>(null);
+const rateLimitRpm = ref<number | string | null>(null);
+const isSavingRateLimit = ref(false);
+
 /** Normalize an optional number input: empty input maps to null ("no limit"). */
 const normalizedBudgetUsd = computed(() => {
   const value = budgetUsd.value;
@@ -148,18 +158,25 @@ const normalizedBudgetUsd = computed(() => {
   return Number.isFinite(n) ? n : null;
 });
 
-// --- Table Filters & Sorting ---
+const normalizedRateLimitRpm = computed(() => {
+  const value = rateLimitRpm.value;
+  if (value === null || value === "") return null;
+  const n = typeof value === "string" ? Number(value) : value;
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+});
+
+// --- Table search, sorting & pagination (server-side) ---
 type SortField = "username" | "role" | "status" | "created";
 const sortField = ref<SortField>("username");
 const sortDir = ref<"asc" | "desc">("asc");
+const searchQuery = ref("");
+const currentPage = ref(1);
+const pageSize = 50;
+const totalMembers = ref(0);
+const totalPages = computed(() => Math.max(1, Math.ceil(totalMembers.value / pageSize)));
 
-const {
-  searchQuery,
-  filteredItems: filteredMembers,
-  clearFilters: clearBaseFilters,
-} = useTableFilter<TeamMember>(members, {
-  searchFields: ["username"],
-});
+// The table is already in API order; the server applies search/sort/paging.
+const sortedMembers = computed(() => members.value);
 
 const defaultDirFor = (field: SortField): "asc" | "desc" => (field === "created" ? "desc" : "asc");
 
@@ -170,50 +187,15 @@ function onSort(field: string) {
     sortField.value = field as SortField;
     sortDir.value = defaultDirFor(field as SortField);
   }
+  reloadFromFirstPage();
 }
 
 const clearFilters = () => {
-  clearBaseFilters();
+  searchQuery.value = "";
   sortField.value = "username";
   sortDir.value = "asc";
+  reloadFromFirstPage();
 };
-
-// null/empty timestamps sort last regardless of direction.
-function compareDate(
-  av: string | null | undefined,
-  bv: string | null | undefined,
-  dir: 1 | -1
-): number {
-  if (!av && !bv) return 0;
-  if (!av) return 1;
-  if (!bv) return -1;
-  return av.localeCompare(bv) * dir;
-}
-
-const sortedMembers = computed(() => {
-  const items = [...filteredMembers.value];
-  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-  switch (sortField.value) {
-    case "created":
-      items.sort((a, b) => compareDate(a.created_at, b.created_at, dir));
-      break;
-    case "role":
-      items.sort((a, b) => a.role.localeCompare(b.role) * dir);
-      break;
-    case "status":
-      items.sort((a, b) => {
-        const statusA = a.is_active ? 1 : 0;
-        const statusB = b.is_active ? 1 : 0;
-        return (statusA - statusB) * dir;
-      });
-      break;
-    case "username":
-    default:
-      items.sort((a, b) => a.username.localeCompare(b.username) * dir);
-      break;
-  }
-  return items;
-});
 
 // --- Model allowlist helpers ---
 const availableModels = computed(() =>
@@ -238,23 +220,56 @@ function patchMember(updated: TeamMember) {
 }
 
 // --- Methods ---
+let loadSequence = 0;
+
 async function loadMembers() {
+  const sequence = ++loadSequence;
   isLoading.value = true;
   loadError.value = null;
   try {
-    members.value = await teamApi.listMembers();
+    const response = await teamApi.listMembers({
+      limit: pageSize,
+      offset: (currentPage.value - 1) * pageSize,
+      search: searchQuery.value.trim() || undefined,
+      sort_by: sortField.value,
+      sort_dir: sortDir.value,
+    });
+    if (sequence !== loadSequence) return;
+    // Deleting the last row of the last page can leave the cursor past the
+    // end; clamp to the new final page and load it.
+    if (response.total > 0 && (currentPage.value - 1) * pageSize >= response.total) {
+      currentPage.value = Math.max(1, Math.ceil(response.total / pageSize));
+      await loadMembers();
+      return;
+    }
+    members.value = response.items;
+    totalMembers.value = response.total;
   } catch {
-    loadError.value = t("errors.fetchFailed");
+    if (sequence === loadSequence) loadError.value = t("errors.fetchFailed");
   } finally {
-    isLoading.value = false;
+    if (sequence === loadSequence) isLoading.value = false;
   }
 }
+
+const goToPage = (page: number) => {
+  if (page === currentPage.value) return;
+  currentPage.value = page;
+  loadMembers();
+};
+
+const reloadFromFirstPage = () => {
+  currentPage.value = 1;
+  loadMembers();
+};
 
 function openCreateDialog() {
   createUsername.value = "";
   createPassword.value = "";
   createConfirmPassword.value = "";
+  createRole.value = "viewer";
+  createModels.value = null;
   createError.value = null;
+  if (modelStore.models.length === 0) void modelStore.fetchModels();
   showCreateDialog.value = true;
 }
 
@@ -289,6 +304,8 @@ async function handleCreate() {
     await teamApi.createMember({
       username,
       password: createPassword.value,
+      role: createRole.value,
+      allowed_models: createModels.value,
     });
     showCreateDialog.value = false;
     // The admin chose the initial password, so the member is flagged to
@@ -540,6 +557,32 @@ async function saveMemberBudget() {
   }
 }
 
+function openRateLimitDialog(member: TeamMember) {
+  rateLimitMember.value = member;
+  rateLimitRpm.value = member.rate_limit_rpm;
+  showRateLimitDialog.value = true;
+}
+
+async function saveMemberRateLimit() {
+  if (!rateLimitMember.value) return;
+  const rpm = normalizedRateLimitRpm.value;
+  if (rpm !== null && rpm <= 0) {
+    toast.error(t("team.rateLimitMustBePositive"));
+    return;
+  }
+  isSavingRateLimit.value = true;
+  try {
+    const updated = await teamApi.updateMemberRateLimit(rateLimitMember.value.id, rpm);
+    patchMember(updated);
+    showRateLimitDialog.value = false;
+    toast.success(t("team.rateLimitSaved", { username: updated.username }));
+  } catch (err: unknown) {
+    toast.error(getErrorMessage(err) || t("errors.saveFailed"));
+  } finally {
+    isSavingRateLimit.value = false;
+  }
+}
+
 async function resetMemberBudgetWindow() {
   if (!budgetMember.value) return;
   isResettingBudget.value = true;
@@ -600,6 +643,7 @@ onMounted(loadMembers);
       <FilterBar
         v-model:search-query="searchQuery"
         :search-placeholder="t('common.searchPlaceholder')"
+        @search="reloadFromFirstPage"
         @clear-filters="clearFilters"
       />
     </div>
@@ -635,267 +679,308 @@ onMounted(loadMembers);
 
       <!-- Members table -->
       <template v-else>
-        <Table
-          class="table-modern"
-          container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
-        >
-          <TableHeader class="config-thead">
-            <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
-              <SortableHead
-                :label="t('team.username')"
-                sort-key="username"
-                :active-field="sortField"
-                :active-dir="sortDir"
-                @sort="onSort"
-              />
-              <SortableHead
-                :label="t('team.role')"
-                sort-key="role"
-                :active-field="sortField"
-                :active-dir="sortDir"
-                @sort="onSort"
-              />
-              <SortableHead
-                :label="t('team.status')"
-                sort-key="status"
-                :active-field="sortField"
-                :active-dir="sortDir"
-                @sort="onSort"
-              />
-              <TableHead class="hidden lg:table-cell">{{ t("team.allowedModels") }}</TableHead>
-              <TableHead class="hidden xl:table-cell">{{ t("team.budget") }}</TableHead>
-              <SortableHead
-                class="hidden md:table-cell"
-                :label="t('apiKeys.created')"
-                sort-key="created"
-                :active-field="sortField"
-                :active-dir="sortDir"
-                @sort="onSort"
-              />
-              <TableHead class="w-24 text-right">
-                <span class="sr-only">{{ t("common.actions") }}</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody class="row-stagger">
-            <TableRow v-for="member in sortedMembers" :key="member.id" class="group">
-              <TableCellName>{{ member.username }}</TableCellName>
-              <TableCell>
-                <!-- Role change: dropdown on the badge (hidden on the current
+        <div class="flex h-full min-h-0 flex-col">
+          <Table
+            class="table-modern"
+            container-class="flex-1 min-h-0 border-0 bg-transparent rounded-none overflow-x-auto"
+          >
+            <TableHeader class="config-thead">
+              <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
+                <SortableHead
+                  :label="t('team.username')"
+                  sort-key="username"
+                  :active-field="sortField"
+                  :active-dir="sortDir"
+                  @sort="onSort"
+                />
+                <SortableHead
+                  :label="t('team.role')"
+                  sort-key="role"
+                  :active-field="sortField"
+                  :active-dir="sortDir"
+                  @sort="onSort"
+                />
+                <SortableHead
+                  :label="t('team.status')"
+                  sort-key="status"
+                  :active-field="sortField"
+                  :active-dir="sortDir"
+                  @sort="onSort"
+                />
+                <TableHead class="hidden lg:table-cell">{{ t("team.allowedModels") }}</TableHead>
+                <TableHead class="hidden xl:table-cell">{{ t("team.budget") }}</TableHead>
+                <TableHead class="hidden 2xl:table-cell">{{ t("team.rateLimit") }}</TableHead>
+                <SortableHead
+                  class="hidden md:table-cell"
+                  :label="t('apiKeys.created')"
+                  sort-key="created"
+                  :active-field="sortField"
+                  :active-dir="sortDir"
+                  @sort="onSort"
+                />
+                <TableHead class="w-24 text-right">
+                  <span class="sr-only">{{ t("common.actions") }}</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody class="row-stagger">
+              <TableRow v-for="member in sortedMembers" :key="member.id" class="group">
+                <TableCellName>{{ member.username }}</TableCellName>
+                <TableCell>
+                  <!-- Role change: dropdown on the badge (hidden on the current
                      admin's own row), confirmed by dialog below. -->
-                <DropdownMenu v-if="!isSelf(member)">
-                  <DropdownMenuTrigger as-child>
-                    <button
-                      type="button"
-                      class="cursor-pointer rounded-full transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      :aria-label="t('team.changeRole')"
+                  <DropdownMenu v-if="!isSelf(member)">
+                    <DropdownMenuTrigger as-child>
+                      <button
+                        type="button"
+                        class="cursor-pointer rounded-full transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        :aria-label="t('team.changeRole')"
+                      >
+                        <Badge :variant="member.role === 'admin' ? 'default' : 'secondary'">
+                          {{ roleLabel(member.role) }}
+                        </Badge>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem
+                        v-for="option in ROLE_OPTIONS"
+                        :key="option"
+                        :disabled="member.role === option"
+                        class="cursor-pointer"
+                        @click="openRoleDialog(member, option)"
+                      >
+                        <Check
+                          class="mr-2 h-4 w-4"
+                          :class="member.role === option ? 'opacity-100' : 'opacity-0'"
+                        />
+                        <span>{{ roleLabel(option) }}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Badge v-else :variant="member.role === 'admin' ? 'default' : 'secondary'">
+                    {{ roleLabel(member.role) }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <Badge :variant="member.is_active ? 'default' : 'secondary'">
+                      <Check v-if="member.is_active" class="mr-1 h-3 w-3" />
+                      {{ member.is_active ? t("team.active") : t("team.inactive") }}
+                    </Badge>
+                    <Badge
+                      v-if="member.must_change_password"
+                      variant="outline"
+                      class="border-status-warning/60 text-status-warning font-normal"
                     >
-                      <Badge :variant="member.role === 'admin' ? 'default' : 'secondary'">
-                        {{ roleLabel(member.role) }}
+                      {{ t("team.passwordChangePending") }}
+                    </Badge>
+                  </div>
+                </TableCell>
+                <TableCell class="hidden lg:table-cell">
+                  <!-- Clicking the scope summary opens the manage dialog directly -->
+                  <component
+                    :is="member.role !== 'admin' ? 'button' : 'div'"
+                    :type="member.role !== 'admin' ? 'button' : undefined"
+                    :title="member.role !== 'admin' ? t('team.manageModels') : undefined"
+                    class="-m-1 flex flex-wrap items-center gap-1.5 rounded-md p-1 text-left transition-colors"
+                    :class="{ 'cursor-pointer hover:bg-accent/60': member.role !== 'admin' }"
+                    @click="member.role !== 'admin' && openModelsDialog(member)"
+                  >
+                    <Badge
+                      v-if="member.allowed_models == null"
+                      variant="secondary"
+                      class="font-normal"
+                    >
+                      {{ t("team.allModels") }}
+                    </Badge>
+                    <Badge
+                      v-else-if="member.allowed_models.length === 0"
+                      variant="outline"
+                      class="border-status-warning/40 text-status-warning font-normal"
+                    >
+                      {{ t("team.noModels") }}
+                    </Badge>
+                    <template v-else>
+                      <Badge
+                        v-for="model in member.allowed_models.slice(0, 3)"
+                        :key="model"
+                        variant="outline"
+                        class="font-mono text-[11px]"
+                      >
+                        {{ model }}
                       </Badge>
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem
-                      v-for="option in ROLE_OPTIONS"
-                      :key="option"
-                      :disabled="member.role === option"
-                      class="cursor-pointer"
-                      @click="openRoleDialog(member, option)"
-                    >
-                      <Check
-                        class="mr-2 h-4 w-4"
-                        :class="member.role === option ? 'opacity-100' : 'opacity-0'"
-                      />
-                      <span>{{ roleLabel(option) }}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Badge v-else :variant="member.role === 'admin' ? 'default' : 'secondary'">
-                  {{ roleLabel(member.role) }}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <Badge :variant="member.is_active ? 'default' : 'secondary'">
-                    <Check v-if="member.is_active" class="mr-1 h-3 w-3" />
-                    {{ member.is_active ? t("team.active") : t("team.inactive") }}
-                  </Badge>
-                  <Badge
-                    v-if="member.must_change_password"
-                    variant="outline"
-                    class="border-status-warning/60 text-status-warning font-normal"
+                      <Badge
+                        v-if="member.allowed_models.length > 3"
+                        variant="outline"
+                        class="font-normal text-muted-foreground"
+                      >
+                        +{{ member.allowed_models.length - 3 }}
+                      </Badge>
+                    </template>
+                  </component>
+                </TableCell>
+                <!-- Account budget: click-through to the manage-budget sheet -->
+                <TableCell class="hidden xl:table-cell">
+                  <button
+                    type="button"
+                    :aria-label="t('team.manageBudget')"
+                    class="-m-1 rounded-md p-1 text-left transition-colors cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    @click="openBudgetDialog(member)"
                   >
-                    {{ t("team.passwordChangePending") }}
-                  </Badge>
-                </div>
-              </TableCell>
-              <TableCell class="hidden lg:table-cell">
-                <!-- Clicking the scope summary opens the manage dialog directly -->
-                <component
-                  :is="member.role !== 'admin' ? 'button' : 'div'"
-                  :type="member.role !== 'admin' ? 'button' : undefined"
-                  :title="member.role !== 'admin' ? t('team.manageModels') : undefined"
-                  class="-m-1 flex flex-wrap items-center gap-1.5 rounded-md p-1 text-left transition-colors"
-                  :class="{ 'cursor-pointer hover:bg-accent/60': member.role !== 'admin' }"
-                  @click="member.role !== 'admin' && openModelsDialog(member)"
-                >
-                  <Badge
-                    v-if="member.allowed_models == null"
-                    variant="secondary"
-                    class="font-normal"
+                    <MemberBudgetCell :member="member" />
+                  </button>
+                </TableCell>
+                <TableCell class="hidden 2xl:table-cell">
+                  <button
+                    type="button"
+                    :aria-label="t('team.manageRateLimit')"
+                    class="-m-1 rounded-md p-1 text-left text-data transition-colors cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    @click="openRateLimitDialog(member)"
                   >
-                    {{ t("team.allModels") }}
-                  </Badge>
-                  <Badge
-                    v-else-if="member.allowed_models.length === 0"
-                    variant="outline"
-                    class="border-status-warning/40 text-status-warning font-normal"
+                    <span v-if="member.rate_limit_rpm == null" class="text-muted-foreground">
+                      {{ t("team.rateLimitUnlimited") }}
+                    </span>
+                    <span v-else class="font-mono">{{ member.rate_limit_rpm }} RPM</span>
+                  </button>
+                </TableCell>
+                <TableCell class="hidden md:table-cell text-data text-muted-foreground">
+                  {{ formatDate(member.created_at) }}
+                </TableCell>
+                <TableCellActions>
+                  <div
+                    class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
                   >
-                    {{ t("team.noModels") }}
-                  </Badge>
-                  <template v-else>
-                    <Badge
-                      v-for="model in member.allowed_models.slice(0, 3)"
-                      :key="model"
-                      variant="outline"
-                      class="font-mono text-[11px]"
-                    >
-                      {{ model }}
-                    </Badge>
-                    <Badge
-                      v-if="member.allowed_models.length > 3"
-                      variant="outline"
-                      class="font-normal text-muted-foreground"
-                    >
-                      +{{ member.allowed_models.length - 3 }}
-                    </Badge>
-                  </template>
-                </component>
-              </TableCell>
-              <!-- Account budget: click-through to the manage-budget sheet -->
-              <TableCell class="hidden xl:table-cell">
-                <button
-                  type="button"
-                  :aria-label="t('team.manageBudget')"
-                  class="-m-1 rounded-md p-1 text-left transition-colors cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  @click="openBudgetDialog(member)"
-                >
-                  <MemberBudgetCell :member="member" />
-                </button>
-              </TableCell>
-              <TableCell class="hidden md:table-cell text-data text-muted-foreground">
-                {{ formatDate(member.created_at) }}
-              </TableCell>
-              <TableCellActions>
-                <div
-                  class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-                >
-                  <Tooltip v-if="member.role !== 'admin'">
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9"
-                        :aria-label="t('team.manageModels')"
-                        @click="openModelsDialog(member)"
-                      >
-                        <Boxes class="h-4 w-4 icon-btn-muted" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.manageModels") }}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9"
-                        :aria-label="t('team.manageBudget')"
-                        @click="openBudgetDialog(member)"
-                      >
-                        <Wallet class="h-4 w-4 icon-btn-muted" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.manageBudget") }}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9"
-                        :aria-label="t('team.renameUsername')"
-                        @click="openRenameDialog(member)"
-                      >
-                        <UserPen class="h-4 w-4 icon-btn-muted" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.renameUsername") }}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9"
-                        :aria-label="t('team.resetPassword')"
-                        @click="openResetDialog(member)"
-                      >
-                        <KeyRound class="h-4 w-4 icon-btn-muted" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.resetPassword") }}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip v-if="member.is_active">
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9"
-                        :disabled="isSelf(member)"
-                        :aria-label="t('team.deactivateMember')"
-                        @click="openDeactivateDialog(member)"
-                      >
-                        <UserX class="h-4 w-4 icon-btn-muted" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.deactivateMember") }}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip v-else>
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9"
-                        :aria-label="t('team.reactivateMember')"
-                        @click="openReactivateDialog(member)"
-                      >
-                        <UserCheck class="h-4 w-4 icon-btn-muted" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.reactivateMember") }}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        :aria-label="t('team.deleteMember')"
-                        @click="openDeleteDialog(member)"
-                      >
-                        <Trash2 class="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{{ t("team.deleteMember") }}</TooltipContent>
-                  </Tooltip>
-                </div>
-              </TableCellActions>
-            </TableRow>
-            <EmptyTableRow v-if="sortedMembers.length === 0" :colspan="7" @clear="clearFilters" />
-          </TableBody>
-        </Table>
+                    <Tooltip v-if="member.role !== 'admin'">
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.manageModels')"
+                          @click="openModelsDialog(member)"
+                        >
+                          <Boxes class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.manageModels") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.manageBudget')"
+                          @click="openBudgetDialog(member)"
+                        >
+                          <Wallet class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.manageBudget") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.manageRateLimit')"
+                          @click="openRateLimitDialog(member)"
+                        >
+                          <Gauge class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.manageRateLimit") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.renameUsername')"
+                          @click="openRenameDialog(member)"
+                        >
+                          <UserPen class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.renameUsername") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.resetPassword')"
+                          @click="openResetDialog(member)"
+                        >
+                          <KeyRound class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.resetPassword") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip v-if="member.is_active">
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :disabled="isSelf(member)"
+                          :aria-label="t('team.deactivateMember')"
+                          @click="openDeactivateDialog(member)"
+                        >
+                          <UserX class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.deactivateMember") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip v-else>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.reactivateMember')"
+                          @click="openReactivateDialog(member)"
+                        >
+                          <UserCheck class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.reactivateMember") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          :aria-label="t('team.deleteMember')"
+                          @click="openDeleteDialog(member)"
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.deleteMember") }}</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </TableCellActions>
+              </TableRow>
+              <EmptyTableRow v-if="sortedMembers.length === 0" :colspan="8" @clear="clearFilters" />
+            </TableBody>
+          </Table>
+          <footer class="flex-none border-t border-border/60 bg-muted/15 px-4 sm:px-6 py-2">
+            <PaginationBar
+              :current-page="currentPage"
+              :total-pages="totalPages"
+              :total-items="totalMembers"
+              :items-per-page="pageSize"
+              :disabled="isLoading"
+              class="w-full border-0 bg-transparent p-0 shadow-none"
+              @go-to-page="goToPage"
+            />
+          </footer>
+        </div>
       </template>
     </div>
 
@@ -942,6 +1027,36 @@ onMounted(loadMembers);
               type="password"
               :disabled="isCreating"
               @keydown.enter="handleCreate"
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="create-role">{{ t("team.role") }}</Label>
+            <Select v-model="createRole" :disabled="isCreating">
+              <SelectTrigger id="create-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="option in ROLE_OPTIONS" :key="option" :value="option">
+                  {{ roleLabel(option) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">{{ t("team.roleHelp") }}</p>
+          </div>
+          <div class="space-y-2">
+            <Label>{{ t("team.allowedModels") }}</Label>
+            <AccessScopePicker
+              v-model="createModels"
+              :items="availableModels"
+              :all-label="t('team.allModels')"
+              :all-help-text="t('team.allowAllModelsHelp')"
+              :search-placeholder="t('team.searchModels')"
+              :empty-available-text="t('team.noModelsAvailable')"
+              :empty-search-text="t('team.noModelsFound')"
+              :empty-text="t('team.denyAllWarning')"
+              empty-meaning="deny"
+              :disabled="isCreating"
+              mono
             />
           </div>
         </div>
@@ -1196,6 +1311,53 @@ onMounted(loadMembers);
           </Button>
           <Button :disabled="isSavingBudget" @click="saveMemberBudget">
             <Loader2 v-if="isSavingBudget" class="h-4 w-4 animate-spin" />
+            {{ t("common.save") }}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+
+    <!-- Manage Account Rate Limit Sheet (slides in from the right) -->
+    <Sheet v-model:open="showRateLimitDialog">
+      <SheetContent
+        side="right"
+        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
+      >
+        <SheetHeaderBand :icon="Gauge">
+          <template #title>{{ t("team.manageRateLimit") }}</template>
+          <template #description>
+            {{ t("team.manageRateLimitDescription") }} —
+            <span class="font-medium">{{ rateLimitMember?.username }}</span>
+          </template>
+        </SheetHeaderBand>
+        <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+          <div class="space-y-2">
+            <Label for="member-rate-limit">{{ t("team.rateLimit") }}</Label>
+            <Input
+              id="member-rate-limit"
+              v-model.number="rateLimitRpm"
+              type="number"
+              min="1"
+              step="1"
+              :placeholder="t('team.rateLimitPlaceholder')"
+              :disabled="isSavingRateLimit"
+            />
+            <p class="text-xs text-muted-foreground">{{ t("team.rateLimitHelp") }}</p>
+            <p class="text-xs text-muted-foreground">{{ t("team.rateLimitEmptyHint") }}</p>
+          </div>
+        </div>
+        <div
+          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
+        >
+          <Button
+            variant="outline"
+            :disabled="isSavingRateLimit"
+            @click="showRateLimitDialog = false"
+          >
+            {{ t("common.cancel") }}
+          </Button>
+          <Button :disabled="isSavingRateLimit" @click="saveMemberRateLimit">
+            <Loader2 v-if="isSavingRateLimit" class="h-4 w-4 animate-spin" />
             {{ t("common.save") }}
           </Button>
         </div>

@@ -17,7 +17,7 @@ service, or environment so you can revoke, budget, and rate-limit them independe
 | **Expires at** | Optional ISO 8601 timestamp; empty = never expires |
 | **Budget** | Optional USD cap with a period: `daily`, `weekly`, `monthly`, or lifetime (no period, counts since the last reset) |
 | **Budget reset day** | 1–31, only for monthly budgets; default is the 1st (UTC) |
-| **Rate limit (RPM)** | Optional requests-per-minute cap. **Admin only** — setting it as a viewer returns 403 |
+| **Rate limit (RPM)** | Optional per-key requests-per-minute cap. **Admin only** — setting it as a viewer returns 403. To cap a member's keys, use the account rate limit in [Team](users.md#account-rate-limits) |
 
 The plaintext key (`sk-` followed by 64 hex characters) is shown **once**, in a
 dialog that requires you to acknowledge "I have saved the key". The proxy stores only
@@ -63,6 +63,8 @@ always follows the UTC calendar window described above.
 ## Rate limits, expiry, and allowlists
 
 - `rate_limit_rpm` is a sliding-window requests-per-minute limit applied per key.
+  It is set by an admin on the admin's own keys; a member-wide cap is configured
+  in [Team](users.md#account-rate-limits) instead.
 - `expires_at` disables the key automatically once passed.
 - `allowed_models` and `allowed_mcp_servers` are checked per request. A model outside
   the allowlist is rejected before any upstream call. The MCP allowlist is enforced
