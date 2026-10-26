@@ -111,7 +111,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     if identity.auth_method == "jwt":
         return None
 
-    path = request.url.path
+    path = request.scope["path"]
     # Alias paths (``/chat/completions``, ``/messages``, ``/v1/v1/...``) carry
     # no ``/v1/`` prefix but are API endpoints and must be restricted too.
     is_api_path = path.startswith("/v1/") or protocol_name_for_path(path) is not None

@@ -23,7 +23,7 @@ from llm_proxy.config.settings import (
     get_settings,
 )
 from llm_proxy.config.types.logging_config import DEFAULT_RETENTION_DAYS, LoggingConfig
-from llm_proxy.database import RequestLog, UsageRecord, get_async_session_context
+from llm_proxy.database import RequestLog, get_async_session_context
 from llm_proxy.database.connection import reclaim_sqlite_space
 from llm_proxy.database.repositories import LogRepository, UsageRepository
 from llm_proxy.observability.logger import get_logger
@@ -394,8 +394,8 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
             repo = LogRepository(session)
 
             if other_data:
-                other_logs = [_request_log_from_create(data, config=config) for data in other_data]
-                await repo.create_logs_bulk(other_logs)
+                other_values = [_request_log_values(data, config=config) for data in other_data]
+                await repo.create_log_values_bulk(other_values)
 
             for data in audit_data:
                 audit_log = _request_log_from_create(data, config=config)
@@ -645,6 +645,17 @@ def _request_log_from_create(
 ) -> RequestLog:
     """Build a RequestLog ORM instance from a RequestLogCreate DTO.
 
+    Kept for the audit path, whose integrity helper needs an instance. Bulk
+    writers call :func:`_request_log_values` and skip the ORM constructor.
+    """
+    return RequestLog(**_request_log_values(data, config=config))
+
+
+def _request_log_values(
+    data: RequestLogCreate, *, config: LoggingConfig | None = None
+) -> dict[str, Any]:
+    """Apply the log-store policies and return one row's INSERT values.
+
     ``config`` is the log store's ``LoggingConfig``. Two policies are enforced
     here, at the single choke point every writer (endpoint, audit, MCP, web
     search, realtime, middleware) builds its row through:
@@ -685,55 +696,55 @@ def _request_log_from_create(
         response_body = cap_payload(_json_safe(data.response_body), max_bytes=max_body_bytes)
         log_metadata = _json_safe(data.log_metadata)
 
-    return RequestLog(
-        user_id=data.user_id,
-        request_id=data.request_id,
-        trace_id=data.trace_id,
-        timestamp=data.timestamp,
-        endpoint=data.endpoint,
-        log_type=data.log_type.value,
-        method=data.method,
-        status_code=data.status_code,
-        response_time_ms=data.response_time_ms,
-        user_identity=data.user_identity,
-        model=data.model,
-        provider=data.provider,
-        request_headers=request_headers,
-        request_body=request_body,
-        response_headers=response_headers,
-        response_body=response_body,
-        error_message=data.error_message,
-        error_stack_trace=data.error_stack_trace,
-        prompt_tokens=data.prompt_tokens,
-        completion_tokens=data.completion_tokens,
-        total_tokens=data.total_tokens,
-        cache_creation_input_tokens=data.cache_creation_input_tokens,
-        cache_read_input_tokens=data.cache_read_input_tokens,
-        cached_prompt_tokens=data.cached_prompt_tokens,
-        audio_input_tokens=data.audio_input_tokens,
-        audio_output_tokens=data.audio_output_tokens,
-        cost_usd=data.cost_usd,
-        cache_savings_usd=data.cache_savings_usd,
-        fallback_count=data.fallback_count,
-        log_metadata=log_metadata,
-        api_key_name=data.api_key_name,
-        ttft_ms=data.ttft_ms,
-        client_ip=data.client_ip,
-        user_agent=data.user_agent,
-        session_id=data.session_id,
-        auth_method=data.auth_method,
-        server_hostname=data.server_hostname,
-        service_name=data.service_name,
-        service_version=data.service_version,
-        event_type=data.event_type,
-        action_category=data.action_category,
-        resource_type=data.resource_type,
-        resource_id=data.resource_id,
-        outcome=data.outcome,
-        sequence_number=data.sequence_number,
-        content_hash=data.content_hash,
-        previous_hash=data.previous_hash,
-    )
+    return {
+        "user_id": data.user_id,
+        "request_id": data.request_id,
+        "trace_id": data.trace_id,
+        "timestamp": data.timestamp,
+        "endpoint": data.endpoint,
+        "log_type": data.log_type.value,
+        "method": data.method,
+        "status_code": data.status_code,
+        "response_time_ms": data.response_time_ms,
+        "user_identity": data.user_identity,
+        "model": data.model,
+        "provider": data.provider,
+        "request_headers": request_headers,
+        "request_body": request_body,
+        "response_headers": response_headers,
+        "response_body": response_body,
+        "error_message": data.error_message,
+        "error_stack_trace": data.error_stack_trace,
+        "prompt_tokens": data.prompt_tokens,
+        "completion_tokens": data.completion_tokens,
+        "total_tokens": data.total_tokens,
+        "cache_creation_input_tokens": data.cache_creation_input_tokens,
+        "cache_read_input_tokens": data.cache_read_input_tokens,
+        "cached_prompt_tokens": data.cached_prompt_tokens,
+        "audio_input_tokens": data.audio_input_tokens,
+        "audio_output_tokens": data.audio_output_tokens,
+        "cost_usd": data.cost_usd,
+        "cache_savings_usd": data.cache_savings_usd,
+        "fallback_count": data.fallback_count,
+        "log_metadata": log_metadata,
+        "api_key_name": data.api_key_name,
+        "ttft_ms": data.ttft_ms,
+        "client_ip": data.client_ip,
+        "user_agent": data.user_agent,
+        "session_id": data.session_id,
+        "auth_method": data.auth_method,
+        "server_hostname": data.server_hostname,
+        "service_name": data.service_name,
+        "service_version": data.service_version,
+        "event_type": data.event_type,
+        "action_category": data.action_category,
+        "resource_type": data.resource_type,
+        "resource_id": data.resource_id,
+        "outcome": data.outcome,
+        "sequence_number": data.sequence_number,
+        "content_hash": data.content_hash,
+        "previous_hash": data.previous_hash,
+    }
 
 
 class RequestLogService:
@@ -885,37 +896,37 @@ class _BackgroundUsageWriter(_BackgroundBatchWriter["UsageRecordCreate"]):
         if not batch:
             return
 
-        records = [
-            UsageRecord(
-                user_id=data.user_id,
-                timestamp=data.timestamp,
-                request_id=data.request_id,
-                model=data.model,
-                provider=data.provider,
-                prompt_tokens=data.prompt_tokens,
-                completion_tokens=data.completion_tokens,
-                total_tokens=data.total_tokens,
-                cost_usd=data.cost_usd,
-                cache_creation_input_tokens=data.cache_creation_input_tokens,
-                cache_read_input_tokens=data.cache_read_input_tokens,
-                cached_prompt_tokens=data.cached_prompt_tokens,
-                cache_savings_usd=data.cache_savings_usd,
-                audio_input_tokens=data.audio_input_tokens,
-                audio_output_tokens=data.audio_output_tokens,
-                response_time_ms=data.response_time_ms,
-                status_code=data.status_code,
-                user_identity=data.user_identity,
-                api_key_name=data.api_key_name,
-                is_streaming=data.is_streaming,
-                ttft_ms=data.ttft_ms,
-                log_type=data.log_type,
-            )
+        values = [
+            {
+                "timestamp": data.timestamp,
+                "request_id": data.request_id,
+                "model": data.model,
+                "provider": data.provider,
+                "prompt_tokens": data.prompt_tokens,
+                "completion_tokens": data.completion_tokens,
+                "total_tokens": data.total_tokens,
+                "cost_usd": data.cost_usd,
+                "cache_creation_input_tokens": data.cache_creation_input_tokens,
+                "cache_read_input_tokens": data.cache_read_input_tokens,
+                "cached_prompt_tokens": data.cached_prompt_tokens,
+                "cache_savings_usd": data.cache_savings_usd,
+                "audio_input_tokens": data.audio_input_tokens,
+                "audio_output_tokens": data.audio_output_tokens,
+                "response_time_ms": data.response_time_ms,
+                "status_code": data.status_code,
+                "user_id": data.user_id,
+                "user_identity": data.user_identity,
+                "api_key_name": data.api_key_name,
+                "is_streaming": data.is_streaming,
+                "ttft_ms": data.ttft_ms,
+                "log_type": data.log_type,
+            }
             for data in batch
         ]
 
         async with get_async_session_context() as session:
             repo = UsageRepository(session)
-            await repo.create_usage_bulk(records)
+            await repo.create_usage_bulk(values)
 
     async def _cleanup_loop(self) -> None:
         await asyncio.sleep(1)

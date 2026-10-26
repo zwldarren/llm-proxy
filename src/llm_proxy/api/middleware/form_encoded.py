@@ -58,7 +58,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
     content_type = request.headers.get("content-type", "")
     if not (
         request.method == "POST"
-        and request.url.path == _RESPONSES_PATH
+        and request.scope["path"] == _RESPONSES_PATH
         and content_type.startswith(_FORM_ENCODED)
     ):
         return None

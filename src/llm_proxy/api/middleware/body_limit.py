@@ -82,7 +82,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
         logger.warning(
             "Invalid negative Content-Length",
             method=request.method,
-            path=request.url.path,
+            path=request.scope["path"],
         )
         return JSONResponse(
             status_code=400,
@@ -102,7 +102,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
                 content_length=content_length,
                 max_size=max_size,
                 method=request.method,
-                path=request.url.path,
+                path=request.scope["path"],
             )
             return _too_large_response(max_size)
         return None
@@ -115,7 +115,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
             "Request body too large",
             max_size=max_size,
             method=request.method,
-            path=request.url.path,
+            path=request.scope["path"],
         )
         return _too_large_response(max_size)
     return None

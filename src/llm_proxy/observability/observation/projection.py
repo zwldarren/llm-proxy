@@ -43,11 +43,12 @@ def _project_content(
     (byte-exact capture) — so it is only size-capped, and a deployment that turns
     raw capture on is choosing to store the frames unmasked.
     """
-    request_headers: Any = dict(content.request_headers)
-    response_headers: Any = dict(content.response_headers)
     if mode == "masked":
-        request_headers = mask_headers(request_headers)
-        response_headers = mask_headers(response_headers)
+        request_headers: Any = mask_headers(content.request_headers)
+        response_headers: Any = mask_headers(content.response_headers)
+    else:
+        request_headers = dict(content.request_headers)
+        response_headers = dict(content.response_headers)
 
     def projected(value: Any) -> Any:
         masked = mask_payload(value, sensitive_keys) if mode == "masked" else value
@@ -85,12 +86,12 @@ def _withheld_content(content: ContentFacts, *, mask_headers_too: bool) -> Conte
     return replace(
         content,
         request_headers=(
-            mask_headers(dict(content.request_headers))
+            mask_headers(content.request_headers)
             if mask_headers_too
             else dict(content.request_headers)
         ),
         response_headers=(
-            mask_headers(dict(content.response_headers))
+            mask_headers(content.response_headers)
             if mask_headers_too
             else dict(content.response_headers)
         ),

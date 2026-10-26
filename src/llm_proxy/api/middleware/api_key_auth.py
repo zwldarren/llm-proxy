@@ -34,7 +34,7 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
     /servers/* MCP requests are authenticated by the dedicated
     MCPProxyMiddleware before they reach the main FastAPI middleware stack.
     """
-    path = request.url.path
+    path = request.scope["path"]
     # Registered protocol paths include the base_url-tolerant aliases
     # (``/chat/completions``, ``/messages``, ``/v1/v1/...``); they must be
     # authenticated like their ``/v1/`` canonical path.

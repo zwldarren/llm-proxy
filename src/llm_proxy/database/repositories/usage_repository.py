@@ -29,38 +29,10 @@ class UsageRepository(BaseUsageRepository):
     def __init__(self, session: AsyncSession):
         super().__init__(session, UsageRecord)
 
-    async def create_usage_bulk(self, records: list[UsageRecord]) -> int:
-        """Persist multiple usage records efficiently."""
-        if not records:
+    async def create_usage_bulk(self, values: list[dict[str, Any]]) -> int:
+        """Persist multiple usage rows from pre-built INSERT values."""
+        if not values:
             return 0
-
-        values = [
-            {
-                "timestamp": record.timestamp,
-                "request_id": record.request_id,
-                "model": record.model,
-                "provider": record.provider,
-                "prompt_tokens": record.prompt_tokens,
-                "completion_tokens": record.completion_tokens,
-                "total_tokens": record.total_tokens,
-                "cost_usd": record.cost_usd,
-                "cache_creation_input_tokens": record.cache_creation_input_tokens,
-                "cache_read_input_tokens": record.cache_read_input_tokens,
-                "cached_prompt_tokens": record.cached_prompt_tokens,
-                "cache_savings_usd": record.cache_savings_usd,
-                "audio_input_tokens": record.audio_input_tokens,
-                "audio_output_tokens": record.audio_output_tokens,
-                "response_time_ms": record.response_time_ms,
-                "status_code": record.status_code,
-                "user_id": record.user_id,
-                "user_identity": record.user_identity,
-                "api_key_name": record.api_key_name,
-                "is_streaming": record.is_streaming,
-                "ttft_ms": record.ttft_ms,
-                "log_type": record.log_type,
-            }
-            for record in records
-        ]
 
         dialect_name = self.session.bind.dialect.name if self.session.bind else "sqlite"
 

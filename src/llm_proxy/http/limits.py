@@ -11,6 +11,7 @@ line until the newline arrives: an endpoint that never sends one would grow
 that buffer until the worker died.
 """
 
+import re
 from typing import Final
 
 from llm_proxy.config.settings import get_settings
@@ -21,6 +22,9 @@ from llm_proxy.http.errors import UpstreamResponseTooLarge
 #: sits comfortably above the largest real event (an inline image chunk) while
 #: keeping the read buffer bounded.
 MAX_STREAM_LINE_BYTES: Final = 8 * 1024 * 1024
+
+#: Line terminators accepted in a stream (CRLF is matched before CR/LF).
+_LINE_BREAK_RE: Final = re.compile(rb"\r\n|\r|\n")
 
 
 def max_response_bytes() -> int:
@@ -53,25 +57,19 @@ def split_lines(buffer: bytes) -> tuple[list[bytes], bytes]:
     Returns the lines and the unterminated tail, mirroring the SSE rule rather
     than ``bytes.splitlines`` so the caller can length-check the tail before it
     grows. A CR at the very end is kept: its LF may arrive in the next chunk.
+
+    The scan runs in the regex engine (C) rather than byte-by-byte in Python;
+    this function runs once per streamed chunk on the request path.
     """
     lines: list[bytes] = []
     start = 0
-    index = 0
     length = len(buffer)
-    while index < length:
-        byte = buffer[index]
-        if byte == 0x0A:
-            lines.append(buffer[start:index])
-            index += 1
-            start = index
-        elif byte == 0x0D:
-            if index + 1 == length:
-                break
-            lines.append(buffer[start:index])
-            index += 2 if buffer[index + 1] == 0x0A else 1
-            start = index
-        else:
-            index += 1
+    for match in _LINE_BREAK_RE.finditer(buffer):
+        if match.end() == length and match.group() == b"\r":
+            # A trailing CR may be the first half of a CRLF crossing chunks.
+            break
+        lines.append(buffer[start : match.start()])
+        start = match.end()
     return lines, buffer[start:]
 
 

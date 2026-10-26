@@ -47,7 +47,7 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
     # Initialize default identity for all requests
     set_request_identity(request, RequestIdentity())
 
-    path = request.url.path
+    path = request.scope["path"]
 
     if path == "/api/health" or path.startswith("/api/health/"):
         return None

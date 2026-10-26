@@ -129,7 +129,7 @@ class HttpLoggingMiddleware:
             request = Request(scope, body)
             try:
                 # Capture and mask request headers
-                facts.request_headers = mask_headers(dict(request.headers))
+                facts.request_headers = mask_headers(request.headers)
 
                 # Capture and mask request body
                 facts.request_body = _capture_and_mask_body(await body.read())

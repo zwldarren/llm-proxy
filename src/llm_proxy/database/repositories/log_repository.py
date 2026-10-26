@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import time
+from collections.abc import Sequence
 from itertools import batched
 from threading import RLock
 from typing import Any
@@ -251,13 +252,22 @@ class LogRepository(BaseUsageRepository):
         _schema_cache.set_table_columns(table_name, result)
         return result
 
-    async def _build_filtered_insert_values(self, logs: list[RequestLog]) -> list[dict[str, Any]]:
-        """Build INSERT payloads filtered to columns that actually exist in DB."""
+    async def _build_filtered_insert_values(
+        self, rows: Sequence[RequestLog | dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Build INSERT payloads filtered to columns that actually exist in DB.
+
+        Accepts ORM instances (audit/single-row callers) and pre-built dicts
+        (the background writer), so both paths share the same column filter.
+        """
 
         existing_columns = await self._get_request_log_column_names()
         filtered_values: list[dict[str, Any]] = []
-        for log in logs:
-            payload = self._build_insert_values(log)
+        for row in rows:
+            if isinstance(row, dict):
+                payload = {"content_hash_version": CONTENT_HASH_VERSION, **row}
+            else:
+                payload = self._build_insert_values(row)
             filtered_values.append({k: v for k, v in payload.items() if k in existing_columns})
         return filtered_values
 
@@ -279,6 +289,24 @@ class LogRepository(BaseUsageRepository):
             return 0
 
         values = await self._build_filtered_insert_values(logs)
+        return await self._insert_values(values)
+
+    async def create_log_values_bulk(self, rows: list[dict[str, Any]]) -> int:
+        """Persist pre-built log INSERT values (background writer path).
+
+        Skips ORM instance construction; the upsert semantics and column
+        filtering are those of :meth:`create_logs_bulk`.
+        """
+
+        if not rows:
+            return 0
+
+        values = await self._build_filtered_insert_values(rows)
+        return await self._insert_values(values)
+
+    async def _insert_values(self, values: list[dict[str, Any]]) -> int:
+        if not values:
+            return 0
 
         # Detect dialect and use appropriate upsert syntax. The dicts are
         # passed as executemany parameters (no ``.values(list)``) so the

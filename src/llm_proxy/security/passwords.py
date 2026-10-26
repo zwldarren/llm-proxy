@@ -1,6 +1,8 @@
 """Security utilities."""
 
 import re
+from collections.abc import Mapping
+from functools import lru_cache
 from secrets import token_hex
 from typing import Any
 
@@ -104,10 +106,14 @@ def _is_sensitive_dict_key(key: str, sensitive_keys: frozenset[str]) -> bool:
     return normalized.endswith(_SENSITIVE_KEY_SUFFIXES)
 
 
-def mask_headers(headers: dict[str, str]) -> dict[str, str]:
-    return {
-        key: "***" if _SENSITIVE_HEADER_RE.search(key) else value for key, value in headers.items()
-    }
+@lru_cache(maxsize=512)
+def _header_is_sensitive(name: str) -> bool:
+    """Classify one header name (cached: the same names repeat on every request)."""
+    return bool(_SENSITIVE_HEADER_RE.search(name))
+
+
+def mask_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    return {key: "***" if _header_is_sensitive(key) else value for key, value in headers.items()}
 
 
 def _mask_value(value: Any) -> Any:

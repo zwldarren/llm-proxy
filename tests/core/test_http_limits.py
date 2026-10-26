@@ -14,6 +14,7 @@ from aiohttp import web
 from llm_proxy.http.aiohttp_backend import AiohttpSession
 from llm_proxy.http.client import _HttpxSession
 from llm_proxy.http.errors import UpstreamResponseTooLarge
+from llm_proxy.http.limits import split_lines
 
 
 def _free_port() -> int:
@@ -143,3 +144,23 @@ async def test_stream_lines_split_on_cr_lf_and_crlf(server: str, session, monkey
         await response.close()
 
     assert lines == [b"a", b"b", b"c", b"d", b"e"]
+
+
+@pytest.mark.parametrize(
+    ("buffer", "lines", "tail"),
+    [
+        (b"", [], b""),
+        (b"a\nb\n", [b"a", b"b"], b""),
+        (b"a\r\nb\r\n", [b"a", b"b"], b""),
+        (b"a\rb\rc", [b"a", b"b"], b"c"),
+        (b"a\r", [], b"a\r"),
+        (b"a\r\r", [b"a"], b"\r"),
+        (b"\n\n", [b"", b""], b""),
+        (b"a\nb\rc\nd\re\r", [b"a", b"b", b"c", b"d"], b"e\r"),
+    ],
+)
+def test_split_lines_keeps_a_trailing_cr_pending(
+    buffer: bytes, lines: list[bytes], tail: bytes
+) -> None:
+    """The splitter carries a final CR so a CRLF split across reads rejoins."""
+    assert split_lines(buffer) == (lines, tail)

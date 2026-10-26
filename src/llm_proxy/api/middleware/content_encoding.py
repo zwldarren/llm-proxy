@@ -276,7 +276,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
             logger.warning(
                 "Request body decompression failed",
                 encodings=",".join(encodings),
-                path=request.url.path,
+                path=request.scope["path"],
                 error=str(exc),
             )
             return _error_response(
@@ -294,7 +294,7 @@ async def _dispatch(request: Request, body: BodyReader) -> JSONResponse | None:
         encodings=",".join(encodings),
         compressed=len(body_bytes),
         decompressed=len(data),
-        path=request.url.path,
+        path=request.scope["path"],
     )
 
     # Replace the body and rewrite the entity headers to match the plain body.

@@ -376,6 +376,44 @@ class TestLogRepository:
             assert payload["auth_method"] == "session_api_key"
 
     @pytest.mark.asyncio
+    async def test_create_log_values_bulk_filters_and_stamps_hash_version(self, repo, mock_session):
+        """The writer's dict path keeps the ORM path's column filter and version."""
+        rows = [
+            {
+                "request_id": "dict-row",
+                "timestamp": time.time(),
+                "endpoint": "/v1/chat/completions",
+                "method": "POST",
+                "status_code": 200,
+                "not_a_column": "dropped",
+            }
+        ]
+
+        with patch.object(
+            _schema_cache,
+            "get_table_columns",
+            return_value={
+                "request_id",
+                "timestamp",
+                "endpoint",
+                "method",
+                "status_code",
+                "content_hash_version",
+            },
+        ):
+            mock_session.execute = AsyncMock()
+            result = await repo.create_log_values_bulk(rows)
+
+        assert result == 1
+        payloads = mock_session.execute.await_args.args[1]
+        assert payloads[0]["content_hash_version"] == CONTENT_HASH_VERSION
+        assert "not_a_column" not in payloads[0]
+
+    @pytest.mark.asyncio
+    async def test_create_log_values_bulk_empty(self, repo):
+        assert await repo.create_log_values_bulk([]) == 0
+
+    @pytest.mark.asyncio
     async def test_delete_old_logs(self, repo, mock_session):
         """Test deleting old logs."""
         mock_result = MagicMock()

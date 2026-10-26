@@ -58,9 +58,9 @@ def _error_type_for_request(request: Request, error_type: str) -> str:
     emit the same spec code); Anthropic paths get the Anthropic type names.
     Everything else passes through.
     """
-    if is_openresponses_path(request.url.path):
+    if is_openresponses_path(request.scope["path"]):
         return openresponses_error_code(error_type)
-    if _is_anthropic_path(request.url.path):
+    if _is_anthropic_path(request.scope["path"]):
         return _ANTHROPIC_ERROR_TYPE_ALIASES.get(error_type, error_type)
     return error_type
 
@@ -82,7 +82,7 @@ def protocol_for_request(request: Request) -> ErrorProtocol:
     shape (``{"type": "error", "error": {...}}``) so Claude Code parses them
     natively; everything else uses the OpenAI envelope.
     """
-    if _is_anthropic_path(request.url.path):
+    if _is_anthropic_path(request.scope["path"]):
         return "anthropic"
     return "openai"
 
@@ -217,7 +217,8 @@ async def recursion_error_handler(request: Request, exc: RecursionError) -> JSON
     """
     request_id = facts_for(request).request_id
     logger.warning(
-        f"Recursion limit exceeded [request_id={request_id}] [endpoint={request.url.path}]: {exc}"
+        f"Recursion limit exceeded [request_id={request_id}] "
+        f"[endpoint={request.scope['path']}]: {exc}"
     )
 
     record_early_failure(
@@ -263,7 +264,7 @@ async def routing_infeasible_handler(request: Request, exc: RoutingInfeasibleErr
         status_code, error_type = 400, "invalid_request_error"
 
     logger.warning(
-        f"Routing infeasible [request_id={request_id}] [endpoint={request.url.path}]: "
+        f"Routing infeasible [request_id={request_id}] [endpoint={request.scope['path']}]: "
         f"{infeasibility.message}"
     )
 
@@ -292,7 +293,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
     logger.log(
         log_level,
-        f"HTTP exception [request_id={request_id}] [endpoint={request.url.path}]: {exc}",
+        f"HTTP exception [request_id={request_id}] [endpoint={request.scope['path']}]: {exc}",
         exc_info=exc,
     )
 
@@ -333,7 +334,7 @@ def _create_handler(
         provider = facts.provider
         model = facts.model
 
-        ctx_parts = [f"endpoint={request.url.path}"]
+        ctx_parts = [f"endpoint={request.scope['path']}"]
         if provider:
             ctx_parts.append(f"provider={provider}")
         if model:

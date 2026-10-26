@@ -465,7 +465,7 @@ def _backfill_request_data(request: Request, config: LoggingConfig) -> tuple[dic
     """
     try:
         facts = facts_for(request)
-        headers = facts.request_headers or mask_headers(dict(request.headers))
+        headers = facts.request_headers or mask_headers(request.headers)
 
         parsed_body = facts.parsed_request_body
         if parsed_body is not None:
