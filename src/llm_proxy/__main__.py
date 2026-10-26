@@ -140,9 +140,14 @@ async def main() -> None:
     # completion so spawned workers only connect (see database.init_db).
     os.environ["LLM_PROXY_MIGRATIONS_DONE"] = "1"
 
-    from llm_proxy.config import ensure_secrets
+    from llm_proxy.config import ensure_secrets, get_encryption_key
+    from llm_proxy.security.encryption import init_encryption
 
     await ensure_secrets()
+    # The fail-fast load below decrypts provider API keys. It runs in this
+    # launching process, before any worker's lifespan reaches
+    # init_encryption(), so the module must be initialized here as well.
+    init_encryption(get_encryption_key())
 
     config_manager = DatabaseConfigManager()
     # Load once to fail fast on invalid database configuration (providers,
