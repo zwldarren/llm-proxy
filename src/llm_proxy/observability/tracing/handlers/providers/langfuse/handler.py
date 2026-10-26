@@ -11,72 +11,26 @@ through the observation collector and hands the exporter an immutable
 ``RequestObservation``.
 """
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 lazy from langfuse import Langfuse
 
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.observability.observation.collector import capture_request_end, collect
+from llm_proxy.observability.observation.policy import (
+    parse_send_content,
+    send_content_field_metadata,
+)
 from llm_proxy.observability.sinks.langfuse import LangfuseExporter, sampled_tracer_provider
-from llm_proxy.observability.tracing.handlers.base import TracingHandler
+from llm_proxy.observability.tracing.handlers.exporter_handler import ExporterBackedHandler
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from llm_proxy.config.manager import DatabaseConfigManager
-    from llm_proxy.models import (
-        InternalDecisionRequest,
-        InternalDecisionResponse,
-        InternalEmbeddingRequest,
-        InternalEmbeddingResponse,
-        InternalImageEditRequest,
-        InternalImageRequest,
-        InternalImageResponse,
-        InternalRequest,
-        InternalRerankRequest,
-        InternalRerankResponse,
-        InternalResponse,
-        InternalSpeechRequest,
-        InternalSpeechResponse,
-        InternalSystemOneRequest,
-        InternalSystemOneResponse,
-        InternalTranscriptionRequest,
-        InternalTranscriptionResponse,
-        InternalTranslationRequest,
-        InternalTranslationResponse,
-    )
-    from llm_proxy.observability.event_context import EventContext
     from llm_proxy.observability.observation.policy import SendContent
 
-    #: What the tracing hooks actually receive: the pipeline hands over the
-    #: strategy's own request and response objects, and only chat uses the
-    #: conversation-shaped pair.
-    type ObservedRequest = (
-        InternalRequest
-        | InternalEmbeddingRequest
-        | InternalRerankRequest
-        | InternalImageRequest
-        | InternalImageEditRequest
-        | InternalSpeechRequest
-        | InternalTranscriptionRequest
-        | InternalTranslationRequest
-        | InternalSystemOneRequest
-        | InternalDecisionRequest
-    )
-    type ObservedResponse = (
-        InternalResponse
-        | InternalEmbeddingResponse
-        | InternalRerankResponse
-        | InternalImageResponse
-        | InternalSpeechResponse
-        | InternalTranscriptionResponse
-        | InternalTranslationResponse
-        | InternalSystemOneResponse
-        | InternalDecisionResponse
-    )
 
-
-class LangfuseTracingHandler(TracingHandler):
+class LangfuseTracingHandler(ExporterBackedHandler):
     """Tracing handler that exports request traces to Langfuse.
 
     Uses the official Langfuse Python SDK. A request is represented as a single
@@ -119,6 +73,8 @@ class LangfuseTracingHandler(TracingHandler):
             "name": "sample_rate",
             "type": "number",
             "required": False,
+            "min": 0.0,
+            "max": 1.0,
             "description": "Sampling rate (0.0-1.0) for trace export",
         },
         {
@@ -128,23 +84,8 @@ class LangfuseTracingHandler(TracingHandler):
             "default": "1.0",
             "description": "Version tag for traces",
         },
-        {
-            "name": "send_content",
-            "type": "select",
-            "required": False,
-            "default": "full",
-            "choices": ["inherit", "none", "full"],
-            "description": (
-                "Which prompt/completion content to export. 'full' (default) exports "
-                "verbatim content. 'inherit' follows the logging settings: no content "
-                "when log_input_output is off, masked content when mask_sensitive_data "
-                "is on. 'none' never exports content."
-            ),
-        },
+        send_content_field_metadata(),
     ]
-
-    #: What an operator may ask this backend to export (see ``SendContent``).
-    _SEND_CONTENT_CHOICES: frozenset[str] = frozenset({"inherit", "none", "full"})
 
     _DEFAULT_BASE_URL = "https://cloud.langfuse.com"
 
@@ -199,9 +140,7 @@ class LangfuseTracingHandler(TracingHandler):
         base_url = cls._resolve_host(settings)
         timeout = settings.get("timeout")
         sample_rate = settings.get("sample_rate")
-        send_content = str(settings.get("send_content") or "full").strip().lower()
-        if send_content not in cls._SEND_CONTENT_CHOICES:
-            raise ValueError("send_content must be one of: inherit, none, full")
+        send_content = parse_send_content(settings)
 
         client_kwargs: dict[str, Any] = {
             "public_key": public_key,
@@ -237,7 +176,7 @@ class LangfuseTracingHandler(TracingHandler):
             client=client,
             base_url=base_url,
             version=settings.get("version", "1.0"),
-            send_content=cast("SendContent", send_content),
+            send_content=send_content,
         )
 
     def __init__(
@@ -262,101 +201,6 @@ class LangfuseTracingHandler(TracingHandler):
             name=name,
         )
 
-    # -- lifecycle --------------------------------------------------------
-
-    async def on_request_start(
-        self,
-        request: ObservedRequest,
-        context: EventContext,
-    ) -> None:
-        if not self._enabled:
-            return
-        self._exporter.open(collect(context), request)
-
-    async def on_request_end(
-        self,
-        request: ObservedRequest,
-        response: ObservedResponse,
-        context: EventContext,
-    ) -> None:
-        # Finalize the capture (usage, status, cost) so this exporter sees the
-        # same facts the log row will; the intake verb repeats it idempotently.
-        record = await capture_request_end(context, response=response)
-        self._exporter.finish(record, request=request, response=response)
-
-    async def on_error(
-        self,
-        request: ObservedRequest,
-        error: Exception,
-        context: EventContext,
-    ) -> None:
-        record = await capture_request_end(context, error=error)
-        self._exporter.fail(record, error)
-
-    async def on_stream_start(
-        self,
-        request: ObservedRequest,
-        context: EventContext,
-    ) -> None:
-        self._exporter.stream_opened(collect(context))
-
-    async def on_stream_chunk(
-        self,
-        request: ObservedRequest,
-        chunk: str,
-        context: EventContext,
-    ) -> None:
-        # The snapshot is taken at most once per stream: ``needs_ttft`` is false as
-        # soon as the first-token update landed, so the per-chunk hook pays only a
-        # dict lookup after that.
-        if not self._exporter.needs_ttft(context.request_id):
-            return
-        self._exporter.stream_progress(collect(context))
-
-    async def on_stream_end(
-        self,
-        request: ObservedRequest,
-        context: EventContext,
-        error: Exception | None = None,
-    ) -> None:
-        # Streaming folds the transformer's usage here, before the audit handler
-        # runs: user handlers are registered ahead of the system ones, and the
-        # export must not miss the final usage report.
-        record = await capture_request_end(context, error=error, streaming=True)
-        if error is not None:
-            self._exporter.fail(record, error, streaming=True)
-        else:
-            self._exporter.finish(record, request=request)
-
-    # -- trace identity ---------------------------------------------------
-
-    def get_trace_id(self) -> str | None:
-        return self._exporter.get_trace_id()
-
-    def get_observation_id(self) -> str | None:
-        return self._exporter.get_observation_id()
-
-    def get_trace_header_name(self) -> str:
-        return "x-trace-id"
-
-    # -- lifetime ---------------------------------------------------------
-
-    async def release(self) -> None:
-        """Release the handler from a live registry without tearing down the SDK.
-
-        Called when the owning registry is dropped (the user changed their tracing
-        config, or a peer worker did). ``LangfuseResourceManager`` is a
-        process-wide singleton keyed by public key, so ``client.shutdown()`` here
-        would stop the media/score consumers for *every* handler sharing the
-        project — and, because a client rebuilt from the same singletons reuses
-        the stopped resource manager, degrade the user's tracing until restart.
-
-        Flush instead and keep the client usable: requests already in flight hold
-        this handler and must be able to end their generation. The client is
-        garbage-collected once the old registry is dropped.
-        """
-        await self._exporter.flush()
-
-    async def shutdown(self) -> None:
-        self._enabled = False
-        await self._exporter.close()
+    # The request lifecycle, trace-id answers, `release` and `shutdown` are the
+    # shared adapter in ``tracing/handlers/exporter_handler.py``: this handler only
+    # declares the backend's metadata and builds its exporter.

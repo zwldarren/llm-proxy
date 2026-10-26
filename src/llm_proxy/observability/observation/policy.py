@@ -33,9 +33,10 @@ See ADR-0044.
 """
 
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import orjson
 
@@ -52,6 +53,43 @@ ContentMode = Literal["none", "masked", "full"]
 #: policy"), not a mode a payload can be projected through, and an exporter
 #: resolves it before any content is touched.
 SendContent = Literal["inherit", "none", "full"]
+
+#: The spellings an operator may store for a backend's ``send_content`` setting.
+SEND_CONTENT_CHOICES: frozenset[str] = frozenset({"inherit", "none", "full"})
+
+
+def parse_send_content(settings: Mapping[str, Any]) -> SendContent:
+    """The operator's ``send_content`` choice, defaulting to ``full``.
+
+    One parser for every exporter-backed backend, so a new backend cannot
+    disagree about the accepted spellings or about the default (ADR-0048).
+    """
+    send_content = str(settings.get("send_content") or "full").strip().lower()
+    if send_content not in SEND_CONTENT_CHOICES:
+        raise ValueError("send_content must be one of: inherit, none, full")
+    return cast("SendContent", send_content)
+
+
+def send_content_field_metadata() -> dict[str, Any]:
+    """The dashboard field every exporter-backed backend declares.
+
+    Built fresh per call so a handler class attribute cannot be mutated by a
+    consumer of the provider-list response.
+    """
+    return {
+        "name": "send_content",
+        "type": "select",
+        "required": False,
+        "default": "full",
+        "choices": ["inherit", "none", "full"],
+        "description": (
+            "Which prompt/completion content to export. 'full' (default) exports "
+            "verbatim content. 'inherit' follows the logging settings: no content "
+            "when log_input_output is off, masked content when mask_sensitive_data "
+            "is on. 'none' never exports content."
+        ),
+    }
+
 
 _MODE_RANK: frozendict[ContentMode, int] = frozendict({"none": 0, "masked": 1, "full": 2})
 

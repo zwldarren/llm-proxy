@@ -29,7 +29,8 @@ Notes:
 
 Optional next steps: enable [smart routing](../api/routing.md) for the virtual models
 `auto`/`fast`/`best`, wire up [MCP servers](../admin/mcp.md), or configure
-[Langfuse tracing](../admin/settings.md#tracing) for your account.
+[tracing](../admin/settings.md#tracing) to Langfuse, OpenTelemetry or LangSmith for
+your account.
 
 ## Sessions and security
 

@@ -1907,41 +1907,94 @@ export default {
   },
   // Tracing
   tracing: {
-    description: "Configure your own observability and tracing with Langfuse",
+    description:
+      "Configure your own observability and tracing with Langfuse, OpenTelemetry or LangSmith",
     enableTracing: "Enable Tracing",
     enableTracingDescription: "Enable tracing for all LLM requests",
     provider: "Provider",
     providerType: {
       langfuse: "Langfuse",
+      otel: "OpenTelemetry",
+      langsmith: "LangSmith",
     },
     addProvider: "Add Provider",
     removeProvider: "Remove Provider",
     providerName: "Name",
-    providerNamePlaceholder: "e.g., production-langfuse",
+    providerNamePlaceholder: "e.g., production-traces",
     selectProviderType: "Select provider type",
-    baseUrl: "Base URL",
-    baseUrlPlaceholder: "https://cloud.langfuse.com",
-    baseUrlHelp: "Langfuse base URL.",
-    publicKey: "Public Key",
-    secretKey: "Secret Key",
-    publicKeyPlaceholder: "pk-...",
-    secretKeyPlaceholder: "sk-...",
-    sendContent: "Send Content",
-    sendContentHelp:
-      "Full exports prompts and completions verbatim. Follow log settings obeys Log Input/Output and Mask Sensitive Data. Metadata only exports no content (usage, cost and metadata are still sent).",
-    sendContentOptions: {
-      full: "Full content",
-      inherit: "Follow log settings",
-      none: "Metadata only",
+    headerKey: "Key",
+    headerValue: "Value",
+    addHeader: "Add header",
+    removeHeader: "Remove header",
+    // Field labels drive the provider form. A provider-specific entry wins over
+    // the shared one, so `endpoint` can describe an OTLP collector for otel and
+    // the LangSmith gateway for langsmith.
+    fields: {
+      langfuse: {
+        base_url: {
+          label: "Base URL",
+          help: "Langfuse base URL (cloud region or self-hosted).",
+        },
+        public_key: { label: "Public Key", help: "Langfuse project public key." },
+        secret_key: { label: "Secret Key", help: "Langfuse project secret key." },
+        version: { label: "Version", help: "Version tag attached to every trace." },
+      },
+      otel: {
+        endpoint: {
+          label: "OTLP Endpoint",
+          help: "Collector URL including the scheme — HTTP: https://collector:4318/v1/traces, gRPC: https://collector:4317.",
+        },
+        headers: {
+          label: "Headers",
+          help: "Extra HTTP headers or gRPC metadata, e.g. Authorization.",
+        },
+        protocol: {
+          label: "Protocol",
+          help: "How spans reach the collector.",
+          choices: { http: "HTTP/protobuf", grpc: "gRPC" },
+        },
+        insecure: {
+          label: "Skip TLS",
+          help: "Send gRPC without TLS (plain-text collector).",
+        },
+        service_name: {
+          label: "Service name",
+          help: "OpenTelemetry service.name resource attribute.",
+        },
+      },
+      langsmith: {
+        api_key: { label: "API Key", help: "LangSmith API key (lsv2_...)." },
+        project: { label: "Project", help: "LangSmith project; created on first ingest." },
+        endpoint: {
+          label: "OTLP Endpoint",
+          help: "LangSmith OTLP gateway; change the host for EU/APAC/AWS or a self-hosted deployment.",
+        },
+        tenant_id: {
+          label: "Workspace ID",
+          help: "X-Tenant-Id header, for keys not scoped to one workspace.",
+        },
+      },
+      timeout: { label: "Timeout (seconds)", help: "Optional exporter request timeout." },
+      sample_rate: {
+        label: "Sample rate",
+        help: "Fraction of requests to export (0.0-1.0).",
+      },
+      send_content: {
+        label: "Send Content",
+        help: "Full exports prompts and completions verbatim. Follow log settings obeys Log Input/Output and Mask Sensitive Data. Metadata only exports no content (usage, cost and metadata are still sent).",
+        choices: {
+          full: "Full content",
+          inherit: "Follow log settings",
+          none: "Metadata only",
+        },
+      },
     },
-    timeout: "Timeout (seconds)",
-    timeoutPlaceholder: "Optional",
     status: {
       active: "Active",
     },
     emptyState: {
       title: "No tracing providers configured",
-      description: "Add a Langfuse provider to start exporting request traces.",
+      description: "Add a tracing provider to start exporting request traces.",
     },
     editProvider: "Edit provider",
     editProviderDescription:

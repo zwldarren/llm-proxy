@@ -93,10 +93,15 @@ def _build_config_read(config_dict: dict) -> TracingConfigRead:
     return TracingConfigRead(enabled=config.enabled, providers=providers)
 
 
+#: Settings whose value is the URL the backend sends traces to: Langfuse's
+#: ``base_url``, the OTLP collector's ``endpoint``, LangSmith's OTLP endpoint.
+_URL_SETTING_KEYS: tuple[str, ...] = ("base_url", "endpoint")
+
+
 def _validate_tracing_provider_urls(
     providers: list[TracingProviderConfig], *, allow_private_hosts: bool = True
 ) -> None:
-    """Validate tracing provider settings for SSRF (currently Langfuse base_url).
+    """Validate the URL settings of every tracing provider for SSRF.
 
     Admin-managed tracing may point at a private/self-hosted collector, so the
     default stays format-only. Self-service configs (any logged-in user) pass
@@ -105,13 +110,15 @@ def _validate_tracing_provider_urls(
     internal hosts through ``HTTP_ALLOWED_HOSTS``.
     """
     for provider in providers:
-        base_url = provider.settings.get("base_url")
-        if base_url and isinstance(base_url, str):
-            label = f"tracing provider '{provider.name}' base_url"
+        for key in _URL_SETTING_KEYS:
+            url = provider.settings.get(key)
+            if not url or not isinstance(url, str):
+                continue
+            label = f"tracing provider '{provider.name}' {key}"
             if allow_private_hosts:
-                validate_url_format(base_url, label=label)
+                validate_url_format(url, label=label)
             else:
-                validate_server_url(base_url, label=label, fail_closed=True)
+                validate_server_url(url, label=label, fail_closed=True)
 
 
 async def _validate_tracing_provider_urls_async(

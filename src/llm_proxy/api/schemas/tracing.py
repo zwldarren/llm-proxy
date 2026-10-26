@@ -125,6 +125,8 @@ class TracingProviderField(BaseModel):
     required: bool = False
     choices: list[str] | None = None
     default: Any | None = None
+    min: float | None = None
+    max: float | None = None
     description: str | None = None
 
 

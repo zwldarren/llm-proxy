@@ -205,9 +205,16 @@ the parent row already holds, and the output is the verdict in metadata.
 
 ## Tracing
 
-Tracing is **per user** (Settings → General → Tracing) and currently supports
-**Langfuse** plus the always-on internal audit handler. There is no global tracing
-configuration and no OTLP exporter in v0.2.3.
+Tracing is **per user** (Settings → General → Tracing). Each user configures their
+own backends, and those backends only ever see that user's requests: there is no
+global tracing configuration. Three backends are built in, beside the always-on
+internal audit handler:
+
+| Provider | Sends traces to | Transport | Credentials |
+| --- | --- | --- | --- |
+| `langfuse` | Langfuse cloud or a self-hosted instance | Langfuse SDK | public + secret key |
+| `otel` | Any OTLP collector — Tempo, Jaeger, Phoenix, Grafana, … | OTLP/HTTP or gRPC | optional `Authorization` header / gRPC metadata |
+| `langsmith` | LangSmith's OTLP gateway | OTLP/HTTP | API key, optional project and workspace id |
 
 When enabled, each request exports one observation, named after its endpoint and
 carrying that request type's own content:
@@ -255,13 +262,35 @@ carrying that request type's own content:
   latency, TTFT, token details not used as buckets, cache savings, and fallback/retry
   information.
 
-The observation type is `generation` for every request type except embeddings:
+In Langfuse, the observation type is `generation` for every request type except
+embeddings:
 Langfuse records usage and cost on `generation` and `embedding` observations only, so a
 billed call keeps its priced home. Version segments are stripped from the name, so
 `/v1/rerank` and `/v2/rerank` both read `rerank`, and the double-version aliases
 (`/v1/v1/chat/completions`) collapse to the canonical name as well.
 
-**Content policy.** The exporter exports the prompt and completion by default: its
+**The two OTLP backends** export one `CLIENT` span per request, named
+`{operation} {model}`, with the OpenTelemetry GenAI attributes:
+`gen_ai.operation.name` (`chat`, `embeddings`, `generate_content`, or the proxy's own
+`rerank`/`speech`/… for types the conventions do not name), `gen_ai.request.model`,
+`gen_ai.response.model`, `gen_ai.request.*` sampling parameters,
+`gen_ai.usage.input_tokens`/`output_tokens`/`total_tokens` (inclusive, as the
+conventions define them) with the cache-read, cache-write and reasoning details beside
+them, and `gen_ai.conversation.id` for the session. The projected input and output are
+attached under `input.value`/`output.value` (the OpenInference spelling), and the
+proxy's own facts — request id, provider, endpoint, latency, TTFT, cost, cache savings,
+fallback/retry counts — under `llm_proxy.*`. TTFT is also recorded as a
+`gen_ai.first_token` span event. A failed request ends as an error span: `error.type`,
+the recorded exception, and `StatusCode.ERROR`.
+
+The LangSmith backend additionally emits the spellings its ingest reads:
+`gen_ai.system` for the upstream provider, flattened
+`gen_ai.prompt.*`/`gen_ai.completion.*` message attributes,
+`langsmith.trace.session_id`, `langsmith.span.tags` and `langsmith.metadata.*`. It
+speaks HTTP only — LangSmith has no gRPC ingest — and it ingests traces only, not
+metrics or logs.
+
+**Content policy.** Every backend exports the prompt and completion by default: its
 `send_content` setting is `full`, so enabling tracing keeps the input/output that
 previous releases recorded. `inherit` instead follows the log privacy switches —
 `log_input_output` off means no prompt/completion content is sent (usage, cost, model,

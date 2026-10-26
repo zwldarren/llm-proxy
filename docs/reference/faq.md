@@ -101,8 +101,8 @@ URI, or an uploaded-file reference. Worth knowing:
 ## Can I export logs to my own system?
 
 There is no export endpoint in v0.2.3; use `GET /api/logs` with cursor pagination
-(max 200 per page) or scrape container logs. Langfuse tracing (per user) covers
-LLM-level observability.
+(max 200 per page) or scrape container logs. Per-user tracing to Langfuse,
+OpenTelemetry or LangSmith covers LLM-level observability.
 
 ## Is there an OpenAPI/Swagger page?
 

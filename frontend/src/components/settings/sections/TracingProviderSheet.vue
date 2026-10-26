@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Plus, Trash2 } from "@lucide/vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,13 +17,19 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SheetHeader from "@/components/ui/sheet/SheetHeader.vue";
 import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
 import SheetDescription from "@/components/ui/sheet/SheetDescription.vue";
+import { Switch } from "@/components/ui/switch";
 import { type TracingProviderEditor } from "@/composables/useTracingProviders";
-import type { TracingProvider } from "@/types/schemas";
+import type { TracingProvider, TracingProviderField } from "@/types/schemas";
 
 /**
  * Focused side sheet for editing one tracing provider's connection details.
  * Kept out of the settings card so the page stays compact no matter how many
  * providers are configured.
+ *
+ * The form is rendered from the provider's field metadata (`/api/me/tracing/
+ * providers`), not from a per-provider template: a new backend becomes
+ * configurable here by declaring its fields, and a provider a user saved with
+ * an older schema still shows whatever its metadata declares today.
  */
 const props = defineProps<{
   provider: TracingProvider | null;
@@ -32,26 +40,129 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 
-type SendContent = "full" | "inherit" | "none";
+const providerType = computed(() =>
+  props.editor.providerTypes.value.find((type) => type.name === props.provider?.provider)
+);
 
-function isSendContent(value: unknown): value is SendContent {
-  return value === "full" || value === "inherit" || value === "none";
+const fields = computed<TracingProviderField[]>(() => providerType.value?.fields ?? []);
+
+/**
+ * Field labels/help/choice labels live in i18n, with the provider-specific entry
+ * winning over the shared one (`endpoint` means a collector for otel and the
+ * LangSmith gateway for langsmith). The backend's English description is the
+ * last fallback, so a provider added without translations still renders.
+ */
+function translated(field: TracingProviderField, kind: string): string | null {
+  const provider = props.provider?.provider;
+  const candidates: string[] = [];
+  if (provider) candidates.push(`tracing.fields.${provider}.${field.name}.${kind}`);
+  candidates.push(`tracing.fields.${field.name}.${kind}`);
+  const key = candidates.find((candidate) => te(candidate));
+  return key ? t(key) : null;
+}
+
+function fieldLabel(field: TracingProviderField): string {
+  return translated(field, "label") ?? humanize(field.name);
+}
+
+function fieldHelp(field: TracingProviderField): string {
+  return translated(field, "help") ?? field.description ?? "";
+}
+
+function choiceLabel(field: TracingProviderField, choice: string): string {
+  return translated(field, `choices.${choice}`) ?? choice;
+}
+
+function humanize(name: string): string {
+  const words = name.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**
- * The value the select shows. A provider saved before `send_content` existed
- * (or whose key was removed) uses the backend default, `full`.
+ * The value shown for a field: what the user saved, or the provider's declared
+ * default when nothing is stored (e.g. `send_content` = `full`).
  */
-function sendContentValue(provider: TracingProvider): SendContent {
-  const value = props.editor.getProviderFieldValue(provider, "send_content");
-  return isSendContent(value) ? value : "full";
+function fieldValue(provider: TracingProvider, field: TracingProviderField): unknown {
+  const value = props.editor.getProviderFieldValue(provider, field.name);
+  if (value === undefined || value === null || value === "") return field.default;
+  return value;
 }
 
-function updateSendContent(provider: TracingProvider, value: unknown): void {
-  if (!provider.id || !isSendContent(value)) return;
-  props.editor.updateProviderField(provider.id, "send_content", value);
+function setField(provider: TracingProvider, field: TracingProviderField, value: unknown): void {
+  if (!provider.id) return;
+  props.editor.updateProviderField(provider.id, field.name, value);
+}
+
+// ── headers field ───────────────────────────────────────────────────────
+// A header map is edited as ordered key/value rows. Rows are projected back
+// into the settings object on every edit, so no draft state can drift from
+// what will be saved.
+
+function headerEntries(provider: TracingProvider, field: TracingProviderField): [string, string][] {
+  const value = props.editor.getProviderFieldValue(provider, field.name);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+    key,
+    entry == null ? "" : String(entry),
+  ]);
+}
+
+function setHeaders(
+  provider: TracingProvider,
+  field: TracingProviderField,
+  entries: [string, string][]
+): void {
+  setField(provider, field, Object.fromEntries(entries));
+}
+
+function addHeader(provider: TracingProvider, field: TracingProviderField): void {
+  const entries = headerEntries(provider, field);
+  const keys = new Set(entries.map(([key]) => key));
+  let index = entries.length + 1;
+  while (keys.has(`header-${index}`)) index += 1;
+  setHeaders(provider, field, [...entries, [`header-${index}`, ""]]);
+}
+
+function renameHeader(
+  provider: TracingProvider,
+  field: TracingProviderField,
+  oldKey: string,
+  newKey: string
+): void {
+  // A cleared key keeps its row (so the user can type a new one); the backend
+  // drops keyless entries when it builds the request headers.
+  setHeaders(
+    provider,
+    field,
+    headerEntries(provider, field).map(([key, value]): [string, string] =>
+      key === oldKey ? [newKey.trim(), value] : [key, value]
+    )
+  );
+}
+
+function updateHeaderValue(
+  provider: TracingProvider,
+  field: TracingProviderField,
+  key: string,
+  value: string
+): void {
+  setHeaders(
+    provider,
+    field,
+    headerEntries(provider, field).map(([entryKey, entryValue]): [string, string] =>
+      entryKey === key ? [entryKey, value] : [entryKey, entryValue]
+    )
+  );
+}
+
+function removeHeader(provider: TracingProvider, field: TracingProviderField, key: string): void {
+  setHeaders(
+    provider,
+    field,
+    headerEntries(provider, field).filter(([entryKey]) => entryKey !== key)
+  );
 }
 </script>
 
@@ -92,111 +203,136 @@ function updateSendContent(provider: TracingProvider, value: unknown): void {
           />
         </div>
 
-        <!-- Base URL -->
-        <div class="space-y-1.5">
-          <Label class="text-xs font-semibold text-muted-foreground">
-            {{ t("tracing.baseUrl") }}
-          </Label>
-          <Input
-            :model-value="(editor.getProviderFieldValue(provider, 'base_url') as string) || ''"
-            :placeholder="t('tracing.baseUrlPlaceholder')"
-            class="font-mono text-sm w-full bg-background"
-            @update:model-value="
-              provider.id && editor.updateProviderField(provider.id!, 'base_url', String($event))
-            "
-          />
-          <p class="text-xs text-muted-foreground">{{ t("tracing.baseUrlHelp") }}</p>
-        </div>
-
-        <!-- Public + Secret keys -->
-        <div class="grid grid-cols-1 gap-4">
-          <div class="space-y-1.5">
+        <!-- Provider fields, in the order the backend declares them -->
+        <template v-for="field in fields" :key="field.name">
+          <!-- Key/value map (headers) -->
+          <div v-if="field.type === 'headers'" class="space-y-1.5">
             <Label class="text-xs font-semibold text-muted-foreground">
-              {{ t("tracing.publicKey") }}
-              <span class="text-destructive">*</span>
+              {{ fieldLabel(field) }}
             </Label>
-            <Input
-              :model-value="(editor.getProviderFieldValue(provider, 'public_key') as string) || ''"
-              :placeholder="t('tracing.publicKeyPlaceholder')"
-              class="font-mono text-sm w-full bg-background"
-              @update:model-value="
-                provider.id &&
-                editor.updateProviderField(provider.id!, 'public_key', String($event))
-              "
+            <div class="space-y-2">
+              <div
+                v-for="[key, value] in headerEntries(provider, field)"
+                :key="key"
+                class="flex items-center gap-2"
+              >
+                <Input
+                  :model-value="key"
+                  :aria-label="`${fieldLabel(field)} ${t('tracing.headerKey')}`"
+                  class="font-mono text-xs w-2/5 bg-background"
+                  @update:model-value="renameHeader(provider!, field, key, String($event))"
+                />
+                <Input
+                  :model-value="value"
+                  :aria-label="`${fieldLabel(field)} ${t('tracing.headerValue')}`"
+                  type="password"
+                  class="font-mono text-xs flex-1 bg-background"
+                  @update:model-value="updateHeaderValue(provider!, field, key, String($event))"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  :aria-label="t('tracing.removeHeader')"
+                  @click="removeHeader(provider!, field, key)"
+                >
+                  <Trash2 class="size-3.5" />
+                </Button>
+              </div>
+              <Button variant="outline" size="sm" @click="addHeader(provider!, field)">
+                <Plus class="size-3.5 mr-1" />
+                {{ t("tracing.addHeader") }}
+              </Button>
+            </div>
+            <p v-if="fieldHelp(field)" class="text-xs text-muted-foreground">
+              {{ fieldHelp(field) }}
+            </p>
+          </div>
+
+          <!-- Boolean switch -->
+          <div v-else-if="field.type === 'boolean'" class="flex items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <Label class="text-xs font-semibold text-muted-foreground">
+                {{ fieldLabel(field) }}
+              </Label>
+              <p v-if="fieldHelp(field)" class="text-xs text-muted-foreground">
+                {{ fieldHelp(field) }}
+              </p>
+            </div>
+            <Switch
+              :model-value="Boolean(fieldValue(provider, field))"
+              :aria-label="fieldLabel(field)"
+              @update:model-value="setField(provider!, field, Boolean($event))"
             />
           </div>
-          <div class="space-y-1.5">
-            <Label class="text-xs font-semibold text-muted-foreground">
-              {{ t("tracing.secretKey") }}
-              <span class="text-destructive">*</span>
-            </Label>
-            <Input
-              :model-value="(editor.getProviderFieldValue(provider, 'secret_key') as string) || ''"
-              type="password"
-              :placeholder="t('tracing.secretKeyPlaceholder')"
-              class="font-mono text-sm w-full bg-background"
-              @update:model-value="
-                provider.id &&
-                editor.updateProviderField(provider.id!, 'secret_key', String($event))
-              "
-            />
-          </div>
-        </div>
 
-        <!-- Content export (Langfuse) -->
-        <div v-if="provider.provider === 'langfuse'" class="space-y-1.5">
-          <Label class="text-xs font-semibold text-muted-foreground">
-            {{ t("tracing.sendContent") }}
-          </Label>
-          <Select
-            :model-value="sendContentValue(provider)"
-            @update:model-value="(value) => updateSendContent(provider!, value)"
-          >
-            <SelectTrigger
-              class="w-full bg-background"
-              :aria-label="t('tracing.sendContent')"
-              data-testid="send-content"
+          <!-- Select -->
+          <div v-else-if="field.type === 'select'" class="space-y-1.5">
+            <Label class="text-xs font-semibold text-muted-foreground">
+              {{ fieldLabel(field) }}
+            </Label>
+            <Select
+              :model-value="String(fieldValue(provider, field) ?? '')"
+              @update:model-value="setField(provider!, field, $event)"
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="full">{{ t("tracing.sendContentOptions.full") }}</SelectItem>
-              <SelectItem value="inherit">{{ t("tracing.sendContentOptions.inherit") }}</SelectItem>
-              <SelectItem value="none">{{ t("tracing.sendContentOptions.none") }}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p class="text-xs text-muted-foreground">{{ t("tracing.sendContentHelp") }}</p>
-        </div>
-
-        <!-- Timeout -->
-        <div class="space-y-1.5">
-          <Label class="text-xs font-semibold text-muted-foreground">
-            {{ t("tracing.timeout") }}
-          </Label>
-          <!-- Width lives on the wrapper so NumberFieldRoot (which hosts the
-               absolutely-positioned stepper buttons) sizes with the input.
-               Passing w-32 to NumberInput only shrinks the inner input while
-               the root stays full-width, leaving the chevrons detached. -->
-          <div class="w-32">
-            <NumberInput
-              :model-value="
-                (editor.getProviderFieldValue(provider, 'timeout') as number | null) || null
-              "
-              :min="1"
-              :aria-label="t('tracing.timeout')"
-              :placeholder="t('tracing.timeoutPlaceholder')"
-              class="font-mono text-sm w-full bg-background"
-              @update:model-value="
-                provider.id &&
-                editor.updateProviderField(
-                  provider.id!,
-                  'timeout',
-                  $event == null ? null : Number($event)
-                )
-              "
-            />
+              <SelectTrigger class="w-full bg-background" :aria-label="fieldLabel(field)">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="choice in field.choices ?? []" :key="choice" :value="choice">
+                  {{ choiceLabel(field, choice) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p v-if="fieldHelp(field)" class="text-xs text-muted-foreground">
+              {{ fieldHelp(field) }}
+            </p>
           </div>
-        </div>
+
+          <!-- Number -->
+          <div v-else-if="field.type === 'number'" class="space-y-1.5">
+            <Label class="text-xs font-semibold text-muted-foreground">
+              {{ fieldLabel(field) }}
+            </Label>
+            <!-- Width lives on the wrapper so NumberFieldRoot (which hosts the
+                 absolutely-positioned stepper buttons) sizes with the input. -->
+            <div class="w-32">
+              <NumberInput
+                :model-value="
+                  fieldValue(provider, field) == null ? null : Number(fieldValue(provider, field))
+                "
+                :min="field.min ?? 0"
+                :max="field.max"
+                :aria-label="fieldLabel(field)"
+                class="text-data w-full bg-background"
+                @update:model-value="
+                  setField(provider!, field, $event == null ? null : Number($event))
+                "
+              />
+            </div>
+            <p v-if="fieldHelp(field)" class="text-xs text-muted-foreground">
+              {{ fieldHelp(field) }}
+            </p>
+          </div>
+
+          <!-- Text / password -->
+          <div v-else class="space-y-1.5">
+            <Label class="text-xs font-semibold text-muted-foreground">
+              {{ fieldLabel(field) }}
+              <span v-if="field.required" class="text-destructive">*</span>
+            </Label>
+            <Input
+              :model-value="String(fieldValue(provider, field) ?? '')"
+              :type="field.type === 'password' ? 'password' : 'text'"
+              :aria-label="fieldLabel(field)"
+              class="font-mono text-sm w-full bg-background"
+              @update:model-value="setField(provider!, field, String($event))"
+            />
+            <p v-if="fieldHelp(field)" class="text-xs text-muted-foreground">
+              {{ fieldHelp(field) }}
+            </p>
+          </div>
+        </template>
       </div>
 
       <div

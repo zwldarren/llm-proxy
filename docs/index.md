@@ -74,7 +74,7 @@ calls, and reasoning traces.
 - **Usage analytics** — trends, provider/model breakdowns, cache efficiency, average
   latency and throughput.
 - **Tamper-evident audit log** — hash-chained audit events with integrity verification,
-  plus per-user Langfuse tracing.
+  plus per-user tracing to Langfuse, OpenTelemetry or LangSmith.
 
 ## Security
 

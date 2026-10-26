@@ -102,8 +102,8 @@ backends. Literal addresses and `localhost` are only checked up front;
 `HTTP_ALLOWED_HOSTS` exempts a host in both places. Forcing
 `HTTP_CLIENT_BACKEND=httpx2` keeps the up-front and redirect checks but not the
 connect-time resolver, and the MCP server client, the smart-routing judge/flywheel
-clients and the Langfuse exporter keep their own HTTP clients, so they are covered
-by the configured-URL check only. See ADR-0047.
+clients and the Langfuse and OTLP/LangSmith exporters keep their own HTTP clients, so
+they are covered by the configured-URL check only. See ADR-0047.
 
 What the proxy reads back is bounded too:
 

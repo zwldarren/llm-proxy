@@ -56,20 +56,28 @@ Details and client-visible behavior: [Tools, Reasoning & Web Search](../api/tool
 
 ### Tracing
 
-Per-user Langfuse configuration: enable tracing and add one or more backends. Settings
-apply **only to your own requests** — there is no global tracing switch.
+Per-user tracing: enable tracing and add one or more backends. Settings apply **only
+to your own requests** — there is no global tracing switch, and no user's requests are
+exported to another user's backend.
 
 | Field | Notes |
 | --- | --- |
-| **Provider** | `langfuse` (and the always-on internal `audit_log` handler) |
-| **Public key / Secret key** | Required; secrets are masked in API responses |
-| **Base URL** | Default `https://cloud.langfuse.com`; self-hosted instances are allowed |
-| **Sample rate** | 0.0–1.0 |
+| **Provider** | `langfuse`, `otel` (OpenTelemetry) or `langsmith`; the internal `audit_log` handler is always on and not user-configurable |
+| **Langfuse** | Public key + secret key (required), base URL (default `https://cloud.langfuse.com`; self-hosted allowed), optional version tag |
+| **OpenTelemetry** | `endpoint` (required, include the scheme — HTTP `https://collector:4318/v1/traces`, gRPC `https://collector:4317`), `protocol` (`http` default or `grpc`), optional `headers`, `insecure` (plain-text gRPC), `service_name` (default `llm-proxy`) and `timeout` |
+| **LangSmith** | `api_key` (required), `project` (default `default`; created on first ingest), optional `endpoint` (default `https://api.smith.langchain.com/otel/v1/traces` — change the host for the EU/APAC/AWS regions or self-hosting) and workspace id (`X-Tenant-Id` for keys not scoped to a workspace) |
+| **Sample rate** | 0.0–1.0, per backend |
 | **Send content** | `full` (default) exports prompt/completion content verbatim; `inherit` follows the log privacy switches (no content when body logging is off, masked content when masking is on); `none` never exports content |
-| **Timeout, version** | Optional tuning |
 
-Correlate traces with requests using the `x-langfuse-trace-id` request header; the
-proxy also returns a trace id header. Up to 10 handlers per user, deduplicated.
+Secrets are masked in API responses, and saving the form again keeps the stored value.
+A collector endpoint is validated before it is stored: a non-admin user cannot point a
+backend at a private address, while an admin keeps the permissive format-only check
+(hosts in `HTTP_ALLOWED_HOSTS` are allowed for everyone). See
+[Security](../guides/security.md).
+
+Correlate traces with requests using the `x-trace-id` request header (or
+`x-langfuse-trace-id` for a Langfuse trace id); the proxy also returns a trace id
+header.
 
 ### About
 

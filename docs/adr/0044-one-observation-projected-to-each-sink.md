@@ -6,7 +6,9 @@ Accepted (2026-10, updated 2026-10). The endpoint lifecycle runs through the
 seam: its intake verbs finalize the capture and emit one observation to the
 database bus. The Langfuse backend reads the same immutable observation; only its
 lifecycle adapter (needed for the trace-id header and TTFT) still implements the
-handler hooks.
+handler hooks. Updated 2026-10: that adapter is now shared by the Langfuse,
+OpenTelemetry and LangSmith backends, which reuse the same live-exporter seam
+(ADR-0048).
 
 ## Context
 

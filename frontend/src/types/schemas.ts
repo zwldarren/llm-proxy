@@ -1025,12 +1025,15 @@ export interface TracingResponse {
   message?: string;
 }
 
-interface TracingProviderField {
+export interface TracingProviderField {
   name: string;
-  type: "text" | "password" | "select" | "number" | "headers";
+  type: "text" | "password" | "select" | "number" | "boolean" | "headers";
   required: boolean;
   choices?: string[];
   default?: unknown;
+  /** Inclusive bounds for a `number` field, mirroring the backend validator. */
+  min?: number;
+  max?: number;
   description?: string | null;
 }
 

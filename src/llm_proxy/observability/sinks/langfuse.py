@@ -30,19 +30,14 @@ lazy from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
 from llm_proxy.core.request_type import coerce_request_type
 from llm_proxy.observability.content.registry import (
-    _endpoint_display_name,
-    _format_output_for_langfuse,
+    endpoint_display_name,
     extract_tool_uses,
-    observation_profile,
+    format_output_blocks,
 )
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.observation.model import RequestObservation
-from llm_proxy.observability.observation.policy import (
-    ContentMode,
-    SendContent,
-    prepare_content,
-    sensitive_keys_for,
-)
+from llm_proxy.observability.observation.policy import SendContent
+from llm_proxy.observability.sinks.send_content import SendContentProjector
 
 if TYPE_CHECKING:
     from llm_proxy.models.params import GenerationParams
@@ -189,7 +184,7 @@ def build_metadata(record: RequestObservation) -> dict[str, Any]:
     endpoint = record.core.endpoint
     if endpoint:
         metadata["endpoint"] = endpoint
-        endpoint_name = _endpoint_display_name(endpoint)
+        endpoint_name = endpoint_display_name(endpoint)
         if endpoint_name:
             metadata["endpoint_name"] = endpoint_name
 
@@ -295,12 +290,12 @@ def sampled_tracer_provider(public_key: str, sample_rate: float) -> TracerProvid
         return provider
 
 
-class LangfuseExporter:
-    """Shape observations and drive the Langfuse SDK for one handler instance."""
+class LangfuseExporter(SendContentProjector):
+    """Shape observations and drive the Langfuse SDK for one handler instance.
 
-    #: The operator's content choice: ``full`` exports verbatim content,
-    #: ``inherit`` follows the request's policy, ``none`` never exports content.
-    send_content: SendContent
+    The operator's content choice (``send_content``) is resolved and applied by
+    :class:`~llm_proxy.observability.sinks.send_content.SendContentProjector`.
+    """
 
     def __init__(
         self,
@@ -324,44 +319,6 @@ class LangfuseExporter:
         )
         self._request_states: dict[str, _RequestState] = {}
         self._request_trace_ids: OrderedDict[str, tuple[str, str]] = OrderedDict()
-
-    # -- content policy ---------------------------------------------------
-
-    def _effective_mode(self, record: RequestObservation) -> ContentMode:
-        """What this exporter may export for this request.
-
-        ``full`` (the default) exports verbatim content. ``inherit`` follows the
-        request's captured logging policy — the same one the database log obeys —
-        so a deployment that wants the body switches to govern tracing too can
-        choose it. ``none`` never exports content.
-        """
-        if self.send_content == "none":
-            return "none"
-        if self.send_content == "full":
-            return "full"
-        return record.policy.mode
-
-    @staticmethod
-    def _profile(record: RequestObservation, request: Any) -> Any:
-        """The request type's profile, preferring what the request itself says.
-
-        ``record.core.request_type`` is ``None`` when the pipeline never stamped
-        one; an explicit request type (e.g. an embedding) must still win, and a
-        missing one must fall back to the metadata-only profile rather than to
-        the log row's "chat" default.
-        """
-        request_type = getattr(request, "request_type", None) or coerce_request_type(
-            record.core.request_type
-        )
-        return observation_profile(request_type)
-
-    def _prepare(self, value: Any, record: RequestObservation) -> Any | None:
-        """Project a payload through this request's effective content mode."""
-        mode = self._effective_mode(record)
-        keys = record.policy.sensitive_keys if mode == "masked" else frozenset()
-        if mode == "masked" and not keys:
-            keys = sensitive_keys_for(None)
-        return prepare_content(value, mode=mode, sensitive_keys=keys)
 
     # -- per-request state ------------------------------------------------
 
@@ -405,7 +362,7 @@ class LangfuseExporter:
 
         Falls back to the operation name and model if the endpoint is unknown.
         """
-        endpoint_name = _endpoint_display_name(record.core.endpoint)
+        endpoint_name = endpoint_display_name(record.core.endpoint)
         if endpoint_name:
             return endpoint_name
         request_type = coerce_request_type(record.core.request_type)
@@ -428,8 +385,8 @@ class LangfuseExporter:
             span_name = self._span_name(record, request)
             # One observation profile per request type: which Langfuse
             # observation type to open and how to render this request's input.
-            profile = self._profile(record, request)
-            input_data = self._prepare(profile.build_input(request), record)
+            profile = self.profile(record, request)
+            input_data = self.prepare(profile.build_input(request), record)
             model = getattr(request, "model", None)
             model_parameters = build_model_parameters(getattr(request, "params", None))
 
@@ -530,15 +487,15 @@ class LangfuseExporter:
         if observation is None:
             return
         try:
-            profile = self._profile(record, request)
+            profile = self.profile(record, request)
             if response is not None:
-                output_data = self._prepare(profile.build_output(response), record)
+                output_data = self.prepare(profile.build_output(response), record)
                 tool_blocks = getattr(response, "output", None)
             else:
                 tool_blocks = (
                     record.content.stream_output_blocks if record.content is not None else None
                 )
-                output_data = self._prepare(self._format_stream_output(tool_blocks), record)
+                output_data = self.prepare(self._format_stream_output(tool_blocks), record)
 
             usage_details = (
                 build_embedding_usage_details(record)
@@ -575,9 +532,14 @@ class LangfuseExporter:
         record: RequestObservation,
         error: Exception,
         *,
+        request: Any | None = None,
         streaming: bool = False,
     ) -> None:
-        """Mark the observation as failed and end it."""
+        """Mark the observation as failed and end it.
+
+        ``request`` is part of the exporter interface every backend implements;
+        Langfuse's failure projection reads the capture alone.
+        """
         self._set_active_request_id(record.core.request_id)
         observation = self._pop_observation(record.core.request_id)
         if observation is None:
@@ -604,7 +566,7 @@ class LangfuseExporter:
         if not output_blocks:
             return None
         try:
-            return _format_output_for_langfuse(output_blocks)
+            return format_output_blocks(output_blocks)
         except TypeError, ValueError:
             return None
 
@@ -622,7 +584,7 @@ class LangfuseExporter:
         appear in the Langfuse trace tree / agent graph and tool filtering
         instead of being buried inside the observation output.
         """
-        if not tool_uses or self._effective_mode(record) == "none":
+        if not tool_uses or self.effective_mode(record) == "none":
             return
         for tool_use in tool_uses:
             name = tool_use.get("name") or "tool"
@@ -630,7 +592,7 @@ class LangfuseExporter:
                 tool = observation.start_observation(
                     name=name,
                     as_type="tool",
-                    input=self._prepare(tool_use.get("input"), record),
+                    input=self.prepare(tool_use.get("input"), record),
                     metadata={
                         "tool_call_id": tool_use.get("id"),
                         # Proxy does not observe tool results; they arrive in a

@@ -37,7 +37,7 @@ export interface TracingProviderEditor {
  * supported provider types from the backend.
  */
 export function useTracingProviderEditor(state: Ref<TracingConfig>): TracingProviderEditor {
-  const { t } = useI18n();
+  const { t, te } = useI18n();
 
   let providerIdCounter = 1;
 
@@ -86,12 +86,7 @@ export function useTracingProviderEditor(state: Ref<TracingConfig>): TracingProv
 
   function addProvider(providerType = "langfuse"): void {
     const typeInfo = providerTypes.value.find((p) => p.name === providerType);
-    let baseName: string;
-    if (typeInfo?.name === "langfuse") {
-      baseName = t("tracing.providerType.langfuse");
-    } else {
-      baseName = typeInfo?.name || providerType;
-    }
+    const baseName = typeInfo ? providerTypeLabel(providerType) : providerType;
 
     const settings: Record<string, unknown> = {};
     if (typeInfo?.fields) {
@@ -149,7 +144,8 @@ export function useTracingProviderEditor(state: Ref<TracingConfig>): TracingProv
   }
 
   function providerTypeLabel(providerType: string): string {
-    if (providerType === "langfuse") return t("tracing.providerType.langfuse");
+    const key = `tracing.providerType.${providerType}`;
+    if (te(key)) return t(key);
     const found = providerTypes.value.find((p) => p.name === providerType);
     return found?.name || providerType;
   }
@@ -160,10 +156,8 @@ export function useTracingProviderEditor(state: Ref<TracingConfig>): TracingProv
     try {
       loadingProviderTypes.value = true;
       const res = await api.getProviders();
-      // Only show langfuse provider (audit_log is internal)
-      providerTypes.value = res.providers.filter(
-        (p) => p.name && p.name !== "audit_log" && p.name !== "otlp"
-      );
+      // Every user-configurable provider; audit_log is internal-only.
+      providerTypes.value = res.providers.filter((p) => p.name && p.name !== "audit_log");
     } catch (e) {
       console.error("Failed to load tracing provider types", e);
     } finally {

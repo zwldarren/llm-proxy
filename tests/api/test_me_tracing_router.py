@@ -540,3 +540,42 @@ class TestTracingURLValidation:
             name="internal", settings={"base_url": "http://127.0.0.1:3000"}
         )
         _validate_tracing_provider_urls([provider], allow_private_hosts=True)
+
+    def test_viewer_private_collector_endpoint_is_rejected(self):
+        """The OTLP/LangSmith ``endpoint`` reaches the same outbound client."""
+        from llm_proxy.api.routers.tracing import _validate_tracing_provider_urls
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.observability.tracing_config import TracingProviderConfig
+
+        provider = TracingProviderConfig(
+            provider="otel",
+            name="collector",
+            settings={"endpoint": "http://127.0.0.1:4318/v1/traces"},
+        )
+        with pytest.raises(ValidationError):
+            _validate_tracing_provider_urls([provider], allow_private_hosts=False)
+
+    def test_admin_private_collector_endpoint_is_allowed(self):
+        from llm_proxy.api.routers.tracing import _validate_tracing_provider_urls
+        from llm_proxy.observability.tracing_config import TracingProviderConfig
+
+        provider = TracingProviderConfig(
+            provider="otel",
+            name="collector",
+            settings={"endpoint": "http://127.0.0.1:4318/v1/traces"},
+        )
+        _validate_tracing_provider_urls([provider], allow_private_hosts=True)
+
+    def test_viewer_endpoint_without_a_scheme_is_rejected(self):
+        """A bare ``host:port`` gRPC endpoint is not a storable URL."""
+        from llm_proxy.api.routers.tracing import _validate_tracing_provider_urls
+        from llm_proxy.core.exceptions import ValidationError
+        from llm_proxy.observability.tracing_config import TracingProviderConfig
+
+        provider = TracingProviderConfig(
+            provider="otel",
+            name="collector",
+            settings={"endpoint": "collector.example:4317"},
+        )
+        with pytest.raises(ValidationError):
+            _validate_tracing_provider_urls([provider], allow_private_hosts=False)

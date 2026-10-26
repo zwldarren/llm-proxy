@@ -1837,41 +1837,90 @@ export default {
   },
   // Tracing
   tracing: {
-    description: "配置你自己的 Langfuse 可观测性和追踪",
+    description: "配置你自己的追踪与可观测性：Langfuse、OpenTelemetry 或 LangSmith",
     enableTracing: "启用追踪",
     enableTracingDescription: "为所有 LLM 请求启用追踪",
     provider: "提供商",
     providerType: {
       langfuse: "Langfuse",
+      otel: "OpenTelemetry",
+      langsmith: "LangSmith",
     },
     addProvider: "添加提供商",
     removeProvider: "删除提供商",
     providerName: "名称",
-    providerNamePlaceholder: "例如：production-langfuse",
+    providerNamePlaceholder: "例如：production-traces",
     selectProviderType: "选择提供商类型",
-    baseUrl: "基础 URL",
-    baseUrlPlaceholder: "https://cloud.langfuse.com",
-    baseUrlHelp: "Langfuse 基础 URL。",
-    publicKey: "公钥",
-    secretKey: "密钥",
-    publicKeyPlaceholder: "pk-...",
-    secretKeyPlaceholder: "sk-...",
-    sendContent: "内容导出",
-    sendContentHelp:
-      "“完整内容”原样导出提示词与回复；“跟随日志设置”遵循“记录输入/输出”和“敏感数据脱敏”开关；“仅元数据”不导出任何内容（用量、费用和元数据仍会发送）。",
-    sendContentOptions: {
-      full: "完整内容",
-      inherit: "跟随日志设置",
-      none: "仅元数据",
+    headerKey: "名称",
+    headerValue: "值",
+    addHeader: "添加请求头",
+    removeHeader: "删除请求头",
+    fields: {
+      langfuse: {
+        base_url: {
+          label: "基础 URL",
+          help: "Langfuse 基础 URL（云区域或自建部署）。",
+        },
+        public_key: { label: "公钥", help: "Langfuse 项目公钥。" },
+        secret_key: { label: "密钥", help: "Langfuse 项目密钥。" },
+        version: { label: "版本", help: "附加到每条 trace 的版本标签。" },
+      },
+      otel: {
+        endpoint: {
+          label: "OTLP 端点",
+          help: "包含协议的采集器地址 —— HTTP：https://collector:4318/v1/traces，gRPC：https://collector:4317。",
+        },
+        headers: {
+          label: "请求头",
+          help: "额外的 HTTP 请求头或 gRPC metadata，例如 Authorization。",
+        },
+        protocol: {
+          label: "协议",
+          help: "span 发送到采集器的方式。",
+          choices: { http: "HTTP/protobuf", grpc: "gRPC" },
+        },
+        insecure: {
+          label: "跳过 TLS",
+          help: "以明文（不加密）方式发送 gRPC。",
+        },
+        service_name: {
+          label: "服务名",
+          help: "OpenTelemetry service.name 资源属性。",
+        },
+      },
+      langsmith: {
+        api_key: { label: "API 密钥", help: "LangSmith API 密钥（lsv2_...）。" },
+        project: { label: "项目", help: "LangSmith 项目名；首次上报时自动创建。" },
+        endpoint: {
+          label: "OTLP 端点",
+          help: "LangSmith OTLP 网关；EU/APAC/AWS 区域或自建部署请修改主机名。",
+        },
+        tenant_id: {
+          label: "工作区 ID",
+          help: "X-Tenant-Id 请求头，用于未绑定工作区的密钥。",
+        },
+      },
+      timeout: { label: "超时时间（秒）", help: "可选的导出请求超时。" },
+      sample_rate: {
+        label: "采样率",
+        help: "导出请求的比例（0.0-1.0）。",
+      },
+      send_content: {
+        label: "内容导出",
+        help: "“完整内容”原样导出提示词与回复；“跟随日志设置”遵循“记录输入/输出”和“敏感数据脱敏”开关；“仅元数据”不导出任何内容（用量、费用和元数据仍会发送）。",
+        choices: {
+          full: "完整内容",
+          inherit: "跟随日志设置",
+          none: "仅元数据",
+        },
+      },
     },
-    timeout: "超时时间（秒）",
-    timeoutPlaceholder: "可选",
     status: {
       active: "已启用",
     },
     emptyState: {
       title: "尚未配置追踪提供商",
-      description: "添加一个 Langfuse 提供商，即可开始导出请求 trace。",
+      description: "添加一个追踪提供商，即可开始导出请求 trace。",
     },
     editProvider: "编辑提供商",
     editProviderDescription: "配置此追踪提供商的连接详情与凭据。",

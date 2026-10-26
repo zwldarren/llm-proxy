@@ -33,7 +33,6 @@ from llm_proxy.models.types import (
     Usage,
 )
 from llm_proxy.observability.content.registry import (
-    _endpoint_display_name,
     build_audio_transcript_input_data,
     build_audio_transcript_output_data,
     build_decisions_input_data,
@@ -50,6 +49,7 @@ from llm_proxy.observability.content.registry import (
     build_speech_output_data,
     build_systemone_input_data,
     build_systemone_output_data,
+    endpoint_display_name,
     extract_tool_uses,
     observation_profile,
 )
@@ -650,12 +650,12 @@ class TestLangfuseObservationProfiles:
     def test_wire_strings_resolve_like_enum_members(self):
         assert observation_profile("rerank") is observation_profile(RequestType.RERANK)
 
-    def test_endpoint_display_name_ignores_version_and_alias_segments(self):
-        assert _endpoint_display_name("/v1/rerank") == "rerank"
-        assert _endpoint_display_name("/v2/rerank") == "rerank"
-        assert _endpoint_display_name("/v1/v1/chat/completions") == "chat completions"
-        assert _endpoint_display_name("/v1/v1/decisions") == "decisions"
-        assert _endpoint_display_name("/v1/audio/transcriptions") == "audio transcriptions"
+    def testendpoint_display_name_ignores_version_and_alias_segments(self):
+        assert endpoint_display_name("/v1/rerank") == "rerank"
+        assert endpoint_display_name("/v2/rerank") == "rerank"
+        assert endpoint_display_name("/v1/v1/chat/completions") == "chat completions"
+        assert endpoint_display_name("/v1/v1/decisions") == "decisions"
+        assert endpoint_display_name("/v1/audio/transcriptions") == "audio transcriptions"
 
 
 class TestLangfuseNonConversationPayloads:

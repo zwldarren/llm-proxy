@@ -75,7 +75,7 @@ _MAX_LIST_PREVIEW_ITEMS = 20
 _VERSION_PREFIX = re.compile(r"v\d+/")
 
 
-def _endpoint_display_name(endpoint: str | None) -> str | None:
+def endpoint_display_name(endpoint: str | None) -> str | None:
     """Convert an HTTP endpoint path to a human-readable display name.
 
     Every leading version segment is dropped, so an operation has one name
@@ -305,12 +305,12 @@ def extract_tool_uses(output: list[Any] | None) -> list[dict[str, Any]]:
     return tool_uses
 
 
-def _format_output_for_langfuse(output_blocks: list[Any]) -> dict[str, Any]:
-    """Format output blocks for Langfuse, separating tool_calls from content.
+def format_output_blocks(output_blocks: list[Any]) -> dict[str, Any]:
+    """Render accumulated output blocks as one assistant message.
 
-    Langfuse expects tool_calls as a separate field in output, not embedded in
-    content. This matches the OpenAI API response format that Langfuse's UI
-    parses to display tool calls in the trace detail view.
+    Tool calls are kept in their own field instead of being embedded in
+    ``content``: that is the OpenAI-compatible response shape every trace UI
+    (Langfuse, LangSmith, Phoenix) renders as a tool call rather than as text.
     """
     content_parts: list[Any] = []
     tool_calls: list[dict[str, Any]] = []
@@ -362,7 +362,7 @@ def _format_output_for_langfuse(output_blocks: list[Any]) -> dict[str, Any]:
 
 
 def build_response_output_data(response: InternalResponse) -> dict[str, Any] | None:
-    """Build the native output payload for a Langfuse generation.
+    """Build the native output payload for a generation observation.
 
     Returns an OpenAI-compatible assistant message dict, or ``None`` when there
     is no output to record.
@@ -371,7 +371,7 @@ def build_response_output_data(response: InternalResponse) -> dict[str, Any] | N
     if not output:
         return None
 
-    formatted = _format_output_for_langfuse(output)
+    formatted = format_output_blocks(output)
     finish_reason = getattr(response, "finish_reason", None)
     if finish_reason:
         formatted["finish_reason"] = finish_reason
