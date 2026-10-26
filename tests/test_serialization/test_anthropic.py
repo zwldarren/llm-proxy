@@ -1108,6 +1108,24 @@ def test_web_search_round_trip_through_parse_request(serializer):
     assert len(conv.messages[3].content) == 1
 
 
+def test_empty_web_search_options_still_add_the_hosted_tool(serializer):
+    """``web_search_options: {}`` asks for search with defaults, not nothing."""
+    from llm_proxy.models import OpenAISpecificParams
+
+    request = InternalRequest(
+        model="claude-sonnet-4-6",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="latest news")])]
+        ),
+        params=GenerationParams(openai=OpenAISpecificParams(web_search_options={})),
+        tools=[],
+    )
+
+    body = serializer.build_provider_request(request)
+
+    assert [tool["type"] for tool in body["tools"]] == ["web_search_20250305"]
+
+
 def test_web_search_options_from_openai_to_anthropic_tool(serializer):
     """web_search_options in OpenAI params should become a web_search tool.
 

@@ -11,7 +11,10 @@ from urllib.parse import urlparse
 
 from llm_proxy.models import InternalRequest
 from llm_proxy.models.tools import ToolChoiceAllowedTools
-from llm_proxy.models.tools.openai_builtin import with_web_search_options
+from llm_proxy.models.tools.openai_builtin import (
+    web_search_options_requested,
+    with_web_search_options,
+)
 from llm_proxy.serialization.hosted_tools import (
     chat_search_dialect,
     render_chat_native_tools,
@@ -106,7 +109,7 @@ class OpenAIRequestBuilder:
         tools = request.tools
         options = request.chat_web_search_options
         native_search = bool(
-            options
+            web_search_options_requested(options)
             and context.target_endpoint == "chat_completions"
             and chat_search_dialect(context.provider_type) is not None
         )

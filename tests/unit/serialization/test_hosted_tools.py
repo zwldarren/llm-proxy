@@ -404,6 +404,13 @@ class TestChatWebSearchOptions:
         assert body["enable_search"] is True
         assert "web_search_options" not in body
 
+    def test_empty_options_become_the_qwen_body_flag(self):
+        """``{}`` enables the dialect's native search with defaults."""
+        body = self._body("qwen", options={})
+
+        assert body["enable_search"] is True
+        assert "web_search_options" not in body
+
     def test_options_stay_a_chat_field_without_a_dialect(self):
         """OpenAI-shaped upstreams (DeepSeek, a custom endpoint) consume it as-is."""
         body = self._body("deepseek", options={"search_context_size": "low"})

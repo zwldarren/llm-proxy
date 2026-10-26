@@ -68,6 +68,13 @@ class TestWithWebSearchOptions:
 
         assert tools == [OpenAIWebSearchTool()]
 
+    def test_empty_dict_options_use_defaults(self):
+        """``{}`` is "enable with defaults"; only ``None`` means absent."""
+        assert with_web_search_options([], {}) == [OpenAIWebSearchTool()]
+
+    def test_bare_false_does_not_enable(self):
+        assert with_web_search_options([], False) == []
+
     def test_existing_declaration_wins(self):
         declared = AnthropicWebSearchTool(type="web_search_20250305")
 

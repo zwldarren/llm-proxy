@@ -2,7 +2,10 @@
 
 from llm_proxy.core.processing.base import RequestContext
 from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
-from llm_proxy.models.tools.openai_builtin import WebSearchTool
+from llm_proxy.models.tools.openai_builtin import (
+    WebSearchTool,
+    web_search_options_requested,
+)
 
 
 class WebSearchStage(PipelineStage):
@@ -35,10 +38,9 @@ class WebSearchStage(PipelineStage):
             not native_ws
             and state.unified_request.params
             and state.unified_request.params.openai
-            # ``web_search_options: {}`` is a valid "enable with defaults"
-            # signal (the OpenAI field is a dict), so test for presence rather
-            # than truthiness. A bare ``true`` is normalized by the parser.
-            and state.unified_request.params.openai.web_search_options is not None
+            # ``web_search_options`` is an object: ``{}`` means "enable with
+            # defaults", so presence (not truthiness) is the signal.
+            and web_search_options_requested(state.unified_request.params.openai.web_search_options)
             and not interceptor.has_web_search_tool(state.unified_request.tools)
         ):
             wso = state.unified_request.params.openai.web_search_options

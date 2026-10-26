@@ -82,6 +82,19 @@ def normalized_user_location(tool: WebSearchTool) -> dict[str, Any] | None:
     return location
 
 
+def web_search_options_requested(options: Any) -> bool:
+    """Whether ``web_search_options`` asks for web search.
+
+    The field is an object, so ``{}`` is "enable with defaults" and presence
+    (not truthiness) is the signal. ``None`` and an explicit ``False`` mean no
+    search. One predicate for every consumer — the interception stage and the
+    wire translators that turn the option into a hosted tool or native flag.
+    """
+    if isinstance(options, bool):
+        return options
+    return options is not None
+
+
 def with_web_search_options(tools: list[Any] | None, options: Any) -> list[Any]:
     """Tools list carrying the hosted ``web_search`` tool that ``options`` implies.
 
@@ -107,7 +120,7 @@ def with_web_search_options(tools: list[Any] | None, options: Any) -> list[Any]:
         A new list; the input list is never mutated.
     """
     resolved = list(tools or [])
-    if not options:
+    if not web_search_options_requested(options):
         return resolved
     if declares_web_search_tool(resolved):
         return resolved
@@ -131,5 +144,6 @@ __all__ = [
     "OpenAIToolSearchTool",
     "WebSearchTool",
     "normalized_user_location",
+    "web_search_options_requested",
     "with_web_search_options",
 ]

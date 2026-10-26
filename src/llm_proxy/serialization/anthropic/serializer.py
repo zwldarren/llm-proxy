@@ -61,6 +61,7 @@ from llm_proxy.models.tools import (
     WebSearchTool,
     declares_web_search_tool,
 )
+from llm_proxy.models.tools.openai_builtin import web_search_options_requested
 from llm_proxy.models.types import Usage
 from llm_proxy.serialization.anthropic import (
     ANTHROPIC_USAGE_EXTENSION_KEYS,
@@ -567,18 +568,14 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
             body["stop_sequences"] = [stop] if isinstance(stop, str) else stop
 
         tools = list(request.tools) if request.tools else []
-        if (
-            request.params.openai
-            and request.params.openai.web_search_options
-            and not declares_web_search_tool(tools)
-        ):
+        wso = request.chat_web_search_options
+        if web_search_options_requested(wso) and not declares_web_search_tool(tools):
             # Map OpenAI web_search_options to Anthropic WebSearchTool fields.
             # search_context_size is OpenAI-specific and has no Anthropic equivalent.
             # ``declares_web_search_tool`` also covers the proxy's own
             # interception bridge (a ``web_search`` function tool): when the
             # proxy executes the search, adding the hosted tool back would make
             # the upstream search too.
-            wso = request.params.openai.web_search_options
             user_location = self._extract_user_location(wso)
             tools.append(
                 WebSearchTool(
@@ -957,12 +954,14 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
             tool_def["cache_control"] = cache_control
 
     @staticmethod
-    def _extract_user_location(options: dict[str, Any]) -> UserLocation | None:
+    def _extract_user_location(options: Any) -> UserLocation | None:
         """Extract Anthropic UserLocation from OpenAI web_search_options dict.
 
         OpenAI format nests location under ``user_location.approximate``;
         Anthropic expects the fields flat under ``user_location``.
         """
+        if not isinstance(options, dict):
+            return None
         ul = options.get("user_location")
         if not isinstance(ul, dict):
             return None
