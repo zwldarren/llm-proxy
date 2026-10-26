@@ -46,9 +46,12 @@ class LoggingHandler(TracingHandler):
     ) -> None:
         if not self._enabled:
             return
+        # Speech responses carry no ``usage`` (they are raw audio); every other
+        # response type does. Never let the debug log break request completion.
+        usage = getattr(response, "usage", None)
         logger.debug(
             f"Request completed: model={request.model}, "
-            f"tokens={response.usage.total_tokens if response.usage else 'N/A'}, "
+            f"tokens={usage.total_tokens if usage else 'N/A'}, "
             f"latency={context.latency_ms:.1f}ms"
         )
 

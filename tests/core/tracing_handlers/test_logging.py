@@ -53,6 +53,24 @@ class TestLoggingHandler:
             mock_logger.debug.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_request_end_tolerates_response_without_usage(self):
+        """Speech responses are raw audio and carry no ``usage`` attribute.
+
+        The debug log must degrade to ``N/A`` instead of raising inside the
+        handler registry, which would surface on every audio request.
+        """
+        handler = LoggingHandler()
+        request = MagicMock(spec=InternalRequest)
+        request.model = "tts-model"
+        response = MagicMock(spec=[])  # deliberately no ``usage`` attribute
+        context = _create_mock_context()
+
+        with patch("llm_proxy.observability.tracing.handlers.logging.logger") as mock_logger:
+            await handler.on_request_end(request, response, context)
+            message = mock_logger.debug.call_args[0][0]
+            assert "tokens=N/A" in message
+
+    @pytest.mark.asyncio
     async def test_logs_error(self):
         handler = LoggingHandler()
         request = MagicMock(spec=InternalRequest)

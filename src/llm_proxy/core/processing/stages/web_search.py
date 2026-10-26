@@ -35,7 +35,10 @@ class WebSearchStage(PipelineStage):
             not native_ws
             and state.unified_request.params
             and state.unified_request.params.openai
-            and state.unified_request.params.openai.web_search_options
+            # ``web_search_options: {}`` is a valid "enable with defaults"
+            # signal (the OpenAI field is a dict), so test for presence rather
+            # than truthiness. A bare ``true`` is normalized by the parser.
+            and state.unified_request.params.openai.web_search_options is not None
             and not interceptor.has_web_search_tool(state.unified_request.tools)
         ):
             wso = state.unified_request.params.openai.web_search_options

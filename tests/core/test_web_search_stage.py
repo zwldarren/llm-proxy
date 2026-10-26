@@ -10,6 +10,7 @@ from llm_proxy.core.processing.stages import PipelineState, WebSearchStage
 from llm_proxy.core.provider_selector import ProviderSelectionResult
 from llm_proxy.models import ConversationContext, InternalRequest, Message
 from llm_proxy.models.content_blocks import TextBlock
+from llm_proxy.models.params import GenerationParams, OpenAISpecificParams
 from llm_proxy.models.tools import FunctionTool, OpenAIWebSearchTool
 from llm_proxy.web_search.interceptor import WebSearchInterceptor
 from llm_proxy.web_search.provider import WebSearchProvider, WebSearchResponse
@@ -109,3 +110,45 @@ async def test_passthrough_when_no_selection():
     assert state.unified_request.tools is not None
     assert len(state.unified_request.tools) == 1
     assert isinstance(state.unified_request.tools[0], OpenAIWebSearchTool)
+
+
+@pytest.mark.asyncio
+async def test_empty_web_search_options_still_intercepts():
+    """``web_search_options: {}`` is "enable with defaults", not "absent".
+
+    The field is a dict, so an empty one is falsy; testing truthiness made a
+    spec-valid request silently skip proxy-side web search.
+    """
+    provider_config = ProviderConfig(type="openai-compatible", native_web_search=False)
+    selection = ProviderSelectionResult(
+        provider_name="test-provider",
+        provider_config=provider_config,
+        provider_model_name="fake-model",
+        priority=0,
+    )
+    state = PipelineState(
+        raw_data={},
+        unified_request=InternalRequest(
+            model="test-model",
+            stream=False,
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            params=GenerationParams(openai=OpenAISpecificParams(web_search_options={})),
+        ),
+        req=MagicMock(),
+        strategy=MagicMock(),
+        trace_id="t",
+        event_context=MagicMock(),
+        selection=selection,
+    )
+    context = _build_context()
+
+    await WebSearchStage().process(state, context)
+
+    assert state.unified_request.native_request_disabled is True
+    assert state.unified_request.tools is not None
+    assert any(
+        isinstance(tool, FunctionTool) and tool.name == "web_search"
+        for tool in state.unified_request.tools
+    )

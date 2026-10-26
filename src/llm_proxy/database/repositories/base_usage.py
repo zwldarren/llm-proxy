@@ -52,7 +52,17 @@ class BaseUsageRepository:
         size = self.DELETE_BATCH_SIZE
         total = 0
         while True:
-            doomed = select(self.model.id).where(*conditions).limit(size)
+            # SKIP LOCKED keeps concurrently running cleanup tasks (one per
+            # uvicorn worker) from locking the same candidate rows in a
+            # different order: each claim sees only rows no other worker is
+            # deleting. SQLite ignores the locking clause (single writer), so
+            # both backends share this path.
+            doomed = (
+                select(self.model.id)
+                .where(*conditions)
+                .limit(size)
+                .with_for_update(skip_locked=True)
+            )
             result = await self.session.execute(delete(self.model).where(self.model.id.in_(doomed)))
             deleted = int(getattr(result, "rowcount", 0) or 0)
             await self.session.commit()

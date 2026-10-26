@@ -98,6 +98,18 @@ class TestDeleteInBatches:
         assert repo.session.execute.await_count == 1
         assert repo.session.commit.await_count == 1
 
+    async def test_claims_rows_with_skip_locked(self):
+        """Concurrent cleanup tasks must not wait on (or deadlock with) peers."""
+        from sqlalchemy.dialects import postgresql
+
+        repo = self._repo(self._result(0))
+
+        await repo._delete_in_batches([_UsageLogWithTtft.timestamp < 1.0])
+
+        statement = repo.session.execute.await_args.args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        assert "FOR UPDATE SKIP LOCKED" in sql
+
 
 def _usage_row(**overrides) -> SimpleNamespace:
     """Build a result row for get_usage_stats with sensible defaults."""
