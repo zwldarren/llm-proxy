@@ -24,7 +24,10 @@ services:
     # Worker count is parameterized for A/B scaling runs (per-process state —
     # rate limits, key lockout, circuit breakers — is per-worker; see
     # docs/getting-started/installation.md).
-    command: ["sh", "-c", "exec uv run llm-proxy --workers $${LOADTEST_WORKERS:-1}"]
+    # Run the venv entry point directly: the image installs with `--no-dev`,
+    # so `uv run` would re-sync the dev group at start and fail on lupa (no C
+    # toolchain in the slim image).
+    command: ["sh", "-c", "exec /app/.venv/bin/llm-proxy --workers $${LOADTEST_WORKERS:-1}"]
     ports: !override
       - "8180:8080"
     depends_on:

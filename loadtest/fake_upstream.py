@@ -24,11 +24,13 @@ Env knobs:
 """
 
 import asyncio
+import base64
 import os
 import time
+from contextlib import suppress
 
 import orjson
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -234,9 +236,58 @@ def _openai_chat_sse(model: str, body: dict):
     return gen()
 
 
+def _requests_web_search(body: dict) -> bool:
+    tools = body.get("tools") or []
+    return any(
+        isinstance(tool, dict)
+        and isinstance(tool.get("function"), dict)
+        and tool["function"].get("name") == "web_search"
+        for tool in tools
+    )
+
+
+def _has_tool_result(body: dict) -> bool:
+    return any(
+        isinstance(message, dict) and message.get("role") == "tool"
+        for message in body.get("messages") or []
+    )
+
+
+def _web_search_tool_call(model: str) -> dict:
+    return {
+        "id": "chatcmpl-fake-tool",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_fake_web_search",
+                            "type": "function",
+                            "function": {
+                                "name": "web_search",
+                                "arguments": '{"query": "llm proxy"}',
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11},
+    }
+
+
 async def _handle_chat(request: Request) -> Response:
     body = await request.json()
     model = body.get("model", "fake-model")
+    if _requests_web_search(body) and not _has_tool_result(body):
+        return _json(_web_search_tool_call(model))
     if body.get("stream"):
         return StreamingResponse(_openai_chat_sse(model, body), media_type="text/event-stream")
     await _maybe_sleep(RESPONSE_DELAY_MS)
@@ -676,6 +727,219 @@ async def _handle_embeddings(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# Ancillary surfaces: rerank, images, audio, decisions, realtime
+# ---------------------------------------------------------------------------
+
+# 1x1 transparent PNG, enough for a client that decodes the b64 payload.
+_TINY_PNG = base64.b64encode(
+    bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d49444154789c626001000000ffff03000006000557bfabd40000000049454e44ae426082"
+    )
+).decode()
+
+
+def _document_text(document: object) -> str:
+    if isinstance(document, str):
+        return document
+    if isinstance(document, dict):
+        value = document.get("text") or document.get("image") or ""
+        return value if isinstance(value, str) else ""
+    return ""
+
+
+async def _handle_rerank(request: Request) -> Response:
+    body = await request.json()
+    documents = body.get("documents") or []
+    terms = {term for term in str(body.get("query") or "").lower().split() if term}
+    scored = []
+    for index, document in enumerate(documents):
+        text = _document_text(document).lower()
+        overlap = sum(1 for term in terms if term in text)
+        scored.append((overlap / max(len(terms), 1), index, document))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    top_n = body.get("top_n")
+    if isinstance(top_n, int) and top_n > 0:
+        scored = scored[:top_n]
+    results = []
+    for score, index, document in scored:
+        item: dict = {"index": index, "relevance_score": round(score, 6)}
+        item["document"] = {"text": document} if isinstance(document, str) else document
+        results.append(item)
+    return _json(
+        {
+            "id": "rerank-fake",
+            "model": body.get("model", ""),
+            "results": results,
+            "usage": {"total_tokens": 10, "search_units": 1, "cost": 0.001},
+        }
+    )
+
+
+_IMAGE_BODY = {"data": [{"b64_json": _TINY_PNG, "revised_prompt": "fake"}]}
+
+
+async def _handle_image_generation(request: Request) -> Response:
+    await _maybe_sleep(RESPONSE_DELAY_MS)
+    with suppress(Exception):
+        await request.json()
+    return _json({"created": int(time.time()), **_IMAGE_BODY})
+
+
+async def _handle_image_edit(request: Request) -> Response:
+    await _maybe_sleep(RESPONSE_DELAY_MS)
+    await request.body()
+    return _json({"created": int(time.time()), **_IMAGE_BODY})
+
+
+async def _handle_audio_speech(request: Request) -> Response:
+    await _maybe_sleep(RESPONSE_DELAY_MS)
+    await request.json()
+    return Response(content=b"ID3\x04\x00\x00\x00\x00\x00\x00fake-audio", media_type="audio/mpeg")
+
+
+async def _handle_audio_text(request: Request) -> Response:
+    await _maybe_sleep(RESPONSE_DELAY_MS)
+    await request.body()
+    return _json({"text": "hello from fake audio"})
+
+
+def _fake_decisions_answers(questions: list) -> list[dict]:
+    answers = []
+    for question in questions:
+        qtype = question.get("type")
+        name = question.get("name")
+        if qtype == "predicate":
+            answers.append({"type": qtype, "name": name, "probability": 0.9})
+        elif qtype == "choice":
+            choices = question.get("choices") or []
+            answers.append(
+                {
+                    "type": qtype,
+                    "name": name,
+                    "choice": choices[0].get("value") if choices else None,
+                    "probabilities": [
+                        {"value": choice.get("value"), "probability": 1 / len(choices)}
+                        for choice in choices
+                    ],
+                    "confidence": 0.9,
+                }
+            )
+        elif qtype == "score":
+            levels = question.get("levels") or []
+            answers.append(
+                {
+                    "type": qtype,
+                    "name": name,
+                    "score": 0.5,
+                    "probabilities": [
+                        {
+                            "value": index,
+                            "label": level.get("label"),
+                            "probability": 1 / len(levels),
+                        }
+                        for index, level in enumerate(levels)
+                    ],
+                    "confidence": 0.5,
+                }
+            )
+    return answers
+
+
+async def _handle_systemone(request: Request) -> Response:
+    body = await request.json()
+    answers = {}
+    for name, question in (body.get("questions") or {}).items():
+        qtype = question.get("type")
+        criteria = question.get("criteria")
+        if qtype == "noul":
+            answers[name] = {"type": "noul", "noul": 0.9}
+        elif qtype == "choice":
+            keys = list(criteria or {})
+            answers[name] = {
+                "type": "choice",
+                "choice": keys[0] if keys else None,
+                "probabilities": {key: 1 / len(keys) for key in keys} if keys else {},
+                "confidence": 0.9,
+            }
+        elif qtype == "score":
+            levels = list(criteria or [])
+            answers[name] = {
+                "type": "score",
+                "score": 0.5,
+                "legend": {str(index): str(level) for index, level in enumerate(levels)},
+                "probabilities": (
+                    {str(index): 1 / len(levels) for index in range(len(levels))} if levels else {}
+                ),
+                "confidence": 0.5,
+            }
+    return _json(
+        {
+            "model": body.get("model", ""),
+            "answers": answers,
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
+    )
+
+
+async def _handle_decisions(request: Request) -> Response:
+    body = await request.json()
+    return _json(
+        {
+            "model": body.get("model", ""),
+            "answers": _fake_decisions_answers(body.get("questions") or []),
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 0},
+                "output_tokens": 0,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": 10,
+            },
+        }
+    )
+
+
+async def _realtime_session(websocket: WebSocket) -> None:
+    await websocket.accept()
+    model = websocket.query_params.get("model", "fake-model")
+    await websocket.send_json(
+        {
+            "type": "session.created",
+            "session": {"id": "sess-fake", "object": "realtime.session", "model": model},
+        }
+    )
+    while True:
+        try:
+            message = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        if message.get("type") == "response.create":
+            await websocket.send_json({"type": "response.created", "response": {"id": "resp-fake"}})
+            await websocket.send_json(
+                {
+                    "type": "response.output_text.delta",
+                    "delta": "hi",
+                    "item_id": "item-fake",
+                    "output_index": 0,
+                    "content_index": 0,
+                }
+            )
+            await websocket.send_json(
+                {
+                    "type": "response.done",
+                    "response": {
+                        "id": "resp-fake",
+                        "status": "completed",
+                        "output": [],
+                        "usage": None,
+                    },
+                }
+            )
+        else:
+            await websocket.send_json({"type": "session.updated", "session": {"id": "sess-fake"}})
+
+
+# ---------------------------------------------------------------------------
 # Misc / routes
 # ---------------------------------------------------------------------------
 
@@ -723,6 +987,54 @@ for _prefix in ("", "/v1"):
         methods=["POST"],
         name=f"embeddings_{_suffix}",
     )
+    app.add_api_route(
+        f"{_prefix}/rerank", _handle_rerank, methods=["POST"], name=f"rerank_{_suffix}"
+    )
+    app.add_api_route(
+        f"{_prefix}/images/generations",
+        _handle_image_generation,
+        methods=["POST"],
+        name=f"image_generations_{_suffix}",
+    )
+    app.add_api_route(
+        f"{_prefix}/images/edits",
+        _handle_image_edit,
+        methods=["POST"],
+        name=f"image_edits_{_suffix}",
+    )
+    app.add_api_route(
+        f"{_prefix}/audio/speech",
+        _handle_audio_speech,
+        methods=["POST"],
+        name=f"speech_{_suffix}",
+    )
+    app.add_api_route(
+        f"{_prefix}/audio/transcriptions",
+        _handle_audio_text,
+        methods=["POST"],
+        name=f"transcriptions_{_suffix}",
+    )
+    app.add_api_route(
+        f"{_prefix}/audio/translations",
+        _handle_audio_text,
+        methods=["POST"],
+        name=f"translations_{_suffix}",
+    )
+    app.add_api_route(
+        f"{_prefix}/decisions",
+        _handle_decisions,
+        methods=["POST"],
+        name=f"decisions_{_suffix}",
+    )
+    app.add_api_route(
+        f"{_prefix}/systemone",
+        _handle_systemone,
+        methods=["POST"],
+        name=f"systemone_{_suffix}",
+    )
+
+app.add_api_websocket_route("/realtime", _realtime_session)
+app.add_api_websocket_route("/v1/realtime", _realtime_session)
 
 # DeepSeek-style native root (site root + /anthropic/v1/messages).
 app.add_api_route(

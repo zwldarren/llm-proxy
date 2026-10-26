@@ -16,7 +16,7 @@ COPY frontend/ .
 RUN bun run build
 
 # Stage 2: Build backend
-FROM python:3.15-rc-slim
+FROM python:3.15-slim
 
 # Copy bun tools (for bunx command) from first stage
 COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun

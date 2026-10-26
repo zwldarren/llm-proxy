@@ -103,7 +103,7 @@ def on_test_stop(environment, **_kwargs):
 
 
 @events.request.add_listener
-def on_request(request_type, name, response_time, exception, **_kwargs):
+def on_request(request_type, name, response_time, exception=None, **_kwargs):
     """Record every gateway request (not the Custom overhead/ttft events)."""
     if _latency_fh is None or request_type != "POST":
         return

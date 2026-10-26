@@ -20,7 +20,10 @@ services:
     environment:
       - LOADTEST_WORKERS=8
       - LOADTEST_LOG_LEVEL=WARNING
-    command: ["sh", "-c", "exec uv run llm-proxy --workers $${LOADTEST_WORKERS:-8}"]
+    # Run the venv entry point directly: the image installs with `--no-dev`,
+    # so `uv run` would re-sync the dev group at start and fail on lupa (no C
+    # toolchain in the slim image). The worker count stays parameterized.
+    command: ["sh", "-c", "exec /app/.venv/bin/llm-proxy --workers $${LOADTEST_WORKERS:-8}"]
 
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
