@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.5.2](https://github.com/zwldarren/llm-proxy/compare/v0.5.1...v0.5.2) (2026-10-26)
+
+
+### Features
+
+* **providers:** add Ollama speech endpoint compatibility ([4fd5bc3](https://github.com/zwldarren/llm-proxy/commit/4fd5bc321019f29d1f9e93834ee0c1c1ddb99edb))
+* **tracing:** export traces to OTLP collectors and LangSmith ([ddd5d9d](https://github.com/zwldarren/llm-proxy/commit/ddd5d9dd272308327f0d5c37bbc36fb40dbae38f))
+* **tracing:** expose the Langfuse content mode in the dashboard ([c339faa](https://github.com/zwldarren/llm-proxy/commit/c339faac4cbb48083a50b720d866b0bd4f25146c))
+
+
+### Bug Fixes
+
+* **auth:** bind credentials to account state and make each guess cost ([c525e4e](https://github.com/zwldarren/llm-proxy/commit/c525e4e0d073f9c5ca213fcb417c74aea5b59c2b))
+* close three edge cases on the request and cleanup paths ([c7e9cff](https://github.com/zwldarren/llm-proxy/commit/c7e9cff33393ba267f60852c03692d43d2787476))
+* **deps:** bound decompression and MCP session slots ([2f1de23](https://github.com/zwldarren/llm-proxy/commit/2f1de23bfe6e5c6e957790d744a94f433d1813a8))
+* **logs:** keep secrets, and client widths, out of the log pipeline ([0b1a9d0](https://github.com/zwldarren/llm-proxy/commit/0b1a9d09c6066a68f7dd0867d8f9aa53881d8a15))
+* **providers:** keep provider API keys encrypted at rest ([0f6335f](https://github.com/zwldarren/llm-proxy/commit/0f6335f2869204263a744aed70fc248983420916))
+* **security:** close the second-axis review of the hardening series ([d91271d](https://github.com/zwldarren/llm-proxy/commit/d91271da6ed58eb2744ca395e7e7eb119c1f06e4))
+* **ssrf:** refuse internal hosts for user-supplied endpoints ([da73352](https://github.com/zwldarren/llm-proxy/commit/da7335286cf301685edbfd11f2e5b9cebb5cb30e))
+* **startup:** initialize encryption before the fail-fast config load ([1b5e29b](https://github.com/zwldarren/llm-proxy/commit/1b5e29bc0c19e58e147e6b651331bbd285bac87b))
+* **streaming:** keep model text out of the frame framing ([2fc367f](https://github.com/zwldarren/llm-proxy/commit/2fc367f269a82bbb0c5fcbf29e3ef79fcc5595c4))
+* **team:** align member management with documented behavior ([20ae853](https://github.com/zwldarren/llm-proxy/commit/20ae8535d82aa03f5793a94fa0f975230cd01f4a))
+* **tracing:** export Langfuse content by default again ([32f8061](https://github.com/zwldarren/llm-proxy/commit/32f8061b67648d90b153ce397e705fb10effc0f8))
+* **web-search:** treat empty options as enable-with-defaults on every wire ([b25dbce](https://github.com/zwldarren/llm-proxy/commit/b25dbce7c46aa36bab542569a155b9a01d61469e))
+* **ws:** charge every socket turn what HTTP charges ([c60cb33](https://github.com/zwldarren/llm-proxy/commit/c60cb335ac4ef46e409484785b646647dd11ef5d))
+
+
+### Performance Improvements
+
+* cut request-path CPU in middleware and background writers ([b196f59](https://github.com/zwldarren/llm-proxy/commit/b196f59672a6331eb5c175e12038b42a0110e0a4))
+
+
+### Documentation
+
+* **admin:** correct the personal tracing endpoint path ([43a00a9](https://github.com/zwldarren/llm-proxy/commit/43a00a9f64b6ad4a5616955355a74e34fdad6b68))
+* **security:** record the socket quotas, tracing rule and MCP bounds ([651762c](https://github.com/zwldarren/llm-proxy/commit/651762c3bdd0d252a4fb80071938a01ab06d9fc4))
+
 ## [0.5.1](https://github.com/zwldarren/llm-proxy/compare/v0.5.0...v0.5.1) (2026-10-23)
 
 
