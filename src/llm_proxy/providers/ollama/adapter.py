@@ -13,11 +13,13 @@ from llm_proxy.models import (
     InternalEmbeddingRequest,
     InternalRequest,
     InternalResponse,
+    InternalSpeechRequest,
 )
 from llm_proxy.models.content_blocks import ImageBlock
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.base import BaseHttpProvider
 from llm_proxy.providers.capabilities import (
+    AudioCapabilityMixin,
     ChatCapabilityMixin,
     DecisionsOverSystemOneMixin,
     EmbeddingCapabilityMixin,
@@ -44,15 +46,17 @@ _serializer = get_provider_serializer("ollama")
 class OllamaAdapter(
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
+    AudioCapabilityMixin,
     DecisionsOverSystemOneMixin,
     SystemOneCapabilityMixin,
     BaseHttpProvider,
 ):
     """Provider adapter for Ollama's native API.
 
-    Chat and embeddings speak the native ``/api/*`` surface. System One
-    (Ollama v0.35+) is served from ``/v1/systemone`` -- the OpenAI-compatibility
-    prefix, not the native one -- and shares TypeSafe's wire format, so it
+    Chat and embeddings speak the native ``/api/*`` surface. Speech
+    (Ollama v0.40.8+) and System One (Ollama v0.35+) sit under the
+    OpenAI-compatibility prefix -- ``/v1/audio/speech`` and ``/v1/systemone``
+    -- not the native one. System One shares TypeSafe's wire format, so it
     reuses the capability mixin's body builder, parser and endpoint plumbing.
 
     ``/v1/decisions`` is served by bridging onto that same endpoint
@@ -78,6 +82,13 @@ class OllamaAdapter(
     #: the native ``/api`` one; ``DEFAULT_BASE_URL`` is the server root, so this
     #: resolves to ``http://localhost:11434/v1/systemone``.
     SYSTEMONE_ENDPOINT = "/v1/systemone"
+    #: Speech is also served under the OpenAI-compatibility prefix (Ollama
+    #: v0.40.8+), not the native ``/api`` one.
+    SPEECH_ENDPOINT = "/v1/audio/speech"
+
+    #: Ollama's speech endpoint accepts only these ``response_format`` values
+    #: and rejects every other value with a 400.
+    _OLLAMA_SPEECH_FORMATS: frozenset[str] = frozenset({"wav", "pcm"})
 
     #: Ollama takes images as one raw-base64 array shared by every question, and
     #: rejects data URLs — so the bridge collects the payloads into ``images``
@@ -165,6 +176,30 @@ class OllamaAdapter(
         if outbound.json_body is None:
             raise ValueError("_build_outbound_body returned no json_body for Ollama request")
         return outbound.json_body
+
+    def _build_speech_raw(self, request: InternalSpeechRequest) -> dict[str, Any]:
+        """Build the OpenAI-compatible speech body Ollama documents.
+
+        Ollama accepts only ``wav`` and ``pcm`` and rejects every other
+        ``response_format`` with a 400. Any other requested codec is served
+        as WAV, which the upstream labels truthfully in ``Content-Type``.
+        """
+        body = super()._build_speech_raw(request)
+        requested = str(body.get("response_format") or "").lower()
+        if requested in self._OLLAMA_SPEECH_FORMATS:
+            body["response_format"] = requested
+        else:
+            logger.info(
+                "Ollama speech supports WAV/PCM only; returning WAV instead of "
+                f"requested response_format={requested!r}."
+            )
+            body["response_format"] = "wav"
+        return body
+
+    def speech_stream_media_type(self, request: InternalSpeechRequest) -> str | None:
+        """Media type Ollama streams for the effective speech format."""
+        requested = (request.response_format or "").lower()
+        return "audio/pcm" if requested == "pcm" else "audio/wav"
 
     def _extract_error_from_body(self, error_body: dict, fallback: str) -> tuple[str, str]:
         error_value = error_body.get("error", "")

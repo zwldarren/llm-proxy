@@ -41,7 +41,7 @@ variable makes stored keys undecryptable.
 | `anthropic` | Anthropic Messages (`x-api-key`, `anthropic-version: 2023-06-01`) | `https://api.anthropic.com` |
 | `openai-compatible` | Chat Completions (generic; **base URL required**) | — |
 | `gemini` | Google `generateContent` (`x-goog-api-key`) | `https://generativelanguage.googleapis.com/v1beta` |
-| `ollama` | Native Ollama (`/api/chat`, `/api/tags`) | `http://localhost:11434` |
+| `ollama` | Native Ollama (`/api/chat`, `/api/tags`) + OpenAI-compatible speech (`/v1/audio/speech`) | `http://localhost:11434` |
 | `vllm` | Chat Completions | `http://localhost:8000/v1` |
 | `sglang` | Chat Completions | `http://localhost:30000/v1` |
 | `deepseek` | Chat Completions + native Anthropic/Responses | `https://api.deepseek.com/v1` |

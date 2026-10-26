@@ -54,8 +54,14 @@ Content-Type: audio/mpeg
 ## Provider support
 
 `openai`, the `openai-compatible` family (except `qwen`/`qwen-intl`, which have no
-upstream speech endpoint), and `gemini` (native TTS) — see the
+upstream speech endpoint), `gemini` (native TTS), and `ollama` (v0.40.8+,
+native `/v1/audio/speech`) — see the
 [capability matrix](../endpoints.md#capability-matrix).
+
+Ollama serves speech as WAV or raw PCM only. Other requested
+`response_format` values are served as WAV (the upstream content type says so);
+`instructions`, a `speed` other than 1, and a `stream_format` other than
+`audio` are rejected by Ollama with a `400`.
 
 ## Related
 
