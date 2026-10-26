@@ -105,6 +105,6 @@ Any signed-in user can:
 | `GET /api/me/budget` | Account budget status |
 | `PUT /api/me/password` | Change own password |
 | `PUT /api/me/username` | Change own username (requires current password) |
-| `GET/PUT /api/me/tracing` | Personal tracing backend configuration |
+| `GET/PUT /api/me/tracing/` | Personal tracing backend configuration |
 | `POST /api/me/feedback` | Rate a smart-routing decision for a request |
 | `POST /api/auth/logout` | Sign out (deactivates the session API keys) |
