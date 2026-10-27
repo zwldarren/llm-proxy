@@ -995,6 +995,26 @@ class TestLangfuseSDKDataBuilders:
         assert data["finish_reason"] == "stop"
         assert data["model"] == "gpt-4"
 
+    def test_build_response_output_data_falls_back_to_a_passthrough_body(self):
+        body = {"id": "chatcmpl-1", "choices": [{"message": {"content": "pong"}}]}
+        response = MagicMock()
+        response.output = []
+        response.provider_info = {"provider": "fake", "_raw_response_body": body}
+
+        assert build_response_output_data(response) == body
+
+    def test_build_response_output_data_keeps_the_parsed_shape_when_it_has_blocks(self):
+        response = MagicMock()
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "world"
+        response.output = [text_block]
+        response.finish_reason = None
+        response.model = None
+        response.provider_info = {"provider": "fake", "_raw_response_body": {"id": "ignored"}}
+
+        assert build_response_output_data(response) == {"role": "assistant", "content": "world"}
+
     def test_build_usage_details(self):
         context = EventContext(
             request_id="req-1",

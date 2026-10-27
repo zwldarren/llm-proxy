@@ -361,6 +361,22 @@ def format_output_blocks(output_blocks: list[Any]) -> dict[str, Any]:
     return result
 
 
+def _passthrough_output(response: Any) -> dict[str, Any] | None:
+    """The answer of a native-passthrough response, taken from its raw body.
+
+    ``BaseAdapter._build_passthrough_response`` keeps the upstream body verbatim
+    and leaves ``output`` empty so that path never materializes content blocks.
+    A trace would then show a prompt and no answer, so the body is exported as it
+    arrived — the wire JSON the caller received, not the re-rendered assistant
+    message the parsed path produces.
+    """
+    info = getattr(response, "provider_info", None)
+    if not isinstance(info, Mapping):
+        return None
+    body = info.get("_raw_response_body")
+    return body if isinstance(body, dict) else None
+
+
 def build_response_output_data(response: InternalResponse) -> dict[str, Any] | None:
     """Build the native output payload for a generation observation.
 
@@ -369,7 +385,7 @@ def build_response_output_data(response: InternalResponse) -> dict[str, Any] | N
     """
     output = getattr(response, "output", None)
     if not output:
-        return None
+        return _passthrough_output(response)
 
     formatted = format_output_blocks(output)
     finish_reason = getattr(response, "finish_reason", None)

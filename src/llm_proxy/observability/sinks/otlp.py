@@ -410,6 +410,25 @@ def _parent_context(trace_id: str | None) -> Any:
     return set_span_in_context(NonRecordingSpan(context))
 
 
+def _span_parent_context(backend: OtlpBackend, trace_id: str | None) -> Any:
+    """The parent context this backend's span is started under (``None`` = root).
+
+    A generic OTLP collector accepts an orphan span: Tempo and Jaeger keep it and
+    show it as its own trace, so a caller-supplied trace id is continued there.
+
+    LangSmith does not. Its ingest only materializes a trace whose root span is
+    present, so a span whose ``parent_span_id`` names a run that never arrives is
+    accepted (HTTP 200, and 409 on a retry) and then dropped without a trace in
+    the project — the whole export silently disappears behind a healthy-looking
+    gateway. Every request therefore leaves as its own root run, and the caller's
+    correlation id is still carried as ``llm_proxy.correlation_id`` /
+    ``langsmith.metadata.correlation_id``.
+    """
+    if backend == "langsmith":
+        return None
+    return _parent_context(trace_id)
+
+
 @dataclass
 class _RequestState:
     """Per-request span, keyed by request id on the exporter."""
@@ -552,7 +571,7 @@ class OtlpExporter(SendContentProjector):
         try:
             span = self._tracer.start_span(
                 self._span_name(record, request),
-                context=_parent_context(record.core.trace_id),
+                context=_span_parent_context(self.backend, record.core.trace_id),
                 kind=SpanKind.CLIENT,
                 start_time=_unix_ns(record.core.started_at),
             )

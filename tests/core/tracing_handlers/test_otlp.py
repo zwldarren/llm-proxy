@@ -7,6 +7,7 @@ streaming task boundary, and the two providers' settings validation.
 """
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -268,6 +269,29 @@ def test_a_long_conversation_stays_inside_the_span_attribute_limit(provider, mem
     assert len(span.attributes) < 128
 
 
+def test_a_passthrough_response_exports_the_body_it_carries(provider, memory):
+    """A native-passthrough response parses no blocks; its trace keeps the body.
+
+    Without the fallback the observation would carry a prompt and no answer: the
+    client-provider wire reuse path deliberately leaves ``output`` empty.
+    """
+    exporter = _exporter(provider)
+    request = _request()
+    body = {"id": "chatcmpl-1", "choices": [{"message": {"content": "pong"}}]}
+    response = MagicMock()
+    response.output = []
+    response.finish_reason = None
+    response.model = None
+    response.provider_info = {"provider": "fake", "_raw_response_body": body}
+    record = collect(_context())
+
+    exporter.open(record, request)
+    exporter.finish(record, request=request, response=response)
+
+    (span,) = memory.get_finished_spans()
+    assert json.loads(span.attributes["output.value"]) == body
+
+
 def test_provider_specific_top_k_is_exported(provider, memory):
     exporter = _exporter(provider)
     request, response = _request(), _response()
@@ -337,6 +361,25 @@ def test_a_caller_trace_id_is_continued_when_it_is_a_trace_id(provider, memory):
     exporter.finish(collect(_context(trace_id=TRACE_ID)), request=request)
     (span,) = memory.get_finished_spans()
     assert format(span.get_span_context().trace_id, "032x") == TRACE_ID
+
+
+def test_a_langsmith_span_starts_its_own_root_run(provider, memory):
+    """LangSmith must receive a root run, not an orphan child span.
+
+    Its ingest only materializes a trace whose root span arrives: a span parented
+    to a run that never comes is accepted with HTTP 200 and then dropped, so the
+    export looks healthy while the project stays empty (ADR-0048).
+    """
+    exporter = _exporter(provider, backend="langsmith")
+    request = _request()
+
+    exporter.open(collect(_context(trace_id=TRACE_ID)), request)
+    exporter.finish(collect(_context(trace_id=TRACE_ID)), request=request)
+
+    (span,) = memory.get_finished_spans()
+    assert span.parent is None
+    # The caller's correlation id survives as an attribute instead of as a parent.
+    assert span.attributes["llm_proxy.correlation_id"] == TRACE_ID
 
 
 def test_a_non_trace_correlation_id_is_not_adopted(provider, memory):

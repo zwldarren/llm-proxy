@@ -221,7 +221,10 @@ carrying that request type's own content:
 
 - **chat** (OpenAI, Anthropic and Responses wire): a `generation` whose `input` is the
   messages (or `{tools, messages}` when tools are present) and whose `output` is the
-  assistant message with tool calls separated out.
+  assistant message with tool calls separated out. When the client and the provider
+  speak the same wire the response is passed through unparsed, so no content blocks
+  exist to render: the trace then carries the response body exactly as the caller
+  received it.
 - **embeddings** (`/v1/embeddings`): an **`embedding`** observation. `input` is the
   text (or list of texts) being embedded; `output` is the response shape (`count`,
   `dimensions`, `model` and a preview of the first vectors) rather than the vectors
@@ -288,7 +291,11 @@ The LangSmith backend additionally emits the spellings its ingest reads:
 `gen_ai.prompt.*`/`gen_ai.completion.*` message attributes,
 `langsmith.trace.session_id`, `langsmith.span.tags` and `langsmith.metadata.*`. It
 speaks HTTP only — LangSmith has no gRPC ingest — and it ingests traces only, not
-metrics or logs.
+metrics or logs. Its ingest materializes a trace only when its root span arrives, so
+the LangSmith backend exports every request as its own root run and does not continue
+a caller's `x-trace-id` as a parent span (the gateway accepts such an orphan span with
+HTTP 200 and then drops it); the correlation id travels as
+`llm_proxy.correlation_id`/`langsmith.metadata.correlation_id` instead.
 
 **Content policy.** Every backend exports the prompt and completion by default: its
 `send_content` setting is `full`, so enabling tracing keeps the input/output that
