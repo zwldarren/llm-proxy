@@ -78,15 +78,19 @@ def _preserve_masked_values(
 
 
 def _build_config_read(config_dict: dict) -> TracingConfigRead:
-    """Build TracingConfigRead from config dict."""
+    """Build TracingConfigRead from config dict.
+
+    Secrets are masked here, once: the read shape carries the masked settings and
+    the write shape restores a masked placeholder from the stored value, so the
+    plaintext key never travels to a client (``api/schemas/tracing.py``).
+    """
     config = TracingConfig.from_dict(config_dict)
     providers = [
         TracingProviderRead(
             provider=p.provider,
             name=p.name,
             enabled=p.enabled,
-            settings=p.settings,
-            masked_settings=_mask_settings(p.settings),
+            settings=_mask_settings(p.settings),
         )
         for p in config.providers
     ]

@@ -11,8 +11,12 @@ class TracingProviderRead(BaseModel):
     provider: str = "langfuse"
     name: str = "langfuse"
     enabled: bool = True
+    #: The stored settings with every secret masked. This is what the editor
+    #: reads and what it round-trips on save: a ``****`` placeholder is restored
+    #: from the stored value by ``build_persisted_tracing_dict``, so editing one
+    #: field never wipes a key. A plaintext credential must never leave the
+    #: server in a response body.
     settings: dict[str, Any] = Field(default_factory=dict)
-    masked_settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class TracingProviderWrite(BaseModel):

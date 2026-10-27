@@ -106,9 +106,12 @@ class TestMeTracingRouter:
         assert len(data["config"]["providers"]) == 1
         provider = data["config"]["providers"][0]
         assert provider["name"] == "my-langfuse"
-        # Secrets are masked in the response
-        assert "****" in provider["masked_settings"]["secret_key"]
-        assert provider["settings"]["secret_key"] == "sk-secret"
+        # Secrets never leave the server: the read shape carries masked values
+        # only, and saving them back restores the stored ones.
+        assert "****" in provider["settings"]["secret_key"]
+        assert "sk-secret" not in response.text
+        assert "****" in provider["settings"]["public_key"]
+        assert provider["settings"]["base_url"] == "https://cloud.langfuse.com"
         assert data["status"]["is_configured"] is True
 
     def test_put_persists_and_invalidates_user_registry(self, client):
@@ -164,6 +167,11 @@ class TestMeTracingRouter:
             )
         assert response.status_code == 200, response.text
         assert response.json()["message"] == "Tracing configuration updated successfully"
+        # The update response describes the config, so it carries the masked view
+        # too: no plaintext secret travels back to the browser.
+        echoed = response.json()["config"]["providers"][0]["settings"]
+        assert "****" in echoed["secret_key"]
+        assert "sk-existing" not in response.text
 
         # Persisted against the authenticated user's id, with secrets restored
         assert len(saved) == 1

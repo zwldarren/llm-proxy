@@ -999,8 +999,8 @@ export interface TracingProvider {
   provider: string;
   name: string;
   enabled: boolean;
+  /** Stored settings with secrets masked; a `****` value is restored on save. */
   settings: Record<string, unknown>;
-  masked_settings?: Record<string, unknown>;
 }
 
 interface TracingProviderStatus {

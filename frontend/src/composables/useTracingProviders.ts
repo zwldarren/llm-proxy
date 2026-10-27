@@ -171,12 +171,10 @@ export function useTracingProviderEditor(state: Ref<TracingConfig>): TracingProv
   function buildSavePayload(config: TracingConfig): TracingConfig {
     return {
       enabled: config.enabled,
-      providers: config.providers.map(
-        ({ id: _id, masked_settings: _masked_settings, ...provider }) => ({
-          ...provider,
-          settings: { ...provider.settings },
-        })
-      ),
+      providers: config.providers.map(({ id: _id, ...provider }) => ({
+        ...provider,
+        settings: { ...provider.settings },
+      })),
     };
   }
 
