@@ -74,7 +74,7 @@ web-aware through your own search provider.
 
 1. **Settings → General → Web Search** — turn on interception and configure a search provider:
    - **SearXNG**: `url` required; optional API key or basic auth; `engines` list;
-     `timeout` (default 30 s); `max_results` (default 10, max 20). Queries over 4000
+     `timeout` (default 30 s); `max_results` (default 10, max 10). Queries over 4000
      characters are rejected.
    - **Ollama**: `api_key` required; `base_url` default `https://ollama.com`;
      `timeout`; `max_results` (max 10).

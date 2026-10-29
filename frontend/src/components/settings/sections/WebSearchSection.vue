@@ -180,7 +180,7 @@ watch(
             <NumberInput
               v-model.number="state.searxng.max_results"
               min="1"
-              max="20"
+              max="10"
               :aria-label="t('settings.searxng.maxResults')"
               class="font-mono text-sm w-full bg-background"
             />
