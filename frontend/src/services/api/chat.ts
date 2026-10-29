@@ -1,4 +1,5 @@
 import { http, handleUnauthorized, TimeoutError } from "@/services/http";
+import { csrfHeaders } from "@/services/csrf";
 import { getAdapterForEndpoint } from "@/adapters";
 import type { WebSearchResultPayload } from "@/adapters/types";
 
@@ -23,7 +24,6 @@ export const chatApi = {
   streamChatCompletion: async (
     endpoint: string,
     data: Record<string, unknown>,
-    apiKey: string,
     onChunk: (chunk: string) => void,
     onError?: (error: string) => void,
     onReasoningChunk?: (chunk: string) => void,
@@ -61,9 +61,10 @@ export const chatApi = {
     try {
       response = await fetch(`${BASE_URL}${relativePath}`, {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          ...csrfHeaders("POST"),
         },
         body: JSON.stringify({ ...data, stream: true }),
         signal: combinedSignal,
@@ -155,8 +156,5 @@ export const chatApi = {
     }
   },
 
-  getModels: (apiKey: string) =>
-    http.get<{ data: { id: string; provider: string }[] }>(`${BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    }),
+  getModels: () => http.get<{ data: { id: string; provider: string }[] }>(`${BASE_URL}/models`),
 };

@@ -2,6 +2,7 @@ import { reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { storeToRefs } from "pinia";
 import { chatApi } from "@/services/api/chat";
+import { csrfHeaders } from "@/services/csrf";
 import { useChatStore } from "@/stores/chat";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import type { ChatMessage, ContentPart } from "@/types/schemas";
@@ -147,7 +148,6 @@ export function useChat() {
   const sendMessage = async (
     content: string | ContentPart[],
     model: string,
-    apiKey: string,
     endpoint: string,
     onChunk?: (chunk: string) => void,
     options?: ChatOptions
@@ -158,7 +158,7 @@ export function useChat() {
         ? content.trim() !== ""
         : Array.isArray(content) && content.length > 0;
 
-    if (!isToolResponse && (!hasContent || !model || !apiKey.trim())) return;
+    if (!isToolResponse && (!hasContent || !model)) return;
 
     // Push User message if not tool call resume
     if (!isToolResponse) {
@@ -237,9 +237,10 @@ export function useChat() {
       try {
         const response = await fetch(endpoint, {
           method: "POST",
+          credentials: "same-origin",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+            ...csrfHeaders("POST"),
           },
           body: JSON.stringify(audioPayload),
         });
@@ -312,7 +313,6 @@ export function useChat() {
       await chatApi.streamChatCompletion(
         endpoint,
         requestPayload,
-        apiKey,
         (chunk) => {
           contentBuffer.push(chunk);
           if (onChunk) onChunk(chunk);

@@ -39,7 +39,6 @@ import { useModelCatalog } from "@/composables/useModelCatalog";
 const { t } = useI18n();
 
 const authStore = useAuthStore();
-const apiKey = computed(() => authStore.sessionApiKey ?? "");
 
 // Models — loaded, retried and persisted by the catalog composable shared with
 // the Chat picker; this view only renders its state.
@@ -52,7 +51,6 @@ const {
   loadModels,
   refreshModels,
 } = useModelCatalog({
-  apiKey,
   storageKey: STORAGE_KEYS.IMAGES_MODEL,
   namespace: "images",
 });
@@ -104,7 +102,7 @@ const clearRuns = () => {
 };
 
 const isSubmitDisabled = computed(
-  () => !prompt.value.trim() || isGenerating.value || !selectedModel.value || !apiKey.value.trim()
+  () => !prompt.value.trim() || isGenerating.value || !selectedModel.value
 );
 
 // File helpers
@@ -192,10 +190,6 @@ async function handleSubmit() {
     toast.warning(t("images.noModel"));
     return;
   }
-  if (!apiKey.value.trim()) {
-    toast.warning(t("images.apiKeyRequired"));
-    return;
-  }
 
   isGenerating.value = true;
 
@@ -219,7 +213,6 @@ async function handleSubmit() {
   try {
     const model = selectedModel.value;
     const trimmedPrompt = prompt.value.trim();
-    const key = apiKey.value.trim();
 
     let images: ImageData[];
     if (run.mode === "edits") {
@@ -240,7 +233,7 @@ async function handleSubmit() {
         size: size.value !== "auto" ? size.value : undefined,
       };
       run.payload = JSON.parse(JSON.stringify(body));
-      const response = await imagesApi.editImage(body, key);
+      const response = await imagesApi.editImage(body);
       images = response.data || [];
     } else {
       const body = {
@@ -257,7 +250,7 @@ async function handleSubmit() {
         response_format: "url" as const,
       };
       run.payload = JSON.parse(JSON.stringify(body));
-      const response = await imagesApi.generateImage(body, key);
+      const response = await imagesApi.generateImage(body);
       images = response.data || [];
     }
 
@@ -348,8 +341,8 @@ onActivated(async () => {
   }
 
   // Re-entry is the natural retry point. KeepAlive never re-runs onMounted, so
-  // a load that failed while the page was hidden used to leave the selector
-  // empty for the rest of the session.
+  // a load that failed while the page was hidden would otherwise leave the
+  // selector empty for the rest of the session.
   if (models.value.length === 0 && !isLoadingModels.value) {
     void loadModels();
   }

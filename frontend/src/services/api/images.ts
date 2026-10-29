@@ -16,15 +16,13 @@ const BASE_URL = "/v1";
 const IMAGE_TIMEOUT_MS = 5 * 60_000;
 
 export const imagesApi = {
-  generateImage: (data: ImageGenerationRequest, apiKey: string) =>
+  generateImage: (data: ImageGenerationRequest) =>
     http.post<ImageGenerationResponse>(`${BASE_URL}/images/generations`, data, {
-      headers: { Authorization: `Bearer ${apiKey}` },
       timeoutMs: IMAGE_TIMEOUT_MS,
     }),
 
-  editImage: (data: ImageEditRequest, apiKey: string) =>
+  editImage: (data: ImageEditRequest) =>
     http.post<ImageGenerationResponse>(`${BASE_URL}/images/edits`, data, {
-      headers: { Authorization: `Bearer ${apiKey}` },
       timeoutMs: IMAGE_TIMEOUT_MS,
     }),
 };

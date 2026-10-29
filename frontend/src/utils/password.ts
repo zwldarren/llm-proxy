@@ -4,12 +4,13 @@ import i18n from "@/i18n";
  * Password strength policy — mirrors the backend
  * `llm_proxy.security.passwords.validate_password_strength`.
  *
- * 8-72 characters with at least one uppercase letter, one lowercase letter,
- * one digit, and one special character.
+ * At least 8 characters and at most 72 UTF-8 bytes (bcrypt's limit), with at
+ * least one uppercase letter, one lowercase letter, one digit, and one special
+ * character.
  */
 
 const PASSWORD_MIN_LENGTH = 8;
-const PASSWORD_MAX_LENGTH = 72;
+const PASSWORD_MAX_BYTES = 72;
 const RE_UPPERCASE = /[A-Z]/;
 const RE_LOWERCASE = /[a-z]/;
 const RE_DIGIT = /[0-9]/;
@@ -32,8 +33,8 @@ export function validatePasswordStrength(password: string): string {
   if (password.length < PASSWORD_MIN_LENGTH) {
     return i18n.global.t("auth.passwordTooShort");
   }
-  if (password.length > PASSWORD_MAX_LENGTH) {
-    return i18n.global.t("auth.passwordWeak");
+  if (new TextEncoder().encode(password).length > PASSWORD_MAX_BYTES) {
+    return i18n.global.t("auth.passwordTooLong");
   }
   if (!RE_UPPERCASE.test(password)) {
     return i18n.global.t("auth.passwordWeak");
@@ -48,4 +49,24 @@ export function validatePasswordStrength(password: string): string {
     return i18n.global.t("auth.passwordWeak");
   }
   return "";
+}
+
+/**
+ * Validate a password and its confirmation for a sign-up form.
+ *
+ * ``required`` marks a password field that must be filled in (invitation
+ * acceptance); OAuth onboarding allows skipping it in favour of a passkey.
+ */
+export function validatePasswordPair(
+  password: string,
+  confirmation: string,
+  { required = false }: { required?: boolean } = {}
+): string {
+  if (!password) {
+    return required ? i18n.global.t("auth.passwordRequired") : "";
+  }
+  if (password !== confirmation) {
+    return i18n.global.t("auth.passwordMismatch");
+  }
+  return validatePasswordStrength(password);
 }

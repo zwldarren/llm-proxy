@@ -41,7 +41,6 @@ describe("chatApi.streamChatCompletion deadlines", () => {
     const done = chatApi.streamChatCompletion(
       "/v1/chat/completions",
       { model: "m", messages: [] },
-      "key",
       (chunk) => chunks.push(chunk)
     );
 
@@ -81,7 +80,6 @@ describe("chatApi.streamChatCompletion deadlines", () => {
     const done = chatApi.streamChatCompletion(
       "/v1/chat/completions",
       { model: "m", messages: [] },
-      "key",
       () => {}
     );
     const rejected = expect(done).rejects.toMatchObject({ name: "TimeoutError" });

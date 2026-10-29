@@ -581,16 +581,83 @@ export interface ChatMessage {
 }
 
 export interface Token {
-  access_token: string;
+  access_token?: string | null;
   token_type: string;
   session_api_key?: string;
+  username?: string | null;
+  role?: string | null;
   /** When true, the user must set a new password before any other API access. */
   must_change_password?: boolean;
+  /** When true, the password/passkey first factor succeeded and a 2FA step is required. */
+  mfa_required?: boolean;
+  /** Short-lived token to carry the first-factor result into the MFA step. */
+  challenge_token?: string | null;
 }
 
 export interface LoginRequest {
   username: string;
   password: string;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: "admin" | "viewer";
+  status: "pending" | "accepted" | "revoked" | "expired";
+  allowed_models?: string[] | null;
+  budget_usd?: number | null;
+  budget_period?: string | null;
+  budget_reset_day?: number | null;
+  created_at: string;
+  expires_at: string;
+  accepted_at?: string | null;
+  revoked_at?: string | null;
+  last_sent_at?: string | null;
+}
+
+export interface InvitationCreated {
+  invitation: Invitation;
+  token: string;
+  invite_url: string;
+  email_sent: boolean;
+}
+
+export interface PublicInvitation {
+  email: string;
+  role: "admin" | "viewer";
+  expires_at: string;
+}
+
+export interface Passkey {
+  id: number;
+  name: string;
+  transports?: string[] | null;
+  created_at: string;
+  last_used_at?: string | null;
+}
+
+export interface PasskeyChallenge {
+  options: Record<string, unknown>;
+  challenge_token: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  recovery_codes_remaining: number;
+  required_for_admins: boolean;
+}
+
+export interface OAuthProvider {
+  id: string;
+  name: string;
+}
+
+export interface OAuthIdentity {
+  id: number;
+  provider: string;
+  email: string;
+  created_at: string;
+  last_login_at?: string | null;
 }
 
 interface ErrorDetails {

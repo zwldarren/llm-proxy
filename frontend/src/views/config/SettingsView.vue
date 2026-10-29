@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Settings2, Trash2 } from "@lucide/vue";
+import { AlertCircle, Check, ChevronDown, ListTree, Settings2, Trash2 } from "@lucide/vue";
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -27,6 +27,14 @@ import McpSecuritySection from "@/components/settings/sections/McpSecuritySectio
 import AboutSection from "@/components/settings/sections/AboutSection.vue";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -156,46 +164,80 @@ watch(
   { immediate: true }
 );
 
-/* In-page section index — each tab stacks many cards, so a sticky index
- * (desktop only) gives one-click jumps and a scrollspy reading position. */
+/* In-page section menu — each tab stacks many cards, so a compact grouped
+ * menu in the page header provides jumps without becoming another content
+ * band. Advanced groups its ten sections by topic; General stays flat. */
 interface SettingsSectionMeta {
   id: string;
-  tab: SettingsSectionId;
   labelKey: string;
   adminOnly?: boolean;
 }
 
-const SECTION_INDEX: SettingsSectionMeta[] = [
-  { id: "interface", tab: "general", labelKey: "settings.preference" },
-  { id: "server", tab: "general", labelKey: "settings.serverLogs", adminOnly: true },
-  { id: "webSearch", tab: "general", labelKey: "settings.webSearch", adminOnly: true },
-  { id: "tracing", tab: "general", labelKey: "nav.tracing" },
-  { id: "about", tab: "general", labelKey: "about.title", adminOnly: true },
-  { id: "requestPolicy", tab: "advanced", labelKey: "requestPolicy.title", adminOnly: true },
-  { id: "smartRouting", tab: "advanced", labelKey: "smartRouting.title", adminOnly: true },
+interface SettingsGroupMeta {
+  id: string;
+  tab: SettingsSectionId;
+  /** Nav-group label; null means the items are listed without a heading. */
+  labelKey: string | null;
+  items: SettingsSectionMeta[];
+}
+
+const SECTION_GROUPS: SettingsGroupMeta[] = [
   {
-    id: "providerSelection",
-    tab: "advanced",
-    labelKey: "providerSelection.title",
-    adminOnly: true,
+    id: "general",
+    tab: "general",
+    labelKey: null,
+    items: [
+      { id: "interface", labelKey: "settings.preference" },
+      { id: "server", labelKey: "settings.serverLogs", adminOnly: true },
+      { id: "webSearch", labelKey: "settings.webSearch", adminOnly: true },
+      { id: "tracing", labelKey: "nav.tracing" },
+      { id: "about", labelKey: "about.title", adminOnly: true },
+    ],
   },
-  { id: "retryFallback", tab: "advanced", labelKey: "resilience.title", adminOnly: true },
-  { id: "circuitBreaker", tab: "advanced", labelKey: "circuitBreaker.title", adminOnly: true },
-  { id: "security", tab: "advanced", labelKey: "security.title", adminOnly: true },
-  { id: "keepalive", tab: "advanced", labelKey: "keepalive.title", adminOnly: true },
-  { id: "rateLimits", tab: "advanced", labelKey: "rateLimits.title", adminOnly: true },
-  { id: "cors", tab: "advanced", labelKey: "cors.title", adminOnly: true },
-  { id: "mcpSecurity", tab: "advanced", labelKey: "mcpSecurity.title", adminOnly: true },
+  {
+    id: "routing",
+    tab: "advanced",
+    labelKey: "settings.groupRouting",
+    items: [
+      { id: "requestPolicy", labelKey: "requestPolicy.title" },
+      { id: "smartRouting", labelKey: "smartRouting.title" },
+      { id: "providerSelection", labelKey: "providerSelection.title" },
+    ],
+  },
+  {
+    id: "resilience",
+    tab: "advanced",
+    labelKey: "settings.groupResilience",
+    items: [
+      { id: "retryFallback", labelKey: "resilience.title" },
+      { id: "circuitBreaker", labelKey: "circuitBreaker.title" },
+      { id: "keepalive", labelKey: "keepalive.title" },
+    ],
+  },
+  {
+    id: "access",
+    tab: "advanced",
+    labelKey: "settings.groupAccess",
+    items: [
+      { id: "security", labelKey: "security.title" },
+      { id: "rateLimits", labelKey: "rateLimits.title" },
+      { id: "cors", labelKey: "cors.title" },
+      { id: "mcpSecurity", labelKey: "mcpSecurity.title" },
+    ],
+  },
 ];
 
-/* The index gutter is mirrored by a spacer in the header band, so the page
- * title and the section cards share a left edge at every width. Both sides use
- * this one string so the two can never drift apart. */
-const INDEX_GUTTER_CLASS = "hidden xl:block w-44 xl:w-52 shrink-0";
-
-const navItems = computed(() =>
-  SECTION_INDEX.filter((s) => s.tab === activeSection.value && (!s.adminOnly || authStore.isAdmin))
+const navGroups = computed(() =>
+  SECTION_GROUPS.filter((group) => group.tab === activeSection.value)
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.adminOnly || authStore.isAdmin),
+    }))
+    .filter((group) => group.items.length > 0)
 );
+
+/** Flat reading order for the scrollspy and the end-of-scroll case. */
+const navItems = computed(() => navGroups.value.flatMap((group) => group.items));
 
 const activeAnchor = ref("");
 const scrollEl = ref<HTMLElement | null>(null);
@@ -262,9 +304,23 @@ function jumpToSection(id: string) {
   router.replace({ query: route.query, hash: `#${id}` });
 }
 
-// Show loading spinner only when we have no cached data at all
-// Non-admin users don't fetch configs, so skip the spinner
-const showLoadingSpinner = computed(() => authStore.isAdmin && !settingsStore.hasCache());
+// Show loading spinner only when we have no cached data at all.
+// A failed first load gets an explicit retry state instead of a permanent spinner.
+const settingsLoadFailed = ref(false);
+const showLoadingSpinner = computed(
+  () => authStore.isAdmin && !settingsLoadFailed.value && !settingsStore.hasCache()
+);
+
+async function loadSettings() {
+  settingsLoadFailed.value = false;
+  try {
+    await settingsStore.fetchAll();
+    initializeAutoSaveFromStore();
+  } catch (e) {
+    console.error("Failed to fetch settings", e);
+    settingsLoadFailed.value = true;
+  }
+}
 
 // First visit renders the settings cards only after fetchAll() resolves; honour a
 // hash that was set before the spinner cleared once the content column mounts.
@@ -433,7 +489,7 @@ async function resetOneCircuit(key: string) {
 
 const showMcpResetDialog = ref(false);
 
-function confirmMcpResetDefaults() {
+async function confirmMcpResetDefaults() {
   mcpSecurityAutoSave.initialize({
     require_key_mcp_permissions: DEFAULT_MCP_SECURITY.require_key_mcp_permissions,
     allowed_commands: [],
@@ -443,9 +499,9 @@ function confirmMcpResetDefaults() {
     blocked_url_hosts: [],
     blocked_url_ips: [...DEFAULT_MCP_SECURITY.blocked_url_ips],
   });
-  mcpSecurityAutoSave.save();
+  const saved = await mcpSecurityAutoSave.save();
   showMcpResetDialog.value = false;
-  toast.success(t("mcpSecurity.resetSuccess"));
+  if (saved) toast.success(t("mcpSecurity.resetSuccess"));
 }
 
 // ── Cleanup dialog ─────────────────────────────────────────────────
@@ -590,15 +646,7 @@ onMounted(async () => {
   }
 
   // First visit: show loading spinner, fetch from API
-  try {
-    await settingsStore.fetchAll();
-    initializeAutoSaveFromStore();
-  } catch (e) {
-    console.error("Failed to fetch settings", e);
-    toast.error(t("common.error"), {
-      description: t("settings.fetchFailed"),
-    });
-  }
+  await loadSettings();
   // Tracing is per-user for everyone (admin included).
   await loadPersonalTracing();
 });
@@ -616,56 +664,93 @@ onUnmounted(() => {
   <AppLayout layoutMode="full">
     <template #header>
       <header class="config-header-bar px-4 sm:px-6 py-4">
-        <!-- The gutter spacer mirrors the index column below, so the band and
-             the section cards share a left edge (and the tab switcher aligns
-             with the cards' right edge). -->
-        <div class="w-full max-w-6xl flex items-start gap-8 xl:gap-12">
-          <div v-if="navItems.length > 1" :class="INDEX_GUTTER_CLASS" aria-hidden="true" />
-          <div class="flex-1 min-w-0">
-            <PageHeader
-              :title="t('settings.title')"
-              :description="t('settings.description')"
-              :icon="Settings2"
-            >
-              <template #actions>
-                <!-- Viewers only ever get the General tab, so the switcher
+        <!-- Section navigation lives in the header, leaving one centered
+             content column with no redundant toolbar above the first card. -->
+        <div class="mx-auto w-full max-w-4xl">
+          <PageHeader
+            :title="t('settings.title')"
+            :description="
+              authStore.isAdmin ? t('settings.description') : t('settings.viewerDescription')
+            "
+            :icon="Settings2"
+          >
+            <template #actions>
+              <!-- Viewers only ever get the General tab, so the switcher
                      would be a one-segment control: omit it rather than offer
                      a tab that renders nothing. -->
-                <div
-                  v-if="authStore.isAdmin"
-                  class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40"
-                  :aria-label="t('settings.title')"
+              <div
+                v-if="authStore.isAdmin"
+                class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40"
+                :aria-label="t('settings.title')"
+                role="group"
+              >
+                <button
+                  type="button"
+                  :aria-pressed="activeSection === 'general'"
+                  class="max-md:min-h-11 max-md:px-4 px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                  :class="
+                    activeSection === 'general'
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="switchTab('general')"
                 >
-                  <button
-                    type="button"
-                    :aria-pressed="activeSection === 'general'"
-                    class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-                    :class="
-                      activeSection === 'general'
-                        ? 'bg-background text-foreground shadow-xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    "
-                    @click="switchTab('general')"
+                  {{ t("nav.general") }}
+                </button>
+                <button
+                  type="button"
+                  :aria-pressed="activeSection === 'advanced'"
+                  class="max-md:min-h-11 max-md:px-4 px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                  :class="
+                    activeSection === 'advanced'
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="switchTab('advanced')"
+                >
+                  {{ t("nav.advanced") }}
+                </button>
+              </div>
+
+              <DropdownMenu v-if="navItems.length > 1" :modal="false">
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
                   >
-                    {{ t("nav.general") }}
-                  </button>
-                  <button
-                    type="button"
-                    :aria-pressed="activeSection === 'advanced'"
-                    class="px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-                    :class="
-                      activeSection === 'advanced'
-                        ? 'bg-background text-foreground shadow-xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    "
-                    @click="switchTab('advanced')"
-                  >
-                    {{ t("nav.advanced") }}
-                  </button>
-                </div>
-              </template>
-            </PageHeader>
-          </div>
+                    <ListTree class="size-4" />
+                    {{ t("settings.sections") }}
+                    <ChevronDown class="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="w-64 sm:w-72">
+                  <DropdownMenuGroup v-for="group in navGroups" :key="group.id">
+                    <DropdownMenuLabel
+                      v-if="group.labelKey"
+                      class="pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                    >
+                      {{ t(group.labelKey) }}
+                    </DropdownMenuLabel>
+                    <DropdownMenuItem
+                      v-for="item in group.items"
+                      :key="item.id"
+                      :aria-current="activeAnchor === item.id ? 'location' : undefined"
+                      :class="
+                        activeAnchor === item.id
+                          ? 'bg-accent/60 text-accent-foreground font-medium'
+                          : ''
+                      "
+                      @select="jumpToSection(item.id)"
+                    >
+                      <span class="flex-1">{{ t(item.labelKey) }}</span>
+                      <Check v-if="activeAnchor === item.id" class="size-4" />
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </template>
+          </PageHeader>
         </div>
       </header>
     </template>
@@ -675,40 +760,21 @@ onUnmounted(() => {
       class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 relative"
       @scroll.passive="scheduleActiveAnchor"
     >
-      <LoadingState v-if="showLoadingSpinner" :show-text="false" />
-
       <div
-        v-else
-        ref="contentEl"
-        class="w-full max-w-6xl flex items-start gap-8 xl:gap-12"
-        @animationend="onContentRevealEnd"
+        v-if="settingsLoadFailed"
+        class="mx-auto flex min-h-[40vh] max-w-md flex-col items-center justify-center gap-4 text-center"
+        role="alert"
       >
-        <!-- Section index — sticky jump list for the active tab (desktop only),
-             doubling as the reading position. The label is the landmark name
-             only: a visible eyebrow above every section is not this system's
-             vocabulary. -->
-        <aside v-if="navItems.length > 1" :class="[INDEX_GUTTER_CLASS, 'sticky top-0']">
-          <nav :aria-label="t('settings.onThisPage')" class="flex flex-col gap-0.5">
-            <button
-              v-for="item in navItems"
-              :key="item.id"
-              type="button"
-              :aria-current="activeAnchor === item.id ? 'location' : undefined"
-              class="rounded-md px-3 py-1.5 text-left text-sm leading-snug transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-              :class="
-                activeAnchor === item.id
-                  ? 'bg-muted/50 text-foreground font-medium'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/25'
-              "
-              @click="jumpToSection(item.id)"
-            >
-              {{ t(item.labelKey) }}
-            </button>
-          </nav>
-        </aside>
+        <AlertCircle class="size-8 text-destructive" aria-hidden="true" />
+        <p class="text-sm text-muted-foreground">{{ t("settings.fetchFailed") }}</p>
+        <Button variant="outline" @click="loadSettings">{{ t("common.retry") }}</Button>
+      </div>
 
-        <!-- Content Area -->
-        <div class="flex-1 min-w-0 space-y-8 pb-20">
+      <LoadingState v-else-if="showLoadingSpinner" :show-text="false" />
+
+      <div v-else ref="contentEl" class="w-full" @animationend="onContentRevealEnd">
+        <!-- Content Area — each anchored section clears the viewport edge. -->
+        <div class="mx-auto w-full max-w-4xl space-y-8 pb-20">
           <!-- General tab -->
           <div
             v-show="activeSection === 'general'"
@@ -817,19 +883,19 @@ onUnmounted(() => {
           <div
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
-            id="security"
+            id="keepalive"
             class="space-y-6 mt-0 scroll-mt-6"
           >
-            <SecuritySection :auto-save="securityAutoSave" />
+            <KeepaliveSection :auto-save="keepaliveAutoSave" />
           </div>
 
           <div
             v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
-            id="keepalive"
+            id="security"
             class="space-y-6 mt-0 scroll-mt-6"
           >
-            <KeepaliveSection :auto-save="keepaliveAutoSave" />
+            <SecuritySection :auto-save="securityAutoSave" />
           </div>
 
           <div

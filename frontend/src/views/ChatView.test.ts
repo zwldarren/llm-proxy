@@ -23,10 +23,8 @@ vi.mock("@/router", () => ({
   default: { beforeEach: vi.fn(), afterEach: vi.fn(), currentRoute: { value: {} } },
 }));
 
-// The Chat page reads the session API key off the auth store; the tests drive
-// its presence to check the "no key" path without a real login.
+// The Chat page only reads the role; authentication travels in cookies.
 const auth = vi.hoisted(() => ({
-  sessionApiKey: "session-key" as string | null,
   isAdmin: false,
 }));
 vi.mock("@/stores/auth", () => ({
@@ -97,7 +95,6 @@ const models = (...ids: string[]) => ({
 });
 
 beforeEach(() => {
-  auth.sessionApiKey = "session-key";
   localStorage.clear();
   vi.mocked(chatApi.getModels).mockReset();
 });
@@ -153,17 +150,5 @@ describe("ChatView model list", () => {
     // KeepAlive never re-runs onMounted: activation is the only retry point.
     expect(chatApi.getModels).toHaveBeenCalledTimes(2);
     expect(wrapper.find("[data-slot='select-trigger']").exists()).toBe(true);
-  });
-
-  it("never calls /v1/models without a session API key", async () => {
-    auth.sessionApiKey = null;
-
-    const wrapper = render();
-    await flushPromises();
-
-    // An empty Bearer is rejected as an invalid key and locks the IP out, so
-    // the request must not be sent at all.
-    expect(chatApi.getModels).not.toHaveBeenCalled();
-    expect(retryButton(wrapper).exists()).toBe(true);
   });
 });

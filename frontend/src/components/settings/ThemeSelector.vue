@@ -26,7 +26,7 @@ const options = [
       v-for="opt in options"
       :key="opt.value"
       :value="opt.value"
-      class="flex items-center gap-1.5 px-3 py-1.5 h-8 text-xs font-medium rounded-md data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-xs transition-all duration-150"
+      class="flex h-8 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 max-md:h-11 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-xs"
     >
       <component :is="opt.icon" class="size-3.5" />
       <span>{{ t(opt.label) }}</span>

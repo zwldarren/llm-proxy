@@ -19,8 +19,8 @@ import { useI18n } from "vue-i18n";
 
 import type { ChatMessage } from "@/types/schemas";
 import { sanitizeMarkdownHtml } from "@/utils/sanitize";
-import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
+import { csrfHeaders } from "@/services/csrf";
 import { useModelStore } from "@/stores/models";
 import { toast } from "vue-sonner";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
@@ -426,15 +426,15 @@ const handleReadAloud = async () => {
     }
 
     // API-based TTS
-    const apiKey = useAuthStore().sessionApiKey ?? "";
     const voice = localStorage.getItem(STORAGE_KEYS.SPEECH_VOICE) || "alloy";
     const speed = parseFloat(localStorage.getItem(STORAGE_KEYS.SPEECH_SPEED) || "1.0");
 
     const response = await fetch("/v1/audio/speech", {
       method: "POST",
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        ...csrfHeaders("POST"),
       },
       body: JSON.stringify({
         model: ttsModel,

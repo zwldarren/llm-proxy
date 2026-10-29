@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component, ComputedRef } from "vue";
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
   BarChart3,
   ChevronLeft,
@@ -10,19 +10,18 @@ import {
   ImageIcon,
   Key,
   KeyRound,
-  Loader2,
   LogOut,
   MessageSquare,
   ScrollText,
   Settings,
-  UserPen,
+  ShieldCheck,
+  UserRound,
   Users,
   X,
   ChevronsUpDown,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -34,16 +33,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sidebar,
   SidebarContent,
@@ -58,14 +47,11 @@ import {
   SidebarMenuSub,
   SidebarMenuSubItem,
   SidebarMenuSubButton,
-  SidebarRail,
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
 import McpIcon from "@/components/common/McpIcon.vue";
-import { useChangePassword } from "@/composables/useChangePassword";
-import { meApi } from "@/services/api/me";
-import { getErrorMessage } from "@/utils/error";
+import LogoIcon from "@/components/common/LogoIcon.vue";
 import { scrollToAnchor } from "@/utils/scroll";
 import { useStorage } from "@vueuse/core";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
@@ -86,8 +72,9 @@ const modelStore = useModelStore();
 const catalogStore = useCatalogStore();
 const apiKeyStore = useApiKeyStore();
 const mcpServerStore = useMcpServerStore();
-const { state, isMobile, toggleSidebar } = useSidebar();
+const { state, isMobile, openMobile, toggleSidebar } = useSidebar();
 const systemStore = useSystemStore();
+const navigationEl = ref<HTMLElement | null>(null);
 
 const userInitials = computed(() => {
   if (!authStore.username) return "U";
@@ -172,6 +159,7 @@ const configSections: ComputedRef<NavSection[]> = computed(() => {
       // /models renders the management UI for admins (see memberSections).
       { name: "nav.models", href: "/models", icon: Cpu },
       { name: "nav.mcpServers", href: "/config/mcp-servers", icon: McpIcon },
+      { name: "nav.consoleAuth", href: "/config/console-auth", icon: KeyRound },
       { name: "team.title", href: "/team", icon: Users }
     );
   }
@@ -180,10 +168,8 @@ const configSections: ComputedRef<NavSection[]> = computed(() => {
 });
 
 // Settings section — a single sidebar item. The in-page General/Advanced tabs
-// (and section headings) handle the rest, so the sidebar no longer mirrors
-// every settings subsection. This removes the triple-navigation and the
-// anchor-label/heading-label mismatch (e.g. "Server Configuration" vs the
-// "Log Management" section heading).
+// (and section headings) handle subsections, so the sidebar tracks only the
+// page itself rather than mirroring every settings card.
 const settingsSections: ComputedRef<NavSection[]> = computed(() => {
   return [
     {
@@ -213,84 +199,15 @@ watch(
   { immediate: true }
 );
 
-// Change password dialog
-const showPasswordDialog = ref(false);
-const {
-  currentPassword: passwordCurrent,
-  newPassword: passwordNew,
-  confirmPassword: passwordConfirm,
-  error: passwordError,
-  loading: isChangingPassword,
-  passwordHint,
-  reset: resetPasswordForm,
-  submit: submitPasswordForm,
-} = useChangePassword();
-
-function openPasswordDialog() {
-  resetPasswordForm();
-  showPasswordDialog.value = true;
-}
-
-async function handleChangePassword() {
-  if (await submitPasswordForm()) {
-    showPasswordDialog.value = false;
-    toast.success(t("profile.passwordChanged"));
-  }
-}
-
-// Change username dialog
-const showUsernameDialog = ref(false);
-const usernameNew = ref("");
-const usernamePassword = ref("");
-const usernameError = ref<string | null>(null);
-const isChangingUsername = ref(false);
-
-function openUsernameDialog() {
-  usernameNew.value = "";
-  usernamePassword.value = "";
-  usernameError.value = null;
-  showUsernameDialog.value = true;
-}
-
-async function handleChangeUsername() {
-  usernameError.value = null;
-  const newName = usernameNew.value.trim();
-
-  if (!newName || newName.length > 64 || !/^[a-zA-Z0-9_-]+$/.test(newName)) {
-    usernameError.value = t("profile.usernameInvalid");
-    return;
-  }
-  if (newName.toLowerCase() === (authStore.username ?? "").toLowerCase()) {
-    usernameError.value = t("profile.usernameUnchanged");
-    return;
-  }
-  if (!usernamePassword.value) {
-    usernameError.value = t("profile.passwordRequired");
-    return;
-  }
-
-  isChangingUsername.value = true;
-  try {
-    const res = await meApi.changeUsername(usernamePassword.value, newName);
-    // Swap in the fresh JWT: the old token's `sub` still names the previous
-    // username and would stop resolving after the rename.
-    authStore.setToken(res.access_token);
-    showUsernameDialog.value = false;
-    toast.success(t("profile.usernameChanged", { username: res.username }));
-  } catch (err: unknown) {
-    const httpErr = err as { status?: number };
-    if (httpErr.status === 401 || httpErr.status === 403) {
-      usernameError.value = t("profile.wrongPassword");
-    } else if (httpErr.status === 409) {
-      usernameError.value = t("profile.usernameTaken");
-    } else {
-      const msg = getErrorMessage(err);
-      usernameError.value = msg || t("errors.saveFailed");
-    }
-  } finally {
-    isChangingUsername.value = false;
-  }
-}
+// Long role-aware menus can exceed a phone's viewport. Reveal the current
+// route when the drawer opens instead of leaving it clipped below the footer.
+watch([isMobile, openMobile], async ([mobile, drawerOpen]) => {
+  if (!mobile || !drawerOpen) return;
+  await nextTick();
+  navigationEl.value
+    ?.querySelector<HTMLElement>('[data-active="true"]')
+    ?.scrollIntoView({ block: "nearest" });
+});
 
 function isCurrent(href: string): boolean {
   if (href === "/") return route.path === "/";
@@ -302,9 +219,19 @@ function isCurrent(href: string): boolean {
   return route.path.startsWith(href.split("?")[0]);
 }
 
-const handleLogout = () => {
-  authStore.logout();
-  router.push("/login");
+function closeMobileSidebar() {
+  if (isMobile.value && openMobile.value) toggleSidebar();
+}
+
+function navigateTo(href: string) {
+  closeMobileSidebar();
+  void router.push(href);
+}
+
+const handleLogout = async () => {
+  closeMobileSidebar();
+  await authStore.logout();
+  await router.push("/login");
 };
 
 const PREFETCH_ROUTES: Record<string, () => void> = {
@@ -339,6 +266,9 @@ const PREFETCH_ROUTES: Record<string, () => void> = {
   "/images": () => import("@/views/ImagesView.vue"),
   "/": () => import("@/views/HomeView.vue"),
   "/config/settings": () => import("@/views/config/SettingsView.vue"),
+  "/config/console-auth": () => import("@/views/config/ConsoleAuthView.vue"),
+  "/account": () => import("@/views/AccountView.vue"),
+  "/account/security": () => import("@/views/SecurityView.vue"),
   "/team": () => import("@/views/TeamView.vue"),
 };
 
@@ -351,6 +281,7 @@ const prefetchRoute = (href: string) => {
  * Scroll directly in that case so the jump always happens. The helper retries
  * while the target is still display:none (e.g. the Advanced tab is active). */
 const handleVersionBadgeClick = () => {
+  closeMobileSidebar();
   if (route.name !== "settings") return;
   scrollToAnchor("about", { highlight: true });
 };
@@ -362,15 +293,29 @@ const handleVersionBadgeClick = () => {
     <SidebarHeader class="h-16 border-b border-sidebar-border justify-center relative">
       <div
         class="flex h-full items-center w-full transition-opacity duration-200"
-        :class="isCollapsed ? 'justify-center px-0' : 'justify-between px-2.5'"
+        :class="isCollapsed ? 'justify-center px-0' : 'justify-between pl-2.5 pr-7'"
       >
         <div class="flex items-center gap-2 min-w-0">
-          <span
-            v-if="!isCollapsed"
-            class="brand-heading text-lg font-semibold tracking-tight shrink-0 animate-in fade-in duration-200"
+          <RouterLink
+            to="/"
+            class="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            :aria-label="t('home.title')"
+            :title="isCollapsed ? t('home.title') : undefined"
+            @click="closeMobileSidebar"
+            @mouseenter="prefetchRoute('/')"
           >
-            {{ t("home.title") }}
-          </span>
+            <span
+              class="flex size-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border/60 bg-sidebar-accent/45 text-sidebar-foreground"
+            >
+              <LogoIcon class="size-5" />
+            </span>
+            <span
+              v-if="!isCollapsed"
+              class="brand-heading text-lg font-semibold tracking-tight shrink-0 animate-in fade-in duration-200"
+            >
+              {{ t("home.title") }}
+            </span>
+          </RouterLink>
           <!-- Instance version badge — links to the About section in Settings.
                Renders nothing while the info is loading or when the fetch failed. -->
           <RouterLink
@@ -427,7 +372,7 @@ const handleVersionBadgeClick = () => {
     <!-- Navigation -->
     <SidebarContent class="py-4">
       <!-- Navigation sections -->
-      <nav :aria-label="t('nav.mainNavigation')" class="flex flex-col gap-2">
+      <nav ref="navigationEl" :aria-label="t('nav.mainNavigation')" class="flex flex-col gap-2">
         <SidebarGroup v-for="section in visibleSections" :key="section.title">
           <SidebarGroupLabel
             class="text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70"
@@ -441,11 +386,13 @@ const handleVersionBadgeClick = () => {
                   <SidebarMenuButton
                     as-child
                     :is-active="isCurrent(item.href!)"
+                    :tooltip="t(item.name)"
                     class="max-md:h-11"
                   >
                     <RouterLink
                       :to="item.href!"
                       :aria-current="isCurrent(item.href!) ? 'page' : undefined"
+                      @click="closeMobileSidebar"
                       @mouseenter="prefetchRoute(item.href!)"
                     >
                       <component :is="item.icon" />
@@ -456,7 +403,7 @@ const handleVersionBadgeClick = () => {
                 <template v-else>
                   <Collapsible v-model:open="expandedGroups[item.name]" class="group/collapsible">
                     <CollapsibleTrigger as-child>
-                      <SidebarMenuButton class="max-md:h-11">
+                      <SidebarMenuButton class="max-md:h-11" :tooltip="t(item.name)">
                         <component :is="item.icon" v-if="item.icon" />
                         <span>{{ t(item.name) }}</span>
                         <ChevronRight
@@ -475,6 +422,7 @@ const handleVersionBadgeClick = () => {
                             <RouterLink
                               :to="sub.href"
                               :aria-current="isCurrent(sub.href) ? 'page' : undefined"
+                              @click="closeMobileSidebar"
                               @mouseenter="prefetchRoute(sub.href)"
                             >
                               <span>{{ t(sub.name) }}</span>
@@ -501,6 +449,8 @@ const handleVersionBadgeClick = () => {
             <DropdownMenuTrigger as-child>
               <SidebarMenuButton
                 size="lg"
+                :tooltip="t('nav.accountMenu')"
+                :aria-label="t('nav.accountMenu')"
                 class="w-full justify-start gap-2.5 px-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground transition-colors duration-200"
               >
                 <div
@@ -550,13 +500,13 @@ const handleVersionBadgeClick = () => {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem @click="openUsernameDialog" class="cursor-pointer">
-                  <UserPen class="mr-2 size-4 text-muted-foreground" />
-                  <span>{{ t("profile.changeUsername") }}</span>
+                <DropdownMenuItem @click="navigateTo('/account')" class="cursor-pointer">
+                  <UserRound class="mr-2 size-4 text-muted-foreground" />
+                  <span>{{ t("nav.account") }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem @click="openPasswordDialog" class="cursor-pointer">
-                  <KeyRound class="mr-2 size-4 text-muted-foreground" />
-                  <span>{{ t("profile.changePassword") }}</span>
+                <DropdownMenuItem @click="navigateTo('/account/security')" class="cursor-pointer">
+                  <ShieldCheck class="mr-2 size-4 text-muted-foreground" />
+                  <span>{{ t("nav.security") }}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
@@ -572,108 +522,5 @@ const handleVersionBadgeClick = () => {
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarFooter>
-
-    <SidebarRail />
-
-    <!-- Change Username Dialog -->
-    <Dialog v-model:open="showUsernameDialog">
-      <DialogContent class="brand-panel">
-        <DialogHeader>
-          <DialogTitle>{{ t("profile.changeUsername") }}</DialogTitle>
-          <DialogDescription>{{ t("profile.changeUsernameDescription") }}</DialogDescription>
-        </DialogHeader>
-        <div class="flex flex-col gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="sidebar-new-username">{{ t("profile.newUsername") }}</Label>
-            <Input
-              id="sidebar-new-username"
-              v-model="usernameNew"
-              :placeholder="authStore.username ?? ''"
-              :disabled="isChangingUsername"
-            />
-            <p class="text-xs text-muted-foreground">{{ t("profile.usernameFormatHint") }}</p>
-          </div>
-          <div class="flex flex-col gap-2">
-            <Label for="sidebar-username-password">{{ t("profile.currentPassword") }}</Label>
-            <Input
-              id="sidebar-username-password"
-              v-model="usernamePassword"
-              type="password"
-              :disabled="isChangingUsername"
-              @keydown.enter="handleChangeUsername"
-            />
-          </div>
-          <p v-if="usernameError" class="text-destructive text-xs">{{ usernameError }}</p>
-        </div>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            :disabled="isChangingUsername"
-            @click="showUsernameDialog = false"
-          >
-            {{ t("common.cancel") }}
-          </Button>
-          <Button :disabled="isChangingUsername" @click="handleChangeUsername">
-            <Loader2 v-if="isChangingUsername" class="h-4 w-4 animate-spin" />
-            {{ t("profile.changeUsername") }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <!-- Change Password Dialog -->
-    <Dialog v-model:open="showPasswordDialog">
-      <DialogContent class="brand-panel">
-        <DialogHeader>
-          <DialogTitle>{{ t("profile.changePassword") }}</DialogTitle>
-          <DialogDescription>{{ t("profile.changePasswordDescription") }}</DialogDescription>
-        </DialogHeader>
-        <div class="flex flex-col gap-4 py-2">
-          <div class="flex flex-col gap-2">
-            <Label for="sidebar-current-password">{{ t("profile.currentPassword") }}</Label>
-            <Input
-              id="sidebar-current-password"
-              v-model="passwordCurrent"
-              type="password"
-              :disabled="isChangingPassword"
-            />
-          </div>
-          <div class="flex flex-col gap-2">
-            <Label for="sidebar-new-password">{{ t("profile.newPassword") }}</Label>
-            <Input
-              id="sidebar-new-password"
-              v-model="passwordNew"
-              type="password"
-              :disabled="isChangingPassword"
-            />
-            <p v-if="passwordError" class="text-destructive text-xs">{{ passwordError }}</p>
-            <p v-else-if="passwordNew" class="text-xs text-muted-foreground">{{ passwordHint }}</p>
-          </div>
-          <div class="flex flex-col gap-2">
-            <Label for="sidebar-confirm-password">{{ t("profile.confirmPassword") }}</Label>
-            <Input
-              id="sidebar-confirm-password"
-              v-model="passwordConfirm"
-              type="password"
-              :disabled="isChangingPassword"
-              @keydown.enter="handleChangePassword"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            :disabled="isChangingPassword"
-            @click="showPasswordDialog = false"
-          >
-            {{ t("common.cancel") }}
-          </Button>
-          <Button :disabled="isChangingPassword" @click="handleChangePassword">
-            <Loader2 v-if="isChangingPassword" class="h-4 w-4 animate-spin" />
-            {{ t("profile.changePassword") }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </Sidebar>
 </template>

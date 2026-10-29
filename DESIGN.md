@@ -8,6 +8,9 @@ colors:
   ink: "#F5F5F5"              # --foreground    hsl(0 0% 96%)
   card: "#151619"             # --card / --popover  hsl(220 10% 9%)
   sidebar: "#0F1114"          # --sidebar       hsl(220 14% 7%)
+  sidebar-accent: "#22252B"  # --sidebar-accent  hsl(220 12% 15%) — active nav step
+  sidebar-ink: "#EBEBEB"      # --sidebar-foreground  hsl(0 0% 92%)
+  sidebar-accent-ink: "#F0F0F0"  # --sidebar-accent-foreground  hsl(0 0% 94%)
   secondary: "#1E2024"        # --secondary     hsl(220 10% 13%)
   muted: "#23252A"            # --muted         hsl(220 9% 15%)
   muted-ink: "#999CA3"        # --muted-foreground  hsl(220 5% 62%)
@@ -36,6 +39,7 @@ colors:
   code-bg: "#121416"          # --code-bg       hsl(220 10% 8%)
   code-header-bg: "#1A1C20"   # --code-header-bg hsl(220 10% 11.5%)
   code-border: "#292C32"      # --code-border   hsl(220 10% 18%)
+  overlay: "#000000"          # --overlay      hsl(0 0% 0%) — modal/sheet scrim
   error-light: "#CD7670"      # --error-light   hsl(4 48% 62%)
   error-dark: "#DD9792"       # --error-dark    hsl(4 52% 72%)
   success-light: "#4CA97A"    # --success-light hsl(150 38% 48%)
@@ -77,6 +81,12 @@ typography:
     fontWeight: 500
     lineHeight: 1.25
     letterSpacing: "0.02em"
+  eyebrow:
+    fontFamily: "Manrope, Noto Sans SC, sans-serif"
+    fontSize: "11px"
+    fontWeight: 600
+    lineHeight: 1.25
+    letterSpacing: "0.05em"
   mono:
     fontFamily: "IBM Plex Mono, IBM Plex Mono Fallback, JetBrains Mono, ui-monospace, monospace"
     fontSize: "0.875rem"
@@ -143,11 +153,18 @@ components:
     rounded: "{rounded.md}"
     padding: "8px 14px"
     height: "40px"
+  auth-input:
+    backgroundColor: "{colors.card}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    rounded: "{rounded.md}"
+    padding: "8px 14px"
+    height: "44px"
   card:
     backgroundColor: "{colors.card}"
     textColor: "{colors.ink}"
     rounded: "{rounded.xl}"
-    padding: "16px"
+    padding: "20px"
   badge-status:
     backgroundColor: "{colors.muted}"
     textColor: "{colors.muted-ink}"
@@ -156,11 +173,11 @@ components:
     padding: "2px 8px"
   nav-item:
     backgroundColor: "transparent"
-    textColor: "{colors.muted-ink}"
+    textColor: "{colors.sidebar-ink}"
     typography: "{typography.label}"
     rounded: "{rounded.lg}"
-    padding: "10px 12px"
-    height: "44px"
+    padding: "8px"
+    height: "32px"
   code-block:
     backgroundColor: "{colors.code-bg}"
     textColor: "{colors.ink}"
@@ -188,6 +205,8 @@ This system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand wa
 - Low-saturation semantic tints (violet/blue/amber/rose/teal + status + syntax) — always paired with text or icon, never color-only.
 - Motion is exponential ease-out (`cubic-bezier(0.16, 1, 0.3, 1)`), 150–500ms, GPU-only, and globally neutralized under `prefers-reduced-motion`.
 - Tabular-numeric monospace for every metric, token count, cost, and timestamp.
+- Three structural grammars, chosen by task: the flush console (management tables), stacked hairline panels (settings and security forms), and the containerless vestibule (auth).
+- The 11px tracked uppercase label is a **label rail** — an in-panel micro-heading — never a page-section kicker.
 
 ## Colors
 
@@ -196,15 +215,18 @@ A two-theme monochrome system with a cool-neutral (hue 220°) undertone. Dark mo
 ### Primary
 - **Console White / Near-Black Ink** (`--primary`): the inverted ink used for primary CTAs and active state. Dark `hsl(0 0% 98%)` `#FAFAFA` / Light `hsl(220 8% 5%)` `#0C0C0E`. In dark mode the CTA is a white-on-black button; in light mode it flips to black-on-white. The inversion is the point — the primary action is the highest-contrast object on the screen.
 - **Primary Foreground** (`--primary-foreground`): text on the primary surface. Dark `hsl(220 15% 8%)` `#111317` / Light `hsl(0 0% 98.5%)` `#FBFBFB`.
+- **Vestibule Glow**: on the auth screens `--primary` becomes a light source. The 56px auth mark's `135deg` gradient runs `primary/0.16 → primary/0.06 → action-blue/0.12`, and the 620px radial behind it is `primary/0.12 → action-blue/0.06 → transparent`. Primary is the only token permitted to glow that large, and only on this one surface.
 
 ### Neutral
 - **Deep Cool-Neutral Void** (`--background`): the page surface. Dark `hsl(220 12% 4%)` `#090A0B` / Light `hsl(220 3% 98.5%)` `#FBFBFB`. The main content sits on a faint `--muted/5` tint above this to separate the page from the chrome.
 - **Crisp White / Near-Black** (`--foreground`): body text and icon ink. Dark `hsl(0 0% 96%)` `#F5F5F5` / Light `hsl(220 8% 5%)` `#0C0C0E`.
 - **Raised Slate** (`--card`, `--popover`): cards, popovers, dialogs. Dark `hsl(220 10% 9%)` `#151619` / Light `hsl(0 0% 100%)` `#FFFFFF`. One step lighter than the void in dark mode; pure white in light mode.
-- **Deeper Slate** (`--sidebar`): the navigation rail. Dark `hsl(220 14% 7%)` `#0F1114` / Light `hsl(220 5% 97.5%)` `#F8F9F9`. Slightly cooler and darker than the card to read as a recessed column.
+- **Deeper Slate** (`--sidebar`): the navigation rail. Dark `hsl(220 14% 7%)` `#0F1114` / Light `hsl(220 5% 97.5%)` `#F8F9F9`. Slightly cooler and darker than the card to read as a recessed column. Its own ink pair lives with it — `--sidebar-foreground` Dark `hsl(0 0% 92%)` `#EBEBEB` / Light `hsl(220 6% 12%)` `#1D1E20`, and `--sidebar-accent-foreground` Dark `hsl(0 0% 94%)` / Light `hsl(220 6% 18%)` — so the rail never borrows the page's text color.
 - **Muted Slate** (`--muted`): secondary fills, table hover, filter bars. Dark `hsl(220 9% 15%)` `#23252A` / Light `hsl(220 4% 94%)` `#EFEFF0`.
 - **Soft Slate** (`--muted-foreground`): secondary text, captions, metadata. Dark `hsl(220 5% 62%)` `#999CA3` / Light `hsl(220 4% 38%)` `#5D6065`. Tuned for WCAG AA against both surfaces — never lighten this "for elegance."
 - **Hairline Slate** (`--border`, `--input`): every 1px divider and input stroke. Dark `hsl(220 10% 22%)` `#32363E` / Light `hsl(220 4% 88%)` `#DFE0E2`.
+- **Active Step** (`--sidebar-accent`): the filled tonal step that marks the current nav item. Dark `hsl(220 12% 15%)` `#22252B` / Light `hsl(220 4% 93%)`. State is a step on this ramp, never a stripe or a color.
+- **Scrim Black** (`--overlay`): the modal, sheet, and image-lightbox scrim, `hsl(0 0% 0%)` at dialog-managed opacity. It is the only true black in the system and it never appears as a surface.
 
 ### Action & HTTP Method Tints (Tertiary — semantic only)
 Muted but perceptible hues used to disambiguate HTTP methods, action types, and categorical data (usage bars, chart series). Chroma is tuned so each hue reads as its color while staying clearly muted — never decoration, never large-surface fills.
@@ -260,7 +282,8 @@ The scale is a 1.25 (Major Third) modular scale on a 16px base, expressed in fix
 - **Title** (Manrope, 600, 1.125rem, line-height 1.375): card titles and form-section headings (`text-lg font-semibold`).
 - **Body** (Manrope, 400, 1rem, line-height 1.5): primary reading text (`text-base`). Max line length ~65–75ch (`max-w-[65ch]`).
 - **Secondary** (Manrope, 400, 0.875rem, line-height 1.5): descriptions, secondary text (`text-sm`, usually `text-muted-foreground`).
-- **Label** (Manrope, 500, 0.75rem, tracking 0.02em, uppercase when eyebrow): captions, metadata, badges, form labels (`text-xs font-medium`, `text-[11px]` for eyebrows).
+- **Label** (Manrope, 500, 0.75rem, tracking 0.02em): captions, metadata, badges, form labels (`text-xs font-medium`).
+- **Label Rail** (Manrope, 600, 11px, tracking 0.05em, uppercase): the in-panel micro-heading — the label row above a spec-sheet value, a log-detail panel heading, a segmented view toggle. The nav groups raise it to `tracking-[0.14em]`.
 - **Mono** (IBM Plex Mono, 400, 0.875rem, `tabular-nums`): code, JSON, technical values (`.text-code`, `.text-data`).
 - **Metric** (IBM Plex Mono, 700, 1.5rem, `tabular-nums slashed-zero`, line-height 1): large stats (`.text-metric`).
 
@@ -274,6 +297,8 @@ Dark mode adds 0.05 to body line-height for light-on-dark readability: `.dark bo
 
 **The Display Restraint Rule.** Display weight is 600 in-app, sizes cap at `text-2xl` (1.5rem) for page titles, and emphasis comes from weight + size in a single solid color — never from `background-clip: text` or a gradient.
 
+**The Label-Rail Rule.** The 11px tracked uppercase label is a *rail*, not a *kicker*: it may sit **inside** a panel to name the value beneath it (spec-sheet cells, log-detail headings, segmented toggles, nav groups), and it never sits **above** a page or a page section to introduce content. If deleting it would leave the heading unable to say what follows, it was a kicker and does not belong.
+
 ## Layout
 
 A fixed left-rail / fluid-`main` app shell built for scan-first density, not marketing space.
@@ -283,9 +308,12 @@ A fixed left-rail / fluid-`main` app shell built for scan-first density, not mar
 - **Page header:** one per page, the consistent anchor — `flex` row with an `.icon-container` at its `.icon-container-sm` page-header size (tinted tile, top sheen), a `.brand-heading` title (`text-xl sm:text-2xl`, `#page-title`), a `text-muted-foreground text-xs max-w-2xl` description, and an `actions` slot (`animate-in fade-in duration-300`, optionally in a `rounded-xl border-border/55 bg-card/76` toolbar).
 - **Grids:** Tailwind grid utilities, composed per surface — `grid-cols-1 lg:grid-cols-2` (gap 4/6), `md:grid-cols-3` (gap 4), `grid-cols-2 lg:grid-cols-4` (gap 4).
 - **Spacing rhythm:** Tailwind scale — 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64px. Page sections are `space-y-4 md:space-y-6`.
-- **Console layout (signature — management pages):** the "card wrapping card" anti-pattern is explicitly rejected. Providers, API Keys, Models, MCP Servers use a flush console: `config-header-bar` (sticky `bg-background` + `border-b/60`) + `config-toolbar` (flush `bg-background` + `border-b/60`) + `config-content` (scrollable) with a pinned `config-thead` (`bg-background`, header cells `bg-muted/50 border-b-2 border-border/70`). One seamless surface separated only by hairlines; table rows sit on the faint page tint.
+- **Console layout (signature — management pages):** the "card wrapping card" anti-pattern is explicitly rejected. Providers, Models, API Keys, MCP Servers, Team, and Settings use a flush console: `config-header-bar` (sticky `bg-background` + `border-b/60`) + `config-toolbar` (flush `bg-background` + `border-b/60`) + `config-content` (scrollable) with a pinned `config-thead` (`bg-background`, header cells `bg-muted/50 border-b-2 border-border/70`). One seamless surface separated only by hairlines; table rows sit on the faint page tint. Settings replaces the toolbar with a two-segment tab strip inside the page header. Section jumps live beside that strip in a compact **Sections** dropdown — General is a flat option list, Advanced groups its sections under Routing & models / Resilience & delivery / Access & limits. The page header and cards share one centered `max-w-4xl` column. There is no second left rail and no full-width navigation band above the content; the section menu is available from the persistent header without competing with the first section.
 - **Model list-row column grammar (signature — Models page, both roles):** list and table modes are one column grammar. List rows carry fixed-width data columns (`.model-col-ctx` 80px, `.model-col-price` 96px, `.model-col-tier` 80px, `.model-col-actions` 76px) under a pinned `ModelListHead` (sticky, `bg-muted/50` + the 2px bottom rule, same gutter/gap/widths as the rows) whose cells repeat the table's sort controls — so list mode sorts and scans exactly like the table. The name cell is indented by the icon footprint (`pl-11`); model names are mono `text-[13px]` in every mode (they are API identifiers, the Mono-Data Rule). Collapse is by tier: the full grammar shows at `lg`; `sm–lg` keeps IN/OUT only (CACHED lives in either's pricing popover); below `sm` columns hide and each row's meta line carries context inline.
 - **Tables:** dense, hairline-separated, `whitespace-nowrap` by default; touch cells are `min-h-11 min-w-11` (44px).
+- **Auth layout (signature — "The Vestibule"):** every pre-console screen — login, first-run setup, force-change-password, invite acceptance, OAuth completion, email verification — renders through `AuthShell`; see §Components → Auth Screen for the full spec.
+- **Personal-settings layout (Account):** one shared Account shell — a centered `max-w-4xl` column whose page header carries a two-segment **Profile / Sign-in & security** tab strip (the same segmented control grammar as Settings). `/account` and `/account/security` remain deep-linkable routes; the shell, not a per-page action button, is the navigation between them. Profile is identity only — a summary with editable username/email rows; Sign-in & security is every credential in strength order (passkeys → password → two-factor → linked providers → current session). See §Components → Personal-Settings Panels for the panel spec; personal settings are read top-to-bottom, not scanned as a grid.
+- **Instance sign-in (admin form):** `/config/console-auth` is instance-wide login policy, not personal security. It uses the single-form variant: one centered `max-w-3xl` column with the standard page header, stacked panels and a sticky save bar. No section index; the security tab links admins here instead of merging the two scopes.
 - **Measure:** long-form body capped at 65ch (`max-w-[65ch]`), prose at 70ch (`max-w-[70ch]`).
 - **Responsive:** mobile-first; `sm:640 md:768 lg:1024 xl:1280`. Container queries (`@sm/@md/@lg`) exist for component-level responsiveness.
 - **Atmosphere layers:** two fixed `body::before`/`::after` layers behind every screen — a trio of soft radial foreground-glints (opacity 0.05–0.12) and a 42px grid masked toward viewport center (opacity 0.45–0.6), dimmer in dark mode. They never sit above content (`z-index: -2/-1`, `pointer-events: none`).
@@ -295,15 +323,19 @@ A fixed left-rail / fluid-`main` app shell built for scan-first density, not mar
 
 **The Page-Header Anchor Rule.** Every route opens with exactly one `.page-header` (tinted icon container + `.brand-heading` title + muted description + actions). It is the consistent entry point a stranger trusts cold.
 
+**The Task-Shape Rule.** Structure follows the task, not the page: management tables are one flush console; settings and security are stacked hairline panels; auth is containerless. Three grammars, one per task shape — never two on one screen.
+
 ## Elevation & Depth
 
 Flat-by-default. Depth is conveyed by **tonal background steps** (`--card` over `--background`, the `--muted/5` page tint, `--muted/50` table hover) and **1px hairline borders**, not by structural drop shadows. Shadows, when they appear, are ambient and state-driven, never decorative.
 
 ### Shadow Vocabulary
-- **Rest card shadow** (`shadow-xs`): the default on `rounded-xl border border-border bg-card` cards and primary buttons — a barely-there lift that confirms the card sits above the page.
+- **Rest card shadow** (`shadow-xs`): the lift on primary buttons, the active settings tab, and the sidebar collapse handle. Panels do **not** carry it — their 1px `border-border/60` does the elevation work. (The `.brand-panel` utility carries `shadow-sm` at 7 call sites; it is not part of this recipe.)
 - **Hover glow** (`0 0 20px -6px hsl(<color> / 0.35–0.4)`): `.hover-glow-primary/-blue/-amber/-success` — a constrained ambient halo on interactive elements in the matching semantic color.
 - **Inset top highlight** (`inset 0 1px 0 hsl(var(--foreground) / 0.06)` on cards; `inset 0 1px 0 hsl(var(--background) / 0.9)` on inputs): the single-pixel top sheen that reads as a lit edge on raised surfaces.
-- **Auth-mark shadow** (`0 18px 36px -20px hsl(var(--primary) / 0.55)` + inset): the floating login mark.
+- **Auth-mark shadow** (`0 18px 36px -20px hsl(var(--primary) / 0.55)` + inset): the floating vestibule mark — the single place where a shadow is ambient rather than state-driven, because the mark floats on the atmosphere instead of on a surface.
+- **Auth-input focus halo** (`0 0 0 3px hsl(var(--primary) / 0.18)`): the vestibule field's focus signal — a softer 3px halo in place of the console's `ring-ring/50`, paired with `background-color` → `background/0.92` and `border-color` → `primary/0.55`.
+- **Anchor flash** (`0 0 0 2px hsl(var(--primary) / 0.32)`): the 900ms `anchor-target-flash` ring that marks a section reached by a deep link, holding as a static 2px ring under reduced motion.
 
 ### Named Rules
 **The Flat-By-Default Rule.** Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained auth-mark exception. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.
@@ -319,6 +351,8 @@ Rounded, restrained, and tiered by component class. Corners never get loud.
 - **Buttons, inputs, badges' outer containers, code containers** (`rounded-md`, 10px): the control radius.
 - **Nav items, tooltips, code containers** (`rounded-lg`, 12px): nav items get a slightly softer corner than controls.
 - **Tags, status chips, the range thumb** (`rounded-full` / pill, 9999px): full-pill is reserved for tags and status chips, never for cards or buttons.
+- **Identity tiles** (`rounded-xl`, 16px): the 56px `auth-mark` and the 56px account initials tile take the card corner, never the pill — an identity mark is a panel, not a chip.
+- **Control heights:** 36 / 40 / 44 / 48px — `h-9` compact, `h-10` default, `h-11` for auth fields, the auth CTA, and every touch target on small screens (`max-sm:h-11`), `h-12` for the MFA code field.
 - **Borders:** 1px `--border` everywhere by default. The only >1px rules are neutral 2px bottom rules on the pinned console header cells (`config-thead` / `ModelListHead`, `border-b-2 border-border/70`). A colored `border-left/right` accent stripe on cards, list items, or alerts is prohibited: active state is a tonal step, never a stripe.
 
 ### Named Rules
@@ -340,7 +374,8 @@ Tactile and confident, but quiet — the primary CTA is the highest-contrast obj
 - **Ghost:** `hover:bg-accent/70 hover:text-accent-foreground` — no border, no fill at rest.
 - **Link:** `text-primary underline-offset-4 hover:underline`.
 - **Focus (all):** `focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]` — a 3px ring, the strongest focus signal in the system. `aria-invalid` switches the ring to `ring-destructive/20` (`/40` dark) and the border to `destructive`.
-- **Sizes:** default `h-10`; `sm` `h-9`; `lg` `h-11`; `icon` `size-10`; `icon-sm` `size-9`; `icon-lg` `size-11`. Icons scale to `size-4` by default.
+- **Sizes:** default `h-10`; `sm` `h-9`; `lg` `h-11`; `icon` `size-10`; `icon-sm` `size-9`; `icon-lg` `size-11`. Default, `sm`, `icon` and `icon-sm` lift to a 44px floor on small screens (`max-sm:h-11` / `max-sm:size-11`), so no button sits under the touch minimum on a phone. Icons scale to `size-4` by default.
+- **Auth CTA:** primary, `h-11 w-full gap-2` (with `.btn-press`) — 44px tall, full column width. The vestibule shows exactly one white button: the passkey button when the account has one, otherwise the password submit; whichever loses becomes `outline`.
 - **Press:** `.btn-press:active { transform: scale(0.98) }` (100ms), neutralized under reduced motion.
 
 ### Status Badge (signature)
@@ -348,28 +383,62 @@ A labeled chip, not a swatch. Color is redundant; the text label and `role="stat
 - **Shape:** `rounded-full border px-2 py-0.5 text-xs font-medium`, `Badge variant="outline"`, `role="status"`, slot `truncate`.
 - **State:** rendered as `bg-<token>/15 text-<token> border-<token>/25–30`. Two families: `status` (success/warning/error/unknown) and `http` (GET→blue, POST→violet, PUT/PATCH→amber, DELETE→rose).
 - **Base badge variants** (non-status): `default` (primary), `secondary`, `destructive`, `warning` (`amber-500/15 text-amber-600 dark:text-amber-400`), `outline` (text-only, hover bg-accent).
+- **Voice:** chips carrying a **technical token** — HTTP method, status code, duration — set their slot in mono (`font-mono tabular-nums`); chips carrying a **word** — "Admin", "Viewer", "Success" — keep the sans voice. A word label in mono reads as a code value and is a defect.
 
 ### Cards / Containers
-Flat raised slates, hairline-edged, tonally stepped above the void.
+Flat raised slates, hairline-edged, tonally stepped above the void. There is no `Card` component in this codebase — the recipe is a class string each surface repeats, so it is stated once, here.
+- **Recipe:** `rounded-xl border border-border/60 bg-card p-5` — `p-5 sm:p-6` when the panel is a page body, `px-4 py-3` for a compact row group.
 - **Corner:** `rounded-xl` (16px).
 - **Background:** `bg-card` (`--card`), one step lighter than `--background`.
-- **Shadow:** `shadow-xs` at rest; hover never adds one.
+- **Shadow:** none at rest. The 1px `border-border/60` does the elevation work; the `.brand-panel` utility's `shadow-sm` is a separate utility, not this recipe. Hover never adds a shadow.
 - **Hover:** the border tightens (`hover:border-border/80`). Never a shadow lift.
 
 ### Inputs / Fields
 A lit-edge control with the strongest focus signal in the system.
-- **Style:** `h-10 rounded-md border border-input/80 bg-background/75 px-3.5 py-2 text-base md:text-sm`, `shadow-[inset_0_1px_0_hsl(var(--background)/0.9)]` (the inset top highlight), `backdrop-blur-sm`, `transition-[color,box-shadow,border-color,background-color]`.
+- **Style:** `h-10 rounded-md border border-input/80 bg-background/75 px-3.5 py-2 text-base md:text-sm`, `shadow-[inset_0_1px_0_hsl(var(--background)/0.9)]` (the inset top highlight), `backdrop-blur-sm`, `transition-[color,box-shadow,border-color,background-color]`. Dark mode lifts the fill to `dark:bg-input/40` so the field reads as a recess in the slate rather than a hole in it; small screens grow it to `h-11`.
 - **Focus:** `focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]` — a 3px primary ring, the strongest focus signal in the system.
 - **Invalid:** `aria-invalid:border-destructive` + `ring-destructive/20`.
 - **Placeholder:** `text-muted-foreground` (tuned for AA contrast, not lightened).
-- **Auth input (login/setup):** `.auth-input` — `bg-card/62 backdrop-blur(10px)`, `border-border/70`; focus shifts to `bg-background/92`, `border-primary/55`, `box-shadow: 0 0 0 3px primary/18`. The other place `backdrop-blur` is allowed.
+- **Auth input (login/setup):** `.auth-input` — `bg-card/62` with `backdrop-filter: blur(10px)`, `border-border/70`, placeholder `muted-foreground/0.7`; sized `h-11`, or `h-12 text-center font-mono text-lg tracking-[0.35em]` for the MFA code field. Hover lifts the border to `--border`; focus shifts to `bg-background/92`, `border-primary/55`, `box-shadow: 0 0 0 3px primary/0.18`. The second of the two places `backdrop-blur` is allowed.
+
+### Auth Screen — "The Vestibule" (signature surface)
+One centered column, no card, one white action. Every screen before the console opens renders through `AuthShell`: login, first-run setup, force-change-password, invite acceptance, OAuth completion, email verification.
+- **Shell:** `min-h-dvh` column, `px-4 py-8 sm:py-10`; block `max-w-sm` centered; `animate-in fade-in slide-in-from-bottom-4 duration-500`.
+- **Atmosphere:** `.login-bg` — a 34px `primary/0.09` grid at `0.45` opacity masked from `50% 20%` (35%) out to 90%, plus a 620px radial `primary/0.12 → action-blue/0.06 → transparent` at `top: 18%` with `blur(8px)`. Both sit behind the form and take no pointer events. Note this is a **different, tighter** grid than the 42px page atmosphere.
+- **Header:** the 56px `.auth-mark` (`rounded-xl`, `ring-1 ring-primary/25`) holding a 32px logo; the product name as `mt-6 text-xs text-muted-foreground`; the screen title as `.brand-heading text-xl sm:text-2xl`; an optional `mt-2 max-w-sm text-sm text-muted-foreground` description.
+- **Fields:** `.auth-input h-11` inside `flex flex-col gap-4` groups (`gap-1.5` within a group); labels `text-sm font-medium text-foreground/90`.
+- **Credential order:** the passkey button leads when the account has one — **primary** `h-11 w-full gap-2` with a `Fingerprint` `size-4` glyph — then the hairline divider, then username/password whose submit is the **outline** twin (`variant="outline" h-11 w-full`), then OIDC providers as `variant="outline" h-11 w-full gap-2` rows. The credential the operator is most likely to hold sits highest, and the white button follows it — never two whites on one screen.
+- **Dividers:** `h-px flex-1 bg-border` on either side of a `text-xs text-muted-foreground` label — a hairline with a word in it, never a bordered band.
+- **MFA challenge:** one `h-12` code field, plus text-link actions at `h-8 px-0 text-xs text-muted-foreground` — the only `link` buttons in the vestibule. "Use a different account" and "go back" both return to the same column, never to a new screen.
+- **Errors:** a destructive `Alert` sits above the form (`mb-4`) and is referenced by `aria-describedby` from the offending group. Validation hints are `text-xs text-muted-foreground` — the field's own border and the alert carry the color, not the hint text.
+- **Motion:** the block entrance is the screen's only authored moment; everything else is a spinner. The global `prefers-reduced-motion` rule neutralizes it.
 
 ### Navigation (`NavSidebar`)
 A recessed rail; items are quiet at rest and marked by a filled tonal step when active.
 - **Shell:** `--sidebar-width` 16rem / icon-collapsed 3rem / mobile drawer 18rem, `bg-sidebar`, `border-r border-sidebar-border` (left side), fixed `inset-y-0`, width transition 200ms ease-linear. The inner shell is a `role="complementary"` landmark so the brand header and account footer (which sit outside the inner `<nav>`) stay reachable by landmark navigation.
-- **Items:** shadcn `SidebarMenuButton` — `rounded-md p-2 text-sm`, `h-8` (`max-md:h-11` for touch), `SidebarMenu` `gap-0.5`, `transition-colors`. Active: `data-[active=true]:bg-sidebar-accent` + `text-sidebar-accent-foreground` + `font-medium`, and the link itself is `aria-current="page"` — the tonal step plus the label carries the state, never a stripe. Hover uses the same step. Collapsed state shows the label as a tooltip.
-- **Brand header / account footer:** the version chip is a mono `text-[10px]` badge on `border-sidebar-border/60`, with a `bg-status-warning` dot plus `sr-only` text when an update is available. The footer account button is an avatar-initials tile (`rounded-md bg-muted`) + name + role, opening a `DropdownMenu` whose logout item is `text-destructive focus:bg-destructive/10`.
-- **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70` — a tracked eyebrow used **only** for the nav section groups (Overview / Catalog for viewers / Playground / Configuration / Settings), never as a page-section eyebrow.
+- **Items:** shadcn `SidebarMenuButton` — `rounded-md p-2 text-sm`, `h-8` (`max-md:h-11` for touch), `SidebarMenu` `gap-0.5`, `transition-colors`. Active: `data-[active=true]:bg-sidebar-accent` (`#22252B` in dark) + `text-sidebar-accent-foreground` + `font-medium`, and the link itself is `aria-current="page"` — the tonal step plus the label carries the state, never a stripe. Hover uses the same step. Collapsed state shows the label as a tooltip.
+- **Brand header / account footer:** the version chip is a mono `text-[10px]` badge on `border-sidebar-border/60`, with a `bg-status-warning` dot plus `sr-only` text when an update is available. The footer is the account menu: a 32px `rounded-md bg-muted` initials tile + `text-xs font-semibold` name + `text-[11px]` role, opening an upward `DropdownMenu` (`w-56`, `slide-in-from-bottom-2 150ms`) that carries **Account** and **Sign-in & security** as its first group, then logout as `text-destructive focus:bg-destructive/10`. The account workspace lives here, not in the nav sections — it is identity, not configuration.
+- **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70` — the label rail at its widest tracking, used **only** for the nav section groups (Overview / Catalog for viewers / Playground / Configuration / Settings).
+
+### Personal-Settings Panels (Account)
+Read top-to-bottom, not scanned: one centered `max-w-4xl` column under the Account shell's Profile / Sign-in & security tabs, made of stacked hairline panels, one topic each, ordered by task frequency and factor strength.
+- **Panel:** the standard panel recipe (§Cards / Containers), one topic per panel, ordered by task frequency and factor strength; anchor targets carry `scroll-mt-6`. Heading `font-medium` (the identity name is `text-lg font-semibold`), optional status/count badge beside it, description `mt-1 text-xs text-muted-foreground`, muted topic icon at the trailing edge, body `mt-4`. The header tab strip is the only navigation between the identity and credential halves; do not add a second in-page menu or a pair of cross-links.
+- **Instance sign-in:** the admin-only `/config/console-auth` page keeps the same panel recipe in a centered `max-w-3xl` form column with a sticky save bar (§Layout → Instance sign-in) — instance policy stays visually and structurally separate from personal credentials.
+- **Rows:** definition rows `flex flex-wrap items-center justify-between gap-3 py-3` inside a `divide-y divide-border/50` `<dl>`; list rows `rounded-lg border border-border/50 px-3 py-2.5`; empty states reuse that hairline row with a `bg-muted/15` step and centered muted copy. Every row control clears `min-h-11` on touch.
+- **Identity tile:** a 56px `rounded-xl border border-border/50 bg-muted` initials tile, `text-lg font-semibold text-muted-foreground`, `aria-hidden`, beside a `truncate text-lg font-semibold` username and a `truncate text-xs text-muted-foreground` email.
+- **Values:** identifiers, dates, and counts in mono (`.text-data`, `text-xs font-mono`); prose in Manrope. A username or ID in the display face is a defect.
+
+### Spec-Sheet Cell (`MetricCell`, signature pattern)
+The log-details metric grid is the densest thing in the product, and its cell is reused verbatim instead of re-declared per view.
+- **Cell:** `bg-card p-3 sm:p-4 flex flex-col gap-1.5 sm:gap-2 min-w-0`. The parent grid owns the hairline dividers; cells never draw their own.
+- **Label rail:** `text-[11px] font-semibold uppercase tracking-wider text-muted-foreground`, with a trailing icon slot.
+- **Value:** `.text-data` inline; `.text-metric` when the cell is the hero of its row. Semantic color (`.metric-blue`, `.metric-amber`, `.metric-success`, `.metric-rose`) is earned only when the value *is* a category, never to decorate a plain count.
+
+### Segmented Tab Strip (Settings)
+Two mutually-exclusive views of one page, chosen in place rather than by route.
+- **Shell:** `flex items-center gap-0 bg-muted/40 p-0.5 rounded-lg border border-border/40`, `role="group"` with an accessible name.
+- **Segment:** `px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200` (`max-md:min-h-11 max-md:px-4` for touch); active is `bg-background text-foreground shadow-xs`, inactive is `text-muted-foreground hover:text-foreground`.
+- **State:** `aria-pressed` on each segment; the active segment is the only place a segmented control lifts off its track.
 
 ### Role-Switched Routes
 One route may render different views by role when both roles work on the same data: `/models` renders the management UI for admins and the read-only catalog for viewers. Rules for this pattern:
@@ -385,6 +454,13 @@ Used by Smart Routing mode-weight sliders. `appearance-none` + `.range-thumb`; t
 
 ### Toasts (vue-sonner)
 Themed via the same tokens; sit on `--popover`, hairline `--border`, `rounded-lg`, with the semantic status tints for success/warning/error variants. No celebratory motion.
+
+### Step-Up Dialog
+A reauthentication gate that interrupts without leaving the current page — the one dialog the console opens on its own.
+- **Shell:** the standard `Dialog` (`bg-card`, hairline border, `rounded-xl`, scrim `--overlay`), so it reads as a panel lifted off the console rather than a new screen.
+- **Body:** `flex flex-col gap-3`, one `Label` + `Input` group at `gap-1.5`, error text `text-xs text-destructive` directly under the field, `DialogFooter` with `gap-2`.
+- **Actions:** the passkey path is the outline button (`gap-2`, `Fingerprint` `h-4 w-4`); the password path is the primary submit. Both disable together while either is in flight, with a `Loader2` spinner in the primary.
+- **Rule:** a step-up never navigates. Closing it cancels the pending action and leaves the operator exactly where they were.
 
 ### Code Blocks & JSON Viewer
 
@@ -403,8 +479,11 @@ Concrete visual guardrails grounded in the implemented system.
 - **Do** use the `config-page-reveal` entrance on every page and the `stagger-fast` / `row-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.
 - **Do** keep display tracking at −0.02em (floor −0.04em), display weight 600 in-app, and page titles at `text-xl sm:text-2xl`.
 - **Do** hit WCAG AA on both themes: tune `--muted-foreground` for readability, never lighten muted text "for elegance," and bump dark-mode body line-height to 1.55–1.6.
-- **Do** keep touch targets ≥44px (`min-h-11 min-w-11`) on nav and mobile controls.
+- **Do** keep touch targets ≥44px (`min-h-11 min-w-11`) on nav, mobile controls, and the `max-sm` floor the button and input components apply to themselves.
 - **Do** render JSON and code with the syntax palette on code surfaces only — subtle chroma that reads as structure, never a rainbow theme.
+- **Do** build every pre-console screen through `AuthShell` and leave it containerless: one centered `max-w-sm` column, a 56px `auth-mark`, 44px glass fields, and exactly one white CTA — the passkey button when the account has one, the password submit otherwise.
+- **Do** pick the structural grammar by task — flush console for management tables, a centered section workspace with header-integrated navigation for Settings, stacked hairline panels in a centered column for personal settings, a centered single form for instance policy, containerless for auth — and never mix two on one screen.
+- **Do** use the label rail *inside* a panel to name the value beneath it, and let a page heading stand without one.
 
 ### Don't:
 - **Don't** make it playful/consumer — no cute illustrations, mascots, gamification, or celebratory confetti. This is infrastructure. *(PRODUCT.md anti-reference.)*
@@ -414,10 +493,12 @@ Concrete visual guardrails grounded in the implemented system.
 - **Don't** pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern). Pick a tonal step or `shadow-xs`, never a wide decorative shadow.
 - **Don't** over-round — cards and panels cap at `rounded-xl` (16px); save full-pill for tags and status chips, `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii.
 - **Don't** use `border-left`/`border-right` greater than 1px as a colored accent stripe on cards, list items, or alerts. State is a tonal step, never a stripe.
-- **Don't** use glassmorphism decoratively. `backdrop-blur-sm` appears only on `outline` buttons, inputs, and the login-screen `auth-input`/`auth-mark` — a deliberate, constrained set, never a default card treatment.
+- **Don't** use glassmorphism decoratively. `backdrop-blur` appears only on `outline` buttons, inputs, and the vestibule's `auth-input` — three constrained sets, never a default card treatment. (`auth-mark` carries a gradient and a shadow, not a blur.)
 - **Don't** use `background-clip: text` with a gradient. Display emphasis comes from weight and size, in a single solid color.
-- **Don't** put a tiny uppercase tracked eyebrow above every page section. The tracked eyebrow is reserved for the nav section groups only.
+- **Don't** put a tiny uppercase tracked eyebrow above a page or a page section. The label rail belongs inside a panel, above the value it names; a kicker above a heading is the pattern this system does not use.
 - **Don't** set a metric or number in Manrope, or introduce a fourth type family. Space Grotesk + Manrope + IBM Plex Mono is the whole system.
 - **Don't** introduce true-gray (`0 0%`) or warm-neutral (`hue 30–100`) tokens. Every neutral carries the 220° cool undertone.
 - **Don't** reuse the JSON/code syntax tokens outside code surfaces — no rainbow syntax themes, no syntax-colored badges or chart series.
 - **Don't** animate layout properties. Motion is `transform`/`opacity` only, exponential ease-out (`cubic-bezier(0.16, 1, 0.3, 1)`), 150–500ms, with a reduced-motion alternative on every animation.
+- **Don't** wrap an auth form in a card, panel, or bordered container. The vestibule has no chrome — a card there turns a threshold into an object on a page.
+- **Don't** wrap a flush console table in an outer card, and don't give a stacked settings panel the console's sticky header bar. Each grammar is complete on its own.

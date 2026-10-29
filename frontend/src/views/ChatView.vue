@@ -72,7 +72,6 @@ const loadSelectedEndpoint = (): string => {
 };
 
 const authStore = useAuthStore();
-const apiKey = computed(() => authStore.sessionApiKey ?? "");
 
 // Loading, retrying and persisting the /v1/models catalog lives in the
 // composable shared with the Images picker; this view only renders its state.
@@ -85,7 +84,6 @@ const {
   loadModels,
   refreshModels,
 } = useModelCatalog({
-  apiKey,
   storageKey: STORAGE_KEYS.CHAT_MODEL,
   namespace: "chat",
 });
@@ -549,8 +547,7 @@ const canSend = computed(
     (input.value.trim().length > 0 || attachedFiles.value.length > 0) &&
     !isLoading.value &&
     !isSubmitting.value &&
-    !!selectedModel.value &&
-    apiKey.value.trim().length > 0
+    !!selectedModel.value
 );
 
 const isFirstLoad = ref(true);
@@ -585,8 +582,8 @@ onActivated(async () => {
 
   // Re-entry is the natural retry point. KeepAlive never re-runs onMounted, so
   // a load that failed while the page was hidden (backend restart, transient
-  // network error, rate-limit window) used to leave the selector empty for the
-  // rest of the session.
+  // network error, rate-limit window) would otherwise leave the selector empty
+  // for the rest of the session.
   if (models.value.length === 0 && !isLoadingModels.value) {
     void loadModels();
   }
@@ -653,14 +650,6 @@ const handleSendMessage = async () => {
   )
     return;
 
-  const key = apiKey.value.trim();
-  if (!key) {
-    toast.warning(t("chat.apiKeyRequired"), {
-      description: t("common.error"),
-    });
-    return;
-  }
-
   const rawInput = input.value;
   const filesToSend = [...attachedFiles.value];
   input.value = "";
@@ -714,7 +703,6 @@ const handleSendMessage = async () => {
     await sendMessage(
       finalContent,
       selectedModel.value,
-      key,
       selectedEndpoint.value,
       () => {
         if (isNearBottom()) {
@@ -742,14 +730,6 @@ const handleRetryMessage = async (msg: ChatMessageType) => {
   const model = selectedModel.value;
   if (!model) {
     toast.warning(t("chat.selectModel"));
-    return;
-  }
-
-  const key = apiKey.value.trim();
-  if (!key) {
-    toast.warning(t("chat.apiKeyRequired"), {
-      description: t("common.error"),
-    });
     return;
   }
 
@@ -787,7 +767,6 @@ const handleRetryMessage = async (msg: ChatMessageType) => {
     await sendMessage(
       userMessageContent,
       model,
-      key,
       selectedEndpoint.value,
       () => {
         if (isNearBottom()) {
@@ -859,14 +838,6 @@ const cancelPendingToolCalls = () => {
 const submitToolOutputs = async () => {
   if (isLoading.value || isSubmitting.value || !selectedModel.value) return;
 
-  const key = apiKey.value.trim();
-  if (!key) {
-    toast.warning(t("chat.apiKeyRequired"), {
-      description: t("common.error"),
-    });
-    return;
-  }
-
   isAutoScroll.value = true;
   isSubmitting.value = true;
 
@@ -890,7 +861,6 @@ const submitToolOutputs = async () => {
     await sendMessage(
       "",
       selectedModel.value,
-      key,
       selectedEndpoint.value,
       () => {
         if (isNearBottom()) {

@@ -12,11 +12,9 @@ export interface CatalogModel {
 }
 
 interface ModelCatalogOptions {
-  /** This picker's session API key; an empty key must never reach `/v1/models`. */
-  apiKey: Ref<string>;
   /** localStorage key holding this picker's last selection. */
   storageKey: string;
-  /** i18n namespace holding the apiKeyRequired/retryModels/noModelsAvailable copy. */
+  /** i18n namespace holding the retryModels/noModelsAvailable copy. */
   namespace: "chat" | "images";
 }
 
@@ -37,12 +35,10 @@ export interface ModelCatalog {
 /**
  * The `/v1/models` catalog shared by the Chat and Images model pickers.
  *
- * A failed load used to blank the list and leave an inert placeholder, so the
- * page stayed stuck until a full reload. Here a failure keeps whatever is
- * already on screen, records why, and leaves the picker able to retry in place.
- * The catalog also reloads itself when the session key changes (a different
- * session must not be served from this cache) or when the model config store
- * updates (it supplies provider names for models that omit them).
+ * A failed load keeps whatever is already on screen, records why, and leaves
+ * the picker able to retry in place. The catalog also reloads itself when the
+ * model config store updates (it supplies provider names for models that omit
+ * them).
  */
 export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
   const { t } = useI18n();
@@ -65,22 +61,11 @@ export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
     modelStore.models.find((cm) => cm.name === id)?.providers?.[0]?.provider_name || "";
 
   const loadModels = async (): Promise<boolean> => {
-    const key = options.apiKey.value.trim();
-    if (!key) {
-      // The proxy authenticates /v1/models with the session API key and rejects
-      // an empty Bearer as an *invalid key*: it counts toward the per-IP lockout
-      // and its 401 tears the session down. Surface the state instead of firing.
-      modelsError.value = t(`${options.namespace}.apiKeyRequired`);
-      models.value = [];
-      selectedModel.value = null;
-      return false;
-    }
-
     const ticket = ++requestTicket;
     isLoadingModels.value = true;
     modelsError.value = null;
     try {
-      const res = await chatApi.getModels(key);
+      const res = await chatApi.getModels();
       if (ticket !== requestTicket) return false;
 
       models.value = (res.data ?? []).map((m) => ({
@@ -115,14 +100,6 @@ export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
       });
     }
   };
-
-  // The key is restored from storage and can legitimately be absent on first
-  // render: wait for it, and reload when it changes (a new session).
-  watch(options.apiKey, (key, previous) => {
-    if (!key.trim()) return;
-    if (previous && previous !== key) void loadModels();
-    else if (models.value.length === 0 && !isLoadingModels.value) void loadModels();
-  });
 
   watch(
     () => modelStore.models,

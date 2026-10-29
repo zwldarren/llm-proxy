@@ -4,12 +4,14 @@
  * to avoid duplication, typos, and scattered string literals.
  */
 export const STORAGE_KEYS = {
-  // Auth
+  // Legacy auth keys. Credentials now live only in HttpOnly cookies; these
+  // names remain so an upgrade can delete values left by older versions.
   AUTH_TOKEN: "auth_token",
   SESSION_API_KEY: "session_api_key",
-  // Forced password change flag (mirrors the backend `must_change_password`
-  // flag so a page reload keeps the user in the forced-change flow).
   MUST_CHANGE_PASSWORD: "must_change_password",
+  // Device-local UX hints: usernames that have registered or used a passkey on
+  // this browser. Used only to choose the primary login action; never exposed.
+  PASSKEY_ACCOUNTS: "passkey_accounts",
 
   // Chat
   CHAT_MESSAGES: "llm-proxy-chat-messages",

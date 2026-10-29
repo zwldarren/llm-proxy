@@ -1,75 +1,739 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-15T00:00:00Z",
+  "generatedAt": "2026-10-27T21:36:09Z",
   "title": "Design System: LLM Proxy",
   "extensions": {
     "colorMeta": {
-      "surface":        { "role": "neutral", "displayName": "Deep Cool-Neutral Void", "canonical": "hsl(220 12% 4%)", "tonalRamp": ["#22252B", "#383D47", "#5A6272", "#7E889A", "#A9AFBC", "#C6CAD2", "#DDDFE4", "#F1F2F4"] },
-      "ink":            { "role": "neutral", "displayName": "Crisp White / Near-Black", "canonical": "hsl(0 0% 96%)", "tonalRamp": ["#262626", "#404040", "#666666", "#8C8C8C", "#B2B2B2", "#CCCCCC", "#E0E0E0", "#F2F2F2"] },
-      "card":           { "role": "neutral", "displayName": "Raised Slate", "canonical": "hsl(220 10% 9%)", "tonalRamp": ["#22252A", "#393E46", "#5C6370", "#818898", "#ABB0BA", "#C7CAD1", "#DDDFE3", "#F1F2F4"] },
-      "sidebar":        { "role": "neutral", "displayName": "Deeper Slate", "canonical": "hsl(220 14% 7%)", "tonalRamp": ["#21242C", "#373D49", "#586174", "#7C879C", "#A8AFBD", "#C5CAD3", "#DCDFE5", "#F0F2F4"] },
-      "muted":          { "role": "neutral", "displayName": "Muted Slate", "canonical": "hsl(220 9% 15%)", "tonalRamp": ["#23252A", "#3A3E45", "#5D636F", "#828997", "#ACB0B9", "#C7CAD1", "#DEDFE3", "#F1F2F3"] },
-      "muted-ink":      { "role": "neutral", "displayName": "Soft Slate", "canonical": "hsl(220 5% 62%)", "tonalRamp": ["#242628", "#3D3F43", "#61646B", "#878A92", "#AFB1B6", "#C9CBCF", "#DFE0E2", "#F2F2F3"] },
-      "border":         { "role": "neutral", "displayName": "Hairline Slate", "canonical": "hsl(220 10% 22%)", "tonalRamp": ["#22252A", "#393E46", "#5C6370", "#818898", "#ABB0BA", "#C7CAD1", "#DDDFE3", "#F1F2F4"] },
-      "primary":        { "role": "primary", "displayName": "Console White / Near-Black Ink", "canonical": "hsl(0 0% 98%)", "tonalRamp": ["#262626", "#404040", "#666666", "#8C8C8C", "#B2B2B2", "#CCCCCC", "#E0E0E0", "#F2F2F2"] },
-      "primary-ink":    { "role": "primary", "displayName": "Primary Foreground", "canonical": "hsl(220 15% 8%)", "tonalRamp": ["#21242C", "#363D49", "#576175", "#7B879D", "#A7AFBE", "#C4C9D4", "#DCDFE5", "#F0F2F4"] },
-      "destructive":    { "role": "tertiary", "displayName": "Desaturated Rose", "canonical": "hsl(4 52% 52%)", "tonalRamp": ["#3A1512", "#6D2722", "#9F3932", "#C7554D", "#D7857F", "#E4AEAA", "#EFCFCD", "#F9EDEC"] },
-      "action-blue":    { "role": "tertiary", "displayName": "Muted Azure (GET)", "canonical": "hsl(210 26% 64%)", "tonalRamp": ["#1C2630", "#2F4050", "#4B6681", "#6E8CAA", "#9FB2C6", "#BFCCD9", "#D8E0E8", "#EFF2F6"] },
-      "action-violet":  { "role": "tertiary", "displayName": "Pale Iris (POST)", "canonical": "hsl(260 24% 80%)", "tonalRamp": ["#231D2F", "#3B304F", "#5E4E7E", "#8371A8", "#ACA0C5", "#C8C0D8", "#DED9E8", "#F1EFF5"] },
-      "action-amber":   { "role": "tertiary", "displayName": "Muted Amber (PUT/PATCH)", "canonical": "hsl(35 28% 60%)", "tonalRamp": ["#31281C", "#52432E", "#836B49", "#AC926C", "#C8B69D", "#DACEBE", "#E9E2D8", "#F6F3EF"] },
-      "action-rose":    { "role": "tertiary", "displayName": "Muted Coral (DELETE)", "canonical": "hsl(350 28% 64%)", "tonalRamp": ["#311C1F", "#522E34", "#834953", "#AC6C77", "#C89DA4", "#DABEC2", "#E9D8DB", "#F6EFF0"] },
-      "action-teal":    { "role": "tertiary", "displayName": "Muted Teal (Embedding)", "canonical": "hsl(180 26% 62%)", "tonalRamp": ["#1C3030", "#355A5A", "#4D8484", "#6BA8A8", "#95C1C1", "#B8D5D5", "#D5E6E6", "#EFF6F6"] },
-      "status-success": { "role": "tertiary", "displayName": "Sage Mint", "canonical": "hsl(150 42% 58%)", "tonalRamp": ["#163626", "#255B40", "#3B9166", "#5CBC8C", "#92D3B2", "#B7E1CC", "#D4EDE0", "#EDF8F2"] },
-      "status-warning": { "role": "tertiary", "displayName": "Muted Gold", "canonical": "hsl(32 42% 58%)", "tonalRamp": ["#362716", "#5B4225", "#91693B", "#BC8F5C", "#D3B592", "#E1CDB7", "#EDE1D4", "#F8F3ED"] },
-      "status-error":   { "role": "tertiary", "displayName": "Salmon Rose", "canonical": "hsl(4 52% 72%)", "tonalRamp": ["#3A1512", "#61231F", "#9B3831", "#C85951", "#DA908B", "#E7B5B1", "#F0D3D0", "#F9EDEC"] },
-      "status-unknown": { "role": "tertiary", "displayName": "Neutral Slate", "canonical": "hsl(220 5% 58%)", "tonalRamp": ["#242628", "#3D3F43", "#61646B", "#878A92", "#AFB1B6", "#C9CBCF", "#DFE0E2", "#F2F2F3"] },
-      "json-string":    { "role": "tertiary", "displayName": "Syntax Green", "canonical": "hsl(145 55% 66%)", "tonalRamp": ["#113B23", "#206F41", "#2FA25F", "#49CA7F", "#7DD9A3", "#A8E6C2", "#CCF0DB", "#EBF9F1"] },
-      "json-number":    { "role": "tertiary", "displayName": "Syntax Azure", "canonical": "hsl(210 65% 68%)", "tonalRamp": ["#0D263F", "#194776", "#2569AD", "#3D8AD6", "#74ABE2", "#A2C7EB", "#C8DEF3", "#EAF2FB"] },
-      "json-boolean":   { "role": "tertiary", "displayName": "Syntax Rose", "canonical": "hsl(350 70% 72%)", "tonalRamp": ["#410B14", "#791526", "#B21F38", "#DC3853", "#E67084", "#EEA0AD", "#F5C7CE", "#FBE9EC"] },
-      "json-null":      { "role": "tertiary", "displayName": "Syntax Slate", "canonical": "hsl(220 15% 58%)", "tonalRamp": ["#21242C", "#3D4452", "#596378", "#78849B", "#9EA7B7", "#BEC4CF", "#D9DCE3", "#F0F2F4"] },
-      "json-key":       { "role": "tertiary", "displayName": "Syntax Key Slate", "canonical": "hsl(220 20% 78%)", "tonalRamp": ["#1F242E", "#394356", "#54627D", "#7282A1", "#9AA5BC", "#BCC3D2", "#D7DCE4", "#F0F1F5"] },
-      "json-keyword":   { "role": "tertiary", "displayName": "Syntax Violet", "canonical": "hsl(260 70% 76%)", "tonalRamp": ["#1D0B41", "#371579", "#501FB2", "#6E38DC", "#9770E6", "#BAA0EE", "#D6C7F5", "#EFE9FB"] },
-      "json-function":  { "role": "tertiary", "displayName": "Syntax Sky", "canonical": "hsl(200 75% 68%)", "tonalRamp": ["#0A3043", "#12597D", "#1A83B7", "#32A7E2", "#6CC0EA", "#9DD5F1", "#C5E6F7", "#E9F5FC"] },
-      "code-bg":        { "role": "neutral", "displayName": "Code Surface", "canonical": "hsl(220 10% 8%)", "tonalRamp": ["#22252A", "#40454F", "#5E6573", "#7E8695", "#A2A8B3", "#C1C5CD", "#DBDDE1", "#F1F2F4"] },
-      "code-header-bg": { "role": "neutral", "displayName": "Code Header", "canonical": "hsl(220 10% 11.5%)", "tonalRamp": ["#22252A", "#40454F", "#5E6573", "#7E8695", "#A2A8B3", "#C1C5CD", "#DBDDE1", "#F1F2F4"] },
-      "code-border":    { "role": "neutral", "displayName": "Code Border", "canonical": "hsl(220 10% 18%)", "tonalRamp": ["#22252A", "#40454F", "#5E6573", "#7E8695", "#A2A8B3", "#C1C5CD", "#DBDDE1", "#F1F2F4"] },
-      "error-light":    { "role": "tertiary", "displayName": "Error Brick (Light Theme)", "canonical": "hsl(4 48% 62%)", "tonalRamp": ["#391614", "#6A2A25", "#9B3D36", "#C25951", "#D38882", "#E2B0AC", "#EED0CE", "#F8EDEC"] },
-      "error-dark":     { "role": "tertiary", "displayName": "Error Salmon (Dark Theme)", "canonical": "hsl(4 52% 72%)", "tonalRamp": ["#3A1512", "#6D2722", "#9F3932", "#C7554D", "#D7857F", "#E4AEAA", "#EFCFCD", "#F9EDEC"] },
-      "success-light":  { "role": "tertiary", "displayName": "Forest Mint (Light Theme)", "canonical": "hsl(150 38% 48%)", "tonalRamp": ["#183526", "#2C6347", "#419069", "#5DB68A", "#8BCBAB", "#B2DCC7", "#D1EADE", "#EDF7F2"] },
-      "success-dark":   { "role": "tertiary", "displayName": "Sage Mint (Dark Theme)", "canonical": "hsl(150 42% 58%)", "tonalRamp": ["#163626", "#296547", "#3D9469", "#58BB8A", "#88CEAB", "#AFDEC7", "#D0ECDE", "#EDF8F2"] }
+      "surface": {
+        "role": "neutral",
+        "displayName": "Deep Cool-Neutral Void",
+        "canonical": "hsl(220 12% 4%)",
+        "tonalRamp": [
+          "#22252B",
+          "#383D47",
+          "#5A6272",
+          "#7E889A",
+          "#A9AFBC",
+          "#C6CAD2",
+          "#DDDFE4",
+          "#F1F2F4"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Crisp White / Near-Black",
+        "canonical": "hsl(0 0% 96%)",
+        "tonalRamp": [
+          "#262626",
+          "#404040",
+          "#666666",
+          "#8C8C8C",
+          "#B2B2B2",
+          "#CCCCCC",
+          "#E0E0E0",
+          "#F2F2F2"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Raised Slate",
+        "canonical": "hsl(220 10% 9%)",
+        "tonalRamp": [
+          "#22252A",
+          "#393E46",
+          "#5C6370",
+          "#818898",
+          "#ABB0BA",
+          "#C7CAD1",
+          "#DDDFE3",
+          "#F1F2F4"
+        ]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Deeper Slate",
+        "canonical": "hsl(220 14% 7%)",
+        "tonalRamp": [
+          "#21242C",
+          "#373D49",
+          "#586174",
+          "#7C879C",
+          "#A8AFBD",
+          "#C5CAD3",
+          "#DCDFE5",
+          "#F0F2F4"
+        ]
+      },
+      "sidebar-accent": {
+        "role": "neutral",
+        "displayName": "Active Step",
+        "canonical": "hsl(220 12% 15%)",
+        "tonalRamp": [
+          "#22252B",
+          "#3B404A",
+          "#565D6C",
+          "#717B8E",
+          "#939AA9",
+          "#B2B7C2",
+          "#D1D5DB",
+          "#F1F2F4"
+        ]
+      },
+      "sidebar-ink": {
+        "role": "neutral",
+        "displayName": "Rail Ink",
+        "canonical": "hsl(0 0% 92%)",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#616161",
+          "#808080",
+          "#9E9E9E",
+          "#BABABA",
+          "#D6D6D6",
+          "#F2F2F2"
+        ]
+      },
+      "sidebar-accent-ink": {
+        "role": "neutral",
+        "displayName": "Active Rail Ink",
+        "canonical": "hsl(0 0% 94%)",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#616161",
+          "#808080",
+          "#9E9E9E",
+          "#BABABA",
+          "#D6D6D6",
+          "#F2F2F2"
+        ]
+      },
+      "secondary": {
+        "role": "neutral",
+        "displayName": "Secondary",
+        "canonical": "hsl(220 10% 13%)",
+        "tonalRamp": [
+          "#23252A",
+          "#3C4048",
+          "#585E6A",
+          "#747C8B",
+          "#959BA7",
+          "#B4B8C0",
+          "#D2D5DA",
+          "#F1F2F3"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Slate",
+        "canonical": "hsl(220 9% 15%)",
+        "tonalRamp": [
+          "#23252A",
+          "#3A3E45",
+          "#5D636F",
+          "#828997",
+          "#ACB0B9",
+          "#C7CAD1",
+          "#DEDFE3",
+          "#F1F2F3"
+        ]
+      },
+      "muted-ink": {
+        "role": "neutral",
+        "displayName": "Soft Slate",
+        "canonical": "hsl(220 5% 62%)",
+        "tonalRamp": [
+          "#242628",
+          "#3D3F43",
+          "#61646B",
+          "#878A92",
+          "#AFB1B6",
+          "#C9CBCF",
+          "#DFE0E2",
+          "#F2F2F3"
+        ]
+      },
+      "accent": {
+        "role": "neutral",
+        "displayName": "Accent",
+        "canonical": "hsl(220 10% 18%)",
+        "tonalRamp": [
+          "#22252A",
+          "#3C4049",
+          "#575E6A",
+          "#737B8C",
+          "#959BA8",
+          "#B3B8C1",
+          "#D2D5DA",
+          "#F1F2F4"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline Slate",
+        "canonical": "hsl(220 10% 22%)",
+        "tonalRamp": [
+          "#22252A",
+          "#393E46",
+          "#5C6370",
+          "#818898",
+          "#ABB0BA",
+          "#C7CAD1",
+          "#DDDFE3",
+          "#F1F2F4"
+        ]
+      },
+      "ring": {
+        "role": "neutral",
+        "displayName": "Ring",
+        "canonical": "hsl(0 0% 98%)",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#616161",
+          "#808080",
+          "#9E9E9E",
+          "#BABABA",
+          "#D6D6D6",
+          "#F2F2F2"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Console White / Near-Black Ink",
+        "canonical": "hsl(0 0% 98%)",
+        "tonalRamp": [
+          "#262626",
+          "#404040",
+          "#666666",
+          "#8C8C8C",
+          "#B2B2B2",
+          "#CCCCCC",
+          "#E0E0E0",
+          "#F2F2F2"
+        ]
+      },
+      "primary-ink": {
+        "role": "primary",
+        "displayName": "Primary Foreground",
+        "canonical": "hsl(220 15% 8%)",
+        "tonalRamp": [
+          "#21242C",
+          "#363D49",
+          "#576175",
+          "#7B879D",
+          "#A7AFBE",
+          "#C4C9D4",
+          "#DCDFE5",
+          "#F0F2F4"
+        ]
+      },
+      "destructive": {
+        "role": "tertiary",
+        "displayName": "Desaturated Rose",
+        "canonical": "hsl(4 52% 52%)",
+        "tonalRamp": [
+          "#3A1512",
+          "#6D2722",
+          "#9F3932",
+          "#C7554D",
+          "#D7857F",
+          "#E4AEAA",
+          "#EFCFCD",
+          "#F9EDEC"
+        ]
+      },
+      "action-blue": {
+        "role": "tertiary",
+        "displayName": "Muted Azure (GET)",
+        "canonical": "hsl(210 26% 64%)",
+        "tonalRamp": [
+          "#1C2630",
+          "#2F4050",
+          "#4B6681",
+          "#6E8CAA",
+          "#9FB2C6",
+          "#BFCCD9",
+          "#D8E0E8",
+          "#EFF2F6"
+        ]
+      },
+      "action-violet": {
+        "role": "tertiary",
+        "displayName": "Pale Iris (POST)",
+        "canonical": "hsl(260 24% 80%)",
+        "tonalRamp": [
+          "#231D2F",
+          "#3B304F",
+          "#5E4E7E",
+          "#8371A8",
+          "#ACA0C5",
+          "#C8C0D8",
+          "#DED9E8",
+          "#F1EFF5"
+        ]
+      },
+      "action-amber": {
+        "role": "tertiary",
+        "displayName": "Muted Amber (PUT/PATCH)",
+        "canonical": "hsl(35 28% 60%)",
+        "tonalRamp": [
+          "#31281C",
+          "#52432E",
+          "#836B49",
+          "#AC926C",
+          "#C8B69D",
+          "#DACEBE",
+          "#E9E2D8",
+          "#F6F3EF"
+        ]
+      },
+      "action-rose": {
+        "role": "tertiary",
+        "displayName": "Muted Coral (DELETE)",
+        "canonical": "hsl(350 28% 64%)",
+        "tonalRamp": [
+          "#311C1F",
+          "#522E34",
+          "#834953",
+          "#AC6C77",
+          "#C89DA4",
+          "#DABEC2",
+          "#E9D8DB",
+          "#F6EFF0"
+        ]
+      },
+      "action-teal": {
+        "role": "tertiary",
+        "displayName": "Muted Teal (Embedding)",
+        "canonical": "hsl(180 26% 62%)",
+        "tonalRamp": [
+          "#1C3030",
+          "#355A5A",
+          "#4D8484",
+          "#6BA8A8",
+          "#95C1C1",
+          "#B8D5D5",
+          "#D5E6E6",
+          "#EFF6F6"
+        ]
+      },
+      "status-success": {
+        "role": "tertiary",
+        "displayName": "Sage Mint",
+        "canonical": "hsl(150 42% 58%)",
+        "tonalRamp": [
+          "#163626",
+          "#255B40",
+          "#3B9166",
+          "#5CBC8C",
+          "#92D3B2",
+          "#B7E1CC",
+          "#D4EDE0",
+          "#EDF8F2"
+        ]
+      },
+      "status-warning": {
+        "role": "tertiary",
+        "displayName": "Muted Gold",
+        "canonical": "hsl(32 42% 58%)",
+        "tonalRamp": [
+          "#362716",
+          "#5B4225",
+          "#91693B",
+          "#BC8F5C",
+          "#D3B592",
+          "#E1CDB7",
+          "#EDE1D4",
+          "#F8F3ED"
+        ]
+      },
+      "status-error": {
+        "role": "tertiary",
+        "displayName": "Salmon Rose",
+        "canonical": "hsl(4 52% 72%)",
+        "tonalRamp": [
+          "#3A1512",
+          "#61231F",
+          "#9B3831",
+          "#C85951",
+          "#DA908B",
+          "#E7B5B1",
+          "#F0D3D0",
+          "#F9EDEC"
+        ]
+      },
+      "status-unknown": {
+        "role": "tertiary",
+        "displayName": "Neutral Slate",
+        "canonical": "hsl(220 5% 58%)",
+        "tonalRamp": [
+          "#242628",
+          "#3D3F43",
+          "#61646B",
+          "#878A92",
+          "#AFB1B6",
+          "#C9CBCF",
+          "#DFE0E2",
+          "#F2F2F3"
+        ]
+      },
+      "json-string": {
+        "role": "tertiary",
+        "displayName": "Syntax Green",
+        "canonical": "hsl(145 55% 66%)",
+        "tonalRamp": [
+          "#113B23",
+          "#206F41",
+          "#2FA25F",
+          "#49CA7F",
+          "#7DD9A3",
+          "#A8E6C2",
+          "#CCF0DB",
+          "#EBF9F1"
+        ]
+      },
+      "json-number": {
+        "role": "tertiary",
+        "displayName": "Syntax Azure",
+        "canonical": "hsl(210 65% 68%)",
+        "tonalRamp": [
+          "#0D263F",
+          "#194776",
+          "#2569AD",
+          "#3D8AD6",
+          "#74ABE2",
+          "#A2C7EB",
+          "#C8DEF3",
+          "#EAF2FB"
+        ]
+      },
+      "json-boolean": {
+        "role": "tertiary",
+        "displayName": "Syntax Rose",
+        "canonical": "hsl(350 70% 72%)",
+        "tonalRamp": [
+          "#410B14",
+          "#791526",
+          "#B21F38",
+          "#DC3853",
+          "#E67084",
+          "#EEA0AD",
+          "#F5C7CE",
+          "#FBE9EC"
+        ]
+      },
+      "json-null": {
+        "role": "tertiary",
+        "displayName": "Syntax Slate",
+        "canonical": "hsl(220 15% 58%)",
+        "tonalRamp": [
+          "#21242C",
+          "#3D4452",
+          "#596378",
+          "#78849B",
+          "#9EA7B7",
+          "#BEC4CF",
+          "#D9DCE3",
+          "#F0F2F4"
+        ]
+      },
+      "json-key": {
+        "role": "tertiary",
+        "displayName": "Syntax Key Slate",
+        "canonical": "hsl(220 20% 78%)",
+        "tonalRamp": [
+          "#1F242E",
+          "#394356",
+          "#54627D",
+          "#7282A1",
+          "#9AA5BC",
+          "#BCC3D2",
+          "#D7DCE4",
+          "#F0F1F5"
+        ]
+      },
+      "json-keyword": {
+        "role": "tertiary",
+        "displayName": "Syntax Violet",
+        "canonical": "hsl(260 70% 76%)",
+        "tonalRamp": [
+          "#1D0B41",
+          "#371579",
+          "#501FB2",
+          "#6E38DC",
+          "#9770E6",
+          "#BAA0EE",
+          "#D6C7F5",
+          "#EFE9FB"
+        ]
+      },
+      "json-function": {
+        "role": "tertiary",
+        "displayName": "Syntax Sky",
+        "canonical": "hsl(200 75% 68%)",
+        "tonalRamp": [
+          "#0A3043",
+          "#12597D",
+          "#1A83B7",
+          "#32A7E2",
+          "#6CC0EA",
+          "#9DD5F1",
+          "#C5E6F7",
+          "#E9F5FC"
+        ]
+      },
+      "code-bg": {
+        "role": "neutral",
+        "displayName": "Code Surface",
+        "canonical": "hsl(220 10% 8%)",
+        "tonalRamp": [
+          "#22252A",
+          "#40454F",
+          "#5E6573",
+          "#7E8695",
+          "#A2A8B3",
+          "#C1C5CD",
+          "#DBDDE1",
+          "#F1F2F4"
+        ]
+      },
+      "code-header-bg": {
+        "role": "neutral",
+        "displayName": "Code Header",
+        "canonical": "hsl(220 10% 11.5%)",
+        "tonalRamp": [
+          "#22252A",
+          "#40454F",
+          "#5E6573",
+          "#7E8695",
+          "#A2A8B3",
+          "#C1C5CD",
+          "#DBDDE1",
+          "#F1F2F4"
+        ]
+      },
+      "code-border": {
+        "role": "neutral",
+        "displayName": "Code Border",
+        "canonical": "hsl(220 10% 18%)",
+        "tonalRamp": [
+          "#22252A",
+          "#40454F",
+          "#5E6573",
+          "#7E8695",
+          "#A2A8B3",
+          "#C1C5CD",
+          "#DBDDE1",
+          "#F1F2F4"
+        ]
+      },
+      "overlay": {
+        "role": "neutral",
+        "displayName": "Scrim Black",
+        "canonical": "hsl(0 0% 0%)",
+        "tonalRamp": [
+          "#262626",
+          "#424242",
+          "#616161",
+          "#808080",
+          "#9E9E9E",
+          "#BABABA",
+          "#D6D6D6",
+          "#F2F2F2"
+        ]
+      },
+      "error-light": {
+        "role": "tertiary",
+        "displayName": "Error Brick (Light Theme)",
+        "canonical": "hsl(4 48% 62%)",
+        "tonalRamp": [
+          "#391614",
+          "#6A2A25",
+          "#9B3D36",
+          "#C25951",
+          "#D38882",
+          "#E2B0AC",
+          "#EED0CE",
+          "#F8EDEC"
+        ]
+      },
+      "error-dark": {
+        "role": "tertiary",
+        "displayName": "Error Salmon (Dark Theme)",
+        "canonical": "hsl(4 52% 72%)",
+        "tonalRamp": [
+          "#3A1512",
+          "#6D2722",
+          "#9F3932",
+          "#C7554D",
+          "#D7857F",
+          "#E4AEAA",
+          "#EFCFCD",
+          "#F9EDEC"
+        ]
+      },
+      "success-light": {
+        "role": "tertiary",
+        "displayName": "Forest Mint (Light Theme)",
+        "canonical": "hsl(150 38% 48%)",
+        "tonalRamp": [
+          "#183526",
+          "#2C6347",
+          "#419069",
+          "#5DB68A",
+          "#8BCBAB",
+          "#B2DCC7",
+          "#D1EADE",
+          "#EDF7F2"
+        ]
+      },
+      "success-dark": {
+        "role": "tertiary",
+        "displayName": "Sage Mint (Dark Theme)",
+        "canonical": "hsl(150 42% 58%)",
+        "tonalRamp": [
+          "#163626",
+          "#296547",
+          "#3D9469",
+          "#58BB8A",
+          "#88CEAB",
+          "#AFDEC7",
+          "#D0ECDE",
+          "#EDF8F2"
+        ]
+      }
     },
     "typographyMeta": {
-      "display":    { "displayName": "Display",    "purpose": "Page titles via .brand-heading; Space Grotesk 600, in-app." },
-      "headline":   { "displayName": "Headline",   "purpose": "Large marketing-style display headlines; rarely used in-app." },
-      "title":      { "displayName": "Title",      "purpose": "Card titles and form-section headings." },
-      "body":       { "displayName": "Body",       "purpose": "Primary reading text; max 65–75ch." },
-      "secondary":  { "displayName": "Secondary",  "purpose": "Descriptions and secondary UI text." },
-      "label":      { "displayName": "Label",      "purpose": "Captions, metadata, badges, form labels; uppercase eyebrow only for nav groups." },
-      "mono":       { "displayName": "Mono",       "purpose": "Every code/JSON/technical value; tabular-nums." },
-      "metric":     { "displayName": "Metric",     "purpose": "Large stats; tabular-nums + slashed-zero." }
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page titles via .brand-heading; Space Grotesk 600, in-app."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Large marketing-style display headlines; rarely used in-app."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card titles and form-section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Primary reading text; max 65–75ch."
+      },
+      "secondary": {
+        "displayName": "Secondary",
+        "purpose": "Descriptions and secondary UI text."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Captions, metadata, badges, form labels."
+      },
+      "eyebrow": {
+        "displayName": "Label Rail",
+        "purpose": "In-panel micro-heading (11px, 600, 0.05em uppercase). Never a page-section kicker."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Every code/JSON/technical value; tabular-nums."
+      },
+      "metric": {
+        "displayName": "Metric",
+        "purpose": "Large stats; tabular-nums + slashed-zero."
+      }
     },
     "shadows": [
-      { "name": "card-rest",      "value": "0 1px 2px 0 rgba(0,0,0,0.05)",                                                              "purpose": "shadow-xs on cards, card-base, primary buttons — the default rest lift." },
-      { "name": "section-card-wash", "value": "0 8px 24px -16px hsl(var(--primary) / 0.25)",                                            "purpose": "Soft colored downward glow under tinted section cards; colored variants swap the hue." },
-      { "name": "sidebar-edge",   "value": "16px 0 36px -32px hsl(var(--sidebar) / 0.95)",                                              "purpose": "Soft right-edge shadow on the nav rail." },
-      { "name": "hover-glow",     "value": "0 0 20px -6px hsl(var(--primary) / 0.4)",                                                   "purpose": "Constrained ambient halo on interactive hover (.hover-glow-*)." },
-      { "name": "inset-top-card", "value": "inset 0 1px 0 hsl(var(--foreground) / 0.06)",                                               "purpose": "Single-pixel top sheen on raised card surfaces." },
-      { "name": "inset-top-input","value": "inset 0 1px 0 hsl(var(--background) / 0.9)",                                                "purpose": "Lit top edge on inputs." },
-      { "name": "auth-mark",      "value": "0 18px 36px -20px hsl(var(--primary) / 0.55), inset 0 1px 0 hsl(var(--foreground) / 0.06)", "purpose": "The floating login mark." }
+      {
+        "name": "rest-lift",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "shadow-xs: primary buttons, the active settings tab, the sidebar collapse handle. Panels do not carry it."
+      },
+      {
+        "name": "hover-glow",
+        "value": "0 0 20px -6px hsl(var(--primary) / 0.4)",
+        "purpose": "hover-glow-primary/-blue/-amber/-success — a constrained ambient halo on interactive elements."
+      },
+      {
+        "name": "inset-top-card",
+        "value": "inset 0 1px 0 hsl(var(--foreground) / 0.06)",
+        "purpose": "The single-pixel top sheen that reads as a lit edge on a raised surface."
+      },
+      {
+        "name": "inset-top-input",
+        "value": "inset 0 1px 0 hsl(var(--background) / 0.9)",
+        "purpose": "The same lit edge on a field, so the control reads as cut into the page."
+      },
+      {
+        "name": "auth-mark",
+        "value": "0 18px 36px -20px hsl(var(--primary) / 0.55), inset 0 1px 0 hsl(var(--foreground) / 0.06)",
+        "purpose": "The floating vestibule mark — the one ambient (not state-driven) shadow in the system."
+      },
+      {
+        "name": "auth-input-focus",
+        "value": "0 0 0 3px hsl(var(--primary) / 0.18)",
+        "purpose": "The vestibule field focus halo — softer than the console ring-ring/50."
+      },
+      {
+        "name": "anchor-flash",
+        "value": "0 0 0 2px hsl(var(--primary) / 0.32)",
+        "purpose": "The 900ms anchor-target-flash ring marking a section reached by a deep link; static under reduced motion."
+      }
     ],
     "motion": [
-      { "name": "ease-standard",    "value": "cubic-bezier(0.16, 1, 0.3, 1)",   "purpose": "Exponential ease-out; default for all state transitions and entrances." },
-      { "name": "ease-in-accel",    "value": "cubic-bezier(0.7, 0, 0.84, 0)",    "purpose": "Settings-panel leave acceleration." },
-      { "name": "duration-fast",    "value": "150ms",                            "purpose": "Borders, color, small state shifts." },
-      { "name": "duration-base",    "value": "200ms",                            "purpose": "Button/control transitions." },
-      { "name": "duration-entrance","value": "320ms",                            "purpose": "config-page-reveal page entrance." },
-      { "name": "stagger-step",     "value": "30ms",                             "purpose": "row-stagger / list-stagger step between siblings." }
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Exponential ease-out; default for all state transitions and entrances."
+      },
+      {
+        "name": "ease-in-accel",
+        "value": "cubic-bezier(0.7, 0, 0.84, 0)",
+        "purpose": "Settings-panel leave acceleration."
+      },
+      {
+        "name": "duration-fast",
+        "value": "150ms",
+        "purpose": "Borders, color, small state shifts."
+      },
+      {
+        "name": "duration-base",
+        "value": "200ms",
+        "purpose": "Button/control transitions."
+      },
+      {
+        "name": "stagger-step",
+        "value": "30ms",
+        "purpose": "row-stagger / list-stagger step between siblings."
+      },
+      {
+        "name": "duration-auth-entrance",
+        "value": "500ms",
+        "purpose": "The vestibule block fade + rise; the sign-in screen's only authored moment."
+      },
+      {
+        "name": "duration-entrance",
+        "value": "320ms",
+        "purpose": "config-page-reveal console entrance."
+      }
     ],
     "breakpoints": [
-      { "name": "sm", "value": "640px" },
-      { "name": "md", "value": "768px" },
-      { "name": "lg", "value": "1024px" },
-      { "name": "xl", "value": "1280px" }
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
     ]
   },
   "components": [
@@ -79,7 +743,7 @@
       "refersTo": "button-primary",
       "description": "The highest-contrast object on screen — white-on-black in dark mode, black-on-white in light.",
       "html": "<button class=\"ds-btn-primary\">Save changes</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); transition: background-color 200ms cubic-bezier(0.16,1,0.3,1), box-shadow 200ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { background: hsl(var(--primary) / 0.9); } .ds-btn-primary:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-btn-primary:active { transform: scale(0.98); } .ds-btn-primary:disabled { pointer-events: none; opacity: 0.5; }"
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); transition: background-color 200ms cubic-bezier(0.16,1,0.3,1), box-shadow 200ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { background: hsl(var(--primary) / 0.9); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-btn-primary:active { transform: scale(0.98); }"
     },
     {
       "name": "Outline Button",
@@ -87,7 +751,7 @@
       "refersTo": "button-outline",
       "description": "Bordered control with a constrained backdrop-blur; hover tightens the border toward primary.",
       "html": "<button class=\"ds-btn-outline\">Cancel</button>",
-      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 1px solid hsl(var(--border) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); backdrop-filter: blur(4px); transition: border-color 200ms cubic-bezier(0.16,1,0.3,1), background-color 200ms, color 200ms; } .ds-btn-outline:hover { border-color: hsl(var(--primary) / 0.35); background: hsl(var(--accent) / 0.7); color: hsl(var(--accent-foreground)); } .ds-btn-outline:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-btn-outline:active { transform: scale(0.98); }"
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 1px solid hsl(var(--border) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.8); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); backdrop-filter: blur(4px); transition: border-color 200ms, background-color 200ms, color 200ms; } .ds-btn-outline:hover { border-color: hsl(var(--primary) / 0.35); background: hsl(var(--accent) / 0.7); color: hsl(var(--accent-foreground)); } .ds-btn-outline:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-btn-outline:active { transform: scale(0.98); }"
     },
     {
       "name": "Ghost Button",
@@ -95,116 +759,213 @@
       "refersTo": "button-ghost",
       "description": "No border, no fill at rest; hover picks up the accent fill.",
       "html": "<button class=\"ds-btn-ghost\">Edit</button>",
-      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: transparent; color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; transition: background-color 200ms cubic-bezier(0.16,1,0.3,1), color 200ms; } .ds-btn-ghost:hover { background: hsl(var(--accent) / 0.7); color: hsl(var(--accent-foreground)); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); }"
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: transparent; color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; transition: background-color 200ms, color 200ms; } .ds-btn-ghost:hover { background: hsl(var(--accent) / 0.7); color: hsl(var(--accent-foreground)); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); }"
     },
     {
       "name": "Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "Lit-edge text control; the 3px primary ring on focus is the strongest focus signal in the system.",
-      "html": "<input class=\"ds-input\" placeholder=\"sk-…\" />",
-      "css": ".ds-input { width: 100%; min-width: 0; height: 40px; padding: 8px 14px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; box-shadow: inset 0 1px 0 hsl(var(--background) / 0.9); backdrop-filter: blur(4px); transition: color 200ms, box-shadow 200ms, border-color 200ms, background-color 200ms; } .ds-input::placeholder { color: hsl(var(--muted-foreground)); } .ds-input:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-input[aria-invalid=\"true\"] { border-color: hsl(var(--destructive)); box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.2); }"
+      "description": "A lit-edge field: inset top highlight, glass fill, and the system's strongest focus signal.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Filter by model\" />",
+      "css": ".ds-input { height: 40px; width: 260px; padding: 8px 14px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; box-shadow: inset 0 1px 0 hsl(var(--background) / 0.9); backdrop-filter: blur(4px); transition: border-color 200ms, background-color 200ms, box-shadow 200ms; } .ds-input::placeholder { color: hsl(var(--muted-foreground)); } .ds-input:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); }"
     },
     {
-      "name": "Card",
+      "name": "Auth Input",
+      "kind": "input",
+      "refersTo": "auth-input",
+      "description": "The vestibule field: 44px, glass at 62% card, and a softer 3px primary halo on focus.",
+      "html": "<label class=\"ds-auth-label\" for=\"ds-auth-user\">Username</label><input id=\"ds-auth-user\" class=\"ds-auth-input\" type=\"text\" placeholder=\"admin\" />",
+      "css": ".ds-auth-label { display: block; margin-bottom: 6px; color: hsl(var(--foreground) / 0.9); font-family: var(--font-sans); font-size: 14px; font-weight: 500; } .ds-auth-input { height: 44px; width: 100%; max-width: 320px; padding: 8px 14px; border: 1px solid hsl(var(--border) / 0.7); border-radius: 10px; background: hsl(var(--card) / 0.62); color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 16px; backdrop-filter: blur(10px); transition: background-color 200ms, border-color 200ms, box-shadow 200ms; } .ds-auth-input::placeholder { color: hsl(var(--muted-foreground) / 0.7); } .ds-auth-input:hover { border-color: hsl(var(--border)); } .ds-auth-input:focus-visible { outline: none; background: hsl(var(--background) / 0.92); border-color: hsl(var(--primary) / 0.55); box-shadow: 0 0 0 3px hsl(var(--primary) / 0.18); }"
+    },
+    {
+      "name": "Auth Mark",
+      "kind": "custom",
+      "description": "The floating 56px tile at the top of every pre-console screen — a gradient light source with a hairline ring and the system's one ambient shadow.",
+      "html": "<div class=\"ds-auth-mark\"><svg viewBox=\"0 0 24 24\" width=\"32\" height=\"32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z\"/><path d=\"m3 7.5 9 4.5 9-4.5\"/><path d=\"M12 12v9\"/></svg></div>",
+      "css": ".ds-auth-mark { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 16px; color: hsl(var(--foreground)); background: linear-gradient(135deg, hsl(var(--primary) / 0.16) 0%, hsl(var(--primary) / 0.06) 52%, hsl(var(--action-blue) / 0.12) 100%); box-shadow: 0 18px 36px -20px hsl(var(--primary) / 0.55), inset 0 1px 0 hsl(var(--foreground) / 0.06); outline: 1px solid hsl(var(--primary) / 0.25); outline-offset: 0; }"
+    },
+    {
+      "name": "Passkey Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The first credential on the vestibule and its single white CTA: full-width 44px primary with a fingerprint glyph; the password submit below it is the outline twin.",
+      "html": "<button class=\"ds-btn-passkey\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4\"/><path d=\"M14 13.12c0 2.38 0 6.38-1 8.88\"/><path d=\"M17.29 21.02c.12-.6.43-2.3.5-3.02\"/><path d=\"M2 12a10 10 0 0 1 18-6\"/><path d=\"M2 16h.01\"/><path d=\"M21.8 16c.2-2 .131-5.354 0-6\"/><path d=\"M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2\"/><path d=\"M8.65 22c.21-.66.45-1.32.57-2\"/><path d=\"M9 6.8a6 6 0 0 1 9 5.2v2\"/></svg>Sign in with a passkey</button>",
+      "css": ".ds-btn-passkey { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 44px; padding: 0 16px; border: 0; border-radius: 10px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 600; letter-spacing: 0.01em; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); transition: background-color 200ms, box-shadow 200ms; } .ds-btn-passkey:hover { background: hsl(var(--primary) / 0.9); } .ds-btn-passkey:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-btn-passkey:active { transform: scale(0.98); }"
+    },
+    {
+      "name": "Card / Panel",
       "kind": "card",
       "refersTo": "card",
-      "description": "Flat raised slate, hairline-edged, shadow-xs at rest; hover tightens the border, never lifts.",
-      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Provider</div><div class=\"ds-card-body\">Anthropic — native adapter, priority 1.</div></div>",
-      "css": ".ds-card { border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--card)); color: hsl(var(--card-foreground)); padding: 16px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); transition: border-color 150ms ease; } .ds-card:hover { border-color: hsl(var(--border) / 0.8); } .ds-card-title { font-family: var(--font-sans); font-size: 18px; font-weight: 600; line-height: 1.375; } .ds-card-body { margin-top: 6px; font-family: var(--font-sans); font-size: 14px; color: hsl(var(--muted-foreground)); line-height: 1.5; }"
+      "description": "The panel recipe — border-first, no shadow at rest; used by settings, security, and log-detail surfaces.",
+      "html": "<section class=\"ds-panel\"><h2 class=\"ds-panel-title\">Passkeys</h2><p class=\"ds-panel-desc\">Sign in without a password on this device.</p><dl class=\"ds-panel-rows\"><div class=\"ds-panel-row\"><dt>Last used</dt><dd>2 hours ago</dd></div><div class=\"ds-panel-row\"><dt>Devices</dt><dd>3</dd></div></dl></section>",
+      "css": ".ds-panel { max-width: 380px; padding: 20px; border: 1px solid hsl(var(--border) / 0.6); border-radius: 16px; background: hsl(var(--card)); color: hsl(var(--foreground)); font-family: var(--font-sans); } .ds-panel-title { margin: 0; font-size: 16px; font-weight: 500; } .ds-panel-desc { margin: 4px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; } .ds-panel-rows { margin: 16px 0 0; display: flex; flex-direction: column; } .ds-panel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid hsl(var(--border) / 0.5); font-size: 14px; } .ds-panel-row:first-child { border-top: 0; } .ds-panel-row dt { color: hsl(var(--muted-foreground)); } .ds-panel-row dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; }"
     },
     {
       "name": "Status Badge",
       "kind": "chip",
       "refersTo": "badge-status",
-      "description": "Signature labeled chip — color is redundant; the text label and role=status are the signal. Shown in the HTTP GET variant.",
-      "html": "<span class=\"ds-badge-status\" role=\"status\">GET</span>",
-      "css": ".ds-badge-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid hsl(var(--action-blue) / 0.3); border-radius: 9999px; background: hsl(var(--action-blue) / 0.15); color: hsl(var(--action-blue)); font-family: var(--font-sans); font-size: 12px; font-weight: 500; line-height: 1.25; white-space: nowrap; }"
+      "description": "A labeled chip, not a swatch: full pill, /15 tint, /30 border, and a text label as the primary signal.",
+      "html": "<span class=\"ds-badge-status\" role=\"status\">Success</span><span class=\"ds-badge-http\" role=\"status\">POST</span>",
+      "css": ".ds-badge-status, .ds-badge-http { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; border: 1px solid; font-family: var(--font-sans); font-size: 12px; font-weight: 500; white-space: nowrap; } .ds-badge-status { background: hsl(var(--status-success) / 0.15); border-color: hsl(var(--status-success) / 0.3); color: hsl(var(--status-success)); } .ds-badge-http { background: hsl(var(--http-post) / 0.15); border-color: hsl(var(--http-post) / 0.25); color: hsl(var(--http-post)); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }"
     },
     {
       "name": "Nav Item",
       "kind": "nav",
       "refersTo": "nav-item",
-      "description": "Sidebar nav item in its active state — a 2px gradient indicator line is the one colored >1px stripe in the system.",
-      "html": "<a class=\"ds-nav-item ds-nav-item-active\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 12h4l3 8 4-16 3 8h4\"/></svg>Providers</a>",
-      "css": ".ds-nav-item { position: relative; display: flex; align-items: center; gap: 12px; min-height: 44px; min-width: 44px; padding: 10px 12px; border-radius: 12px; background: transparent; color: hsl(var(--sidebar-foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 500; text-decoration: none; transition: background-color 200ms cubic-bezier(0.16,1,0.3,1); } .ds-nav-item:hover { background: hsl(var(--sidebar-accent) / 0.7); } .ds-nav-item svg { width: 16px; height: 16px; flex-shrink: 0; } .ds-nav-item-active { background: hsl(var(--sidebar-accent) / 0.95); } .ds-nav-item-active::before { content: \"\"; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; border-radius: 0 9999px 9999px 0; background: linear-gradient(to bottom, hsl(var(--sidebar-primary)), hsl(var(--sidebar-primary) / 0.6)); } .ds-nav-item-active svg { transform: scale(1.1); }"
+      "description": "A quiet rail item; the active one is a filled --sidebar-accent step plus aria-current, never a stripe.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item\" href=\"#\">Dashboard</a><a class=\"ds-nav-item ds-nav-item-active\" href=\"#\" aria-current=\"page\">Providers</a><a class=\"ds-nav-item\" href=\"#\">Logs</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 208px; padding: 8px; border-radius: 12px; background: hsl(var(--sidebar)); border: 1px solid hsl(var(--sidebar-border)); font-family: var(--font-sans); } .ds-nav-item { display: flex; align-items: center; gap: 8px; height: 32px; padding: 8px; border-radius: 10px; color: hsl(var(--sidebar-foreground)); font-size: 14px; text-decoration: none; transition: background-color 150ms, color 150ms; } .ds-nav-item:hover { background: hsl(var(--sidebar-accent)); color: hsl(var(--sidebar-accent-foreground)); } .ds-nav-item:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--sidebar-ring) / 0.6); } .ds-nav-item-active { background: hsl(var(--sidebar-accent)); color: hsl(var(--sidebar-accent-foreground)); font-weight: 500; }"
     },
     {
       "name": "Color-Tinted Icon Container",
       "kind": "custom",
-      "refersTo": "icon-container",
-      "description": "Signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen. Primary variant shown.",
-      "html": "<div class=\"ds-icon-container ds-icon-primary\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/></svg></div>",
-      "css": ".ds-icon-container { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 10px; border-radius: 16px; } .ds-icon-primary { background: linear-gradient(135deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.1), hsl(var(--primary) / 0.05)); box-shadow: inset 0 1px 0 hsl(var(--primary) / 0.26), 0 0 0 1px hsl(var(--primary) / 0.3); } .ds-icon-container svg { width: 18px; height: 18px; color: hsl(var(--foreground)); }"
+      "description": "The signature tile beside a page title: a diagonal primary→azure wash, a hairline ring, and a top sheen.",
+      "html": "<div class=\"ds-icon-container\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"6\" rx=\"2\"/><rect x=\"3\" y=\"14\" width=\"18\" height=\"6\" rx=\"2\"/></svg></div>",
+      "css": ".ds-icon-container { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 10px; border-radius: 16px; color: hsl(var(--primary)); background: linear-gradient(to bottom right, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.1) 50%, hsl(var(--action-blue) / 0.12)); box-shadow: inset 0 1px 0 hsl(var(--primary) / 0.26); outline: 1px solid hsl(var(--primary) / 0.3); }"
     },
     {
       "name": "Range Slider",
       "kind": "custom",
-      "refersTo": "range-thumb",
-      "description": "Signature control for Smart Routing mode-weight sliders — thumb scales on hover, neutralized under reduced motion.",
-      "html": "<input class=\"ds-range\" type=\"range\" min=\"0\" max=\"100\" value=\"60\" />",
-      "css": ".ds-range { appearance: none; -webkit-appearance: none; width: 100%; height: 8px; border-radius: 9999px; background: hsl(var(--muted)); } .ds-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border: 2px solid hsl(var(--background)); border-radius: 9999px; background: hsl(var(--primary)); box-shadow: 0 1px 2px rgba(0,0,0,0.25); cursor: pointer; transition: transform 150ms ease; } .ds-range::-webkit-slider-thumb:hover { transform: scale(1.12); } .ds-range::-webkit-slider-thumb:active { transform: scale(0.96); } .ds-range::-webkit-slider-thumb:focus-visible { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)); outline: none; } .ds-range::-moz-range-thumb { width: 16px; height: 16px; border: 2px solid hsl(var(--background)); border-radius: 9999px; background: hsl(var(--primary)); cursor: pointer; transition: transform 150ms ease; } @media (prefers-reduced-motion: reduce) { .ds-range::-webkit-slider-thumb, .ds-range::-moz-range-thumb { transition: none; } .ds-range::-webkit-slider-thumb:hover, .ds-range::-webkit-slider-thumb:active, .ds-range::-moz-range-thumb:hover, .ds-range::-moz-range-thumb:active { transform: none; } }"
+      "description": "The Smart Routing weight control: muted track, primary thumb ringed in the page color, a 1.12 hover scale.",
+      "html": "<input class=\"ds-range\" type=\"range\" min=\"0\" max=\"100\" value=\"62\" aria-label=\"Mode weight\" />",
+      "css": ".ds-range { -webkit-appearance: none; appearance: none; width: 240px; height: 16px; background: transparent; accent-color: hsl(var(--primary)); cursor: pointer; } .ds-range::-webkit-slider-runnable-track { height: 8px; border-radius: 9999px; background: hsl(var(--muted)); } .ds-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -4px; border-radius: 9999px; border: 2px solid hsl(var(--background)); background: hsl(var(--primary)); box-shadow: 0 1px 2px hsl(var(--primary) / 0.4); transition: transform 150ms ease; } .ds-range:hover::-webkit-slider-thumb { transform: scale(1.12); } .ds-range:active::-webkit-slider-thumb { transform: scale(0.96); } .ds-range:focus-visible { outline: none; } .ds-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring)); }"
     },
     {
       "name": "Code Block",
       "kind": "custom",
       "refersTo": "code-block",
-      "description": "Quiet progressive-gray code surface — rounded-xl wrapper with a header bar one step lighter; JSON syntax renders structure at low chroma.",
-      "html": "<div class=\"ds-code-block\"><div class=\"ds-code-block-header\"><span>json</span></div><pre class=\"ds-code-block-pre\"><code><span class=\"ds-code-key\">\"model\"</span>: <span class=\"ds-code-string\">\"anthropic\"</span></code></pre></div>",
-      "css": ".ds-code-block { border: 1px solid hsl(var(--code-border)); border-radius: 16px; background: hsl(var(--code-bg)); font-family: var(--font-mono); overflow: hidden; } .ds-code-block-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid hsl(var(--code-border)); background: hsl(var(--code-header-bg)); color: hsl(var(--muted-foreground)); font-family: var(--font-sans); font-size: 12px; } .ds-code-block-pre { margin: 0; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.625; color: hsl(var(--foreground) / 0.9); } .ds-code-key { color: hsl(var(--json-key)); font-weight: 500; } .ds-code-string { color: hsl(var(--json-string)); }"
+      "description": "A quiet progressive-gray surface: header bar one step lighter than the body, mono at 13px, copy affordance right.",
+      "html": "<div class=\"ds-code\"><div class=\"ds-code-header\"><span>json</span><button class=\"ds-code-copy\" type=\"button\">Copy</button></div><pre class=\"ds-code-pre\">{\n  \"provider\": \"anthropic\",\n  \"tokens\": 1284\n}</pre></div>",
+      "css": ".ds-code { width: 360px; border-radius: 16px; background: hsl(var(--code-bg)); border: 1px solid hsl(var(--code-border)); overflow: hidden; font-family: var(--font-mono); } .ds-code-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: hsl(var(--code-header-bg)); border-bottom: 1px solid hsl(var(--code-border)); color: hsl(var(--muted-foreground)); font-family: var(--font-sans); font-size: 12px; } .ds-code-copy { border: 0; background: transparent; color: hsl(var(--muted-foreground)); font-family: inherit; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 8px; } .ds-code-copy:hover { background: hsl(var(--accent) / 0.7); color: hsl(var(--foreground)); } .ds-code-pre { margin: 0; padding: 16px; color: hsl(var(--foreground) / 0.9); font-size: 13px; line-height: 1.6; }"
+    },
+    {
+      "name": "Step-Up Dialog",
+      "kind": "custom",
+      "description": "Reauthentication without leaving the page: a panel lifted off the console, passkey on the left, password submit on the right.",
+      "html": "<div class=\"ds-dialog\"><div class=\"ds-dialog-backdrop\"></div><div class=\"ds-dialog-panel\" role=\"dialog\" aria-modal=\"true\"><h2 class=\"ds-dialog-title\">Confirm it is you</h2><p class=\"ds-dialog-desc\">Changing security settings needs a fresh check.</p><label class=\"ds-dialog-label\" for=\"ds-dialog-pw\">Password</label><input id=\"ds-dialog-pw\" class=\"ds-dialog-input\" type=\"password\" /> <div class=\"ds-dialog-footer\"><button class=\"ds-dialog-outline\" type=\"button\">Use a passkey</button><button class=\"ds-dialog-primary\" type=\"button\">Verify</button></div></div></div>",
+      "css": ".ds-dialog { position: relative; display: flex; align-items: center; justify-content: center; width: 460px; height: 280px; } .ds-dialog-backdrop { position: absolute; inset: 0; border-radius: 16px; background: hsl(var(--overlay) / 0.8); } .ds-dialog-panel { position: relative; width: 340px; padding: 20px; border: 1px solid hsl(var(--border)); border-radius: 16px; background: hsl(var(--card)); color: hsl(var(--foreground)); font-family: var(--font-sans); box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.45); } .ds-dialog-title { margin: 0; font-size: 16px; font-weight: 600; } .ds-dialog-desc { margin: 6px 0 12px; color: hsl(var(--muted-foreground)); font-size: 14px; } .ds-dialog-label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 500; } .ds-dialog-input { width: 100%; height: 40px; padding: 8px 14px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: inherit; font-size: 14px; } .ds-dialog-input:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; } .ds-dialog-outline, .ds-dialog-primary { height: 40px; padding: 0 16px; border-radius: 10px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; } .ds-dialog-outline { border: 1px solid hsl(var(--border) / 0.8); background: hsl(var(--background) / 0.8); color: hsl(var(--foreground)); } .ds-dialog-outline:hover { border-color: hsl(var(--primary) / 0.35); background: hsl(var(--accent) / 0.7); } .ds-dialog-primary { border: 0; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); } .ds-dialog-primary:hover { background: hsl(var(--primary) / 0.9); }"
     }
   ],
   "narrative": {
     "northStar": "The Operator's Console",
-    "overview": "LLM Proxy's admin UI is an infrastructure instrument panel — a dark, monochrome console an operator reads mid-incident and trusts on the first glance. It pairs the discipline of editorial typography (Space Grotesk display, Manrope body, IBM Plex Mono for every number and code value) with the restraint of a telemetry surface: tonal layering, hairline borders, and ambient glow in place of ornament. The operator is technical, time-pressed, and often a stranger deploying the proxy for the first time, so the system earns trust through precision, not decoration.\n\nThe palette is monochrome editorial — deep cool-neutral voids in dark mode, crisp near-white in light mode — with a barely-perceptible hue tinting system reserved for semantic differentiation only: HTTP methods, status, and action types. Saturation is deliberately low; color never decorates, it disambiguates. The atmosphere is built from two fixed layers behind every screen: a trio of soft radial foreground-glints and a faint 42px grid masked toward the viewport center — present enough to read as a designed surface, quiet enough never to compete with data.\n\nThis system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand warm-neutral bodies, gradient-text headlines, identical icon-card grids, big-number hero-metric templates), loud SaaS gradients, playful/consumer affordances, and circa-2008 enterprise chrome. It is dark-first: dark mode is the primary experience and the canonical reference for every token; light mode is a complete, first-class translation, not an afterthought.",
+    "overview": "LLM Proxy's admin UI is an infrastructure instrument panel — a dark, monochrome console an operator reads mid-incident and trusts on the first glance. It pairs the discipline of editorial typography (Space Grotesk display, Manrope body, IBM Plex Mono for every number and code value) with the restraint of a telemetry surface: tonal layering, hairline borders, and ambient glow in place of ornament. The operator is technical, time-pressed, and often a stranger deploying the proxy for the first time, so the system earns trust through precision, not decoration.\n\nThe palette is monochrome editorial — deep cool-neutral voids in dark mode, crisp near-white in light mode — with a barely-perceptible hue tinting system reserved for semantic differentiation only: HTTP methods, status, and action types. Saturation is deliberately low; color never decorates, it disambiguates. The atmosphere is built from two fixed layers behind every screen: a trio of soft radial foreground-glints and a faint 42px grid masked toward the viewport center — present enough to read as a designed surface, quiet enough never to compete with data.\n\nThis system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand warm-neutral bodies, gradient-text headlines, identical icon-card grids, big-number hero-metric templates), loud SaaS gradients, playful/consumer affordances, and circa-2008 enterprise chrome. It is **dark-first**: dark mode is the primary experience and the canonical reference for every token below; light mode is a complete, first-class translation, not an afterthought.",
     "keyCharacteristics": [
       "Dark-first monochrome with cool-neutral (220°) undertones; light mode is a crisp mirror.",
       "Editorial type pairing: geometric Space Grotesk display + humanist Manrope body + IBM Plex Mono for data.",
       "Flat-by-default surfaces; depth via tonal background steps + 1px hairline borders, never structural drop shadows.",
       "Low-saturation semantic tints (violet/blue/amber/rose/teal + status + syntax) — always paired with text or icon, never color-only.",
-      "Motion is exponential ease-out (cubic-bezier(0.16, 1, 0.3, 1)), 150–500ms, GPU-only, and globally neutralized under prefers-reduced-motion.",
-      "Tabular-numeric monospace for every metric, token count, cost, and timestamp."
+      "Motion is exponential ease-out (`cubic-bezier(0.16, 1, 0.3, 1)`), 150–500ms, GPU-only, and globally neutralized under `prefers-reduced-motion`.",
+      "Tabular-numeric monospace for every metric, token count, cost, and timestamp.",
+      "Three structural grammars, chosen by task: the flush console (management tables), stacked hairline panels (settings and security forms), and the containerless vestibule (auth).",
+      "The 11px tracked uppercase label is a **label rail** — an in-panel micro-heading — never a page-section kicker."
     ],
     "rules": [
-      { "name": "The Monochrome-First Rule",        "body": "Black, white, and the cool-neutral slate ramp carry 90%+ of any screen. Action/status tints are permitted only on badges, icon containers, metric values, and hover glows — never as section backgrounds, button colors (except destructive), or large fills.", "section": "colors" },
-      { "name": "The Tint, Not the Hue Rule",       "body": "Status and HTTP colors render at low alpha (/15 background, /25–30 border) with the full token as text. The badge is a labeled chip, not a swatch; the text label and role=status are the primary signal.", "section": "colors" },
-      { "name": "The Cool-Neutral Undertone Rule",  "body": "Every neutral token carries hue 220° at very low chroma (3–14%). Never introduce a true-gray (0 0%) or warm-neutral (hue 30–100) — both break the cool-console atmosphere.", "section": "colors" },
-      { "name": "The Quiet Syntax Rule",           "body": "The JSON and code palettes differentiate structure at low chroma for scanning — and only on code surfaces (JSON viewers, highlighted snippets, code blocks). Never reuse syntax tokens for badges, chart series, or fills; a rainbow syntax theme is a defect, not a feature.", "section": "colors" },
-      { "name": "The Three Voices Rule",            "body": "Space Grotesk + Manrope + IBM Plex Mono is the whole system. Never introduce a fourth family. A number or code value set in Manrope is a defect.", "section": "typography" },
-      { "name": "The Mono-Data Rule",               "body": "Every numeric value — tokens, cost, latency, counts, timestamps, status codes, HTTP methods — is set in IBM Plex Mono with tabular-nums.", "section": "typography" },
-      { "name": "The Display Restraint Rule",       "body": "Display weight is 600 in-app, sizes cap at text-2xl (1.5rem) for page titles, and emphasis comes from weight + size in a single solid color — never from background-clip: text or a gradient.", "section": "typography" },
-      { "name": "The One-Console Rule",             "body": "Management pages are one seamless surface — sticky header, flush toolbar, scrollable body — separated only by border-b/60 hairlines. Never wrap a console table in an outer Card.", "section": "layout" },
-      { "name": "The Page-Header Anchor Rule",      "body": "Every route opens with exactly one page-header (tinted icon container + brand-heading title + muted description + actions).", "section": "layout" },
-      { "name": "The Flat-By-Default Rule",         "body": "Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained section-card / auth-mark exceptions. Never pair a 1px border with a 16px+ blur drop shadow on the same element.", "section": "elevation" },
-      { "name": "The Tonal-Step Rule",              "body": "When separating two surfaces, step the background token (background → card → muted) before reaching for a shadow. A 1px border hairline plus a tonal step is the default depth recipe.", "section": "elevation" },
-      { "name": "The Radius Cap Rule",              "body": "Cards and panels cap at rounded-xl (16px). Save full-pill for tags and status chips, rounded-lg (12px) for nav items. No 24/28/32/40px card radii, no pill buttons.", "section": "shapes" },
-      { "name": "The One 2px Stripe Rule",          "body": "The only colored >1px stripe in the system is the 2px active-nav gradient indicator. Never use a colored border-left/right accent stripe on cards, list items, or alerts.", "section": "shapes" }
+      {
+        "name": "The Monochrome-First Rule",
+        "body": "Black, white, and the cool-neutral slate ramp carry 90%+ of any screen. The action/status tints are permitted only on badges, icon containers, metric values, and hover glows — never as section backgrounds, never as button colors (except `destructive`), never as large fills. If a screen reads as \"colorful,\" it has failed this rule.",
+        "section": "Colors"
+      },
+      {
+        "name": "The Tint, Not the Hue Rule",
+        "body": "Status and HTTP colors render at low alpha (`/15` background, `/25–30` border) with the full token as text. The badge is a labeled chip, not a swatch. Color is redundant information; the text label and `role=\"status\"` are the primary signal.",
+        "section": "Colors"
+      },
+      {
+        "name": "The Cool-Neutral Undertone Rule",
+        "body": "Every neutral token carries hue 220° at very low chroma (3–14%). Never introduce a true-gray (`0 0%`) neutral or a warm-neutral (`hue 30–100`) — both break the cool-console atmosphere and edge toward the cream/SaaS default this system rejects.",
+        "section": "Colors"
+      },
+      {
+        "name": "The Quiet Syntax Rule",
+        "body": "The JSON and code palettes differentiate structure at low chroma for scanning — and only on code surfaces (JSON viewers, highlighted snippets, code blocks). Never reuse syntax tokens for badges, chart series, or fills; a rainbow syntax theme is a defect, not a feature.",
+        "section": "Colors"
+      },
+      {
+        "name": "The Three Voices Rule",
+        "body": "Space Grotesk + Manrope + IBM Plex Mono is the whole system. Never introduce a fourth family. A number or code value set in Manrope is a defect, not a stylistic choice.",
+        "section": "Typography"
+      },
+      {
+        "name": "The Mono-Data Rule",
+        "body": "Every numeric value — tokens, cost, latency, counts, timestamps, status codes, HTTP methods — is set in IBM Plex Mono with `tabular-nums`. Use `.text-data` inline and `.text-metric` for large stats.",
+        "section": "Typography"
+      },
+      {
+        "name": "The Display Restraint Rule",
+        "body": "Display weight is 600 in-app, sizes cap at `text-2xl` (1.5rem) for page titles, and emphasis comes from weight + size in a single solid color — never from `background-clip: text` or a gradient.",
+        "section": "Typography"
+      },
+      {
+        "name": "The Label-Rail Rule",
+        "body": "The 11px tracked uppercase label is a *rail*, not a *kicker*: it may sit **inside** a panel to name the value beneath it (spec-sheet cells, log-detail headings, segmented toggles, nav groups), and it never sits **above** a page or a page section to introduce content. If deleting it would leave the heading unable to say what follows, it was a kicker and does not belong.",
+        "section": "Typography"
+      },
+      {
+        "name": "The One-Console Rule",
+        "body": "Management pages are one seamless surface — sticky header, flush toolbar, scrollable body — separated only by `border-b/60` hairlines. Never wrap a console table in an outer Card; never compete with the table's own thead.",
+        "section": "Layout"
+      },
+      {
+        "name": "The Page-Header Anchor Rule",
+        "body": "Every route opens with exactly one `.page-header` (tinted icon container + `.brand-heading` title + muted description + actions). It is the consistent entry point a stranger trusts cold.",
+        "section": "Layout"
+      },
+      {
+        "name": "The Task-Shape Rule",
+        "body": "Structure follows the task, not the page: management tables are one flush console; settings and security are stacked hairline panels; auth is containerless. Three grammars, one per task shape — never two on one screen.",
+        "section": "Layout"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained auth-mark exception. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.",
+        "section": "Elevation & Depth"
+      },
+      {
+        "name": "The Tonal-Step Rule",
+        "body": "When you need to separate two surfaces, step the background token (`--background` → `--card` → `--muted`) before reaching for a shadow. A 1px `--border` hairline plus a tonal step is the default depth recipe.",
+        "section": "Elevation & Depth"
+      },
+      {
+        "name": "The Radius Cap Rule",
+        "body": "Cards and panels cap at `rounded-xl` (16px). Save full-pill for tags and status chips; `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii, no pill buttons.",
+        "section": "Shapes"
+      },
+      {
+        "name": "The No-Stripe Rule",
+        "body": "A colored >1px stripe never marks state anywhere in the system — active nav items are a filled `--sidebar-accent` step plus `font-medium`, and the only >1px rules are the neutral 2px console header bottom rules. Never use a colored `border-left/right` accent stripe on cards, list items, or alerts.",
+        "section": "Shapes"
+      }
     ],
     "dos": [
-      "Do set every numeric value — tokens, cost, latency, counts, timestamps, status codes — in IBM Plex Mono with tabular-nums (.text-data inline, .text-metric for large stats).",
-      "Do convey depth with tonal background steps (--card over --background, --muted/5 page tint) and 1px --border hairlines; reserve shadow for shadow-xs at rest and ambient glow on hover.",
-      "Do render status and HTTP semantics as labeled StatusBadge chips at /15 tint + /25–30 border, with role=status and a text label as the primary signal.",
-      "Do use the config-page-reveal entrance on every page and the stagger-children / row-stagger cascades on first render — and let the global prefers-reduced-motion rule neutralize them.",
-      "Do keep display tracking at -0.02em (floor -0.04em), display weight 600 in-app, and page titles at text-xl sm:text-2xl.",
-      "Do hit WCAG AA on both themes: tune --muted-foreground for readability, never lighten muted text for elegance, and bump dark-mode body line-height to 1.55–1.6.",
-      "Do keep touch targets ≥44px (min-h-11 min-w-11) on nav and mobile controls.",
-      "Do render JSON and code with the syntax palette on code surfaces only — subtle chroma that reads as structure, never a rainbow theme."
+      "Do set every numeric value — tokens, cost, latency, counts, timestamps, status codes — in IBM Plex Mono with `tabular-nums` (`.text-data` inline, `.text-metric` for large stats).",
+      "Do convey depth with tonal background steps (`--card` over `--background`, `--muted/5` page tint) and 1px `--border` hairlines; reserve shadow for `shadow-xs` at rest and ambient glow on hover.",
+      "Do render status and HTTP semantics as labeled `StatusBadge` chips at `/15` tint + `/25–30` border, with `role=\"status\"` and a text label as the primary signal.",
+      "Do use the `config-page-reveal` entrance on every page and the `stagger-fast` / `row-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.",
+      "Do keep display tracking at −0.02em (floor −0.04em), display weight 600 in-app, and page titles at `text-xl sm:text-2xl`.",
+      "Do hit WCAG AA on both themes: tune `--muted-foreground` for readability, never lighten muted text \"for elegance,\" and bump dark-mode body line-height to 1.55–1.6.",
+      "Do keep touch targets ≥44px (`min-h-11 min-w-11`) on nav, mobile controls, and the `max-sm` floor the button and input components apply to themselves.",
+      "Do render JSON and code with the syntax palette on code surfaces only — subtle chroma that reads as structure, never a rainbow theme.",
+      "Do build every pre-console screen through `AuthShell` and leave it containerless: one centered `max-w-sm` column, a 56px `auth-mark`, 44px glass fields, and exactly one white CTA — the passkey button when the account has one, the password submit otherwise.",
+      "Do pick the structural grammar by task — flush console for management tables, stacked hairline panels for settings and security, containerless for auth — and never mix two on one screen.",
+      "Do use the label rail *inside* a panel to name the value beneath it, and let a page heading stand without one."
     ],
     "donts": [
-      "Don't make it playful/consumer — no cute illustrations, mascots, gamification, or celebratory confetti. This is infrastructure. (PRODUCT.md anti-reference.)",
-      "Don't ship boring/outdated admin panels — no dense gray-on-gray tables, no circa-2008 enterprise chrome, no cluttered everything-on-one-screen dashboards. (PRODUCT.md anti-reference.)",
-      "Don't use loud color accents — no saturated SaaS gradients, no neon, no rainbow status badges. Color is a subtle low-saturation tinting system for semantic differentiation, never decoration. (PRODUCT.md anti-reference.)",
-      "Don't ship the generic 2026 AI-tool aesthetic — no cream/sand warm-neutral body backgrounds, no gradient-text headlines, no identical icon+heading+text card grids, no big-number hero-metric template. This is monochrome editorial, not warm SaaS. (PRODUCT.md anti-reference.)",
-      "Don't pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern). Pick a tonal step or shadow-xs, never a wide decorative shadow.",
-      "Don't over-round — cards and panels cap at rounded-xl (16px); save full-pill for tags and status chips, rounded-lg (12px) for nav items. No 24/28/32/40px card radii.",
-      "Don't use border-left/border-right greater than 1px as a colored accent stripe on cards, list items, or alerts. The 2px active nav indicator is the one exception, and it is a dedicated active-state affordance, not decoration.",
-      "Don't use glassmorphism decoratively. backdrop-blur-sm appears only on outline buttons, inputs, and the login-screen auth-input/auth-mark — a deliberate, constrained set, never a default card treatment.",
-      "Don't use background-clip: text with a gradient. Display emphasis comes from weight and size, in a single solid color.",
-      "Don't put a tiny uppercase tracked eyebrow above every page section. The tracked eyebrow is reserved for the three nav section groups only.",
+      "Don't make it playful/consumer — no cute illustrations, mascots, gamification, or celebratory confetti. This is infrastructure. *(PRODUCT.md anti-reference.)*",
+      "Don't ship boring/outdated admin panels — no dense gray-on-gray tables, no circa-2008 enterprise chrome, no cluttered \"everything on one screen\" dashboards. *(PRODUCT.md anti-reference.)*",
+      "Don't use loud color accents — no saturated SaaS gradients, no neon, no rainbow status badges. Color is a subtle low-saturation tinting system for semantic differentiation, never decoration. *(PRODUCT.md anti-reference.)*",
+      "Don't ship the generic 2026 AI-tool aesthetic — no cream/sand warm-neutral body backgrounds, no gradient-text headlines, no identical icon+heading+text card grids, no big-number hero-metric template. This is monochrome editorial, not warm SaaS. *(PRODUCT.md anti-reference.)*",
+      "Don't pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern). Pick a tonal step or `shadow-xs`, never a wide decorative shadow.",
+      "Don't over-round — cards and panels cap at `rounded-xl` (16px); save full-pill for tags and status chips, `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii.",
+      "Don't use `border-left`/`border-right` greater than 1px as a colored accent stripe on cards, list items, or alerts. State is a tonal step, never a stripe.",
+      "Don't use glassmorphism decoratively. `backdrop-blur` appears only on `outline` buttons, inputs, and the vestibule's `auth-input` — three constrained sets, never a default card treatment. (`auth-mark` carries a gradient and a shadow, not a blur.)",
+      "Don't use `background-clip: text` with a gradient. Display emphasis comes from weight and size, in a single solid color.",
+      "Don't put a tiny uppercase tracked eyebrow above a page or a page section. The label rail belongs inside a panel, above the value it names; a kicker above a heading is the pattern this system does not use.",
       "Don't set a metric or number in Manrope, or introduce a fourth type family. Space Grotesk + Manrope + IBM Plex Mono is the whole system.",
-      "Don't introduce true-gray (0 0%) or warm-neutral (hue 30–100) tokens. Every neutral carries the 220° cool undertone.",
-      "Don't animate layout properties. Motion is transform/opacity only, exponential ease-out (cubic-bezier(0.16, 1, 0.3, 1)), 150–500ms, with a reduced-motion alternative on every animation.",
-      "Don't reuse the JSON/code syntax tokens outside code surfaces — no rainbow syntax themes, no syntax-colored badges or chart series."
+      "Don't introduce true-gray (`0 0%`) or warm-neutral (`hue 30–100`) tokens. Every neutral carries the 220° cool undertone.",
+      "Don't reuse the JSON/code syntax tokens outside code surfaces — no rainbow syntax themes, no syntax-colored badges or chart series.",
+      "Don't animate layout properties. Motion is `transform`/`opacity` only, exponential ease-out (`cubic-bezier(0.16, 1, 0.3, 1)`), 150–500ms, with a reduced-motion alternative on every animation.",
+      "Don't wrap an auth form in a card, panel, or bordered container. The vestibule has no chrome — a card there turns a threshold into an object on a page.",
+      "Don't wrap a flush console table in an outer card, and don't give a stacked settings panel the console's sticky header bar. Each grammar is complete on its own."
     ]
   }
 }

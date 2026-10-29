@@ -1,19 +1,27 @@
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { meApi } from "@/services/api/me";
-import { HttpError } from "@/services/http";
 import { getErrorMessage } from "@/utils/error";
 import { passwordRequirementsText, validatePasswordStrength } from "@/utils/password";
+
+interface ChangePasswordOptions {
+  /**
+   * Whether the account has a password to prove before setting a new one.
+   * Passwordless (passkey/OIDC) accounts cannot: the backend accepts a null
+   * current password and asks for a recent step-up instead. Defaults to true.
+   */
+  requireCurrentPassword?: () => boolean;
+}
 
 /**
  * Shared state and submit flow for the change-password form.
  *
- * Used by the sidebar change-password dialog and the forced-password-change
- * page so validation, error mapping, and the API call are defined once. The
- * caller decides what happens on success (close the dialog / end the
- * session and redirect); the form only reports whether the change landed.
+ * Used by the account-security password panel and the forced-password-change
+ * screen so validation, error mapping, and the API call are defined once. The
+ * caller decides what happens on success (end the session and redirect); the
+ * form only reports whether the change landed.
  */
-export function useChangePassword() {
+export function useChangePassword(options: ChangePasswordOptions = {}) {
   const { t } = useI18n();
 
   const currentPassword = ref("");
@@ -22,6 +30,8 @@ export function useChangePassword() {
   const error = ref("");
   const loading = ref(false);
   const passwordHint = passwordRequirementsText();
+
+  const requiresCurrentPassword = () => options.requireCurrentPassword?.() ?? true;
 
   function reset() {
     currentPassword.value = "";
@@ -34,7 +44,11 @@ export function useChangePassword() {
   async function submit(): Promise<boolean> {
     if (loading.value) return false;
 
-    if (!currentPassword.value) {
+    // Resolve once: a passwordless account can gain a password while the form
+    // is open, and validation and submission must agree on which mode ran.
+    const needsCurrentPassword = requiresCurrentPassword();
+
+    if (needsCurrentPassword && !currentPassword.value) {
       error.value = t("profile.passwordRequired");
       return false;
     }
@@ -55,15 +69,13 @@ export function useChangePassword() {
     error.value = "";
     loading.value = true;
     try {
-      await meApi.changePassword(currentPassword.value, newPassword.value);
+      await meApi.changePassword(
+        needsCurrentPassword ? currentPassword.value : null,
+        newPassword.value
+      );
       return true;
     } catch (e: unknown) {
-      // The backend rejects a wrong current password with 401.
-      if (e instanceof HttpError && (e.status === 401 || e.status === 403)) {
-        error.value = t("profile.wrongPassword");
-      } else {
-        error.value = getErrorMessage(e) || t("errors.saveFailed");
-      }
+      error.value = getErrorMessage(e) || t("errors.saveFailed");
       return false;
     } finally {
       loading.value = false;

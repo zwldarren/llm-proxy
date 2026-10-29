@@ -23,6 +23,33 @@ const router = createRouter({
       component: () => import("@/views/SetupView.vue"),
     },
     {
+      path: "/invite/:token",
+      name: "invite",
+      component: () => import("@/views/InviteAcceptView.vue"),
+    },
+    {
+      path: "/oauth/complete",
+      name: "oauthComplete",
+      component: () => import("@/views/OAuthCompleteView.vue"),
+    },
+    {
+      path: "/verify-email",
+      name: "verifyEmail",
+      component: () => import("@/views/VerifyEmailView.vue"),
+    },
+    {
+      // Where the emailed reset link lands. The token in the query string is
+      // the credential, so the route must stay reachable while signed out.
+      path: "/reset-password",
+      name: "resetPassword",
+      component: () => import("@/views/ResetPasswordView.vue"),
+    },
+    {
+      path: "/forgot-password",
+      name: "forgotPassword",
+      component: () => import("@/views/ForgotPasswordView.vue"),
+    },
+    {
       // Forced password change: reachable only while authenticated with the
       // `mustChangePassword` flag set; the guard funnels all other
       // authenticated navigation here until the password is replaced.
@@ -80,6 +107,12 @@ const router = createRouter({
       component: () => import("@/views/config/SettingsView.vue"),
       meta: { requiresAuth: true },
     },
+    {
+      path: "/config/console-auth",
+      name: "consoleAuth",
+      component: () => import("@/views/config/ConsoleAuthView.vue"),
+      meta: { requiresAuth: true, adminOnly: true },
+    },
 
     {
       path: "/config/api-keys",
@@ -99,6 +132,23 @@ const router = createRouter({
       component: () => import("@/views/TeamView.vue"),
       meta: { requiresAuth: true, adminOnly: true },
     },
+    {
+      path: "/account",
+      name: "account",
+      component: () => import("@/views/AccountView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/account/security",
+      name: "security",
+      component: () => import("@/views/SecurityView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      name: "notFound",
+      component: () => import("@/views/NotFoundView.vue"),
+    },
   ],
 });
 
@@ -112,10 +162,21 @@ router.beforeEach(async (to, _from) => {
   // later navigations resolve immediately.
   await authStore.ensureSetupStatus();
 
+  // The status probe failed: the app cannot know whether the first-run setup
+  // screen or the login form is correct. SetupView shows the retry state.
+  if (authStore.setupStatusError && to.name !== "setup") {
+    return { path: "/setup" };
+  }
   // Force the first-run admin setup screen when no admin account exists yet.
   if (authStore.needsSetup === true && to.name !== "setup") {
     return { path: "/setup" };
   }
+  // Resolve the HttpOnly cookie's identity before any auth decision. The probe
+  // is memoized; a login/logout/401 replaces the memoized result.
+  if (authStore.needsSetup === false) {
+    await authStore.ensureSession();
+  }
+
   // Once setup is complete, do not allow revisiting the setup screen.
   if (authStore.needsSetup === false && to.name === "setup") {
     return authStore.isAuthenticated ? "/" : "/login";
@@ -128,13 +189,20 @@ router.beforeEach(async (to, _from) => {
   }
 
   // Forced password change: while the flag is set, every authenticated area
-  // redirects to the dedicated screen until the user sets a new password.
+  // (including /login and unknown paths) redirects to the dedicated screen
+  // until the user sets a new password.
   if (authStore.isAuthenticated && authStore.mustChangePassword) {
-    if (to.name !== "forceChangePassword" && to.meta.requiresAuth) {
+    if (to.name !== "forceChangePassword") {
       return { name: "forceChangePassword" };
     }
   } else if (to.name === "forceChangePassword") {
     // No pending forced change: the screen is not directly visitable.
+    return { path: "/" };
+  }
+
+  // /login is meaningless with a live session; send the operator back to the
+  // console instead of showing a second sign-in form.
+  if (to.name === "login" && authStore.isAuthenticated) {
     return { path: "/" };
   }
 

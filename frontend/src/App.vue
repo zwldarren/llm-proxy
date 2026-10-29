@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onErrorCaptured, ref, watchEffect } from "vue";
 import i18n from "@/i18n";
+import StepUpDialog from "@/components/common/StepUpDialog.vue";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useI18n } from "vue-i18n";
@@ -67,6 +68,7 @@ const handleRetry = () => {
         </KeepAlive>
       </RouterView>
     </div>
+    <StepUpDialog />
     <Toaster position="top-right" :expand="false" />
   </TooltipProvider>
 </template>

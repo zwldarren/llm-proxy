@@ -16,7 +16,22 @@ const { state, pending, error } = useAutoSaveRefs(props.autoSave);
 
 const { t } = useI18n();
 
-const BUCKETS = ["auth.login", "auth.setup", "auth.setup_status"] as const;
+const BUCKETS = [
+  "auth.login",
+  "auth.setup",
+  "auth.setup_status",
+  "auth.capabilities",
+  "auth.mfa",
+  "auth.step_up",
+  "auth.invite_accept",
+  "auth.invite_status",
+  "auth.passkey",
+  "auth.oauth",
+  "auth.email_verify",
+  "auth.password_reset",
+  "auth.password_reset_confirm",
+  "account.sensitive",
+] as const;
 
 const bucketLabels: Record<(typeof BUCKETS)[number], { title: string; description: string }> = {
   "auth.login": {
@@ -31,10 +46,55 @@ const bucketLabels: Record<(typeof BUCKETS)[number], { title: string; descriptio
     title: "rateLimits.setupStatus",
     description: "rateLimits.setupStatusDescription",
   },
+  "auth.capabilities": {
+    title: "rateLimits.capabilities",
+    description: "rateLimits.capabilitiesDescription",
+  },
+  "auth.mfa": {
+    title: "rateLimits.mfa",
+    description: "rateLimits.mfaDescription",
+  },
+  "auth.step_up": {
+    title: "rateLimits.stepUp",
+    description: "rateLimits.stepUpDescription",
+  },
+  "auth.invite_accept": {
+    title: "rateLimits.inviteAccept",
+    description: "rateLimits.inviteAcceptDescription",
+  },
+  "auth.invite_status": {
+    title: "rateLimits.inviteStatus",
+    description: "rateLimits.inviteStatusDescription",
+  },
+  "auth.passkey": {
+    title: "rateLimits.passkey",
+    description: "rateLimits.passkeyDescription",
+  },
+  "auth.oauth": {
+    title: "rateLimits.oauth",
+    description: "rateLimits.oauthDescription",
+  },
+  "auth.email_verify": {
+    title: "rateLimits.emailVerify",
+    description: "rateLimits.emailVerifyDescription",
+  },
+  "auth.password_reset": {
+    title: "rateLimits.passwordReset",
+    description: "rateLimits.passwordResetDescription",
+  },
+  "auth.password_reset_confirm": {
+    title: "rateLimits.passwordResetConfirm",
+    description: "rateLimits.passwordResetConfirmDescription",
+  },
+  "account.sensitive": {
+    title: "rateLimits.accountSensitive",
+    description: "rateLimits.accountSensitiveDescription",
+  },
 };
 
-// Allow 0 as a valid limit value (e.g. "0/minute") to block a bucket entirely.
-const LIMIT_PATTERN = /^\d+\/(second|minute|hour|day|\d+second|\d+minute|\d+hour)$/;
+// The backend rejects zero (it would make every request fail), so the UI must
+// accept exactly what the API accepts: a positive count and a valid period.
+const LIMIT_PATTERN = /^[1-9]\d*\/(second|minute|hour|day|\d+second|\d+minute|\d+hour)$/;
 
 // Local drafts let the user type freely while only valid values are committed
 // to state (and thus persisted). Invalid values are shown in the input but

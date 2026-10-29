@@ -6,6 +6,8 @@ export type TeamBudgetPeriod = "daily" | "weekly" | "monthly";
 export type TeamMember = {
   id: number;
   username: string;
+  email?: string | null;
+  email_verified?: boolean;
   role: TeamRole;
   is_active: boolean;
   // True when the member's password was set by an admin and must be replaced
@@ -85,6 +87,11 @@ export const teamApi = {
       { username }
     ),
 
+  // Set an admin-attested login email (used when SMTP verification is not
+  // configured). The backend marks the address as verified by the admin.
+  setMemberEmail: (userId: number, email: string) =>
+    http.put<TeamMember>(`${BASE_URL}/members/${userId}/email`, { email }),
+
   // Set a member's model allowlist. null = unrestricted, [] = deny all.
   updateMemberModels: (userId: number, allowedModels: string[] | null) =>
     http.put<TeamMember>(`${BASE_URL}/members/${userId}/models`, {
@@ -118,4 +125,13 @@ export const teamApi = {
   // Reset the member's current budget window (spend counts from now).
   resetMemberBudget: (userId: number) =>
     http.post<TeamMember>(`${BASE_URL}/members/${userId}/budget/reset`, {}),
+
+  // Admin recovery: clear the member's TOTP secret and recovery codes.
+  resetMemberTwoFactor: (userId: number) =>
+    http.delete<{ success: boolean }>(`${BASE_URL}/members/${userId}/2fa`),
+
+  // Admin recovery: revoke every passkey. Refused when that would remove the
+  // member's last sign-in factor.
+  revokeMemberPasskeys: (userId: number) =>
+    http.delete<{ success: boolean; removed: number }>(`${BASE_URL}/members/${userId}/passkeys`),
 };

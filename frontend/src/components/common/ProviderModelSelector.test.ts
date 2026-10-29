@@ -1,7 +1,10 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("vue-i18n", () => ({ useI18n: () => ({ t: (k: string) => k }) }));
+vi.mock("vue-i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("vue-i18n")>();
+  return { ...actual, useI18n: () => ({ t: (k: string) => k }) };
+});
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
   return {

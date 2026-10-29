@@ -2,11 +2,14 @@
 import {
   Boxes,
   Check,
+  Fingerprint,
   Gauge,
   KeyRound,
   Loader2,
+  Mail,
   Plus,
   RotateCcw,
+  ShieldCheck,
   Trash2,
   UserCheck,
   UserPen,
@@ -18,8 +21,11 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useAuthStore } from "@/stores/auth";
+import { invitationsApi } from "@/services/api/invitations";
+import type { Invitation } from "@/types/schemas";
 import { useModelStore } from "@/stores/models";
 import { getErrorMessage } from "@/utils/error";
+import { copyToClipboard } from "@/utils/clipboard";
 import { passwordRequirementsText, validatePasswordStrength } from "@/utils/password";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import AccessScopePicker from "@/components/common/AccessScopePicker.vue";
@@ -31,6 +37,7 @@ import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import MemberBudgetCell from "@/components/common/MemberBudgetCell.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import PaginationBar from "@/components/common/PaginationBar.vue";
+import StatusBadge from "@/components/common/StatusBadge.vue";
 import SortableHead from "@/components/common/SortableHead.vue";
 import TableCellActions from "@/components/common/TableCellActions.vue";
 import TableCellName from "@/components/common/TableCellName.vue";
@@ -93,6 +100,52 @@ const createModels = ref<string[] | null>(null);
 const createError = ref<string | null>(null);
 const isCreating = ref(false);
 
+// Invitation dialog
+const showInviteDialog = ref(false);
+const inviteEmail = ref("");
+const inviteRole = ref<TeamRole>("viewer");
+const inviteUrl = ref("");
+const inviteError = ref<string | null>(null);
+const isInviting = ref(false);
+const inviteModels = ref<string[] | null>(null);
+const inviteBudgetUsd = ref<number | string | null>(null);
+const inviteBudgetPeriod = ref<BudgetPeriodChoice>("none");
+const inviteBudgetResetDay = ref(1);
+const invitations = ref<Invitation[]>([]);
+const pendingInvitations = computed(() =>
+  invitations.value.filter((invitation) => invitation.status === "pending")
+);
+// Accepted, revoked and expired rows are history, not actions: keeping them in
+// the same strip is what makes "I already invited this person" answerable
+// without reading the server logs.
+const pastInvitations = computed(() =>
+  invitations.value
+    .filter((invitation) => invitation.status !== "pending")
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+);
+
+const INVITATION_STATUS_VARIANTS = {
+  accepted: "success",
+  revoked: "error",
+  expired: "warning",
+  pending: "unknown",
+} as const;
+
+function invitationStatusVariant(status: Invitation["status"]) {
+  return INVITATION_STATUS_VARIANTS[status];
+}
+
+function formatInvitationDate(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleDateString() : "";
+}
+
+/** The date that explains a non-pending invitation's current state. */
+function invitationResolvedAt(invitation: Invitation): string {
+  if (invitation.status === "accepted") return invitation.accepted_at ?? invitation.created_at;
+  if (invitation.status === "revoked") return invitation.revoked_at ?? invitation.created_at;
+  return invitation.expires_at;
+}
+
 // Reset password dialog
 const showResetDialog = ref(false);
 const resettingMember = ref<TeamMember | null>(null);
@@ -107,6 +160,13 @@ const renamingMember = ref<TeamMember | null>(null);
 const renameUsername = ref("");
 const renameError = ref<string | null>(null);
 const isRenaming = ref(false);
+
+// Admin-attested login email (no-SMTP deployments)
+const showEmailDialog = ref(false);
+const emailMember = ref<TeamMember | null>(null);
+const emailAddress = ref("");
+const emailError = ref<string | null>(null);
+const isSavingEmail = ref(false);
 
 // Delete confirmation dialog
 const showDeleteDialog = ref(false);
@@ -150,6 +210,13 @@ const rateLimitMember = ref<TeamMember | null>(null);
 const rateLimitRpm = ref<number | string | null>(null);
 const isSavingRateLimit = ref(false);
 
+// Admin recovery for a member's authentication factors. The backend refuses
+// a passkey revoke that would leave the account with no way to sign in.
+type MemberSecurityAction = "2fa" | "passkeys";
+const securityMember = ref<TeamMember | null>(null);
+const securityAction = ref<MemberSecurityAction | null>(null);
+const isSecurityActionRunning = ref(false);
+
 /** Normalize an optional number input: empty input maps to null ("no limit"). */
 const normalizedBudgetUsd = computed(() => {
   const value = budgetUsd.value;
@@ -163,6 +230,13 @@ const normalizedRateLimitRpm = computed(() => {
   if (value === null || value === "") return null;
   const n = typeof value === "string" ? Number(value) : value;
   return Number.isFinite(n) ? Math.trunc(n) : null;
+});
+
+const normalizedInviteBudget = computed(() => {
+  const value = inviteBudgetUsd.value;
+  if (value === null || value === "") return null;
+  const n = typeof value === "string" ? Number(value) : value;
+  return Number.isFinite(n) ? n : null;
 });
 
 // --- Table search, sorting & pagination (server-side) ---
@@ -396,9 +470,10 @@ async function handleRename() {
     if (idx !== -1) {
       members.value[idx] = { ...members.value[idx], username: updated.username };
     }
-    // Self-rename: the old JWT's `sub` is stale, so swap in the fresh token.
+    // Self-rename: the backend rotated the HttpOnly cookie, so re-read the
+    // identity instead of parsing a token the page cannot access.
     if (updated.access_token) {
-      authStore.setToken(updated.access_token);
+      await authStore.refreshSession();
     }
     showRenameDialog.value = false;
     toast.success(t("team.renameSuccess", { username: updated.username }));
@@ -620,7 +695,168 @@ async function saveMemberModels() {
   }
 }
 
-onMounted(loadMembers);
+function openInviteDialog() {
+  inviteEmail.value = "";
+  inviteRole.value = "viewer";
+  inviteUrl.value = "";
+  inviteError.value = null;
+  inviteModels.value = null;
+  inviteBudgetUsd.value = null;
+  inviteBudgetPeriod.value = "none";
+  inviteBudgetResetDay.value = 1;
+  if (modelStore.models.length === 0) void modelStore.fetchModels();
+  showInviteDialog.value = true;
+}
+
+async function createInvitation() {
+  if (!inviteEmail.value.trim()) return;
+  const budget = normalizedInviteBudget.value;
+  if (budget !== null && budget <= 0) {
+    inviteError.value = t("team.budgetMustBePositive");
+    return;
+  }
+  isInviting.value = true;
+  inviteError.value = null;
+  try {
+    const response = await invitationsApi.create({
+      email: inviteEmail.value.trim(),
+      role: inviteRole.value,
+      allowed_models: inviteModels.value,
+      budget_usd: budget,
+      budget_period:
+        budget === null || inviteBudgetPeriod.value === "none" ? null : inviteBudgetPeriod.value,
+      budget_reset_day:
+        budget !== null &&
+        inviteBudgetPeriod.value === "monthly" &&
+        inviteBudgetResetDay.value !== 1
+          ? inviteBudgetResetDay.value
+          : null,
+    });
+    inviteUrl.value = response.invite_url;
+    toast.success(t("team.inviteCreated"));
+    await loadInvitations();
+  } catch (err: unknown) {
+    inviteError.value = getErrorMessage(err) || t("errors.saveFailed");
+  } finally {
+    isInviting.value = false;
+  }
+}
+
+async function copyInviteUrl() {
+  // copyToClipboard falls back to execCommand on plain-HTTP deployments, where
+  // navigator.clipboard is unavailable — exactly those LAN setups this invite
+  // flow targets.
+  try {
+    await copyToClipboard(inviteUrl.value);
+    toast.success(t("team.inviteCopied"));
+  } catch {
+    toast.error(t("errors.saveFailed"));
+  }
+}
+
+async function loadInvitations() {
+  try {
+    invitations.value = (await invitationsApi.list()).items;
+  } catch {
+    invitations.value = [];
+  }
+}
+
+async function resendInvitation(id: string) {
+  try {
+    const response = await invitationsApi.resend(id);
+    inviteUrl.value = response.invite_url;
+    inviteError.value = null;
+    showInviteDialog.value = true;
+    toast.success(t("team.inviteCreated"));
+    await loadInvitations();
+  } catch (err: unknown) {
+    toast.error(getErrorMessage(err) || t("errors.saveFailed"));
+  }
+}
+
+async function revokeInvitation(id: string) {
+  try {
+    await invitationsApi.revoke(id);
+    toast.success(t("team.inviteRevoked"));
+    await loadInvitations();
+  } catch (err: unknown) {
+    toast.error(getErrorMessage(err) || t("errors.saveFailed"));
+  }
+}
+
+function openSecurityAction(member: TeamMember, action: MemberSecurityAction) {
+  securityMember.value = member;
+  securityAction.value = action;
+}
+
+const securityDialogTitle = computed(() => {
+  if (!securityMember.value || !securityAction.value) return "";
+  return t(securityAction.value === "2fa" ? "team.resetTwoFactor" : "team.revokePasskeys");
+});
+
+const securityDialogDescription = computed(() => {
+  if (!securityMember.value || !securityAction.value) return "";
+  return t(
+    securityAction.value === "2fa" ? "team.resetTwoFactorConfirm" : "team.revokePasskeysConfirm",
+    { username: securityMember.value.username }
+  );
+});
+
+async function runSecurityAction() {
+  if (!securityMember.value || !securityAction.value) return;
+  isSecurityActionRunning.value = true;
+  const action = securityAction.value;
+  const username = securityMember.value.username;
+  try {
+    if (action === "2fa") {
+      await teamApi.resetMemberTwoFactor(securityMember.value.id);
+      toast.success(t("team.resetTwoFactorSuccess", { username }));
+    } else {
+      await teamApi.revokeMemberPasskeys(securityMember.value.id);
+      toast.success(t("team.revokePasskeysSuccess", { username }));
+    }
+    securityAction.value = null;
+    securityMember.value = null;
+  } catch (err: unknown) {
+    toast.error(getErrorMessage(err) || t("errors.saveFailed"));
+  } finally {
+    isSecurityActionRunning.value = false;
+  }
+}
+
+function openEmailDialog(member: TeamMember) {
+  emailMember.value = member;
+  emailAddress.value = member.email ?? "";
+  emailError.value = null;
+  showEmailDialog.value = true;
+}
+
+async function saveMemberEmail() {
+  if (!emailMember.value) return;
+  const email = emailAddress.value.trim();
+  if (!email) {
+    emailError.value = t("accountSecurity.invalidEmail");
+    return;
+  }
+  isSavingEmail.value = true;
+  emailError.value = null;
+  try {
+    const updated = await teamApi.setMemberEmail(emailMember.value.id, email);
+    patchMember(updated);
+    showEmailDialog.value = false;
+    toast.success(t("team.emailSaved", { username: updated.username }));
+  } catch (err: unknown) {
+    emailError.value = getErrorMessage(err) || t("errors.saveFailed");
+  } finally {
+    isSavingEmail.value = false;
+  }
+}
+
+onMounted(() => {
+  void loadMembers();
+  void loadInvitations();
+});
 </script>
 
 <template>
@@ -629,7 +865,11 @@ onMounted(loadMembers);
       <header class="config-header-bar px-4 sm:px-6 py-4">
         <PageHeader :title="t('team.title')" :description="t('team.description')" :icon="Users">
           <template #actions>
-            <Button @click="openCreateDialog" class="btn-action">
+            <Button @click="openInviteDialog" class="btn-action">
+              <Mail class="h-4 w-4 mr-2" />
+              {{ t("team.inviteMember") }}
+            </Button>
+            <Button variant="outline" @click="openCreateDialog" class="btn-action">
               <Plus class="h-4 w-4 mr-2" />
               {{ t("team.addMember") }}
             </Button>
@@ -637,6 +877,65 @@ onMounted(loadMembers);
         </PageHeader>
       </header>
     </template>
+
+    <!-- Invitations: actionable pending rows, then history -->
+    <div
+      v-if="invitations.length"
+      class="mx-4 mt-3 rounded-xl border border-border/60 bg-card px-4 py-3 sm:mx-6"
+    >
+      <p v-if="pendingInvitations.length" class="mb-2 text-xs font-medium text-muted-foreground">
+        {{ t("team.pendingInvitations") }}
+      </p>
+      <div v-if="pendingInvitations.length" class="flex flex-col gap-2">
+        <div
+          v-for="invitation in pendingInvitations"
+          :key="invitation.id"
+          class="flex flex-wrap items-center justify-between gap-2 text-sm"
+        >
+          <div class="flex min-w-0 items-center gap-2">
+            <Mail class="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span class="truncate">{{ invitation.email }}</span>
+            <Badge variant="outline">{{ roleLabel(invitation.role) }}</Badge>
+          </div>
+          <div class="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{{
+              t("team.expiresOn", { date: formatInvitationDate(invitation.expires_at) })
+            }}</span>
+            <Button variant="ghost" size="sm" @click="resendInvitation(invitation.id)">
+              {{ t("team.inviteResend") }}
+            </Button>
+            <Button variant="ghost" size="sm" @click="revokeInvitation(invitation.id)">
+              {{ t("team.inviteRevoke") }}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <details v-if="pastInvitations.length" class="mt-3 border-t border-border/50 pt-2">
+        <summary class="cursor-pointer text-xs text-muted-foreground">
+          {{ t("team.pastInvitations", { count: pastInvitations.length }) }}
+        </summary>
+        <div class="mt-2 flex max-h-64 flex-col gap-2 overflow-y-auto">
+          <div
+            v-for="invitation in pastInvitations"
+            :key="invitation.id"
+            class="flex flex-wrap items-center justify-between gap-2 text-sm"
+          >
+            <div class="flex min-w-0 items-center gap-2">
+              <Mail class="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span class="truncate text-muted-foreground">{{ invitation.email }}</span>
+              <Badge variant="outline">{{ roleLabel(invitation.role) }}</Badge>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{{ formatInvitationDate(invitationResolvedAt(invitation)) }}</span>
+              <StatusBadge variant="status" :status="invitationStatusVariant(invitation.status)">
+                {{ t(`team.invitationStatus.${invitation.status}`) }}
+              </StatusBadge>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
 
     <!-- Toolbar band (flush) -->
     <div v-if="members.length > 0 || isLoading" class="config-toolbar px-4 sm:px-6 py-3">
@@ -725,7 +1024,15 @@ onMounted(loadMembers);
             </TableHeader>
             <TableBody class="row-stagger">
               <TableRow v-for="member in sortedMembers" :key="member.id" class="group">
-                <TableCellName>{{ member.username }}</TableCellName>
+                <TableCellName>
+                  <div class="truncate">{{ member.username }}</div>
+                  <div
+                    v-if="member.email"
+                    class="truncate text-xs font-normal text-muted-foreground"
+                  >
+                    {{ member.email }}
+                  </div>
+                </TableCellName>
                 <TableCell>
                   <!-- Role change: dropdown on the badge (hidden on the current
                      admin's own row), confirmed by dialog below. -->
@@ -912,6 +1219,20 @@ onMounted(loadMembers);
                           variant="ghost"
                           size="icon"
                           class="h-9 w-9"
+                          :aria-label="t('team.setEmail')"
+                          @click="openEmailDialog(member)"
+                        >
+                          <Mail class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.setEmail") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
                           :aria-label="t('team.resetPassword')"
                           @click="openResetDialog(member)"
                         >
@@ -919,6 +1240,34 @@ onMounted(loadMembers);
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{{ t("team.resetPassword") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip v-if="!isSelf(member)">
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.resetTwoFactor')"
+                          @click="openSecurityAction(member, '2fa')"
+                        >
+                          <ShieldCheck class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.resetTwoFactor") }}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip v-if="!isSelf(member)">
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9"
+                          :aria-label="t('team.revokePasskeys')"
+                          @click="openSecurityAction(member, 'passkeys')"
+                        >
+                          <Fingerprint class="h-4 w-4 icon-btn-muted" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ t("team.revokePasskeys") }}</TooltipContent>
                     </Tooltip>
                     <Tooltip v-if="member.is_active">
                       <TooltipTrigger as-child>
@@ -1041,7 +1390,9 @@ onMounted(loadMembers);
                 </SelectItem>
               </SelectContent>
             </Select>
-            <p class="text-xs text-muted-foreground">{{ t("team.roleHelp") }}</p>
+            <p class="text-xs text-muted-foreground">
+              {{ t(createRole === "admin" ? "team.roleHelpAdmin" : "team.roleHelpViewer") }}
+            </p>
           </div>
           <div class="space-y-2">
             <Label>{{ t("team.allowedModels") }}</Label>
@@ -1069,6 +1420,173 @@ onMounted(loadMembers);
           <Button :disabled="isCreating" @click="handleCreate">
             <Loader2 v-if="isCreating" class="h-4 w-4 animate-spin" />
             {{ t("team.addMember") }}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+
+    <!-- Invite Member Sheet -->
+    <Sheet v-model:open="showInviteDialog">
+      <SheetContent
+        side="right"
+        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
+      >
+        <SheetHeaderBand :icon="Mail">
+          <template #title>{{ t("team.inviteMember") }}</template>
+          <template #description>{{ t("team.inviteDescription") }}</template>
+        </SheetHeaderBand>
+        <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+          <div class="space-y-2">
+            <Label for="invite-email">{{ t("team.inviteEmail") }}</Label>
+            <Input
+              id="invite-email"
+              v-model="inviteEmail"
+              type="email"
+              :disabled="isInviting || !!inviteUrl"
+              @keydown.enter="createInvitation"
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="invite-role">{{ t("team.role") }}</Label>
+            <Select v-model="inviteRole" :disabled="isInviting || !!inviteUrl">
+              <SelectTrigger id="invite-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="option in ROLE_OPTIONS" :key="option" :value="option">
+                  {{ roleLabel(option) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="space-y-2">
+            <Label>{{ t("team.allowedModels") }}</Label>
+            <AccessScopePicker
+              v-model="inviteModels"
+              :items="availableModels"
+              :all-label="t('team.allModels')"
+              :all-help-text="t('team.allowAllModelsHelp')"
+              :search-placeholder="t('team.searchModels')"
+              :empty-available-text="t('team.noModelsAvailable')"
+              :empty-search-text="t('team.noModelsFound')"
+              :empty-text="t('team.denyAllWarning')"
+              empty-meaning="deny"
+              :disabled="isInviting || !!inviteUrl"
+              mono
+            />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label for="invite-budget">{{ t("team.budget") }}</Label>
+              <Input
+                id="invite-budget"
+                v-model="inviteBudgetUsd"
+                type="number"
+                min="0"
+                step="0.01"
+                :placeholder="t('team.budgetEmptyHint')"
+                :disabled="isInviting || !!inviteUrl"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="invite-budget-period">{{ t("team.budgetPeriod") }}</Label>
+              <Select
+                v-model="inviteBudgetPeriod"
+                :disabled="isInviting || !!inviteUrl || normalizedInviteBudget === null"
+              >
+                <SelectTrigger id="invite-budget-period">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{{ t("apiKeys.periodNone") }}</SelectItem>
+                  <SelectItem value="daily">{{ t("apiKeys.periodDaily") }}</SelectItem>
+                  <SelectItem value="weekly">{{ t("apiKeys.periodWeekly") }}</SelectItem>
+                  <SelectItem value="monthly">{{ t("apiKeys.periodMonthly") }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <!-- Monthly reset day: the invite preset otherwise always resets on the 1st. -->
+          <div
+            v-if="inviteBudgetPeriod === 'monthly' && normalizedInviteBudget !== null"
+            class="flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <span>{{ t("apiKeys.resetDayPrefix") }}</span>
+            <Select v-model="inviteBudgetResetDay" :disabled="isInviting || !!inviteUrl">
+              <SelectTrigger class="w-18 h-8 text-xs" :aria-label="t('apiKeys.resetDayPrefix')">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent class="max-h-56">
+                <SelectItem v-for="day in 31" :key="day" :value="day">{{ day }}</SelectItem>
+              </SelectContent>
+            </Select>
+            <span>{{ t("apiKeys.resetDaySuffix") }}</span>
+          </div>
+          <p class="text-xs text-muted-foreground">{{ t("team.invitePresetsHelp") }}</p>
+          <p v-if="inviteError" class="text-destructive text-xs">{{ inviteError }}</p>
+          <div v-if="inviteUrl" class="space-y-2">
+            <Label>{{ t("team.inviteLink") }}</Label>
+            <div class="flex gap-2">
+              <Input :model-value="inviteUrl" readonly class="font-mono text-xs" />
+              <Button variant="outline" class="shrink-0" @click="copyInviteUrl">
+                {{ t("team.inviteCopy") }}
+              </Button>
+            </div>
+            <p class="text-xs text-muted-foreground">{{ t("team.inviteLinkHelp") }}</p>
+          </div>
+        </div>
+        <div
+          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
+        >
+          <Button variant="outline" :disabled="isInviting" @click="showInviteDialog = false">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button v-if="!inviteUrl" :disabled="isInviting" @click="createInvitation">
+            <Loader2 v-if="isInviting" class="h-4 w-4 animate-spin" />
+            {{ t("team.inviteCreate") }}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+
+    <!-- Admin-attested login email (used when SMTP verification is off) -->
+    <Sheet v-model:open="showEmailDialog">
+      <SheetContent
+        side="right"
+        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
+      >
+        <SheetHeaderBand :icon="Mail">
+          <template #title>{{ t("team.setEmail") }}</template>
+          <template #description>
+            {{ t("team.setEmailDescription") }} —
+            <span class="font-medium">{{ emailMember?.username }}</span>
+          </template>
+        </SheetHeaderBand>
+        <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+          <div class="space-y-2">
+            <Label for="member-email">{{ t("accountSecurity.email") }}</Label>
+            <Input
+              id="member-email"
+              v-model="emailAddress"
+              type="email"
+              :disabled="isSavingEmail"
+              @keydown.enter="saveMemberEmail"
+            />
+            <p v-if="emailError" class="text-destructive text-xs">{{ emailError }}</p>
+            <p v-else class="text-xs text-muted-foreground">
+              {{ t("team.setEmailHelp") }}
+            </p>
+          </div>
+        </div>
+        <div
+          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
+        >
+          <Button variant="outline" :disabled="isSavingEmail" @click="showEmailDialog = false">
+            {{ t("common.cancel") }}
+          </Button>
+          <Button :disabled="isSavingEmail" @click="saveMemberEmail">
+            <Loader2 v-if="isSavingEmail" class="h-4 w-4 animate-spin" />
+            {{ t("common.save") }}
           </Button>
         </div>
       </SheetContent>
@@ -1423,6 +1941,18 @@ onMounted(loadMembers);
       variant="default"
       :loading="isTogglingActive"
       @confirm="handleSetActive(true)"
+    />
+
+    <!-- Member factor recovery (reset TOTP / revoke passkeys) -->
+    <ConfirmDialog
+      :open="!!securityAction"
+      :title="securityDialogTitle"
+      :description="securityDialogDescription"
+      :confirm-text="securityAction === '2fa' ? t('team.resetTwoFactor') : t('team.revokePasskeys')"
+      :loading="isSecurityActionRunning"
+      @update:open="(open) => !open && (securityAction = null)"
+      @confirm="runSecurityAction"
+      @cancel="securityAction = null"
     />
   </AppLayout>
 </template>

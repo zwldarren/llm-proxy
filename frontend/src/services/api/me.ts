@@ -4,6 +4,28 @@ const BASE_URL = "/api/me";
 
 export type FeedbackSignal = "ok" | "weak" | "strong";
 
+type MeSessionInfo = {
+  auth_method: string;
+  created_at: string;
+  expires_at: string;
+  last_verified_at: string;
+  client_ip: string;
+};
+
+export type MeProfile = {
+  id: number;
+  username: string;
+  email: string | null;
+  email_verified: boolean;
+  has_password: boolean;
+  role: string;
+  must_change_password: boolean;
+  created_at: string;
+  allowed_models: string[] | null;
+  last_login_at: string | null;
+  session: MeSessionInfo | null;
+};
+
 export type MeBudget = {
   // Admin-set account-level budget envelope. All fields are null when the
   // account has no budget configured.
@@ -15,20 +37,25 @@ export type MeBudget = {
 };
 
 export const meApi = {
-  changePassword: (currentPassword: string, newPassword: string) =>
+  getProfile: () => http.get<MeProfile>(`${BASE_URL}/profile`),
+
+  changePassword: (currentPassword: string | null, newPassword: string) =>
     http.put<{ message: string }>(`${BASE_URL}/password`, {
-      current_password: currentPassword,
+      current_password: currentPassword || null,
       new_password: newPassword,
     }),
 
-  changeUsername: (currentPassword: string, newUsername: string) =>
+  changeUsername: (currentPassword: string | null, newUsername: string) =>
     http.put<{ message: string; username: string; access_token: string; token_type: string }>(
       `${BASE_URL}/username`,
       {
-        current_password: currentPassword,
+        current_password: currentPassword || null,
         new_username: newUsername,
       }
     ),
+
+  requestEmailVerification: (email: string) =>
+    http.post<{ sent: boolean }>(`${BASE_URL}/email`, { email }),
 
   // The caller's own account-level budget and current-window spend.
   getBudget: () => http.get<MeBudget>(`${BASE_URL}/budget`),

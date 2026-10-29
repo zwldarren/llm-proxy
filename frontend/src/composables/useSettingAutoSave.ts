@@ -1,13 +1,14 @@
 import { ref, toRaw, watch, onUnmounted, type Ref } from "vue";
 import { toast } from "vue-sonner";
 import { useI18n } from "vue-i18n";
+import { getErrorMessage } from "@/utils/error";
 
 export interface AutoSaveState<T> {
   state: Ref<T>;
   pending: Ref<boolean>;
   error: Ref<string | null>;
   initialize: (value: T) => void;
-  save: () => Promise<void>;
+  save: () => Promise<boolean>;
 }
 
 export function useSettingAutoSave<T extends object>(
@@ -25,8 +26,8 @@ export function useSettingAutoSave<T extends object>(
   let lastToastAt = 0;
   let isSaving = false;
 
-  async function doSave() {
-    if (isSaving) return;
+  async function doSave(): Promise<boolean> {
+    if (isSaving) return false;
     isSaving = true;
     pending.value = true;
     error.value = null;
@@ -34,16 +35,20 @@ export function useSettingAutoSave<T extends object>(
     try {
       await saveFn(snapshot);
       lastSaved.value = snapshot;
-      if (options.showSuccessToast) {
+      // Auto-save has no explicit submit button, so a throttled toast is the
+      // durable confirmation that the change reached the server.
+      if (options.showSuccessToast ?? true) {
         const now = Date.now();
         if (now - lastToastAt > (options.toastThrottleMs ?? 3000)) {
           toast.success(t("settings.saved"));
           lastToastAt = now;
         }
       }
+      return true;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : t("settings.saveFailed");
+      error.value = getErrorMessage(e) || t("settings.saveFailed");
       state.value = deepClone(lastSaved.value) as Ref<T>["value"];
+      return false;
     } finally {
       pending.value = false;
       isSaving = false;
