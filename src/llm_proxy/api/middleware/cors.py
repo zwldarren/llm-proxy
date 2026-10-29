@@ -30,6 +30,7 @@ _ALLOWED_HEADERS = [
     "X-Request-ID",
     "X-Trace-ID",
     "X-Langfuse-Trace-ID",
+    "X-CSRF-Token",
     "Accept",
     "Accept-Language",
     "Accept-Encoding",

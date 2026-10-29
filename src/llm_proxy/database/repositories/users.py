@@ -38,6 +38,68 @@ class UserRepository(BaseRepository):
             # rather than choosing an account arbitrarily.
             return None
 
+    async def get_by_login(self, identifier: str) -> UserRecord | None:
+        """Resolve a login identifier as username first, then verified email.
+
+        The login form has one field. Resolving username first preserves the
+        existing identifier for accounts that later add an email; email is
+        only consulted when no username matches.
+        """
+        normalized = identifier.strip().lower()
+        user = await self.get_by_username(normalized)
+        if user is not None:
+            return user
+        result = await self.session.execute(
+            select(UserRecord).where(UserRecord.email == normalized)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_email(self, email: str) -> UserRecord | None:
+        normalized = email.strip().lower()
+        result = await self.session.execute(
+            select(UserRecord).where(UserRecord.email == normalized)
+        )
+        return result.scalar_one_or_none()
+
+    async def is_email_taken(self, email: str, *, exclude_user_id: int | None = None) -> bool:
+        normalized = email.strip().lower()
+        stmt = select(UserRecord.id).where(UserRecord.email == normalized)
+        if exclude_user_id is not None:
+            stmt = stmt.where(UserRecord.id != exclude_user_id)
+        result = await self.session.execute(stmt.limit(1))
+        return result.first() is not None
+
+    async def set_email(
+        self,
+        user_id: int,
+        email: str | None,
+        *,
+        verified_by: str | None = None,
+    ) -> UserRecord | None:
+        """Set or clear the login email, preserving the verification source."""
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            user.email = None
+            user.email_verified_at = None
+            user.email_verified_by = None
+            await self.session.flush()
+            await self.session.refresh(user)
+            return user
+        if await self.is_email_taken(normalized, exclude_user_id=user_id):
+            raise ValueError(f"Email '{normalized}' is already in use")
+        user.email = normalized
+        user.email_verified_at = datetime.now(UTC) if verified_by else None
+        user.email_verified_by = verified_by
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            raise ValueError(f"Email '{normalized}' is already in use") from None
+        await self.session.refresh(user)
+        return user
+
     async def _username_taken(self, username: str, *, exclude_user_id: int | None = None) -> bool:
         """Whether any account already uses *username* case-insensitively.
 
@@ -172,6 +234,19 @@ class UserRepository(BaseRepository):
 
     async def get_by_id(self, user_id: int) -> UserRecord | None:
         stmt = select(UserRecord).where(UserRecord.id == user_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_for_update(self, user_id: int) -> UserRecord | None:
+        """Read a user row and lock it for the rest of the transaction.
+
+        The anchor for "is this the last usable factor?" guards: the check and
+        the delete that follows it must not interleave with a second request,
+        or two concurrent removals each observe two factors and both succeed.
+        Locking the account row serializes those transactions (a no-op on
+        SQLite, which serializes writers anyway).
+        """
+        stmt = select(UserRecord).where(UserRecord.id == user_id).with_for_update()
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -381,6 +456,9 @@ class UserRepository(BaseRepository):
         password_hash: str,
         role: str = "viewer",
         must_change_password: bool = False,
+        *,
+        email: str | None = None,
+        email_verified_by: str | None = None,
     ) -> UserRecord:
         """Create a new user with a pre-hashed password.
 
@@ -414,6 +492,9 @@ class UserRepository(BaseRepository):
             role=role,
             is_active=True,
             must_change_password=must_change_password,
+            email=(email or "").strip().lower() or None,
+            email_verified_at=datetime.now(UTC) if email and email_verified_by else None,
+            email_verified_by=email_verified_by if email else None,
         )
         self.session.add(user)
         try:

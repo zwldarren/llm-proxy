@@ -9,6 +9,7 @@ from llm_proxy.api.dependencies import (
     get_async_session_dep,
     publish_config_generation,
     require_authenticated,
+    require_recent_auth_for_mutations,
 )
 from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
 from llm_proxy.api.schemas.api_keys import (
@@ -46,7 +47,7 @@ logger = get_logger(__name__)
 router = APIRouter(
     prefix="/api/api-keys",
     tags=["API Keys"],
-    dependencies=[Depends(require_authenticated)],
+    dependencies=[Depends(require_authenticated), Depends(require_recent_auth_for_mutations)],
 )
 
 

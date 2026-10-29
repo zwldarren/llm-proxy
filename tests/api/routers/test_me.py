@@ -1,6 +1,7 @@
 """Integration tests for the self-service endpoints (/api/me/*)."""
 
 import time
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from llm_proxy.api.dependencies import get_current_user
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
+from llm_proxy.api.middleware.rate_limiting import RateLimitManager
 from llm_proxy.api.routers.logs import _user_role_cache
 from llm_proxy.api.routers.me import router
 from llm_proxy.config.types.auth import ProxyAuthConfig
@@ -46,7 +48,16 @@ def me_client():
     mock_config_manager.get_config = AsyncMock(return_value=mock_config)
     mock_config_manager.publish_generation = AsyncMock()
 
-    with patch("llm_proxy.api.routers.me.UserRepository", return_value=mock_repo):
+    with (
+        patch("llm_proxy.api.routers.me.UserRepository", return_value=mock_repo),
+        # The sensitive-account limiter is Redis-backed and shared across test
+        # runs; its own behavior is covered by dedicated rate-limit tests.
+        patch.object(
+            RateLimitManager,
+            "check_rate_limit",
+            new=AsyncMock(return_value=(False, {})),
+        ),
+    ):
         app = FastAPI()
         register_exception_handlers(app)
         app.include_router(router)
@@ -55,7 +66,13 @@ def me_client():
         @app.middleware("http")
         async def _set_identity(request: Request, call_next):
             set_request_identity(
-                request, RequestIdentity(user=user.username, auth_method="jwt", user_id=user.id)
+                request,
+                RequestIdentity(
+                    user=user.username,
+                    auth_method="jwt",
+                    user_id=user.id,
+                    console_session_id="sess-1",
+                ),
             )
             return await call_next(request)
 
@@ -79,7 +96,7 @@ class TestChangeUsername:
             json={"current_password": CURRENT_PASSWORD, "new_username": "NewName"},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         body = response.json()
         assert body["username"] == "newname"
         mock_repo.update_username.assert_awaited_once_with(user.id, "NewName")
@@ -100,7 +117,8 @@ class TestChangeUsername:
             json={"current_password": "wrong-password", "new_username": "newname"},
         )
 
-        assert response.status_code == 401
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_current_password"
         mock_repo.update_username.assert_not_awaited()
 
     def test_taken_username_conflicts(self, me_client):
@@ -202,7 +220,8 @@ class TestChangePassword:
             json={"current_password": "wrong-password", "new_password": "New-password-456!"},
         )
 
-        assert response.status_code == 401
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_current_password"
         mock_repo.set_must_change_password.assert_not_awaited()
 
 
@@ -243,3 +262,36 @@ class TestGetBudget:
         # The spend query is scoped to the caller's user id.
         call = usage_repo.get_user_spend_since.await_args
         assert call.args[0] == user.id
+
+
+class TestGetProfile:
+    """GET /api/me/profile surfaces access and session facts."""
+
+    def test_profile_includes_models_last_login_and_current_session(self, me_client):
+        client, user, _ = me_client
+        user.email = "admin@example.com"
+        user.email_verified = True
+        user.has_password = True
+        user.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+        user.allowed_models = ["gpt-4o", "claude-sonnet-4"]
+        record = MagicMock()
+        record.auth_method = "passkey"
+        record.created_at = datetime(2026, 10, 28, 10, 0, tzinfo=UTC)
+        record.expires_at = datetime(2026, 10, 29, 10, 0, tzinfo=UTC)
+        record.last_verified_at = datetime(2026, 10, 28, 10, 5, tzinfo=UTC)
+        session_repo = AsyncMock()
+        session_repo.get_by_id = AsyncMock(return_value=record)
+        session_repo.get_last_login_at = AsyncMock(
+            return_value=datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+        )
+
+        with patch("llm_proxy.api.routers.me.UserSessionRepository", return_value=session_repo):
+            response = client.get("/api/me/profile")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["allowed_models"] == ["gpt-4o", "claude-sonnet-4"]
+        assert body["last_login_at"].startswith("2026-10-27")
+        assert body["session"]["auth_method"] == "passkey"
+        assert body["session"]["client_ip"] == "testclient"
+        session_repo.get_by_id.assert_awaited_once_with("sess-1")

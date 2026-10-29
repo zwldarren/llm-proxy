@@ -25,6 +25,7 @@ dependencies = [
   "tiktoken>=0.12.0",
   "redis>=7.1.0",
   "bcrypt>=5.0.0",
+  "webauthn>=2.7.0",
   "opentelemetry-api>=1.44.0",
   "opentelemetry-sdk>=1.44.0",
   "opentelemetry-exporter-otlp>=1.44.0",
@@ -60,6 +61,7 @@ build-backend = "uv_build"
 llm-proxy = "llm_proxy.__main__:main_wrapper"
 llm-proxy-dev = "llm_proxy.__main__:main_wrapper_dev"
 llm-proxy-openapi = "llm_proxy.api.openapi_docs:main"
+llm-proxy-reset-password = "llm_proxy.cli.reset_password:main"
 
 [tool.ruff]
 line-length = 100

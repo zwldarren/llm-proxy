@@ -5,7 +5,30 @@ single resource module so that reusing a validator never means importing
 another resource's schemas.
 """
 
+import re
+
 from pydantic import field_validator
+
+# ``\Z`` rather than ``$``: with prefix-match semantics ``$`` also matches just
+# before a trailing newline, so ``"name\n"`` would pass a validator whose whole
+# purpose is to reject it.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+\Z")
+_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_-]+\Z")
+
+
+def validate_email(value: str) -> str:
+    """Normalize and validate an email address without an extra dependency."""
+    normalized = value.strip().lower()
+    if len(normalized) > 320 or not _EMAIL_RE.prefixmatch(normalized):
+        raise ValueError("Enter a valid email address")
+    return normalized
+
+
+def validate_username_format(username: str) -> str:
+    """Ensure a username only contains letters, digits, underscores, and dashes."""
+    if not _USERNAME_RE.prefixmatch(username):
+        raise ValueError("Username may only contain letters, digits, underscores, and hyphens")
+    return username
 
 
 class ValidatorMixin:

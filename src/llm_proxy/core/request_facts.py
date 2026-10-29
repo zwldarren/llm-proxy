@@ -60,6 +60,7 @@ class RequestIdentity:
     api_key_name: str | None = None
     auth_method: str | None = None
     user_id: int | None = None
+    console_session_id: str | None = None
 
     @property
     def is_authenticated(self) -> bool:

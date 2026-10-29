@@ -27,6 +27,17 @@ DEFAULT_RATE_LIMITS: frozendict[str, str] = frozendict(
         "auth.login": "5/minute",
         "auth.setup": "5/minute",
         "auth.setup_status": "10/minute",
+        "auth.capabilities": "20/minute",
+        "auth.mfa": "10/minute",
+        "auth.step_up": "10/minute",
+        "auth.invite_accept": "10/minute",
+        "auth.invite_status": "20/minute",
+        "auth.passkey": "20/minute",
+        "auth.oauth": "20/minute",
+        "auth.email_verify": "20/minute",
+        "auth.password_reset": "5/minute",
+        "auth.password_reset_confirm": "10/minute",
+        "account.sensitive": "10/minute",
     }
 )
 

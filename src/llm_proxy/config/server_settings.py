@@ -29,6 +29,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, create_model
 
+from llm_proxy.config.types.console_auth import ConsoleAuthSettings
 from llm_proxy.config.types.logging_config import (
     LoggingConfig,
     LoggingWireConfig,
@@ -141,10 +142,21 @@ class ServerSetting:
     #: with an operator-facing message the caller maps to its wire error
     #: (rate_limits: unknown buckets, invalid specs).
     validate: Callable[[BaseModel], None] | None = None
+    #: Whether a write changes a security control and therefore needs a recent
+    #: step-up. ADR-0049 names security-factor changes explicitly; a setting
+    #: that can weaken a control (relaxing the ``auth.login`` bucket, turning
+    #: on full prompt logging) belongs in that category too.
+    sensitive: bool = False
     #: RAW_OR_DEFAULT: the response document when no row exists.
     default_doc: Mapping[str, Any] | None = None
     #: Response document for DELETE.
     delete_message: str | None = None
+    #: Optional secret handling for settings that carry credentials. The
+    #: write transform receives the validated request, the value the write
+    #: mode produced, and the existing stored row; the read transform receives
+    #: the response document. Kept narrow: only console_auth needs it today.
+    write_transform: Callable[[BaseModel, Any, Any], Any] | None = None
+    read_transform: Callable[[Any], Any] | None = None
 
 
 def _validate_rate_limits(payload: BaseModel) -> None:
@@ -153,7 +165,7 @@ def _validate_rate_limits(payload: BaseModel) -> None:
     validate_rate_limit_overrides(payload.limits)
 
 
-def _validate_web_search_urls(payload: BaseModel) -> None:
+def _validate_web_search(payload: BaseModel) -> None:
     """Pre-persist validation for the web_search_config key (mapped to HTTP 422).
 
     The proxy calls the configured search endpoint itself, so a URL pointing at
@@ -161,6 +173,9 @@ def _validate_web_search_urls(payload: BaseModel) -> None:
     operator-configured URL. Hostnames are not resolved at save time — ADR-0047
     leaves that to the connect-time check — and ``HTTP_ALLOWED_HOSTS`` still
     admits a deliberately local instance, which is the documented way to run one.
+
+    Secret fields are validated too: an edited mask must not be mistaken for a
+    new credential.
     """
     from llm_proxy.http.client import validate_server_url
 
@@ -171,6 +186,207 @@ def _validate_web_search_urls(payload: BaseModel) -> None:
     ):
         if url:
             validate_server_url(url, label=label, resolve_dns=False, fail_closed=True)
+    if payload.searxng:
+        _reject_edited_secret_mask(payload.searxng.api_key, label="SearXNG API key")
+        _reject_edited_secret_mask(
+            payload.searxng.basic_auth_password,
+            label="SearXNG basic auth password",
+        )
+    if payload.ollama:
+        _reject_edited_secret_mask(payload.ollama.api_key, label="Ollama API key")
+
+
+def _validate_console_auth(payload: BaseModel) -> None:
+    """Validate the public URL, provider IDs and issuer URLs before persisting."""
+    from llm_proxy.security.console_url import is_secure_issuer, public_origin
+
+    if not isinstance(payload, ConsoleAuthSettings):
+        raise ValueError("console_auth payload must be ConsoleAuthSettings")
+    if payload.public_base_url and public_origin(payload) is None:
+        raise ValueError(
+            "public_base_url must be an HTTPS URL, or http://localhost for development"
+        )
+    _reject_edited_secret_mask(payload.smtp.password, label="SMTP password")
+    seen: set[str] = set()
+    for provider in payload.oidc_providers:
+        if provider.id in seen:
+            raise ValueError(f"Duplicate OIDC provider id: {provider.id}")
+        seen.add(provider.id)
+        _reject_edited_secret_mask(
+            provider.client_secret,
+            label=f"OIDC provider '{provider.id}' client secret",
+        )
+        # The issuer is used verbatim to fetch the discovery document and to
+        # exchange the authorization code (with the client secret). An http://
+        # issuer would put both on the wire in plaintext, so reject it here
+        # rather than failing mysteriously at first login.
+        if not is_secure_issuer(provider.issuer):
+            raise ValueError(
+                f"OIDC provider '{provider.id}' issuer must be an HTTPS URL "
+                "(or http://localhost for development)"
+            )
+
+
+_MASKED_SECRET = "****"
+
+
+def _reject_edited_secret_mask(value: str | None, *, label: str) -> None:
+    """Refuse a secret that carries a modified copy of the read mask.
+
+    Read responses replace stored secrets with ``****``. Echoing that value
+    back unchanged means "keep the stored secret". If the field still contains
+    the mask, or is an all-asterisk variant of it, the operator edited the
+    placeholder; accepting it would replace the real secret with the edited
+    placeholder. Reject it instead of overwriting silently.
+    """
+    if not value or value == _MASKED_SECRET:
+        return
+    if _MASKED_SECRET in value or not value.strip("*"):
+        raise ValueError(f"{label} looks like the secret mask; clear the field to set a new secret")
+
+
+def _mask_console_auth_secrets(doc: Any) -> Any:
+    """Mask write-only secrets in the admin response.
+
+    The frontend sends the mask back unchanged when the operator did not edit
+    the field; the write transform then preserves the stored ciphertext.
+    """
+    if not isinstance(doc, dict):
+        return doc
+    masked = {**doc}
+    smtp = masked.get("smtp")
+    if isinstance(smtp, dict):
+        smtp = {**smtp}
+        smtp["password"] = _MASKED_SECRET if smtp.get("password") else ""
+        masked["smtp"] = smtp
+    providers = masked.get("oidc_providers")
+    if isinstance(providers, list):
+        masked["oidc_providers"] = [
+            {
+                **provider,
+                "client_secret": _MASKED_SECRET if provider.get("client_secret") else "",
+            }
+            if isinstance(provider, dict)
+            else provider
+            for provider in providers
+        ]
+    return masked
+
+
+def _merge_console_auth_secrets(payload: BaseModel, stored: Any, existing: Any) -> Any:
+    """Encrypt new secrets and preserve unchanged/masked ones.
+
+    ``stored`` is the REPLACE-mode dump of the request; ``existing`` is the
+    previous row. A blank or masked secret means "keep what is stored".
+
+    There is deliberately no wire value that clears a stored secret: blank and
+    the mask both mean "unchanged", so removing an SMTP password or an OIDC
+    client secret means deleting the whole provider / disabling SMTP.
+    """
+    from llm_proxy.security.encryption import encrypt_api_key
+
+    result = dict(stored) if isinstance(stored, dict) else payload.model_dump()
+    old = existing if isinstance(existing, dict) else {}
+    old_smtp_value = old.get("smtp")
+    old_smtp = old_smtp_value if isinstance(old_smtp_value, dict) else {}
+    smtp = dict(result.get("smtp") or {})
+    password = str(smtp.get("password") or "")
+    if password in ("", _MASKED_SECRET):
+        smtp["password"] = str(old_smtp.get("password") or "")
+    else:
+        smtp["password"] = encrypt_api_key(password) or ""
+    result["smtp"] = smtp
+
+    old_providers = {
+        str(provider.get("id")): provider
+        for provider in old.get("oidc_providers") or []
+        if isinstance(provider, dict)
+    }
+    providers = []
+    for provider in result.get("oidc_providers") or []:
+        if not isinstance(provider, dict):
+            providers.append(provider)
+            continue
+        provider = {**provider}
+        secret = str(provider.get("client_secret") or "")
+        if secret in ("", _MASKED_SECRET):
+            stored_secret = str(
+                (old_providers.get(str(provider.get("id"))) or {}).get("client_secret") or ""
+            )
+            if secret == _MASKED_SECRET and not stored_secret:
+                # The client sent the mask back, so it believed a secret was
+                # stored, but nothing is stored under this id: the provider was
+                # renamed (the secret is keyed by id). Say so instead of
+                # silently dropping the credential.
+                logger.warning(
+                    f"OIDC provider '{provider.get('id')}' was renamed or removed: "
+                    "no stored client secret matches this id, so the saved provider has none"
+                )
+            provider["client_secret"] = stored_secret
+        else:
+            provider["client_secret"] = encrypt_api_key(secret) or ""
+        providers.append(provider)
+    result["oidc_providers"] = providers
+    return result
+
+
+_WEB_SEARCH_SECRET_FIELDS: tuple[tuple[str, tuple[str, ...], bool], ...] = (
+    # (block, fields, every field is required on the wire)
+    ("searxng", ("api_key", "basic_auth_password"), False),
+    ("ollama", ("api_key",), True),
+)
+
+
+def _mask_web_search_secrets(doc: Any) -> Any:
+    """Replace stored search credentials with the write-only mask.
+
+    The frontend echoes the mask back when the operator did not edit a field;
+    the write transform then keeps the stored ciphertext.
+    """
+    if not isinstance(doc, dict):
+        return doc
+    masked = {**doc}
+    for block_name, fields, _ in _WEB_SEARCH_SECRET_FIELDS:
+        block = masked.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        block = {**block}
+        for field in fields:
+            if block.get(field):
+                block[field] = _MASKED_SECRET
+        masked[block_name] = block
+    return masked
+
+
+def _merge_web_search_secrets(payload: BaseModel, stored: Any, existing: Any) -> Any:
+    """Encrypt new search credentials and preserve blank or masked fields.
+
+    Like console auth, blank and the mask both mean "keep the stored value";
+    removing a credential means clearing the whole provider block.
+    """
+    from llm_proxy.security.encryption import encrypt_api_key
+
+    result = dict(stored) if isinstance(stored, dict) else payload.model_dump()
+    old = existing if isinstance(existing, dict) else {}
+    for block_name, fields, required in _WEB_SEARCH_SECRET_FIELDS:
+        block = result.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        block = {**block}
+        old_block_value = old.get(block_name)
+        old_block = old_block_value if isinstance(old_block_value, dict) else {}
+        for field in fields:
+            value = block.get(field)
+            if value is None and not required:
+                continue
+            text = str(value or "")
+            if text in ("", _MASKED_SECRET):
+                previous = str(old_block.get(field) or "")
+                block[field] = previous if previous or required else None
+            else:
+                block[field] = encrypt_api_key(text) or ""
+        result[block_name] = block
+    return result
 
 
 #: The registry. Order matches the settings UI's section order.
@@ -183,6 +399,8 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
         wire_model=LoggingWireConfig,
         write=WriteMode.MERGE_WIRE_PARTIAL,
         read=ReadMode.WIRE_MERGED,
+        # Full prompt/response logging decides how much user content is kept.
+        sensitive=True,
     ),
     ServerSetting(
         key="web_search_config",
@@ -192,9 +410,21 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
         verbs=("GET", "PUT", "DELETE"),
         write=WriteMode.REPLACE_EXCLUDE_NONE,
         read=ReadMode.RAW_OR_DEFAULT,
-        validate=_validate_web_search_urls,
+        validate=_validate_web_search,
+        write_transform=_merge_web_search_secrets,
+        read_transform=_mask_web_search_secrets,
         default_doc={"enabled": False, "provider": "searxng", "searxng": None, "ollama": None},
         delete_message="Web search configuration deleted",
+    ),
+    ServerSetting(
+        key="console_auth",
+        path="/console-auth",
+        description="Console authentication, SMTP and OIDC configuration",
+        model=ConsoleAuthSettings,
+        validate=_validate_console_auth,
+        write_transform=_merge_console_auth_secrets,
+        read_transform=_mask_console_auth_secrets,
+        sensitive=True,
     ),
     ServerSetting(
         key="smart_routing",
@@ -228,6 +458,7 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
         path="/security",
         description="Security and rate-limiting configuration",
         model=SecurityParams,
+        sensitive=True,
     ),
     ServerSetting(
         key="keepalive",
@@ -243,6 +474,8 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
         write=WriteMode.REPLACE_INNER,
         read=ReadMode.LIMITS_MERGED,
         validate=_validate_rate_limits,
+        # Relaxing a bucket is a way to defeat the login brute-force lockout.
+        sensitive=True,
     ),
     ServerSetting(
         key="cors_origins",
@@ -251,12 +484,14 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
         model=CorsConfig,
         write=WriteMode.REPLACE_LIST,
         read=ReadMode.LIST_WRAP,
+        sensitive=True,
     ),
     ServerSetting(
         key="mcp_security_policy",
         path="/mcp-security",
         description="MCP security policy configuration",
         model=McpSecurityPolicyConfig,
+        sensitive=True,
     ),
 )
 
@@ -329,20 +564,20 @@ def apply_write(setting: ServerSetting, payload: BaseModel, existing: Any) -> An
     """Compute the stored row value for a validated PUT request body."""
     match setting.write:
         case WriteMode.REPLACE:
-            return payload.model_dump()
+            stored = payload.model_dump()
         case WriteMode.REPLACE_EXCLUDE_NONE:
             # Only the top-level presence of sub-configs is conditional (a
             # provided sub-config dumps in full, nulls included — matching the
             # old handler's ``config_data.searxng.model_dump()``); pydantic's
             # ``exclude_none`` would recurse into the sub-config and drop keys.
             dumped = payload.model_dump()
-            return {k: v for k, v in dumped.items() if v is not None}
+            stored = {k: v for k, v in dumped.items() if v is not None}
         case WriteMode.REPLACE_INNER:
             assert isinstance(payload, RateLimitsConfig)
-            return dict(payload.limits)
+            stored = dict(payload.limits)
         case WriteMode.REPLACE_LIST:
             assert isinstance(payload, CorsConfig)
-            return [o.strip() for o in payload.origins if o.strip()]
+            stored = [o.strip() for o in payload.origins if o.strip()]
         case WriteMode.MERGE_FIELDS:
             current = setting.model(**(existing if isinstance(existing, dict) else {}))
             names = setting.update_fields or tuple(setting.model.model_fields)
@@ -350,15 +585,18 @@ def apply_write(setting: ServerSetting, payload: BaseModel, existing: Any) -> An
                 value = getattr(payload, name, None)
                 if value is not None:
                     setattr(current, name, value)
-            return current.model_dump()
+            stored = current.model_dump()
         case WriteMode.MERGE_WIRE_PARTIAL:
             assert setting.wire_model is not None
             stored = setting.wire_model().model_dump()
             if isinstance(existing, dict):
                 stored.update(existing)
             stored.update(payload.model_dump(exclude_unset=True))
-            return stored
-    raise ValueError(f"Unhandled write mode: {setting.write}")  # pragma: no cover
+        case _:
+            raise ValueError(f"Unhandled write mode: {setting.write}")  # pragma: no cover
+    if setting.write_transform is not None:
+        stored = setting.write_transform(payload, stored, existing)
+    return stored
 
 
 # --------------------------------------------------------------------------
@@ -371,26 +609,28 @@ def build_response(setting: ServerSetting, stored: Any) -> Any:
     match setting.read:
         case ReadMode.MODEL_DUMP:
             value = stored if isinstance(stored, dict) else {}
-            return setting.model(**value).model_dump()
+            response = setting.model(**value).model_dump()
         case ReadMode.WIRE_MERGED:
             assert setting.wire_model is not None
             merged = setting.wire_model().model_dump()
             if isinstance(stored, dict):
                 merged.update(stored)
-            return merged
+            response = merged
         case ReadMode.RAW_OR_DEFAULT:
-            if stored is not None:
-                return stored
-            return dict(setting.default_doc or {})
+            response = stored if stored is not None else dict(setting.default_doc or {})
         case ReadMode.LIMITS_MERGED:
             merged = dict(DEFAULT_RATE_LIMITS)
             if isinstance(stored, dict):
                 merged.update({k: str(v) for k, v in stored.items() if k in DEFAULT_RATE_LIMITS})
-            return {"limits": merged}
+            response = {"limits": merged}
         case ReadMode.LIST_WRAP:
             origins = [str(o) for o in stored] if isinstance(stored, list) else []
-            return setting.model.model_validate({"origins": origins}).model_dump()
-    raise ValueError(f"Unhandled read mode: {setting.read}")  # pragma: no cover
+            response = setting.model.model_validate({"origins": origins}).model_dump()
+        case _:
+            raise ValueError(f"Unhandled read mode: {setting.read}")  # pragma: no cover
+    if setting.read_transform is not None:
+        response = setting.read_transform(response)
+    return response
 
 
 # --------------------------------------------------------------------------
@@ -534,6 +774,7 @@ class ServerSettingsRuntime:
     """
 
     logging: LoggingConfig
+    console_auth: ConsoleAuthSettings
     web_search: WebSearchConfig | None
     request_policy_unknown_fields: Literal["ignore", "passthrough", "error"] | None
     request_policy_unsupported_block: Literal["drop", "degrade", "error"] | None
@@ -593,6 +834,35 @@ def load_server_settings(rows: Mapping[str, Any]) -> ServerSettingsRuntime:
         logging_overrides if isinstance(logging_overrides, dict) else None
     )
 
+    console_auth_value = rows.get("console_auth")
+    try:
+        console_auth = ConsoleAuthSettings.model_validate(
+            console_auth_value if isinstance(console_auth_value, dict) else {}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to parse console_auth config: {e}")
+        console_auth = ConsoleAuthSettings()
+    else:
+        # Secrets are encrypted at rest by the settings endpoint. Decrypt for
+        # runtime use; a malformed ciphertext disables that one secret rather
+        # than wedging every config reload.
+        from llm_proxy.security.encryption import EncryptionError, decrypt_api_key
+
+        if console_auth.smtp.password:
+            try:
+                console_auth.smtp.password = decrypt_api_key(console_auth.smtp.password) or ""
+            except EncryptionError as exc:
+                logger.warning(f"Failed to decrypt SMTP password: {exc}")
+                console_auth.smtp.password = ""
+        for provider in console_auth.oidc_providers:
+            if not provider.client_secret:
+                continue
+            try:
+                provider.client_secret = decrypt_api_key(provider.client_secret) or ""
+            except EncryptionError as exc:
+                logger.warning(f"Failed to decrypt OIDC secret for {provider.id}: {exc}")
+                provider.client_secret = ""
+
     web_search_config = None
     if "web_search_config" in rows:
         stored = rows["web_search_config"]
@@ -604,6 +874,26 @@ def load_server_settings(rows: Mapping[str, Any]) -> ServerSettingsRuntime:
             )
         try:
             web_search_config = WebSearchConfig.model_validate(stored)
+            # Search credentials are write-only in the API; decrypt the stored
+            # ciphertext for the actual provider call. A bad token disables
+            # that one credential instead of wedging config reload.
+            from llm_proxy.security.encryption import EncryptionError, decrypt_api_key
+
+            for block_name, fields, _ in _WEB_SEARCH_SECRET_FIELDS:
+                block = getattr(web_search_config, block_name, None)
+                if block is None:
+                    continue
+                for field in fields:
+                    value = getattr(block, field, None)
+                    if not value:
+                        continue
+                    try:
+                        setattr(block, field, decrypt_api_key(value) or "")
+                    except EncryptionError as exc:
+                        logger.warning(
+                            f"Failed to decrypt {block_name}.{field} for web search: {exc}"
+                        )
+                        setattr(block, field, "")
         except Exception as e:
             logger.warning(f"Failed to parse web_search_config: {e}")
 
@@ -710,6 +1000,7 @@ def load_server_settings(rows: Mapping[str, Any]) -> ServerSettingsRuntime:
 
     return ServerSettingsRuntime(
         logging=logging_config,
+        console_auth=console_auth,
         web_search=web_search_config,
         request_policy_unknown_fields=unknown_fields_policy,
         request_policy_unsupported_block=unsupported_block_policy,

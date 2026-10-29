@@ -1,6 +1,7 @@
 """Integration tests for the team management endpoints (/api/team/*)."""
 
 import time
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
@@ -37,6 +38,8 @@ def _mock_user(user_id: int, username: str, role: str = "viewer") -> MagicMock:
     # values a bare MagicMock would coerce to 1.0 under pydantic validation.
     user.budget_spend_usd = None
     user.budget_period_start = None
+    user.email = None
+    user.email_verified = False
     return user
 
 
@@ -58,8 +61,14 @@ def team_client():
     mock_config_manager.get_config = AsyncMock(return_value=mock_config)
     mock_config_manager.publish_generation = AsyncMock()
 
+    session_record = MagicMock()
+    session_record.last_verified_at = datetime.now(UTC)
+    session_repo = AsyncMock()
+    session_repo.get_valid_session = AsyncMock(return_value=session_record)
+
     with (
         patch("llm_proxy.api.dependencies.UserRepository", return_value=auth_repo),
+        patch("llm_proxy.api.dependencies.UserSessionRepository", return_value=session_repo),
         patch("llm_proxy.api.routers.team.UserRepository", return_value=mock_repo),
     ):
         app = FastAPI()
@@ -71,7 +80,12 @@ def team_client():
         async def _set_identity(request: Request, call_next):
             set_request_identity(
                 request,
-                RequestIdentity(user=admin.username, auth_method="jwt", user_id=admin.id),
+                RequestIdentity(
+                    user=admin.username,
+                    auth_method="jwt",
+                    user_id=admin.id,
+                    console_session_id="sess-team",
+                ),
             )
             return await call_next(request)
 
@@ -116,6 +130,9 @@ class TestUpdateMemberUsername:
         assert payload["sub"] == "boss"
         assert payload["role"] == "admin"
         assert payload["tv"] == 1
+        # The replacement token stays bound to the single active console
+        # session, so it cannot bypass rotation or step-up.
+        assert payload["sid"] == "sess-team"
 
     def test_user_not_found(self, team_client):
         client, _, mock_repo = team_client

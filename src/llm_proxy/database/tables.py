@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     false,
     text,
 )
@@ -290,6 +292,15 @@ class UserRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional login alias. Stored normalized (trimmed, lowercased) so the
+    # unique index is case-insensitive without a functional index, which
+    # SQLite does not support uniformly across versions.
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True, nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # How verification happened: ``smtp``, ``oidc``, or ``admin`` (attested).
+    email_verified_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Least-privilege default: every creation path passes a role explicitly;
     # the DB-level default must never silently grant admin.
     role: Mapped[str] = mapped_column(
@@ -341,6 +352,16 @@ class UserRecord(Base):
     def __repr__(self) -> str:
         return f"<UserRecord(id={self.id}, username='{self.username}', role='{self.role}')>"
 
+    @property
+    def email_verified(self) -> bool:
+        """Whether the current email has been verified (or admin-attested)."""
+        return self.email_verified_at is not None
+
+    @property
+    def has_password(self) -> bool:
+        """Whether this account has a bcrypt password (OAuth/passkey-only accounts do not)."""
+        return isinstance(self.password_hash, str) and self.password_hash.startswith("$2")
+
 
 class UserSessionRecord(Base):
     """Database model for admin UI session API keys.
@@ -361,11 +382,165 @@ class UserSessionRecord(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # Last time this session satisfied a step-up challenge. Sensitive
+    # endpoints require this to be within the configured window.
+    last_verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    # Primary factor that created the session: password, passkey, oidc.
+    auth_method: Mapped[str] = mapped_column(
+        String(20), default="password", server_default="password", nullable=False
+    )
 
     def __repr__(self) -> str:
         return (
             f"<UserSessionRecord(id='{self.id}', user_id={self.user_id}, active={self.is_active})>"
         )
+
+
+class PasskeyCredentialRecord(Base):
+    """A WebAuthn credential registered by a console user.
+
+    ``credential_public_key`` is the COSE public key returned by the
+    authenticator, base64url-encoded so the row is portable across SQLite and
+    PostgreSQL without a binary-column migration.
+    """
+
+    __tablename__ = "passkey_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    credential_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False, index=True)
+    credential_public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    transports: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    aaguid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    name: Mapped[str] = mapped_column(
+        String(100), default="Passkey", server_default="Passkey", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<PasskeyCredentialRecord(id={self.id}, user_id={self.user_id})>"
+
+
+class TotpCredentialRecord(Base):
+    """One TOTP secret per user, encrypted at rest."""
+
+    __tablename__ = "totp_credentials"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    secret: Mapped[str] = mapped_column(Text, nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TotpCredentialRecord(user_id={self.user_id}, "
+            f"confirmed={self.confirmed_at is not None})>"
+        )
+
+
+class RecoveryCodeRecord(Base):
+    """A one-time 2FA recovery code (SHA-256 hash, never plaintext)."""
+
+    __tablename__ = "recovery_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+
+
+class InvitationRecord(Base):
+    """An email invitation to join the console.
+
+    The plaintext token is shown to the admin once; only its SHA-256 hash is
+    stored. ``accepted_by_user_id`` is set when the invitation is consumed.
+    """
+
+    __tablename__ = "invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(
+        String(20), default="viewer", server_default="viewer", nullable=False
+    )
+    allowed_models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    budget_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    budget_period: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    budget_reset_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OAuthIdentityRecord(Base):
+    """A verified external identity bound to one console user."""
+
+    __tablename__ = "oauth_identities"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_oauth_provider_subject"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=False,
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<OAuthIdentityRecord(provider='{self.provider}', user_id={self.user_id})>"
 
 
 class McpServerRecord(Base):

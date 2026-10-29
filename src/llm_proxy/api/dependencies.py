@@ -7,6 +7,8 @@ request-introspection helpers. Request-context assembly lives in
 must not depend on either (one-directional layering).
 """
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import Depends, Request
 
 from llm_proxy.config.manager import DatabaseConfigManager
@@ -20,9 +22,15 @@ from llm_proxy.core.exceptions import (
 from llm_proxy.core.internal_call import build_provider_adapter
 from llm_proxy.core.provider_selector import ProviderSelectionResult
 from llm_proxy.core.request_facts import get_request_identity
-from llm_proxy.database import UserRecord, UserRepository, get_async_session
+from llm_proxy.database import (
+    UserRecord,
+    UserRepository,
+    UserSessionRepository,
+    get_async_session,
+)
 from llm_proxy.database.tables import SESSION_ID_MAX_LENGTH, TRACE_ID_MAX_LENGTH
 from llm_proxy.http.client import AsyncSession, ProviderHTTPClientManager
+from llm_proxy.security.jwt import JWTManager
 from llm_proxy.services import runtime_services
 
 get_async_session_dep = Depends(get_async_session)
@@ -111,6 +119,11 @@ async def get_auth_config(request: Request):
     return (await get_config_from_state(request)).server_params.auth
 
 
+async def get_jwt_manager(request: Request) -> JWTManager:
+    """The JWT manager built from the current auth config."""
+    return JWTManager(await get_auth_config(request))
+
+
 async def require_authenticated(request: Request):
     """Require the request to be authenticated (any auth method).
 
@@ -149,6 +162,77 @@ async def require_api_key_auth(request: Request):
             message="Authentication required.",
             code="api_key_required",
         )
+
+
+STEP_UP_WINDOW = timedelta(minutes=15)
+
+
+def ensure_recent_verification(record, *, message: str) -> None:
+    """Raise unless *record* was verified within the step-up window."""
+    last_verified_at = record.last_verified_at
+    if last_verified_at.tzinfo is None:
+        last_verified_at = last_verified_at.replace(tzinfo=UTC)
+    if datetime.now(UTC) - last_verified_at > STEP_UP_WINDOW:
+        raise ForbiddenError(message=message, code="step_up_required")
+
+
+_REAUTH_MESSAGE = "Please re-authenticate before performing this action"
+
+
+async def _require_fresh_session(
+    session,
+    session_id: str,
+    user_id: int,
+) -> None:
+    """Raise unless the bound console session is live and recently verified."""
+    record = await UserSessionRepository(session).get_valid_session(session_id, user_id)
+    if record is None:
+        raise AuthenticationFailedError(
+            message="Session has been revoked. Please log in again.",
+            code="session_revoked",
+        )
+    ensure_recent_verification(record, message=_REAUTH_MESSAGE)
+
+
+async def require_recent_auth(
+    request: Request,
+    session=Depends(get_async_session),
+    user: UserRecord = Depends(get_current_user),
+) -> UserRecord:
+    """Require a step-up authentication within the last 15 minutes.
+
+    Used by sensitive operations (factor changes, role changes, key
+    creation/deletion, invitations). The check is server-side and reads the
+    session row, so a client cannot extend the window by editing its JWT.
+    """
+    identity = get_request_identity(request)
+    if not identity.console_session_id:
+        # Tokens issued before session binding existed have no ``sid``. They
+        # keep working until their 24h expiry; without a session row there is
+        # no timestamp to enforce, and forcing a re-login here would break
+        # every in-flight legacy token at deploy time.
+        return user
+    await _require_fresh_session(session, identity.console_session_id, user.id)
+    return user
+
+
+async def require_recent_auth_for_mutations(
+    request: Request,
+    session=Depends(get_async_session),
+) -> None:
+    """Apply the step-up window to state-changing requests only.
+
+    Router-level dependency: GET/HEAD/OPTIONS stay readable, while POST/PUT/
+    PATCH/DELETE require a session verified within the last 15 minutes. Legacy
+    tokens without ``sid`` are admitted until their 24h expiry (there is no
+    session timestamp to check).
+    """
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    identity = get_request_identity(request)
+    if not identity.console_session_id:
+        return
+    await _require_fresh_session(session, identity.console_session_id, identity.user_id or -1)
 
 
 async def require_admin_role(request: Request, session=Depends(get_async_session)):

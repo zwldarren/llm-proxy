@@ -11,7 +11,11 @@ hand-written endpoints this replaces (ADR-0026).
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from llm_proxy.api.dependencies import get_async_session_dep, require_admin_role
+from llm_proxy.api.dependencies import (
+    get_async_session_dep,
+    require_admin_role,
+    require_recent_auth_for_mutations,
+)
 from llm_proxy.api.routers.config.helpers import (
     commit_and_reload,
     get_config_repository,
@@ -101,6 +105,9 @@ for _setting in SERVER_SETTINGS:
             _make_put_handler(_setting),
             methods=["PUT"],
             name=f"Update {_setting.description}",
+            dependencies=(
+                [Depends(require_recent_auth_for_mutations)] if _setting.sensitive else None
+            ),
         )
     if "DELETE" in _setting.verbs:
         router.add_api_route(

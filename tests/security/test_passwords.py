@@ -10,6 +10,7 @@ from llm_proxy.security.passwords import (
     is_bcrypt_hash,
     mask_headers,
     mask_sensitive,
+    validate_password_strength,
     verify_admin_password,
     verify_api_key,
 )
@@ -156,6 +157,15 @@ class TestBcrypt72ByteBoundary:
         password = "a" * 71
         hashed = hash_password(password)
         assert verify_admin_password(password, hashed)
+
+    def test_multibyte_password_is_bounded_by_encoded_bytes(self):
+        """34 characters can still exceed bcrypt's 72-byte limit when UTF-8 encoded."""
+        password = "Ä" * 32 + "Aa1!"  # 32 * 2 + 4 = 68 bytes, accepted
+        assert validate_password_strength(password) == password
+
+        too_long = "Ä" * 35 + "Aa1!"  # 35 * 2 + 4 = 74 bytes
+        with pytest.raises(ValueError, match="72 bytes"):
+            validate_password_strength(too_long)
 
 
 class TestMaskHeaders:

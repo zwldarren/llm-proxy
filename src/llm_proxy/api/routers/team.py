@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import (
@@ -12,12 +12,16 @@ from llm_proxy.api.dependencies import (
     get_auth_config,
     publish_config_generation,
     require_admin_role,
+    require_recent_auth,
+    require_recent_auth_for_mutations,
 )
 from llm_proxy.api.middleware.api_key_cache import invalidate_api_key_cache
 from llm_proxy.api.routers.logs import invalidate_user_role_cache
+from llm_proxy.api.schemas.common import validate_email
 from llm_proxy.api.schemas.team import (
     TeamMemberBudgetUpdate,
     TeamMemberCreate,
+    TeamMemberEmailUpdate,
     TeamMemberListResponse,
     TeamMemberModelsUpdate,
     TeamMemberPasswordReset,
@@ -27,18 +31,31 @@ from llm_proxy.api.schemas.team import (
     TeamMemberUsernameUpdate,
     TeamMemberUsernameUpdateResponse,
 )
+from llm_proxy.api.session_cookies import set_console_cookie
 from llm_proxy.core.budget import BudgetEnvelope, effective_budget_window, validate_budget_envelope
 from llm_proxy.core.exceptions import ConflictError, NotFoundError, ValidationError
-from llm_proxy.database import ApiKeyRepository, UserRepository, UserSessionRepository
+from llm_proxy.core.request_facts import get_request_identity
+from llm_proxy.database import (
+    ApiKeyRepository,
+    OAuthIdentityRepository,
+    PasskeyRepository,
+    TotpRepository,
+    UserRepository,
+    UserSessionRepository,
+)
 from llm_proxy.database.repositories.usage_repository import UsageRepository
 from llm_proxy.database.tables import UserRecord
 from llm_proxy.observability.log_intake import record_member_action
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import ActionCategory, Outcome
 from llm_proxy.security.jwt import JWTManager
-from llm_proxy.security.passwords import hash_password
+from llm_proxy.security.passwords import hash_password, is_bcrypt_hash
 
-router = APIRouter(prefix="/api/team", tags=["Team"], dependencies=[Depends(require_admin_role)])
+router = APIRouter(
+    prefix="/api/team",
+    tags=["Team"],
+    dependencies=[Depends(require_admin_role), Depends(require_recent_auth_for_mutations)],
+)
 logger = get_logger(__name__)
 
 
@@ -176,13 +193,12 @@ async def create_member(
     admin: UserRecord = Depends(require_admin_role),
 ):
     repo = UserRepository(session)
-    password_hash = hash_password(data.password)
     try:
         # The initial password is chosen by the admin, so it must be treated
         # as temporary: the member is forced to set their own password on
         # first login before they can use the rest of the API.
         user = await repo.create_user(
-            data.username, password_hash, role=data.role, must_change_password=True
+            data.username, hash_password(data.password), role=data.role, must_change_password=True
         )
     except ValueError as e:
         raise ConflictError(message=str(e)) from e
@@ -613,6 +629,7 @@ async def update_member_username(
     user_id: int,
     data: TeamMemberUsernameUpdate,
     request: Request,
+    response: Response,
     session: AsyncSession = get_async_session_dep,
     # Same callable as the router-level dependency, so FastAPI reuses the
     # already-resolved admin record instead of querying twice.
@@ -628,9 +645,7 @@ async def update_member_username(
     previously issued JWT stops working and cannot be revalidated later.
     """
     repo = UserRepository(session)
-    target = await repo.get_by_id(user_id)
-    if target is None:
-        raise NotFoundError(message=f"User {user_id} not found")
+    target = await _get_member_or_404(repo, user_id)
     old_username = target.username
     try:
         updated = await repo.update_username(user_id, data.username)
@@ -644,8 +659,12 @@ async def update_member_username(
     if is_self_rename:
         auth_config = await get_auth_config(request)
         access_token = JWTManager(auth_config).create_token(
-            updated.username, role=updated.role, token_version=updated.token_version
+            updated.username,
+            role=updated.role,
+            token_version=updated.token_version,
+            session_id=get_request_identity(request).console_session_id,
         )
+        set_console_cookie(response, request, access_token=access_token)
 
     # The logs router caches role/user_id keyed by username; drop both names
     # so a recycled username cannot inherit the previous owner's cached entry.
@@ -672,11 +691,108 @@ async def update_member_username(
             invalidate_role_usernames=(old_username, updated.username),
         ),
     )
-    response = TeamMemberUsernameUpdateResponse(
+    return TeamMemberUsernameUpdateResponse(
         **(await _member_with_spend(session, updated)).model_dump(),
         access_token=access_token,
     )
-    return response
+
+
+@router.put("/members/{user_id}/email", response_model=TeamMemberRead)
+async def set_member_email(
+    user_id: int,
+    data: TeamMemberEmailUpdate,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    admin: UserRecord = Depends(require_recent_auth),
+):
+    """Set an admin-attested email when SMTP verification is unavailable.
+
+    The invite flow and OAuth set a verified email automatically. This route
+    exists for existing password accounts and for operators who deliberately
+    attest the address themselves.
+    """
+    repo = UserRepository(session)
+    await _get_member_or_404(repo, user_id)
+    try:
+        updated = await repo.set_email(user_id, validate_email(data.email), verified_by="admin")
+    except ValueError as exc:
+        raise ConflictError(message=str(exc)) from exc
+    assert updated is not None  # existence checked above
+    await session.commit()
+    await _commit_member_operation(
+        request,
+        MemberOperation(
+            actor=admin.username,
+            action=ActionCategory.UPDATE,
+            target_user=updated.username,
+            extra={"email": updated.email, "verified_by": "admin"},
+            log_message="Admin set a member email",
+            log_fields={"admin_username": admin.username, "target_user_id": updated.id},
+        ),
+    )
+    return TeamMemberRead.model_validate(updated)
+
+
+@router.delete("/members/{user_id}/2fa", response_model=dict)
+async def reset_member_2fa(
+    user_id: int,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    admin: UserRecord = Depends(require_recent_auth),
+):
+    """Revoke a member's TOTP secret and recovery codes (admin recovery)."""
+    repo = UserRepository(session)
+    user = await _get_member_or_404(repo, user_id)
+    await TotpRepository(session).delete(user_id)
+    await session.commit()
+    await _commit_member_operation(
+        request,
+        MemberOperation(
+            actor=admin.username,
+            action=ActionCategory.DELETE,
+            target_user=user.username,
+            extra={"operation": "2fa_reset"},
+            log_message="Admin reset a member's two-factor authentication",
+            log_fields={"admin_username": admin.username, "target_user_id": user.id},
+        ),
+    )
+    return {"success": True}
+
+
+@router.delete("/members/{user_id}/passkeys", response_model=dict)
+async def revoke_member_passkeys(
+    user_id: int,
+    request: Request,
+    session: AsyncSession = get_async_session_dep,
+    admin: UserRecord = Depends(require_recent_auth),
+):
+    """Revoke every passkey for a member, refusing to remove their last factor."""
+    repo = UserRepository(session)
+    user = await _get_member_or_404(repo, user_id)
+    if not is_bcrypt_hash(user.password_hash):
+        identities = await OAuthIdentityRepository(session).list_for_user(user_id)
+        if not identities:
+            raise ValidationError(
+                message=(
+                    "This member has no password or linked sign-in provider; "
+                    "resetting passkeys would lock them out"
+                ),
+                code="last_factor",
+            )
+    removed = await PasskeyRepository(session).delete_all_for_user(user_id)
+    await session.commit()
+    await _commit_member_operation(
+        request,
+        MemberOperation(
+            actor=admin.username,
+            action=ActionCategory.DELETE,
+            target_user=user.username,
+            extra={"operation": "passkeys_reset", "removed": removed},
+            log_message="Admin revoked a member's passkeys",
+            log_fields={"admin_username": admin.username, "target_user_id": user.id},
+        ),
+    )
+    return {"success": True, "removed": removed}
 
 
 @router.put("/members/{user_id}/password", response_model=dict)
@@ -689,8 +805,7 @@ async def reset_member_password(
 ):
     repo = UserRepository(session)
     target = await _get_member_or_404(repo, user_id)
-    password_hash = hash_password(data.password)
-    await repo.update_password(user_id, password_hash)
+    await repo.update_password(user_id, hash_password(data.password))
     # The admin chose the new password, so the member must replace it with
     # their own on next login.
     await repo.set_must_change_password(user_id, True)

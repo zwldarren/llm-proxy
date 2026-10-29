@@ -703,7 +703,8 @@ class TestPasswordManagement:
             },
             headers=_auth_header(token),
         )
-        assert resp.status_code == 401, resp.text
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == "invalid_current_password"
 
     @pytest.mark.asyncio
     async def test_admin_resets_member_password(self, app_and_db, client):
@@ -959,6 +960,55 @@ class TestTokenRevocation:
         # Logout is an optional-auth path: revoked token is treated as anonymous
         resp = await client.post("/api/auth/logout", headers=_auth_header(token))
         assert resp.status_code == 200, resp.text
+
+    @pytest.mark.asyncio
+    async def test_a_rotated_tab_signing_out_keeps_the_live_session(self, app_and_db, client):
+        """Two tabs: the old one signs out, the newer one must stay signed in.
+
+        Sign-in rotates the account's single console session. The old tab's
+        sign-out used to revoke by user (sessions + token version), which ended
+        the session the other tab was still holding.
+        """
+        await _seed_user(app_and_db, "viewer1", "Old@pass123")
+        login = {"username": "viewer1", "password": "Old@pass123"}
+
+        old_token = (await client.post("/api/auth/login", json=login)).json()["access_token"]
+        new_token = (await client.post("/api/auth/login", json=login)).json()["access_token"]
+
+        # Rotation already signed the old tab out.
+        rotated = await client.get("/api/me/profile", headers=_auth_header(old_token))
+        assert rotated.status_code == 401, rotated.text
+        assert rotated.json()["code"] == "session_revoked"
+
+        # The stale tab's sign-out must leave the live session untouched.
+        resp = await client.post("/api/auth/logout", headers=_auth_header(old_token))
+        assert resp.status_code == 200, resp.text
+        still_live = await client.get("/api/me/profile", headers=_auth_header(new_token))
+        assert still_live.status_code == 200, still_live.text
+
+    @pytest.mark.asyncio
+    async def test_rotated_session_is_not_reported_as_signed_in(self, app_and_db, client):
+        """The session probe answers ``authenticated: false`` once rotated."""
+        await _seed_user(app_and_db, "viewer1", "Old@pass123")
+        login = {"username": "viewer1", "password": "Old@pass123"}
+
+        old_token = (await client.post("/api/auth/login", json=login)).json()["access_token"]
+        new_token = (await client.post("/api/auth/login", json=login)).json()["access_token"]
+
+        stale = await client.get("/api/auth/session", headers=_auth_header(old_token))
+        assert stale.status_code == 200, stale.text
+        assert stale.json() == {
+            "authenticated": False,
+            "username": None,
+            "role": None,
+            "must_change_password": False,
+        }
+
+        # The live tab is still reported as itself.
+        live = await client.get("/api/auth/session", headers=_auth_header(new_token))
+        assert live.status_code == 200, live.text
+        assert live.json()["authenticated"] is True
+        assert live.json()["username"] == "viewer1"
 
 
 class TestMemberModelAllowlist:

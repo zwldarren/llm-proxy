@@ -1,10 +1,11 @@
 """Integration tests for the authentication endpoints (/api/auth/*)."""
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
@@ -12,6 +13,7 @@ from llm_proxy.api.middleware.rate_limiting import RateLimitManager
 from llm_proxy.api.middleware.security import BaseLockoutManager
 from llm_proxy.api.routers.auth import router
 from llm_proxy.config.types.auth import ProxyAuthConfig
+from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 from llm_proxy.database import get_async_session
 from llm_proxy.security.passwords import hash_password, verify_admin_password
 
@@ -21,6 +23,7 @@ TEST_SECRET = "test-secret-at-least-32-characters-long-aaaaaa"
 def _mock_user(username: str = "admin", password: str = "test-password-123") -> MagicMock:
     """A mock user record with a real bcrypt hash so verify_admin_password works."""
     user = MagicMock()
+    user.id = 1
     user.username = username
     user.password_hash = hash_password(password)
     user.is_active = True
@@ -34,6 +37,7 @@ def _mock_user(username: str = "admin", password: str = "test-password-123") -> 
 def auth_client_with_lockout():
     """Build a test app with mocked user repo, jwt config, and neutralized rate limiting."""
     mock_repo = AsyncMock()
+    mock_repo.get_by_email = AsyncMock(return_value=None)
 
     mock_config = MagicMock()
     mock_config.server_params.auth = ProxyAuthConfig(jwt_secret=TEST_SECRET)
@@ -44,11 +48,21 @@ def auth_client_with_lockout():
     lockout_mock.is_locked_out.return_value = False
 
     mock_session_repo = AsyncMock()
-    mock_session_repo.create_session = AsyncMock(return_value=(MagicMock(), "sk-session-test-key"))
+    session_record = MagicMock()
+    session_record.id = "session-1"
+    mock_session_repo.create_session = AsyncMock(
+        return_value=(session_record, "sk-session-test-key")
+    )
     mock_session_repo.deactivate_user_sessions = AsyncMock()
+
+    mock_totp_repo = AsyncMock()
+    mock_totp_repo.get = AsyncMock(return_value=None)
 
     with (
         patch("llm_proxy.api.routers.auth.UserRepository", return_value=mock_repo),
+        patch("llm_proxy.api.auth_session.UserRepository", return_value=mock_repo),
+        patch("llm_proxy.api.auth_session.UserSessionRepository", return_value=mock_session_repo),
+        patch("llm_proxy.api.auth_session.TotpRepository", return_value=mock_totp_repo),
         patch("llm_proxy.api.routers.auth.UserSessionRepository", return_value=mock_session_repo),
         patch("llm_proxy.api.routers.auth.get_lockout_manager", return_value=lockout_mock),
         patch.object(
@@ -190,6 +204,19 @@ class TestSetup:
         assert response.status_code == 422
         mock_repo.create_initial_admin.assert_not_called()
 
+    @pytest.mark.parametrize("username", ["bad user", "bad/name", "a" * 65])
+    def test_rejects_username_outside_console_format(self, auth_client, username):
+        client, mock_repo = auth_client
+        mock_repo.has_admin = AsyncMock(return_value=False)
+
+        response = client.post(
+            "/api/auth/setup",
+            json={"username": username, "password": "Strong-Pass1!"},
+        )
+
+        assert response.status_code == 422
+        mock_repo.create_initial_admin.assert_not_called()
+
 
 class TestLogin:
     def test_login_success(self, auth_client):
@@ -203,10 +230,30 @@ class TestLogin:
         )
 
         assert response.status_code == 200
-        payload = _decode(response.json()["access_token"])
+        body = response.json()
+        payload = _decode(body["access_token"])
         assert payload["sub"] == "admin"
         assert payload["type"] == "admin"
-        assert response.json()["must_change_password"] is False
+        assert body["must_change_password"] is False
+        assert body["username"] == "admin"
+        assert body["role"] == "admin"
+
+        cookies = "; ".join(response.headers.get_list("set-cookie"))
+        assert "llm_proxy_console=" in cookies
+        assert "llm_proxy_session_key=" in cookies
+        assert "llm_proxy_csrf=" in cookies
+        console_cookie = next(
+            value
+            for value in response.headers.get_list("set-cookie")
+            if "llm_proxy_console=" in value
+        )
+        assert "HttpOnly" in console_cookie
+        assert "Path=/api" in console_cookie
+        csrf_cookie = next(
+            value for value in response.headers.get_list("set-cookie") if "llm_proxy_csrf=" in value
+        )
+        assert "HttpOnly" not in csrf_cookie
+        assert "Path=/" in csrf_cookie
 
     def test_login_returns_must_change_password_flag(self, auth_client):
         """Flagged accounts learn about the forced change right at login."""
@@ -385,3 +432,94 @@ class TestLogout:
 
         assert response.status_code == 200
         assert response.json() == {"success": True}
+
+
+@pytest.fixture
+def logout_client():
+    """A client whose request identity is stamped the way the JWT gate does it.
+
+    The identity holder is mutable so a test can present a token without a
+    ``sid`` (minted before sessions were bound) without rebuilding the app.
+    """
+    user = _mock_user()
+    mock_repo = AsyncMock()
+    mock_repo.get_by_username = AsyncMock(return_value=user)
+    mock_repo.increment_token_version = AsyncMock(return_value=True)
+    mock_session_repo = AsyncMock()
+    mock_session_repo.deactivate_session = AsyncMock(return_value=True)
+    mock_session_repo.deactivate_user_sessions = AsyncMock()
+    identity: dict[str, Any] = {
+        "user": user.username,
+        "user_id": user.id,
+        "session_id": "session-1",
+    }
+
+    with (
+        patch("llm_proxy.api.routers.auth.UserRepository", return_value=mock_repo),
+        patch("llm_proxy.api.routers.auth.UserSessionRepository", return_value=mock_session_repo),
+        patch.object(
+            RateLimitManager,
+            "check_rate_limit",
+            new=AsyncMock(return_value=(False, {})),
+        ),
+    ):
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router)
+        app.dependency_overrides[get_async_session] = lambda: AsyncMock()
+
+        @app.middleware("http")
+        async def _set_identity(request: Request, call_next):
+            set_request_identity(
+                request,
+                RequestIdentity(
+                    user=identity["user"],
+                    auth_method="jwt",
+                    user_id=identity["user_id"],
+                    console_session_id=identity["session_id"],
+                ),
+            )
+            return await call_next(request)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client, user, mock_repo, mock_session_repo, identity
+
+
+class TestLogoutScope:
+    """Signing out ends this browser's session, not the account's."""
+
+    def test_revokes_only_the_callers_own_session(self, logout_client):
+        client, user, mock_repo, mock_session_repo, _ = logout_client
+
+        response = client.post("/api/auth/logout")
+
+        assert response.status_code == 200
+        assert response.json() == {"success": True}
+        mock_session_repo.deactivate_session.assert_awaited_once_with("session-1", user.id)
+        # The bug: an old tab whose session had been rotated away revoking every
+        # session of the account, ending the live session on another device.
+        mock_session_repo.deactivate_user_sessions.assert_not_awaited()
+        mock_repo.increment_token_version.assert_not_awaited()
+
+    def test_legacy_token_without_sid_falls_back_to_account_wide_revoke(self, logout_client):
+        """A pre-``sid`` token has no session to end, so it is revoked account-wide."""
+        client, user, mock_repo, mock_session_repo, identity = logout_client
+        identity["session_id"] = None
+
+        response = client.post("/api/auth/logout")
+
+        assert response.status_code == 200
+        mock_session_repo.deactivate_session.assert_not_awaited()
+        mock_session_repo.deactivate_user_sessions.assert_awaited_once_with(user.id)
+        mock_repo.increment_token_version.assert_awaited_once_with(user.id)
+
+    def test_unknown_caller_is_not_attributed_to_a_user(self, logout_client):
+        """An identity whose subject no longer resolves revokes nothing."""
+        client, _, mock_repo, mock_session_repo, _ = logout_client
+        mock_repo.get_by_username = AsyncMock(return_value=None)
+
+        response = client.post("/api/auth/logout")
+
+        assert response.status_code == 200
+        mock_session_repo.deactivate_session.assert_not_awaited()
+        mock_session_repo.deactivate_user_sessions.assert_not_awaited()

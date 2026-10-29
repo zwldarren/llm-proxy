@@ -217,6 +217,7 @@ class DatabaseConfigManager:
 
             server_params = ServerParams(
                 auth=load_auth_config(),
+                console_auth=settings.console_auth,
                 logging=settings.logging,
                 web_search=settings.web_search,
                 unknown_fields_policy=settings.request_policy_unknown_fields,

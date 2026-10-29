@@ -58,6 +58,8 @@ from llm_proxy.api.routers import (
     feedback_router,
     health_router,
     import_registered_protocol_modules,
+    invitations_public_router,
+    invitations_router,
     logs_router,
     mcp_proxy_app,
     mcp_public_router,
@@ -65,12 +67,17 @@ from llm_proxy.api.routers import (
     me_router,
     me_tracing_router,
     models_router,
+    oauth_public_router,
+    oauth_router,
     openresponses_router,
     openresponses_ws_router,
+    passkeys_public_router,
+    passkeys_router,
     realtime_ws_router,
     routing_export_router,
     system_router,
     team_router,
+    two_factor_router,
 )
 from llm_proxy.core.errors import register_formatter_factory
 from llm_proxy.core.exceptions import NotFoundError
@@ -210,6 +217,13 @@ def create_app() -> FastAPI:
     import_registered_protocol_modules()
 
     app.include_router(auth_router)
+    app.include_router(invitations_public_router)
+    app.include_router(invitations_router)
+    app.include_router(passkeys_public_router)
+    app.include_router(passkeys_router)
+    app.include_router(two_factor_router)
+    app.include_router(oauth_public_router)
+    app.include_router(oauth_router)
     app.include_router(models_router)
     app.include_router(config_router)
     app.include_router(catalog_router)

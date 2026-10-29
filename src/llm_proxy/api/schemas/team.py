@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from llm_proxy.api.schemas.me import validate_username_format
+from llm_proxy.api.schemas.common import validate_username_format
 from llm_proxy.security.passwords import validate_password_strength
 
 
@@ -78,6 +78,8 @@ class TeamMemberRateLimitUpdate(BaseModel):
 class TeamMemberRead(BaseModel):
     id: int
     username: str
+    email: str | None = None
+    email_verified: bool = False
     role: Literal["admin", "viewer"]
     is_active: bool
     must_change_password: bool = False
@@ -139,3 +141,9 @@ class TeamMemberUsernameUpdateResponse(TeamMemberRead):
 
     access_token: str | None = None
     token_type: str = "bearer"
+
+
+class TeamMemberEmailUpdate(BaseModel):
+    """Admin-attested email for an existing member (SMTP may be disabled)."""
+
+    email: str = Field(..., max_length=320)

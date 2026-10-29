@@ -54,6 +54,7 @@ from llm_proxy.api.middleware.security import (
     apply_auth_failure_delay,
     get_api_key_lockout_manager,
 )
+from llm_proxy.api.session_cookies import SESSION_API_KEY_COOKIE
 from llm_proxy.core.budget import BudgetEnvelope
 from llm_proxy.core.request_facts import (
     RequestIdentity,
@@ -110,6 +111,10 @@ class GatePolicy:
     extraction: KeyExtraction
     #: Subprotocol prefix accepted as a key source (WebSocket only).
     ws_subprotocol_prefix: str | None = None
+    #: Accept the browser's HttpOnly /v1 session-key cookie when no explicit
+    #: Authorization or x-api-key header was supplied. The transport must
+    #: validate CSRF before calling the gate for unsafe methods.
+    allow_session_cookie: bool = False
     #: Client-IP lockout: check on entry, clear failed attempts on success.
     lockout: bool = True
     #: On a missing/invalid key: record a failed attempt and pay the
@@ -702,7 +707,11 @@ def _extract_key(request: Request, policy: GatePolicy) -> str | None:
         if not auth_header.startswith("Bearer "):
             return None
         return auth_header[7:]
-    return x_api_key or None
+    if x_api_key:
+        return x_api_key
+    if policy.allow_session_cookie:
+        return request.cookies.get(SESSION_API_KEY_COOKIE) or None
+    return None
 
 
 def _missing_key_message(request: Request, policy: GatePolicy) -> str:

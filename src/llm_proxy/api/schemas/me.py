@@ -1,43 +1,49 @@
 """Schemas for self-service endpoints."""
 
-import re
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from llm_proxy.api.schemas.common import validate_email, validate_username_format
 from llm_proxy.security.passwords import validate_password_strength
 
-# Matches the username format enforced by the team-management UI.
-USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+class MeSessionInfo(BaseModel):
+    """The console session behind the current request."""
 
-def validate_username_format(username: str) -> str:
-    """Ensure a username only contains letters, digits, underscores, and dashes."""
-    if not USERNAME_PATTERN.prefixmatch(username):
-        raise ValueError("Username may only contain letters, digits, underscores, and hyphens")
-    return username
+    auth_method: str
+    created_at: datetime
+    expires_at: datetime
+    last_verified_at: datetime
+    client_ip: str
 
 
 class MeProfile(BaseModel):
     id: int
     username: str
+    email: str | None = None
+    email_verified: bool = False
+    has_password: bool = True
     role: str
     must_change_password: bool = False
     created_at: datetime
+    allowed_models: list[str] | None = None
+    last_login_at: datetime | None = None
+    session: MeSessionInfo | None = None
 
     model_config = {"from_attributes": True}
 
 
 class MePasswordChange(BaseModel):
-    current_password: str = Field(..., min_length=1)
+    current_password: str | None = Field(default=None, min_length=1)
     new_password: str = Field(..., min_length=8, max_length=72)
 
     _validate_password = field_validator("new_password")(validate_password_strength)
 
 
 class MeUsernameChange(BaseModel):
-    current_password: str = Field(..., min_length=1)
+    current_password: str | None = Field(default=None, min_length=1)
     new_username: str = Field(..., min_length=1, max_length=64)
 
     _validate_username = field_validator("new_username")(validate_username_format)
@@ -50,6 +56,14 @@ class MeUsernameChangeResponse(BaseModel):
     # references the previous username and would no longer resolve to a user.
     access_token: str
     token_type: str = "bearer"
+
+
+class MeEmailChange(BaseModel):
+    """Request verification of a new login email (SMTP required)."""
+
+    email: str = Field(..., max_length=320)
+
+    _validate_email = field_validator("email")(validate_email)
 
 
 class MeBudget(BaseModel):

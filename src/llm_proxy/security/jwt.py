@@ -27,7 +27,13 @@ class JWTManager:
 
     _ALLOWED_ROLES: frozenset[str] = frozenset({"admin", "viewer"})
 
-    def create_token(self, username: str, role: str = "admin", token_version: int = 0) -> str:
+    def create_token(
+        self,
+        username: str,
+        role: str = "admin",
+        token_version: int = 0,
+        session_id: str | None = None,
+    ) -> str:
         """Create a JWT token for the given username.
 
         Validates that the role is one of the allowed roles (admin, member).
@@ -50,7 +56,42 @@ class JWTManager:
             "type": role,  # reflects the actual role, not hardcoded "admin"
             "tv": token_version,
         }
+        if session_id is not None:
+            # Binds the stateless JWT to the one active console session. Old
+            # tokens stop working as soon as a new login rotates the session.
+            payload["sid"] = session_id
         return jwt.encode(payload, self.secret, algorithm=self._ALGORITHM)
+
+    def create_scoped_token(
+        self,
+        purpose: str,
+        claims: dict[str, Any],
+        *,
+        ttl_seconds: int,
+    ) -> str:
+        """Create a short-lived token for a multi-step flow.
+
+        Used for WebAuthn challenges, OAuth state/PKCE and the 2FA login
+        challenge. The token is signed with the same secret but carries an
+        explicit purpose and a short expiry; it is never accepted as an
+        access token (the middleware requires a ``type`` of admin/viewer and
+        an access token does not carry ``purpose``).
+        """
+        now = datetime.now(tz=UTC)
+        payload = {
+            **claims,
+            "purpose": purpose,
+            "iat": now,
+            "exp": now + timedelta(seconds=ttl_seconds),
+        }
+        return jwt.encode(payload, self.secret, algorithm=self._ALGORITHM)
+
+    def verify_scoped_token(self, token: str, purpose: str) -> dict[str, Any]:
+        """Verify a scoped flow token and return its claims."""
+        payload = self.verify_token(token)
+        if payload.get("purpose") != purpose:
+            raise ConfigurationError(f"Invalid token purpose: expected {purpose}")
+        return payload
 
     def verify_token(self, token: str) -> dict[str, Any]:
         """Verify JWT token and return payload."""

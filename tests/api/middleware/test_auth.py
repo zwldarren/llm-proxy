@@ -7,7 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from llm_proxy.api.gate import VerifiedKeyAuth
+from llm_proxy.api.middleware.api_key_auth import api_key_auth_middleware
 from llm_proxy.api.middleware.jwt_auth import jwt_auth_middleware
+from llm_proxy.api.middleware.rate_limiting import RateLimitManager
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.core.request_facts import facts_for, get_request_identity
 
@@ -142,7 +144,7 @@ class TestPublicApiPaths:
     """Test that PUBLIC_API_PATHS is explicit and not broad."""
 
     def test_only_auth_public_paths_are_listed(self):
-        """Only the public auth endpoints (login + first-run setup) are truly public.
+        """The exact set of public auth endpoints is explicit.
 
         Logout uses optional JWT auth: if a valid token is provided, the user is
         identified; otherwise the request is allowed but will be attributed to
@@ -151,15 +153,44 @@ class TestPublicApiPaths:
         from llm_proxy.api.middleware.jwt_auth import PUBLIC_API_PATHS
 
         assert (
-            frozenset({"/api/auth/login", "/api/auth/setup", "/api/auth/setup-status"})
+            frozenset(
+                {
+                    "/api/auth/login",
+                    "/api/auth/setup",
+                    "/api/auth/setup-status",
+                    "/api/auth/capabilities",
+                    "/api/auth/2fa/verify",
+                    "/api/auth/2fa/recover",
+                    "/api/auth/email/verify",
+                    "/api/auth/password/forgot",
+                    "/api/auth/password/reset",
+                }
+            )
             == PUBLIC_API_PATHS
         )
+
+    def test_first_factor_and_invitation_prefixes_are_public(self):
+        """Passkey login and OAuth/invite flows must not need a JWT."""
+        from llm_proxy.api.middleware.jwt_auth import is_public_api_path
+
+        for path in (
+            "/api/auth/passkeys/login/begin",
+            "/api/auth/passkeys/login/finish",
+            "/api/auth/oauth/providers",
+            "/api/auth/oauth/google/callback",
+            "/api/auth/invitations/token/accept",
+        ):
+            assert is_public_api_path(path), path
+
+        assert not is_public_api_path("/api/auth/passkeysX/login")
+        assert not is_public_api_path("/api/me/passkeys/register/begin")
 
     def test_logout_optional_auth(self):
         """Logout endpoint supports optional JWT auth."""
         from llm_proxy.api.middleware.jwt_auth import _OPTIONAL_AUTH_PATHS
 
         assert "/api/auth/logout" in _OPTIONAL_AUTH_PATHS
+        assert "/api/auth/session" in _OPTIONAL_AUTH_PATHS
 
     def test_auth_other_paths_not_public(self):
         """Paths like /api/auth/other should not be public."""
@@ -677,6 +708,10 @@ class TestForcedPasswordChangeGate:
         async def admin_test():
             return {"ok": True}
 
+        @app.get("/api/auth/session")
+        async def session_probe():
+            return {"authenticated": True}
+
         @app.middleware("http")
         async def middleware(request: Request, call_next):
             return await jwt_auth_middleware(request, call_next)
@@ -692,6 +727,11 @@ class TestForcedPasswordChangeGate:
                 "llm_proxy.api.routers.me.UserSessionRepository",
                 return_value=mock_session_repo,
             ),
+            patch.object(
+                RateLimitManager,
+                "check_rate_limit",
+                new=AsyncMock(return_value=(False, {})),
+            ),
         ):
             client = TestClient(app, raise_server_exceptions=False)
 
@@ -699,6 +739,12 @@ class TestForcedPasswordChangeGate:
             blocked = client.get("/api/admin/test", headers=headers)
             assert blocked.status_code == 403
             assert blocked.json()["code"] == "password_change_required"
+
+            # The console's session probe stays reachable, otherwise a reload
+            # cannot learn that this account is in the forced-change flow.
+            probe = client.get("/api/auth/session", headers=headers)
+            assert probe.status_code == 200
+            assert probe.json() == {"authenticated": True}
 
             # The change-password endpoint is reachable and clears the flag.
             changed = client.put(
@@ -830,3 +876,376 @@ class TestMissingConfigManagerRefusesToServe:
 
         assert response.status_code == 500, response.text
         assert not reached, "a request with no readable auth policy reached the handler"
+
+
+class TestConsoleSessionBinding:
+    """A JWT bound to a revoked console session must stop working at once."""
+
+    @pytest.fixture
+    def revoked_session_client(self):
+        """A client whose token's ``sid`` no longer resolves to a live session."""
+        from llm_proxy.security.jwt import JWTManager
+
+        auth_config = _make_auth_config()
+        config = MagicMock()
+        config.server_params.auth = auth_config
+        config_manager = MagicMock()
+        config_manager.get_config = AsyncMock(return_value=config)
+
+        app = FastAPI()
+
+        @app.get("/api/authenticated")
+        async def authenticated():
+            return {"ok": True}
+
+        @app.get("/api/auth/session")
+        async def session_probe(request: Request):
+            identity = get_request_identity(request)
+            return {"authenticated": identity.user is not None, "username": identity.user}
+
+        @app.post("/api/auth/logout")
+        async def logout_probe(request: Request):
+            return {"user": get_request_identity(request).user}
+
+        app.state.config_manager = config_manager
+        app.middleware("http")(jwt_auth_middleware)
+
+        user = MagicMock()
+        user.id = 1
+        user.username = "admin"
+        user.is_active = True
+        user.role = "admin"
+        user.token_version = 0
+        user.must_change_password = False
+        user_repo = AsyncMock()
+        user_repo.get_by_username = AsyncMock(return_value=user)
+        session_repo = AsyncMock()
+        session_repo.get_valid_session = AsyncMock(return_value=None)
+        totp_repo = AsyncMock()
+        totp_repo.get = AsyncMock(return_value=None)
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=AsyncMock())
+        context.__aexit__ = AsyncMock(return_value=False)
+
+        token = JWTManager(auth_config).create_token(
+            "admin", role="admin", token_version=0, session_id="sess-1"
+        )
+        with (
+            patch("llm_proxy.database.UserRepository", return_value=user_repo),
+            patch("llm_proxy.database.UserSessionRepository", return_value=session_repo),
+            patch("llm_proxy.database.TotpRepository", return_value=totp_repo),
+            patch("llm_proxy.database.get_async_session_context", return_value=context),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            yield client, token, user_repo
+
+    def test_revoked_session_returns_stable_code(self, revoked_session_client):
+        client, token, _ = revoked_session_client
+
+        response = client.get(
+            "/api/authenticated",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 401
+        assert response.json()["code"] == "session_revoked"
+
+    def test_revoked_session_is_not_reported_as_signed_in(self, revoked_session_client):
+        """The console probe must not name a user whose session is gone.
+
+        Optional-auth paths stay reachable without a live session; the bug was
+        that they were handed the *rejected* token's identity, so a tab whose
+        session another sign-in had rotated away kept reporting a signed-in
+        console and could act as that account (including signing it out).
+        """
+        client, token, _ = revoked_session_client
+
+        response = client.get("/api/auth/session", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        assert response.json() == {"authenticated": False, "username": None}
+
+    def test_revoked_session_logout_touches_nothing(self, revoked_session_client):
+        """A stale tab's sign-out must resolve to an anonymous request."""
+        client, token, user_repo = revoked_session_client
+
+        response = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        # Anonymous: the handler sees no identity, so it cannot revoke the
+        # account's sessions on behalf of a session that is already gone. The
+        # only subject lookup is the gate's own, which rejected the token.
+        assert response.json() == {"user": None}
+        user_repo.get_by_username.assert_awaited_once()
+
+
+class TestMfaEnrollmentGate:
+    """An admin without TOTP must still reach the page that enrolls it."""
+
+    #: Everything SecurityView reads on mount, plus the flows that let a
+    #: passwordless admin step up to begin/confirm enrollment.
+    _SECURITY_PAGE_PATHS = (
+        "/api/me/2fa",
+        "/api/me/2fa/begin",
+        "/api/me/2fa/confirm",
+        "/api/me/passkeys",
+        "/api/me/passkeys/step-up/begin",
+        "/api/me/passkeys/step-up/finish",
+        "/api/me/oauth/identities",
+        "/api/me/profile",
+        "/api/auth/logout",
+        "/api/auth/session",
+        "/api/auth/step-up",
+    )
+
+    def test_allowlist_covers_the_security_page(self):
+        """The gate's allowlist is exactly what the enrollment page needs."""
+        from llm_proxy.api.middleware.jwt_auth import _MFA_ENROLLMENT_ALLOWED_PATHS
+
+        assert frozenset(self._SECURITY_PAGE_PATHS) == _MFA_ENROLLMENT_ALLOWED_PATHS
+
+    @pytest.fixture
+    def enrollment_gate_client(self):
+        """A client whose JWT belongs to an admin without a confirmed TOTP."""
+        from llm_proxy.security.jwt import JWTManager
+
+        auth_config = _make_auth_config()
+        config = MagicMock()
+        config.server_params.auth = auth_config
+        config.server_params.console_auth.require_2fa_for_admins = True
+        config_manager = MagicMock()
+        config_manager.get_config = AsyncMock(return_value=config)
+
+        app = FastAPI()
+
+        @app.api_route("/{path:path}", methods=["GET", "POST"])
+        async def catch_all(path: str):
+            return {"path": path}
+
+        app.state.config_manager = config_manager
+        app.middleware("http")(jwt_auth_middleware)
+
+        user = MagicMock()
+        user.id = 1
+        user.username = "admin"
+        user.is_active = True
+        user.role = "admin"
+        user.token_version = 0
+        user.must_change_password = False
+        user_repo = AsyncMock()
+        user_repo.get_by_username = AsyncMock(return_value=user)
+        session_repo = AsyncMock()
+        session_repo.get_valid_session = AsyncMock(return_value=MagicMock())
+        totp_repo = AsyncMock()
+        totp_repo.get = AsyncMock(return_value=None)
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=AsyncMock())
+        context.__aexit__ = AsyncMock(return_value=False)
+
+        token = JWTManager(auth_config).create_token(
+            "admin", role="admin", token_version=0, session_id="sess-1"
+        )
+        with (
+            patch("llm_proxy.database.UserRepository", return_value=user_repo),
+            patch("llm_proxy.database.UserSessionRepository", return_value=session_repo),
+            patch("llm_proxy.database.TotpRepository", return_value=totp_repo),
+            patch("llm_proxy.database.get_async_session_context", return_value=context),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            yield client, token
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("get", "/api/me/2fa"),
+            ("post", "/api/me/2fa/begin"),
+            ("post", "/api/me/2fa/confirm"),
+            ("get", "/api/me/passkeys"),
+            ("post", "/api/me/passkeys/step-up/begin"),
+            ("post", "/api/me/passkeys/step-up/finish"),
+            ("get", "/api/me/oauth/identities"),
+            ("get", "/api/me/profile"),
+            ("post", "/api/auth/step-up"),
+        ],
+    )
+    def test_security_page_requests_are_reachable(
+        self, enrollment_gate_client, method: str, path: str
+    ) -> None:
+        client, token = enrollment_gate_client
+
+        response = client.request(method, path, headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200, response.text
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("get", "/api/team/members"),
+            ("get", "/api/me/passkeys/register/begin"),
+            ("post", "/api/me/passkeys/register/begin"),
+        ],
+    )
+    def test_other_console_requests_stay_blocked(
+        self, enrollment_gate_client, method: str, path: str
+    ) -> None:
+        client, token = enrollment_gate_client
+
+        response = client.request(method, path, headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 403, response.text
+        assert response.json()["code"] == "mfa_enrollment_required"
+
+
+class TestConsoleCookieAuth:
+    """The browser cookie is ambient, so unsafe calls need the CSRF header."""
+
+    def _app(self):
+
+        auth_config = _make_auth_config()
+        config = MagicMock()
+        config.server_params.auth = auth_config
+        config_manager = MagicMock()
+        config_manager.get_config = AsyncMock(return_value=config)
+
+        app = FastAPI()
+
+        @app.get("/api/authenticated")
+        async def authenticated_get():
+            return {"ok": True}
+
+        @app.post("/api/authenticated")
+        async def authenticated_post():
+            return {"ok": True}
+
+        app.state.config_manager = config_manager
+        app.middleware("http")(jwt_auth_middleware)
+        return app, auth_config
+
+    def _repos(self):
+        user = MagicMock()
+        user.username = "admin"
+        user.is_active = True
+        user.role = "admin"
+        user.token_version = 0
+        user.must_change_password = False
+        user_repo = AsyncMock()
+        user_repo.get_by_username = AsyncMock(return_value=user)
+        session_repo = AsyncMock()
+        session_repo.get_valid_session = AsyncMock(return_value=MagicMock())
+        totp_repo = AsyncMock()
+        totp_repo.get = AsyncMock(return_value=None)
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=AsyncMock())
+        context.__aexit__ = AsyncMock(return_value=False)
+        return user_repo, session_repo, totp_repo, context
+
+    def test_cookie_authenticates_get(self):
+        from llm_proxy.api.session_cookies import CONSOLE_SESSION_COOKIE
+        from llm_proxy.security.jwt import JWTManager
+
+        app, auth_config = self._app()
+        user_repo, session_repo, totp_repo, context = self._repos()
+        token = JWTManager(auth_config).create_token(
+            "admin", role="admin", token_version=0, session_id="sess-1"
+        )
+        with (
+            patch("llm_proxy.database.UserRepository", return_value=user_repo),
+            patch("llm_proxy.database.UserSessionRepository", return_value=session_repo),
+            patch("llm_proxy.database.TotpRepository", return_value=totp_repo),
+            patch("llm_proxy.database.get_async_session_context", return_value=context),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            response = client.get(
+                "/api/authenticated",
+                headers={"Cookie": f"{CONSOLE_SESSION_COOKIE}={token}"},
+            )
+
+        assert response.status_code == 200, response.text
+
+    def test_cookie_post_requires_csrf_header(self):
+        from llm_proxy.api.session_cookies import (
+            CONSOLE_SESSION_COOKIE,
+            CSRF_COOKIE,
+            CSRF_HEADER,
+        )
+        from llm_proxy.security.jwt import JWTManager
+
+        app, auth_config = self._app()
+        user_repo, session_repo, totp_repo, context = self._repos()
+        token = JWTManager(auth_config).create_token(
+            "admin", role="admin", token_version=0, session_id="sess-1"
+        )
+        cookie_header = f"{CONSOLE_SESSION_COOKIE}={token}; {CSRF_COOKIE}=csrf-value"
+        with (
+            patch("llm_proxy.database.UserRepository", return_value=user_repo),
+            patch("llm_proxy.database.UserSessionRepository", return_value=session_repo),
+            patch("llm_proxy.database.TotpRepository", return_value=totp_repo),
+            patch("llm_proxy.database.get_async_session_context", return_value=context),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            rejected = client.post("/api/authenticated", headers={"Cookie": cookie_header})
+            accepted = client.post(
+                "/api/authenticated",
+                headers={"Cookie": cookie_header, CSRF_HEADER: "csrf-value"},
+            )
+
+        assert rejected.status_code == 403, rejected.text
+        assert rejected.json()["code"] == "csrf_failed"
+        assert accepted.status_code == 200, accepted.text
+
+
+class TestV1SessionCookieAuth:
+    """The /v1 session key cookie is HttpOnly and CSRF-gated."""
+
+    def test_cookie_key_requires_csrf_for_post(self) -> None:
+        from llm_proxy.api.session_cookies import (
+            CSRF_COOKIE,
+            CSRF_HEADER,
+            SESSION_API_KEY_COOKIE,
+        )
+
+        app = FastAPI()
+
+        @app.post("/v1/chat/completions")
+        async def chat():
+            return {"ok": True}
+
+        app.middleware("http")(api_key_auth_middleware)
+        app.state.config_manager = MagicMock()
+        mock_lockout = MagicMock()
+        mock_lockout.is_locked_out.return_value = False
+        auth_info = VerifiedKeyAuth(
+            principal_id="ui-session",
+            allowed_models=None,
+            allowed_mcp_servers=None,
+            user_id=1,
+        )
+        cookie = f"{SESSION_API_KEY_COOKIE}=sk-ui-test; {CSRF_COOKIE}=csrf-value"
+
+        with (
+            patch(
+                "llm_proxy.api.gate.verify_api_key",
+                new=AsyncMock(return_value=auth_info),
+            ),
+            patch(
+                "llm_proxy.api.gate.get_api_key_lockout_manager",
+                return_value=mock_lockout,
+            ),
+            patch("llm_proxy.api.gate.apply_auth_failure_delay", new=AsyncMock()),
+            patch("llm_proxy.api.gate._update_key_last_used", new=AsyncMock()),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            rejected = client.post(
+                "/v1/chat/completions",
+                headers={"Cookie": cookie},
+                json={"model": "m"},
+            )
+            accepted = client.post(
+                "/v1/chat/completions",
+                headers={"Cookie": cookie, CSRF_HEADER: "csrf-value"},
+                json={"model": "m"},
+            )
+
+        assert rejected.status_code == 403, rejected.text
+        assert rejected.json()["code"] == "csrf_failed"
+        assert accepted.status_code == 200, accepted.text

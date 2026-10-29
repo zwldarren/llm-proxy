@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from llm_proxy.config.types.auth import ProxyAuthConfig
+from llm_proxy.config.types.console_auth import ConsoleAuthSettings
 from llm_proxy.config.types.logging_config import LoggingConfig
 from llm_proxy.config.types.web_search import WebSearchConfig
 
@@ -234,6 +235,12 @@ class ServerParams(BaseModel):
     auth: ProxyAuthConfig = Field(
         default_factory=ProxyAuthConfig,
         description="Authentication configuration",
+    )
+    console_auth: ConsoleAuthSettings = Field(
+        default_factory=ConsoleAuthSettings,
+        description=(
+            "Console login, invitation, SMTP and OIDC settings (server_config: console_auth)"
+        ),
     )
     logging: LoggingConfig = Field(
         default_factory=LoggingConfig,

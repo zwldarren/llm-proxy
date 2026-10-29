@@ -20,12 +20,16 @@ from llm_proxy.api.middleware.asgi_utils import (
     CoreASGIMiddleware,
     adapt_http_middleware,
 )
+from llm_proxy.api.session_cookies import SESSION_API_KEY_COOKIE, csrf_rejection, validate_csrf
 from llm_proxy.protocols.registry import protocol_name_for_path
 from llm_proxy.services import runtime_services
 
 #: The /v1/* transport's gate policy: every check on, strict key extraction
 #: (a non-Bearer Authorization header is an invalid-format auth failure).
-V1_GATE_POLICY = GatePolicy(extraction=KeyExtraction.STRICT)
+V1_GATE_POLICY = GatePolicy(
+    extraction=KeyExtraction.STRICT,
+    allow_session_cookie=True,
+)
 
 
 async def _dispatch(request: Request, body: BodyReader) -> Response | None:
@@ -55,6 +59,17 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
 
     # JWT is only for the /api/* admin panel — /v1/* and /servers/* always
     # require API key authentication, even when a valid JWT is present.
+    # The browser's session-key cookie is ambient, so unsafe calls must also
+    # present the double-submit CSRF token. Explicit headers are never
+    # cross-site, so they skip this check.
+    cookie_key = request.cookies.get(SESSION_API_KEY_COOKIE)
+    if (
+        cookie_key
+        and not request.headers.get("Authorization")
+        and not request.headers.get("x-api-key")
+        and not validate_csrf(request)
+    ):
+        return csrf_rejection()
 
     rejection = await gate.gate_request(request, V1_GATE_POLICY)
     if rejection is not None:

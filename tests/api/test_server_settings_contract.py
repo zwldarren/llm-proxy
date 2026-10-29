@@ -215,6 +215,200 @@ def test_replace_put_resets_omitted_fields_to_defaults(client, repo, path, key, 
 # --- Storage shapes ---
 
 
+@pytest.mark.parametrize("value", ["****edited", "prefix****suffix", "***", "*****"])
+def test_edited_secret_mask_values_are_rejected(value):
+    from llm_proxy.config.server_settings import _reject_edited_secret_mask
+
+    with pytest.raises(ValueError, match="looks like the secret mask"):
+        _reject_edited_secret_mask(value, label="SMTP password")
+
+
+def test_exact_or_empty_secret_mask_is_accepted():
+    from llm_proxy.config.server_settings import _reject_edited_secret_mask
+
+    for value in ("****", "", None):
+        _reject_edited_secret_mask(value, label="SMTP password")
+
+
+def test_web_search_secrets_are_encrypted_masked_and_preserved(client, repo, monkeypatch):
+    """Search credentials never round-trip: stored ciphertext, masked response."""
+    from llm_proxy.security import encryption
+
+    monkeypatch.setattr(encryption, "encrypt_api_key", lambda value: f"enc:{value}")
+    payload = {
+        "enabled": True,
+        "provider": "searxng",
+        "searxng": {
+            "url": "https://search.example.com",
+            "api_key": "search-secret",
+            "basic_auth_username": "operator",
+            "basic_auth_password": "http-secret",
+        },
+    }
+    res = client.put(f"{BASE}/web-search", json=payload)
+    assert res.status_code == 200
+
+    stored = repo.rows["web_search_config"]["searxng"]
+    assert stored["api_key"] == "enc:search-secret"
+    assert stored["basic_auth_password"] == "enc:http-secret"
+    assert res.json()["searxng"]["api_key"] == "****"
+    assert res.json()["searxng"]["basic_auth_password"] == "****"
+
+    # The UI echoes the mask back for untouched fields: keep the ciphertext
+    # instead of encrypting the mask or clearing the credential.
+    payload["searxng"]["api_key"] = "****"
+    payload["searxng"]["basic_auth_password"] = "****"
+    res = client.put(f"{BASE}/web-search", json=payload)
+    assert res.status_code == 200
+    assert repo.rows["web_search_config"]["searxng"]["api_key"] == "enc:search-secret"
+    assert repo.rows["web_search_config"]["searxng"]["basic_auth_password"] == "enc:http-secret"
+
+
+def test_web_search_rejects_an_edited_secret_mask(client, repo):
+    """A mask that was edited must not be stored as the new credential.
+
+    The read shape returns ``****`` for a stored secret. If the operator edits
+    that placeholder (instead of clearing it or replacing it completely), the
+    write must fail loudly rather than overwrite the real credential with the
+    edited mask.
+    """
+    stored = {
+        "enabled": True,
+        "provider": "searxng",
+        "searxng": {
+            "url": "https://search.example.com",
+            "api_key": "enc:stored-api-key",
+            "basic_auth_password": "enc:stored-password",
+        },
+    }
+    repo.rows["web_search_config"] = stored
+    payload = {
+        **stored,
+        "searxng": {**stored["searxng"], "api_key": "****edited"},
+    }
+
+    res = client.put(f"{BASE}/web-search", json=payload)
+
+    assert res.status_code == 422
+    assert "SearXNG API key" in res.text
+    assert repo.rows["web_search_config"] == stored
+
+
+def test_web_search_rejects_an_edited_basic_auth_password_mask(client, repo):
+    stored = {
+        "enabled": True,
+        "provider": "searxng",
+        "searxng": {
+            "url": "https://search.example.com",
+            "basic_auth_username": "operator",
+            "basic_auth_password": "enc:stored-password",
+        },
+    }
+    repo.rows["web_search_config"] = stored
+    payload = {
+        **stored,
+        "searxng": {**stored["searxng"], "basic_auth_password": "****edited"},
+    }
+
+    res = client.put(f"{BASE}/web-search", json=payload)
+
+    assert res.status_code == 422
+    assert "SearXNG basic auth password" in res.text
+    assert repo.rows["web_search_config"] == stored
+
+
+def test_web_search_rejects_an_edited_ollama_mask(client, repo):
+    stored = {
+        "enabled": True,
+        "provider": "ollama",
+        "ollama": {"api_key": "enc:stored-api-key", "base_url": "https://ollama.com"},
+    }
+    repo.rows["web_search_config"] = stored
+    payload = {
+        **stored,
+        "ollama": {**stored["ollama"], "api_key": "****edited"},
+    }
+
+    res = client.put(f"{BASE}/web-search", json=payload)
+
+    assert res.status_code == 422
+    assert "Ollama API key" in res.text
+    assert repo.rows["web_search_config"] == stored
+
+
+def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo, monkeypatch):
+    """Echoed masks keep secrets; an edited mask is rejected, not written."""
+    from llm_proxy.security import encryption
+
+    monkeypatch.setattr(encryption, "encrypt_api_key", lambda value: f"enc:{value}")
+    stored = {
+        "public_base_url": "https://proxy.example.com",
+        "require_2fa_for_admins": False,
+        "smtp": {
+            "enabled": True,
+            "host": "smtp.example.com",
+            "port": 587,
+            "username": "operator",
+            "password": "enc:stored-smtp-password",
+            "from_address": "proxy@example.com",
+            "starttls": True,
+            "use_ssl": False,
+        },
+        "oidc_providers": [
+            {
+                "id": "idp",
+                "name": "Example IdP",
+                "issuer": "https://idp.example.com",
+                "client_id": "client-id",
+                "client_secret": "enc:stored-client-secret",
+                "scopes": "openid email profile",
+                "enabled": True,
+            }
+        ],
+    }
+    repo.rows["console_auth"] = stored
+
+    unchanged = {
+        **stored,
+        "smtp": {**stored["smtp"], "password": "****"},
+        "oidc_providers": [{**stored["oidc_providers"][0], "client_secret": "****"}],
+    }
+    res = client.put(f"{BASE}/console-auth", json=unchanged)
+    assert res.status_code == 200
+    assert repo.rows["console_auth"] == stored
+
+    edited_smtp = {
+        **unchanged,
+        "smtp": {**unchanged["smtp"], "password": "****edited"},
+    }
+    res = client.put(f"{BASE}/console-auth", json=edited_smtp)
+    assert res.status_code == 422
+    assert "SMTP password" in res.text
+    assert repo.rows["console_auth"] == stored
+
+    edited_oidc = {
+        **unchanged,
+        "oidc_providers": [{**unchanged["oidc_providers"][0], "client_secret": "****edited"}],
+    }
+    res = client.put(f"{BASE}/console-auth", json=edited_oidc)
+    assert res.status_code == 422
+    assert "client secret" in res.text
+    assert repo.rows["console_auth"] == stored
+
+    rotated = {
+        **unchanged,
+        "smtp": {**unchanged["smtp"], "password": "new-smtp-password"},
+        "oidc_providers": [
+            {**unchanged["oidc_providers"][0], "client_secret": "new-client-secret"}
+        ],
+    }
+    res = client.put(f"{BASE}/console-auth", json=rotated)
+    assert res.status_code == 200
+    saved = repo.rows["console_auth"]
+    assert saved["smtp"]["password"] == "enc:new-smtp-password"
+    assert saved["oidc_providers"][0]["client_secret"] == "enc:new-client-secret"
+
+
 def test_rate_limits_persist_overrides_only(client, repo):
     res = client.put(f"{BASE}/rate-limits", json={"limits": {"auth.login": "10/minute"}})
     assert res.status_code == 200

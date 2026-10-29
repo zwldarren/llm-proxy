@@ -10,11 +10,11 @@ lazy import bcrypt
 
 from llm_proxy.observability.logger import get_logger
 
-# Password strength policy: 8-72 characters (bcrypt truncates at 72 bytes)
-# with at least one uppercase letter, one lowercase letter, one digit, and
-# one special character.
+# Password strength policy: at least 8 characters, at most 72 UTF-8 bytes
+# (bcrypt truncates at 72 bytes), with at least one uppercase letter, one
+# lowercase letter, one digit, and one special character.
 PASSWORD_MIN_LENGTH = 8
-PASSWORD_MAX_LENGTH = 72
+PASSWORD_MAX_BYTES = 72
 _RE_UPPERCASE = re.compile(r"[A-Z]")
 _RE_LOWERCASE = re.compile(r"[a-z]")
 _RE_DIGIT = re.compile(r"[0-9]")
@@ -30,8 +30,8 @@ def validate_password_strength(password: str) -> str:
     """
     if len(password) < PASSWORD_MIN_LENGTH:
         raise ValueError("Password must be at least 8 characters long")
-    if len(password) > PASSWORD_MAX_LENGTH:
-        raise ValueError("Password must be at most 72 characters long")
+    if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        raise ValueError("Password must be at most 72 bytes long when encoded as UTF-8")
     if not _RE_UPPERCASE.search(password):
         raise ValueError("Password must contain at least one uppercase letter")
     if not _RE_LOWERCASE.search(password):
