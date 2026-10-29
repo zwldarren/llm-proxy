@@ -1,5 +1,6 @@
 """Tests for the Langfuse tracing handler and its SDK data builders."""
 
+from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -995,13 +996,41 @@ class TestLangfuseSDKDataBuilders:
         assert data["finish_reason"] == "stop"
         assert data["model"] == "gpt-4"
 
-    def test_build_response_output_data_falls_back_to_a_passthrough_body(self):
-        body = {"id": "chatcmpl-1", "choices": [{"message": {"content": "pong"}}]}
-        response = MagicMock()
-        response.output = []
-        response.provider_info = {"provider": "fake", "_raw_response_body": body}
+    def test_build_response_output_data_falls_back_to_a_passthrough_body(
+        self, make_passthrough_response
+    ):
+        response = make_passthrough_response()
+        body = response.provider_info["_raw_response_body"]
 
         assert build_response_output_data(response) == body
+
+    def test_build_response_output_data_bounds_and_copies_a_passthrough_body(
+        self, make_passthrough_response
+    ):
+        long_text = "x" * 2500
+        data_uri = f"data:image/png;base64,{'A' * 5000}"
+        body = {
+            "id": "chatcmpl-1",
+            "choices": [
+                {
+                    "message": {
+                        "content": long_text,
+                        "image": data_uri,
+                        "extra": list(range(25)),
+                    }
+                }
+            ],
+        }
+        original = deepcopy(body)
+        response = make_passthrough_response(body)
+
+        rendered = build_response_output_data(response)
+
+        message = rendered["choices"][0]["message"]
+        assert message["content"] == f"{'x' * 2000}…<truncated 500 chars>"
+        assert message["image"] == f"<data-uri {len(data_uri)} chars>"
+        assert message["extra"] == [*range(20), "<truncated 5 items>"]
+        assert body == original
 
     def test_build_response_output_data_keeps_the_parsed_shape_when_it_has_blocks(self):
         response = MagicMock()

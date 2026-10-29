@@ -269,7 +269,9 @@ def test_a_long_conversation_stays_inside_the_span_attribute_limit(provider, mem
     assert len(span.attributes) < 128
 
 
-def test_a_passthrough_response_exports_the_body_it_carries(provider, memory):
+def test_a_passthrough_response_exports_the_body_it_carries(
+    provider, memory, make_passthrough_response
+):
     """A native-passthrough response parses no blocks; its trace keeps the body.
 
     Without the fallback the observation would carry a prompt and no answer: the
@@ -277,12 +279,8 @@ def test_a_passthrough_response_exports_the_body_it_carries(provider, memory):
     """
     exporter = _exporter(provider)
     request = _request()
-    body = {"id": "chatcmpl-1", "choices": [{"message": {"content": "pong"}}]}
-    response = MagicMock()
-    response.output = []
-    response.finish_reason = None
-    response.model = None
-    response.provider_info = {"provider": "fake", "_raw_response_body": body}
+    response = make_passthrough_response()
+    body = response.provider_info["_raw_response_body"]
     record = collect(_context())
 
     exporter.open(record, request)

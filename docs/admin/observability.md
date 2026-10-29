@@ -223,8 +223,9 @@ carrying that request type's own content:
   messages (or `{tools, messages}` when tools are present) and whose `output` is the
   assistant message with tool calls separated out. When the client and the provider
   speak the same wire the response is passed through unparsed, so no content blocks
-  exist to render: the trace then carries the response body exactly as the caller
-  received it.
+  exist to render: the trace uses the response body's wire shape, passed through the
+  same bounded rendering as every other trace payload (long text, inline binary data
+  and unbounded lists are summarized) and the standard masking policy.
 - **embeddings** (`/v1/embeddings`): an **`embedding`** observation. `input` is the
   text (or list of texts) being embedded; `output` is the response shape (`count`,
   `dimensions`, `model` and a preview of the first vectors) rather than the vectors
@@ -298,8 +299,8 @@ HTTP 200 and then drops it); the correlation id travels as
 `llm_proxy.correlation_id`/`langsmith.metadata.correlation_id` instead.
 
 **Content policy.** Every backend exports the prompt and completion by default: its
-`send_content` setting is `full`, so enabling tracing keeps the input/output that
-previous releases recorded. `inherit` instead follows the log privacy switches —
+`send_content` setting is `full`, so enabling tracing records input/output.
+`inherit` instead follows the log privacy switches —
 `log_input_output` off means no prompt/completion content is sent (usage, cost, model,
 identity, timing and metadata still are), and `mask_sensitive_data` on means the same
 masked payload the log row stores is sent. `none` never sends content. Tool

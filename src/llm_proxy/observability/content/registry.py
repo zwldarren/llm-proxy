@@ -366,15 +366,17 @@ def _passthrough_output(response: Any) -> dict[str, Any] | None:
 
     ``BaseAdapter._build_passthrough_response`` keeps the upstream body verbatim
     and leaves ``output`` empty so that path never materializes content blocks.
-    A trace would then show a prompt and no answer, so the body is exported as it
-    arrived — the wire JSON the caller received, not the re-rendered assistant
-    message the parsed path produces.
+    A trace would then show a prompt and no answer, so the body is exported with
+    the registry's bounded renderer: the wire JSON's shape is preserved, while
+    long text, inline binary data and unbounded lists get the same summaries as
+    every other trace payload. The body is copied, never mutated — it is still
+    the response the client receives.
     """
     info = getattr(response, "provider_info", None)
     if not isinstance(info, Mapping):
         return None
     body = info.get("_raw_response_body")
-    return body if isinstance(body, dict) else None
+    return _render_bounded(body) if isinstance(body, dict) else None
 
 
 def build_response_output_data(response: InternalResponse) -> dict[str, Any] | None:

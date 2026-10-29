@@ -80,6 +80,11 @@ surface on the same footing as a provider `base_url`.
    ever receive, so the handler answers `None` for a non-recording span. A
    caller-supplied canonical 32-hex `x-trace-id` (or `x-langfuse-trace-id`) is adopted
    as the span's parent context, so the proxy's span continues the caller's trace.
+   **LangSmith is the exception:** its ingest only materializes a trace whose root
+   span arrives, so `langsmith` starts every request as its own root run rather
+   than parent it to a caller run that LangSmith never receives. The correlation id
+   travels as `llm_proxy.correlation_id` / `langsmith.metadata.correlation_id`
+   instead; `otel` keeps adopting the caller's trace id.
 
 7. **Endpoints are validated like any other outbound URL.** `endpoint` joins
    `base_url` in `_validate_tracing_provider_urls`: format-only for an admin (who can
