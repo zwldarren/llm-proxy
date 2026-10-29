@@ -20,10 +20,11 @@ account lockout is available but **off by default** (see
 [Server Settings](settings.md#security-rate-limiting)).
 
 ::: info Two different credentials
-Your console login (JWT session) works only on `/api/*` endpoints. When the
-Chat and Images playgrounds call `/v1/*`, they use a short-lived *session API key*
-that is created at sign-in. Real client traffic uses the API keys you create in
-**API Keys** — see [API Keys](api-keys.md).
+Your console login (JWT session) works only on `/api/*` endpoints and is held in an
+`HttpOnly` cookie. When the Chat and Images playgrounds call `/v1/*`, they use a
+short-lived *session API key* delivered in a second `HttpOnly` cookie; neither
+credential is readable by page JavaScript. Real client traffic uses the API keys you
+create in **API Keys** — see [API Keys](api-keys.md).
 :::
 
 ## What each role can do

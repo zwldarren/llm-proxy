@@ -109,7 +109,7 @@ All under `/api`, all requiring a JWT unless noted. Groups:
 
 | Prefix | Contents |
 | --- | --- |
-| `/api/auth/*` | `setup-status`, `setup`, `login`, `logout` (logout accepts an optional token) |
+| `/api/auth/*` | `setup-status`, `capabilities`, `session`, `setup`, `login`, 2FA verify/recover, step-up, passkey login, OAuth, invitation acceptance, password reset (forgot/confirm), `logout` |
 | `/api/api-keys*` | Key CRUD, budget reset, per-key usage, spend summary |
 | `/api/config/providers*` | Provider CRUD, provider types, key reveal, upstream model list |
 | `/api/config/models*` | Model CRUD, pricing/metadata sync endpoints, model names |
@@ -118,8 +118,9 @@ All under `/api`, all requiring a JWT unless noted. Groups:
 | `/api/logs*` | Log query/detail/stats, usage stats, audit verification, cleanup |
 | `/api/routing/*` | Training-data export: feedback labels and judge verdicts as JSONL (`/api/routing/export/dataset`) |
 | `/api/mcp/*` | MCP server CRUD, status, capabilities |
-| `/api/team/members*` | Member CRUD, roles, model allowlists, account budgets, account rate limits, password resets |
-| `/api/me/*` | Profile, budget, password, username, tracing, feedback |
+| `/api/team/members*` | Member CRUD, roles, model allowlists, account budgets, account rate limits, password resets, email |
+| `/api/team/invitations*` | Create/list/revoke/resend single-use email invitations |
+| `/api/me/*` | Profile, budget, password, username, email verification, 2FA, passkeys, linked OIDC identities, tracing, feedback |
 | `/api/catalog/models` | Display catalog (any authenticated user) |
 | `/api/system/info` | Version and update check (admin) |
 

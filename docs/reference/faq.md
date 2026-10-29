@@ -146,9 +146,18 @@ point.
   the proxy, since the lockout counters live in process memory.
 - Another admin can reset your password from **Team** (which forces a change at next
   sign-in).
-- If you are the **last admin** with a forgotten password: there is no CLI recovery
-  command — edit the database directly. Passwords are stored as bcrypt hashes in the
-  `users.password_hash` column, so replacing the hash is the supported-by-hand route.
+- If you are the **last admin** with a forgotten password, run the offline recovery
+  command on the host that owns the database:
+
+  ```bash
+  uv run llm-proxy-reset-password --username admin --config /path/to/config.db
+  ```
+
+  The password is read interactively (never from an argument, so it cannot leak
+  through shell history), the account is forced to change it at the next sign-in,
+  and every existing JWT/session API key for that account is revoked. Omit
+  `--config` when the database lives at the default path. Stop the proxy first so
+  there is a single writer.
 
 ## Which languages does the console support?
 

@@ -9,7 +9,8 @@ reviewing before exposing it to the internet.
 | Credential | Storage | Notes |
 | --- | --- | --- |
 | API keys (`sk-…`) | bcrypt hash | Plaintext shown once; used on `/v1/*` and `/servers/*` only |
-| Console sessions | HS256 JWT, 24 h, no refresh | `/api/*` only; invalidated by password/role/deactivation changes |
+| Console sessions | HS256 JWT, 24 h, no refresh, in an `HttpOnly` `/api` cookie | `/api/*` only; invalidated by password/role/deactivation changes; unsafe cookie calls require the `X-CSRF-Token` double-submit header |
+| Playground session keys | `HttpOnly` `/v1` cookie, 24 h | Browser-only transport for the console; explicit `Authorization`/`x-api-key` headers still win |
 | User passwords | bcrypt, policy 8–72 chars with mixed classes | Forced change for admin-created accounts |
 | Provider API keys | Fernet-encrypted at rest (`enc:` prefix) | Reveal is admin-only and audited; rotating `ENCRYPTION_KEY` breaks them |
 | JWT / encryption secrets | Auto-generated, stored in the database | Keep the database; a backup contains both |
@@ -37,7 +38,7 @@ reviewing before exposing it to the internet.
 | Model allowlist rejection | 403, not counted as an auth failure | The key is already authenticated, so requesting a disallowed model neither feeds the IP lockout nor pays the failure delay |
 | WebSocket quotas | Budget checked before each billable turn | `/v1/responses` re-runs the key gate before every `response.create`; `/v1/realtime` checks before forwarding each `response.create` and again after a completed turn. Enforcement is best-effort: spend is cached for 15 s and usage rows are written asynchronously, so a burst or an in-flight turn can overshoot the cap |
 | Auth failure delay | 100 ms ±10% jitter | Slows brute force; keep enabled on public instances |
-| Console auth buckets | `auth.login` 5/min, `auth.setup` 5/min, `auth.setup_status` 10/min | Tunable per bucket |
+| Console auth buckets | `auth.login` 5/min, `auth.setup` 5/min (the highest-traffic buckets) | Tunable per bucket; the full list lives in [Server Settings → Rate Limits](../admin/settings.md#rate-limits) |
 
 ## Keys, roles, and tenants
 

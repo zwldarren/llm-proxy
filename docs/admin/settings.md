@@ -49,8 +49,15 @@ same window as the logs; set **Log Retention Period** to `0` to keep both foreve
 | --- | --- |
 | **Enabled** | Off by default. When on, the proxy intercepts `web_search` tool calls for providers that lack native search |
 | **Provider** | `searxng` or `ollama` |
-| **SearXNG** | `url` (required), optional `api_key` or basic-auth username/password, `engines` list, `timeout` (default 30 s), `max_results` (default 10, max 20) |
+| **SearXNG** | `url` (required), optional `api_key` or basic-auth username/password, `engines` list, `timeout` (default 30 s), `max_results` (default 10, max 10) |
 | **Ollama** | `api_key` (required), `base_url` (default `https://ollama.com`), `timeout`, `max_results` (max 10) |
+
+Search credentials are write-only in the API: they are encrypted at rest (when
+`ENCRYPTION_KEY` is configured) and reads return `****`. Submitting the mask or a
+blank field keeps the stored secret; to remove one, clear the whole provider
+block. A value that looks like the mask but is not exactly `****` is rejected
+with `422` instead of silently replacing the stored credential — clear the field
+and enter the full new secret to rotate it.
 
 Details and client-visible behavior: [Tools, Reasoning & Web Search](../api/tools.md#web-search).
 
@@ -163,6 +170,32 @@ Higher-priority groups are always tried before lower ones, regardless of strateg
 The tab lists live breaker state per provider and offers **Reset all** / per-provider
 reset. Counters are per process and reset on restart.
 
+### Instance Sign-in
+
+| Field | Default | Effect |
+| --- | --- | --- |
+| Public base URL | empty | Canonical external URL (`https://proxy.example.com`). WebAuthn RP ID and OAuth redirect URIs derive from it. Must be HTTPS, or `http://localhost` for development. Changing it invalidates registered passkeys |
+| Require admins to use 2FA | off | Blocks admins that have not confirmed TOTP; the console funnels them to **Account → Sign-in & security** |
+| SMTP enabled | off | Send invitation, email-verification and password-reset messages. Without it, invitations are copyable links and a forgotten password goes to an administrator |
+| SMTP host / port / username / password / from address | empty / `587` / empty / empty / empty | Standard SMTP delivery. The password is encrypted at rest and masked in the API response |
+| STARTTLS / TLS (SMTPS) | on / off | Transport security for the SMTP connection |
+| OIDC providers | empty | Named OpenID Connect providers (`id`, display name, issuer, client ID/secret, scopes). OAuth buttons appear only for enabled providers. Secrets are encrypted at rest and masked on read |
+
+The SMTP password and OIDC client secrets are write-only: reads return `****`.
+Submitting that exact mask or a blank value keeps the stored secret. Editing the
+mask in place is rejected rather than overwriting the real credential; clear the
+field and enter the full new secret to rotate it.
+
+An OIDC provider's **id** is permanent once saved: the stored client secret is
+keyed by it, so the console locks the field for an existing provider. Each
+**issuer** must be an HTTPS URL (or `http://localhost` for development); the
+proxy refuses to save a plain-HTTP issuer, because the client secret and the
+authorization code travel to it.
+
+Passkey and OAuth endpoints are unavailable when no HTTPS public base URL is
+configured. This is deliberate: WebAuthn cannot be made secure over plain HTTP or a
+LAN IP.
+
 ### Security & Rate Limiting
 
 | Field | Default | Effect |
@@ -194,16 +227,28 @@ Read the caveats before changing anything here:
 ### Rate Limits
 
 Per-bucket overrides for the built-in IP limits, in `N/period` form
-(`5/minute`, `100/hour`). Editable buckets:
+(`5/minute`, `100/hour`). Editable buckets and their defaults:
 
 | Bucket | Default |
 | --- | --- |
 | `auth.login` | `5/minute` |
 | `auth.setup` | `5/minute` |
 | `auth.setup_status` | `10/minute` |
+| `auth.capabilities` | `20/minute` |
+| `auth.mfa` | `10/minute` |
+| `auth.step_up` | `10/minute` |
+| `auth.invite_accept` | `10/minute` |
+| `auth.invite_status` | `20/minute` |
+| `auth.passkey` | `20/minute` |
+| `auth.oauth` | `20/minute` |
+| `auth.email_verify` | `20/minute` |
+| `auth.password_reset` | `5/minute` |
+| `auth.password_reset_confirm` | `10/minute` |
+| `account.sensitive` | `10/minute` |
 
-Unknown bucket names or unparseable values are rejected with 422. Per-API-key limits
-(`rate_limit_rpm`) are set on the key itself.
+Unknown bucket names or unparseable values are rejected with 422, and the count
+must be positive (`0/minute` is rejected rather than silently disabling the
+bucket). Per-API-key limits (`rate_limit_rpm`) are set on the key itself.
 
 ### CORS Origins
 
