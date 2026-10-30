@@ -15,17 +15,19 @@ needs Redis (`REDIS_ENABLED=true`), which the shipped compose sets. Without Redi
 a multi-worker deployment only hot-reloads the worker that handled the change; the
 provider/model lookup cache is a separate, optional switch (`REDIS_CACHE_ENABLED`).
 
-The screen has two tabs: **General** and **Advanced**. Preference and Tracing are
-available to all users; everything else is admin-only.
+The screen has two tabs: **General** and **Advanced**, and it is admin-only: every
+setting here is instance-wide. Theme, language and per-user tracing are personal
+settings and live in **Account → Preferences** instead. The **Sections** menu beside
+the tabs jumps to a section and names the one you are currently reading, so you can
+tell where you are without opening it.
 
 ## General tab
 
-### Preference
-
-Theme (light/dark/system) and language (English / 中文). Stored in the browser, not on
-the server.
-
 ### Log Management
+
+The console groups these controls into **Capture**, **Retention**, and **Audit** so
+body capture, lifecycle policy, and audit overrides can be scanned independently.
+Grouping does not change the underlying hot-reloaded settings.
 
 | Field | Default | Effect |
 | --- | --- | --- |
@@ -61,30 +63,10 @@ and enter the full new secret to rotate it.
 
 Details and client-visible behavior: [Tools, Reasoning & Web Search](../api/tools.md#web-search).
 
-### Tracing
+### MCP Security
 
-Per-user tracing: enable tracing and add one or more backends. Settings apply **only
-to your own requests** — there is no global tracing switch, and no user's requests are
-exported to another user's backend.
-
-| Field | Notes |
-| --- | --- |
-| **Provider** | `langfuse`, `otel` (OpenTelemetry) or `langsmith`; the internal `audit_log` handler is always on and not user-configurable |
-| **Langfuse** | Public key + secret key (required), base URL (default `https://cloud.langfuse.com`; self-hosted allowed), optional version tag |
-| **OpenTelemetry** | `endpoint` (required, include the scheme — HTTP `https://collector:4318/v1/traces`, gRPC `https://collector:4317`), `protocol` (`http` default or `grpc`), optional `headers`, `insecure` (plain-text gRPC), `service_name` (default `llm-proxy`) and `timeout` |
-| **LangSmith** | `api_key` (required), `project` (default `default`; created on first ingest), optional `endpoint` (default `https://api.smith.langchain.com/otel/v1/traces` — change the host for the EU/APAC/AWS regions or self-hosting) and workspace id (`X-Tenant-Id` for keys not scoped to a workspace) |
-| **Sample rate** | 0.0–1.0, per backend |
-| **Send content** | `full` (default) exports prompt/completion content verbatim; `inherit` follows the log privacy switches (no content when body logging is off, masked content when masking is on); `none` never exports content |
-
-Secrets are masked in API responses, and saving the form again keeps the stored value.
-A collector endpoint is validated before it is stored: a non-admin user cannot point a
-backend at a private address, while an admin keeps the permissive format-only check
-(hosts in `HTTP_ALLOWED_HOSTS` are allowed for everyone). See
-[Security](../guides/security.md).
-
-Correlate traces with requests using the `x-trace-id` request header (or
-`x-langfuse-trace-id` for a Langfuse trace id); the proxy also returns a trace id
-header.
+Deny-by-default policy for MCP servers: allowed/blocked commands, env filtering, and
+URL/IP blocks. Full reference: [MCP Servers](mcp.md#security-policy).
 
 ### About
 
@@ -181,6 +163,11 @@ reset. Counters are per process and reset on restart.
 | STARTTLS / TLS (SMTPS) | on / off | Transport security for the SMTP connection |
 | OIDC providers | empty | Named OpenID Connect providers (`id`, display name, issuer, client ID/secret, scopes). OAuth buttons appear only for enabled providers. Secrets are encrypted at rest and masked on read |
 
+SMTP details appear after delivery is enabled, and saved OIDC providers start
+collapsed. The form validates URLs, required fields and the SMTP port before
+saving; **Discard changes** restores the last saved snapshot, and leaving with
+unsaved edits requires confirmation.
+
 The SMTP password and OIDC client secrets are write-only: reads return `****`.
 Submitting that exact mask or a blank value keeps the stored secret. Editing the
 mask in place is rejected rather than overwriting the real credential; clear the
@@ -256,11 +243,6 @@ List of origins allowed to call the API from a browser. Empty (default) disables
 entirely — correct for same-origin deployments. See
 [Reverse Proxy & TLS](../deployment/reverse-proxy.md#cors) for the interaction with
 auth failures.
-
-### MCP Security
-
-Deny-by-default policy for MCP servers: allowed/blocked commands, env filtering, and
-URL/IP blocks. Full reference: [MCP Servers](mcp.md#security-policy).
 
 ## Related
 

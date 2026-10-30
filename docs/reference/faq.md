@@ -161,8 +161,7 @@ point.
 
 ## Which languages does the console support?
 
-English and 中文, switchable in Settings → General → Preference (browser-local,
-per user).
+English and 中文, switchable in Account → Preferences (browser-local, per user).
 
 ## Where do feature requests and bugs go?
 

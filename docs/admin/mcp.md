@@ -90,13 +90,13 @@ Point the MCP client at the proxy URL and give it an API key:
 
 Every key owner can set this field on their own keys. Policy changes are cached for
 up to 60 seconds. The global switch
-`require_key_mcp_permissions` (Settings → Advanced → MCP Security) turns the whole
+`require_key_mcp_permissions` (Settings → General → MCP Security) turns the whole
 check off — with it disabled, any valid key may use any server.
 
 ## Security policy
 
 MCP servers execute processes and make outbound HTTP requests on your behalf, so the
-proxy is deny-by-default. Configure in **Settings → Advanced → MCP Security**:
+proxy is deny-by-default. Configure in **Settings → General → MCP Security**:
 
 | Setting | Default | Behavior |
 | --- | --- | --- |

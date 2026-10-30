@@ -39,7 +39,7 @@ const { t } = useI18n();
 
 const mcpSecurityLink = {
   name: "settings",
-  query: { tab: "advanced" },
+  query: { tab: "general" },
   hash: "#mcpSecurity",
 };
 

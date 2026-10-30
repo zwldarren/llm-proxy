@@ -15,6 +15,7 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   UserRound,
   Users,
   X,
@@ -145,43 +146,47 @@ const expandedGroups = useStorage<Record<string, boolean>>(STORAGE_KEYS.SIDEBAR_
   "nav.advanced": true,
 });
 
-// Configuration section — visible to all users, with role-based item filtering
-const configSections: ComputedRef<NavSection[]> = computed(() => {
-  const items: NavItem[] = [];
+// Access section — who may call the proxy: every member manages their own keys;
+// member management and the instance's sign-in policy are admin work.
+const accessSections: ComputedRef<NavSection[]> = computed(() => {
+  const items: NavItem[] = [{ name: "nav.apiKeys", href: "/config/api-keys", icon: Key }];
 
-  // Items accessible to all authenticated users
-  items.push({ name: "nav.apiKeys", href: "/config/api-keys", icon: Key });
-
-  // Admin-only items
   if (authStore.isAdmin) {
     items.push(
-      { name: "nav.providers", href: "/config/providers", icon: Database },
-      // /models renders the management UI for admins (see memberSections).
-      { name: "nav.models", href: "/models", icon: Cpu },
-      { name: "nav.mcpServers", href: "/config/mcp-servers", icon: McpIcon },
-      { name: "nav.consoleAuth", href: "/config/console-auth", icon: KeyRound },
-      { name: "team.title", href: "/team", icon: Users }
+      { name: "team.title", href: "/team", icon: Users },
+      { name: "nav.consoleAuth", href: "/config/console-auth", icon: KeyRound }
     );
   }
 
-  return [{ title: "nav.config", items }];
+  return [{ title: "nav.access", items }];
 });
 
-// Settings section — a single sidebar item. The in-page General/Advanced tabs
-// (and section headings) handle subsections, so the sidebar tracks only the
-// page itself rather than mirroring every settings card.
-const settingsSections: ComputedRef<NavSection[]> = computed(() => {
+// Configuration section — what the instance routes to, plus its settings page.
+// The whole section is admin-only: the settings page is instance-wide policy,
+// and the personal preferences that used to live there moved to the account
+// workspace.
+const configSections: ComputedRef<NavSection[]> = computed(() => {
+  if (!authStore.isAdmin) return [];
+
   return [
     {
-      title: "nav.settings",
-      items: [{ name: "nav.settings", href: "/config/settings", icon: Settings }],
+      title: "nav.config",
+      items: [
+        { name: "nav.providers", href: "/config/providers", icon: Database },
+        // /models renders the management UI for admins (see memberSections).
+        { name: "nav.models", href: "/models", icon: Cpu },
+        { name: "nav.mcpServers", href: "/config/mcp-servers", icon: McpIcon },
+        // Settings is instance-wide, so it sits with the other admin resources
+        // instead of repeating its own name as a one-item section label.
+        { name: "nav.settings", href: "/config/settings", icon: Settings },
+      ],
     },
   ];
 });
 
 // Sections visible based on user role
 const visibleSections = computed(() => {
-  return [...memberSections.value, ...configSections.value, ...settingsSections.value];
+  return [...memberSections.value, ...accessSections.value, ...configSections.value];
 });
 
 // Ensure any dynamic/new collapsible groups default to true
@@ -268,6 +273,7 @@ const PREFETCH_ROUTES: Record<string, () => void> = {
   "/config/settings": () => import("@/views/config/SettingsView.vue"),
   "/config/console-auth": () => import("@/views/config/ConsoleAuthView.vue"),
   "/account": () => import("@/views/AccountView.vue"),
+  "/account/preferences": () => import("@/views/PreferencesView.vue"),
   "/account/security": () => import("@/views/SecurityView.vue"),
   "/team": () => import("@/views/TeamView.vue"),
 };
@@ -503,6 +509,13 @@ const handleVersionBadgeClick = () => {
                 <DropdownMenuItem @click="navigateTo('/account')" class="cursor-pointer">
                   <UserRound class="mr-2 size-4 text-muted-foreground" />
                   <span>{{ t("nav.account") }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  @click="navigateTo('/account/preferences')"
+                  class="cursor-pointer"
+                >
+                  <SlidersHorizontal class="mr-2 size-4 text-muted-foreground" />
+                  <span>{{ t("nav.preferences") }}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem @click="navigateTo('/account/security')" class="cursor-pointer">
                   <ShieldCheck class="mr-2 size-4 text-muted-foreground" />

@@ -32,168 +32,190 @@ const { t } = useI18n();
     :icon="Server"
     :description="t('settings.serverLogsDescription')"
   >
-    <SettingsItem
-      v-if="isAdmin"
-      :icon="FileText"
-      :title="t('settings.logInputOutput')"
-      :description="t('settings.logInputOutputDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <Switch v-model="state.log_input_output" :aria-label="t('settings.logInputOutput')" />
-      </template>
-    </SettingsItem>
+    <section v-if="isAdmin" aria-labelledby="log-capture-heading" class="divide-y divide-border/45">
+      <h3
+        id="log-capture-heading"
+        class="px-5.5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+      >
+        {{ t("settings.logCaptureGroup") }}
+      </h3>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.logRawStream')"
-      :description="t('settings.logRawStreamDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <Switch v-model="state.log_raw_stream" :aria-label="t('settings.logRawStream')" />
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        :icon="FileText"
+        :title="t('settings.logInputOutput')"
+        :description="t('settings.logInputOutputDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <Switch v-model="state.log_input_output" :aria-label="t('settings.logInputOutput')" />
+        </template>
+      </SettingsItem>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.logRetentionDays')"
-      :description="t('settings.setZeroToKeepIndefinitely')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <NumberStepper
-          :model-value="state.log_retention_days"
-          :min="0"
-          :suffix="t('settings.days')"
-          :aria-label="t('settings.logRetentionDays')"
-          @update:model-value="state.log_retention_days = $event ?? 0"
-        />
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        :title="t('settings.logRawStream')"
+        :description="t('settings.logRawStreamDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <Switch v-model="state.log_raw_stream" :aria-label="t('settings.logRawStream')" />
+        </template>
+      </SettingsItem>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.maskSensitiveData')"
-      :description="t('settings.maskSensitiveDataDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <Switch v-model="state.mask_sensitive_data" :aria-label="t('settings.maskSensitiveData')" />
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        :title="t('settings.maskSensitiveData')"
+        :description="t('settings.maskSensitiveDataDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <Switch
+            v-model="state.mask_sensitive_data"
+            :aria-label="t('settings.maskSensitiveData')"
+          />
+        </template>
+      </SettingsItem>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.samplingRate')"
-      :description="t('settings.samplingRateDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <NumberInput
-          :model-value="state.sampling_rate"
-          min="0"
-          max="1"
-          step="0.1"
-          :aria-label="t('settings.samplingRate')"
-          class="font-mono text-sm w-28 bg-background"
-          @update:model-value="state.sampling_rate = $event ?? 1"
-        />
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        :title="t('settings.sensitiveKeys')"
+        :description="t('settings.sensitiveKeysDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <Input
+            v-model="state.sensitive_keys"
+            :aria-label="t('settings.sensitiveKeys')"
+            :placeholder="t('settings.sensitiveKeysPlaceholder')"
+            class="font-mono text-sm w-64 bg-background"
+          />
+        </template>
+      </SettingsItem>
+    </section>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.maxLoggedBodySize')"
-      :description="t('settings.maxLoggedBodySizeDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <NumberStepper
-          :model-value="Math.floor(state.max_logged_body_bytes / BYTES_PER_MB)"
-          :min="0"
-          suffix="MB"
-          :aria-label="t('settings.maxLoggedBodySize')"
-          @update:model-value="
-            state.max_logged_body_bytes =
-              ($event ?? DEFAULT_LOGGING.max_logged_body_bytes / BYTES_PER_MB) * BYTES_PER_MB
-          "
-        />
-      </template>
-    </SettingsItem>
+    <section aria-labelledby="log-retention-heading" class="divide-y divide-border/45">
+      <h3
+        id="log-retention-heading"
+        class="px-5.5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+      >
+        {{ t("settings.logRetentionGroup") }}
+      </h3>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.auditSamplingRate')"
-      :description="t('settings.auditSamplingRateDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <NumberInput
-          v-model="state.audit_sampling_rate"
-          min="0"
-          max="1"
-          step="0.1"
-          :aria-label="t('settings.auditSamplingRate')"
-          :placeholder="t('settings.inheritPlaceholder')"
-          class="font-mono text-sm w-28 bg-background"
-        />
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        v-if="isAdmin"
+        :title="t('settings.logRetentionDays')"
+        :description="t('settings.setZeroToKeepIndefinitely')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <NumberStepper
+            :model-value="state.log_retention_days"
+            :min="0"
+            :suffix="t('settings.days')"
+            :aria-label="t('settings.logRetentionDays')"
+            @update:model-value="state.log_retention_days = $event ?? 0"
+          />
+        </template>
+      </SettingsItem>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.auditRetentionDays')"
-      :description="t('settings.auditRetentionDaysDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <NumberInput
-          v-model="state.audit_retention_days"
-          min="0"
-          :aria-label="t('settings.auditRetentionDays')"
-          :placeholder="t('settings.inheritPlaceholder')"
-          class="font-mono text-sm w-28 bg-background"
-        />
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        :icon="Trash2"
+        :title="t('settings.cleanOldLogs')"
+        :description="t('settings.cleanOldLogsDescription')"
+      >
+        <template #action>
+          <Button variant="destructive" size="sm" @click="emit('cleanup')">
+            <Trash2 class="size-4 mr-2" />
+            {{ t("settings.cleanupLogs") }}
+          </Button>
+        </template>
+      </SettingsItem>
+    </section>
 
-    <SettingsItem
-      v-if="isAdmin"
-      :title="t('settings.sensitiveKeys')"
-      :description="t('settings.sensitiveKeysDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <Input
-          v-model="state.sensitive_keys"
-          :aria-label="t('settings.sensitiveKeys')"
-          :placeholder="t('settings.sensitiveKeysPlaceholder')"
-          class="font-mono text-sm w-64 bg-background"
-        />
-      </template>
-    </SettingsItem>
+    <section v-if="isAdmin" aria-labelledby="log-audit-heading" class="divide-y divide-border/45">
+      <h3
+        id="log-audit-heading"
+        class="px-5.5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+      >
+        {{ t("settings.logAuditGroup") }}
+      </h3>
 
-    <SettingsItem
-      :icon="Trash2"
-      :title="t('settings.cleanOldLogs')"
-      :description="t('settings.cleanOldLogsDescription')"
-    >
-      <template #action>
-        <Button variant="destructive" size="sm" @click="emit('cleanup')">
-          <Trash2 class="size-4 mr-2" />
-          {{ t("settings.cleanupLogs") }}
-        </Button>
-      </template>
-    </SettingsItem>
+      <SettingsItem
+        :title="t('settings.samplingRate')"
+        :description="t('settings.samplingRateDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <NumberInput
+            :model-value="state.sampling_rate"
+            min="0"
+            max="1"
+            step="0.1"
+            :aria-label="t('settings.samplingRate')"
+            class="font-mono text-sm w-28 bg-background"
+            @update:model-value="state.sampling_rate = $event ?? 1"
+          />
+        </template>
+      </SettingsItem>
+
+      <SettingsItem
+        :title="t('settings.maxLoggedBodySize')"
+        :description="t('settings.maxLoggedBodySizeDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <NumberStepper
+            :model-value="Math.floor(state.max_logged_body_bytes / BYTES_PER_MB)"
+            :min="0"
+            suffix="MB"
+            :aria-label="t('settings.maxLoggedBodySize')"
+            @update:model-value="
+              state.max_logged_body_bytes =
+                ($event ?? DEFAULT_LOGGING.max_logged_body_bytes / BYTES_PER_MB) * BYTES_PER_MB
+            "
+          />
+        </template>
+      </SettingsItem>
+
+      <SettingsItem
+        :title="t('settings.auditSamplingRate')"
+        :description="t('settings.auditSamplingRateDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <NumberInput
+            v-model="state.audit_sampling_rate"
+            min="0"
+            max="1"
+            step="0.1"
+            :aria-label="t('settings.auditSamplingRate')"
+            :placeholder="t('settings.inheritPlaceholder')"
+            class="font-mono text-sm w-28 bg-background"
+          />
+        </template>
+      </SettingsItem>
+
+      <SettingsItem
+        :title="t('settings.auditRetentionDays')"
+        :description="t('settings.auditRetentionDaysDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <NumberInput
+            v-model="state.audit_retention_days"
+            min="0"
+            :aria-label="t('settings.auditRetentionDays')"
+            :placeholder="t('settings.inheritPlaceholder')"
+            class="font-mono text-sm w-28 bg-background"
+          />
+        </template>
+      </SettingsItem>
+    </section>
   </SettingsSection>
 </template>

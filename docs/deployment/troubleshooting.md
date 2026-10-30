@@ -47,7 +47,7 @@ container/console logs:
 | Logs screen shows `{"_sampled_out": true}` on some rows with body logging on | **Body Sampling Rate** is below 1.0, so that request lost the draw. Distinct from the disabled marker on purpose | Raise **Body Sampling Rate** to 1.0, or send `x-log-full: true` on the requests you need captured |
 | Usage stats empty but logs exist | Usage and logs are written separately | Check the date range; usage records are pruned on the log retention window |
 | `503 redis_not_available` on Responses endpoints | Redis is not enabled, but stored responses need it | Enable Redis, or avoid the response-storage endpoints |
-| MCP server refuses to start | Deny-by-default policy: its command or env var is not allowlisted | Allowlist the exact command in Settings → Advanced → MCP Security (see [MCP Servers](../admin/mcp.md)) |
+| MCP server refuses to start | Deny-by-default policy: its command or env var is not allowlisted | Allowlist the exact command in Settings → General → MCP Security (see [MCP Servers](../admin/mcp.md)) |
 | MCP `403 Access denied to MCP server` | Key allowlist excludes the server | Update the key's MCP allowlist |
 | MCP returns 404 for a server that exists | Server is not running (stopped/disabled, or crash at startup) | Check status in the console; disable + re-enable to restart |
 | MCP changes don't take effect | A running server is not restarted by an update | Disable, then re-enable the server |

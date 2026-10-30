@@ -37,7 +37,8 @@ create in **API Keys** — see [API Keys](api-keys.md).
 | Providers, MCP Servers, Team | Full control | Hidden (403 on the API) |
 | API keys | Own keys, all fields | Own keys; MCP allowlist allowed, no per-key rate limit |
 | Account rate limit | Set per member in Team | Enforced, read-only |
-| Settings | All sections | Preference and Tracing only |
+| Settings | All sections | Hidden (admin only) |
+| Account (profile, preferences, sign-in & security) | Own | Own |
 | Playgrounds (Chat, Images) | Yes | Yes |
 
 ## Navigation map
@@ -53,7 +54,11 @@ create in **API Keys** — see [API Keys](api-keys.md).
 | **Team** (`/team`) | Create members, assign roles, per-user model allowlists, account budgets, and account rate limits |
 | **Chat** (`/chat`) | Playground: test any model with streaming, tools, vision, and reasoning |
 | **Images** (`/images`) | Playground: image generation and edits |
-| **Settings** (`/config/settings`) | Theme and language, logging, web search, tracing, and all server-wide policy sections |
+| **Instance sign-in** (`/config/console-auth`) | Instance-wide sign-in policy: public URL, SMTP delivery, OIDC providers, forced admin 2FA |
+| **Settings** (`/config/settings`) | Logging, web search, and all server-wide policy sections — admin only |
+| **Account** (`/account`) | Your identity: username, email, role, budget and current session |
+| **Preferences** (`/account/preferences`) | Theme and language (stored in this browser) and your own tracing backends |
+| **Sign-in & security** (`/account/security`) | Your passkeys, password, two-factor, linked providers and current session |
 | **About** (Settings → General) | Version and update check |
 
 ![Chat playground](../screenshots/chat.png)

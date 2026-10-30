@@ -30,7 +30,8 @@ interface Command {
 
 const navCommands = computed<Command[]>(() => {
   // Mirrors the sidebar's role-aware placement: the merged /models page
-  // reads as a catalog to viewers and as configuration to admins.
+  // reads as a catalog to viewers and as configuration to admins, and the
+  // settings page is instance-wide (admin-only) configuration.
   const modelsCommand: Command = {
     id: "nav-models",
     label: t("nav.models"),
@@ -40,7 +41,7 @@ const navCommands = computed<Command[]>(() => {
   const commands: Command[] = [
     {
       id: "nav-home",
-      label: t("home.usageTitle"),
+      label: t("nav.usage"),
       group: t("nav.overview"),
       run: () => router.push("/"),
     },
@@ -70,12 +71,44 @@ const navCommands = computed<Command[]>(() => {
     {
       id: "nav-apikeys",
       label: t("nav.apiKeys"),
-      group: t("nav.config"),
+      group: t("nav.access"),
       run: () => router.push("/config/api-keys"),
+    },
+    // Personal destinations, not instance configuration: every signed-in
+    // role reaches them, and Preferences is where theme and language live.
+    {
+      id: "nav-account",
+      label: t("nav.account"),
+      group: t("nav.account"),
+      run: () => router.push("/account"),
+    },
+    {
+      id: "nav-preferences",
+      label: t("nav.preferences"),
+      group: t("nav.account"),
+      run: () => router.push("/account/preferences"),
+    },
+    {
+      id: "nav-security",
+      label: t("nav.security"),
+      group: t("nav.account"),
+      run: () => router.push("/account/security"),
     }
   );
   if (authStore.isAdmin) {
     commands.push(
+      {
+        id: "nav-team",
+        label: t("team.title"),
+        group: t("nav.access"),
+        run: () => router.push("/team"),
+      },
+      {
+        id: "nav-console-auth",
+        label: t("nav.consoleAuth"),
+        group: t("nav.access"),
+        run: () => router.push("/config/console-auth"),
+      },
       {
         id: "nav-providers",
         label: t("nav.providers"),
@@ -90,19 +123,13 @@ const navCommands = computed<Command[]>(() => {
         run: () => router.push("/config/mcp-servers"),
       },
       {
-        id: "nav-team",
-        label: t("team.title"),
+        id: "nav-settings",
+        label: t("nav.settings"),
         group: t("nav.config"),
-        run: () => router.push("/team"),
+        run: () => router.push("/config/settings"),
       }
     );
   }
-  commands.push({
-    id: "nav-settings",
-    label: t("nav.settings"),
-    group: t("nav.settings"),
-    run: () => router.push("/config/settings"),
-  });
   return commands;
 });
 

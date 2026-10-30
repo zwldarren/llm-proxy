@@ -205,7 +205,7 @@ the parent row already holds, and the output is the verdict in metadata.
 
 ## Tracing
 
-Tracing is **per user** (Settings → General → Tracing). Each user configures their
+Tracing is **per user** (Account → Preferences → Tracing). Each user configures their
 own backends, and those backends only ever see that user's requests: there is no
 global tracing configuration. Three backends are built in, beside the always-on
 internal audit handler:
@@ -215,6 +215,14 @@ internal audit handler:
 | `langfuse` | Langfuse cloud or a self-hosted instance | Langfuse SDK | public + secret key |
 | `otel` | Any OTLP collector — Tempo, Jaeger, Phoenix, Grafana, … | OTLP/HTTP or gRPC | optional `Authorization` header / gRPC metadata |
 | `langsmith` | LangSmith's OTLP gateway | OTLP/HTTP | API key, optional project and workspace id |
+
+Each backend also carries a **sample rate** (0.0–1.0) and a **send content** policy
+(`full`, `inherit`, `none` — see *Content policy* below). Secrets are masked in API
+responses, and saving the form again keeps the stored value. A collector endpoint is
+validated before it is stored: a non-admin user cannot point a backend at a private
+address, while an admin keeps the permissive format-only check (hosts in
+`HTTP_ALLOWED_HOSTS` are allowed for everyone). See
+[Security](../guides/security.md).
 
 When enabled, each request exports one observation, named after its endpoint and
 carrying that request type's own content:

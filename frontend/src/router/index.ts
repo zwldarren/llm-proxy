@@ -105,7 +105,9 @@ const router = createRouter({
       path: "/config/settings",
       name: "settings",
       component: () => import("@/views/config/SettingsView.vue"),
-      meta: { requiresAuth: true },
+      // Instance-wide configuration: theme, language and personal tracing moved
+      // to the account workspace, so nothing on this page is a member's.
+      meta: { requiresAuth: true, adminOnly: true },
     },
     {
       path: "/config/console-auth",
@@ -142,6 +144,14 @@ const router = createRouter({
       path: "/account/security",
       name: "security",
       component: () => import("@/views/SecurityView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      // Personal preferences (theme, language, per-user tracing) are an
+      // account tab: they are nobody else's configuration.
+      path: "/account/preferences",
+      name: "preferences",
+      component: () => import("@/views/PreferencesView.vue"),
       meta: { requiresAuth: true },
     },
     {
@@ -267,6 +277,7 @@ router.afterEach((to) => {
   const ADMIN_ROUTES: Record<string, true> = {
     providers: true,
     mcpServers: true,
+    settings: true,
     team: true,
     circuitBreaker: true,
   };

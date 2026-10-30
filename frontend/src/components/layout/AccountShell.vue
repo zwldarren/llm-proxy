@@ -10,15 +10,16 @@ const { t } = useI18n();
 const route = useRoute();
 
 const isProfile = computed(() => route.name === "account");
+const isPreferences = computed(() => route.name === "preferences");
 const isSecurity = computed(() => route.name === "security");
 </script>
 
 <template>
   <AppLayout>
-    <!-- One account workspace: the two routes are deep-linkable tabs, not
-         separate destinations. max-w-4xl gives the identity form and the
-         credential panels the same reading measure without leaving the
-         column pinned to the left edge on wide screens. -->
+    <!-- One account workspace: the routes are deep-linkable tabs, not
+         separate destinations. max-w-4xl gives the identity form, the
+         preference panels and the credential panels the same reading measure
+         without leaving the column pinned to the left edge on wide screens. -->
     <div class="mx-auto w-full max-w-4xl">
       <PageHeader
         :title="t('account.title')"
@@ -41,6 +42,18 @@ const isSecurity = computed(() => route.name === "security");
               :aria-current="isProfile ? 'page' : undefined"
             >
               {{ t("account.tabProfile") }}
+            </RouterLink>
+            <RouterLink
+              to="/account/preferences"
+              class="rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 max-md:min-h-11 max-md:px-4"
+              :class="
+                isPreferences
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              "
+              :aria-current="isPreferences ? 'page' : undefined"
+            >
+              {{ t("account.tabPreferences") }}
             </RouterLink>
             <RouterLink
               to="/account/security"

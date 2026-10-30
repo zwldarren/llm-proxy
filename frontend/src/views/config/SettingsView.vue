@@ -9,11 +9,8 @@ import AppLayout from "@/components/layout/AppLayout.vue";
 import LoadingState from "@/components/common/LoadingState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import NumberStepper from "@/components/settings/NumberStepper.vue";
-import PreferenceSection from "@/components/settings/sections/PreferenceSection.vue";
 import ServerLogsSection from "@/components/settings/sections/ServerLogsSection.vue";
 import WebSearchSection from "@/components/settings/sections/WebSearchSection.vue";
-import TracingSection from "@/components/settings/sections/TracingSection.vue";
-import TracingProviderSheet from "@/components/settings/sections/TracingProviderSheet.vue";
 import RequestPolicySection from "@/components/settings/sections/RequestPolicySection.vue";
 import SmartRoutingSection from "@/components/settings/sections/SmartRoutingSection.vue";
 import ProviderSelectionSection from "@/components/settings/sections/ProviderSelectionSection.vue";
@@ -46,14 +43,11 @@ import {
 } from "@/components/ui/alert-dialog";
 
 import { useSettingAutoSave } from "@/composables/useSettingAutoSave";
-import { useAuthStore } from "@/stores/auth";
-import { useTracingProviderEditor } from "@/composables/useTracingProviders";
 import { useSettingsStore } from "@/stores/settings";
 import { logsApi } from "@/services/api/logs";
 import { scrollToAnchor } from "@/utils/scroll";
 import {
   configApi,
-  meTracingApi,
   mcpSecurityApi,
   requestPolicyApi,
   smartRoutingApi,
@@ -76,13 +70,11 @@ import type {
   ProviderSelectionConfig,
   SecurityConfig,
   SmartRoutingConfig,
-  TracingConfig,
   WebSearchConfig,
   ResilienceConfig,
   CircuitBreakerListResponse,
 } from "@/types/schemas";
 import {
-  DEFAULT_TRACING,
   DEFAULT_LOGGING,
   DEFAULT_WEB_SEARCH,
   DEFAULT_SMART_ROUTING,
@@ -98,7 +90,6 @@ import {
 
 const { t } = useI18n();
 const settingsStore = useSettingsStore();
-const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -107,10 +98,9 @@ type SettingsSectionId = "general" | "advanced";
 /* The ?tab= query is shared URL state — the kept-alive Logs view also reads
  * a `tab` key, so an unrelated value (e.g. ?tab=proxy) can land here. Treat
  * anything that is not a real settings tab as General instead of blanking
- * the page. The Advanced tab is entirely admin-only, so a viewer stays on
- * General even when the URL asks for it (otherwise the page renders empty). */
+ * the page. */
 const activeSection = computed<SettingsSectionId>(() =>
-  authStore.isAdmin && route.query.tab === "advanced" ? "advanced" : "general"
+  route.query.tab === "advanced" ? "advanced" : "general"
 );
 
 const switchTab = (tab: SettingsSectionId) => {
@@ -166,11 +156,10 @@ watch(
 
 /* In-page section menu — each tab stacks many cards, so a compact grouped
  * menu in the page header provides jumps without becoming another content
- * band. Advanced groups its ten sections by topic; General stays flat. */
+ * band. Advanced groups its sections by topic; General stays flat. */
 interface SettingsSectionMeta {
   id: string;
   labelKey: string;
-  adminOnly?: boolean;
 }
 
 interface SettingsGroupMeta {
@@ -187,11 +176,10 @@ const SECTION_GROUPS: SettingsGroupMeta[] = [
     tab: "general",
     labelKey: null,
     items: [
-      { id: "interface", labelKey: "settings.preference" },
-      { id: "server", labelKey: "settings.serverLogs", adminOnly: true },
-      { id: "webSearch", labelKey: "settings.webSearch", adminOnly: true },
-      { id: "tracing", labelKey: "nav.tracing" },
-      { id: "about", labelKey: "about.title", adminOnly: true },
+      { id: "server", labelKey: "settings.serverLogs" },
+      { id: "webSearch", labelKey: "settings.webSearch" },
+      { id: "mcpSecurity", labelKey: "mcpSecurity.title" },
+      { id: "about", labelKey: "about.title" },
     ],
   },
   {
@@ -222,24 +210,27 @@ const SECTION_GROUPS: SettingsGroupMeta[] = [
       { id: "security", labelKey: "security.title" },
       { id: "rateLimits", labelKey: "rateLimits.title" },
       { id: "cors", labelKey: "cors.title" },
-      { id: "mcpSecurity", labelKey: "mcpSecurity.title" },
     ],
   },
 ];
 
 const navGroups = computed(() =>
   SECTION_GROUPS.filter((group) => group.tab === activeSection.value)
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => !item.adminOnly || authStore.isAdmin),
-    }))
-    .filter((group) => group.items.length > 0)
 );
 
 /** Flat reading order for the scrollspy and the end-of-scroll case. */
 const navItems = computed(() => navGroups.value.flatMap((group) => group.items));
 
 const activeAnchor = ref("");
+
+/* The trigger carries the section the reading position is in, so the header
+ * answers "where am I" without the operator opening the menu first. With no
+ * scrollspy hit yet it falls back to the first section of the tab. */
+const activeSectionLabel = computed(() => {
+  const item = navItems.value.find((entry) => entry.id === activeAnchor.value);
+  return item ? t(item.labelKey) : "";
+});
+
 const scrollEl = ref<HTMLElement | null>(null);
 let anchorFrame = 0;
 
@@ -286,7 +277,7 @@ function scheduleActiveAnchor() {
 }
 
 watch(
-  [activeSection, () => authStore.isAdmin],
+  activeSection,
   async () => {
     await nextTick();
     updateActiveAnchor();
@@ -307,9 +298,7 @@ function jumpToSection(id: string) {
 // Show loading spinner only when we have no cached data at all.
 // A failed first load gets an explicit retry state instead of a permanent spinner.
 const settingsLoadFailed = ref(false);
-const showLoadingSpinner = computed(
-  () => authStore.isAdmin && !settingsLoadFailed.value && !settingsStore.hasCache()
-);
+const showLoadingSpinner = computed(() => !settingsLoadFailed.value && !settingsStore.hasCache());
 
 async function loadSettings() {
   settingsLoadFailed.value = false;
@@ -334,29 +323,6 @@ watch(showLoadingSpinner, (loading) => {
 
 // ── Auto-save instances ─────────────────────────────────────────────
 // Initialize with defaults - will be updated after data loads
-
-const tracingAutoSave = useSettingAutoSave<TracingConfig>(DEFAULT_TRACING, (val) => {
-  const saveData = tracing.buildSavePayload(val);
-  return meTracingApi.updateTracing(saveData).then((r) => r.config);
-});
-
-const tracing = useTracingProviderEditor(tracingAutoSave.state);
-
-// ── Tracing provider editor (sheet) ───────────────────────────────
-// Editing a provider happens in a focused side sheet rather than inline, so
-// the settings page stays compact no matter how many providers are added.
-const editingProviderId = ref<string | null>(null);
-const editingProvider = computed(
-  () => tracingAutoSave.state.value.providers.find((p) => p.id === editingProviderId.value) ?? null
-);
-
-function openProviderEditor(id: string) {
-  editingProviderId.value = id;
-}
-
-function closeProviderEditor() {
-  editingProviderId.value = null;
-}
 
 const webSearchAutoSave = useSettingAutoSave<WebSearchConfig>(DEFAULT_WEB_SEARCH, (val) =>
   webSearchApi.updateConfig(val).then((r) => {
@@ -592,35 +558,9 @@ function initializeAutoSaveFromStore() {
   }
 }
 
-/** Fetch the current user's personal tracing config + supported providers and
- * initialize the tracing auto-save from it. Used by non-admin (viewer) users. */
-async function loadPersonalTracing() {
-  try {
-    await tracing.loadProviderTypes(meTracingApi);
-  } catch (err) {
-    console.error("Failed to load tracing provider types:", err);
-  }
-  try {
-    const res = await meTracingApi.getTracing();
-    tracingAutoSave.initialize({
-      enabled: res.config.enabled ?? false,
-      providers: tracing.prepareInitialProviders(res.config.providers ?? []),
-    });
-  } catch (err) {
-    console.error("Failed to load personal tracing config:", err);
-  }
-}
-
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 onMounted(async () => {
-  // Non-admin users only fetch logging config (no admin-only settings).
-  if (!authStore.isAdmin) {
-    initializeAutoSaveFromStore();
-    await loadPersonalTracing();
-    return;
-  }
-
   // Start polling only when the advanced section is active
   watch(
     () => activeSection.value === "advanced",
@@ -641,14 +581,11 @@ onMounted(async () => {
     initializeAutoSaveFromStore();
     // Background refresh - updates cache, auto-save won't trigger because we update cache
     settingsStore.fetchAll();
-    await loadPersonalTracing();
     return;
   }
 
   // First visit: show loading spinner, fetch from API
   await loadSettings();
-  // Tracing is per-user for everyone (admin included).
-  await loadPersonalTracing();
 });
 
 onUnmounted(() => {
@@ -664,34 +601,28 @@ onUnmounted(() => {
   <AppLayout layoutMode="full">
     <template #header>
       <header class="config-header-bar px-4 sm:px-6 py-4">
-        <!-- Section navigation lives in the header, leaving one centered
-             content column with no redundant toolbar above the first card. -->
-        <div class="mx-auto w-full max-w-4xl">
+        <!-- The page header stays on the shared console gutter; only the form
+             column below uses a narrower reading measure. -->
+        <div class="w-full">
           <PageHeader
             :title="t('settings.title')"
-            :description="
-              authStore.isAdmin ? t('settings.description') : t('settings.viewerDescription')
-            "
+            :description="t('settings.description')"
             :icon="Settings2"
           >
             <template #actions>
-              <!-- Viewers only ever get the General tab, so the switcher
-                     would be a one-segment control: omit it rather than offer
-                     a tab that renders nothing. -->
               <div
-                v-if="authStore.isAdmin"
-                class="flex items-center bg-muted/40 p-0.5 rounded-lg border border-border/40"
+                class="flex items-center bg-muted/60 p-[3px] rounded-lg border border-border/55"
                 :aria-label="t('settings.title')"
                 role="group"
               >
                 <button
                   type="button"
                   :aria-pressed="activeSection === 'general'"
-                  class="max-md:min-h-11 max-md:px-4 px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                  class="max-md:min-h-11 max-md:px-4 px-3 py-1.5 text-xs rounded-md border transition-all duration-200 cursor-pointer focus-visible-ring"
                   :class="
                     activeSection === 'general'
-                      ? 'bg-background text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:text-foreground'
+                      ? 'bg-accent text-foreground font-semibold border-border/70 shadow-xs'
+                      : 'border-transparent text-muted-foreground font-medium hover:bg-accent/40 hover:text-foreground'
                   "
                   @click="switchTab('general')"
                 >
@@ -700,11 +631,11 @@ onUnmounted(() => {
                 <button
                   type="button"
                   :aria-pressed="activeSection === 'advanced'"
-                  class="max-md:min-h-11 max-md:px-4 px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
+                  class="max-md:min-h-11 max-md:px-4 px-3 py-1.5 text-xs rounded-md border transition-all duration-200 cursor-pointer focus-visible-ring"
                   :class="
                     activeSection === 'advanced'
-                      ? 'bg-background text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:text-foreground'
+                      ? 'bg-accent text-foreground font-semibold border-border/70 shadow-xs'
+                      : 'border-transparent text-muted-foreground font-medium hover:bg-accent/40 hover:text-foreground'
                   "
                   @click="switchTab('advanced')"
                 >
@@ -714,14 +645,26 @@ onUnmounted(() => {
 
               <DropdownMenu v-if="navItems.length > 1" :modal="false">
                 <DropdownMenuTrigger as-child>
+                  <!-- The trigger names the section being read rather than the
+                       menu itself: "Sections" alone told the operator nothing
+                       about their position on a ten-section page. The label
+                       keeps the accessible name complete, so the visible text
+                       stays a substring of it (WCAG 2.5.3). The width follows
+                       the label rather than being pinned to the widest section
+                       name: a fixed frame would leave a dead 60–140px inside
+                       the hit area and under the focus ring for most sections. -->
                   <Button
                     variant="ghost"
                     size="sm"
-                    class="gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                    class="max-w-full gap-1.5 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    :title="t('settings.sections')"
+                    :aria-label="`${t('settings.sections')}: ${activeSectionLabel}`"
                   >
-                    <ListTree class="size-4" />
-                    {{ t("settings.sections") }}
-                    <ChevronDown class="size-3.5" />
+                    <ListTree class="size-4 shrink-0" />
+                    <span class="min-w-0 truncate text-left text-foreground">
+                      {{ activeSectionLabel || t("settings.sections") }}
+                    </span>
+                    <ChevronDown class="size-3.5 shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" class="w-64 sm:w-72">
@@ -776,29 +719,15 @@ onUnmounted(() => {
         <!-- Content Area — each anchored section clears the viewport edge. -->
         <div class="mx-auto w-full max-w-4xl space-y-8 pb-20">
           <!-- General tab -->
-          <div
-            v-show="activeSection === 'general'"
-            id="interface"
-            class="space-y-6 mt-0 scroll-mt-6"
-          >
-            <PreferenceSection />
-          </div>
-
-          <div
-            v-if="authStore.isAdmin"
-            v-show="activeSection === 'general'"
-            id="server"
-            class="space-y-6 mt-0 scroll-mt-6"
-          >
+          <div v-show="activeSection === 'general'" id="server" class="space-y-6 mt-0 scroll-mt-6">
             <ServerLogsSection
               :auto-save="loggingAutoSave"
-              :is-admin="authStore.isAdmin"
+              :is-admin="true"
               @cleanup="openCleanupDialog"
             />
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'general'"
             id="webSearch"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -806,26 +735,23 @@ onUnmounted(() => {
             <WebSearchSection :auto-save="webSearchAutoSave" />
           </div>
 
-          <div v-show="activeSection === 'general'" id="tracing" class="space-y-6 mt-0 scroll-mt-6">
-            <TracingSection
-              :auto-save="tracingAutoSave"
-              :editor="tracing"
-              @edit-provider="openProviderEditor"
+          <div
+            v-show="activeSection === 'general'"
+            id="mcpSecurity"
+            class="space-y-6 mt-0 scroll-mt-6"
+          >
+            <McpSecuritySection
+              :auto-save="mcpSecurityAutoSave"
+              @reset-defaults="showMcpResetDialog = true"
             />
           </div>
 
-          <div
-            v-if="authStore.isAdmin"
-            v-show="activeSection === 'general'"
-            id="about"
-            class="space-y-6 mt-0 scroll-mt-6"
-          >
+          <div v-show="activeSection === 'general'" id="about" class="space-y-6 mt-0 scroll-mt-6">
             <AboutSection />
           </div>
 
           <!-- Advanced tab -->
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="requestPolicy"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -834,7 +760,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="smartRouting"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -846,7 +771,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="providerSelection"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -855,7 +779,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="retryFallback"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -864,7 +787,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="circuitBreaker"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -881,7 +803,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="keepalive"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -890,7 +811,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="security"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -899,7 +819,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            v-if="authStore.isAdmin"
             v-show="activeSection === 'advanced'"
             id="rateLimits"
             class="space-y-6 mt-0 scroll-mt-6"
@@ -907,25 +826,8 @@ onUnmounted(() => {
             <RateLimitsSection :auto-save="rateLimitsAutoSave" />
           </div>
 
-          <div
-            v-if="authStore.isAdmin"
-            v-show="activeSection === 'advanced'"
-            id="cors"
-            class="space-y-6 mt-0 scroll-mt-6"
-          >
+          <div v-show="activeSection === 'advanced'" id="cors" class="space-y-6 mt-0 scroll-mt-6">
             <CorsSection :auto-save="corsAutoSave" />
-          </div>
-
-          <div
-            v-if="authStore.isAdmin"
-            v-show="activeSection === 'advanced'"
-            id="mcpSecurity"
-            class="space-y-6 mt-0 scroll-mt-6"
-          >
-            <McpSecuritySection
-              :auto-save="mcpSecurityAutoSave"
-              @reset-defaults="showMcpResetDialog = true"
-            />
           </div>
         </div>
       </div>
@@ -992,12 +894,5 @@ onUnmounted(() => {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-
-    <!-- Tracing provider editor (side sheet) -->
-    <TracingProviderSheet
-      :provider="editingProvider"
-      :editor="tracing"
-      @close="closeProviderEditor"
-    />
   </AppLayout>
 </template>

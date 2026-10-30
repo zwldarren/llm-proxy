@@ -205,6 +205,10 @@ Both thresholds are configurable in [Server Settings](settings.md#security-rate-
 
 ## Self-service account endpoints
 
+The Account workspace exposes these under three tabs: **Profile** (identity, budget,
+current session), **Preferences** (theme and language, stored in this browser, plus
+your own tracing backends) and **Sign-in & security**.
+
 Any signed-in user can:
 
 | Endpoint | Purpose |

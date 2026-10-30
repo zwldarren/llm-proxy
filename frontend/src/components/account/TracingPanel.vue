@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Edit, Plus, Radio, Trash2 } from "@lucide/vue";
+import { Edit, Loader2, Plus, Radio, Trash2 } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import PanelSection from "@/components/common/PanelSection.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import CollapsiblePanel from "@/components/common/CollapsiblePanel.vue";
-import { SettingsItem, SettingsSection } from "@/components/settings";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
@@ -39,8 +39,15 @@ const hasProviders = computed(() => state.value.providers.length > 0);
 </script>
 
 <template>
-  <SettingsSection :title="t('nav.tracing')" :icon="Radio" :description="t('tracing.description')">
-    <template #actions>
+  <!-- Per-user tracing: exported only for your own requests, so it is a
+       personal setting (Account), never an instance-wide switch. -->
+  <PanelSection
+    id="tracing"
+    :title="t('nav.tracing')"
+    :description="t('tracing.description')"
+    :icon="Radio"
+  >
+    <template #badge>
       <StatusBadge v-if="state.enabled && configuredCount > 0" variant="status" status="success">
         {{ t("tracing.status.active") }}&nbsp;·&nbsp;<span class="font-mono tabular-nums">{{
           configuredCount
@@ -48,21 +55,24 @@ const hasProviders = computed(() => state.value.providers.length > 0);
       </StatusBadge>
     </template>
 
-    <SettingsItem
-      :title="t('tracing.enableTracing')"
-      :description="t('tracing.enableTracingDescription')"
-      :loading="pending"
-      :error="error"
-    >
-      <template #action>
-        <Switch v-model="state.enabled" :aria-label="t('tracing.enableTracing')" />
-      </template>
-    </SettingsItem>
+    <div class="flex items-center justify-between gap-4 py-3">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2 text-sm font-medium text-foreground">
+          {{ t("tracing.enableTracing") }}
+          <Loader2 v-if="pending" class="size-3.5 animate-spin text-muted-foreground" />
+        </div>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ t("tracing.enableTracingDescription") }}
+        </p>
+        <p v-if="error" class="mt-1 text-xs text-destructive">{{ error }}</p>
+      </div>
+      <Switch v-model="state.enabled" :aria-label="t('tracing.enableTracing')" class="shrink-0" />
+    </div>
 
-    <CollapsiblePanel :open="state.enabled" bordered>
+    <CollapsiblePanel :open="state.enabled" bordered class="mt-3">
       <div class="overflow-hidden divide-y divide-border/40">
         <!-- Empty state (matches the dashed-panel style used elsewhere) -->
-        <div v-if="!hasProviders" class="p-5.5">
+        <div v-if="!hasProviders" class="py-4">
           <div
             class="flex flex-col items-center text-center gap-3 py-8 px-4 border border-dashed border-border/60 rounded-lg bg-muted/20"
           >
@@ -82,11 +92,11 @@ const hasProviders = computed(() => state.value.providers.length > 0);
           </div>
         </div>
 
-        <!-- Provider rows — same rhythm as SettingsItem rows; edit in side sheet -->
+        <!-- Provider rows — same rhythm as the panel's definition rows; edit in side sheet -->
         <div
           v-for="provider in state.providers"
           :key="provider.id"
-          class="px-5.5 py-3.5 flex items-center gap-3.5 hover:bg-muted/12 transition-colors duration-200"
+          class="py-3 flex items-center gap-3.5 transition-colors duration-200"
         >
           <div class="flex-1 min-w-0">
             <div
@@ -130,7 +140,7 @@ const hasProviders = computed(() => state.value.providers.length > 0);
         </div>
 
         <!-- Add provider (single type → direct button, multiple → menu) -->
-        <div class="px-5.5 py-3.5 flex items-center gap-3">
+        <div class="py-3 flex items-center gap-3">
           <Popover v-if="editor.providerTypes.value.length > 1" v-model:open="isAddDropdownOpen">
             <PopoverTrigger as-child>
               <Button variant="outline" size="sm">
@@ -159,5 +169,5 @@ const hasProviders = computed(() => state.value.providers.length > 0);
         </div>
       </div>
     </CollapsiblePanel>
-  </SettingsSection>
+  </PanelSection>
 </template>
