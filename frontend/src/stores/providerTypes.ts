@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
+import i18n from "@/i18n";
 import { configApi } from "@/services/api/config";
 import type { ProviderTypeInfo } from "@/types/schemas";
 import { getErrorMessage } from "@/utils/error";
@@ -15,9 +15,15 @@ import { getErrorMessage } from "@/utils/error";
  * request) and is retried on failure: `ready` stays false, so the next call
  * tries again. Failures surface a toast (the list stays empty so the UI
  * never shows stale data).
+ *
+ * Messages come from the i18n singleton, never `useI18n()`: pinia registers a
+ * setup store *before* running its setup, so a store first instantiated
+ * outside a component setup (the 401 teardown resets every session store from
+ * `auth.clearLocalSession`) would leave a poisoned, permanently cached store
+ * whose state is `undefined` — exactly the crash that surfaced as
+ * "Cannot read properties of undefined (reading 'map')" in the providers view.
  */
 export const useProviderTypesStore = defineStore("providerTypes", () => {
-  const { t } = useI18n();
   const types = ref<ProviderTypeInfo[]>([]);
   const loading = ref(false);
   const ready = ref(false);
@@ -49,7 +55,7 @@ export const useProviderTypesStore = defineStore("providerTypes", () => {
         // Keep the list empty so the UI never shows stale data; a later
         // ensureLoaded() call retries. Surface the failure to the user.
         console.error("Failed to load provider types", e);
-        toast.error(t("errors.providerTypesLoadFailed"), {
+        toast.error(i18n.global.t("errors.providerTypesLoadFailed"), {
           description: getErrorMessage(e),
         });
         return false;

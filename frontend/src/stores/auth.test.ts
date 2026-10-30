@@ -12,13 +12,6 @@ vi.mock("@/services/api/auth", () => ({
   },
 }));
 
-// The providerTypes store calls useI18n() in its setup; webauthn.ts uses the
-// real i18n singleton, so keep createI18n available.
-vi.mock("vue-i18n", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, useI18n: () => ({ t: (key: string) => key }) };
-});
-
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { authApi } from "@/services/api/auth";
 import { useAuthStore } from "./auth";

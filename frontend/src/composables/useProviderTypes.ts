@@ -34,9 +34,16 @@ export function useProviderTypes() {
     return name || info.type;
   }
 
-  /** Select/filter options in backend display-name order. */
+  /**
+   * Select/filter options in backend display-name order.
+   *
+   * `types` is read defensively: this runs inside a render computed, and a
+   * single missing field must degrade to an empty option list for one frame
+   * (the next `ensureLoaded()` repopulates it) instead of taking the whole
+   * console down through the global error boundary.
+   */
   const typeOptions = computed<ProviderTypeOption[]>(() =>
-    store.types.map((t) => ({ label: labelOf(t), value: t.type }))
+    (store.types ?? []).map((t) => ({ label: labelOf(t), value: t.type }))
   );
 
   /**

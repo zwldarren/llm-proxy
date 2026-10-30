@@ -1513,6 +1513,9 @@ export default {
     somethingWrong: "出错了",
     unknown: "未知错误",
     unexpectedError: "发生意外错误，请重试。",
+    renderFailed: "这个页面渲染失败。返回仪表盘可以继续工作，或重新加载控制台。",
+    backToDashboard: "返回仪表盘",
+    errorDetails: "错误详情",
     codes: {
       accountLocked: "登录失败次数过多。请稍后再试，或联系管理员解锁。",
       emailDeliveryFailed: "邮件发送失败。请检查 SMTP 设置后重试。",

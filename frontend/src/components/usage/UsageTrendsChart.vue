@@ -71,7 +71,10 @@ const series = computed<UsageSeries[]>(() => {
       by_model: bucket.by_model ?? [],
     }));
   }
-  return props.dailyUsage.map((day) => ({ key: day.date, by_model: day.by_model }));
+  // The stats payload is assembled server-side; a field missing from it must
+  // degrade to an empty chart rather than take the console down with a
+  // `Cannot read properties of undefined (reading 'map')`.
+  return (props.dailyUsage ?? []).map((day) => ({ key: day.date, by_model: day.by_model }));
 });
 
 // Human label for a chart-type value, shared by the aria label and the toggle

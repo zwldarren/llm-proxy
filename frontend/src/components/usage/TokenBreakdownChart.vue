@@ -35,7 +35,7 @@ interface BreakdownRow {
 }
 
 const rows = computed<BreakdownRow[]>(() =>
-  props.buckets.map((b) => {
+  (props.buckets ?? []).map((b) => {
     const cacheHit = b.cache_read_tokens + b.cached_prompt_tokens;
     const cacheMiss = Math.max(b.input_tokens - cacheHit, 0);
     const output = b.output_tokens;

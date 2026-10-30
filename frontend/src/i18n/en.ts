@@ -1579,6 +1579,11 @@ export default {
     somethingWrong: "Something went wrong",
     unknown: "Unknown error",
     unexpectedError: "An unexpected error occurred. Please try again.",
+    // Render-crash recovery surface (App.vue error boundary).
+    renderFailed:
+      "This screen failed to render. Go back to the dashboard to keep working, or reload the console.",
+    backToDashboard: "Back to dashboard",
+    errorDetails: "Error details",
     // Backend ``code`` values with a message the console can act on. Text that
     // describes a console state lives here so a toast is never half English.
     codes: {

@@ -22,7 +22,7 @@ type SortBy = "requests" | "cost";
 const sortBy = ref<SortBy>("requests");
 
 const sortedProviders = computed(() => {
-  const result = [...props.byProvider];
+  const result = [...(props.byProvider ?? [])];
 
   if (sortBy.value === "cost") {
     result.sort((a, b) => b.cost - a.cost || b.requests - a.requests);

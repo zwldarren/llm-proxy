@@ -35,7 +35,7 @@ const sortBy = ref<SortBy>("requests");
 
 // Sort models
 const sortedModels = computed(() => {
-  const result = [...props.byModel];
+  const result = [...(props.byModel ?? [])];
 
   if (sortBy.value === "cost") {
     result.sort((a, b) => b.cost - a.cost || b.requests - a.requests);

@@ -47,17 +47,15 @@ const totalCacheHitTokens = computed(
   () => props.summary.total_cache_read_tokens + props.summary.total_cached_prompt_tokens
 );
 const cacheEligibleInputTokens = computed(() => {
+  const byProvider = props.byProvider ?? [];
   const reporters = new Set(
-    props.byProvider
+    byProvider
       .filter(
         (p) => p.cache_read_tokens > 0 || p.cached_prompt_tokens > 0 || p.cache_creation_tokens > 0
       )
       .map((p) => p.provider)
   );
-  return props.byProvider.reduce(
-    (sum, p) => sum + (reporters.has(p.provider) ? p.input_tokens : 0),
-    0
-  );
+  return byProvider.reduce((sum, p) => sum + (reporters.has(p.provider) ? p.input_tokens : 0), 0);
 });
 const cacheHitRate = computed(() => {
   if (cacheEligibleInputTokens.value === 0) return 0;
