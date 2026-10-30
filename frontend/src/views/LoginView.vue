@@ -2,7 +2,16 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Fingerprint, KeyRound, Loader2 } from "@lucide/vue";
+import {
+  ArrowLeft,
+  CircleAlert,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  Info,
+  KeyRound,
+  Loader2,
+} from "@lucide/vue";
 import AuthShell from "@/components/common/AuthShell.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -31,6 +40,12 @@ const challengeToken = ref<string | null>(null);
 const mfaCode = ref("");
 const recoveryMode = ref(false);
 const recoveryCode = ref("");
+const revealPassword = ref(false);
+const capsLock = ref(false);
+// Which field the operator still has to fill in. Field-level feedback points at
+// the control that needs attention; the alert is reserved for the server's
+// verdict on what was actually sent.
+const fieldError = ref<"identifier" | "password" | "mfa" | null>(null);
 // null = not asked yet. The sign-in page cannot promise an emailed reset on an
 // instance without SMTP, so the entry below is chosen once the backend says
 // which recovery path actually exists here.
@@ -58,6 +73,7 @@ const sessionNotice = computed(() =>
 );
 
 onMounted(async () => {
+  focusFirstField();
   const oauthError = route.query.oauth_error;
   if (typeof oauthError === "string" && oauthError) {
     try {
@@ -79,6 +95,40 @@ onMounted(async () => {
     resetAvailable.value = false;
   }
 });
+
+/**
+ * Focusing the identifier on arrival saves a click for the operator who opened
+ * the console to sign in. A touch-first device is excluded: there, the focus
+ * would raise the software keyboard over a screen that is still being read.
+ */
+function focusFirstField() {
+  if (typeof window.matchMedia !== "function") return;
+  if (window.matchMedia("(pointer: coarse)").matches) return;
+  focusField("username");
+}
+
+function focusField(id: "username" | "password" | "mfa-code") {
+  document.getElementById(id)?.focus({ preventScroll: true });
+}
+
+/**
+ * Editing retires the previous verdict, so a stale "invalid username or
+ * password" never sits under text the operator has already corrected.
+ */
+function clearFeedback() {
+  error.value = "";
+  fieldError.value = null;
+}
+
+/**
+ * The password field is the one place a wrong-looking password is usually not
+ * wrong: report Caps Lock while the hardware key is down, and drop the note on
+ * blur so it cannot outlive the state it describes.
+ */
+function trackCapsLock(event: KeyboardEvent) {
+  if (typeof event.getModifierState !== "function") return;
+  capsLock.value = event.getModifierState("CapsLock");
+}
 
 function errorMessage(e: unknown): string {
   // A 401 that carries no backend code is a rejected credential; everything
@@ -127,10 +177,17 @@ const handleLogin = async () => {
   // Passkey login may leave it empty to use a discoverable credential, so
   // the input itself is not `required`; the password path enforces it here.
   if (!identifier.value.trim()) {
-    error.value = t("auth.identifierRequired");
+    fieldError.value = "identifier";
+    focusField("username");
+    return;
+  }
+  if (!password.value) {
+    fieldError.value = "password";
+    focusField("password");
     return;
   }
   error.value = "";
+  fieldError.value = null;
   loading.value = true;
   try {
     await afterAuth(
@@ -146,6 +203,7 @@ const handleLogin = async () => {
 const handlePasskeyLogin = async () => {
   if (passkeyLoading.value) return;
   error.value = "";
+  fieldError.value = null;
   passkeyLoading.value = true;
   try {
     const response = await authStore.loginWithPasskey(identifier.value || undefined);
@@ -160,7 +218,14 @@ const handlePasskeyLogin = async () => {
 
 const handleMfa = async () => {
   if (!challengeToken.value || loading.value) return;
+  const submitted = recoveryMode.value ? recoveryCode.value.trim() : mfaCode.value.trim();
+  if (!submitted) {
+    fieldError.value = "mfa";
+    focusField("mfa-code");
+    return;
+  }
   error.value = "";
+  fieldError.value = null;
   loading.value = true;
   try {
     const response = recoveryMode.value
@@ -173,10 +238,7 @@ const handleMfa = async () => {
       // The 5-minute challenge token is dead. Returning to the identifier form
       // is the only way forward; leaving the MFA screen up would trap the user
       // in a form that can never succeed.
-      challengeToken.value = null;
-      mfaCode.value = "";
-      recoveryCode.value = "";
-      recoveryMode.value = false;
+      resetChallenge();
       error.value = t("auth.mfaChallengeExpired");
     } else {
       error.value = errorMessage(e);
@@ -196,26 +258,48 @@ function resetChallenge() {
   recoveryCode.value = "";
   recoveryMode.value = false;
   error.value = "";
+  fieldError.value = null;
 }
 
 function toggleRecoveryMode() {
   recoveryMode.value = !recoveryMode.value;
   error.value = "";
+  fieldError.value = null;
 }
 </script>
 
 <template>
   <AuthShell :title="authTitle" :description="authDescription">
-    <Alert v-if="sessionNotice" class="mb-4" id="session-notice">
-      <AlertDescription>{{ sessionNotice }}</AlertDescription>
+    <Alert
+      v-if="sessionNotice"
+      id="session-notice"
+      class="mb-4 animate-in fade-in slide-in-from-top-2 duration-300"
+    >
+      <AlertDescription>
+        <span class="flex items-start gap-2">
+          <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span>{{ sessionNotice }}</span>
+        </span>
+      </AlertDescription>
     </Alert>
-    <Alert v-if="error" variant="destructive" class="mb-4" id="login-error">
-      <AlertDescription>{{ error }}</AlertDescription>
+    <Alert
+      v-if="error"
+      id="login-error"
+      variant="destructive"
+      class="mb-4 animate-in fade-in slide-in-from-top-2 duration-300"
+    >
+      <AlertDescription>
+        <span class="flex items-start gap-2">
+          <CircleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span>{{ error }}</span>
+        </span>
+      </AlertDescription>
     </Alert>
 
     <form
       v-if="challengeToken"
       class="flex flex-col gap-4"
+      novalidate
       :aria-busy="loading"
       :aria-describedby="error ? 'login-error' : undefined"
       @submit.prevent="handleMfa"
@@ -235,7 +319,10 @@ function toggleRecoveryMode() {
           required
           autofocus
           :disabled="loading"
+          :aria-invalid="fieldError === 'mfa'"
+          :aria-describedby="fieldError === 'mfa' ? 'mfa-error' : undefined"
           class="auth-input h-12 text-center font-mono text-lg tracking-[0.35em]"
+          @input="clearFeedback"
         />
         <Input
           v-else
@@ -245,12 +332,18 @@ function toggleRecoveryMode() {
           required
           autofocus
           :disabled="loading"
+          :aria-invalid="fieldError === 'mfa'"
+          :aria-describedby="fieldError === 'mfa' ? 'mfa-error' : undefined"
           class="auth-input h-11 font-mono"
+          @input="clearFeedback"
         />
+        <p v-if="fieldError === 'mfa'" id="mfa-error" class="text-xs text-destructive">
+          {{ recoveryMode ? t("auth.enterRecoveryCode") : t("auth.enterMfaCode") }}
+        </p>
       </div>
       <Button type="submit" :disabled="loading" class="btn-press h-11 w-full" size="lg">
         <Loader2 v-if="loading" class="size-4 animate-spin" />
-        {{ loading ? t("common.loading") : t("auth.verifyButton") }}
+        {{ loading ? t("auth.verifying") : t("auth.verifyButton") }}
       </Button>
       <div class="flex flex-wrap items-center justify-between gap-2">
         <Button
@@ -278,10 +371,35 @@ function toggleRecoveryMode() {
     <form
       v-else
       class="flex flex-col gap-4"
+      novalidate
       :aria-describedby="error ? 'login-error' : undefined"
       :aria-busy="loading || passkeyLoading"
       @submit.prevent="handleLogin"
     >
+      <!-- The passkey action leads, and the hairline that follows it opens the
+           whole password path. Leaving the identifier above that hairline split
+           one form across two "or" branches and made the field look like part
+           of the passkey flow. -->
+      <template v-if="passkeySupported">
+        <Button
+          type="button"
+          :variant="passkeyPreferred ? 'default' : 'outline'"
+          :disabled="loading || passkeyLoading"
+          class="btn-press h-11 w-full gap-2"
+          size="lg"
+          @click="handlePasskeyLogin"
+        >
+          <Loader2 v-if="passkeyLoading" class="size-4 animate-spin" />
+          <Fingerprint v-else class="size-4" />
+          {{ passkeyLoading ? t("auth.waitingForPasskey") : t("auth.passkeyLogin") }}
+        </Button>
+        <div class="flex items-center gap-3 py-1 text-xs text-muted-foreground">
+          <span class="h-px flex-1 bg-border" />
+          {{ t("auth.orUsePassword") }}
+          <span class="h-px flex-1 bg-border" />
+        </div>
+      </template>
+
       <div class="flex flex-col gap-1.5">
         <Label for="username" class="text-sm font-medium text-foreground/90">
           {{ t("auth.identifier") }}
@@ -294,46 +412,71 @@ function toggleRecoveryMode() {
           autocapitalize="none"
           spellcheck="false"
           :disabled="loading || passkeyLoading"
+          :aria-invalid="fieldError === 'identifier'"
+          :aria-describedby="fieldError === 'identifier' ? 'identifier-error' : undefined"
           class="auth-input h-11"
+          @input="clearFeedback"
         />
-      </div>
-
-      <Button
-        v-if="passkeySupported"
-        type="button"
-        :variant="passkeyPreferred ? 'default' : 'outline'"
-        :disabled="loading || passkeyLoading"
-        class="btn-press h-11 w-full gap-2"
-        size="lg"
-        @click="handlePasskeyLogin"
-      >
-        <Loader2 v-if="passkeyLoading" class="size-4 animate-spin" />
-        <Fingerprint v-else class="size-4" />
-        {{ passkeyLoading ? t("common.loading") : t("auth.passkeyLogin") }}
-      </Button>
-
-      <div
-        v-if="passkeySupported"
-        class="flex items-center gap-3 py-1 text-xs text-muted-foreground"
-      >
-        <span class="h-px flex-1 bg-border" />
-        {{ t("auth.orUsePassword") }}
-        <span class="h-px flex-1 bg-border" />
+        <p
+          v-if="fieldError === 'identifier'"
+          id="identifier-error"
+          class="text-xs text-destructive"
+        >
+          {{ t("auth.identifierRequired") }}
+        </p>
       </div>
 
       <div class="flex flex-col gap-1.5">
-        <Label for="password" class="text-sm font-medium text-foreground/90">
-          {{ t("auth.password") }}
-        </Label>
-        <Input
-          id="password"
-          v-model="password"
-          type="password"
-          autocomplete="current-password"
-          required
-          :disabled="loading || passkeyLoading"
-          class="auth-input h-11"
-        />
+        <!-- The recovery entry sits with the field it repairs, not at the foot
+             of the column where it read as a footnote to the whole page. -->
+        <div class="flex items-baseline justify-between gap-3">
+          <Label for="password" class="text-sm font-medium text-foreground/90">
+            {{ t("auth.password") }}
+          </Label>
+          <RouterLink
+            v-if="resetAvailable"
+            id="forgot-password-link"
+            :to="{ path: '/forgot-password', query: identifier ? { identifier } : {} }"
+            class="-my-1 rounded-sm py-1 text-xs text-muted-foreground underline-offset-4 transition-colors outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {{ t("auth.forgotPassword") }}
+          </RouterLink>
+        </div>
+        <div class="relative">
+          <Input
+            id="password"
+            v-model="password"
+            :type="revealPassword ? 'text' : 'password'"
+            autocomplete="current-password"
+            required
+            :disabled="loading || passkeyLoading"
+            :aria-invalid="fieldError === 'password'"
+            :aria-describedby="fieldError === 'password' ? 'password-error' : undefined"
+            class="auth-input h-11 pr-12"
+            @input="clearFeedback"
+            @keydown="trackCapsLock"
+            @keyup="trackCapsLock"
+            @blur="capsLock = false"
+          />
+          <!-- Revealing the value is local to this screen and never widens what
+               autocomplete or the browser remembers. The focus ring is inset so
+               it cannot bleed past the field's own rounded edge. -->
+          <button
+            type="button"
+            class="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-ring/40 focus-visible:ring-inset"
+            :aria-label="revealPassword ? t('auth.hidePassword') : t('auth.showPassword')"
+            :aria-pressed="revealPassword"
+            @click="revealPassword = !revealPassword"
+          >
+            <component :is="revealPassword ? EyeOff : Eye" class="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <p v-if="fieldError === 'password'" id="password-error" class="text-xs text-destructive">
+          {{ t("auth.enterPassword") }}
+        </p>
+        <p v-else-if="capsLock" id="password-caps" class="text-xs text-muted-foreground">
+          {{ t("auth.passwordCapsLock") }}
+        </p>
       </div>
 
       <Button
@@ -344,33 +487,21 @@ function toggleRecoveryMode() {
         size="lg"
       >
         <Loader2 v-if="loading" class="size-4 animate-spin" />
-        {{ loading ? t("common.loading") : t("auth.loginButton") }}
+        {{ loading ? t("auth.signingIn") : t("auth.loginButton") }}
       </Button>
-    </form>
 
-    <!-- The recovery entry belongs on the identifier form only: an MFA screen is
-         already a sign-in in progress, and leaving it must not drop the
-         challenge. Where SMTP is missing the link becomes an instruction,
-         because sending mail is exactly what this deployment cannot do. -->
-    <div v-if="!challengeToken" class="mt-4 flex flex-col items-center gap-2">
-      <RouterLink
-        v-if="resetAvailable"
-        id="forgot-password-link"
-        :to="{ path: '/forgot-password', query: identifier ? { identifier } : {} }"
-        class="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-      >
-        {{ t("auth.forgotPassword") }}
-      </RouterLink>
+      <!-- Where SMTP is missing the recovery entry becomes an instruction,
+           because sending mail is exactly what this deployment cannot do. -->
       <p
-        v-else-if="resetAvailable === false"
+        v-if="resetAvailable === false"
         id="forgot-password-contact"
         class="text-center text-xs text-muted-foreground"
       >
         {{ t("auth.forgotContactAdmin") }}
       </p>
-    </div>
+    </form>
 
-    <div v-if="!challengeToken && providers.length" class="mt-6 flex flex-col gap-2">
+    <div v-if="!challengeToken && providers.length" class="mt-8 flex flex-col gap-2">
       <div class="flex items-center gap-3 text-xs text-muted-foreground">
         <span class="h-px flex-1 bg-border" />
         {{ t("auth.orContinueWith") }}

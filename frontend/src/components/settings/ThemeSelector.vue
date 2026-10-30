@@ -4,6 +4,18 @@ import { useI18n } from "vue-i18n";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useTheme, type Theme } from "@/composables/useTheme";
 
+interface Props {
+  /**
+   * Icon-only, unboxed form for quiet surroundings such as the auth footer,
+   * where the switcher is chrome rather than part of the task on screen.
+   */
+  compact?: boolean;
+}
+
+withDefaults(defineProps<Props>(), {
+  compact: false,
+});
+
 const { t } = useI18n();
 const { theme, setTheme } = useTheme();
 
@@ -17,7 +29,11 @@ const options = [
 <template>
   <ToggleGroup
     type="single"
-    class="inline-flex rounded-lg border border-border p-0.5 bg-muted/40"
+    :class="
+      compact
+        ? 'inline-flex rounded-lg'
+        : 'inline-flex rounded-lg border border-border p-0.5 bg-muted/40'
+    "
     :spacing="1"
     :model-value="theme"
     @update:model-value="(v) => v && setTheme(v as Theme)"
@@ -26,10 +42,15 @@ const options = [
       v-for="opt in options"
       :key="opt.value"
       :value="opt.value"
-      class="flex h-8 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 max-md:h-11 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-xs"
+      :title="compact ? t(opt.label) : undefined"
+      :class="
+        compact
+          ? 'flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:text-foreground max-md:size-11 data-[state=on]:bg-muted data-[state=on]:text-foreground'
+          : 'flex h-9 items-center gap-1.5 rounded-md border border-transparent px-3 py-1.5 text-xs font-medium transition-all duration-150 max-md:h-11 data-[state=on]:bg-accent data-[state=on]:border-border/70 data-[state=on]:text-foreground data-[state=on]:shadow-xs'
+      "
     >
-      <component :is="opt.icon" class="size-3.5" />
-      <span>{{ t(opt.label) }}</span>
+      <component :is="opt.icon" :class="compact ? 'size-4' : 'size-3.5'" />
+      <span :class="compact ? 'sr-only' : undefined">{{ t(opt.label) }}</span>
     </ToggleGroupItem>
   </ToggleGroup>
 </template>

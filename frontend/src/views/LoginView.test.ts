@@ -42,7 +42,11 @@ vi.mock("@lucide/vue", () => {
     Check: Stub,
     ChevronDown: Stub,
     ChevronUp: Stub,
+    CircleAlert: Stub,
+    Eye: Stub,
+    EyeOff: Stub,
     Fingerprint: Stub,
+    Info: Stub,
     KeyRound: Stub,
     Languages: Stub,
     Loader2: Stub,
@@ -114,6 +118,51 @@ describe("LoginView", () => {
 
     expect(passkey!.classes()).toContain("border");
     expect(password!.classes()).toContain("bg-primary");
+  });
+
+  it("points at the identifier instead of sending an empty form", async () => {
+    const wrapper = mount(LoginView);
+    await flushPromises();
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(auth.login).not.toHaveBeenCalled();
+    expect(wrapper.find("#identifier-error").text()).toBe("auth.identifierRequired");
+    expect(wrapper.find("#password-error").exists()).toBe(false);
+  });
+
+  it("asks for the password when only the identifier was filled in", async () => {
+    const wrapper = mount(LoginView);
+    await flushPromises();
+
+    await wrapper.find("#username").setValue("operator");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(auth.login).not.toHaveBeenCalled();
+    expect(wrapper.find("#password-error").text()).toBe("auth.enterPassword");
+    expect(wrapper.find("#identifier-error").exists()).toBe(false);
+  });
+
+  it("lets the operator reveal the typed password", async () => {
+    const wrapper = mount(LoginView);
+    await flushPromises();
+
+    expect(wrapper.find("#password").attributes("type")).toBe("password");
+
+    const reveal = wrapper
+      .findAll("button")
+      .find((button) => button.attributes("aria-label") === "auth.showPassword");
+    expect(reveal).toBeDefined();
+    await reveal!.trigger("click");
+
+    expect(wrapper.find("#password").attributes("type")).toBe("text");
+    expect(
+      wrapper
+        .findAll("button")
+        .some((button) => button.attributes("aria-label") === "auth.hidePassword")
+    ).toBe(true);
   });
 
   it("explains that a newer sign-in ended the current session", async () => {
