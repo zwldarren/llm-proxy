@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.5.3](https://github.com/zwldarren/llm-proxy/compare/v0.5.2...v0.5.3) (2026-10-31)
+
+
+### Features
+
+* **auth:** rebuild the vestibule and validate the instance sign-in form ([684c62f](https://github.com/zwldarren/llm-proxy/commit/684c62f5987e62e03f26934e3fef1bf4e8ce42c2))
+* **console-auth:** make console sign-in invite-only and passwordless (ADR-0049) ([80a594e](https://github.com/zwldarren/llm-proxy/commit/80a594ef2535b280d757124c07162cfd48e39974))
+* **frontend:** rebuild sign-in and the account workspace around the new auth (ADR-0049) ([6dfc0e9](https://github.com/zwldarren/llm-proxy/commit/6dfc0e94ef9796dfaa7cd26209f99d2198d35b92))
+* **opencode:** pin conversations to a stable upstream session id ([ae03ea4](https://github.com/zwldarren/llm-proxy/commit/ae03ea4b3c03e7b5c59f1455fc35de1ef7cff8a8))
+* **settings:** make instance settings admin-only and give preferences an account tab ([c674df2](https://github.com/zwldarren/llm-proxy/commit/c674df2db52c126f5b5ce4925a1823f183dc814c))
+
+
+### Bug Fixes
+
+* **console:** contain a render crash instead of blanking the console ([aae511b](https://github.com/zwldarren/llm-proxy/commit/aae511bf587044ad1dafd844bd797abb8f433c18))
+* **docker:** drop stale frontend/patches COPY ([637e7c4](https://github.com/zwldarren/llm-proxy/commit/637e7c4733a81aa0ffad26f18055913f378e76f9))
+* **security:** mask tracing credentials in the read shape ([63e1311](https://github.com/zwldarren/llm-proxy/commit/63e13119df03834b2f736b05723b4301bc99c964))
+* **tracing:** let LangSmith store the run and keep passthrough output ([cccbf8e](https://github.com/zwldarren/llm-proxy/commit/cccbf8e60e7e4628b90fc1997b360d8e1e49f290))
+* **tracing:** render the passthrough body through the bounded renderer ([2015920](https://github.com/zwldarren/llm-proxy/commit/2015920adec662b945a3c539b04a86e4daec62db))
+* **web-search:** stop the SearXNG input offering results the schema rejects ([6904784](https://github.com/zwldarren/llm-proxy/commit/6904784137a4505c4028e339f66141a65cb1f6a2))
+
+
+### Documentation
+
+* **console-auth:** document invites, passkeys, 2FA, OIDC and password reset ([39264f8](https://github.com/zwldarren/llm-proxy/commit/39264f86bcca8aeec75fd7ac8eb4d646580cd513))
+
 ## [0.5.2](https://github.com/zwldarren/llm-proxy/compare/v0.5.1...v0.5.2) (2026-10-26)
 
 
