@@ -357,6 +357,10 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         client=StarletteWebSocketAdapter(websocket),
         upstream=WebsocketsClientAdapter(upstream_conn),
         on_upstream_message=_on_upstream,
+        # Observation only: this stamps the turn's start instant (peak/off-peak
+        # rates) and its requested service tier, both of which come from the
+        # client's own events rather than the provider's answer.
+        on_client_message=observer.on_client_message,
         on_client_error=lambda code, message: _ws_send_error(websocket, message, code=code),
         should_stop=_should_stop,
         before_client_send=_authorize_client_message,

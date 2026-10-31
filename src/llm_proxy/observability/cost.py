@@ -11,6 +11,7 @@ populated ``EventContext``. ``AuditLogHandler`` keeps its existing guards and
 simply skips re-calculation when the cost is already set.
 """
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.billing.cost import calculate_cost
@@ -118,6 +119,11 @@ async def calculate_event_cost(
             messages=messages,
             completion_text=completion_text,
             dimensions=proxy_dimensions(context),
+            # Peak/off-peak rates key off when the request started, not when it
+            # finished: a turn that straddles the boundary bills at the rate the
+            # upstream quoted when it accepted it.
+            at=datetime.fromtimestamp(context.start_timestamp, UTC),
+            service_tier=context.service_tier,
         )
         context.cost_usd = breakdown.cost_usd
         context.cache_savings_usd = breakdown.cache_savings_usd

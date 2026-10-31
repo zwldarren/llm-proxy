@@ -55,6 +55,8 @@ class TokenUsage:
     # Audio token fields
     audio_input_tokens: int = 0  # OpenAI: audio tokens in prompt
     audio_output_tokens: int = 0  # OpenAI: audio tokens in completion
+    # Reasoning token fields
+    reasoning_tokens: int = 0  # thinking tokens, already counted in completion_tokens
     # Image token fields
     image_input_tokens: int = 0  # gpt-image: image tokens in prompt
     # Non-token billable dimensions
@@ -113,6 +115,7 @@ def token_usage_from(
         result.cache_read_input_tokens = usage.cache_read_input_tokens or 0
         result.cache_creation_input_tokens = usage.cache_creation_input_tokens or 0
         result.audio_duration_seconds = usage.audio_duration_seconds or 0.0
+        result.reasoning_tokens = usage.reasoning_tokens or 0
 
         prompt_details = usage.prompt_tokens_details
         if prompt_details is not None:
@@ -127,6 +130,10 @@ def token_usage_from(
         completion_details = usage.completion_tokens_details
         if completion_details is not None:
             result.audio_output_tokens = completion_details.audio_tokens or 0
+            # The flat field is the canonical expression (ADR-0025); the nested
+            # one is a fallback for a record that only carries the wire shape.
+            if not result.reasoning_tokens:
+                result.reasoning_tokens = completion_details.reasoning_tokens or 0
 
     if result.cache_read_input_tokens and result.cached_prompt_tokens:
         result.cached_prompt_tokens = 0

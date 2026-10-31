@@ -55,6 +55,23 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _requested_service_tier(unified_request: InternalRequest) -> str | None:
+    """The service tier the client asked this turn to be served at.
+
+    Captured for billing: a tier the provider publishes a rate list for
+    (``flex``, ``priority``, ...) prices the turn from that list instead of the
+    standard rates. Both protocol dialects that carry the field express it as a
+    per-protocol parameter block, and the provider's own answer replaces this
+    value once the response reports it.
+    """
+    params = unified_request.params
+    for protocol_params in (params.openai, params.anthropic):
+        tier = getattr(protocol_params, "service_tier", None)
+        if isinstance(tier, str) and tier.strip():
+            return tier.strip()
+    return None
+
+
 class UnifiedProcessor:
     """Processor for ProtocolEndpoint instances.
 
@@ -164,6 +181,7 @@ class UnifiedProcessor:
             model=unified_request.model,
             internal_model=unified_request.model,
             provider=None,
+            service_tier=_requested_service_tier(unified_request),
             session_id=context.session_id,
             user_id=context.user_id or identity.user,
             auth_user_id=identity.user_id,

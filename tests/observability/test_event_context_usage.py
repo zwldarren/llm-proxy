@@ -88,3 +88,24 @@ class TestWebSearchRequestCount:
         context.update_provider_info({"server_tool_use": {"web_search_requests": 2}})
         context.update_provider_info({"server_tool_use": {"web_search_requests": 5}})
         assert context.web_search_requests == 5
+
+
+class TestServiceTierCapture:
+    def test_provider_reported_tier_wins(self):
+        """The provider answers with the tier it actually served."""
+        context = _context()
+        context.service_tier = "auto"
+        context.update_provider_info({"service_tier": "default"})
+        assert context.service_tier == "default"
+
+    def test_blank_provider_tier_is_ignored(self):
+        context = _context()
+        context.service_tier = "flex"
+        context.update_provider_info({"service_tier": "  "})
+        assert context.service_tier == "flex"
+
+    def test_absent_provider_tier_keeps_the_requested_one(self):
+        context = _context()
+        context.service_tier = "flex"
+        context.update_provider_info({"server_tool_use": {"web_search_requests": 1}})
+        assert context.service_tier == "flex"

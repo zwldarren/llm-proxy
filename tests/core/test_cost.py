@@ -1,5 +1,6 @@
 """Tests for cost calculation utilities."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -8,18 +9,29 @@ from pydantic import ValidationError
 from llm_proxy.billing.cost import (
     CostTier,
     PricingRates,
+    _apply_service_tier,
+    _apply_time_window,
     _calculate_audio_cost,
     _calculate_cache_cost,
     _calculate_image_token_cost,
     _calculate_unit_costs,
     _coerce_pricing_tier,
+    _coerce_pricing_window,
     _get_pricing_tiers,
+    _get_pricing_windows,
     _get_provider_pricing,
+    _get_service_tier_pricing,
     _select_tier_rates,
+    _window_applies,
     calculate_cost,
 )
-from llm_proxy.billing.tokens import ProxyBillableDimensions, TokenUsage
-from llm_proxy.config.types.model import ModelConfig, ModelProviderConfig, PricingTierConfig
+from llm_proxy.billing.tokens import ProxyBillableDimensions, TokenUsage, token_usage_from
+from llm_proxy.config.types.model import (
+    ModelConfig,
+    ModelProviderConfig,
+    PricingTierConfig,
+    PricingTimeWindowConfig,
+)
 from llm_proxy.models.types import CompletionTokensDetails, PromptTokensDetails, Usage
 from llm_proxy.serialization.usage import parse_usage
 
@@ -1593,6 +1605,13 @@ class TestGetPricingTiers:
 
         assert _get_pricing_tiers(model_config, "openai") == []
 
+    def test_provider_empty_tier_list_clears_the_model_tiers(self):
+        model_config = _model_config(
+            providers=[ModelProviderConfig(provider="openai", pricing_tiers=[])]
+        )
+
+        assert _get_pricing_tiers(model_config, "openai") == []
+
 
 class TestPricingTierConfig:
     """Config-load normalization for tier lists."""
@@ -1739,3 +1758,443 @@ class TestCalculateCostTiered:
 
         assert result.cost_usd is not None
         assert abs(result.cost_usd - (2000 / 1_000_000) * 5.0) < 0.000001
+
+
+class TestPricingWindowSelection:
+    """Time-of-day (peak/off-peak) window selection."""
+
+    def _base(self) -> PricingRates:
+        return PricingRates(input_cost_per_1m=2.5, output_cost_per_1m=15.0)
+
+    def _window(self, **overrides) -> PricingTimeWindowConfig:
+        defaults = dict(start="22:00", end="08:00", timezone="UTC", input_cost_per_1m=1.25)
+        defaults.update(overrides)
+        return PricingTimeWindowConfig(**defaults)
+
+    def test_window_overrides_rates_inside(self):
+        window = _coerce_pricing_window(self._window())
+        assert window is not None
+        rates = _apply_time_window(self._base(), [window], datetime(2026, 1, 1, 23, 0, tzinfo=UTC))
+
+        assert rates.input_cost_per_1m == 1.25
+        # A dimension the window leaves unset keeps the base rate.
+        assert rates.output_cost_per_1m == 15.0
+
+    def test_outside_window_keeps_base_rates(self):
+        window = _coerce_pricing_window(self._window())
+        assert window is not None
+        rates = _apply_time_window(self._base(), [window], datetime(2026, 1, 1, 12, 0, tzinfo=UTC))
+
+        assert rates.input_cost_per_1m == 2.5
+
+    @pytest.mark.parametrize(
+        ("hour", "minute", "expected"),
+        [
+            (22, 0, True),
+            (23, 59, True),
+            (0, 0, True),
+            (7, 59, True),
+            (8, 0, False),
+            (21, 59, False),
+        ],
+    )
+    def test_cross_midnight_boundaries(self, hour, minute, expected):
+        window = _coerce_pricing_window(self._window())
+        assert window is not None
+        assert _window_applies(window, datetime(2026, 1, 1, hour, minute, tzinfo=UTC)) is expected
+
+    def test_end_before_start_wraps(self):
+        window = _coerce_pricing_window(self._window(start="22:00", end="08:00"))
+        assert window is not None
+        # 23:30 is inside the evening half, 07:59 the morning half.
+        assert _window_applies(window, datetime(2026, 1, 1, 23, 30, tzinfo=UTC))
+        assert _window_applies(window, datetime(2026, 1, 1, 7, 59, tzinfo=UTC))
+
+    def test_days_name_the_start_day_not_the_local_day(self):
+        # Fridays (ISO 4) only: Saturday 03:00 still belongs to Friday's window.
+        window = _coerce_pricing_window(self._window(days=[4]))
+        assert window is not None
+
+        assert _window_applies(window, datetime(2026, 1, 2, 23, 0, tzinfo=UTC))  # Friday
+        # Saturday 03:00 belongs to Friday's window; Thursday 03:00 does not.
+        assert _window_applies(window, datetime(2026, 1, 3, 3, 0, tzinfo=UTC))
+        assert not _window_applies(window, datetime(2026, 1, 3, 23, 0, tzinfo=UTC))
+        assert not _window_applies(window, datetime(2026, 1, 2, 3, 0, tzinfo=UTC))
+
+    def test_window_reads_its_own_timezone(self):
+        window = _coerce_pricing_window(self._window(timezone="Asia/Shanghai"))
+        assert window is not None
+
+        # 16:00 UTC is 00:00 in Shanghai — inside the overnight band.
+        assert _window_applies(window, datetime(2026, 1, 1, 16, 0, tzinfo=UTC))
+        # 04:00 UTC is 12:00 in Shanghai — outside it.
+        assert not _window_applies(window, datetime(2026, 1, 1, 4, 0, tzinfo=UTC))
+
+    def test_naive_datetime_is_read_as_utc(self):
+        window = _coerce_pricing_window(self._window())
+        assert window is not None
+        assert _window_applies(window, datetime(2026, 1, 1, 23, 0))
+
+    def test_malformed_windows_are_dropped(self):
+        assert _coerce_pricing_window({"start": "nope", "end": "08:00"}) is None
+        assert _coerce_pricing_window({"start": "08:00", "end": "08:00"}) is None
+        unknown_zone = {"start": "22:00", "end": "08:00", "timezone": "Mars/Base"}
+        assert _coerce_pricing_window(unknown_zone) is None
+
+    def test_days_are_filtered_to_valid_weekdays(self):
+        window = _coerce_pricing_window({"start": "22:00", "end": "08:00", "days": [1, 9, -1]})
+        assert window is not None
+        assert window.days == frozenset({1})
+
+    def test_provider_empty_window_list_clears_the_model_windows(self):
+        """A provider that has no off-peak rates must not inherit the model's.
+
+        ``None`` means "inherit the model list"; an empty list is the explicit
+        statement that this upstream has no windows, which is a distinct state.
+        """
+        model_config = ModelConfig(
+            providers=[ModelProviderConfig(provider="openai", priority=0, pricing_time_windows=[])],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(start="00:00", end="12:00", input_cost_per_1m=9.0)
+            ],
+        )
+
+        assert _get_pricing_windows(model_config, "openai") == []
+
+    def test_provider_windows_win_over_model_windows(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(
+                    provider="openai",
+                    priority=0,
+                    pricing_time_windows=[
+                        PricingTimeWindowConfig(start="00:00", end="12:00", input_cost_per_1m=0.5)
+                    ],
+                )
+            ],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(start="00:00", end="12:00", input_cost_per_1m=9.0)
+            ],
+        )
+
+        windows = _get_pricing_windows(model_config, "openai")
+
+        assert len(windows) == 1
+        assert windows[0].input_cost_per_1m == 0.5
+
+    def test_model_windows_used_when_provider_sets_none(self):
+        model_config = ModelConfig(
+            providers=[ModelProviderConfig(provider="openai", priority=0)],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(start="00:00", end="12:00", input_cost_per_1m=9.0)
+            ],
+        )
+
+        windows = _get_pricing_windows(model_config, "openai")
+
+        assert len(windows) == 1
+        assert windows[0].input_cost_per_1m == 9.0
+
+
+class TestServiceTierRates:
+    """Service-tier rate overlays (models.dev ``experimental.modes``)."""
+
+    def _base(self) -> PricingRates:
+        return PricingRates(input_cost_per_1m=2.5, output_cost_per_1m=15.0)
+
+    def test_tier_rates_override_set_dimensions_only(self):
+        rates = _apply_service_tier(
+            self._base(),
+            {"flex": {"input_cost_per_1m": 1.25}},
+            "flex",
+        )
+
+        assert rates.input_cost_per_1m == 1.25
+        assert rates.output_cost_per_1m == 15.0
+
+    def test_unknown_tier_keeps_base_rates(self):
+        rates = _apply_service_tier(self._base(), {"flex": {"input_cost_per_1m": 1.25}}, "priority")
+
+        assert rates.input_cost_per_1m == 2.5
+
+    def test_tier_lookup_is_case_insensitive(self):
+        rates = _apply_service_tier(self._base(), {"flex": {"input_cost_per_1m": 1.25}}, "FLEX")
+
+        assert rates.input_cost_per_1m == 1.25
+
+    def test_no_service_tier_reported_keeps_base_rates(self):
+        rates = _apply_service_tier(self._base(), {"flex": {"input_cost_per_1m": 1.25}}, None)
+
+        assert rates.input_cost_per_1m == 2.5
+
+    def test_provider_tier_map_wins_over_model(self):
+        model_config = ModelConfig(
+            providers=[
+                ModelProviderConfig(
+                    provider="openai",
+                    priority=0,
+                    service_tier_pricing={"flex": {"input_cost_per_1m": 0.1}},
+                )
+            ],
+            service_tier_pricing={"flex": {"input_cost_per_1m": 0.9}},
+        )
+
+        pricing = _get_service_tier_pricing(model_config, "openai")
+
+        assert pricing["flex"].input_cost_per_1m == 0.1
+
+    def test_provider_empty_map_clears_the_model_tier_prices(self):
+        model_config = ModelConfig(
+            providers=[ModelProviderConfig(provider="openai", priority=0, service_tier_pricing={})],
+            service_tier_pricing={"flex": {"input_cost_per_1m": 0.9}},
+        )
+
+        assert _get_service_tier_pricing(model_config, "openai") == {}
+
+
+class TestCalculateCostTimeAndServiceTier:
+    """End-to-end overlay composition through calculate_cost."""
+
+    def _manager(self, model_config: ModelConfig) -> MagicMock:
+        manager = MagicMock()
+        manager.get_model_config = AsyncMock(return_value=model_config)
+        return manager
+
+    async def _cost(self, model_config: ModelConfig, at: datetime, service_tier=None):
+        return await calculate_cost(
+            usage=Usage(input_tokens=1_000_000, output_tokens=500_000),
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+            at=at,
+            service_tier=service_tier,
+        )
+
+    @pytest.mark.asyncio
+    async def test_off_peak_request_is_billed_at_window_rates(self):
+        model_config = _model_config(
+            pricing_tiers=[],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(
+                    start="22:00",
+                    end="08:00",
+                    timezone="Asia/Shanghai",
+                    input_cost_per_1m=1.0,
+                    output_cost_per_1m=5.0,
+                )
+            ],
+        )
+
+        # 23:00 UTC is 07:00 in Shanghai: inside the window.
+        result = await self._cost(model_config, datetime(2026, 1, 1, 23, 0, tzinfo=UTC))
+
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - (1.0 + 0.5 * 5.0)) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_outside_every_window_bills_base_rates(self):
+        model_config = _model_config(
+            pricing_tiers=[],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(start="22:00", end="08:00", input_cost_per_1m=1.0)
+            ],
+        )
+
+        result = await self._cost(model_config, datetime(2026, 1, 1, 12, 0, tzinfo=UTC))
+
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - (2.5 + 0.5 * 15.0)) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_no_start_instant_leaves_the_time_window_off(self):
+        """A missing ``at`` must never fall back to the completion instant."""
+        model_config = _model_config(
+            pricing_tiers=[],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(start="22:00", end="08:00", input_cost_per_1m=1.0)
+            ],
+        )
+
+        result = await calculate_cost(
+            usage=Usage(input_tokens=1_000_000, output_tokens=500_000),
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - (2.5 + 0.5 * 15.0)) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_window_only_model_is_unknown_outside_and_billable_inside(self):
+        model_config = _model_config(
+            input_cost_per_1m=None,
+            output_cost_per_1m=None,
+            pricing_tiers=[],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(start="22:00", end="08:00", input_cost_per_1m=1.0)
+            ],
+        )
+
+        outside = await self._cost(model_config, datetime(2026, 1, 1, 12, 0, tzinfo=UTC))
+        inside = await self._cost(model_config, datetime(2026, 1, 1, 23, 0, tzinfo=UTC))
+
+        assert outside.cost_usd is None
+        assert inside.cost_usd is not None
+        assert abs(inside.cost_usd - 1.0) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_service_tier_overrides_bill(self):
+        model_config = _model_config(
+            pricing_tiers=[],
+            service_tier_pricing={"flex": {"input_cost_per_1m": 1.25, "output_cost_per_1m": 7.5}},
+        )
+
+        result = await self._cost(model_config, datetime(2026, 1, 1, 12, 0, tzinfo=UTC), "flex")
+
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - (1.25 + 0.5 * 7.5)) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_service_tier_wins_over_window_per_dimension(self):
+        model_config = _model_config(
+            pricing_tiers=[],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(
+                    start="22:00",
+                    end="08:00",
+                    timezone="UTC",
+                    input_cost_per_1m=1.0,
+                    output_cost_per_1m=5.0,
+                )
+            ],
+            service_tier_pricing={"flex": {"input_cost_per_1m": 0.5}},
+        )
+
+        result = await self._cost(
+            model_config, datetime(2026, 1, 1, 23, 0, tzinfo=UTC), service_tier="flex"
+        )
+
+        assert result.cost_usd is not None
+        # Input from the tier (0.5), output from the window (5.0).
+        assert abs(result.cost_usd - (0.5 + 0.5 * 5.0)) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_context_tier_applies_before_window(self):
+        model_config = _model_config(
+            pricing_tiers=[
+                PricingTierConfig(threshold=500000, input_cost_per_1m=6.0, output_cost_per_1m=30.0)
+            ],
+            pricing_time_windows=[
+                PricingTimeWindowConfig(
+                    start="22:00", end="08:00", timezone="UTC", input_cost_per_1m=1.0
+                )
+            ],
+        )
+
+        result = await self._cost(model_config, datetime(2026, 1, 1, 23, 0, tzinfo=UTC))
+
+        assert result.cost_usd is not None
+        # Window prices input, the reached context tier still prices output.
+        assert abs(result.cost_usd - (1.0 + 0.5 * 30.0)) < 0.000001
+
+
+class TestCalculateCostReasoning:
+    """Reasoning tokens bill at their own rate when one is configured."""
+
+    def _manager(self, model_config: ModelConfig) -> MagicMock:
+        manager = MagicMock()
+        manager.get_model_config = AsyncMock(return_value=model_config)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_reasoning_rate_carves_tokens_out_of_output(self):
+        model_config = _model_config(
+            pricing_tiers=[],
+            output_cost_per_1m=4.0,
+            reasoning_cost_per_1m=8.0,
+        )
+
+        result = await calculate_cost(
+            usage=Usage(input_tokens=0, output_tokens=500_000, reasoning_tokens=200_000),
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        # 300k output at 4/M + 200k reasoning at 8/M.
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - (0.3 * 4.0 + 0.2 * 8.0)) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_without_reasoning_rate_tokens_bill_as_output(self):
+        model_config = _model_config(pricing_tiers=[], output_cost_per_1m=4.0)
+
+        result = await calculate_cost(
+            usage=Usage(input_tokens=0, output_tokens=500_000, reasoning_tokens=200_000),
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - 0.5 * 4.0) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_reasoning_tokens_above_the_output_count_are_charged_once(self):
+        """A provider reporting more reasoning than output tokens bills no double.
+
+        The whole output count is carved out (output cost 0) and the reported
+        reasoning tokens are charged at the reasoning rate — once.
+        """
+        model_config = _model_config(
+            pricing_tiers=[],
+            output_cost_per_1m=4.0,
+            reasoning_cost_per_1m=8.0,
+        )
+
+        result = await calculate_cost(
+            usage=Usage(input_tokens=0, output_tokens=100_000, reasoning_tokens=200_000),
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        # 200k reasoning at 8/M, nothing left to bill at the output rate.
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - 0.2 * 8.0) < 0.000001
+
+    @pytest.mark.asyncio
+    async def test_context_tier_can_price_reasoning(self):
+        model_config = _model_config(
+            pricing_tiers=[
+                PricingTierConfig(
+                    threshold=1000,
+                    input_cost_per_1m=5.0,
+                    output_cost_per_1m=15.0,
+                    reasoning_cost_per_1m=30.0,
+                )
+            ]
+        )
+
+        result = await calculate_cost(
+            usage=Usage(input_tokens=2000, output_tokens=100_000, reasoning_tokens=50_000),
+            model_name="gpt-5.4",
+            config_manager=self._manager(model_config),
+            provider_name="openai",
+        )
+
+        assert result.cost_usd is not None
+        expected = (2000 / 1_000_000) * 5.0 + 0.05 * 15.0 + 0.05 * 30.0
+        assert abs(result.cost_usd - expected) < 0.000001
+
+    def test_nested_reasoning_details_are_a_fallback(self):
+        token_usage = token_usage_from(
+            Usage(
+                input_tokens=10,
+                output_tokens=100,
+                completion_tokens_details=CompletionTokensDetails(reasoning_tokens=40),
+            )
+        )
+
+        assert token_usage.reasoning_tokens == 40

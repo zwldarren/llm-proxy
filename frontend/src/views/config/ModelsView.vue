@@ -25,6 +25,8 @@ import {
 import type { ModelListColumn } from "@/components/models/ModelListHead.vue";
 import ModelsSyncDialog from "@/components/models/ModelsSyncDialog.vue";
 import PricingTierEditor from "@/components/models/PricingTierEditor.vue";
+import PricingTimeWindowEditor from "@/components/models/PricingTimeWindowEditor.vue";
+import ServiceTierPricingEditor from "@/components/models/ServiceTierPricingEditor.vue";
 import {
   BOUND_CAPABILITIES,
   INFO_CAPABILITIES,
@@ -800,6 +802,29 @@ const confirmDelete = async () => {
                   </div>
                 </div>
                 <div class="grid gap-2">
+                  <Label for="reasoningCost">
+                    {{ t("models.costDimReasoning") }}
+                    <span class="ml-1 font-normal text-muted-foreground"
+                      >· {{ t("models.perMillionTokens") }}</span
+                    >
+                  </Label>
+                  <div class="relative">
+                    <div
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
+                    >
+                      <span class="text-muted-foreground sm:text-sm">$</span>
+                    </div>
+
+                    <NumberInput
+                      id="reasoningCost"
+                      v-model.number="newModel.reasoning_cost_per_1m"
+                      step="0.01"
+                      placeholder="0.0"
+                      class="pl-7"
+                    />
+                  </div>
+                </div>
+                <div class="grid gap-2">
                   <Label for="cachedReadCost">
                     {{ t("models.costDimCachedRead") }}
                     <span class="ml-1 font-normal text-muted-foreground"
@@ -894,6 +919,8 @@ const confirmDelete = async () => {
               </div>
 
               <PricingTierEditor v-model="newModel.pricing_tiers" />
+              <PricingTimeWindowEditor v-model="newModel.pricing_time_windows" />
+              <ServiceTierPricingEditor v-model="newModel.service_tier_pricing" />
 
               <!-- Other pricing dimensions (non-token modalities) -->
               <div class="border-t border-border pt-4 mt-2">
@@ -1446,6 +1473,20 @@ const confirmDelete = async () => {
               </div>
               <div class="space-y-1">
                 <Label class="text-xs">
+                  {{ t("models.costDimReasoning") }}
+                  <span class="ml-1 font-normal text-muted-foreground"
+                    >· {{ t("models.perMillionTokens") }}</span
+                  >
+                </Label>
+                <NumberInput
+                  v-model.number="editingProviderData.reasoning_cost_per_1m"
+                  step="0.01"
+                  placeholder="0.00"
+                  class="h-9"
+                />
+              </div>
+              <div class="space-y-1">
+                <Label class="text-xs">
                   {{ t("models.costDimCachedRead") }}
                   <span class="ml-1 font-normal text-muted-foreground"
                     >· {{ t("models.perMillionTokens") }}</span
@@ -1581,7 +1622,18 @@ const confirmDelete = async () => {
             </div>
           </div>
 
-          <PricingTierEditor v-model="editingProviderData.pricing_tiers" />
+          <PricingTierEditor
+            v-model="editingProviderData.pricing_tiers"
+            :inherit-when-empty="false"
+          />
+          <PricingTimeWindowEditor
+            v-model="editingProviderData.pricing_time_windows"
+            :inherit-when-empty="false"
+          />
+          <ServiceTierPricingEditor
+            v-model="editingProviderData.service_tier_pricing"
+            :inherit-when-empty="false"
+          />
 
           <div class="border-t pt-4">
             <Label class="text-sm font-medium mb-3 block">{{

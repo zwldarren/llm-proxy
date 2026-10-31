@@ -49,11 +49,14 @@ def _mapping(**overrides) -> SimpleNamespace:
         audio_input_cost_per_1m=None,
         audio_output_cost_per_1m=None,
         image_input_cost_per_1m=None,
+        reasoning_cost_per_1m=None,
         cost_per_image=None,
         audio_cost_per_minute=None,
         tts_cost_per_1m_chars=None,
         web_search_cost_per_1k=None,
         pricing_tiers=None,
+        pricing_time_windows=None,
+        service_tier_pricing=None,
         parameter_overrides={"temperature": 0.5},
     )
     defaults.update(overrides)
@@ -73,11 +76,14 @@ def _model_record(mappings, **overrides) -> SimpleNamespace:
         audio_input_cost_per_1m=None,
         audio_output_cost_per_1m=None,
         image_input_cost_per_1m=None,
+        reasoning_cost_per_1m=None,
         cost_per_image=None,
         audio_cost_per_minute=None,
         tts_cost_per_1m_chars=None,
         web_search_cost_per_1k=None,
         pricing_tiers=None,
+        pricing_time_windows=None,
+        service_tier_pricing=None,
         auto_eligible=True,
         quality_tier="premium",
         routing_assignments=["auto"],
@@ -211,8 +217,16 @@ def test_map_model_provider_record_maps_all_pricing():
     assert config.pricing_tiers[0].input_cost_per_1m == 5.0
 
 
-def test_map_model_provider_record_null_pricing_tiers_defaults_to_empty():
+def test_map_model_provider_record_null_pricing_tiers_means_inherit():
+    """``None`` is "no provider override", not "no tiers": billing inherits the model."""
     mapping = _mapping(pricing_tiers=None)
+    config = map_model_provider_record(mapping)
+
+    assert config.pricing_tiers is None
+
+
+def test_map_model_provider_record_empty_pricing_tiers_means_no_overlay():
+    mapping = _mapping(pricing_tiers=[])
     config = map_model_provider_record(mapping)
 
     assert config.pricing_tiers == []

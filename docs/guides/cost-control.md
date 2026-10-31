@@ -22,8 +22,18 @@ request. Requests with null cost still consume budget checks only if a rate
 exists to compute spend; configure prices for every model you serve.
 :::
 
+Price lists can change with more than the model: **context tiers** (from an input
+threshold up), **time windows** (peak/off-peak, read on the window's own timezone),
+and **service tiers** (`flex`/`priority`, selected by the request's `service_tier`).
+They compose in that order, each replacing only the rates it sets; a request that
+matches none of them keeps the rates the earlier overlays resolved. On a provider
+mapping, leaving an overlay empty (`null`) inherits the model-level one, while an
+explicit empty list/map disables it for that upstream. Reasoning tokens bill at
+`reasoning_cost_per_1m` when it is set, otherwise at the output rate.
+
 Two providers report their own cost (`openrouter`, `nanogpt`); those figures replace
-computed cost for their requests.
+computed cost for their requests — including any peak/off-peak or service-tier
+discount they applied upstream.
 
 ## 2. Budgets
 

@@ -1,18 +1,47 @@
 /**
- * One context-based pricing tier: applies from `threshold` input tokens up.
+ * Token rates one overlay (context tier, time window, service tier) may replace.
  * Unset dimensions inherit the model/provider base price.
  */
-export interface PricingTier {
-  /** Input token count at which this tier starts applying. */
-  threshold: number;
+export interface TokenRateOverrides {
   input_cost_per_1m?: number | null;
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  reasoning_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   image_input_cost_per_1m?: number | null;
 }
+
+/** One context-based pricing tier: applies from `threshold` input tokens up. */
+export interface PricingTier extends TokenRateOverrides {
+  /** Input token count at which this tier starts applying. */
+  threshold: number;
+}
+
+/**
+ * One time-of-day price window (peak/off-peak).
+ *
+ * Applies to a request that STARTED inside it, read on `timezone`'s clock;
+ * `end` at or before `start` wraps past midnight, and `days` names the weekday
+ * the window starts on (0=Monday). Empty `days` means every day.
+ */
+export interface PricingTimeWindow extends TokenRateOverrides {
+  /** Window start, `HH:MM` in `timezone` (inclusive). */
+  start: string;
+  /** Window end, `HH:MM` in `timezone` (exclusive); wraps past midnight. */
+  end: string;
+  /** ISO weekdays the window starts on (0=Monday .. 6=Sunday). */
+  days?: number[];
+  /** IANA timezone the window's clock is read in. */
+  timezone?: string;
+}
+
+/** Rate overrides for one service tier (flex, priority, ...). */
+export type ServiceTierRates = TokenRateOverrides;
+
+/** Per-service-tier rates keyed by mode name. */
+export type ServiceTierPricing = Record<string, ServiceTierRates>;
 
 export interface ModelProviderMapping {
   provider_name: string;
@@ -54,6 +83,10 @@ export interface ModelProviderMapping {
    */
   image_input_cost_per_1m?: number | null;
   /**
+   * Cost per 1M reasoning (thinking) tokens in USD.
+   */
+  reasoning_cost_per_1m?: number | null;
+  /**
    * Cost per generated image in USD.
    */
   cost_per_image?: number | null;
@@ -73,6 +106,14 @@ export interface ModelProviderMapping {
    * Context-based pricing tiers (override model-level tiers).
    */
   pricing_tiers?: PricingTier[] | null;
+  /**
+   * Time-of-day price windows (override model-level windows).
+   */
+  pricing_time_windows?: PricingTimeWindow[] | null;
+  /**
+   * Per-service-tier rate overrides (override model-level ones).
+   */
+  service_tier_pricing?: ServiceTierPricing | null;
   /**
    * Parameter overrides to enforce for requests via this provider.
    */
@@ -100,6 +141,10 @@ interface ModelBase {
    */
   image_input_cost_per_1m?: number | null;
   /**
+   * Default cost per 1M reasoning (thinking) tokens in USD.
+   */
+  reasoning_cost_per_1m?: number | null;
+  /**
    * Default cost per generated image in USD.
    */
   cost_per_image?: number | null;
@@ -120,6 +165,15 @@ interface ModelBase {
    * inheriting base rates for any unset dimension.
    */
   pricing_tiers?: PricingTier[] | null;
+  /**
+   * Time-of-day price windows (peak/off-peak): a request that started inside
+   * one bills at that window's rates, otherwise at the base rates.
+   */
+  pricing_time_windows?: PricingTimeWindow[] | null;
+  /**
+   * Per-service-tier rate overrides keyed by mode name (flex, priority, ...).
+   */
+  service_tier_pricing?: ServiceTierPricing | null;
   icon_url?: string | null;
   /** Smart routing: eligible for automatic candidate pool selection */
   auto_eligible?: boolean;
@@ -191,11 +245,14 @@ export interface ModelUpdate {
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   image_input_cost_per_1m?: number | null;
+  reasoning_cost_per_1m?: number | null;
   cost_per_image?: number | null;
   audio_cost_per_minute?: number | null;
   tts_cost_per_1m_chars?: number | null;
   web_search_cost_per_1k?: number | null;
   pricing_tiers?: PricingTier[] | null;
+  pricing_time_windows?: PricingTimeWindow[] | null;
+  service_tier_pricing?: ServiceTierPricing | null;
   icon_url?: string | null;
   auto_eligible?: boolean | null;
   supports_images?: boolean | null;
@@ -281,9 +338,11 @@ interface PricingOption {
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  reasoning_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   tiers?: PricingTier[] | null;
+  service_tier_pricing?: ServiceTierPricing | null;
 }
 
 export interface SyncPricingResult {
@@ -300,12 +359,16 @@ export interface SyncPricingResult {
   new_cached_read_cost?: number | null;
   old_cached_write_cost?: number | null;
   new_cached_write_cost?: number | null;
+  old_reasoning_cost?: number | null;
+  new_reasoning_cost?: number | null;
   old_audio_input_cost?: number | null;
   new_audio_input_cost?: number | null;
   old_audio_output_cost?: number | null;
   new_audio_output_cost?: number | null;
   old_pricing_tiers?: PricingTier[] | null;
   new_pricing_tiers?: PricingTier[] | null;
+  old_service_tier_pricing?: ServiceTierPricing | null;
+  new_service_tier_pricing?: ServiceTierPricing | null;
   updated: boolean;
   message: string;
   available_sources: PricingOption[];
@@ -333,11 +396,14 @@ export interface PricingUpdateItem {
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   image_input_cost_per_1m?: number | null;
+  reasoning_cost_per_1m?: number | null;
   cost_per_image?: number | null;
   audio_cost_per_minute?: number | null;
   tts_cost_per_1m_chars?: number | null;
   web_search_cost_per_1k?: number | null;
   pricing_tiers?: PricingTier[] | null;
+  pricing_time_windows?: PricingTimeWindow[] | null;
+  service_tier_pricing?: ServiceTierPricing | null;
 }
 
 export interface ApplyPricingRequest {

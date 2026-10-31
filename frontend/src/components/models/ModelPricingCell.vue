@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import PricingTierList from "@/components/models/PricingTierList.vue";
+import PricingRateList from "@/components/models/PricingRateList.vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { costRange, type ModelCostKey } from "@/utils/modelPricing";
-import type { ModelRead, PricingTier } from "@/types/schemas";
+import {
+  formatCost,
+  serviceTierRateRows,
+  tierRateRows,
+  windowRateRows,
+} from "@/utils/pricingTiers";
+import type {
+  ModelRead,
+  PricingTier,
+  PricingTimeWindow,
+  ServiceTierPricing,
+} from "@/types/schemas";
 
 /**
  * Pricing cell for the models table/list.
@@ -18,7 +29,9 @@ import type { ModelRead, PricingTier } from "@/types/schemas";
  *   CACHED row renders as "—" when no cached-read price is configured.
  *
  * Either way the cell stays a popover trigger that opens the full pricing
- * breakdown across all pricing dimensions (cached write, audio, image, ...).
+ * breakdown across all pricing dimensions (reasoning, cached write, audio,
+ * image, ...) and every price overlay the model or its providers carry: context
+ * tiers, time windows and service tiers.
  */
 
 const props = defineProps<{
@@ -26,7 +39,7 @@ const props = defineProps<{
   field?: "input" | "output" | "cached";
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 interface CostField {
   key: ModelCostKey;
@@ -48,6 +61,7 @@ const COST_FIELDS: CostField[] = [
     labelKey: "models.cachedWriteCost",
     dimKey: "models.dimCached",
   },
+  { key: "reasoning_cost_per_1m", labelKey: "models.reasoningCost" },
   {
     key: "audio_input_cost_per_1m",
     labelKey: "models.audioInputCost",
@@ -79,13 +93,6 @@ const COST_FIELDS: CostField[] = [
 
 const providers = computed(() => props.model.providers ?? []);
 
-function formatCost(v: number): string {
-  // Trim to at most 6 decimal places without trailing zeros.
-  const formatted = Number.parseFloat(v.toFixed(6));
-  if (formatted === 0 && v > 0) return `$${v.toExponential(2)}`;
-  return `$${formatted}`;
-}
-
 /** Effective price as a single value or "min–max" range. */
 function rangeText(key: ModelCostKey): string | null {
   const range = costRange(props.model, key);
@@ -104,22 +111,6 @@ const FIELD_TEXTS = { input: inputText, output: outputText, cached: cachedText }
 /** The single value shown when `field` is set. */
 const fieldText = computed(() => (props.field ? FIELD_TEXTS[props.field].value : null));
 
-/** Short labels for extra priced dimensions (cached, audio, image, ...). */
-const activeDims = computed(() => {
-  const dims = new Set<string>();
-  for (const f of COST_FIELDS) {
-    if (f.dimKey && costRange(props.model, f.key) != null) dims.add(t(f.dimKey));
-  }
-  if (hasTiers.value) dims.add(t("models.pricingTiersSection"));
-  return [...dims];
-});
-
-const extraDimsTitle = computed(() =>
-  activeDims.value.length
-    ? t("models.morePricingDims", { dims: activeDims.value.join(", ") })
-    : undefined
-);
-
 interface CostRow extends CostField {
   value: number;
 }
@@ -135,6 +126,13 @@ const defaultRows = computed<CostRow[]>(() =>
 /** Model-level context tiers (empty when none configured). */
 const defaultTiers = computed<PricingTier[]>(() => props.model.pricing_tiers ?? []);
 
+/** Model-level time windows (empty when none configured). */
+const defaultWindows = computed<PricingTimeWindow[]>(() => props.model.pricing_time_windows ?? []);
+
+/** Model-level service-tier rates (empty when none configured). */
+const defaultServiceTiers = computed<ServiceTierPricing>(
+  () => props.model.service_tier_pricing ?? {}
+);
 /** Per-provider override rows (only providers with at least one override). */
 const providerGroups = computed(() =>
   providers.value
@@ -145,16 +143,57 @@ const providerGroups = computed(() =>
         return v != null ? [{ ...f, value: v }] : [];
       }),
       tiers: p.pricing_tiers ?? [],
+      windows: p.pricing_time_windows ?? [],
+      serviceTiers: p.service_tier_pricing ?? {},
     }))
-    .filter((g) => g.rows.length > 0 || g.tiers.length > 0)
+    .filter(
+      (g) =>
+        g.rows.length > 0 ||
+        g.tiers.length > 0 ||
+        g.windows.length > 0 ||
+        Object.keys(g.serviceTiers).length > 0
+    )
 );
 
 const hasTiers = computed(
   () => defaultTiers.value.length > 0 || providerGroups.value.some((g) => g.tiers.length > 0)
 );
 
+const hasWindows = computed(
+  () => defaultWindows.value.length > 0 || providerGroups.value.some((g) => g.windows.length > 0)
+);
+
+const hasServiceTiers = computed(
+  () =>
+    Object.keys(defaultServiceTiers.value).length > 0 ||
+    providerGroups.value.some((g) => Object.keys(g.serviceTiers).length > 0)
+);
+
+/** Short labels for extra priced dimensions (cached, reasoning, overlays, ...). */
+const activeDims = computed(() => {
+  const dims = new Set<string>();
+  for (const f of COST_FIELDS) {
+    if (f.dimKey && costRange(props.model, f.key) != null) dims.add(t(f.dimKey));
+  }
+  if (hasTiers.value) dims.add(t("models.pricingTiersSection"));
+  if (hasWindows.value) dims.add(t("models.pricingWindowsSection"));
+  if (hasServiceTiers.value) dims.add(t("models.serviceTiersSection"));
+  return [...dims];
+});
+
+const extraDimsTitle = computed(() =>
+  activeDims.value.length
+    ? t("models.morePricingDims", { dims: activeDims.value.join(", ") })
+    : undefined
+);
+
 const hasAnyPricing = computed(
-  () => defaultRows.value.length > 0 || providerGroups.value.length > 0 || hasTiers.value
+  () =>
+    defaultRows.value.length > 0 ||
+    providerGroups.value.length > 0 ||
+    hasTiers.value ||
+    hasWindows.value ||
+    hasServiceTiers.value
 );
 </script>
 
@@ -243,7 +282,21 @@ const hasAnyPricing = computed(
               <span class="text-data text-xs text-foreground">{{ formatCost(row.value) }}</span>
             </div>
           </div>
-          <PricingTierList v-if="defaultTiers.length" :tiers="defaultTiers" />
+          <PricingRateList
+            v-if="defaultTiers.length"
+            :heading="t('models.pricingTiersSection')"
+            :rows="tierRateRows(t, defaultTiers)"
+          />
+          <PricingRateList
+            v-if="defaultWindows.length"
+            :heading="t('models.pricingWindowsSection')"
+            :rows="windowRateRows(t, defaultWindows, locale)"
+          />
+          <PricingRateList
+            v-if="Object.keys(defaultServiceTiers).length"
+            :heading="t('models.serviceTiersSection')"
+            :rows="serviceTierRateRows(t, defaultServiceTiers)"
+          />
         </section>
 
         <!-- Per-provider overrides -->
@@ -268,7 +321,24 @@ const hasAnyPricing = computed(
               <span class="text-data text-xs text-foreground">{{ formatCost(row.value) }}</span>
             </div>
           </div>
-          <PricingTierList v-if="group.tiers.length" :tiers="group.tiers" dense />
+          <PricingRateList
+            v-if="group.tiers.length"
+            :heading="t('models.pricingTiersSection')"
+            :rows="tierRateRows(t, group.tiers)"
+            dense
+          />
+          <PricingRateList
+            v-if="group.windows.length"
+            :heading="t('models.pricingWindowsSection')"
+            :rows="windowRateRows(t, group.windows, locale)"
+            dense
+          />
+          <PricingRateList
+            v-if="Object.keys(group.serviceTiers).length"
+            :heading="t('models.serviceTiersSection')"
+            :rows="serviceTierRateRows(t, group.serviceTiers)"
+            dense
+          />
         </section>
       </div>
     </PopoverContent>

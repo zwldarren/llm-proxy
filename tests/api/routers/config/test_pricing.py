@@ -20,7 +20,9 @@ from llm_proxy.api.routers.config.pricing_schemas import (
     ApplyPricingRequest,
     ModelPricingInfo,
     PricingTierOption,
+    PricingTimeWindowOption,
     PricingUpdateItem,
+    ServiceTierRatesOption,
     SyncPricingRequest,
 )
 
@@ -341,7 +343,10 @@ class TestSyncModelPricingEndpoint:
         mapping.cached_write_cost_per_1m = None
         mapping.audio_input_cost_per_1m = None
         mapping.audio_output_cost_per_1m = None
+        mapping.reasoning_cost_per_1m = None
         mapping.pricing_tiers = None
+        mapping.pricing_time_windows = None
+        mapping.service_tier_pricing = None
         return mapping
 
     async def test_http_status_error_returns_failure(self, request_obj):
@@ -423,7 +428,9 @@ class TestSyncModelPricingEndpoint:
             cached_write_cost_per_1m=None,
             audio_input_cost_per_1m=None,
             audio_output_cost_per_1m=None,
+            reasoning_cost_per_1m=None,
             pricing_tiers=None,
+            service_tier_pricing=None,
         )
         reload_mock.assert_awaited_once()
 
@@ -586,6 +593,174 @@ class TestSyncModelPricingEndpoint:
         assert response.updated_count == 0
         repo._models.update_model_provider_pricing.assert_not_awaited()
 
+    @staticmethod
+    def _models_dev_with_modes(cost: dict, modes: dict | None = None) -> dict:
+        model: dict = {"cost": cost}
+        if modes is not None:
+            model["experimental"] = {"modes": modes}
+        return {"openai": {"models": {"gpt-5.4": model}}}
+
+    async def test_sync_parses_reasoning_rate(self, request_obj):
+        mapping = self._mapping(30, "gpt-5.4", "openai")
+        model = self._model("gpt-5.4", [mapping])
+        repo = self._fake_repo([model])
+
+        async def fake_fetch_models_dev_data(client):
+            return self._models_dev_with_modes({"input": 2.5, "output": 15.0, "reasoning": 30.0})
+
+        with (
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
+            patch.object(pricing, "get_config_repository", return_value=repo),
+            patch.object(pricing, "commit_and_reload", AsyncMock()),
+        ):
+            response = await sync_model_pricing(
+                SyncPricingRequest(dry_run=False), request_obj, session=MagicMock()
+            )
+
+        assert response.updated_count == 1
+        assert response.results[0].new_reasoning_cost == 30.0
+        call_kwargs = repo._models.update_model_provider_pricing.await_args.kwargs
+        assert call_kwargs["reasoning_cost_per_1m"] == 30.0
+
+    async def test_sync_parses_tier_reasoning_rate(self, request_obj):
+        mapping = self._mapping(31, "gpt-5.4", "openai")
+        model = self._model("gpt-5.4", [mapping])
+        repo = self._fake_repo([model])
+
+        async def fake_fetch_models_dev_data(client):
+            return self._models_dev_with_modes(
+                {
+                    "input": 2.5,
+                    "output": 15.0,
+                    "tiers": [
+                        {
+                            "input": 5.0,
+                            "output": 22.5,
+                            "reasoning": 45.0,
+                            "tier": {"type": "context", "size": 272000},
+                        }
+                    ],
+                }
+            )
+
+        with (
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
+            patch.object(pricing, "get_config_repository", return_value=repo),
+            patch.object(pricing, "commit_and_reload", AsyncMock()),
+        ):
+            await sync_model_pricing(
+                SyncPricingRequest(dry_run=False), request_obj, session=MagicMock()
+            )
+
+        call_kwargs = repo._models.update_model_provider_pricing.await_args.kwargs
+        assert call_kwargs["pricing_tiers"][0]["reasoning_cost_per_1m"] == 45.0
+
+    async def test_sync_parses_service_tier_modes(self, request_obj):
+        mapping = self._mapping(32, "gpt-5.4", "openai")
+        model = self._model("gpt-5.4", [mapping])
+        repo = self._fake_repo([model])
+
+        async def fake_fetch_models_dev_data(client):
+            return self._models_dev_with_modes(
+                {"input": 2.5, "output": 15.0},
+                {
+                    "flex": {
+                        "cost": {"input": 1.25, "output": 7.5},
+                        "provider": {"body": {"service_tier": "flex"}},
+                    },
+                    "priority": {"cost": {"input": 5.0, "output": 30.0}},
+                },
+            )
+
+        with (
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
+            patch.object(pricing, "get_config_repository", return_value=repo),
+            patch.object(pricing, "commit_and_reload", AsyncMock()),
+        ):
+            response = await sync_model_pricing(
+                SyncPricingRequest(dry_run=False), request_obj, session=MagicMock()
+            )
+
+        assert response.updated_count == 1
+        assert response.results[0].new_service_tier_pricing is not None
+        call_kwargs = repo._models.update_model_provider_pricing.await_args.kwargs
+        assert call_kwargs["service_tier_pricing"]["flex"]["output_cost_per_1m"] == 7.5
+        assert call_kwargs["service_tier_pricing"]["priority"]["input_cost_per_1m"] == 5.0
+
+    async def test_service_tier_only_change_updates_mapping(self, request_obj):
+        mapping = self._mapping(33, "gpt-5.4", "openai", input_cost=2.5, output_cost=15.0)
+        mapping.service_tier_pricing = {"flex": {"input_cost_per_1m": 9.9}}
+        model = self._model("gpt-5.4", [mapping])
+        repo = self._fake_repo([model])
+
+        async def fake_fetch_models_dev_data(client):
+            return self._models_dev_with_modes(
+                {"input": 2.5, "output": 15.0},
+                {"flex": {"cost": {"input": 1.25, "output": 7.5}}},
+            )
+
+        with (
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
+            patch.object(pricing, "get_config_repository", return_value=repo),
+            patch.object(pricing, "commit_and_reload", AsyncMock()),
+        ):
+            response = await sync_model_pricing(
+                SyncPricingRequest(dry_run=True, preserve_custom_pricing=False),
+                request_obj,
+                session=MagicMock(),
+            )
+
+        # Flat prices match models.dev, so only the modes drive the diff.
+        assert response.updated_count == 1
+        assert response.results[0].old_service_tier_pricing is not None
+
+    async def test_custom_service_tier_pricing_is_preserved(self, request_obj):
+        mapping = self._mapping(34, "gpt-5.4", "openai")
+        mapping.service_tier_pricing = {"flex": {"input_cost_per_1m": 9.9}}
+        model = self._model("gpt-5.4", [mapping])
+        repo = self._fake_repo([model])
+
+        async def fake_fetch_models_dev_data(client):
+            return self._models_dev_with_modes({"input": 2.5, "output": 15.0})
+
+        with (
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
+            patch.object(pricing, "get_config_repository", return_value=repo),
+        ):
+            response = await sync_model_pricing(
+                SyncPricingRequest(dry_run=False, preserve_custom_pricing=True),
+                request_obj,
+                session=MagicMock(),
+            )
+
+        assert response.skipped_count == 1
+        repo._models.update_model_provider_pricing.assert_not_awaited()
+
+    async def test_sync_never_writes_time_windows(self, request_obj):
+        # models.dev cannot express peak/off-peak pricing, so a sync must leave a
+        # hand-authored window list untouched rather than clearing it.
+        mapping = self._mapping(35, "gpt-5.4", "openai")
+        mapping.pricing_time_windows = [
+            {"start": "22:00", "end": "08:00", "input_cost_per_1m": 1.0}
+        ]
+        model = self._model("gpt-5.4", [mapping])
+        repo = self._fake_repo([model])
+
+        async def fake_fetch_models_dev_data(client):
+            return self._models_dev_with_modes({"input": 2.5, "output": 15.0, "reasoning": 30.0})
+
+        with (
+            patch.object(pricing, "fetch_models_dev_data", fake_fetch_models_dev_data),
+            patch.object(pricing, "get_config_repository", return_value=repo),
+            patch.object(pricing, "commit_and_reload", AsyncMock()),
+        ):
+            await sync_model_pricing(
+                SyncPricingRequest(dry_run=False), request_obj, session=MagicMock()
+            )
+
+        call_kwargs = repo._models.update_model_provider_pricing.await_args.kwargs
+        assert "pricing_time_windows" not in call_kwargs
+
 
 class TestApplyModelPricingEndpoint:
     """Behavior of the POST /models/pricing/apply endpoint."""
@@ -645,6 +820,42 @@ class TestApplyModelPricingEndpoint:
         repo._models.apply_mapping_pricing.assert_awaited_once_with(
             10, {"cached_read_cost_per_1m": None}
         )
+
+    async def test_applies_time_windows_and_service_tiers(self, request_obj):
+        repo = self._fake_repo()
+
+        with (
+            patch.object(pricing, "get_config_repository", return_value=repo),
+            patch.object(pricing, "commit_and_reload", AsyncMock()),
+        ):
+            response = await apply_model_pricing(
+                ApplyPricingRequest(
+                    updates=[
+                        PricingUpdateItem(
+                            mapping_id=10,
+                            pricing_time_windows=[
+                                PricingTimeWindowOption(
+                                    start="22:00",
+                                    end="08:00",
+                                    timezone="Asia/Shanghai",
+                                    input_cost_per_1m=1.0,
+                                )
+                            ],
+                            service_tier_pricing={
+                                "flex": ServiceTierRatesOption(input_cost_per_1m=1.25)
+                            },
+                        )
+                    ]
+                ),
+                request_obj,
+                session=MagicMock(),
+            )
+
+        assert response.success
+        updates = repo._models.apply_mapping_pricing.await_args.args[1]
+        assert updates["pricing_time_windows"][0]["start"] == "22:00"
+        assert updates["pricing_time_windows"][0]["timezone"] == "Asia/Shanghai"
+        assert updates["service_tier_pricing"]["flex"]["input_cost_per_1m"] == 1.25
 
     async def test_applies_pricing_tiers(self, request_obj):
         repo = self._fake_repo()

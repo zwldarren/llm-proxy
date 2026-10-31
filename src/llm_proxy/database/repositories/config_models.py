@@ -10,6 +10,14 @@ from llm_proxy.database.repositories.base import BaseRepository
 from llm_proxy.database.repositories.config_providers import ProviderRepository
 from llm_proxy.database.tables import ModelProviderRecord, ModelRecord
 
+# "Leave this field alone" marker for the pricing update path. The models.dev
+# sync writes the rates the catalog publishes but must never touch the
+# hand-authored time windows (the catalog cannot express them), while the
+# pricing-apply path does need to clear them. A plain ``None`` default cannot
+# tell those two apart. The name matches the module attribute so pickle/copy
+# identity holds.
+_UNSET = sentinel("_UNSET")
+
 
 class ModelRepository(BaseRepository):
     """Repository for model configuration operations."""
@@ -67,11 +75,14 @@ class ModelRepository(BaseRepository):
                     audio_input_cost_per_1m=prov_config.get("audio_input_cost_per_1m"),
                     audio_output_cost_per_1m=prov_config.get("audio_output_cost_per_1m"),
                     image_input_cost_per_1m=prov_config.get("image_input_cost_per_1m"),
+                    reasoning_cost_per_1m=prov_config.get("reasoning_cost_per_1m"),
                     cost_per_image=prov_config.get("cost_per_image"),
                     audio_cost_per_minute=prov_config.get("audio_cost_per_minute"),
                     tts_cost_per_1m_chars=prov_config.get("tts_cost_per_1m_chars"),
                     web_search_cost_per_1k=prov_config.get("web_search_cost_per_1k"),
                     pricing_tiers=prov_config.get("pricing_tiers"),
+                    pricing_time_windows=prov_config.get("pricing_time_windows"),
+                    service_tier_pricing=prov_config.get("service_tier_pricing"),
                     parameter_overrides=prov_config.get("parameter_overrides"),
                 )
                 self.session.add(mapping)
@@ -95,7 +106,9 @@ class ModelRepository(BaseRepository):
                 input_cost_per_1m (float | None), output_cost_per_1m (float | None),
                 cached_read_cost_per_1m (float | None), cached_write_cost_per_1m (float | None),
                 audio_input_cost_per_1m (float | None), audio_output_cost_per_1m (float | None),
-                pricing_tiers (list[dict] | None), parameter_overrides (dict | None)
+                reasoning_cost_per_1m (float | None), pricing_tiers (list[dict] | None),
+                pricing_time_windows (list[dict] | None), service_tier_pricing (dict | None),
+                parameter_overrides (dict | None)
             **kwargs: Additional model configuration options
 
         Returns:
@@ -178,8 +191,10 @@ class ModelRepository(BaseRepository):
                 audio_input_cost_per_1m (float | None), audio_output_cost_per_1m (float | None),
                 image_input_cost_per_1m (float | None), cost_per_image (float | None),
                 audio_cost_per_minute (float | None), tts_cost_per_1m_chars (float | None),
-                web_search_cost_per_1k (float | None), pricing_tiers (list[dict] | None),
-                parameter_overrides (dict | None)
+                web_search_cost_per_1k (float | None), reasoning_cost_per_1m (float | None),
+                pricing_tiers (list[dict] | None),
+                pricing_time_windows (list[dict] | None),
+                service_tier_pricing (dict | None), parameter_overrides (dict | None)
             new_name: Optional new name to rename the model
             **kwargs: Additional model configuration options (any ModelRecord column,
                 including the unit-based pricing fields cost_per_image,
@@ -233,7 +248,10 @@ class ModelRepository(BaseRepository):
         cached_write_cost_per_1m: float | None = None,
         audio_input_cost_per_1m: float | None = None,
         audio_output_cost_per_1m: float | None = None,
+        reasoning_cost_per_1m: float | None = None,
         pricing_tiers: list[dict[str, Any]] | None = None,
+        pricing_time_windows: list[dict[str, Any]] | None | sentinel = _UNSET,
+        service_tier_pricing: dict[str, Any] | None = None,
     ) -> ModelProviderRecord | None:
         """Update the pricing for a specific model-provider mapping.
 
@@ -249,8 +267,19 @@ class ModelRepository(BaseRepository):
                 (only updated when not None)
             audio_output_cost_per_1m: New audio output cost per 1M tokens
                 (only updated when not None)
+            reasoning_cost_per_1m: New reasoning-token cost per 1M tokens
+                (only updated when not None)
             pricing_tiers: New context tiers, replacing the stored list (an
                 empty/None value clears it so stale tiers never linger)
+            pricing_time_windows: New time-of-day windows, replacing the stored
+                list. Omitting it leaves the stored list untouched, which is how
+                the models.dev sync keeps hand-authored windows: the catalog
+                cannot express them, so a sync must not drop them. An explicit
+                ``None`` stores "inherit the model-level list"; an explicit empty
+                list stores "this provider has no windows", which is not the same
+                thing and must not be collapsed into ``None``.
+            service_tier_pricing: New per-service-tier rates, replacing the stored
+                map (an empty/None value clears it)
 
         Returns:
             The updated ModelProviderRecord or None if not found
@@ -272,7 +301,12 @@ class ModelRepository(BaseRepository):
             mapping.audio_input_cost_per_1m = audio_input_cost_per_1m
         if audio_output_cost_per_1m is not None:
             mapping.audio_output_cost_per_1m = audio_output_cost_per_1m
+        if reasoning_cost_per_1m is not None:
+            mapping.reasoning_cost_per_1m = reasoning_cost_per_1m
         mapping.pricing_tiers = pricing_tiers or None
+        if not isinstance(pricing_time_windows, sentinel):
+            mapping.pricing_time_windows = pricing_time_windows
+        mapping.service_tier_pricing = service_tier_pricing or None
 
         await self.session.flush()
         await self.session.refresh(mapping)
@@ -287,11 +321,14 @@ class ModelRepository(BaseRepository):
             "audio_input_cost_per_1m",
             "audio_output_cost_per_1m",
             "image_input_cost_per_1m",
+            "reasoning_cost_per_1m",
             "cost_per_image",
             "audio_cost_per_minute",
             "tts_cost_per_1m_chars",
             "web_search_cost_per_1k",
             "pricing_tiers",
+            "pricing_time_windows",
+            "service_tier_pricing",
         }
     )
 

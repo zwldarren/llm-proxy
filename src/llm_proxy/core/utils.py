@@ -118,6 +118,19 @@ def coerce_float(value: Any) -> float | None:
         return None
 
 
+def read_field(source: Any, name: str) -> Any:
+    """Read one field from a validated model or a raw JSON dict of the same shape.
+
+    Pricing overlays reach their readers in two shapes — validated config models
+    on the load path, stored JSON on the billing path — so every reader has to
+    accept both. A missing field reads as ``None``, which is how callers tell
+    "unset" from a real zero.
+    """
+    if isinstance(source, dict):
+        return source.get(name)
+    return getattr(source, name, None)
+
+
 def safe_float(value: Any, default: float = 0.0) -> float:
     """Convert value to float safely, returning default on failure.
 

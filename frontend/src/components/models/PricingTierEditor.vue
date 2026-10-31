@@ -5,7 +5,13 @@ import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
-import { tierThresholdLabel, type TierRateKey } from "@/utils/pricingTiers";
+import {
+  EXTRA_RATE_FIELDS,
+  PRIMARY_RATE_FIELDS,
+  tierThresholdLabel,
+  type RateField,
+  type TierRateKey,
+} from "@/utils/pricingTiers";
 import type { PricingTier } from "@/types/schemas";
 
 /**
@@ -17,29 +23,23 @@ import type { PricingTier } from "@/types/schemas";
  */
 defineOptions({ name: "PricingTierEditor" });
 
-const props = defineProps<{
-  modelValue?: PricingTier[] | null;
-  disabled?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    modelValue?: PricingTier[] | null;
+    disabled?: boolean;
+    /** An emptied editor means "inherit the model-level list" unless the parent
+     * says otherwise: a provider mapping may instead store the empty list, which
+     * is the explicit statement that this upstream has no tiers. */
+    inheritWhenEmpty?: boolean;
+  }>(),
+  { inheritWhenEmpty: true }
+);
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: PricingTier[] | null): void;
 }>();
 
 const { t } = useI18n();
-
-const PRIMARY_FIELDS: Array<{ key: TierRateKey; labelKey: string }> = [
-  { key: "input_cost_per_1m", labelKey: "models.costDimInput" },
-  { key: "output_cost_per_1m", labelKey: "models.costDimOutput" },
-  { key: "cached_read_cost_per_1m", labelKey: "models.costDimCachedRead" },
-  { key: "cached_write_cost_per_1m", labelKey: "models.costDimCachedWrite" },
-];
-
-const EXTRA_FIELDS: Array<{ key: TierRateKey; labelKey: string }> = [
-  { key: "audio_input_cost_per_1m", labelKey: "models.costDimAudioInput" },
-  { key: "audio_output_cost_per_1m", labelKey: "models.costDimAudioOutput" },
-  { key: "image_input_cost_per_1m", labelKey: "models.costDimImageInput" },
-];
 
 const tiers = computed(() => props.modelValue ?? []);
 const expanded = ref<Set<number>>(new Set());
@@ -56,7 +56,8 @@ const duplicateThresholds = computed(() => {
 
 function emitUpdate(list: PricingTier[]) {
   list.sort((a, b) => a.threshold - b.threshold);
-  emit("update:modelValue", list.length ? list : null);
+  const cleared = props.inheritWhenEmpty === false ? [] : null;
+  emit("update:modelValue", list.length ? list : cleared);
 }
 
 function setThreshold(index: number, value: number | null) {
@@ -98,14 +99,16 @@ function toggleExpanded(index: number) {
 }
 
 function isExpanded(index: number): boolean {
-  return expanded.value.has(index) || EXTRA_FIELDS.some((f) => tiers.value[index]?.[f.key] != null);
+  return (
+    expanded.value.has(index) || EXTRA_RATE_FIELDS.some((f) => tiers.value[index]?.[f.key] != null)
+  );
 }
 
 /**
  * Rate inputs repeat once per tier, so the accessible name carries the tier's
  * threshold; the visible `<Label>` alone would not tell two tiers apart.
  */
-function rateAriaLabel(index: number, field: { key: TierRateKey; labelKey: string }): string {
+function rateAriaLabel(index: number, field: RateField): string {
   const threshold = tiers.value[index]?.threshold ?? 0;
   return `${t(field.labelKey)} · ${tierThresholdLabel(t, threshold)}`;
 }
@@ -177,7 +180,7 @@ function rateAriaLabel(index: number, field: { key: TierRateKey; labelKey: strin
         </div>
 
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 px-3 pb-3">
-          <div v-for="field in PRIMARY_FIELDS" :key="field.key" class="space-y-1">
+          <div v-for="field in PRIMARY_RATE_FIELDS" :key="field.key" class="space-y-1">
             <Label class="text-[11px] text-muted-foreground">{{ t(field.labelKey) }}</Label>
             <NumberInput
               :model-value="tier[field.key] ?? null"
@@ -204,7 +207,7 @@ function rateAriaLabel(index: number, field: { key: TierRateKey; labelKey: strin
         </div>
 
         <div v-if="isExpanded(index)" class="grid grid-cols-2 sm:grid-cols-3 gap-2 px-3 pb-3">
-          <div v-for="field in EXTRA_FIELDS" :key="field.key" class="space-y-1">
+          <div v-for="field in EXTRA_RATE_FIELDS" :key="field.key" class="space-y-1">
             <Label class="text-[11px] text-muted-foreground">{{ t(field.labelKey) }}</Label>
             <NumberInput
               :model-value="tier[field.key] ?? null"

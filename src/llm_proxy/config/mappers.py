@@ -79,11 +79,17 @@ def map_model_provider_record(mapping: ModelProviderRecord) -> ModelProviderConf
         audio_input_cost_per_1m=mapping.audio_input_cost_per_1m,
         audio_output_cost_per_1m=mapping.audio_output_cost_per_1m,
         image_input_cost_per_1m=mapping.image_input_cost_per_1m,
+        reasoning_cost_per_1m=mapping.reasoning_cost_per_1m,
         cost_per_image=mapping.cost_per_image,
         audio_cost_per_minute=mapping.audio_cost_per_minute,
         tts_cost_per_1m_chars=mapping.tts_cost_per_1m_chars,
         web_search_cost_per_1k=mapping.web_search_cost_per_1k,
-        pricing_tiers=mapping.pricing_tiers or [],
+        # Overlays use three states, not two: null means "inherit the model-level
+        # list", an empty list means "this provider has none" (which must survive the
+        # mapper so billing can tell the two apart).
+        pricing_tiers=mapping.pricing_tiers,
+        pricing_time_windows=mapping.pricing_time_windows,
+        service_tier_pricing=mapping.service_tier_pricing,
         parameter_overrides=mapping.parameter_overrides or {},
     )
 
@@ -117,11 +123,14 @@ def map_model_record(record: ModelRecord) -> ModelConfig | None:
         audio_input_cost_per_1m=record.audio_input_cost_per_1m,
         audio_output_cost_per_1m=record.audio_output_cost_per_1m,
         image_input_cost_per_1m=record.image_input_cost_per_1m,
+        reasoning_cost_per_1m=record.reasoning_cost_per_1m,
         cost_per_image=record.cost_per_image,
         audio_cost_per_minute=record.audio_cost_per_minute,
         tts_cost_per_1m_chars=record.tts_cost_per_1m_chars,
         web_search_cost_per_1k=record.web_search_cost_per_1k,
         pricing_tiers=record.pricing_tiers or [],
+        pricing_time_windows=record.pricing_time_windows or [],
+        service_tier_pricing=record.service_tier_pricing or {},
         auto_eligible=record.auto_eligible,
         quality_tier=record.quality_tier,
         routing_assignments=record.routing_assignments,

@@ -49,6 +49,7 @@ All prices are **USD**. Rates are per 1M tokens unless stated otherwise:
 | --- | --- |
 | `input_cost_per_1m`, `output_cost_per_1m` | tokens |
 | `cached_read_cost_per_1m`, `cached_write_cost_per_1m` | tokens (cache hits/writes) |
+| `reasoning_cost_per_1m` | reasoning/thinking tokens |
 | `audio_input_cost_per_1m`, `audio_output_cost_per_1m` | tokens |
 | `image_input_cost_per_1m` | tokens |
 | `cost_per_image` | per generated image |
@@ -64,6 +65,31 @@ Details that affect the bill:
   `threshold <= input tokens` applies; unset dimensions inherit the base rate.
   Thresholds must be unique. Unit-based rates (images, audio minutes, TTS chars,
   searches) are never tiered.
+- **Time windows** (`pricing_time_windows`) bill by the clock, for peak/off-peak
+  pricing (Volcengine Ark, DeepSeek's former overnight discount). A window is a
+  `start`/`end` pair of `HH:MM` plus an optional `days` list (ISO weekdays, empty
+  means every day) and an IANA `timezone` (default `UTC`). It applies to a request
+  that **started** inside it, read on the window's clock; `end` at or before
+  `start` wraps past midnight, and `days` names the day the window starts on.
+  Requests outside every window bill at the base rates. Windows must not overlap
+  in real (UTC) time, across timezones too — the whole request is repriced by the
+  first match, so an overlap would make the bill depend on list order. models.dev
+  does not publish these — enter them by hand.
+- **Service tiers** (`service_tier_pricing`) bill by the tier the request was
+  served at: a map from mode name (`flex`, `priority`, …) to rates, selected by the
+  request's `service_tier` (the provider's reported tier wins over the requested
+  one). A tier with no entry keeps the rates the earlier overlays resolved (the
+  standard rates when no window applies). Synced from models.dev
+  `experimental.modes`.
+- **Provider overrides**: for tiers, windows and service tiers a provider mapping
+  has three states — absent/`null` inherits the model-level value, a non-empty
+  value replaces it, and an empty list/map disables the overlay for that provider.
+- **Overlay order**: base rates → context tier → time window → service tier. Each
+  overlay replaces only the dimensions it sets and the whole request is repriced;
+  none of them is a marginal rate.
+- **Reasoning tokens** are already counted in `output_tokens`; when
+  `reasoning_cost_per_1m` is set they are carved out and charged at that rate,
+  otherwise they bill at the output rate.
 - **Cache tokens** are re-priced from the base input rate to the cached read/write
   rate, and the difference is recorded as `cache_savings_usd`. Without a base input
   rate, cache tokens are charged at the cache rates directly.
@@ -89,6 +115,11 @@ cached in-process for 1 hour, with a 5-minute stale grace if upstream fails):
    turn off *preserve custom pricing*.
 3. Hand-tune individual rows afterwards via the model editor or
    `POST /api/config/models/pricing/apply` (partial updates; `null` clears a field).
+
+The sync also pulls `cost.reasoning` (reasoning-token rate), the `reasoning` rate of
+each context tier, and `experimental.modes` (the service-tier price lists). It never
+writes `pricing_time_windows`: the catalog cannot express time-of-day pricing, so a
+sync leaves a hand-authored window list untouched.
 
 The **Capabilities** tab compares capability/catalog fields against models.dev and
 applies the reviewed diff (`POST /api/config/models/metadata/apply`;

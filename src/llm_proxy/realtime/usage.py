@@ -8,6 +8,7 @@ logged and never break the relay.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import orjson
@@ -24,8 +25,14 @@ logger = get_logger(__name__)
 # The upstream event that carries per-turn usage.
 _RESPONSE_DONE = "response.done"
 
+# The client event that starts a billable turn.
+_RESPONSE_CREATE = "response.create"
+
 # The upstream event that announces the provider-issued session id.
 _SESSION_CREATED = "session.created"
+
+# The client event that sets session-wide defaults.
+_SESSION_UPDATE = "session.update"
 
 
 @dataclass
@@ -66,6 +73,15 @@ class RealtimeUsageObserver:
         self._context = context
         self._config_manager = config_manager
         self._turns = 0
+        # The instant the client asked for the current turn: peak/off-peak rates
+        # key off when a request started, which the relay knows before the
+        # provider answers.
+        self._turn_started_at: datetime | None = None
+        # The tier the client asked for, from its own ``response.create`` or the
+        # session's ``session.update``. It is the tier the turn bills at unless
+        # the provider reports the one it actually served (upstreams downgrade
+        # ``auto`` to ``default``).
+        self._requested_service_tier: str | None = None
 
     @property
     def turns(self) -> int:
@@ -76,6 +92,35 @@ class RealtimeUsageObserver:
     def session_id(self) -> str | None:
         """Session id for log correlation (provider-issued once known)."""
         return self._context.session_id
+
+    async def on_client_message(self, kind: Literal["text", "binary"], data: str | bytes) -> None:
+        """Note the start instant and requested tier of a billable turn.
+
+        Called by the relay for every client→upstream message. Only
+        ``response.create`` starts a turn; a ``session.update`` that names a
+        ``service_tier`` sets the session default, which later turns inherit.
+        """
+        if kind != KIND_TEXT or not isinstance(data, str):
+            return
+        try:
+            message = orjson.loads(data)
+        except orjson.JSONDecodeError:
+            return
+        if not isinstance(message, dict):
+            return
+        message_type = message.get("type")
+        if message_type not in (_RESPONSE_CREATE, _SESSION_UPDATE):
+            return
+        if message_type == _RESPONSE_CREATE:
+            self._turn_started_at = datetime.now(UTC)
+        # ``service_tier`` lives on the event itself or inside the ``response`` /
+        # ``session`` object it carries, depending on the event.
+        for carrier in (message, message.get("response"), message.get("session")):
+            if not isinstance(carrier, dict):
+                continue
+            tier = carrier.get("service_tier")
+            if isinstance(tier, str) and tier.strip():
+                self._requested_service_tier = tier.strip()
 
     async def on_upstream_message(self, kind: Literal["text", "binary"], data: str | bytes) -> bool:
         """Relay hook: record a log entry for each ``response.done`` event.
@@ -119,11 +164,22 @@ class RealtimeUsageObserver:
         """
         response_id = response.get("id") or ""
         self._turns += 1
+        started_at = self._turn_started_at
+        self._turn_started_at = None
+        # The provider's reported tier is the one it actually served; the tier
+        # the client asked for is the fallback when the event omits it.
+        reported_tier = response.get("service_tier")
         breakdown = await calculate_cost(
             usage,
             self._context.model,
             config_manager=self._config_manager,
             provider_name=self._context.provider,
+            at=started_at,
+            service_tier=(
+                reported_tier.strip()
+                if isinstance(reported_tier, str) and reported_tier.strip()
+                else self._requested_service_tier
+            ),
         )
         record_realtime_turn(
             self._context,

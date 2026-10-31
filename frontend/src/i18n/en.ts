@@ -603,6 +603,7 @@ export default {
     costDimOutput: "Output",
     costDimCachedRead: "Cache read",
     costDimCachedWrite: "Cache write",
+    costDimReasoning: "Reasoning",
     costDimAudioInput: "Audio input",
     costDimAudioOutput: "Audio output",
     costDimImageInput: "Image input",
@@ -750,6 +751,32 @@ export default {
     pricingTiersDuplicate: "Duplicate thresholds: {thresholds}. Each threshold must be unique.",
     pricingTierFrom: "≥ {tokens} tokens",
     pricingTiersSection: "Context tiers",
+    reasoningShort: "REASON",
+    reasoningCost: "Reasoning cost",
+    pricingWindows: "Peak / off-peak pricing",
+    pricingWindowsHelp:
+      "Time-of-day rate windows: a request that STARTED inside a window is billed at that window's rates for the whole request, otherwise at the base price above. Read on the window's own timezone, and an end at or before the start wraps past midnight. Blank dimensions inherit the base price. models.dev does not publish these — enter them from the provider's price sheet.",
+    pricingWindowsEmpty:
+      "No windows — every request bills at the base rates, whatever the clock says.",
+    addPricingWindow: "Add window",
+    removePricingWindow: "Remove window",
+    pricingWindowStart: "Window start",
+    pricingWindowEnd: "Window end",
+    pricingWindowTimezone: "Timezone (IANA)",
+    pricingWindowDays: "Starts on",
+    pricingWindowEveryDay: "every day",
+    pricingWindowsOverlap:
+      "Windows overlap on the same real instant (timezones included). Billing would depend on list order, so the backend rejects this — split or shorten them.",
+    pricingWindowsSection: "Peak / off-peak",
+    serviceTiers: "Service tier pricing",
+    serviceTiersHelp:
+      "Rate overrides per service tier (flex, priority, ...), keyed by the name a client sends as service_tier. A tier with no entry keeps the rate the earlier overlays resolved (the standard rate when no window applies); blank dimensions inherit the rate the turn would otherwise be billed at. Synced from models.dev experimental.modes where the catalog publishes one.",
+    serviceTiersEmpty: "No tier overrides — every request bills at the standard rates.",
+    addServiceTier: "Add tier",
+    removeServiceTier: "Remove tier",
+    serviceTierName: "Tier name",
+    serviceTierNameHelp: "matches the request's service_tier",
+    serviceTiersSection: "Service tiers",
     editProvider: "Edit Provider",
     providerCosts: "Provider Costs",
     // Smart routing fields
@@ -816,6 +843,7 @@ export default {
       clearSelection: "Clear selection",
       reviewHint: "Click any price to edit it; only rows with actual changes will be updated.",
       tierChip: "tiers",
+      serviceTierChip: "tiers",
     },
     sync: {
       trigger: "Sync from models.dev",

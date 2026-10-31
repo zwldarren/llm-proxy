@@ -37,6 +37,9 @@ def observer(monkeypatch):
         messages=None,
         completion_text=None,
         provider_name=None,
+        dimensions=None,
+        at=None,
+        service_tier=None,
     ):
         return CostBreakdown(
             cost_usd=0.01,
@@ -64,13 +67,22 @@ def observer(monkeypatch):
     return obs, recorded, usage_recorded
 
 
-def _response_done(usage=None, status="completed", response_id="resp_123"):
+def _response_done(usage=None, status="completed", response_id="resp_123", service_tier=None):
     response = {"id": response_id, "status": status}
     if usage is not None:
         response["usage"] = usage
+    if service_tier is not None:
+        response["service_tier"] = service_tier
     return orjson.dumps(
         {"type": "response.done", "event_id": "event_1", "response": response}
     ).decode()
+
+
+def _response_create(service_tier=None):
+    response = {"modalities": ["text"]}
+    if service_tier is not None:
+        response["service_tier"] = service_tier
+    return orjson.dumps({"type": "response.create", "response": response}).decode()
 
 
 _USAGE = {
@@ -208,3 +220,75 @@ class TestRealtimeUsageObserver:
         assert recorded[0].log_metadata["response_status"] == "failed"
         assert len(usage_recorded) == 1
         assert usage_recorded[0].request_id == "rt_resp_fail"
+
+    async def test_turn_priced_at_its_start_instant(self, observer, monkeypatch):
+        """A turn bills by when the client asked for it, not when it finished."""
+        obs, _, _ = observer
+        calls = []
+
+        async def fake_calculate_cost(usage, model_name, **kwargs):
+            calls.append(kwargs)
+            return CostBreakdown(cost_usd=0.0)
+
+        monkeypatch.setattr("llm_proxy.realtime.usage.calculate_cost", fake_calculate_cost)
+
+        await obs.on_client_message("text", _response_create())
+        await obs.on_upstream_message("text", _response_done(usage=_USAGE))
+
+        assert calls[0]["at"] is not None
+
+    async def test_requested_tier_prices_the_turn_until_the_provider_reports_one(
+        self, observer, monkeypatch
+    ):
+        """The client's service_tier bills the turn until the provider answers."""
+        obs, _, _ = observer
+        calls = []
+
+        async def fake_calculate_cost(usage, model_name, **kwargs):
+            calls.append(kwargs)
+            return CostBreakdown(cost_usd=0.0)
+
+        monkeypatch.setattr("llm_proxy.realtime.usage.calculate_cost", fake_calculate_cost)
+
+        await obs.on_client_message("text", _response_create(service_tier="flex"))
+        await obs.on_upstream_message("text", _response_done(usage=_USAGE))
+
+        assert calls[0]["service_tier"] == "flex"
+
+    async def test_reported_tier_replaces_the_requested_one(self, observer, monkeypatch):
+        """Upstreams downgrade ``auto``, so the reported tier wins."""
+        obs, _, _ = observer
+        calls = []
+
+        async def fake_calculate_cost(usage, model_name, **kwargs):
+            calls.append(kwargs)
+            return CostBreakdown(cost_usd=0.0)
+
+        monkeypatch.setattr("llm_proxy.realtime.usage.calculate_cost", fake_calculate_cost)
+
+        await obs.on_client_message("text", _response_create(service_tier="auto"))
+        await obs.on_upstream_message("text", _response_done(usage=_USAGE, service_tier="default"))
+
+        assert calls[0]["service_tier"] == "default"
+
+    async def test_session_update_tier_applies_to_the_next_turn(self, observer, monkeypatch):
+        """A session-wide default is inherited by turns that name no tier."""
+        obs, _, _ = observer
+        calls = []
+
+        async def fake_calculate_cost(usage, model_name, **kwargs):
+            calls.append(kwargs)
+            return CostBreakdown(cost_usd=0.0)
+
+        monkeypatch.setattr("llm_proxy.realtime.usage.calculate_cost", fake_calculate_cost)
+
+        await obs.on_client_message(
+            "text",
+            orjson.dumps(
+                {"type": "session.update", "session": {"service_tier": "priority"}}
+            ).decode(),
+        )
+        await obs.on_client_message("text", _response_create())
+        await obs.on_upstream_message("text", _response_done(usage=_USAGE))
+
+        assert calls[0]["service_tier"] == "priority"

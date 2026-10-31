@@ -88,6 +88,7 @@ class ModelProviderRecord(Base):
     audio_input_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_output_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
     image_input_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reasoning_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Unit-based pricing (non-token dimensions)
     cost_per_image: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_cost_per_minute: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -95,6 +96,10 @@ class ModelProviderRecord(Base):
     web_search_cost_per_1k: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Context-based pricing tiers: [{"threshold": int, "input_cost_per_1m": float, ...}]
     pricing_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    # Time-of-day price windows (peak/off-peak): [{"start": "HH:MM", "end": "HH:MM", ...}]
+    pricing_time_windows: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    # Per-service-tier rate overrides (models.dev experimental.modes): {"flex": {...}}
+    service_tier_pricing: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Per-provider parameter overrides (applied to all requests via this provider)
     parameter_overrides: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -128,6 +133,7 @@ class ModelRecord(Base):
     audio_input_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_output_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
     image_input_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reasoning_cost_per_1m: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Unit-based pricing (non-token dimensions)
     cost_per_image: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_cost_per_minute: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -135,6 +141,10 @@ class ModelRecord(Base):
     web_search_cost_per_1k: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Context-based pricing tiers: [{"threshold": int, "input_cost_per_1m": float, ...}]
     pricing_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    # Time-of-day price windows (peak/off-peak): [{"start": "HH:MM", "end": "HH:MM", ...}]
+    pricing_time_windows: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    # Per-service-tier rate overrides (models.dev experimental.modes): {"flex": {...}}
+    service_tier_pricing: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     icon_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     homepage_url: Mapped[str | None] = mapped_column(String(500), nullable=True)

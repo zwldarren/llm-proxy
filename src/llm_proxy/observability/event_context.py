@@ -65,6 +65,11 @@ class EventContext:
     model: str | None
     internal_model: str | None = None
     provider: str | None = None
+    # Service tier the turn was served at ("default", "flex", "priority", ...):
+    # the provider's own answer when it reports one, otherwise the tier the
+    # client asked for. Billing prices a tier from its ``service_tier_pricing``
+    # map, so this is the fact that decides which rate list a turn falls under.
+    service_tier: str | None = None
     session_id: str | None = None
     # user_id: the user-facing identifier (e.g. username or display name) used in
     #          audit logs, request logs, and usage records for human-readable attribution.
@@ -223,6 +228,13 @@ class EventContext:
             and provider_cost > 0
         ):
             self.provider_reported_cost = provider_cost
+
+        # The provider's reported service tier is the tier it actually served
+        # (e.g. OpenAI downgrades ``auto`` to ``default``), so it replaces the
+        # one the client requested.
+        reported_tier = provider_info.get("service_tier")
+        if isinstance(reported_tier, str) and reported_tier.strip():
+            self.service_tier = reported_tier.strip()
 
         # Extract web search request count from server_tool_use (Anthropic).
         # Same fact as the record's ``web_search_requests`` (which may also carry

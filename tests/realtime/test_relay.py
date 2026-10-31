@@ -69,6 +69,7 @@ def _relay(
     *,
     config=None,
     on_upstream_message=None,
+    on_client_message=None,
     on_client_error=None,
 ):
     return RealtimeRelay(
@@ -76,6 +77,7 @@ def _relay(
         upstream=WebsocketsClientAdapter(upstream),
         config=config,
         on_upstream_message=on_upstream_message,
+        on_client_message=on_client_message,
         on_client_error=on_client_error,
     )
 
@@ -225,3 +227,30 @@ class TestRealtimeRelay:
         assert seen == [("text", "first"), ("text", "boom")]
         # The hook failure did not break the relay: both messages were delivered.
         assert client.sent == [("text", "first"), ("text", "boom")]
+
+    async def test_client_observation_hook_receives_forwarded_messages(self):
+        """The client-side hook sees exactly what the relay forwarded upstream."""
+        seen = []
+
+        async def hook(kind, data):
+            seen.append((kind, data))
+
+        client = FakeSocket(incoming=[("text", "response.create"), ("binary", b"\x00")])
+        upstream = FakeUpstreamSocket(incoming=[])
+        relay = _relay(client, upstream, on_client_message=hook)
+        await relay.run()
+
+        assert seen == [("text", "response.create"), ("binary", b"\x00")]
+
+    async def test_client_observation_hook_failure_is_swallowed(self):
+        """A failing client-side hook must not drop the client's message."""
+
+        async def hook(kind, data):
+            raise RuntimeError("observer failure")
+
+        client = FakeSocket(incoming=[("text", "response.create"), ("disconnect", 1000)])
+        upstream = FakeUpstreamSocket(incoming=[])
+        relay = _relay(client, upstream, on_client_message=hook)
+        await relay.run()
+
+        assert upstream.sent == ["response.create"]

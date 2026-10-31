@@ -12,7 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 
 from llm_proxy.config.types.model import (
     SUPPORTS_SYSTEMONE_DESCRIPTION,
+    PricingTimeWindowConfig,
+    TokenRateOverrides,
     normalize_pricing_tiers,
+    normalize_pricing_time_windows,
+    normalize_service_tier_pricing,
 )
 
 from .common import ValidatorMixin
@@ -40,6 +44,9 @@ class PricingTier(BaseModel):
     cached_write_cost_per_1m: float | None = Field(
         None, ge=0, description="Cost per 1M cached write tokens in USD"
     )
+    reasoning_cost_per_1m: float | None = Field(
+        None, ge=0, description="Cost per 1M reasoning (thinking) tokens in USD"
+    )
     audio_input_cost_per_1m: float | None = Field(
         None, ge=0, description="Cost per 1M audio input tokens in USD"
     )
@@ -49,6 +56,25 @@ class PricingTier(BaseModel):
     image_input_cost_per_1m: float | None = Field(
         None, ge=0, description="Cost per 1M image input tokens in USD"
     )
+
+
+class PricingTimeWindow(PricingTimeWindowConfig):
+    """A time-of-day price window (peak/off-peak pricing).
+
+    Applies to a request that **started** inside the window, read on the
+    window's own ``timezone`` clock; the whole request is repriced at its rates.
+    A request outside every window bills at the base rates.
+    """
+
+
+class ServiceTierRates(TokenRateOverrides):
+    """Rate overrides for one service tier (``flex``, ``priority``, ...).
+
+    The request's ``service_tier`` selects the entry; a turn served at a tier
+    with no entry keeps the rates the earlier overlays resolved (the standard
+    rates when no time window applies). A provider's ``null`` map inherits the
+    model-level one; an empty map disables it.
+    """
 
 
 class ModelProviderMapping(BaseModel, ValidatorMixin):
@@ -105,6 +131,11 @@ class ModelProviderMapping(BaseModel, ValidatorMixin):
         ge=0,
         description="Cost per 1M image input tokens in USD (overrides model pricing)",
     )
+    reasoning_cost_per_1m: float | None = Field(
+        None,
+        ge=0,
+        description="Cost per 1M reasoning (thinking) tokens in USD (overrides model pricing)",
+    )
     cost_per_image: float | None = Field(
         None,
         ge=0,
@@ -132,6 +163,20 @@ class ModelProviderMapping(BaseModel, ValidatorMixin):
             "applies from its input-token threshold up, with unset rates inherited"
         ),
     )
+    pricing_time_windows: list[PricingTimeWindow] | None = Field(
+        None,
+        description=(
+            "Time-of-day price windows (overrides model-level windows): a request "
+            "that started inside one bills at that window's rates"
+        ),
+    )
+    service_tier_pricing: dict[str, ServiceTierRates] | None = Field(
+        None,
+        description=(
+            "Per-service-tier rate overrides (overrides model-level ones), keyed by "
+            "mode name such as flex or priority"
+        ),
+    )
     parameter_overrides: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameter overrides to enforce for requests via this provider",
@@ -141,6 +186,16 @@ class ModelProviderMapping(BaseModel, ValidatorMixin):
     @classmethod
     def validate_pricing_tiers(cls, v):
         return normalize_pricing_tiers(v)
+
+    @field_validator("pricing_time_windows", mode="before")
+    @classmethod
+    def validate_pricing_time_windows(cls, v):
+        return normalize_pricing_time_windows(v)
+
+    @field_validator("service_tier_pricing", mode="before")
+    @classmethod
+    def validate_service_tier_pricing(cls, v):
+        return normalize_service_tier_pricing(v)
 
 
 ModelStatus = Literal["beta", "deprecated"]
@@ -264,6 +319,11 @@ class ModelBase(BaseModel, ValidatorMixin):
         ge=0,
         description="Default cost per 1M image input tokens in USD",
     )
+    reasoning_cost_per_1m: float | None = Field(
+        None,
+        ge=0,
+        description="Default cost per 1M reasoning (thinking) tokens in USD",
+    )
     cost_per_image: float | None = Field(
         None,
         ge=0,
@@ -289,6 +349,20 @@ class ModelBase(BaseModel, ValidatorMixin):
         description=(
             "Context-based pricing tiers: each entry applies from its input-token "
             "threshold up, with unset rates inherited from the base pricing above"
+        ),
+    )
+    pricing_time_windows: list[PricingTimeWindow] | None = Field(
+        None,
+        description=(
+            "Time-of-day price windows (peak/off-peak): a request that started "
+            "inside one bills at that window's rates, otherwise at the base rates"
+        ),
+    )
+    service_tier_pricing: dict[str, ServiceTierRates] | None = Field(
+        None,
+        description=(
+            "Per-service-tier rate overrides keyed by mode name (flex, priority, ...): "
+            "the request's service_tier selects one; unset dimensions inherit"
         ),
     )
     auto_eligible: bool = Field(default=False)
@@ -404,6 +478,16 @@ class ModelBase(BaseModel, ValidatorMixin):
     def validate_pricing_tiers(cls, v):
         return normalize_pricing_tiers(v)
 
+    @field_validator("pricing_time_windows", mode="before")
+    @classmethod
+    def validate_pricing_time_windows(cls, v):
+        return normalize_pricing_time_windows(v)
+
+    @field_validator("service_tier_pricing", mode="before")
+    @classmethod
+    def validate_service_tier_pricing(cls, v):
+        return normalize_service_tier_pricing(v)
+
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, v: object) -> str | None:
@@ -451,6 +535,7 @@ class ModelUpdate(BaseModel):
     audio_input_cost_per_1m: float | None = Field(None, ge=0)
     audio_output_cost_per_1m: float | None = Field(None, ge=0)
     image_input_cost_per_1m: float | None = Field(None, ge=0)
+    reasoning_cost_per_1m: float | None = Field(None, ge=0)
     cost_per_image: float | None = Field(None, ge=0)
     audio_cost_per_minute: float | None = Field(None, ge=0)
     tts_cost_per_1m_chars: float | None = Field(None, ge=0)
@@ -458,6 +543,14 @@ class ModelUpdate(BaseModel):
     pricing_tiers: list[PricingTier] | None = Field(
         None,
         description="Context-based pricing tiers for this model",
+    )
+    pricing_time_windows: list[PricingTimeWindow] | None = Field(
+        None,
+        description="Time-of-day price windows (peak/off-peak) for this model",
+    )
+    service_tier_pricing: dict[str, ServiceTierRates] | None = Field(
+        None,
+        description="Per-service-tier rate overrides for this model",
     )
     supports_images: bool | None = None
     supports_image_generation: bool | None = None
@@ -491,6 +584,16 @@ class ModelUpdate(BaseModel):
     @classmethod
     def validate_pricing_tiers(cls, v):
         return normalize_pricing_tiers(v)
+
+    @field_validator("pricing_time_windows", mode="before")
+    @classmethod
+    def validate_pricing_time_windows(cls, v):
+        return normalize_pricing_time_windows(v)
+
+    @field_validator("service_tier_pricing", mode="before")
+    @classmethod
+    def validate_service_tier_pricing(cls, v):
+        return normalize_service_tier_pricing(v)
 
     @field_validator("homepage_url", mode="before")
     @classmethod
@@ -567,6 +670,11 @@ class ModelRead(BaseModel):
         ge=0,
         description="Default cost per 1M image input tokens in USD",
     )
+    reasoning_cost_per_1m: float | None = Field(
+        None,
+        ge=0,
+        description="Default cost per 1M reasoning (thinking) tokens in USD",
+    )
     cost_per_image: float | None = Field(
         None,
         ge=0,
@@ -590,6 +698,14 @@ class ModelRead(BaseModel):
     pricing_tiers: list[PricingTier] | None = Field(
         None,
         description="Context-based pricing tiers for this model",
+    )
+    pricing_time_windows: list[PricingTimeWindow] | None = Field(
+        None,
+        description="Time-of-day price windows (peak/off-peak) for this model",
+    )
+    service_tier_pricing: dict[str, ServiceTierRates] | None = Field(
+        None,
+        description="Per-service-tier rate overrides for this model",
     )
     auto_eligible: bool = Field(default=False)
     quality_tier: str | None = Field(default=None)

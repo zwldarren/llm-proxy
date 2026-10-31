@@ -133,6 +133,10 @@ class RealtimeRelay:
         on_upstream_message: Optional async hook called for every
             upstream→client message (used for usage observation). Exceptions
             are logged and swallowed — observation must never break the relay.
+        on_client_message: Optional async hook called for every client→upstream
+            message the relay forwards (used to stamp a turn's start instant,
+            which peak/off-peak pricing keys off). Exceptions are logged and
+            swallowed, like ``on_upstream_message``.
         on_client_error: Optional async hook called with an error
             code and message when the relay rejects a client message
             (oversized) or the connection age cap is hit. The router sends
@@ -148,6 +152,9 @@ class RealtimeRelay:
         on_upstream_message: (
             Callable[[Literal["text", "binary"], str | bytes], Awaitable[None]] | None
         ) = None,
+        on_client_message: (
+            Callable[[Literal["text", "binary"], str | bytes], Awaitable[None]] | None
+        ) = None,
         on_client_error: Callable[[str, str], Awaitable[None]] | None = None,
         should_stop: Callable[[], Awaitable[bool]] | None = None,
         before_client_send: (
@@ -158,6 +165,7 @@ class RealtimeRelay:
         self._upstream = upstream
         self._config = config or RealtimeRelayConfig()
         self._on_upstream_message = on_upstream_message
+        self._on_client_message = on_client_message
         self._on_client_error = on_client_error
         self._should_stop = should_stop
         self._before_client_send = before_client_send
@@ -225,6 +233,11 @@ class RealtimeRelay:
                     except Exception as exc:  # noqa: BLE001 - authorization is fail-closed
                         logger.warning(f"Realtime client-message authorization failed: {exc}")
                         break
+                if self._on_client_message is not None:
+                    try:
+                        await self._on_client_message(kind, data)
+                    except Exception as exc:  # noqa: BLE001 - observation must not break the relay
+                        logger.warning(f"Realtime observation hook failed: {exc}")
                 await self._upstream.send(kind, data)
         except Exception as exc:
             logger.warning(f"Realtime client→upstream pump error: {exc}")

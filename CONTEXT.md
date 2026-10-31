@@ -392,3 +392,15 @@ _Avoid_: usage dict, dialect tolerance in billing (that lives in the intake adap
 **Context pricing tier**:
 A price band that applies once a request's input token count reaches its threshold: the whole request is billed at the band's rates, and any dimension the band leaves unset inherits the base rate. Stored per model and per provider mapping (`pricing_tiers` JSON), edited in the model form, and synced from models.dev `cost.tiers`; thresholds are inclusive and must be unique. See ADR-0014.
 _Avoid_: long-context surcharge, tier pricing (ambiguous with routing quality tiers), marginal overage pricing
+
+**Pricing overlay**:
+One of the three selectors that replace token rates on top of the base price: a context tier (by input size), a time window (by the request's start instant) or a service tier (by the tier the turn was served at). Applied in that order, each replacing only the dimensions it sets, with the whole request repriced at the result — never a marginal rate. Unit prices are never overlaid. See ADR-0053.
+_Avoid_: discount, multiplier, surcharge
+
+**Time window (peak/off-peak)**:
+A `pricing_time_windows` entry: `start`/`end` as `HH:MM`, an optional `days` list of ISO weekdays and an IANA `timezone`. It applies to a request that **started** inside it, read on the window's own clock; `end <= start` wraps past midnight, `days` names the start day, windows must not overlap in real (UTC) time (across timezones too), and a request outside every window bills at the base rates. A provider mapping inherits the model list when its own is absent/`null`, replaces it with a non-empty list, and disables it with an empty list. Hand-authored because models.dev cannot express time-of-day pricing.
+_Avoid_: time tier (`tier` is the context band), scheduled price, peak multiplier
+
+**Service tier pricing**:
+The `service_tier_pricing` map: a lowercase mode name (`flex`, `priority`, …) onto the rate overrides that mode bills at, selected by the turn's `service_tier` (the provider's reported tier first, else the requested one). A mode with no entry keeps the rates the earlier overlays resolved (the standard rates when no window applies). Synced from models.dev `experimental.modes`.
+_Avoid_: priority pricing, mode cost, speed tier

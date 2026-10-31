@@ -2,63 +2,35 @@
 
 from pydantic import BaseModel, Field, field_validator
 
-from llm_proxy.config.types.model import normalize_pricing_tiers
+from llm_proxy.api.schemas.models import PricingTier, PricingTimeWindow, ServiceTierRates
+from llm_proxy.config.types.model import (
+    TokenRateOverrides,
+    normalize_pricing_tiers,
+    normalize_pricing_time_windows,
+    normalize_service_tier_pricing,
+)
+
+# The three overlay shapes are admin schemas of the models resource, so they live
+# with it (ADR-0023) and are reused here: one shape per overlay, at every boundary
+# that accepts one. The base-rate schemas below inherit ``TokenRateOverrides`` for
+# the same reason — a new rate dimension is declared once and reaches every
+# sync/apply shape instead of drifting across four copies of the same eight fields.
+PricingTierOption = PricingTier
+PricingTimeWindowOption = PricingTimeWindow
+ServiceTierRatesOption = ServiceTierRates
 
 
-class PricingTierOption(BaseModel):
-    """A context-based pricing tier from models.dev's ``cost.tiers``.
-
-    Applies from ``threshold`` input tokens up; unset dimensions inherit the
-    entry's base cost.
-    """
-
-    threshold: int = Field(
-        ..., ge=0, description="Input token count at which this tier starts applying"
-    )
-    input_cost_per_1m: float | None = Field(None, description="Input cost per 1M tokens")
-    output_cost_per_1m: float | None = Field(None, description="Output cost per 1M tokens")
-    cached_read_cost_per_1m: float | None = Field(
-        None, description="Cached read cost per 1M tokens"
-    )
-    cached_write_cost_per_1m: float | None = Field(
-        None, description="Cached write cost per 1M tokens"
-    )
-    audio_input_cost_per_1m: float | None = Field(
-        None, description="Audio input cost per 1M tokens"
-    )
-    audio_output_cost_per_1m: float | None = Field(
-        None, description="Audio output cost per 1M tokens"
-    )
-    image_input_cost_per_1m: float | None = Field(
-        None,
-        description=(
-            "Image input cost per 1M tokens; models.dev's tiers never set it, "
-            "so it inherits the base rate unless edited by hand"
-        ),
-    )
-
-
-class ModelPricingInfo(BaseModel):
+class ModelPricingInfo(TokenRateOverrides):
     """Schema for model pricing information from models.dev."""
 
     model_id: str = Field(..., description="Model ID")
     provider: str = Field(..., description="Provider name")
-    input_cost_per_1m: float | None = Field(None, description="Input cost per 1M tokens")
-    output_cost_per_1m: float | None = Field(None, description="Output cost per 1M tokens")
-    cached_read_cost_per_1m: float | None = Field(
-        None, description="Cached read cost per 1M tokens"
-    )
-    cached_write_cost_per_1m: float | None = Field(
-        None, description="Cached write cost per 1M tokens"
-    )
-    audio_input_cost_per_1m: float | None = Field(
-        None, description="Audio input cost per 1M tokens"
-    )
-    audio_output_cost_per_1m: float | None = Field(
-        None, description="Audio output cost per 1M tokens"
-    )
     tiers: list[PricingTierOption] = Field(
         default_factory=list, description="Context-based pricing tiers"
+    )
+    service_tier_pricing: dict[str, ServiceTierRatesOption] = Field(
+        default_factory=dict,
+        description="Per-service-tier rates from models.dev ``experimental.modes``",
     )
 
 
@@ -86,26 +58,15 @@ class SyncPricingRequest(BaseModel):
     )
 
 
-class PricingOption(BaseModel):
+class PricingOption(TokenRateOverrides):
     """Schema for an available pricing option."""
 
     source: str = Field(..., description="Pricing source (models.dev provider key)")
-    input_cost_per_1m: float | None = Field(None, description="Input cost per 1M tokens")
-    output_cost_per_1m: float | None = Field(None, description="Output cost per 1M tokens")
-    cached_read_cost_per_1m: float | None = Field(
-        None, description="Cached read cost per 1M tokens"
-    )
-    cached_write_cost_per_1m: float | None = Field(
-        None, description="Cached write cost per 1M tokens"
-    )
-    audio_input_cost_per_1m: float | None = Field(
-        None, description="Audio input cost per 1M tokens"
-    )
-    audio_output_cost_per_1m: float | None = Field(
-        None, description="Audio output cost per 1M tokens"
-    )
     tiers: list[PricingTierOption] = Field(
         default_factory=list, description="Context-based pricing tiers"
+    )
+    service_tier_pricing: dict[str, ServiceTierRatesOption] = Field(
+        default_factory=dict, description="Per-service-tier rates"
     )
 
 
@@ -132,6 +93,10 @@ class SyncPricingResult(BaseModel):
     new_cached_write_cost: float | None = Field(
         None, description="New cached write cost per 1M tokens"
     )
+    old_reasoning_cost: float | None = Field(
+        None, description="Previous reasoning cost per 1M tokens"
+    )
+    new_reasoning_cost: float | None = Field(None, description="New reasoning cost per 1M tokens")
     old_audio_input_cost: float | None = Field(
         None, description="Previous audio input cost per 1M tokens"
     )
@@ -150,6 +115,12 @@ class SyncPricingResult(BaseModel):
     new_pricing_tiers: list[PricingTierOption] | None = Field(
         None, description="New context-based pricing tiers"
     )
+    old_service_tier_pricing: dict[str, ServiceTierRatesOption] | None = Field(
+        None, description="Previous per-service-tier rates"
+    )
+    new_service_tier_pricing: dict[str, ServiceTierRatesOption] | None = Field(
+        None, description="New per-service-tier rates"
+    )
     updated: bool = Field(..., description="Whether the model was updated")
     message: str = Field(..., description="Status message")
     available_sources: list[PricingOption] = Field(
@@ -159,7 +130,7 @@ class SyncPricingResult(BaseModel):
     selected_source: str | None = Field(None, description="Which pricing source was used")
 
 
-class PricingUpdateItem(BaseModel):
+class PricingUpdateItem(TokenRateOverrides):
     """Explicit pricing update for a single model-provider mapping.
 
     Only fields explicitly provided are written; a provided ``null`` clears
@@ -171,23 +142,6 @@ class PricingUpdateItem(BaseModel):
     """
 
     mapping_id: int = Field(..., description="ModelProviderRecord ID to update")
-    input_cost_per_1m: float | None = Field(None, description="Input cost per 1M tokens")
-    output_cost_per_1m: float | None = Field(None, description="Output cost per 1M tokens")
-    cached_read_cost_per_1m: float | None = Field(
-        None, description="Cached read cost per 1M tokens"
-    )
-    cached_write_cost_per_1m: float | None = Field(
-        None, description="Cached write cost per 1M tokens"
-    )
-    audio_input_cost_per_1m: float | None = Field(
-        None, description="Audio input cost per 1M tokens"
-    )
-    audio_output_cost_per_1m: float | None = Field(
-        None, description="Audio output cost per 1M tokens"
-    )
-    image_input_cost_per_1m: float | None = Field(
-        None, ge=0, description="Cost per 1M image input tokens in USD"
-    )
     cost_per_image: float | None = Field(None, ge=0, description="Cost per generated image in USD")
     audio_cost_per_minute: float | None = Field(
         None, ge=0, description="Cost per minute of audio (STT) in USD"
@@ -201,11 +155,27 @@ class PricingUpdateItem(BaseModel):
     pricing_tiers: list[PricingTierOption] | None = Field(
         None, description="Context-based pricing tiers (null clears them)"
     )
+    pricing_time_windows: list[PricingTimeWindowOption] | None = Field(
+        None, description="Time-of-day pricing windows (null clears them)"
+    )
+    service_tier_pricing: dict[str, ServiceTierRatesOption] | None = Field(
+        None, description="Per-service-tier rate overrides (null clears them)"
+    )
 
     @field_validator("pricing_tiers")
     @classmethod
     def validate_pricing_tiers(cls, v):
         return normalize_pricing_tiers(v)
+
+    @field_validator("pricing_time_windows")
+    @classmethod
+    def validate_pricing_time_windows(cls, v):
+        return normalize_pricing_time_windows(v)
+
+    @field_validator("service_tier_pricing")
+    @classmethod
+    def validate_service_tier_pricing(cls, v):
+        return normalize_service_tier_pricing(v)
 
 
 class ApplyPricingRequest(BaseModel):

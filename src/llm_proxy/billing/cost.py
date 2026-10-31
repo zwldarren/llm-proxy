@@ -1,10 +1,13 @@
 """Cost calculation utilities."""
 
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from llm_proxy.billing.tokens import ProxyBillableDimensions, TokenUsage, token_usage_from
-from llm_proxy.core.utils import coerce_float
+from llm_proxy.config.types.model import minutes_of_day
+from llm_proxy.core.utils import coerce_float, read_field
 from llm_proxy.models.types import Usage
 from llm_proxy.observability.logger import get_logger
 
@@ -27,6 +30,7 @@ class PricingRates:
     output_cost_per_1m: float | None = None
     cached_read_cost_per_1m: float | None = None
     cached_write_cost_per_1m: float | None = None
+    reasoning_cost_per_1m: float | None = None
     audio_input_cost_per_1m: float | None = None
     audio_output_cost_per_1m: float | None = None
     image_input_cost_per_1m: float | None = None
@@ -50,6 +54,31 @@ class CostTier:
     output_cost_per_1m: float | None = None
     cached_read_cost_per_1m: float | None = None
     cached_write_cost_per_1m: float | None = None
+    reasoning_cost_per_1m: float | None = None
+    audio_input_cost_per_1m: float | None = None
+    audio_output_cost_per_1m: float | None = None
+    image_input_cost_per_1m: float | None = None
+
+
+@dataclass
+class PricingWindow:
+    """One time-of-day price band, read in ``timezone``'s wall clock.
+
+    ``start_minute >= end_minute`` marks a window that crosses midnight (a
+    ``22:00``–``08:00`` off-peak band). ``days`` names the ISO weekday the window
+    *starts* on, so a Friday band also covers Saturday's small hours; an empty set
+    means every day.
+    """
+
+    start_minute: int
+    end_minute: int
+    days: frozenset[int]
+    timezone: str
+    input_cost_per_1m: float | None = None
+    output_cost_per_1m: float | None = None
+    cached_read_cost_per_1m: float | None = None
+    cached_write_cost_per_1m: float | None = None
+    reasoning_cost_per_1m: float | None = None
     audio_input_cost_per_1m: float | None = None
     audio_output_cost_per_1m: float | None = None
     image_input_cost_per_1m: float | None = None
@@ -83,17 +112,49 @@ class CostBreakdown:
 
 _PRICING_FIELDS = tuple(PricingRates.__dataclass_fields__)
 
-# Token rates a context tier may override. Unit-based pricing (per image, per
-# minute, per character, per search) is never tiered, matching models.dev.
-_TIER_RATE_FIELDS = (
+# Token rates an overlay (context tier, time window, service tier) may override.
+# Unit-based pricing (per image, per minute, per character, per search) is never
+# overlaid: no upstream prices those by request size, clock or service tier.
+_OVERLAY_RATE_FIELDS = (
     "input_cost_per_1m",
     "output_cost_per_1m",
     "cached_read_cost_per_1m",
     "cached_write_cost_per_1m",
+    "reasoning_cost_per_1m",
     "audio_input_cost_per_1m",
     "audio_output_cost_per_1m",
     "image_input_cost_per_1m",
 )
+
+
+def _provider_config(model_config: Any, provider_name: str | None) -> Any:
+    """The provider mapping ``provider_name`` names, or ``None`` when the model
+    has no mapping for it (or the caller named no provider)."""
+    if not provider_name:
+        return None
+    return next(
+        (p for p in model_config.providers if p.provider == provider_name),
+        None,
+    )
+
+
+def _effective_overlay(model_config: Any, provider_name: str | None, attribute: str) -> Any:
+    """A model's price overlay, unless its provider mapping carries its own.
+
+    A provider mapping may override the model's tiers, windows or service-tier
+    rates (the same model can be priced differently per upstream); when it does,
+    it replaces the model-level value wholesale rather than extending it. The
+    three states matter: ``None`` means the provider sets nothing and inherits
+    the model-level value, while an empty list/map is a provider that explicitly
+    has no overlay (an upstream with no off-peak rates, say) and must not fall
+    back — hence an identity check, not a truthiness test.
+    """
+    provider_config = _provider_config(model_config, provider_name)
+    if provider_config is not None:
+        value = getattr(provider_config, attribute, None)
+        if value is not None:
+            return value
+    return getattr(model_config, attribute, None)
 
 
 def _get_provider_pricing(
@@ -101,28 +162,18 @@ def _get_provider_pricing(
     provider_name: str | None,
 ) -> PricingRates:
     """Get pricing for a specific provider, falling back to model-level pricing."""
-
-    def _rate(obj: Any, attr: str) -> float | None:
-        return getattr(obj, attr, None)
-
-    if provider_name:
-        provider_config = next(
-            (p for p in model_config.providers if p.provider == provider_name),
-            None,
-        )
-        if provider_config:
-            return PricingRates(
-                **{
-                    field: (
-                        v
-                        if (v := _rate(provider_config, field)) is not None
-                        else _rate(model_config, field)
-                    )
-                    for field in _PRICING_FIELDS
-                }
+    provider_config = _provider_config(model_config, provider_name)
+    return PricingRates(
+        **{
+            field: (
+                provider_value
+                if provider_config is not None
+                and (provider_value := getattr(provider_config, field, None)) is not None
+                else getattr(model_config, field, None)
             )
-
-    return PricingRates(**{field: _rate(model_config, field) for field in _PRICING_FIELDS})
+            for field in _PRICING_FIELDS
+        }
+    )
 
 
 def _coerce_pricing_tier(raw: Any) -> CostTier | None:
@@ -134,18 +185,13 @@ def _coerce_pricing_tier(raw: Any) -> CostTier | None:
     if isinstance(raw, CostTier):
         return raw
 
-    def read(key: str) -> Any:
-        if isinstance(raw, dict):
-            return raw.get(key)
-        return getattr(raw, key, None)
-
-    threshold = coerce_float(read("threshold"))
+    threshold = coerce_float(read_field(raw, "threshold"))
     if threshold is None:
         logger.warning(f"Ignoring pricing tier without threshold: {raw!r}")
         return None
     return CostTier(
         threshold=int(threshold),
-        **{field: coerce_float(read(field)) for field in _TIER_RATE_FIELDS},
+        **{field: coerce_float(read_field(raw, field)) for field in _OVERLAY_RATE_FIELDS},
     )
 
 
@@ -154,21 +200,25 @@ def _get_pricing_tiers(
     provider_name: str | None,
 ) -> list[CostTier]:
     """Get the effective tier list: provider tiers win over model-level ones."""
-    raw_tiers: Any = None
-    if provider_name:
-        provider_config = next(
-            (p for p in model_config.providers if p.provider == provider_name),
-            None,
-        )
-        if provider_config:
-            raw_tiers = getattr(provider_config, "pricing_tiers", None)
-
-    if not raw_tiers:
-        raw_tiers = getattr(model_config, "pricing_tiers", None)
-
+    raw_tiers = _effective_overlay(model_config, provider_name, "pricing_tiers")
     if not raw_tiers:
         return []
     return [tier for tier in (_coerce_pricing_tier(raw) for raw in raw_tiers) if tier is not None]
+
+
+def _overlay(base: PricingRates, source: CostTier | PricingWindow | dict[str, Any]) -> PricingRates:
+    """Replace the rates ``source`` sets, keeping every rate it leaves unset."""
+    overrides = {
+        field: value
+        for field in _OVERLAY_RATE_FIELDS
+        if (value := _overlay_rate(source, field)) is not None
+    }
+    return replace(base, **overrides) if overrides else base
+
+
+def _overlay_rate(source: CostTier | PricingWindow | dict[str, Any], field: str) -> float | None:
+    """One overlay rate, read from a config/JSON overlay of either shape."""
+    return coerce_float(read_field(source, field))
 
 
 def _select_tier_rates(
@@ -187,12 +237,120 @@ def _select_tier_rates(
             selected = tier
     if selected is None:
         return base
-    overrides = {
-        field: value
-        for field in _TIER_RATE_FIELDS
-        if (value := getattr(selected, field)) is not None
-    }
-    return replace(base, **overrides)
+    return _overlay(base, selected)
+
+
+def _coerce_pricing_window(raw: Any) -> PricingWindow | None:
+    """Coerce a config model or stored JSON dict into a :class:`PricingWindow`.
+
+    Returns ``None`` for entries whose clock, days or timezone cannot be read so
+    one malformed row is ignored instead of failing every request that touches
+    the model.
+    """
+    start = minutes_of_day(read_field(raw, "start"))
+    end = minutes_of_day(read_field(raw, "end"))
+    if start is None or end is None or start == end:
+        logger.warning(f"Ignoring pricing time window without a valid start/end: {raw!r}")
+        return None
+
+    timezone = str(read_field(raw, "timezone") or "UTC")
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError) as _:
+        logger.warning(f"Ignoring pricing time window with unknown timezone {timezone!r}")
+        return None
+
+    raw_days = read_field(raw, "days") or []
+    days = frozenset(day for day in raw_days if isinstance(day, int) and 0 <= day <= 6)
+
+    return PricingWindow(
+        start_minute=start,
+        end_minute=end,
+        days=days,
+        timezone=timezone,
+        **{field: coerce_float(read_field(raw, field)) for field in _OVERLAY_RATE_FIELDS},
+    )
+
+
+def _get_pricing_windows(
+    model_config: Any,
+    provider_name: str | None,
+) -> list[PricingWindow]:
+    """Get the effective window list: provider windows win over model-level ones."""
+    raw_windows = _effective_overlay(model_config, provider_name, "pricing_time_windows")
+    if not raw_windows:
+        return []
+    return [
+        window
+        for window in (_coerce_pricing_window(raw) for raw in raw_windows)
+        if window is not None
+    ]
+
+
+def _window_applies(window: PricingWindow, at: datetime) -> bool:
+    """Whether ``at`` falls inside ``window``, read on the window's own clock.
+
+    The start day is resolved first: after midnight, the instant belongs to the
+    weekday the window started on, not the weekday it is locally now.
+    """
+    moment = at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+    local = moment.astimezone(ZoneInfo(window.timezone))
+    minutes = local.hour * 60 + local.minute
+
+    crosses_midnight = window.start_minute > window.end_minute
+    if crosses_midnight:
+        # After midnight the instant belongs to the previous weekday's window.
+        start_day = (local.weekday() - 1) % 7 if minutes < window.end_minute else local.weekday()
+        inside = minutes >= window.start_minute or minutes < window.end_minute
+    else:
+        start_day = local.weekday()
+        inside = window.start_minute <= minutes < window.end_minute
+
+    if not inside:
+        return False
+    return not window.days or start_day in window.days
+
+
+def _apply_time_window(
+    base: PricingRates,
+    windows: list[PricingWindow],
+    at: datetime,
+) -> PricingRates:
+    """Overlay the first time window that covers ``at`` (peak/off-peak repricing).
+
+    Windows in one list never overlap (validated at every boundary that accepts
+    them), so the first match is also the only one.
+    """
+    for window in windows:
+        if _window_applies(window, at):
+            return _overlay(base, window)
+    return base
+
+
+def _get_service_tier_pricing(
+    model_config: Any,
+    provider_name: str | None,
+) -> dict[str, Any]:
+    """Get the effective service-tier map: provider map wins over model-level."""
+    return _effective_overlay(model_config, provider_name, "service_tier_pricing") or {}
+
+
+def _apply_service_tier(
+    base: PricingRates,
+    pricing: dict[str, Any],
+    service_tier: str | None,
+) -> PricingRates:
+    """Overlay the rates of the service tier the request was served at.
+
+    models.dev publishes these as ``experimental.modes`` (``flex``/``priority``);
+    a mode missing from the map means the request keeps the rates the earlier
+    overlays resolved, which is what an upstream serving ``default`` charges. Keys are stored
+    lowercased by every writer, so one lowering matches them all.
+    """
+    if not service_tier or not pricing:
+        return base
+    rates = pricing.get(service_tier.strip().lower())
+    return base if rates is None else _overlay(base, rates)
 
 
 def _calculate_cache_cost(
@@ -413,13 +571,32 @@ async def calculate_cost(
     completion_text: str | None = None,
     provider_name: str | None = None,
     dimensions: ProxyBillableDimensions | None = None,
+    at: datetime | None = None,
+    service_tier: str | None = None,
 ) -> CostBreakdown:
     """Calculate cost from a turn's canonical usage record and model pricing.
 
-    Supports token-based billing (text/cache/audio/image tokens) and
+    Supports token-based billing (text/cache/reasoning/audio/image tokens) and
     unit-based billing (per image, per audio minute, per 1M TTS characters,
     per 1k web searches). ``dimensions`` carries the quantities the proxy
     itself produced, which the record does not hold (ADR-0025).
+
+    Three overlays can replace the base token rates, applied in this order:
+
+    1. the context tier the input token count reaches;
+    2. the time-of-day window covering ``at`` — the request's **start**
+       instant, which is what upstreams price a peak/off-peak request by;
+    3. the service tier (``flex``/``priority``/...) the request was served at.
+
+    ``at`` is deliberately not defaulted to "now": billing the instant the turn
+    *finished* is exactly the mistake ADR-0053 rejects, and a caller that has no
+    start instant must say so. Passing ``None`` leaves the time-window overlay
+    off (base/tier rates stay in force), so a forgotten ``at`` under-reports an
+    off-peak discount instead of silently pricing the wrong band.
+
+    Each overlay only replaces the dimensions it sets, and a later overlay wins
+    per dimension. The whole request is repriced at the resulting rates — none
+    of the three is a marginal rate over the base.
 
     Returns a CostBreakdown; ``cost_usd`` is None when the cost cannot be
     determined. A count the provider reported as zero stays ``0`` — only the
@@ -458,11 +635,21 @@ async def calculate_cost(
         # Get all pricing rates with provider-specific fallback
         rates = _get_provider_pricing(model_config, provider_name)
         tiers = _get_pricing_tiers(model_config, provider_name)
+        windows = _get_pricing_windows(model_config, provider_name)
+        tier_pricing = _get_service_tier_pricing(model_config, provider_name)
 
         # Model resolved but no pricing configured at any level: report None
         # ("unknown") rather than a fake $0.00 that silently under-reports
-        # spend in usage stats.
-        if not tiers and all(getattr(rates, field) is None for field in _PRICING_FIELDS):
+        # spend in usage stats. A model priced only by an overlay is not
+        # "unpriced": its rates are resolved below, and the same check runs
+        # again on the resolved rates so a window or tier that covers nothing
+        # here still reports unknown.
+        if (
+            not tiers
+            and not windows
+            and not tier_pricing
+            and all(getattr(rates, field) is None for field in _PRICING_FIELDS)
+        ):
             return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
         input_cost = 0.0
@@ -482,6 +669,13 @@ async def calculate_cost(
         # Context-tier pricing keys off the request's whole input, before the
         # audio/image token carve-outs below shrink the billable text input.
         rates = _select_tier_rates(rates, tiers, effective_prompt_tokens)
+        # Peak/off-peak, then the service tier actually served. Both key off
+        # facts about the turn rather than its size, so they compose with the
+        # context band by replacing only the dimensions they price. No start
+        # instant means no window: never fall back to the completion time.
+        if at is not None:
+            rates = _apply_time_window(rates, windows, at)
+        rates = _apply_service_tier(rates, tier_pricing, service_tier)
         if all(getattr(rates, field) is None for field in _PRICING_FIELDS):
             return _breakdown_from_usage(token_usage, None, usage_reported=usage_reported)
 
@@ -506,6 +700,19 @@ async def calculate_cost(
         ):
             effective_completion_tokens -= token_usage.audio_output_tokens
 
+        # Reasoning tokens are already in completion_tokens, and a dedicated
+        # reasoning rate carves them out so they are charged once at that rate.
+        # Without a reasoning rate they keep billing at the output rate, which is
+        # what every provider that does not publish one charges. The carve-out and
+        # the charge below share one count, so a provider reporting more reasoning
+        # tokens than completion tokens can never bill a token twice: only the
+        # overlapping part is removed from the output count.
+        reasoning_tokens = token_usage.reasoning_tokens or 0
+        reasoning_cost = 0.0
+        if reasoning_tokens > 0 and rates.reasoning_cost_per_1m is not None:
+            effective_completion_tokens -= min(reasoning_tokens, effective_completion_tokens)
+            reasoning_cost = (reasoning_tokens / 1_000_000) * rates.reasoning_cost_per_1m
+
         # Image tokens are already in prompt_tokens (gpt-image).
         # Subtract them so they are charged at the image rate only.
         if (
@@ -526,7 +733,15 @@ async def calculate_cost(
         image_token_cost = _calculate_image_token_cost(token_usage, rates)
         unit_cost = _calculate_unit_costs(token_usage, rates)
 
-        cost_usd = input_cost + output_cost + cache_cost + audio_cost + image_token_cost + unit_cost
+        cost_usd = (
+            input_cost
+            + output_cost
+            + reasoning_cost
+            + cache_cost
+            + audio_cost
+            + image_token_cost
+            + unit_cost
+        )
         breakdown = _breakdown_from_usage(token_usage, cost_usd, usage_reported=usage_reported)
         breakdown.cache_savings_usd = cache_savings_usd
         return breakdown
