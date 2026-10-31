@@ -24,6 +24,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from llm_proxy.providers.headers import merge_passthrough_headers
+from llm_proxy.providers.session_headers import (
+    capture_session_headers,
+    clear_session_headers,
+)
 
 # Exact header names (lowercase) forwarded to native Anthropic upstreams.
 _PASSTHROUGH_EXACT = frozenset(
@@ -78,6 +82,7 @@ _client_headers: contextvars.ContextVar[dict[str, str] | None] = contextvars.Con
 
 def capture_client_headers(headers: Mapping[str, str]) -> None:
     """Filter the incoming request headers and store the whitelisted subset."""
+    capture_session_headers(headers)
     selected: dict[str, str] = {}
     for key, value in headers.items():
         lowered = key.lower()
@@ -96,6 +101,7 @@ def get_client_headers() -> dict[str, str]:
 def clear_client_headers() -> None:
     """Drop the captured headers (request-scoped cleanup)."""
     _client_headers.set(None)
+    clear_session_headers()
 
 
 def merge_captured_headers(values: Mapping[str, str]) -> None:

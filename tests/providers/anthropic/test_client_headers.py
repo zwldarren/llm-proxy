@@ -10,6 +10,7 @@ from llm_proxy.providers.anthropic.client_headers import (
     ensure_claude_code_beta,
     get_client_headers,
 )
+from llm_proxy.providers.session_headers import get_client_upstream_session_id
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,18 @@ def _clean_contextvar():
 
 
 class TestCaptureClientHeaders:
+    def test_captures_claude_code_session_header(self):
+        """The Anthropic middleware also feeds the OpenCode session resolver."""
+        capture_client_headers({"x-claude-code-session-id": "claude-session"})
+
+        assert get_client_upstream_session_id() == "claude-session"
+
+    def test_clear_drops_the_session_context_too(self):
+        capture_client_headers({"x-opencode-session": "ses_client"})
+        clear_client_headers()
+
+        assert get_client_upstream_session_id() is None
+
     def test_captures_whitelisted_headers(self):
         capture_client_headers(
             {

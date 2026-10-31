@@ -30,5 +30,10 @@ class OpenCodeGoAdapter(OpenCodeGatewayAdapter):
     #: The Go subscription models have their own catalog entry.
     CATALOG_ENTRY = "opencode-go"
 
+    #: The Go docs ask clients to identify themselves with their own
+    #: User-Agent instead of a generic SDK or HTTP-library name. Zen keeps the
+    #: CLI stamp because its free tier only accepts the OpenCode identity.
+    IDENTIFY_AS_LLM_PROXY = True
+
 
 __all__ = ["OpenCodeGoAdapter"]

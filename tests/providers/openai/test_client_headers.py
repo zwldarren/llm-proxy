@@ -9,6 +9,7 @@ from llm_proxy.providers.openai.client_headers import (
     get_client_headers,
     get_openrouter_client_headers,
 )
+from llm_proxy.providers.session_headers import get_client_upstream_session_id
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +53,23 @@ class TestCaptureClientHeaders:
         assert captured["x-client-request-id"] == "req_1"
         assert captured["x-stainless-os"] == "macOS"
         assert captured["x-stainless-runtime"] == "node"
+
+    def test_captures_client_session_headers(self):
+        """The same middleware feeds the OpenCode session resolver."""
+        capture_client_headers(
+            {
+                "x-claude-code-session-id": "claude-session",
+                "session_id": "codex-session",
+            }
+        )
+
+        assert get_client_upstream_session_id() == "claude-session"
+
+    def test_clear_drops_the_session_context_too(self):
+        capture_client_headers({"x-opencode-session": "ses_client"})
+        clear_client_headers()
+
+        assert get_client_upstream_session_id() is None
 
     def test_drops_non_whitelisted_and_sensitive_headers(self):
         capture_client_headers(

@@ -34,6 +34,16 @@ field of the record, reached through `get_request_identity`. See ADR-0022.
 _Avoid_: request state, request context (that is `RequestContext`, the processing
 carrier), session context
 
+**Upstream session**:
+The conversation-scoped affinity id a provider sends upstream — OpenCode's
+`x-opencode-session`. It is stable across turns, retries, and workers,
+resolved from the client's native session header, request metadata, or a
+deterministic conversation fingerprint, and it is purely provider-scoped.
+Do not confuse it with the request-fact `session_id`, which is the client's
+log-correlation id for request logs and tracing; the upstream id is never
+written to the request facts. See ADR-0052.
+_Avoid_: session id (ambiguous on its own), session context, cache key
+
 ### Access control
 
 **Key gate**:

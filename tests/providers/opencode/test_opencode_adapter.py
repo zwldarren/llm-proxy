@@ -16,13 +16,24 @@ from providers.helpers import (
 )
 
 from llm_proxy.core.conversion import plan_conversion
-from llm_proxy.models import ConversionTier, InternalDecisionRequest, InternalSystemOneRequest
+from llm_proxy.models import (
+    AnthropicSpecificParams,
+    ConversionTier,
+    GenerationParams,
+    InternalDecisionRequest,
+    InternalSystemOneRequest,
+    OpenAISpecificParams,
+)
 from llm_proxy.providers.opencode import adapter as adapter_module
 from llm_proxy.providers.opencode.adapter import OpenCodeGatewayAdapter
 from llm_proxy.providers.opencode.catalog import CatalogModel
 from llm_proxy.providers.opencode.dialect import Dialect
 from llm_proxy.providers.opencode_go import OpenCodeGoAdapter
 from llm_proxy.providers.opencode_zen import OpenCodeZenAdapter
+from llm_proxy.providers.session_headers import (
+    capture_session_headers,
+    clear_session_headers,
+)
 
 ZEN_BASE = "https://opencode.ai/zen/v1"
 #: The Zen lane keeps every dialect on the base root: these ARE base + path.
@@ -70,6 +81,13 @@ GOOGLE_UPSTREAM = {
     "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2, "totalTokenCount": 5},
     "modelVersion": "gemini-3.6-flash",
 }
+
+
+@pytest.fixture(autouse=True)
+def _clean_session_headers():
+    clear_session_headers()
+    yield
+    clear_session_headers()
 
 
 def make_adapter(mock_response_cls, mock_client, **config) -> OpenCodeZenAdapter:
@@ -282,6 +300,169 @@ class TestIdentityHeaders:
         assert headers["x-opencode-project"] == "team-x"
         # The untouched identity defaults still ride along.
         assert headers["x-opencode-client"] == "cli"
+
+    async def test_client_session_header_is_preserved(self, mock_response_cls, make_mock_client):
+        """A client that speaks OpenCode (the CLI, Hermes, Pi, ...) owns the id."""
+        capture_session_headers({"x-opencode-session": "ses_client_owned"})
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        assert post_headers(adapter)["x-opencode-session"] == "ses_client_owned"
+
+    async def test_native_session_header_is_translated_and_forwarded(
+        self, mock_response_cls, make_mock_client
+    ):
+        """Claude Code / Codex session headers become x-opencode-session, too."""
+        capture_session_headers({"x-claude-code-session-id": "claude-session-1"})
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        headers = post_headers(adapter)
+        assert headers["x-opencode-session"] == "claude-session-1"
+        # The edge also recognizes the native header, so it rides along.
+        assert headers["x-claude-code-session-id"] == "claude-session-1"
+
+    async def test_protocol_capture_feeds_the_adapter(self, mock_response_cls, make_mock_client):
+        """The real protocol middleware path (not just the session module) works."""
+        from llm_proxy.providers.openai.client_headers import (
+            capture_client_headers as capture_openai_headers,
+        )
+
+        capture_openai_headers({"x-claude-code-session-id": "claude-session-2"})
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        assert post_headers(adapter)["x-opencode-session"] == "claude-session-2"
+
+    async def test_session_is_stable_across_turns(self, mock_response_cls, make_mock_client):
+        """A new adapter per request (as production does) keeps the conversation id."""
+        client = make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+
+        first_adapter = make_adapter(mock_response_cls, client)
+        await first_adapter.chat_completion(chat_request("glm-5.3"))
+        first = post_headers(first_adapter)
+
+        second_adapter = make_adapter(mock_response_cls, client)
+        await second_adapter.chat_completion(chat_request("glm-5.3"))
+        second = post_headers(second_adapter)
+
+        assert first["x-opencode-session"] == second["x-opencode-session"]
+        assert first["x-opencode-request"] != second["x-opencode-request"]
+
+    async def test_different_conversations_get_different_sessions(
+        self, mock_response_cls, make_mock_client
+    ):
+        client = make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        first_request = chat_request("glm-5.3")
+        second_request = chat_request("glm-5.3")
+        second_request.conversation.messages[0].content[0].text = "a different conversation"
+
+        first_adapter = make_adapter(mock_response_cls, client)
+        await first_adapter.chat_completion(first_request)
+        first = post_headers(first_adapter)["x-opencode-session"]
+
+        second_adapter = make_adapter(mock_response_cls, client)
+        await second_adapter.chat_completion(second_request)
+        second = post_headers(second_adapter)["x-opencode-session"]
+
+        assert first != second
+
+    async def test_prompt_cache_key_is_used_as_the_session(
+        self, mock_response_cls, make_mock_client
+    ):
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+        request = chat_request(
+            "glm-5.3",
+            params=GenerationParams(openai=OpenAISpecificParams(prompt_cache_key="cache-key-1")),
+        )
+
+        await adapter.chat_completion(request)
+
+        assert post_headers(adapter)["x-opencode-session"] == "cache-key-1"
+
+    async def test_anthropic_metadata_session_is_used(self, mock_response_cls, make_mock_client):
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+        request = chat_request(
+            "glm-5.3",
+            params=GenerationParams(
+                anthropic=AnthropicSpecificParams(
+                    metadata={"user_id": "user_1_account_2_session_ses_metadata"}
+                )
+            ),
+        )
+
+        await adapter.chat_completion(request)
+
+        assert post_headers(adapter)["x-opencode-session"] == "ses_metadata"
+
+    async def test_custom_session_header_wins_over_the_client(
+        self, mock_response_cls, make_mock_client
+    ):
+        capture_session_headers({"x-opencode-session": "ses_client_owned"})
+        adapter = make_adapter(
+            mock_response_cls,
+            make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM)),
+            custom_headers={"x-opencode-session": "ses_pinned_by_operator"},
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        assert post_headers(adapter)["x-opencode-session"] == "ses_pinned_by_operator"
+
+    async def test_conflicting_native_headers_forward_only_the_resolved_one(
+        self, mock_response_cls, make_mock_client
+    ):
+        """The edge must not see a second native id the proxy did not resolve."""
+        capture_session_headers(
+            {"x-claude-code-session-id": "claude-session-1", "session_id": "codex-session-1"}
+        )
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        headers = post_headers(adapter)
+        assert headers["x-opencode-session"] == "claude-session-1"
+        assert headers["x-claude-code-session-id"] == "claude-session-1"
+        assert "session_id" not in headers
+        assert "session-id" not in headers
+
+    async def test_go_lane_identifies_the_proxy(self, mock_response_cls, make_mock_client):
+        """The Go docs ask clients for their own User-Agent, not a generic SDK name."""
+        adapter = OpenCodeGoAdapter(api_key="sk-test", opencode_catalog_url="")
+        adapter._http_client = make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        assert post_headers(adapter)["User-Agent"].startswith("llm-proxy/")
+
+    async def test_empty_custom_header_is_an_explicit_override(
+        self, mock_response_cls, make_mock_client
+    ):
+        """``custom_headers`` wins even when it is empty; it is an operator choice."""
+        adapter = make_adapter(
+            mock_response_cls,
+            make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM)),
+            custom_headers={"x-opencode-session": ""},
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        assert post_headers(adapter)["x-opencode-session"] == ""
 
 
 class TestSystemOneModels:

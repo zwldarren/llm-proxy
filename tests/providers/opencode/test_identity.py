@@ -50,6 +50,39 @@ def test_ids_are_unique_across_calls():
     assert first["x-opencode-request"] != second["x-opencode-request"]
 
 
+def test_resolved_session_is_preserved():
+    headers = identity.identity_headers(session_id="ses_conversation")
+
+    assert headers["x-opencode-session"] == "ses_conversation"
+    # The request id is always per request; a client's value is not reused.
+    assert headers["x-opencode-request"].startswith("msg_")
+    assert headers["x-opencode-request"] != "ses_conversation"
+
+
+def test_user_agent_is_overridable():
+    headers = identity.identity_headers(user_agent="llm-proxy/0.5.2")
+
+    assert headers["User-Agent"] == "llm-proxy/0.5.2"
+
+
+def test_llm_proxy_user_agent_identifies_the_proxy():
+    user_agent = identity.llm_proxy_user_agent()
+
+    assert user_agent.startswith("llm-proxy/")
+    assert not user_agent.startswith("opencode/")
+
+
+def test_seeded_session_is_deterministic_and_shaped():
+    first = identity.session_id_from_seed("conversation")
+    second = identity.session_id_from_seed("conversation")
+
+    assert first == second
+    assert first.startswith("ses_")
+    assert len(first) == 4 + 12 + 14
+    assert all(c in identity._ID_CHARS for c in first[4:])
+    assert identity.session_id_from_seed("another") != first
+
+
 def test_counter_splits_per_millisecond():
     """Two ids minted in the same millisecond get consecutive counters."""
     now = 1_700_000_000_000

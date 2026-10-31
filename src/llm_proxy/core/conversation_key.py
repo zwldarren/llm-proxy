@@ -1,11 +1,16 @@
 """Conversation-key derivation shared by routing and provider layers.
 
 Used by smart routing (model continuity), the provider-level
-``session_sticky`` selection strategy, and provider request building (an
-upstream ``prompt_cache_key`` derived from client session metadata). The
-key identifies "the same conversation" as best we can: an explicit session
-id when the client is a trusted proxy, otherwise a hash of the first user
-message prefix.
+``session_sticky`` selection strategy, provider request building (an
+upstream ``prompt_cache_key`` derived from client session metadata), and the
+OpenCode adapter's upstream session affinity. The key identifies "the same
+conversation" as best we can: an explicit session id when the client is a
+trusted proxy, otherwise a hash of the first real user message.
+
+This module is also the single definition of which user message identifies a
+conversation: clients such as GitHub Copilot prepend boilerplate
+(``<environment_info>`` / ``<context>``) that is identical across chats, so it
+must not key a conversation on its own.
 """
 
 import hashlib
@@ -20,6 +25,14 @@ _TEXT_PART_TYPES = frozenset({"text", "input_text", "output_text"})
 # Claude Code's ``metadata.user_id`` embeds the session id after this marker
 # (``user_<id>_account_<account>_session_<session>``).
 _SESSION_MARKER = "_session_"
+
+# Near-identical user-role boilerplate that clients prepend to a conversation.
+_BOILERPLATE_TAGS = ("environment_info", "context")
+
+# Request-metadata keys that carry a conversation/session id directly. An
+# explicit id is more trustworthy than a derived cache key, so these are read
+# before ``prompt_cache_key``.
+_METADATA_SESSION_KEYS = ("session_id", "conversation_id", "conversation", "thread_id")
 
 
 def session_id_from_client_metadata(metadata: Any) -> str | None:
@@ -71,6 +84,47 @@ def prompt_cache_key_from_request(request: Any) -> str | None:
     return session_id_from_client_metadata(getattr(anthropic_params, "metadata", None))
 
 
+def _first_metadata_session(metadata: Any) -> str | None:
+    """First explicit session id in a metadata mapping.
+
+    The Responses API's ``conversation`` field may also be an object carrying
+    the id instead of the id string itself.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    for key in _METADATA_SESSION_KEYS:
+        value = metadata.get(key)
+        if isinstance(value, dict):
+            value = value.get("id") or value.get("conversation_id") or value.get("session_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def session_id_from_request_metadata(request: Any) -> str | None:
+    """A session id carried by the request body rather than a header.
+
+    Explicit ``session_id`` / ``conversation_id`` / ``conversation`` /
+    ``thread_id`` fields win over the derived ``prompt_cache_key`` and the
+    session embedded in Anthropic ``metadata.user_id``: a client that sends
+    both is naming the conversation explicitly, while a cache key may be
+    minted per request by some clients.
+    """
+    params = getattr(request, "params", None)
+    for section_name in ("openai", "anthropic"):
+        section = getattr(params, section_name, None)
+        candidate = _first_metadata_session(getattr(section, "metadata", None))
+        if candidate:
+            return candidate
+
+    extra = getattr(request, "extra", None)
+    candidate = _first_metadata_session(extra)
+    if candidate:
+        return candidate
+
+    return prompt_cache_key_from_request(request)
+
+
 def _content_text(content: Any) -> str:
     """Flatten message content to a plain-text form for key derivation.
 
@@ -96,24 +150,100 @@ def _content_text(content: Any) -> str:
     return ""
 
 
+def message_text(message: Any) -> str:
+    """The message's textual content, whichever message shape it uses.
+
+    Parsed requests carry :class:`~llm_proxy.models.Message` instances with
+    their ``text_content`` property; routing passes role/content dicts.
+    """
+    if isinstance(message, dict):
+        return _content_text(message.get("content", "")).strip()
+    text = getattr(message, "text_content", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    return _content_text(getattr(message, "content", None)).strip()
+
+
+def _strip_leading_boilerplate(text: str) -> str:
+    """Remove leading ``<environment_info>`` / ``<context>`` blocks.
+
+    A message that carries a preamble *and* the real prompt (Copilot puts
+    both in the same message) yields the prompt; a message that is only
+    boilerplate yields the empty string.
+    """
+    remaining = text.lstrip()
+    while remaining:
+        for tag in _BOILERPLATE_TAGS:
+            opening = f"<{tag}>"
+            if not remaining.startswith(opening):
+                continue
+            closing = f"</{tag}>"
+            end = remaining.find(closing, len(opening))
+            if end == -1:
+                return ""
+            remaining = remaining[end + len(closing) :].lstrip()
+            break
+        else:
+            return remaining
+    return ""
+
+
+def first_user_text(messages: Any) -> str | None:
+    """The first user message text that identifies a conversation.
+
+    Boilerplate-only messages are skipped in favour of the first real prompt;
+    when every user message is boilerplate, the first one is returned so the
+    conversation still gets a stable key.
+    """
+    fallback: str | None = None
+    for message in messages or []:
+        role = message.get("role") if isinstance(message, dict) else getattr(message, "role", None)
+        if role != "user":
+            continue
+        text = message_text(message)
+        if not text:
+            continue
+        if fallback is None:
+            fallback = text
+        real = _strip_leading_boilerplate(text)
+        if real:
+            return real
+    return fallback
+
+
+def first_text(messages: Any) -> str | None:
+    """The first message of any role that carries textual content."""
+    for message in messages or []:
+        text = message_text(message)
+        if text:
+            return text
+    return None
+
+
 def conversation_key(session_id: str | None, messages: list[dict]) -> str | None:
     """Derive a stable key for a conversation to track continuity.
 
     Uses the session_id when available (trusted proxy), otherwise falls back
-    to a hash of the first user message prefix. Messages whose content
+    to a hash of the first real user message prefix. Messages whose content
     flattens to empty text (tool results, images-only payloads) are skipped
     so the first user message that actually carries text is used. Returns
     None when neither a session id nor a textual user message is available.
     """
     if session_id:
         return session_id
-    for msg in messages or []:
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            text = _content_text(msg.get("content", "")).strip()
-            if text:
-                prefix = text[:200]
-                return hashlib.sha256(prefix.encode()).hexdigest()[:16]
-    return None
+    text = first_user_text(messages)
+    if text is None:
+        return None
+    prefix = text[:200]
+    return hashlib.sha256(prefix.encode()).hexdigest()[:16]
 
 
-__all__ = ["conversation_key", "prompt_cache_key_from_request", "session_id_from_client_metadata"]
+__all__ = [
+    "conversation_key",
+    "first_text",
+    "first_user_text",
+    "message_text",
+    "prompt_cache_key_from_request",
+    "session_id_from_client_metadata",
+    "session_id_from_request_metadata",
+]

@@ -74,6 +74,10 @@ proxy records instead of computing them from token prices.
 
 ### OpenCode (`opencode-zen` / `opencode-go`)
 
+Use the dedicated `opencode-zen` / `opencode-go` provider types for this gateway:
+a generic `openai-compatible` provider pointed at `opencode.ai` does not apply the
+gateway's identity and session headers described below.
+
 The OpenCode gateway fronts model families whose upstreams speak different wire
 protocols. Which dialect a request takes is a property of the **model**, resolved per
 request from, in order: a learned correction (below), the models.dev catalog (the
@@ -93,10 +97,28 @@ everything else on Chat Completions.
   are reachable by setting `base_url` to it.
 - **Headers**: `Authorization: Bearer` everywhere, plus the dialect's auth header where
   the gateway reads one (`x-api-key` on the Anthropic route, `x-goog-api-key` on the
-  Google route). The OpenCode CLI's client-identity headers (`User-Agent: opencode/...`,
-  `x-opencode-client`, `x-opencode-project`, per-request `x-opencode-session` /
-  `x-opencode-request`) are sent by default — the free-tier models are rejected with
-  `403 FreeTierError` without them. Any of these can be replaced via **Custom headers**.
+  Google route). The identity headers (`x-opencode-client`, `x-opencode-project`, a
+  conversation-scoped `x-opencode-session`, a fresh per-request `x-opencode-request`)
+  are sent by default. The Zen lane keeps `User-Agent: opencode/...` because its free
+  tier gates on that identity; the Go lane sends `User-Agent: llm-proxy/<version>`, as
+  the Go docs ask clients to identify themselves. Any of these can be replaced via
+  **Custom headers**, including with an empty value.
+- **Session affinity**: `x-opencode-session` is the *conversation's* stable upstream
+  id, not a per-request nonce — OpenCode pins a conversation to one backend and reuses
+  its prompt cache based on it. The proxy takes the client's own session header when it
+  sent one (`x-opencode-session`, or the native `x-claude-code-session-id` / Codex
+  `session_id` / `thread-id` / Pi `x-session-affinity` / DeepSeek Harness
+  `x-deepseek-harness-session-id` forms), then an explicit body-level `session_id` /
+  `conversation_id` / `thread_id`, then the Anthropic `metadata.user_id` session or
+  `prompt_cache_key`, then a deterministic fingerprint of the first real user message.
+  Copilot-style `<environment_info>` / `<context>` blocks are stripped even when the
+  prompt follows them in the same message. A fresh id is minted only when none of those
+  exist. Only the native header that carries the resolved id is forwarded (plus Codex's
+  `x-codex-turn-metadata` when it supplied the id), so conflicting client spellings
+  cannot make the edge choose a different conversation. Set `x-opencode-session` in
+  **Custom headers** to pin one id deliberately (this disables per-conversation
+  affinity). See
+  [ADR-0052](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0052-opencode-session-affinity.md).
 - **Self-healing**: when the gateway rejects a model with a model-flavored 400/404, the
   request is retried on the remaining dialects (Chat Completions first) and the working
   dialect is remembered for the process lifetime.

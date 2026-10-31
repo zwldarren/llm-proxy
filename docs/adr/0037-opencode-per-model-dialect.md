@@ -89,8 +89,14 @@ Headers follow the dialect too: `Authorization: Bearer` everywhere, plus
 `x-api-key` on the Anthropic route and `x-goog-api-key` on the Google route
 (the lanes disagree on which they read, so both ride), the
 `anthropic-version` stamp unless the client pinned its own, and the OpenCode
-CLI identity headers — ids minted in the CLI's exact snowflake shape —
-with every value overridable through the provider's `custom_headers`.
+CLI identity headers, with every value overridable through the provider's
+`custom_headers`. The Go lane identifies itself as `llm-proxy/<version>`
+because the Go docs ask clients for their own User-Agent; the Zen lane keeps
+the CLI stamp its free tier requires. Session identity was later refined by
+[ADR-0052](0052-opencode-session-affinity.md): `x-opencode-session` is the
+conversation's stable id (from the client's own session header, request
+metadata, or a deterministic conversation fingerprint), not a fresh id per
+request.
 
 The catalog also enriches `list_models`: the gateway answers with bare ids,
 and models.dev contributes the display names, context windows and per-1M

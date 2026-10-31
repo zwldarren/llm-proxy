@@ -8,7 +8,14 @@ degrades session_sticky to random, so any shape that produces None for a
 normal chat is a bug.
 """
 
-from llm_proxy.core.conversation_key import conversation_key, session_id_from_client_metadata
+from types import SimpleNamespace
+
+from llm_proxy.core.conversation_key import (
+    conversation_key,
+    first_user_text,
+    session_id_from_client_metadata,
+    session_id_from_request_metadata,
+)
 
 
 def _chat(messages: list[dict]) -> list[dict]:
@@ -140,6 +147,63 @@ def test_consecutive_text_parts_join_without_separator():
     )
     joined = _chat([{"role": "user", "content": "Hello world"}])
     assert conversation_key(None, split) == conversation_key(None, joined)
+
+
+def test_first_user_text_strips_a_preamble_that_precedes_the_prompt():
+    """Copilot puts the preamble and the prompt in the same message."""
+    text = first_user_text(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "<environment_info>same for every chat</environment_info>\nbuild the thing"
+                ),
+            }
+        ]
+    )
+
+    assert text == "build the thing"
+
+
+def test_first_user_text_skips_a_preamble_only_message():
+    text = first_user_text(
+        [
+            {"role": "user", "content": "<context>only preamble</context>"},
+            {"role": "user", "content": "the real prompt"},
+        ]
+    )
+
+    assert text == "the real prompt"
+
+
+def test_first_user_text_falls_back_to_the_first_preamble():
+    text = first_user_text([{"role": "user", "content": "<context>only preamble</context>"}])
+
+    assert text == "<context>only preamble</context>"
+
+
+def _request(*, openai=None, anthropic=None, extra=None):
+    return SimpleNamespace(
+        params=SimpleNamespace(openai=openai, anthropic=anthropic),
+        extra=extra or {},
+    )
+
+
+def test_explicit_metadata_session_wins_over_prompt_cache_key():
+    request = _request(
+        openai=SimpleNamespace(
+            prompt_cache_key="per-request-key",
+            metadata={"session_id": "explicit-session"},
+        )
+    )
+
+    assert session_id_from_request_metadata(request) == "explicit-session"
+
+
+def test_prompt_cache_key_is_the_last_body_signal():
+    request = _request(openai=SimpleNamespace(prompt_cache_key="cache-key", metadata={}))
+
+    assert session_id_from_request_metadata(request) == "cache-key"
 
 
 def test_session_from_metadata_user_id_session_marker():

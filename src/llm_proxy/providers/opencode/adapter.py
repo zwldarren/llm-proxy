@@ -31,11 +31,18 @@ Headers. Chat/Responses/System One authenticate with ``Authorization:
 Bearer``; the gateway's Anthropic route reads ``x-api-key`` and its Google
 route ``x-goog-api-key``, so those dialects send the Bearer header *and*
 their dialect's auth header with the same key. The edge also checks the
-OpenCode CLI's client identity (``User-Agent: opencode/...``,
-``x-opencode-client``, ``x-opencode-project``, per-request
-``x-opencode-session``/``x-opencode-request``) — free-tier models are
-rejected with ``403 FreeTierError`` without it (:mod:`.identity`). All of
-these are defaults: ``custom_headers`` wins over any of them.
+OpenCode CLI's client identity (``User-Agent``, ``x-opencode-client``,
+``x-opencode-project``, per-request ``x-opencode-session`` /
+``x-opencode-request``) — free-tier models are rejected with
+``403 FreeTierError`` without it (:mod:`.identity`). The Zen lane keeps the
+CLI stamp the free tier requires; the Go lane identifies the proxy itself
+(``llm-proxy/<version>``). The session id is the conversation's stable
+upstream id, never a fresh value per request: the adapter takes the client's
+own session header when it sent one (Codex, Claude Code, Pi, Hermes,
+DeepSeek Harness, ...), otherwise request metadata or a deterministic
+conversation fingerprint (:mod:`.session`), and forwards the client's native
+session header when it carries the same id. All of these are defaults:
+``custom_headers`` wins over any of them.
 """
 
 import threading
@@ -64,7 +71,16 @@ from llm_proxy.providers.opencode.dialect import (
     derive_dialect_roots,
     infer_dialect_from_id,
 )
-from llm_proxy.providers.opencode.identity import identity_headers
+from llm_proxy.providers.opencode.identity import (
+    identity_headers,
+    llm_proxy_user_agent,
+    mint_session_id,
+)
+from llm_proxy.providers.opencode.session import resolve_upstream_session_id
+from llm_proxy.providers.session_headers import (
+    get_client_upstream_session_headers,
+    get_client_upstream_session_id,
+)
 from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.providers import get_provider_serializer
 from llm_proxy.streaming.sse_parse import iter_sse_data_events
@@ -238,6 +254,17 @@ class OpenCodeGatewayAdapter(
     #: created per request (``adapter_factory``), so this is request-scoped.
     _active_dialect: Dialect | None = None
 
+    #: Whether this lane identifies the proxy itself in ``User-Agent`` (Go)
+    #: or keeps the OpenCode CLI stamp the Zen free tier requires.
+    IDENTIFY_AS_LLM_PROXY = False
+
+    #: The stable OpenCode *upstream* session id for the request in flight,
+    #: resolved once by ``_bind_upstream_session`` from the client's own
+    #: session header or the conversation content. It is not the request-fact
+    #: ``session_id`` (the client's log-correlation id, ADR-0022); stability
+    #: across turns comes from the resolver, not from this per-request field.
+    _upstream_session_id: str | None = None
+
     def __init__(self, config: Any = None, **kwargs: Any) -> None:
         super().__init__(config, **kwargs)
         base = self._base_url or self.DEFAULT_BASE_URL
@@ -388,6 +415,20 @@ class OpenCodeGatewayAdapter(
     # Upstream headers
     # ------------------------------------------------------------------
 
+    def _bind_upstream_session(self, request: InternalRequest) -> None:
+        """Pin the conversation's upstream session id for this request.
+
+        The id comes from the client's own session header when it sent one,
+        otherwise from request metadata or a deterministic fingerprint of the
+        conversation content (:mod:`.session`). Binding is idempotent: the
+        first entry point to see the request wins, so retries and
+        dialect-fallback attempts inside one turn keep the same id. Adapter
+        instances are per request, which is why cross-turn stability comes
+        from the resolver rather than this field.
+        """
+        if self._upstream_session_id is None:
+            self._upstream_session_id = resolve_upstream_session_id(request)
+
     def _build_headers(
         self,
         auth_header: str | None = None,
@@ -398,9 +439,16 @@ class OpenCodeGatewayAdapter(
         The Anthropic route reads ``x-api-key`` and the Google route
         ``x-goog-api-key``; both dialects also carry the Bearer header with
         the same key, because the lanes disagree on which one they read.
-        The OpenCode CLI identity headers go out on every request (the free
-        tier rejects requests without them); the operator's
-        ``custom_headers`` wins over any identity default.
+        The identity headers go out on every request (the free tier rejects
+        requests without them); the operator's ``custom_headers`` wins over
+        any identity default, including an empty value.
+
+        The session id is the conversation's stable upstream one, not a fresh
+        value per request: OpenCode routes a conversation to one backend and
+        reuses that backend's prompt cache based on it. Only the client's
+        native session header that carries the resolved id is forwarded
+        alongside the translated value, so conflicting spellings cannot make
+        the edge choose a different conversation.
         """
         dialect = self._active_dialect or DEFAULT_DIALECT
         match dialect:
@@ -422,9 +470,31 @@ class OpenCodeGatewayAdapter(
             if "anthropic-version" not in existing:
                 headers["anthropic-version"] = "2023-06-01"
 
-        custom_lower = {key.lower() for key in (self._custom_headers or {})}
-        for key, value in identity_headers().items():
-            if key.lower() not in custom_lower:
+        custom_keys = {key.lower() for key in (self._custom_headers or {})}
+        existing = {key.lower() for key in headers}
+
+        if "x-opencode-session" not in custom_keys:
+            # Forward only the native headers that carry the id we resolved;
+            # an operator-pinned session must not be contradicted by a
+            # different client value on another spelling.
+            for key, value in get_client_upstream_session_headers(
+                self._upstream_session_id
+            ).items():
+                if key not in existing:
+                    headers[key] = value
+                    existing.add(key)
+
+        if self._upstream_session_id is None:
+            # No chat entry point bound one (e.g. the model-list or System One
+            # call): there is no conversation to key on, so mint one value and
+            # keep it for the request's retries.
+            self._upstream_session_id = get_client_upstream_session_id() or mint_session_id()
+        identity = identity_headers(
+            session_id=self._upstream_session_id,
+            user_agent=llm_proxy_user_agent() if self.IDENTIFY_AS_LLM_PROXY else None,
+        )
+        for key, value in identity.items():
+            if key.lower() not in custom_keys:
                 headers[key] = value
         return headers
 
@@ -533,6 +603,7 @@ class OpenCodeGatewayAdapter(
     ) -> tuple[str, dict[str, Any]]:
         """Native endpoint parts, stamping the dialect for header building."""
         self._active_dialect = _PROTOCOL_DIALECT.get(request.protocol_name or "")
+        self._bind_upstream_session(request)
         return super()._native_request_parts(request, stream=stream)
 
     async def stream_chat_completion_native(
@@ -548,6 +619,7 @@ class OpenCodeGatewayAdapter(
         response store) stream the freshly built dialect body instead, so a
         proxy-local id on the request never reaches the upstream.
         """
+        self._bind_upstream_session(request)
         if request.protocol_name == "openai":
             return await super().stream_chat_completion_native(
                 request, cancel_token=cancel_token, **kwargs
@@ -572,6 +644,7 @@ class OpenCodeGatewayAdapter(
     # ------------------------------------------------------------------
 
     async def chat_completion(self, request: InternalRequest, **kwargs: Any) -> InternalResponse:
+        self._bind_upstream_session(request)
         dialect = await self._resolve_dialect(request)
         self._active_dialect = dialect
         if dialect not in CHAT_CAPABLE:
@@ -651,6 +724,7 @@ class OpenCodeGatewayAdapter(
         context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str | dict[str, Any]]:
+        self._bind_upstream_session(request)
         dialect = await self._resolve_dialect(request)
         self._active_dialect = dialect
         if dialect not in CHAT_CAPABLE:
