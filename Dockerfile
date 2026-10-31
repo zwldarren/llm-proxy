@@ -2,9 +2,8 @@
 FROM oven/bun:1 AS frontend-builder
 WORKDIR /app/frontend
 
-# Copy dependency files and patches
+# Copy dependency files
 COPY frontend/package.json frontend/bun.lock ./
-COPY frontend/patches patches/
 
 # Install dependencies
 RUN bun install
