@@ -998,14 +998,16 @@ export default {
     title: "提供商选择",
     description: "全局策略：决定如何从优先级相同的提供商中选择，应用于所有模型。",
     random: "随机",
-    randomDescription: "均匀随机选择——在提供商之间平均分摊负载。",
+    randomDescription:
+      "均匀随机选择——平均分摊负载，但每轮可能落到不同提供商，需要重新预热提示词缓存。",
     sessionSticky: "会话粘性",
     sessionStickyDescription:
-      "将同一会话固定到同一提供商，保持提示词缓存命中——降低长会话成本。配置了 Redis 时使用 Redis，否则使用哈希一致性。",
+      "将同一会话固定到同一提供商，保持提示词缓存命中——降低长会话成本。配置了 Redis 时使用 Redis，否则使用确定性哈希。",
     costOptimized: "成本优先",
     costOptimizedDescription: "总是优先尝试最便宜的提供商。结果确定，因此同样有利于缓存命中。",
     balanced: "均衡",
-    balancedDescription: "综合配置定价与实测延迟（权重各 0.5）。尚无延迟数据时退化为成本优先。",
+    balancedDescription:
+      "综合配置定价与实测延迟（权重各 0.5），并保留少量探索流量让每个提供商持续产生新样本。尚无延迟数据时退化为成本优先。",
     help: "策略仅在最高可用优先级组内对提供商排序——高优先级提供商始终优先尝试。请求内回退按同一顺序进行。",
   },
   smartRouting: {

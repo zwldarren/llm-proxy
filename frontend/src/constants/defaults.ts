@@ -73,7 +73,7 @@ export const DEFAULT_SMART_ROUTING: SmartRoutingConfig = {
 };
 
 export const DEFAULT_PROVIDER_SELECTION: ProviderSelectionConfig = {
-  strategy: "random",
+  strategy: "session_sticky",
 };
 
 export const DEFAULT_REQUEST_POLICY: RequestPolicyConfig = {

@@ -1037,16 +1037,17 @@ export default {
     description:
       "Global strategy for picking among providers with the same priority, applied to every model.",
     random: "Random",
-    randomDescription: "Uniform random pick — spreads load evenly across providers.",
+    randomDescription:
+      "Uniform random pick — spreads load evenly, but each turn can land on a different provider and re-warm its prompt cache.",
     sessionSticky: "Session Sticky",
     sessionStickyDescription:
-      "Pins each conversation to one provider so prompt caches stay warm — lower cost on long sessions. Uses Redis when configured, rendezvous hashing otherwise.",
+      "Pins each conversation to one provider so prompt caches stay warm — lower cost on long sessions. Uses Redis when configured, deterministic hashing otherwise.",
     costOptimized: "Cost Optimized",
     costOptimizedDescription:
       "Always tries the cheapest provider first. Deterministic, so also cache-friendly.",
     balanced: "Balanced",
     balancedDescription:
-      "Weighs configured cost against observed latency (0.5 / 0.5). Degrades to Cost Optimized while no latency samples exist.",
+      "Weighs configured cost against observed latency (0.5 / 0.5) and keeps a small share of picks for the runner-up, so every provider stays measured. Degrades to Cost Optimized while no latency samples exist.",
     help: "The strategy only orders providers within the highest available priority group — higher-priority providers are always tried first. Per-request fallback walks the same ordering.",
   },
   smartRouting: {

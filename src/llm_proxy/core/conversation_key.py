@@ -11,6 +11,13 @@ This module is also the single definition of which user message identifies a
 conversation: clients such as GitHub Copilot prepend boilerplate
 (``<environment_info>`` / ``<context>``) that is identical across chats, so it
 must not key a conversation on its own.
+
+Two callers want different things from the same idea. Smart routing groups
+request-log rows into conversations for outcome analytics
+(:func:`conversation_key`), while ``session_sticky`` provider selection pins a
+conversation to one provider for cache affinity
+(:func:`sticky_conversation_key`), which prefers the client's own session
+header over any content-derived hash.
 """
 
 import hashlib
@@ -238,6 +245,49 @@ def conversation_key(session_id: str | None, messages: list[dict]) -> str | None
     return hashlib.sha256(prefix.encode()).hexdigest()[:16]
 
 
+def sticky_conversation_key(
+    request: Any,
+    messages: list[dict],
+    header_session_id: str | None = None,
+    proxy_session_id: str | None = None,
+) -> str | None:
+    """The conversation handle ``session_sticky`` provider selection pins on.
+
+    This is an *affinity* key: it decides which provider keeps serving a
+    conversation so its prompt cache stays warm. It is not the request fact
+    ``session_id`` (ADR-0022, a log-correlation id) and not smart routing's
+    analytics handle; both merely feed into it as lower-priority sources.
+
+    Sources, most truthful first:
+
+    1. ``header_session_id`` — the client's own session header, already
+       validated by :mod:`llm_proxy.providers.session_headers`. This is the
+       same handle the OpenCode lane forwards upstream as
+       ``x-opencode-session`` (ADR-0052), so both layers agree on where a
+       conversation lives. Unlike a message hash it survives compaction,
+       editing of the first message, and clients that resend a rewritten
+       history.
+    2. An explicit request-metadata session id (``session_id`` /
+       ``conversation_id`` / ``conversation`` / ``thread_id``), then the
+       session embedded in Anthropic ``metadata.user_id``, then an explicit
+       ``prompt_cache_key``.
+    3. ``proxy_session_id`` — the correlation id of a trusted proxy peer.
+    4. A hash of the first real user message, for clients that offer nothing
+       else (GitHub Copilot, ad-hoc scripts).
+
+    Returns None when nothing names the conversation; the strategy then picks
+    randomly, exactly as ``random`` would.
+    """
+    for candidate in (
+        header_session_id,
+        session_id_from_request_metadata(request),
+        proxy_session_id,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return conversation_key(None, messages)
+
+
 __all__ = [
     "conversation_key",
     "first_text",
@@ -246,4 +296,5 @@ __all__ = [
     "prompt_cache_key_from_request",
     "session_id_from_client_metadata",
     "session_id_from_request_metadata",
+    "sticky_conversation_key",
 ]

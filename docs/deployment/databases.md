@@ -74,7 +74,7 @@ storage.
 | Settings hot-reload on every worker/replica (web search, circuit breaker, MCP servers, MCP security policy) | `REDIS_ENABLED=true` |
 | API-key / user-role changes across workers/replicas (revocation, role, activation, budget, model allowlist) | `REDIS_ENABLED=true` |
 | Personal tracing config changes on every worker/replica | `REDIS_ENABLED=true` |
-| Sticky provider routing | `REDIS_ENABLED=true` **and** provider selection strategy `session_sticky` (global default is `random`) — other strategies never read or write the sticky key |
+| Sticky provider routing | `REDIS_ENABLED=true` **and** provider selection strategy `session_sticky` (the global default) — other strategies never read or write the sticky key |
 | Last-model continuity (smart routing `auto`/`fast`/`best`) | Redis connected (`REDIS_ENABLED=true`) and smart routing enabled |
 | OpenResponses response store: `GET`/`DELETE`/cancel/`input_items`, and `background: true` | Redis connected |
 | Log shipping | Not implemented in v0.2.3 — logs are always stored in the SQL database |
@@ -89,9 +89,11 @@ Behavior details:
 - Rate-limit keys use the prefix `REDIS_RATE_LIMIT_PREFIX` (default `rate_limit:`);
   cache keys use `REDIS_CACHE_PREFIX` (default `cache:`).
 - Sticky routing applies only with the `session_sticky` provider-selection strategy
-  (the global default is `random`); keys look like
-  `routing:conv:{conversation}:provider:{model}`. Last-model continuity is written only
-  by smart routing (`auto`/`fast`/`best`) and its key lives for 30 minutes.
+  (the global default); keys look like
+  `routing:conv:{conversation}:provider:{model}`. Without Redis the strategy still
+  pins a conversation, using stateless rendezvous hashing over the mapping keys.
+  Last-model continuity is written only by smart routing (`auto`/`fast`/`best`) and
+  its key lives for 30 minutes.
 - Stored Responses expire after **24 hours** (Redis TTL 86400 s), namespaced per API
   key so tenants cannot read each other's responses.
 - Redis holds only reconstructible state: safe to flush, though doing so drops sticky

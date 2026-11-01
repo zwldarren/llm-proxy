@@ -32,7 +32,7 @@ are catalog/display metadata.
 - Candidates are grouped by mapping priority; the highest non-empty group is tried
   first, then the rest in order.
 - Within a group, the global [provider selection strategy](settings.md#provider-selection)
-  orders candidates (`random` by default, or sticky/cost-optimized/balanced).
+  orders candidates (`session_sticky` by default, or random/cost-optimized/balanced).
 - Each mapping is attempted once per request. Failures retry within the provider
   (`max_retries`) and then fall back across providers (`max_fallback_attempts`).
 - **Any** provider error falls back to the next mapping while one remains. The

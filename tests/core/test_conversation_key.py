@@ -15,6 +15,7 @@ from llm_proxy.core.conversation_key import (
     first_user_text,
     session_id_from_client_metadata,
     session_id_from_request_metadata,
+    sticky_conversation_key,
 )
 
 
@@ -238,3 +239,64 @@ def test_invalid_metadata_returns_none():
     assert session_id_from_client_metadata("user_x_session_y") is None
     assert session_id_from_client_metadata({"user_id": ""}) is None
     assert session_id_from_client_metadata({"session_id": "   "}) is None
+
+
+# --- sticky_conversation_key: the affinity key provider selection pins on ---
+
+
+def test_sticky_key_prefers_the_client_session_header():
+    """A client's own session header beats every body signal and the content hash."""
+    request = _request(openai=SimpleNamespace(prompt_cache_key="cache-key", metadata={}))
+    messages = _chat([{"role": "user", "content": "Hello"}])
+
+    key = sticky_conversation_key(
+        request, messages, header_session_id="x-claude-code-session-id", proxy_session_id=None
+    )
+
+    assert key == "x-claude-code-session-id"
+
+
+def test_sticky_key_falls_back_to_metadata_before_the_content_hash():
+    request = _request(openai=SimpleNamespace(prompt_cache_key="cache-key", metadata={}))
+    messages = _chat([{"role": "user", "content": "Hello"}])
+
+    assert sticky_conversation_key(request, messages) == "cache-key"
+
+
+def test_sticky_key_falls_back_to_the_trusted_proxy_session_id():
+    request = _request(openai=SimpleNamespace(prompt_cache_key=None, metadata={}))
+
+    assert sticky_conversation_key(request, [], proxy_session_id="proxy-sess") == "proxy-sess"
+
+
+def test_sticky_key_falls_back_to_the_first_user_message_hash():
+    request = _request(openai=SimpleNamespace(prompt_cache_key=None, metadata={}))
+    messages = _chat([{"role": "user", "content": "Hello"}])
+
+    key = sticky_conversation_key(request, messages)
+
+    assert key == conversation_key(None, messages)
+
+
+def test_sticky_key_survives_a_first_message_that_the_header_pins():
+    """Compaction rewrites the first message; the header keeps the conversation."""
+    before = _chat([{"role": "user", "content": "Original task"}])
+    after = _chat([{"role": "user", "content": "Summary of the task so far"}])
+    request = _request(openai=SimpleNamespace(prompt_cache_key=None, metadata={}))
+
+    key_before = sticky_conversation_key(request, before, header_session_id="sess-1")
+    key_after = sticky_conversation_key(request, after, header_session_id="sess-1")
+
+    assert key_before == key_after == "sess-1"
+
+
+def test_sticky_key_is_none_without_any_signal():
+    request = _request(openai=SimpleNamespace(prompt_cache_key=None, metadata={}))
+
+    assert sticky_conversation_key(request, []) is None
+
+
+def test_blank_header_falls_through_instead_of_pinning_nothing():
+    request = _request(openai=SimpleNamespace(prompt_cache_key="cache-key", metadata={}))
+
+    assert sticky_conversation_key(request, [], header_session_id="  ") == "cache-key"

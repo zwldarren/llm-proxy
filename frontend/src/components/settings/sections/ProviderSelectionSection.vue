@@ -29,17 +29,17 @@ interface StrategyOption {
  * place instead of cross-referencing a dropdown against separate info rows. */
 const options: StrategyOption[] = [
   {
-    value: "random",
-    icon: Shuffle,
-    nameKey: "providerSelection.random",
-    descriptionKey: "providerSelection.randomDescription",
-    isDefault: true,
-  },
-  {
     value: "session_sticky",
     icon: Pin,
     nameKey: "providerSelection.sessionSticky",
     descriptionKey: "providerSelection.sessionStickyDescription",
+    isDefault: true,
+  },
+  {
+    value: "random",
+    icon: Shuffle,
+    nameKey: "providerSelection.random",
+    descriptionKey: "providerSelection.randomDescription",
   },
   {
     value: "cost_optimized",

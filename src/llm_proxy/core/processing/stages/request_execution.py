@@ -78,7 +78,11 @@ class RetryExecutor:
         while True:
             try:
                 result = await state.strategy.execute(current_request, current_adapter, context)
-                context.orchestrator.record_last_success(state.event_context.latency_ms)
+                context.orchestrator.record_last_success(
+                    None
+                    if isinstance(result, StreamingResponseMarker)
+                    else state.event_context.latency_ms
+                )
                 if (
                     context.web_search_interceptor is not None
                     and context.proxy_web_search_active

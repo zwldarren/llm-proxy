@@ -8,10 +8,10 @@ from llm_proxy.config.types.provider_selection import ProviderSelectionConfig
 
 
 class TestProviderSelectionConfig:
-    def test_default_strategy_is_random(self):
-        """The default global strategy preserves historical behavior."""
+    def test_default_strategy_is_session_sticky(self):
+        """The default keeps a conversation on one provider for cache affinity."""
         cfg = ProviderSelectionConfig()
-        assert cfg.strategy is ProviderSelectionStrategy.RANDOM
+        assert cfg.strategy is ProviderSelectionStrategy.SESSION_STICKY
 
     @pytest.mark.parametrize(
         "raw",
@@ -29,8 +29,14 @@ class TestProviderSelectionConfig:
 
     def test_from_row_empty_and_none(self):
         """from_row falls back to defaults for empty/missing rows."""
-        assert ProviderSelectionConfig.from_row(None).strategy is ProviderSelectionStrategy.RANDOM
-        assert ProviderSelectionConfig.from_row({}).strategy is ProviderSelectionStrategy.RANDOM
+        assert (
+            ProviderSelectionConfig.from_row(None).strategy
+            is ProviderSelectionStrategy.SESSION_STICKY
+        )
+        assert (
+            ProviderSelectionConfig.from_row({}).strategy
+            is ProviderSelectionStrategy.SESSION_STICKY
+        )
 
     def test_from_row_unknown_strategy_raises(self):
         """Unknown strategies surface as validation errors (manager degrades gracefully)."""

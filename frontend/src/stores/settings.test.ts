@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { DEFAULT_SMART_ROUTING } from "@/constants/defaults";
+import { DEFAULT_PROVIDER_SELECTION, DEFAULT_SMART_ROUTING } from "@/constants/defaults";
 
 vi.mock("@/services/api/config", () => {
   const api = () => ({ getConfig: vi.fn(), updateConfig: vi.fn() });
@@ -20,12 +20,13 @@ vi.mock("@/services/api/config", () => {
   };
 });
 
-import { smartRoutingApi } from "@/services/api/config";
+import { providerSelectionApi, smartRoutingApi } from "@/services/api/config";
 import { useSettingsStore } from "./settings";
 
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.mocked(smartRoutingApi.getConfig).mockReset();
+  vi.mocked(providerSelectionApi.getConfig).mockReset();
 });
 
 describe("settings store: smart routing judge", () => {
@@ -114,5 +115,16 @@ describe("settings store: smart routing judge", () => {
     // Empty is a meaningful choice (no virtual model is ever judged) and must
     // not be replaced by the defaults on the next load.
     expect(config.judge.modes).toEqual([]);
+  });
+});
+
+describe("settings store: provider selection", () => {
+  it("uses session sticky when a stored row has no strategy", async () => {
+    expect(DEFAULT_PROVIDER_SELECTION.strategy).toBe("session_sticky");
+    vi.mocked(providerSelectionApi.getConfig).mockResolvedValue({} as never);
+
+    const config = await useSettingsStore().fetchProviderSelection();
+
+    expect(config.strategy).toBe("session_sticky");
   });
 });

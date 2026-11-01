@@ -9,10 +9,19 @@ from llm_proxy.config.types.model import (
     ModelProviderConfig,
     ProviderSelectionStrategy,
 )
-from llm_proxy.core.provider_stats import ProviderStatsStore
+from llm_proxy.core.provider_stats import (
+    DEFAULT_LATENCY_KIND,
+    KIND_TOTAL,
+    KIND_TTFT,
+    SAMPLE_TTL_SECONDS,
+    LatencyKind,
+    ProviderStatsStore,
+)
 from llm_proxy.core.provider_strategy import (
+    _BALANCED_EXPLORE_RATE,
     STICKY_TTL_SECONDS,
     StrategyContext,
+    _sticky_ranked,
     order_providers,
     pick_provider,
     resolve_sticky_key,
@@ -88,14 +97,17 @@ def _ctx(
     redis=None,
     stats_store: ProviderStatsStore | None = None,
     rng: random.Random | None = None,
+    latency_kind: LatencyKind = DEFAULT_LATENCY_KIND,
 ) -> StrategyContext:
+    """Strategy inputs for one test request."""
     return StrategyContext(
         model_config=model_config,
         model_name="test-model",
         conversation_key=conversation_key,
         redis=redis,
         stats_store=stats_store,
-        rng=rng,
+        latency_kind=latency_kind,
+        rng=rng or random.Random(0),
     )
 
 
@@ -261,6 +273,40 @@ class TestResolveStickyKey:
         assert redis.setex_calls == []  # no re-persist on hit
 
     @pytest.mark.asyncio
+    async def test_hit_on_the_rendezvous_head_skips_the_write(self):
+        """A redundant pin is re-derivable, so a hit costs one Redis command."""
+        available, model = _candidates("a", "b")
+        head = _sticky_ranked(available, "conv-1")[0][1]
+        redis = FakeRedis({"routing:conv:conv-1:provider:test-model": head})
+        ctx = _ctx(model, conversation_key="conv-1", redis=redis)
+
+        key = await resolve_sticky_key(available, ctx)
+
+        assert key == head
+        assert redis.setex_calls == []
+
+    @pytest.mark.asyncio
+    async def test_hit_on_a_drifted_pin_refreshes_the_ttl(self):
+        """A pin hashing would not reproduce is kept alive while it is in use.
+
+        This is the conversation that fell back to a backup provider while its
+        rendezvous head was down: expiring the pin would drag it back onto the
+        head mid-conversation and throw away the cache it just warmed.
+        """
+        available, model = _candidates("a", "b")
+        head = _sticky_ranked(available, "conv-1")[0][1]
+        drifted = next(k for _, k in available if k != head)
+        redis = FakeRedis({"routing:conv:conv-1:provider:test-model": drifted})
+        ctx = _ctx(model, conversation_key="conv-1", redis=redis)
+
+        key = await resolve_sticky_key(available, ctx)
+
+        assert key == drifted
+        assert redis.setex_calls == [
+            ("routing:conv:conv-1:provider:test-model", STICKY_TTL_SECONDS, drifted)
+        ]
+
+    @pytest.mark.asyncio
     async def test_stored_not_available_resolves_new(self):
         available, model = _candidates("a", "b")
         redis = FakeRedis({"routing:conv:conv-1:provider:test-model": "ghost::9"})
@@ -364,6 +410,71 @@ class TestBalancedStrategy:
         )
         assert picked[0].provider == "b"
 
+    def test_default_explore_rate_matches_the_documented_share(self):
+        """A real request keeps 10% of picks for the runner-up."""
+        assert _BALANCED_EXPLORE_RATE == 0.1
+
+    def test_exploration_starts_on_a_runner_up(self):
+        """Every 10th-ish request samples a provider the score would skip."""
+        available, model = _candidates(
+            "slow", "fast", costs={"slow": (2.0, 2.0), "fast": (2.0, 2.0)}
+        )
+        store = ProviderStatsStore()
+        store.observe("slow::0", 2000.0)
+        store.observe("fast::0", 200.0)
+        ctx = _ctx(model, stats_store=store, rng=random.Random(2))
+
+        picked = pick_provider(available, ProviderSelectionStrategy.BALANCED, ctx)
+
+        assert picked[0].provider == "slow"
+
+    def test_exploration_keeps_a_fallback_order_behind_the_head(self):
+        """Only the head moves; the rest keeps its score order for fallback."""
+        available, model = _candidates(
+            "a",
+            "b",
+            "c",
+            costs={"a": (2.0, 2.0), "b": (2.0, 2.0), "c": (2.0, 2.0)},
+        )
+        store = ProviderStatsStore()
+        store.observe("a::0", 100.0)
+        store.observe("b::0", 200.0)
+        store.observe("c::0", 300.0)
+        ordered = order_providers(
+            available,
+            ProviderSelectionStrategy.BALANCED,
+            _ctx(model, stats_store=store, rng=random.Random(2)),
+        )
+
+        assert ordered[0][0].provider != "a"
+        assert {p.provider for p, _ in ordered} == {"a", "b", "c"}
+
+    def test_streaming_and_total_latency_are_not_averaged_together(self):
+        """A provider quick to first token but slow overall loses on a
+        non-streaming request and wins on a streaming one."""
+        available, model = _candidates(
+            "snappy", "steady", costs={"snappy": (2.0, 2.0), "steady": (2.0, 2.0)}
+        )
+        store = ProviderStatsStore()
+        store.observe("snappy::0", 100.0, kind=KIND_TTFT)
+        store.observe("steady::0", 600.0, kind=KIND_TTFT)
+        store.observe("snappy::0", 30_000.0, kind=KIND_TOTAL)
+        store.observe("steady::0", 4_000.0, kind=KIND_TOTAL)
+
+        streamed = pick_provider(
+            available,
+            ProviderSelectionStrategy.BALANCED,
+            _ctx(model, stats_store=store, latency_kind=KIND_TTFT),
+        )
+        complete = pick_provider(
+            available,
+            ProviderSelectionStrategy.BALANCED,
+            _ctx(model, stats_store=store, latency_kind=KIND_TOTAL),
+        )
+
+        assert streamed[0].provider == "snappy"
+        assert complete[0].provider == "steady"
+
 
 class TestProviderStatsStore:
     def test_ewma_updates(self):
@@ -389,3 +500,38 @@ class TestProviderStatsStore:
         assert store.get("b") == 2.0
         store.reset()
         assert store.key_count == 0
+
+    def test_kinds_are_kept_apart(self):
+        store = ProviderStatsStore()
+        store.observe("k", 100.0, kind=KIND_TTFT)
+        store.observe("k", 5_000.0, kind=KIND_TOTAL)
+
+        assert store.get("k", kind=KIND_TTFT) == 100.0
+        assert store.get("k", kind=KIND_TOTAL) == 5_000.0
+        assert store.get("k") == 5_000.0  # default kind is total
+        assert store.sample_count("k", kind=KIND_TTFT) == 1
+        assert set(store.get_all()["k"]) == {KIND_TTFT, KIND_TOTAL}
+
+    def test_stale_samples_read_as_unmeasured(self):
+        """An old sample must not keep a provider ranked from stale data."""
+        now = [1000.0]
+        store = ProviderStatsStore(clock=lambda: now[0])
+        store.observe("k", 100.0)
+
+        assert store.get("k") == 100.0
+
+        now[0] += SAMPLE_TTL_SECONDS + 1
+        assert store.get("k") is None
+        assert store.sample_count("k") == 1  # the sample is still on record
+
+    def test_fresh_sample_revives_a_stale_provider(self):
+        now = [1000.0]
+        store = ProviderStatsStore(clock=lambda: now[0])
+        store.observe("k", 100.0)
+        now[0] += SAMPLE_TTL_SECONDS + 1
+
+        store.observe("k", 400.0)
+
+        # A new sample restarts the EWMA from the old average but is current
+        # again: 0.3 * 400 + 0.7 * 100.
+        assert store.get("k") == pytest.approx(190.0)

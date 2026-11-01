@@ -25,13 +25,14 @@ from llm_proxy.api.dependencies import (
 )
 from llm_proxy.api.middleware.model_restriction import check_model_restriction
 from llm_proxy.config.types.model import ProviderSelectionStrategy
-from llm_proxy.core.conversation_key import conversation_key
+from llm_proxy.core.conversation_key import sticky_conversation_key
 from llm_proxy.core.exceptions import (
     AuthenticationFailedError,
     ModelNotFoundError,
     ValidationError,
 )
 from llm_proxy.core.processing import RequestContext
+from llm_proxy.core.provider_stats import KIND_TOTAL, KIND_TTFT
 from llm_proxy.core.request_facts import facts_for, get_request_identity
 from llm_proxy.core.request_type import RequestType
 from llm_proxy.core.request_utils import peer_is_trusted_proxy
@@ -280,14 +281,21 @@ async def _build_request_context(
     # Resolve per-request inputs for the provider-selection strategy. The
     # strategy itself is a single global setting (server_config:
     # provider_selection); the conversation key is only needed by
-    # session_sticky: session id when the peer is a trusted proxy, otherwise
-    # a hash of the first user message.
+    # session_sticky, and prefers the client's own session header (the same
+    # handle the OpenCode lane forwards upstream, ADR-0052) over a hash of the
+    # first user message.
     strategy = config.provider_selection.strategy
     conv_key: str | None = None
     if strategy is ProviderSelectionStrategy.SESSION_STICKY:
+        from llm_proxy.providers.session_headers import get_client_upstream_session_id
         from llm_proxy.routing.message_extract import extract_messages_for_routing
 
-        conv_key = conversation_key(session_id, extract_messages_for_routing(request))
+        conv_key = sticky_conversation_key(
+            request,
+            extract_messages_for_routing(request),
+            header_session_id=get_client_upstream_session_id(),
+            proxy_session_id=session_id,
+        )
 
     orchestrator = create_provider_selector(
         model_config=model_config,
@@ -300,6 +308,10 @@ async def _build_request_context(
         conversation_key=conv_key,
         redis=redis,
         stats_store=services.provider_stats(),
+        # The balanced strategy must compare like with like: a streamed request
+        # is judged by its time to first token, everything else by its total
+        # duration (core/provider_stats.py).
+        latency_kind=KIND_TTFT if getattr(request, "stream", False) else KIND_TOTAL,
     )
     # Resolve async per-request selection inputs (the session_sticky provider
     # mapping) before the pipeline starts. No-op for other strategies.

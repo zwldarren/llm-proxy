@@ -245,6 +245,78 @@ class TestProviderSelectorSelection:
         assert result is None  # Provider config not found
 
 
+class TestProviderMappingIdentity:
+    """Mapping keys carry a positional index, so the enumeration must be canonical.
+
+    The index is what the circuit breaker, the latency store and the Redis
+    sticky mapping are keyed by, so it may not depend on the order the mapping
+    list happened to arrive in.
+    """
+
+    @staticmethod
+    def _keyed(selector: ProviderSelector) -> list[tuple[str, str]]:
+        """(provider name, mapping key) pairs in the selector's own order."""
+        return [
+            (provider.provider, key)
+            for group in selector._get_providers_by_priority_with_keys()
+            for provider, key in group
+        ]
+
+    def test_keys_ignore_the_order_mappings_were_submitted_in(self):
+        """Reordering a model's provider list leaves every mapping key alone."""
+        providers = [
+            {"provider": "zeta", "priority": 1},
+            {"provider": "alpha", "priority": 1},
+            {"provider": "mid", "priority": 1},
+        ]
+
+        forward = self._keyed(create_test_selector(providers=providers))
+        backward = self._keyed(create_test_selector(providers=list(reversed(providers))))
+
+        assert forward == backward
+
+    def test_same_provider_and_model_with_different_overrides_gets_two_keys(self):
+        """Overrides are part of a mapping's identity, not an afterthought."""
+        selector = create_test_selector(
+            providers=[
+                {"provider": "openai", "priority": 1, "parameter_overrides": {"max_tokens": 1000}},
+                {"provider": "openai", "priority": 1, "parameter_overrides": {"max_tokens": 2000}},
+                {"provider": "openai", "priority": 1},
+            ]
+        )
+
+        keys = [key for _, key in self._keyed(selector)]
+
+        assert len(keys) == len(set(keys)) == 3
+
+    def test_identical_mappings_still_get_distinct_keys(self):
+        """Two identical mappings must not collapse into one candidate."""
+        selector = create_test_selector(
+            providers=[
+                {"provider": "openai", "priority": 1},
+                {"provider": "openai", "priority": 1},
+            ]
+        )
+
+        keys = [key for _, key in self._keyed(selector)]
+
+        assert len(keys) == len(set(keys)) == 2
+
+    def test_priority_groups_stay_ordered_highest_first(self):
+        """Canonical ordering must not disturb priority dominance."""
+        selector = create_test_selector(
+            providers=[
+                {"provider": "zzz", "priority": 1},
+                {"provider": "aaa", "priority": 10},
+                {"provider": "mmm", "priority": 5},
+            ]
+        )
+
+        keys = self._keyed(selector)
+
+        assert [provider for provider, _ in keys] == ["aaa", "mmm", "zzz"]
+
+
 class TestProviderSelectorShouldRetry:
     """Tests for ProviderSelector should_retry logic."""
 
@@ -829,12 +901,12 @@ class FakeRedis:
 class TestProviderStrategies:
     """Strategy wiring in ProviderSelector."""
 
-    def test_default_strategy_is_random(self):
-        """Selectors default to the random strategy (historical behavior)."""
+    def test_default_strategy_is_session_sticky(self):
+        """A selector built without an explicit strategy follows the global default."""
         from llm_proxy.config.types.model import ProviderSelectionStrategy
 
         selector = create_test_selector()
-        assert selector.strategy is ProviderSelectionStrategy.RANDOM
+        assert selector.strategy is ProviderSelectionStrategy.SESSION_STICKY
 
     def test_cost_optimized_picks_cheapest(self):
         """cost_optimized picks the cheapest same-priority provider."""
@@ -920,6 +992,22 @@ class TestProviderStrategies:
         selector.redis = FakeRedis()
         await selector.prepare()
         assert selector.state.sticky_key is None
+
+    async def test_prepare_skips_redis_for_a_single_candidate_group(self):
+        """One candidate means no choice: no sticky lookup, no Redis round trip."""
+        from llm_proxy.config.types.model import ProviderSelectionStrategy
+
+        selector = create_test_selector(providers=[{"provider": "only", "priority": 1}])
+        selector.strategy = ProviderSelectionStrategy.SESSION_STICKY
+        selector.model_name = "test-model"
+        selector.conversation_key = "conv-42"
+        redis = FakeRedis()
+        selector.redis = redis
+
+        await selector.prepare()
+
+        assert selector.state.sticky_key is None
+        assert redis.data == {}
 
     def test_record_last_success_feeds_stats_store(self):
         """record_last_success(duration) records EWMA latency for the key."""

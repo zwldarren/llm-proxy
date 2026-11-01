@@ -8,7 +8,8 @@ across priority levels.
 
 Strategies:
 
-- ``random``: current default behavior — uniform random pick.
+- ``random``: uniform random pick — spreads load evenly, at the cost of
+  re-warming a conversation's prompt cache on a different provider each turn.
 - ``session_sticky``: pin a conversation to one provider for cache affinity.
   The Redis-backed sticky mapping is resolved once per request by
   :func:`resolve_sticky_key` (async, called from the provider-selection
@@ -20,8 +21,12 @@ Strategies:
 - ``cost_optimized``: cheapest provider first (per-mapping pricing with
   model-level fallback). Deterministic, so also cache-friendly.
 - ``balanced``: 0.5 * normalized cost + 0.5 * normalized observed latency
-  (in-memory EWMA). Degrades to ``cost_optimized`` while no latency samples
-  exist (cold start).
+  (in-memory EWMA, in the bucket matching the request: time-to-first-token for
+  streaming, total duration otherwise). Degrades to ``cost_optimized`` while no
+  latency samples exist. Picks the best score for most requests but hands a
+  small share to the runners-up (:data:`_BALANCED_EXPLORE_RATE`): a provider
+  that never gets picked never produces a fresh sample, and its stale score
+  would otherwise freeze the ordering.
 """
 
 import hashlib
@@ -35,6 +40,7 @@ from llm_proxy.config.types.model import (
     ModelProviderConfig,
     ProviderSelectionStrategy,
 )
+from llm_proxy.core.provider_stats import DEFAULT_LATENCY_KIND, LatencyKind
 from llm_proxy.observability.logger import get_logger
 
 if TYPE_CHECKING:
@@ -49,6 +55,14 @@ STICKY_TTL_SECONDS = 1800  # 30 min
 # Weights for the balanced strategy score.
 _BALANCED_COST_WEIGHT = 0.5
 _BALANCED_LATENCY_WEIGHT = 0.5
+
+# Share of balanced picks handed to a runner-up instead of the best score. It is
+# what keeps every candidate measured: with a strict best-first ordering the
+# runners-up receive traffic only after a failure, so their samples age out and
+# the ordering never revisits the decision. The cost is that 1 in 10 turns of a
+# conversation starts on a provider whose prompt cache is cold — far cheaper
+# than a ranking that cannot change its mind.
+_BALANCED_EXPLORE_RATE = 0.1
 
 _default_rng = random.Random()
 
@@ -66,6 +80,10 @@ class StrategyContext:
             or None when no session/message signal is available.
         redis: Optional async Redis client for the sticky mapping.
         stats_store: Optional EWMA latency stats for the balanced strategy.
+        latency_kind: Which latency measurement the balanced strategy compares
+            (:data:`llm_proxy.core.provider_stats.KIND_TTFT` for a streaming
+            request, ``KIND_TOTAL`` otherwise) so the two are never averaged
+            together.
         rng: Optional randomness source (tests inject a seeded instance).
     """
 
@@ -74,6 +92,7 @@ class StrategyContext:
     conversation_key: str | None = None
     redis: Any | None = None
     stats_store: ProviderStatsStore | None = None
+    latency_kind: LatencyKind = DEFAULT_LATENCY_KIND
     rng: random.Random | None = None
 
 
@@ -129,10 +148,17 @@ def _cost_ordered(available: list[Candidate], ctx: StrategyContext) -> list[Cand
 
 
 def _balanced_ordered(available: list[Candidate], ctx: StrategyContext) -> list[Candidate]:
-    """Order candidates by combined cost+latency score (ascending)."""
+    """Order candidates by combined cost+latency score (ascending).
+
+    Requests are served by the best score, except for the exploration share
+    (:data:`_BALANCED_EXPLORE_RATE`) that starts on a runner-up so the runner-up
+    keeps producing fresh samples.
+    """
     rng = ctx.rng or _default_rng
     store = ctx.stats_store
-    latencies = [store.get(k) if store is not None else None for _, k in available]
+    latencies = [
+        store.get(k, ctx.latency_kind) if store is not None else None for _, k in available
+    ]
     known = [lat for lat in latencies if lat is not None]
     if not known:
         # Cold start: no latency signal yet — behave like cost_optimized.
@@ -153,7 +179,13 @@ def _balanced_ordered(available: list[Candidate], ctx: StrategyContext) -> list[
         for pk, nc, nl in zip(available, norm_cost, norm_latency, strict=True)
     ]
     scored.sort(key=lambda item: (item[0], item[1]))
-    return [pk for _, _, pk in scored]
+    ordered = [pk for _, _, pk in scored]
+    if len(ordered) > 1 and rng.random() < _BALANCED_EXPLORE_RATE:
+        # Exploration turn: start on a runner-up, keep the remaining ordering so
+        # a fallback inside this request still drifts consistently.
+        head = rng.choice(ordered[1:])
+        return [head, *[pk for pk in ordered if pk[1] != head[1]]]
+    return ordered
 
 
 def _sticky_ranked(available: list[Candidate], conv_key: str) -> list[Candidate]:
@@ -193,6 +225,35 @@ def _sticky_ordered(
     return head + tail
 
 
+async def _refresh_sticky_ttl(
+    redis: Any,
+    redis_key: str,
+    stored: str,
+    conv_key: str,
+    available: list[Candidate],
+) -> None:
+    """Keep a pin that hashing would not reproduce from expiring.
+
+    A conversation whose pin is also the rendezvous head of the currently
+    available set carries no information: if the mapping expires, the next
+    request derives the same head and persists it again. Skipping the write
+    keeps the steady state at one Redis command per request.
+
+    A pin that differs from the head is the opposite: the conversation drifted
+    to a backup provider while its head was down and has since warmed that
+    provider's prompt cache. Expiring it would drop the conversation back onto
+    the head mid-conversation, so the TTL is extended on every hit.
+    """
+    if available and _sticky_ranked(available, conv_key)[0][1] == stored:
+        return
+    try:
+        await redis.setex(redis_key, STICKY_TTL_SECONDS, stored)
+    except Exception as exc:
+        # Losing the refresh only shortens the pin's life; log so it is
+        # diagnosable rather than silent.
+        logger.warning(f"Redis sticky-provider refresh failed for key {redis_key}: {exc}")
+
+
 async def resolve_sticky_key(
     available: list[Candidate],
     ctx: StrategyContext,
@@ -216,6 +277,7 @@ async def resolve_sticky_key(
             stored = stored.decode("utf-8") if isinstance(stored, bytes) else stored
             available_keys = {k for _, k in available}
             if stored in available_keys:
+                await _refresh_sticky_ttl(ctx.redis, redis_key, stored, conv_key, available)
                 return stored
     except Exception as exc:
         # Degrade gracefully to rendezvous hashing, but leave a diagnostic

@@ -127,12 +127,21 @@ How providers of the same priority are ordered when several can serve a model:
 
 | Strategy | Behavior |
 | --- | --- |
-| `random` (default) | Random pick within the priority group |
-| `session_sticky` | Reuses the provider chosen earlier in the same conversation when Redis is available; without Redis (or without a conversation key) it degrades to deterministic rendezvous hashing |
-| `cost_optimized` | Cheapest usable provider first |
-| `balanced` | Blends cost and observed latency/error statistics |
+| `session_sticky` (default) | Keeps a conversation on one provider so its prompt cache stays warm. Redis remembers the choice when configured, otherwise deterministic rendezvous hashing over the conversation key pins it. A request with no conversation key falls back to a random pick |
+| `random` | Random pick within the priority group — spreads load evenly, but a conversation can land on a different provider every turn, re-warming its prompt cache |
+| `cost_optimized` | Cheapest usable provider first. It only differs from `random` when mappings of the same priority carry different prices |
+| `balanced` | Weighs cost against observed latency, keeping a small exploration share so no provider's samples go stale |
 
 Higher-priority groups are always tried before lower ones, regardless of strategy.
+
+The sticky key prefers the client's own session header (`x-opencode-session`,
+`x-claude-code-session-id`, Codex's `x-codex-turn-metadata`, Pi's
+`x-session-affinity`, …), then an explicit session id in the request body, then the
+`x-session-id` of a trusted proxy, and finally a hash of the first user message.
+That is the same conversation handle the [OpenCode lane](providers.md) forwards
+upstream, so both layers agree on where a conversation lives. Redis holds the pin
+for 30 minutes and extends it while the conversation is being served by a provider
+it drifted to (a fallback) rather than by the one hashing would pick.
 
 ### Retry & Fallback
 

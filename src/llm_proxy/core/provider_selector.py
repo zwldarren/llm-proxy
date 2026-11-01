@@ -1,9 +1,12 @@
 """Provider selector for priority-based provider selection and fallback."""
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from llm_proxy.config.types.model import (
+    DEFAULT_PROVIDER_SELECTION_STRATEGY,
     ModelConfig,
     ModelProviderConfig,
     ProviderSelectionStrategy,
@@ -16,6 +19,7 @@ from llm_proxy.core.errors import (
     classify_error,
 )
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.core.provider_stats import DEFAULT_LATENCY_KIND, LatencyKind
 from llm_proxy.core.provider_strategy import (
     StrategyContext,
     pick_provider,
@@ -50,14 +54,57 @@ def _get_provider_mapping_key(provider: ModelProviderConfig, index: int) -> str:
     model names. The key combines provider name, model name, and index
     to ensure uniqueness.
 
+    The index is a position in the *canonical* enumeration built by
+    :meth:`ProviderSelector._get_providers_by_priority_with_keys` (priority
+    descending, then content order), never in whatever order the provider list
+    happened to arrive in — see :func:`_mapping_order_key` for why. The format
+    itself is read by ``api/routers/config/circuit_breaker.py``
+    (``_parse_provider_key``) and rendered in the console, so it is a contract:
+    keep the three colon-separated parts.
+
     Args:
         provider: The provider configuration
-        index: The index of this provider in the list (for uniqueness)
+        index: Position in the canonical enumeration (for uniqueness)
 
     Returns:
         A unique string key for this provider mapping
     """
     return f"{provider.provider}:{provider.provider_model_name or ''}:{index}"
+
+
+def _overrides_fingerprint(overrides: dict[str, Any] | None) -> str:
+    """Short, order-independent digest of a mapping's parameter overrides.
+
+    Two mappings of one provider and upstream model can differ only by their
+    overrides, so the overrides are part of a mapping's identity. JSON with
+    sorted keys makes the digest independent of dict insertion order.
+    """
+    if not overrides:
+        return ""
+    payload = json.dumps(overrides, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()[:8]
+
+
+def _mapping_order_key(provider: ModelProviderConfig) -> tuple[str, str, str]:
+    """Canonical ordering key for the mappings of one priority group.
+
+    Provider mapping keys carry a positional index, and that index is what the
+    circuit breaker, the latency store and the Redis sticky mapping are keyed
+    by. Enumeration therefore must depend on *which* mappings exist, never on
+    the order rows came back from the database or a config was submitted in:
+    a mapping that shifts position would otherwise inherit another mapping's
+    breaker state and sticky pins, and every conversation would be re-hashed
+    onto a new provider after an unrelated edit.
+
+    Mappings that compare equal here are indistinguishable upstream (same
+    provider, upstream model and overrides), so the stable sort keeps their
+    relative order and swapping them is harmless.
+    """
+    return (
+        provider.provider,
+        provider.provider_model_name or "",
+        _overrides_fingerprint(provider.parameter_overrides),
+    )
 
 
 @dataclass
@@ -82,11 +129,15 @@ class ProviderSelector:
         state: The SelectionState tracking per-request mutable state.
         circuit_breaker: Optional shared circuit breaker store.
         strategy: Selection strategy applied within the highest available
-            priority group. Default ``random`` preserves historical behavior.
+            priority group (default: the global default,
+            :data:`DEFAULT_PROVIDER_SELECTION_STRATEGY`).
         model_name: Proxy-facing model name (namespaces the sticky mapping).
         conversation_key: Stable conversation identifier for session_sticky.
         redis: Optional async Redis client for the sticky provider mapping.
         stats_store: Optional EWMA latency stats for the balanced strategy.
+        latency_kind: Which latency bucket this request's measurement (and the
+            balanced strategy's comparison) belongs to — time-to-first-token for
+            a streaming request, total duration otherwise.
     """
 
     model_config: ModelConfig
@@ -95,11 +146,12 @@ class ProviderSelector:
     default_max_retries: int = DEFAULT_MAX_RETRIES
     state: SelectionState = field(default_factory=SelectionState)
     circuit_breaker: CircuitBreakerStore | None = None
-    strategy: ProviderSelectionStrategy = ProviderSelectionStrategy.RANDOM
+    strategy: ProviderSelectionStrategy = DEFAULT_PROVIDER_SELECTION_STRATEGY
     model_name: str = ""
     conversation_key: str | None = None
     redis: Any | None = None
     stats_store: ProviderStatsStore | None = None
+    latency_kind: LatencyKind = DEFAULT_LATENCY_KIND
 
     @property
     def attempt_count(self) -> int:
@@ -111,19 +163,32 @@ class ProviderSelector:
     ) -> list[list[tuple[ModelProviderConfig, str]]]:
         """Group providers by priority level with their unique keys.
 
+        The enumeration is canonical (see :func:`_mapping_order_key`): priority
+        groups descending, and inside a group the mappings in content order.
+        That is what makes a mapping key's positional index reproducible, so
+        breaker state, latency samples and sticky pins stay attached to the
+        same mapping across reloads and workers.
+
         Returns:
             List of provider groups, sorted by priority (highest first).
             Each group contains tuples of (provider_config, unique_key).
         """
-        providers = self.model_config.get_providers_by_priority()
+        grouped: dict[int, list[ModelProviderConfig]] = {}
+        for prov in self.model_config.get_providers_by_priority():
+            grouped.setdefault(prov.priority, []).append(prov)
+
+        # Sort by priority descending, then by mapping content inside a group,
+        # and hand out indices in that single canonical order.
+        ordered: list[ModelProviderConfig] = []
+        for priority in sorted(grouped, reverse=True):
+            ordered.extend(sorted(grouped[priority], key=_mapping_order_key))
+
         priority_groups: dict[int, list[tuple[ModelProviderConfig, str]]] = {}
-        for idx, prov in enumerate(providers):
+        for idx, prov in enumerate(ordered):
             key = _get_provider_mapping_key(prov, idx)
             priority_groups.setdefault(prov.priority, []).append((prov, key))
 
-        # Sort by priority descending
-        sorted_priorities = sorted(priority_groups.keys(), reverse=True)
-        return [priority_groups[p] for p in sorted_priorities]
+        return [priority_groups[p] for p in sorted(priority_groups, reverse=True)]
 
     def _strategy_context(self) -> StrategyContext:
         """Assemble the per-request strategy inputs."""
@@ -133,6 +198,7 @@ class ProviderSelector:
             conversation_key=self.conversation_key,
             redis=self.redis,
             stats_store=self.stats_store,
+            latency_kind=self.latency_kind,
         )
 
     def _first_available_group(self) -> list[tuple[ModelProviderConfig, str]]:
@@ -153,15 +219,17 @@ class ProviderSelector:
 
         For the ``session_sticky`` strategy with Redis configured, resolves
         and pins this conversation's provider mapping key. No-op for other
-        strategies or when sticky resolution is unavailable (the ordering
-        then degrades to stateless rendezvous hashing at pick time).
+        strategies, when sticky resolution is unavailable (the ordering then
+        degrades to stateless rendezvous hashing at pick time), and when the
+        highest priority group holds a single candidate — there is nothing to
+        choose, so a Redis round trip would only add latency.
         """
         if self.strategy is not ProviderSelectionStrategy.SESSION_STICKY:
             return
         if not self.conversation_key or self.redis is None:
             return
         available = self._first_available_group()
-        if not available:
+        if len(available) < 2:
             return
         self.state.sticky_key = await resolve_sticky_key(available, self._strategy_context())
 
@@ -302,13 +370,18 @@ class ProviderSelector:
         if self.circuit_breaker is not None and self.state.last_selected_key is not None:
             self.circuit_breaker.record_failure(self.state.last_selected_key)
 
-    def record_last_success(self, duration_ms: float | None = None) -> None:
+    def record_last_success(
+        self,
+        duration_ms: float | None = None,
+        kind: LatencyKind = DEFAULT_LATENCY_KIND,
+    ) -> None:
         """Record a success for the last selected provider.
 
         Resets the circuit breaker and, when a latency measurement is
         provided, feeds the EWMA stats store used by the ``balanced``
-        strategy (streaming requests pass TTFT, non-streaming pass total
-        response time).
+        strategy. The measurement goes into the bucket named by *kind*
+        (streaming requests pass TTFT, non-streaming pass total response
+        time) so the two are never averaged together.
         """
         key = self.state.last_selected_key
         if key is None:
@@ -316,7 +389,7 @@ class ProviderSelector:
         if self.circuit_breaker is not None:
             self.circuit_breaker.record_success(key)
         if duration_ms is not None and self.stats_store is not None:
-            self.stats_store.observe(key, duration_ms)
+            self.stats_store.observe(key, duration_ms, kind)
 
     def needs_role_transform(self, error: Exception | None = None) -> bool:
         """Check if the request needs role transformation (developer to system).
@@ -358,11 +431,12 @@ def create_provider_selector(
     max_fallback_attempts: int = DEFAULT_MAX_FALLBACK_ATTEMPTS,
     default_max_retries: int = DEFAULT_MAX_RETRIES,
     circuit_breaker: CircuitBreakerStore | None = None,
-    strategy: ProviderSelectionStrategy = ProviderSelectionStrategy.RANDOM,
+    strategy: ProviderSelectionStrategy = DEFAULT_PROVIDER_SELECTION_STRATEGY,
     model_name: str = "",
     conversation_key: str | None = None,
     redis: Any | None = None,
     stats_store: ProviderStatsStore | None = None,
+    latency_kind: LatencyKind = DEFAULT_LATENCY_KIND,
 ) -> ProviderSelector:
     """Create a ProviderSelector for a model.
 
@@ -373,11 +447,13 @@ def create_provider_selector(
         default_max_retries: Default retry count per provider
         circuit_breaker: Optional shared circuit breaker store
         strategy: Selection strategy within same-priority groups
-            (default ``random``, preserving historical behavior)
+            (defaults to the global default, ``session_sticky``)
         model_name: Proxy-facing model name (sticky mapping namespace)
         conversation_key: Stable conversation id for session_sticky
         redis: Optional async Redis client for the sticky mapping
         stats_store: Optional EWMA latency stats for the balanced strategy
+        latency_kind: Latency bucket this request is measured in (streaming:
+            time-to-first-token, otherwise total duration)
 
     Returns:
         A configured ProviderSelector instance
@@ -393,6 +469,7 @@ def create_provider_selector(
         conversation_key=conversation_key,
         redis=redis,
         stats_store=stats_store,
+        latency_kind=latency_kind,
     )
 
 

@@ -4,7 +4,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from llm_proxy.config.types.model import ProviderSelectionStrategy
+from llm_proxy.config.types.model import (
+    DEFAULT_PROVIDER_SELECTION_STRATEGY,
+    ProviderSelectionStrategy,
+)
 
 
 class ProviderSelectionConfig(BaseModel):
@@ -16,11 +19,12 @@ class ProviderSelectionConfig(BaseModel):
     """
 
     strategy: ProviderSelectionStrategy = Field(
-        default=ProviderSelectionStrategy.RANDOM,
+        default=DEFAULT_PROVIDER_SELECTION_STRATEGY,
         description=(
-            "How to pick among same-priority providers: 'random' (default), "
-            "'session_sticky' (pin a conversation to one provider for cache affinity), "
-            "'cost_optimized' (cheapest first), 'balanced' (cost + observed latency)"
+            "How to pick among same-priority providers: 'session_sticky' (default) "
+            "pins a conversation to one provider for cache affinity, "
+            "'random' rotates every request, 'cost_optimized' picks the cheapest first, "
+            "'balanced' weighs cost against observed latency"
         ),
     )
 

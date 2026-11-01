@@ -45,6 +45,7 @@ from llm_proxy.core.processing.stream_prefetch import (
 from llm_proxy.core.processing.web_search_streaming import (
     WebSearchStreamProcessor,
 )
+from llm_proxy.core.provider_stats import KIND_TTFT
 from llm_proxy.models import (
     ConversionTier,
     InternalImageEditRequest,
@@ -375,9 +376,11 @@ class StreamingProcessor:
                     )
 
                     # At this point the first chunks just arrived, so the
-                    # elapsed time ≈ TTFT — feed it to the latency stats store.
+                    # elapsed time ≈ TTFT — feed it to the latency stats store
+                    # in the TTFT bucket, never mixed with total durations.
                     context.orchestrator.record_last_success(
-                        event_context.ttft_ms if event_context is not None else None
+                        event_context.ttft_ms if event_context is not None else None,
+                        kind=KIND_TTFT,
                     )
 
                     return await self._create_streaming_response(

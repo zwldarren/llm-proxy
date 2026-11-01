@@ -32,14 +32,16 @@ class ProviderSelectionStrategy(StrEnum):
     walks the same ordering, skipping providers already tried.
 
     Attributes:
-        RANDOM: Current default behavior — pick uniformly at random.
+        RANDOM: Pick uniformly at random — keeps the provider of a conversation
+            rotating, so prompt caches are re-warmed on every turn.
         SESSION_STICKY: Pin a conversation to one provider (cache affinity):
             same session keeps hitting the same provider so prompt caches stay
             warm. Uses Redis when available, rendezvous hashing otherwise.
         COST_OPTIMIZED: Pick the cheapest provider (per-mapping pricing with
             model-level fallback). Deterministic, so also cache-friendly.
         BALANCED: Score = 0.5 * normalized cost + 0.5 * normalized observed
-            latency (in-memory EWMA); picks the best trade-off. Degrades to
+            latency (in-memory EWMA); picks the best trade-off with a small
+            exploration share so no candidate's samples go stale. Degrades to
             COST_OPTIMIZED while no latency samples exist.
     """
 
@@ -47,6 +49,15 @@ class ProviderSelectionStrategy(StrEnum):
     SESSION_STICKY = "session_sticky"
     COST_OPTIMIZED = "cost_optimized"
     BALANCED = "balanced"
+
+
+#: The strategy every deployment starts with and the fallback for a missing or
+#: unparseable ``server_config.provider_selection`` row. Session sticky is the
+#: default because most traffic is multi-turn agent work, where re-warming a
+#: prompt cache on a different provider every turn costs more than the even load
+#: spread ``random`` buys; a request without a usable conversation key degrades
+#: to the random ordering anyway.
+DEFAULT_PROVIDER_SELECTION_STRATEGY = ProviderSelectionStrategy.SESSION_STICKY
 
 
 class TokenRateOverrides(BaseModel):

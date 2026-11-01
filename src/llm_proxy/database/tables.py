@@ -210,7 +210,13 @@ class ModelRecord(Base):
         "ModelProviderRecord",
         back_populates="model",
         cascade="all, delete-orphan",
-        order_by="desc(ModelProviderRecord.priority)",
+        # Priority is the only meaningful ordering, so mappings that share one
+        # need an explicit tiebreak: without it the order is whatever the
+        # database returns, which differs across engines, workers and after
+        # rewrites. Consumers read position — routing price estimates take the
+        # first mapping, and the provider selector derives its mapping keys
+        # from a deterministic enumeration (core/provider_selector.py).
+        order_by="desc(ModelProviderRecord.priority), ModelProviderRecord.id",
     )
 
     @property
