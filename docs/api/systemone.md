@@ -138,7 +138,7 @@ The proxy rejects a malformed question up front with a `422` naming it. Where
 the upstreams disagree on a limit, the proxy accepts the union and lets the
 upstream that does not support the request answer for itself:
 
-- `score` takes 2–26 ordered levels — Ollama's ceiling. TypeSafe and OpenRouter
+- `score` takes 2–26 ordered levels: Ollama's ceiling. TypeSafe and OpenRouter
   stop at 10, so a rubric above that is served by Ollama and rejected upstream
   by the other two.
 - `choice` takes at most 255 options (Ollama's own ceiling is 26).
@@ -178,6 +178,6 @@ is still alpha, so reaching it is a deployment choice rather than the default.
 
 ## Related
 
-- [Decisions](decisions.md) — the sibling envelope (OpenAI's `/v1/decisions`)
+- [Decisions](decisions.md): the sibling envelope (OpenAI's `/v1/decisions`)
 - [Endpoint Index](endpoints.md)
 - [Errors & Rate Limits](errors.md)

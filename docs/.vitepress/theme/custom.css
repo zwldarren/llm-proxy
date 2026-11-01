@@ -48,6 +48,13 @@
   overflow-x: auto;
 }
 
+/* Chinese labels have no spaces, so a narrow column can break a bold field name
+   one character per line. Keep bold labels intact; the table scrolls instead. */
+.vp-doc table td strong,
+.vp-doc table th strong {
+  white-space: nowrap;
+}
+
 /* -----------------------------------------------------------------------------
    API reference pages (pageClass: api-reference) — a dedicated endpoint-reference
    look, not a regular article page. The code rail itself is emitted at build
@@ -277,6 +284,37 @@ text with a .kicker-<category> class in their frontmatter pageClass. */
 
 .kicker-advanced .vp-doc > div > h1:first-child::before {
   content: 'Advanced';
+}
+
+/* Chinese kickers. The category is carried by pageClass, while the label itself
+   is CSS content, so it needs its own locale switch. */
+html[lang^='zh'] .kicker-overview .vp-doc > div > h1:first-child::before {
+  content: '概览';
+}
+
+html[lang^='zh'] .kicker-chat .vp-doc > div > h1:first-child::before {
+  content: '聊天';
+}
+
+html[lang^='zh'] .kicker-images .vp-doc > div > h1:first-child::before {
+  content: '图像';
+}
+
+html[lang^='zh'] .kicker-audio .vp-doc > div > h1:first-child::before {
+  content: '音频';
+}
+
+html[lang^='zh'] .kicker-systemone .vp-doc > div > h1:first-child::before,
+html[lang^='zh'] .kicker-decisions .vp-doc > div > h1:first-child::before {
+  content: '评估';
+}
+
+html[lang^='zh'] .kicker-models .vp-doc > div > h1:first-child::before {
+  content: '模型';
+}
+
+html[lang^='zh'] .kicker-advanced .vp-doc > div > h1:first-child::before {
+  content: '进阶';
 }
 
 /* Endpoint tables read as OpenAI-style parameter lists: no zebra, no vertical

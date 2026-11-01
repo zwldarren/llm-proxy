@@ -113,14 +113,14 @@ Reasoning items carry `encrypted_content` when the client requests
 (`store: false`) — the current OpenAI reasoning docs return encrypted reasoning by
 default in stateless mode, with `include` kept as the legacy explicit request.
 
-Anthropic-origin reasoning items additionally carry their verification payload
+Anthropic-origin reasoning items also carry their verification payload
 (`thinking.signature` / `redacted_thinking.data`) in `encrypted_content`
 regardless of `include` or `store` — the Responses wire has no other field for it,
 and dropping it would break the next turn's extended thinking.
 
 ::: tip Zero Data Retention (ZDR)
 ZDR organizations are stateless upstream, but when `store` is omitted the proxy
-cannot see that and treats the response as stored, so it gates genuine encrypted
+cannot see that and treats the response as stored, so it gates the encrypted
 reasoning behind `include`. Pass `store: false` or
 `include: ["reasoning.encrypted_content"]` explicitly to receive it.
 :::
@@ -166,7 +166,7 @@ API key are not persisted either).
 
 `background: true`:
 
-- Requires Redis **and** an authenticated API-key request — otherwise 503
+- Requires Redis **and** an authenticated API-key request: otherwise 503
   `redis_not_available` (fail fast instead of returning a dead poll id).
 - Returns **HTTP 200 immediately** with `status: "in_progress"`, a pre-generated id,
   `output: []`.
@@ -217,5 +217,5 @@ is returned; otherwise a local `o200k_base` estimate is used.
 
 ## Related
 
-- [Streaming](../streaming.md#openai-responses-api) — event reference
+- [Streaming](../streaming.md#openai-responses-api): event reference
 - [Errors & Rate Limits](../errors.md)

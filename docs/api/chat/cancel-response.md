@@ -47,5 +47,5 @@ print(resp.status)
 
 ## Related
 
-- [Create response](create-response.md) — background mode
+- [Create response](create-response.md): background mode
 - [Retrieve response](retrieve-response.md)

@@ -30,6 +30,19 @@ User documentation lives in `docs/` — a VitePress site published to GitHub Pag
 `.github/workflows/docs.yml` (`docs/adr/` and `docs/agents/` are excluded from the
 site via `srcExclude`).
 
+English is the source language and lives at the site root. Simplified Chinese
+pages live under `docs/zh/`, mirroring the English structure. When you edit a page
+that has a Chinese counterpart, update both in the same change; a page without a
+translation is linked from the Chinese navigation to its English original and
+marked “（英文）”. Style, terminology and worked examples for Chinese pages are
+in [`docs/agents/documentation-zh.md`](docs/agents/documentation-zh.md).
+
+Write plain documentation, not marketing copy. Avoid em-dash glosses on every
+sentence, bold lead-ins on every bullet, parallel headline triads, “not X but Y”
+contrasts, and generic closers. The `avoid-ai-writing` skill (when installed) can
+audit a page; use its `docs` profile, which treats parameter lists and tables as
+legitimate.
+
 ```bash
 cd docs
 bun install          # Install the VitePress toolchain

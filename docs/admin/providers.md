@@ -19,8 +19,8 @@ and let fallback and priority decide who answers.
 | **Icon URL** | Optional logo shown next to the provider in the console; must be a public URL (`https:`/`http:`) — private/loopback addresses are rejected by the SSRF guard |
 | **Gemini Interactions** | `gemini` type only: use Google's newer Interactions API instead of `generateContent` (`metadata.api_variant`). The provider list shows an **Interactions** badge |
 | **Gemini model family overrides** | `gemini` type only, API/DB (`metadata.model_family_overrides`): maps an exact model id to a Gemini family version (e.g. `{"gemini-flash-latest": "4.0"}`) for the generateContent dialect. Use it when a model's id carries no `gemini-X.Y` segment (Google aliases, aggregator nicknames) — without it the proxy falls back to the legacy-safe request shape for that id and logs a warning once; with it the pinned family's shapes apply (thinking level vs budget, JSON-Schema fields, thought signatures, sampling-parameter dropping). Values must be versions like `"4.0"`/`"3.8"`; invalid entries are dropped with a warning. The Interactions dialect has no family gates, so a pin is a no-op there |
-| **API version** | Not in the console dialog; set via API/DB only. Not applied by any adapter in v0.2.3 |
-| **Timeout** | Not in the console dialog; set via API/DB only. Not applied in v0.2.3 — upstream calls use a fixed 600 s read timeout (10 s connect) |
+| **API version** | Not in the console dialog; set via API/DB only. Stored for forward compatibility — no adapter applies it yet |
+| **Timeout** | Not in the console dialog; set via API/DB only. Stored but not applied — upstream calls use a fixed 600 s read timeout (10 s connect) |
 | **Custom headers** | Extra headers sent upstream (e.g. tenant or organization headers). These win over any other source for the same header name |
 | **App Attribution** | `openrouter` type only: application URL (`HTTP-Referer`), name, marketplace categories and ranking visibility. Unset values fall back to crediting the LLM Proxy project |
 | **Endpoint base URLs** | Per-endpoint overrides; the URL is used as-is, without appending the endpoint path |
@@ -88,14 +88,14 @@ on OpenAI Responses, Gemini on generateContent, Jev on System One (`/v1/systemon
 endpoint only — chat requests for Jev models are rejected with a pointer there), and
 everything else on Chat Completions.
 
-- **Types = lanes**: `opencode-zen` is the Console pay-as-you-go lane
+- Types = lanes: `opencode-zen` is the Console pay-as-you-go lane
   (`https://opencode.ai/zen/v1`), `opencode-go` the subscription lane
   (`https://opencode.ai/zen/go/v1`) — the two lanes serve different model catalogs
   (the same id can even speak a different dialect on each; the adapter reads the
   lane's own models.dev entry). Both keep every dialect on one flat root under the
   base URL. The Console lane's dialect-prefixed paths (`https://opencode.ai/inference/v1`)
   are reachable by setting `base_url` to it.
-- **Headers**: `Authorization: Bearer` everywhere, plus the dialect's auth header where
+- Headers: `Authorization: Bearer` everywhere, plus the dialect's auth header where
   the gateway reads one (`x-api-key` on the Anthropic route, `x-goog-api-key` on the
   Google route). The identity headers (`x-opencode-client`, `x-opencode-project`, a
   conversation-scoped `x-opencode-session`, a fresh per-request `x-opencode-request`)
@@ -103,7 +103,7 @@ everything else on Chat Completions.
   tier gates on that identity; the Go lane sends `User-Agent: llm-proxy/<version>`, as
   the Go docs ask clients to identify themselves. Any of these can be replaced via
   **Custom headers**, including with an empty value.
-- **Session affinity**: `x-opencode-session` is the *conversation's* stable upstream
+- Session affinity: `x-opencode-session` is the *conversation's* stable upstream
   id, not a per-request nonce — OpenCode pins a conversation to one backend and reuses
   its prompt cache based on it. The proxy takes the client's own session header when it
   sent one (`x-opencode-session`, or the native `x-claude-code-session-id` / Codex
@@ -119,10 +119,10 @@ everything else on Chat Completions.
   **Custom headers** to pin one id deliberately (this disables per-conversation
   affinity). See
   [ADR-0052](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0052-opencode-session-affinity.md).
-- **Self-healing**: when the gateway rejects a model with a model-flavored 400/404, the
+- Self-healing: when the gateway rejects a model with a model-flavored 400/404, the
   request is retried on the remaining dialects (Chat Completions first) and the working
   dialect is remembered for the process lifetime.
-- **Model list**: the gateway's `/v1/models` answers with bare ids; display names,
+- Model list: the gateway's `/v1/models` answers with bare ids; display names,
   context windows and pricing are enriched from the models.dev catalog. Set provider
   metadata `opencode_catalog_url` to a mirror to pin the catalog, or to an empty value
   to disable it (heuristics then carry the routing).
@@ -132,7 +132,7 @@ everything else on Chat Completions.
 OpenRouter is a router rather than a single upstream, so the adapter keeps a few
 of its request shapes intact:
 
-- **Responses and Messages passthrough.** `/v1/responses` and `/v1/messages`
+- Responses and Messages passthrough. `/v1/responses` and `/v1/messages`
   clients are forwarded verbatim, so `reasoning.mode` / `reasoning.context`,
   `thinking` budgets, `context_management`, `provider` routing preferences,
   `plugins`, `models` fallbacks and `usage` accounting all reach OpenRouter.
@@ -142,12 +142,12 @@ of its request shapes intact:
   Set provider metadata `native_passthrough: false` to fall back to the
   Chat Completions translation (e.g. if the routed model rejects a
   Responses-only item type).
-- **Unified `reasoning` object.** The proxy sends `reasoning: {effort, mode,
+- Unified `reasoning` object. The proxy sends `reasoning: {effort, mode,
   context, summary, max_tokens, exclude, enabled}` instead of a bare
   `reasoning_effort`, because `mode: "pro"` (and the other Responses-only
   fields) have no top-level equivalent. OpenRouter only honours `mode: "pro"`
   when it can route to OpenAI or Azure, and only for GPT-5.6 and newer.
-- **App attribution.** The **App Attribution** fields in the provider dialog
+- App attribution. The **App Attribution** fields in the provider dialog
   identify your deployment on OpenRouter's rankings: the application URL
   (`HTTP-Referer`), display name (`X-OpenRouter-Title`), marketplace
   categories and whether a newly created app is listed publicly. Unset fields
@@ -155,7 +155,7 @@ of its request shapes intact:
   **Custom Headers** win over both. Values are validated as printable ASCII
   (they become raw HTTP headers), the URL must be an absolute http(s) URL, and
   at most two categories are accepted.
-- **Forwarded client headers.** Per-request OpenRouter control headers
+- Forwarded client headers. Per-request OpenRouter control headers
   (`X-OpenRouter-Metadata`, `X-OpenRouter-Cache`, `X-OpenRouter-Cache-TTL`,
   `X-OpenRouter-Cache-Clear`) are forwarded from the client, as are
   `x-session-id` (sticky routing and prompt-cache affinity on chat; on the
@@ -164,7 +164,7 @@ of its request shapes intact:
   (Claude beta opt-ins such as `structured-outputs-2025-11-13`, without which
   OpenRouter strips `strict` from tool definitions). Client Codex / Claude Code
   fingerprint headers are *not* forwarded to a router.
-- **Per-endpoint passthrough fields.** Each endpoint keeps the fields OpenRouter
+- Per-endpoint passthrough fields. Each endpoint keeps the fields OpenRouter
   documents beyond the OpenAI schema: chat (`provider`, `models`, `plugins`,
   `session_id`, `trace`, `preset`, `structured_outputs`, `cache_control`,
   `min_p`, `top_k`, `top_a`, `repetition_penalty`), embeddings (`input_type`,
@@ -180,20 +180,20 @@ of its request shapes intact:
   and `style` are dropped), and TTS/STT `response_format` is validated against
   the formats OpenRouter accepts (`mp3`/`pcm` and `json`/`verbose_json`) instead
   of surfacing an upstream 400.
-- **Response metadata.** `X-Generation-Id` (usable with
+- Response metadata. `X-Generation-Id` (usable with
   `GET /api/v1/generation?id=`) and the `X-OpenRouter-Cache-*` headers are
   forwarded to the client; `cost`, `cost_details` and `is_byok` from `usage`
   feed the cost record.
-- **Model picker.** The provider's catalog is fetched with
+- Model picker. The provider's catalog is fetched with
   `output_modalities=all` — upstream defaults to `text`, which would hide the
   image, video, audio and embedding models this adapter also serves — and keeps
   the catalog's `context_length`, modalities, `supported_parameters` and
   pricing, so the picker can show which models are non-text and what they cost.
-- **Audio.** Speech (`mp3`/`pcm`) and transcription (`json`/`verbose_json`)
+- Audio. Speech (`mp3`/`pcm`) and transcription (`json`/`verbose_json`)
   formats are checked at the proxy boundary rather than surfaced as an upstream
   400. OpenRouter has no audio *translation* endpoint, so
   `/v1/audio/translations` is rejected locally instead of 404-ing upstream.
-- **Model variants.** `:free`, `:nitro`, `:floor`, `:online`, `:thinking` and
+- Model variants. `:free`, `:nitro`, `:floor`, `:online`, `:thinking` and
   the `*-pro` variants are passed through as plain model strings, but model
   lookup is an exact name match — register each variant you want to expose as
   its own model, or route to it with a model alias.
@@ -207,31 +207,31 @@ vice versa. Business-space dedicated domains
 (`https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/…`) work through the provider
 **Base URL** field.
 
-- **Native protocols.** Anthropic Messages (`{host}/apps/anthropic/v1/messages`) and
+- Native protocols. Anthropic Messages (`{host}/apps/anthropic/v1/messages`) and
   OpenAI Responses (`{base_url}/responses`) are forwarded verbatim, so Claude Code
   request shapes, `cache_control` breakpoints and Responses items reach DashScope
   unchanged. The Anthropic endpoint exposes only `/v1/messages` — there is no
   model-list endpoint, so clients that probe `/v1/models` see a 404 from upstream.
-- **Chat vendor fields.** Unrecognized chat fields pass through to DashScope, so
+- Chat vendor fields. Unrecognized chat fields pass through to DashScope, so
   `enable_thinking`, `thinking_budget`, `enable_search`, `search_options`,
   `tool_stream` and `enable_code_interpreter` work from a client's `extra_body`.
-- **Images.** Wan and Qwen-Image both run through the DashScope async task API.
+- Images. Wan and Qwen-Image both run through the DashScope async task API.
   DashScope's image extension fields are accepted and forwarded, flat on the body:
   `image` (URL / base64 / array, turning the call into image-to-image),
   `negative_prompt`, `seed`, `prompt_extend`, `prompt_extend_mode`,
   `enable_thinking`, `watermark`, and on edits `bbox_list`, `color_palette`,
   `enable_sequential`, `thinking_mode`. There is no mask concept — pass `bbox_list`
   instead.
-- **Embeddings.** `text-embedding-v1..v4` and `qwen3.7-text-embedding` ride
+- Embeddings. `text-embedding-v1..v4` and `qwen3.7-text-embedding` ride
   `{base_url}/embeddings`. `dimensions` is validated against DashScope's documented
   value set, and per-request row caps (20 for `qwen3.7-text-embedding`, 10 for
   v3/v4, 25 for v1/v2) are enforced at the proxy.
-- **No audio.** DashScope has no OpenAI-compatible audio surface. Speech synthesis
+- No audio. DashScope has no OpenAI-compatible audio surface. Speech synthesis
   (Qwen-TTS, CosyVoice) uses the native
   `/api/v1/services/aigc/multimodal-generation/generation` endpoint, and
   OpenAI-compatible ASR (`qwen3-asr-flash`) is `/chat/completions` with `input_audio`
   content parts. `/v1/audio/*` against a qwen provider is rejected with a `400`.
-- **Web search.** DashScope's Responses API has its own `web_search` /
+- Web search. DashScope's Responses API has its own `web_search` /
   `web_extractor` / `code_interpreter` tools. Set provider metadata
   `native_web_search: true` to let `web_search` tools reach it; otherwise the proxy
   intercepts them and runs its own web search. On Chat Completions the proxy emits
@@ -251,7 +251,7 @@ DeepSeek serves three wire protocols from one host: Chat Completions
 endpoint (`https://api.deepseek.com/responses`). The adapter strips the `/v1`
 compatibility alias when it derives the two native endpoints.
 
-- **Native web search.** DeepSeek runs `web_search` **server-side on the
+- Native web search. DeepSeek runs `web_search` **server-side on the
   Responses endpoint only**, and only for `deepseek-v4-pro` (`deepseek-flash`
   accepts the tool and silently ignores it). Declare it as you would for
   OpenAI — `"tools": [{"type": "web_search"}]`, or DeepSeek's dated spelling
@@ -268,7 +268,7 @@ compatibility alias when it derives the two native endpoints.
   blocks are accepted (they survive replay), but DeepSeek's documented built-in
   tool list stops at `function`, so do not expect `web_search_20250305` to be
   executed there.
-- **Stateless Responses.** There is no `previous_response_id`: the proxy
+- Stateless Responses. There is no `previous_response_id`: the proxy
   materializes a stored turn into `input` items and falls back to the Chat
   Completions translation for that turn, which is also why a materialized
   continuation cannot use the server-side `web_search`.
@@ -281,7 +281,7 @@ an Anthropic-compatible Messages endpoint
 endpoint (`https://api.minimax.io/v1/responses`). The two native endpoints are
 forwarded verbatim, so the client's own fields survive.
 
-- **The thinking vocabulary is translated.** MiniMax does not speak
+- The thinking vocabulary is translated. MiniMax does not speak
   Anthropic's: `thinking.type` is `disabled` or `adaptive` (there is no
   `budget_tokens`), the depth rides `reasoning_effort` (Chat) or
   `output_config.effort` (Messages), and `none` / `minimal` are not spellings
@@ -292,27 +292,27 @@ forwarded verbatim, so the client's own fields survive.
   reasoning" becomes `thinking: {"type": "disabled"}` rather than
   `reasoning_effort: "none"`. `MiniMax-M3.1-Flash` always thinks and rejects
   `disabled` as well, so on that model the field is dropped instead.
-- **`reasoning_split`** is MiniMax's own output switch: with it off, the
+- `reasoning_split` is MiniMax's own output switch: with it off, the
   thinking content stays inside `content` wrapped in `<think>` tags instead of
   moving to `reasoning_content`. It is forwarded on the chat wire.
-- **Video input.** The M-series models read image and video. The OpenAI chat
+- Video input. The M-series models read image and video. The OpenAI chat
   wire carries `video_url`; the Anthropic-compatible Messages endpoint carries
   a `video` block, which the proxy parses into the shared video block and
   renders as `video_url` on a chat wire.
-- **The service tier is translated.** MiniMax names its tiers `standard` and
+- The service tier is translated. MiniMax names its tiers `standard` and
   `priority` (the priority tier costs 1.5× and buys priority admission;
   `MiniMax-M3.1-Flash` does not support the field). The clients speak other
   words — Anthropic `auto`/`standard_only`, OpenAI `auto`/`default`/`flex`/
   `priority` — so the proxy maps them: `standard_only`/`default` become
   `standard`, `priority` stays, and a tier MiniMax has no word for (`auto`,
   `flex`) is dropped rather than sent as an illegal enum value.
-- **Errors arrive in the body.** The Chat Completions endpoint answers
+- Errors arrive in the body. The Chat Completions endpoint answers
   HTTP 200 and carries the failure in `base_resp.status_code` (1002 rate
   limit, 1004 authentication, 1008 balance, 1026/1027 sensitive content,
   2013 invalid params, …). The proxy turns those into real HTTP errors
   (429/401/402/400) instead of an empty success. The Messages and Responses
   endpoints use ordinary HTTP status codes and need no translation.
-- **Token counting.** MiniMax serves two counters: the Anthropic-compatible
+- Token counting. MiniMax serves two counters: the Anthropic-compatible
   `POST /anthropic/v1/messages/count_tokens` (behind
   `POST /v1/messages/count_tokens`) and `POST /v1/responses/input_tokens`
   (behind `POST /v1/responses/input_tokens`). Both are forwarded to the
@@ -331,63 +331,63 @@ deliberately not used: it is an OpenAI-shaped projection that drops the
 Cohere-only fields this adapter keeps and rejects OpenAI fields the proxy would
 otherwise forward.
 
-- **Chat messages.** v2 has `system`/`user`/`assistant`/`tool` roles and a single
+- Chat messages. v2 has `system`/`user`/`assistant`/`tool` roles and a single
   leading system slot, so every system and developer turn (including
   mid-conversation ones) is folded into that message, joined with blank lines. Tool
   output becomes its own `role: "tool"` message keyed by `tool_call_id`. Content is
   a plain string or `text`/`image_url` blocks; an image the client sent as bytes
   arrives as a `data:` URI.
-- **Sampling.** `top_p` → `p`, `stop` → `stop_sequences` (v2 honours at most five;
+- Sampling. `top_p` → `p`, `stop` → `stop_sequences` (v2 honours at most five;
   the rest are dropped with a warning), and `temperature`, `max_tokens`,
   `frequency_penalty`, `presence_penalty`, `seed` map one to one. **`n > 1` is
   refused**: v2 returns one completion per request, and fanning out would multiply
   the billed requests.
-- **Structured output.** OpenAI's `{"type": "json_schema", "json_schema": {name,
+- Structured output. OpenAI's `{"type": "json_schema", "json_schema": {name,
   schema, strict}}` becomes v2's `{"type": "json_object", "json_schema": <schema>}`;
   Cohere has no strict flag. v2 documents that `response_format` cannot be combined
   with `documents` or `tools` — ask for one or the other.
-- **Thinking.** The unified `thinking` config becomes v2's
+- Thinking. The unified `thinking` config becomes v2's
   `{"type": "enabled"|"disabled", "token_budget": N}`. Reasoning is on by default
   for models that support it; `disabled` (or an effort of `none`/`minimal`) sends
   the off spelling rather than omitting the field.
-- **Tools.** Tools are JSON-Schema function entries (`parameters` is required, so a
+- Tools. Tools are JSON-Schema function entries (`parameters` is required, so a
   schema-less tool gets `{}`) and a freeform tool bridges to a single-`content`
   function. `tool_choice` collapses onto v2's `REQUIRED`/`NONE` pair: v2 has no
   "call *this* tool" mode, so a named choice becomes `REQUIRED`, and `auto` is
   expressed by omitting the field. A hosted tool has no slot on this wire and is
   dropped with the reason.
-- **Cohere-only fields.** `documents`, `citation_options`, `safety_mode`,
+- Cohere-only fields. `documents`, `citation_options`, `safety_mode`,
   `strict_tools`, `priority`, `k` and `logprobs` pass through `extra` and are exempt
   from the unknown-fields policy. Citations Cohere returns on a RAG answer ride the
   text block they cite (`content_index`).
-- **Embeddings.** v2 requires `input_type` — `search_document` by default; pass
+- Embeddings. v2 requires `input_type`: `search_document` by default; pass
   `extra.input_type` for `search_query`/`classification`/`clustering`/`image` — and
   answers vectors grouped by embedding type. `dimensions` → `output_dimension`,
   `encoding_format: "base64"` → `embedding_types: ["base64"]`. A batch over
   Cohere's 96-input cap is rejected rather than silently split.
-- **Rerank.** v2 takes plain-string documents and echoes none back, so the proxy
+- Rerank. v2 takes plain-string documents and echoes none back, so the proxy
   projects the request's own documents onto the ranked results (unless the client
   asked for indexes and scores only). An image-only document has no v2
   representation and is refused. `max_tokens_per_doc`, `relevant_spans` and
   `priority` pass through `extra`.
-- **Audio.** `/v2/audio/transcriptions` requires `language` (ISO-639-1) — Cohere has
+- Audio. `/v2/audio/transcriptions` requires `language` (ISO-639-1): Cohere has
   no auto-detect — and `prompt`, `response_format`, timestamp granularities and
   `include` have no v2 equivalent, so they are dropped and the client's own response
   format is honoured by the proxy. There is no streaming transcription, no TTS and
   no audio translation.
-- **Model list.** `GET /v1/models` (Cohere documents no `/v2/models`), with its own
+- Model list. `GET /v1/models` (Cohere documents no `/v2/models`), with its own
   `page_size`/`page_token` pagination rather than the OpenAI-style page tokens.
 
 ## Web search: native or proxy-side
 
 Two systems can answer a `web_search` tool, and exactly one of them runs per request:
 
-- **Proxy-side (default).** With a search provider configured under **Settings → Web
+- Proxy-side (default). With a search provider configured under **Settings → General → Web
   search** (SearXNG or Ollama), the proxy rewrites the hosted tool into a plain
   function tool, executes the searches itself and injects the results in
   Anthropic-compatible shape. This works for every provider, including
   Chat-Completions-only upstreams that have no hosted search at all.
-- **Native (per provider).** Set the provider's **Use Native Web Search**
+- Native (per provider). Set the provider's **Use Native Web Search**
   (provider metadata `native_web_search: true`) to let the upstream execute the
   tool instead. The proxy then forwards the tool declaration in that upstream's
   own shape — including on Chat Completions wires, where the shape is often not a
@@ -478,23 +478,23 @@ Two deliberate asymmetries, both documented in ADR-0038:
 - Once a model mapping exists, send a test request from the **Chat playground** or with
   `curl`, then confirm the row in [Logs](../admin/observability.md).
 
-## Known limitations (v0.2.3)
+## Known limitations
 
 Documented deliberately so you do not chase them:
 
-- **Provider `timeout`, `api_version`, and `rate_limit` are not applied** by the
-  request path. Upstream calls use a fixed 600 s read timeout; rate limiting is
-  global/per-key, not per provider.
-- **Provider `priority` does not affect selection** — set priority on each model →
+- Provider `timeout`, `api_version`, and `rate_limit` are not applied by the
+  request path. Upstream calls use a fixed 600 s read timeout (10 s connect); rate
+  limiting is global/per-key, not per provider.
+- Provider `priority` does not affect selection: set priority on each model →
   provider mapping instead.
-- **Provider `enabled` does not filter traffic**; remove the model mappings (or raise
+- Provider `enabled` does not filter traffic; remove the model mappings (or raise
   another provider's mapping priority) to take a provider out of rotation.
-- **No vertex/region/project fields** for Gemini; no OAuth flows. Upstreams that need
+- No vertex/region/project fields for Gemini; no OAuth flows. Upstreams that need
   client fingerprint headers work via native passthrough only.
-- **No per-provider health checks**; the circuit breaker is the only automatic
+- No per-provider health checks; the circuit breaker is the only automatic
   protection.
 
 ## Related
 
-- [Models & Pricing](models.md) — map client-facing names onto this provider
-- [Server Settings](settings.md#retry-fallback) — retries, fallback, circuit breaker
+- [Models & Pricing](models.md): map client-facing names onto this provider
+- [Server Settings](settings.md#retry-fallback): retries, fallback, circuit breaker

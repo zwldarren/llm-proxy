@@ -39,7 +39,7 @@ Enabled servers start immediately and are auto-started on every process start
 
 ::: warning No custom HTTP headers
 Remote (`streamableHttp`) servers are contacted without extra headers — there is
-no per-server header/auth field in v0.2.3. Use a network path you control, or a
+no per-server header/auth field yet. Use a network path you control, or a
 backend that authenticates by URL.
 :::
 
@@ -132,18 +132,18 @@ and `uvx`, so Python/Node MCP servers work without extra installs.
 
 ## Lifecycle and limits
 
-- **Start/stop**: create, enable (`PUT enabled: true`), disable (`PUT enabled: false`),
+- Start/stop: create, enable (`PUT enabled: true`), disable (`PUT enabled: false`),
   delete. Disabling stops the process; enabling starts it.
-- **No restart endpoint**: editing command/args/env/base_url of a *running* server
+- No restart endpoint: editing command/args/env/base_url of a *running* server
   restarts its process so the new definition takes effect, on the worker that
   served the edit and on every peer that adopts the change.
-- **Status** (`GET /api/mcp/servers/{name}/status`) reports `running`/`stopped` from
+- Status (`GET /api/mcp/servers/{name}/status`) reports `running`/`stopped` from
   the in-memory registry. There is no periodic health check; stdio/HTTP backends
   attempt a one-shot reconnect on connection errors.
-- **Capabilities** (`GET /api/mcp/servers/{name}/capabilities`) returns the tools,
+- Capabilities (`GET /api/mcp/servers/{name}/capabilities`) returns the tools,
   prompts, and resources the running server advertises. In the console, **View
   Details** on a server row opens the capabilities dialog. A stopped server has none.
-- **Timeout**: every backend operation is capped at **30 seconds** (not configurable).
+- Timeout: every backend operation is capped at **30 seconds** (not configurable).
   Slow tools fail with an MCP timeout error.
 
 ## Observability

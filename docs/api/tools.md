@@ -32,7 +32,7 @@ Thinking controls are accepted in every dialect and normalized:
 | Anthropic | `thinking: {"type":"enabled","budget_tokens":N}` or an effort form |
 | Responses | `reasoning: {effort, mode, context, summary}` |
 
-Provider-specific behavior worth knowing:
+Provider-specific details:
 
 - For Claude targets, `budget_tokens` must be ≥ 1024 and < `max_tokens` (400
   `invalid_parameter` otherwise), and `temperature`/`top_p` are omitted while thinking
@@ -57,7 +57,7 @@ spelling (`reasoning_content` wins when both are present), plus
 
 ::: warning Mixed-provider reasoning payloads
 `encrypted_content` is overloaded: it carries an Anthropic thinking signature
-when the proxy bridged one for round-trip, and a genuine OpenAI
+when the proxy bridged one for round-trip, and a native OpenAI
 encrypted-reasoning blob otherwise. A blob the proxy parsed straight from an
 OpenAI upstream is marked, so it is never replayed to Anthropic as a signature,
 but a blob that reached your client and came back carries no origin marker —
@@ -72,13 +72,13 @@ web-aware through your own search provider.
 
 ### Enable
 
-1. **Settings → General → Web Search** — turn on interception and configure a search provider:
-   - **SearXNG**: `url` required; optional API key or basic auth; `engines` list;
+1. Settings → General → Web Search: turn on interception and configure a search provider:
+   - SearXNG: `url` required; optional API key or basic auth; `engines` list;
      `timeout` (default 30 s); `max_results` (default 10, max 10). Queries over 4000
      characters are rejected.
-   - **Ollama**: `api_key` required; `base_url` default `https://ollama.com`;
+   - Ollama: `api_key` required; `base_url` default `https://ollama.com`;
      `timeout`; `max_results` (max 10).
-2. Nothing else — the change is hot-reloaded.
+2. Save the settings. Changes are hot-reloaded.
 
 ### How interception works
 

@@ -19,7 +19,7 @@ configured in the [admin console](../admin/overview.md) and hot-reloaded instead
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
 | `REDIS_RATE_LIMIT_ENABLED` | `false` | Redis-backed sliding-window rate limiting (requires `REDIS_ENABLED`) |
 | `REDIS_CACHE_ENABLED` | `false` | Redis cache for provider/model config lookups |
-| `REDIS_LOGGING_ENABLED` | `false` | Reserved; no effect in v0.2.3 — logs are always stored in the SQL database |
+| `REDIS_LOGGING_ENABLED` | `false` | Reserved; no effect — logs are always stored in the SQL database |
 | `UVICORN_WORKERS` | auto | Uvicorn worker processes. Unset = CPU budget (cgroup-aware) capped at 16 on PostgreSQL; always 1 on SQLite. `--workers` overrides |
 | `UVICORN_TIMEOUT_KEEPALIVE` | `600` | Keep-alive timeout in seconds |
 | `UPDATE_CHECK__ENABLED` | `true` | Double underscore. Whether `/api/system/info` checks GitHub for a newer version |
@@ -48,7 +48,7 @@ Pool sizes, timeouts, and background writer tuning. Change only if you know why.
 | `REDIS_CACHE_PREFIX` | `cache:` | Config-cache key prefix |
 | `REDIS_CACHE_TTL_PROVIDER_CONFIG` | `300` | Provider-config cache TTL (seconds) |
 | `REDIS_CACHE_TTL_MODEL_MAPPING` | `300` | Model-mapping cache TTL (seconds) |
-| `REDIS_LOGGING_PREFIX` / `_TTL_DAYS` / `_BATCH_SIZE` / `_FLUSH_INTERVAL_MS` | `logs:` / `30` / `50` / `250` | Reserved; no effect in v0.2.3 |
+| `REDIS_LOGGING_PREFIX` / `_TTL_DAYS` / `_BATCH_SIZE` / `_FLUSH_INTERVAL_MS` | `logs:` / `30` / `50` / `250` | Reserved; no effect |
 | `LOG_WRITE_QUEUE_SIZE` | `2000` | Request-log writer queue depth; full queue drops records |
 | `LOG_WRITE_BATCH_SIZE` | `100` | Request-log batch size |
 | `LOG_WRITE_FLUSH_INTERVAL_MS` | `500` | Request-log flush interval |
@@ -61,14 +61,14 @@ Pool sizes, timeouts, and background writer tuning. Change only if you know why.
 These live in the admin console (database-backed, hot-reloaded) — deliberately, so
 they can change without a restart:
 
-- **Logging policy**: retention, body logging, raw stream capture, masking, sampling,
+- Logging policy: retention, body logging, raw stream capture, masking, sampling,
   sensitive keys
-- **Security**: lockout thresholds, HSTS, request body size, auth failure delay,
+- Security: lockout thresholds, HSTS, request body size, auth failure delay,
   rate-limit buckets
-- **Network behavior**: CORS origins, response keepalive
-- **Features**: web search, smart routing, provider selection strategy, retry/fallback,
+- Network behavior: CORS origins, response keepalive
+- Features: web search, smart routing, provider selection strategy, retry/fallback,
   circuit breaker, MCP security policy
-- **Providers, models, pricing, API keys, users, MCP servers**
+- Providers, models, pricing, API keys, users, MCP servers
 
 ## `.env.example`
 

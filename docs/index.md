@@ -1,91 +1,119 @@
 ---
 home: true
 layout: home
+titleTemplate: false
 hero:
   name: LLM Proxy
-  tagline: One gateway for every LLM. Any client protocol in, any provider out — with smart routing, cost control, and a full admin console.
+  tagline: A self-hosted LLM gateway with OpenAI, Anthropic, and Cohere-compatible endpoints, built-in provider adapters, routing, budgets, and an admin console.
   actions:
     - text: Get started
       link: /getting-started/installation
       type: primary
     - text: API reference
-      link: /api/authentication
+      link: /api/
       type: secondary
 features:
-  - title: Write once, run on any provider
-    details: Your app speaks one protocol (OpenAI *or* Anthropic); the proxy translates bidirectionally to every upstream. Switch providers by changing a model name, not your code.
-  - title: Never hard-down
-    details: Priority-based provider fallback with circuit breakers retries the next provider automatically when one fails or rate-limits.
-  - title: Route by intent, not by model ID
-    details: Virtual models `auto` / `fast` / `best` classify each request and pick the right real model for cost and quality.
-  - title: Know exactly what you spend
-    details: Per-token billing (input / output / cached / audio / image rates) with live usage analytics, plus per-key USD budgets that cut off spend before the bill surprises you.
-  - title: Everything is operable from the UI
-    details: Providers, models, pricing, keys, teams, logs, tracing, security policy — all hot-reloaded from the dashboard. No config-file archaeology, no restarts.
-  - title: Extend without code
-    details: Host MCP servers behind the gateway for every MCP client in your team, and route `web_search` calls through your own search backend.
+  - title: One base URL
+    details: Keep your OpenAI or Anthropic SDK and change the base URL. The proxy translates the request to the upstream format and translates the response back.
+  - title: Automatic retry and fallback
+    details: Provider mappings are ranked by priority. Failures retry on the same provider, then move down the chain, and a circuit breaker skips providers that keep failing.
+  - title: In-process virtual models
+    details: The auto, fast, and best models classify each request with local features, then pick a configured model by complexity, cost, and capability.
+  - title: Budgets and usage analytics
+    details: Prices cover input, output, cached, audio, and image tokens. Usage analytics show where the money goes, and USD budgets stop requests before the invoice arrives.
+  - title: Console-managed configuration
+    details: Providers, models, pricing, keys, MCP servers, tracing, and policy are stored in the database and reloaded when changed. No restart or config file is needed.
+  - title: MCP hosting and web search
+    details: Expose MCP servers at /servers/<name>/mcp for every client in your team, and answer web_search calls through your own SearXNG or Ollama backend.
 footer: MIT licensed · LLM Proxy
 ---
 
-LLM Proxy is a self-hostable LLM API gateway. Point your existing OpenAI or Anthropic
-SDK at it and instantly gain access to every provider you have configured — with
-automatic failover, cost-aware routing, per-key budgets, request logging, and an admin
-dashboard that manages it all without restarts.
+LLM Proxy is a self-hosted gateway for LLM APIs. Point an existing OpenAI or Anthropic
+SDK at it, or a Cohere SDK at the rerank endpoint. The proxy sends each request to the
+upstream that serves the requested model and translates the response back. Fallback,
+cost-aware routing, budgets, request logging, and the admin console are built in, and
+configuration changes do not require a restart.
 
 ![Usage dashboard](./screenshots/usage.png)
 
-## Protocol translation
+## How it works
 
-Speak any client protocol; the proxy normalizes it to a unified internal model and
-renders it for whatever provider serves the request — including SSE streaming, tool
-calls, and reasoning traces.
+```text
+Client                     LLM Proxy                                  Upstream
+OpenAI / Anthropic /  ──▶  parse to InternalRequest                   provider API
+Cohere rerank wires        route: mapping, allowlists, budgets,   ──▶  (built-in
+                           retries, fallback, circuit breaker           adapters)
+                      ◀──  translate back to the client's protocol
+```
+
+A protocol serializer parses and renders the client wire format. A provider serializer
+renders the same internal model for the upstream. A request can enter as OpenAI Chat
+Completions and leave as Anthropic Messages, or be forwarded verbatim when both sides use
+the same protocol. [Core Concepts](getting-started/concepts.md) explains the terms.
+
+## Protocol translation
 
 | Protocol | Endpoint |
 | --- | --- |
 | **OpenAI Chat Completions** | `POST /v1/chat/completions` |
-| **OpenAI Responses API** | `POST /v1/responses` (with `GET`/`DELETE /v1/responses/{id}`) |
-| **Anthropic Messages** | `POST /v1/messages` |
+| **OpenAI Responses** | `POST /v1/responses` (retrieve, delete, cancel, input items, compact, SSE and WebSocket) |
+| **Anthropic Messages** | `POST /v1/messages` (+ `POST /v1/messages/count_tokens`) |
+| **Cohere-compatible rerank** | `POST /v1/rerank` (alias `POST /v2/rerank`) |
+| **Evaluation** | `POST /v1/systemone` · `POST /v1/decisions` |
 | **OpenAI-compatible utilities** | `/v1/embeddings` · `/v1/images/generations` · `/v1/images/edits` · `/v1/audio/speech` · `/v1/audio/transcriptions` · `/v1/audio/translations` · `/v1/models` |
+
+The full route list, auth column, and provider capability matrix are in the
+[Endpoint Index](api/endpoints.md).
 
 ## Smart routing and resilience
 
-- **Virtual models** — send `auto`, `fast`, or `best` and let the built-in classifier
-  (structural + Unicode + n-gram features, no LLM call) pick a real model by
-  complexity, cost, and capability.
-- **Cost-aware selection** — routing tiers (`ECONOMY` / `BALANCED` / `PREMIUM`) with
+- Virtual models: send `auto`, `fast`, or `best`. The built-in classifier uses
+  structural, Unicode, and n-gram features (it does not call an LLM) and picks a model by
+  complexity, cost, and capability. An optional routing judge handles ambiguous first
+  turns.
+- Cost-aware selection uses the `ECONOMY`, `BALANCED`, and `PREMIUM` tiers, with
   bandit-style exploration that learns from real outcomes.
-- **Fallback chains and circuit breakers** — per-provider attempt tracking, automatic
-  retries on failure, and breakers that stop hammering a sick upstream.
-- **Keepalive heartbeats** — whitespace heartbeats keep slow non-streaming requests
-  alive behind CDNs; abandoned requests are cancelled and logged as 499 failures.
+- Fallback and circuit breakers: attempts are tracked per provider. Failures retry, and a
+  breaker stops requests to a provider that keeps failing.
+- Keepalive heartbeats keep slow non-streaming requests alive behind CDNs. Requests
+  abandoned by the client are cancelled and logged as 499.
+
+## MCP and web search
+
+- MCP servers: attach stdio or HTTP servers once, and every MCP client can reach them at
+  `/servers/<name>/mcp` with the same API keys, budgets, rate limits, and logs as model
+  traffic. Per-key allowlists and a deny-by-default policy limit process execution and
+  outbound requests.
+- Web search: `web_search` calls from any client are answered through your SearXNG or
+  Ollama backend and injected back in the client's format, including Anthropic.
 
 ## Cost control and billing
 
-- **Per-token pricing** per model: input, output, cached-input, audio, and image rates,
-  with one-click pricing sync from [models.dev](https://models.dev).
-- **Per-API-key budgets** — daily / weekly / monthly USD windows with automatic
-  enforcement and manual reset.
-- **Token counting** — tiktoken-based counting with cache-hit tracking and estimated
-  savings on the dashboard.
+- Prices can be set per model for input, output, cached input, audio, and image tokens,
+  with one-click sync from [models.dev](https://models.dev).
+- Budgets can be daily, weekly, or monthly USD windows per API key, plus an account budget
+  that covers all keys owned by a member.
+- Token counting uses tiktoken and tracks cache hits. The dashboard estimates savings from
+  cached reads.
 
 ## Observability
 
-- **Live request logs** — TTFT, duration, tokens, cost, status, retries, and fallbacks.
-- **Usage analytics** — trends, provider/model breakdowns, cache efficiency, average
-  latency and throughput.
-- **Tamper-evident audit log** — hash-chained audit events with integrity verification,
-  plus per-user tracing to Langfuse, OpenTelemetry or LangSmith.
+- Request logs record TTFT, duration, tokens, cost, status, retries, and fallbacks.
+- Usage analytics show trends, provider and model breakdowns, cache efficiency, average
+  latency, and throughput.
+- Audit events are hash-chained, and the console can verify their integrity.
+- Tracing supports Langfuse, any OTLP collector (Tempo, Jaeger, Phoenix, Grafana), or
+  LangSmith, configured per account or server-wide.
 
 ## Security
 
-- **Multi-user teams** — `admin` / `viewer` roles, per-user model allowlists, per-key
-  budgets and rate limits.
-- **API keys with guardrails** — model allowlists, MCP allowlists, requests-per-minute
-  limits, expiry, and spend tracking.
-- **Abuse protection** — sliding-window rate limiting (memory or Redis), login lockout,
-  HSTS, request-size limits, trusted-proxy-aware client IP resolution.
-- **Secrets handled for you** — the JWT secret and API-key encryption key are
-  auto-generated and persisted on first run.
+- Teams use `admin` and `viewer` roles. Users can have model allowlists, account budgets,
+  and rate limits. Invitations, passkeys, TOTP two-factor, and OIDC are supported.
+- API keys can carry model allowlists, MCP allowlists, requests-per-minute limits, an
+  expiry date, and spend tracking.
+- Abuse protection includes sliding-window rate limiting (memory or Redis), login
+  lockout, HSTS, request-size limits, and trusted-proxy-aware client IP resolution.
+- The JWT secret and API-key encryption key are generated and stored on first run.
 
 ## Documentation map
 
@@ -94,10 +122,10 @@ calls, and reasoning traces.
 | [Getting Started](getting-started/installation.md) | Install, first-run setup, connect an SDK or coding agent, concepts |
 | [Deployment](deployment/docker.md) | Docker Compose, databases, reverse proxy, upgrades |
 | [Admin Console](admin/overview.md) | Every dashboard screen and server setting, explained |
-| [API Reference](api/authentication.md) | Endpoints, auth, streaming, tools, routing, errors |
+| [API Reference](api/index.md) | Endpoints, auth, streaming, tools, routing, errors, OpenAPI |
 | [Guides](guides/cost-control.md) | Cost control, monitoring, security hardening |
 | [Reference](reference/environment.md) | Environment variables, FAQ |
 
 ## License
 
-MIT — see [LICENSE](https://github.com/zwldarren/llm-proxy/blob/main/LICENSE).
+MIT. See [LICENSE](https://github.com/zwldarren/llm-proxy/blob/main/LICENSE).

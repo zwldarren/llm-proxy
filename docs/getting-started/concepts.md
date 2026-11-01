@@ -1,6 +1,6 @@
 # Core Concepts
 
-Five minutes here will save you an hour in the console.
+The rest of the documentation uses the terms on this page.
 
 ```text
 Your app (OpenAI or Anthropic SDK)
@@ -21,92 +21,95 @@ Your app
 
 ## Protocol in, protocol out
 
-Clients speak one of the two chat protocols — OpenAI (`/v1/chat/completions`,
-`/v1/responses`, plus embeddings/images/audio) or Anthropic (`/v1/messages`) — or
-the Cohere-compatible `/v1/rerank` retrieval wire. Internally every request
-becomes one normalized model; the **provider serializer** renders it in whatever form
-the target upstream expects, and responses are translated back.
+Clients use one of two chat protocols, OpenAI (`/v1/chat/completions`,
+`/v1/responses`, plus embeddings, images, and audio) or Anthropic (`/v1/messages`), or
+the Cohere-compatible `/v1/rerank` endpoint. Internally every request becomes one
+normalized model. The provider serializer renders it in the form the target upstream
+expects, and the response is translated back.
 
-When a provider natively speaks the same protocol as the client (for example an
-Anthropic client hitting an Anthropic upstream), the proxy can forward the request
-**verbatim** — the *native passthrough* tier. That preserves fields the proxy would
-otherwise normalize. Chat Completions never uses this tier.
+When a provider speaks the same protocol as the client, for example an Anthropic client
+calling an Anthropic upstream, the proxy can forward the request unchanged. This is
+native passthrough. It preserves fields the proxy would otherwise normalize. Chat
+Completions never uses this path.
 
 ## Provider
 
-An upstream API endpoint plus its credentials: type (OpenAI, Anthropic, Gemini,
-Ollama, vLLM, SGLang, OpenRouter, and more), base URL, API key, optional custom
-headers, and timeout. Providers are configured in
-[Providers](../admin/providers.md); the priority that matters for selection lives on
-each model's provider mappings, not here.
+A provider is an upstream API endpoint and its credentials: type (OpenAI, Anthropic,
+Gemini, Ollama, vLLM, SGLang, OpenRouter, and others), base URL, API key, optional custom
+headers, and timeout. Providers are configured on the
+[Providers](../admin/providers.md) page. The priority that affects selection is stored on
+each model's provider mappings, not on the provider.
 
 ## Model mapping
 
-A model *name* that clients can send, pointing at a provider and the upstream model id,
-with capability flags (tools, vision, reasoning…), context size, and
-pricing. This is the unit that routing, allowlists, and budgets operate on. Model names
-are yours to choose: `gpt-5.6-luna` can map to any upstream.
+A model mapping gives a client-facing model name a provider and an upstream model id,
+along with capability flags (tools, vision, reasoning), context size, and pricing.
+Routing, allowlists, and budgets work on this unit. The name is yours to choose:
+`gpt-5.6-luna` can point to any upstream.
 
-If a client sends a name with no mapping, the request fails with `404 model_not_found`.
+A request for a name that has no mapping fails with `404 model_not_found`.
 
 ## Virtual models
 
-When [smart routing](../api/routing.md) is enabled, three extra names exist:
+When [smart routing](../api/routing.md) is enabled, three more names are available.
 
 | Name | Intent |
 | --- | --- |
-| `fast` | Cheapest capable model — latency/cost first |
-| `auto` | Balanced (default bias) |
-| `best` | Highest quality, cost secondary |
+| `fast` | Cheapest capable model; latency and cost first |
+| `auto` | Balanced (the default bias) |
+| `best` | Highest quality, with cost secondary |
 
-The classifier runs in-process and picks a concrete mapped model, which is then
-subject to the same allowlists, budgets, and fallback rules. With the optional
-[routing judge](../api/routing.md#routing-judge) enabled, an ambiguous first turn may
-instead be settled by one short System One call.
+The classifier runs in-process and picks a mapped model. The result is subject to the
+same allowlists, budgets, and fallback rules. If the optional
+[routing judge](../api/routing.md#routing-judge) is enabled, an ambiguous first turn can
+be settled by a short System One call instead.
 
 ## Priority, retries, fallback
 
-- Provider selection is ordered by each **model→provider mapping's** priority; mappings
-  in a higher priority group are tried first. The provider record's own `priority`
-  field is not used for selection. Within a group, the
-  [provider selection strategy](../admin/settings.md#provider-selection) orders
-  candidates.
-- Failures are retried against the same provider (`max_retries`, default 3) before
-  the request **falls back** to the next provider (`max_fallback_attempts`, default 10).
-- The **circuit breaker** skips providers that keep failing (5 consecutive failures →
-  60 s cooldown by default).
-- Every attempt is recorded in the request log (`fallback_attempts`, `retry_count`).
+Provider selection follows the priority on each model-to-provider mapping. Mappings in a
+higher priority group are tried first; the provider record's own `priority` field is not
+used. Within a group, the
+[provider selection strategy](../admin/settings.md#provider-selection) orders
+candidates.
+
+A failure is retried on the same provider (`max_retries`, default 3), then the request
+falls back to the next provider (`max_fallback_attempts`, default 10). The circuit breaker
+skips providers that keep failing: 5 consecutive failures cause a 60 second cooldown by
+default. Every attempt is recorded in the request log (`fallback_attempts`,
+`retry_count`).
 
 ## API key, budget, allowlist
 
-A request authenticates with an API key, which can carry:
+A request authenticates with an API key. The key can carry:
 
-- **model allowlist** — which model names the caller may use,
-- **MCP allowlist** — which MCP servers the caller may reach,
-- **budget** — a USD cap per day/week/month (UTC windows) or a lifetime cap,
-- **rate limit** — requests per minute,
-- **expiry**.
+- a model allowlist, which limits the model names the caller can use;
+- an MCP allowlist, which limits the MCP servers the caller can reach;
+- a budget, a USD cap per day, week, or month (UTC windows) or a lifetime cap;
+- a rate limit in requests per minute;
+- an expiry date.
 
-Above the key, a **user** (account) has a role, an optional model allowlist, and an
-optional account budget that spans all of their keys. The effective model access is
-the intersection of key and user allowlists.
+A user account has a role, an optional model allowlist, and an optional account budget
+that covers all of its keys. Effective model access is the intersection of the key
+allowlist and the user allowlist.
 
 ## What happens to one request
 
-1. **Authenticate** — API key checked (bcrypt hash), lockout and rate-limit buckets
-   consulted, budget checked.
-2. **Authorize** — model allowlist against the requested model (after virtual-model
-   resolution).
-3. **Resolve** — concrete model name, or classifier decision for `auto`/`fast`/`best`.
-4. **Build** — the request is rendered for the target provider; web-search tools may be
-   intercepted here; unknown/unsupported fields follow the
+1. Authenticate: check the API key (bcrypt hash), the lockout and rate-limit buckets, and
+   the budget.
+2. Authorize: check the model allowlist against the requested model, after virtual-model
+   resolution.
+3. Resolve: use a concrete model name, or ask the classifier for `auto`, `fast`, or
+   `best`.
+4. Build: render the request for the target provider. Web search tools may be intercepted
+   here, and unknown or unsupported fields follow the
    [request policy](../admin/settings.md#request-policy).
-5. **Call** — with retries, fallback, circuit-breaker awareness, keepalive heartbeats,
-   and streaming translation.
-6. **Record** — log row, usage record, metrics, optional tracing export; the response
-   is translated back into the client's protocol with its original model name restored.
+5. Call: retries, fallback, circuit-breaker checks, keepalive heartbeats, and streaming
+   translation.
+6. Record: write the log row, usage record, metrics, and optional tracing export. The
+   response is translated back into the client protocol, with the requested model name
+   restored.
 
 ## Related
 
-- [Connect a Client](connect-a-client.md) — put these concepts to work
-- [Endpoint Index](../api/endpoints.md) — every route the proxy serves
+- [Connect a Client](connect-a-client.md): put these concepts to work.
+- [Endpoint Index](../api/endpoints.md): every route the proxy serves.

@@ -34,7 +34,7 @@ for any multi-worker or multi-replica deployment.
 - PostgreSQL connections get `pool_pre_ping` plus `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`,
   `DB_POOL_RECYCLE_SECONDS`, and `DB_POOL_TIMEOUT_SECONDS`
   (see [Environment Variables](../reference/environment.md)).
-- SQLite has a single writer — do not use it with `--workers > 1` or multiple
+- SQLite has a single writer: do not use it with `--workers > 1` or multiple
   replicas.
 
 ### Migrations
@@ -77,14 +77,14 @@ storage.
 | Sticky provider routing | `REDIS_ENABLED=true` **and** provider selection strategy `session_sticky` (the global default) — other strategies never read or write the sticky key |
 | Last-model continuity (smart routing `auto`/`fast`/`best`) | Redis connected (`REDIS_ENABLED=true`) and smart routing enabled |
 | OpenResponses response store: `GET`/`DELETE`/cancel/`input_items`, and `background: true` | Redis connected |
-| Log shipping | Not implemented in v0.2.3 — logs are always stored in the SQL database |
+| Log shipping | Not implemented — logs are always stored in the SQL database |
 
 Behavior details:
 
-- **Enabled but unreachable at startup** → `ConfigurationError`, startup fails. There
+- Enabled but unreachable at startup → `ConfigurationError`, startup fails. There
   is no silent degradation at boot. At runtime, cache lookups degrade gracefully with
   warnings.
-- **Rate-limit fail mode**: `redis_rate_limit_fail_closed` (default true) blocks
+- Rate-limit fail mode: `redis_rate_limit_fail_closed` (default true) blocks
   requests when Redis errors; set it false to fail open.
 - Rate-limit keys use the prefix `REDIS_RATE_LIMIT_PREFIX` (default `rate_limit:`);
   cache keys use `REDIS_CACHE_PREFIX` (default `cache:`).
@@ -112,5 +112,5 @@ REDIS_CACHE_ENABLED=true
 
 ## Related
 
-- [Environment Variables](../reference/environment.md) — every database and Redis knob
-- [Upgrades & Backups](upgrades.md) — dump/restore procedures
+- [Environment Variables](../reference/environment.md): every database and Redis knob
+- [Upgrades & Backups](upgrades.md): dump/restore procedures

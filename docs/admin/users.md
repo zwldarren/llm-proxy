@@ -1,7 +1,7 @@
 # Users & Roles
 
-LLM Proxy is multi-tenant: every person gets their own account, their own API keys,
-their own logs, and optionally their own model allowlist and spending cap.
+LLM Proxy supports multiple users. Each account has its own API keys and logs, plus an
+optional model allowlist and spending cap.
 
 **Team** (admin only) is where accounts are created and managed.
 
@@ -97,18 +97,18 @@ Users manage their password, passkeys and TOTP in the **Sign-in & security** tab
 admin account is created, so the first session does not end with a password as the
 only way back in.
 
-- **Password** is optional. A passwordless account (passkey or OIDC only) can set
+- Password is optional. A passwordless account (passkey or OIDC only) can set
   one from the same page; the proxy asks for a fresh re-authentication instead of
   a current password.
 
-- **Passkeys** are a primary login factor. The console supports discoverable
+- Passkeys are a primary login factor. The console supports discoverable
   credentials (no username needed), multiple named passkeys per user, and synced
   passkeys. User verification (biometric/PIN) is required. Passkeys have an inline
   rename action, since the name is how you tell a laptop from a phone. A
   passwordless account cannot remove its last passkey unless it also has a password
   or a linked OAuth provider; losing the last usable factor requires an
   administrator reset.
-- **Two-factor authentication** is optional per user. Enrollment shows a QR code for
+- Two-factor authentication is optional per user. Enrollment shows a QR code for
   the authenticator app, with the setup secret and `otpauth://` URI as the manual
   fallback. When enabled, a TOTP code is required after *every* primary factor —
   password, passkey or OIDC — otherwise the strongest factor would bypass 2FA. Ten
@@ -144,7 +144,7 @@ Each member can be restricted to a set of model names.
 
 - Applied to the Models screen (read-only catalog for viewers), to `/v1/models`, and
   to every inference request.
-- A viewer's API keys can only narrow this list further — the intersection is enforced
+- A viewer's API keys can only narrow this list further: the intersection is enforced
   when the key is created or updated.
 - `null`/empty selection at the account level means unrestricted; `[]` means deny all.
 
@@ -185,7 +185,7 @@ Safety rules enforced by the proxy:
 
 - You cannot delete, deactivate, or demote yourself.
 - You cannot delete, demote, or deactivate the **last active admin**.
-- Deactivating or deleting a member is irreversible from their side — the console
+- Deactivating or deleting a member is irreversible from their side: the console
   asks for confirmation, with a stricter prompt when the member is an admin.
 
 ## Sign-in protection

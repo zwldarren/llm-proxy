@@ -23,8 +23,8 @@ Names are case-insensitive. `GET /v1/models` lists them with `"provider": "routi
 
 Two things must be true:
 
-1. **Settings → Advanced → Smart Routing → Enabled** (`server_config.smart_routing`).
-2. At least one model record has **`auto_eligible: true`** — only those enter the
+1. Settings → Advanced → Smart Routing → Enabled (`server_config.smart_routing`).
+2. At least one model record has **`auto_eligible: true`**: only those enter the
    candidate pool.
 
 Then mark the pool properly:
@@ -44,9 +44,9 @@ configuration error naming the problem.
 ## How a request is classified
 
 The ensemble votes over two in-process signals. The [routing judge](#routing-judge)
-is **not** one of them: it never contributes a vote to this blend, and no weight in
-this table changes when it is enabled — inside its band its verdict *replaces* what
-this ensemble produced, outside it nothing calls the judge at all (ADR-0018).
+is not part of it: it does not contribute a vote, and enabling it does not change the
+weights below. Inside the judge's band, its verdict replaces the ensemble result;
+outside the band, the judge is not called (ADR-0018).
 
 | Signal | Weight | Source |
 | --- | --- | --- |
@@ -73,18 +73,18 @@ ADR-0018 ("A routing judge owns the tier inside the ambiguity band",
 [in the repository](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0018-routing-judge-owns-ambiguous-band.md)).
 What matters operationally:
 
-- **Only a first turn is judged — never a background call.** The judge sees the
+- Only a first turn is judged: never a background call. The judge sees the
   current ask, a configured number of
   earlier *user* turns, and capability flags — never assistant or tool output. From the
   second turn on it would be classifying blind, so the ensemble keeps those turns. A
   request with the OpenResponses `background` flag is likewise never judged: the client
   polls for its answer instead of waiting on it, so there is no latency budget to spend.
-- **Only `auto` and `best` by default.** `fast` exists to pick the cheapest capable model;
+- Only `auto` and `best` by default. `fast` exists to pick the cheapest capable model;
   a judge call works against that.
-- **A gate decides which first turns are worth asking about.** Predicates are
+- A gate decides which first turns get judged. Predicates are
   configurable: a confidence threshold, a half-open complexity band, and
   `not_low_anchor` (judge every turn the ensemble did not already place at the
-  trivial low anchor — complexity `0.0`). **Nothing is on by default**: run the
+  trivial low anchor — complexity `0.0`). Nothing is on by default: run the
   gate closed and let shadow mode collect the data first (ADR-0029) — once the
   ensemble's over-tier distortion was fixed, the recorded corpora moved the
   judge below the ensemble on every high-call-rate gate, so a blanket default
@@ -92,7 +92,7 @@ What matters operationally:
   are what an operator turns on when their own rig run over shadow-verdict
   records shows a band where the judge wins. The judge call rate — not the
   model — is what bounds the added latency and cost.
-- **A consumption bar decides which verdicts are obeyed.** A consulted verdict
+- A consumption bar decides which verdicts are obeyed. A consulted verdict
   is not automatically right: on the recorded corpora the judge's confident
   verdicts are markedly more accurate than its hedged ones. When
   `apply_min_confidence` (the verdict's own probability mass on the tier it
@@ -102,25 +102,25 @@ What matters operationally:
   obey every non-abstaining verdict. The measured starting points and the
   measure-first warning live in ADR-0029; the evaluation rig reports the
   policies side by side with the gates.
-- **Floors and caps still win.** The verdict replaces the complexity the ensemble would
+- Floors and caps still win. The verdict replaces the complexity the ensemble would
   have used; the vision, structured-output and final-verification floors and the
   routine-success cap are applied afterwards, exactly as they are without a judge.
-- **Anything short of a verdict falls back to the ensemble**: the deadline, an HTTP error,
+- Anything short of a verdict falls back to the ensemble: the deadline, an HTTP error,
   an unparseable answer, the model's own *ambiguous* answer, or an open circuit. The judge
   is never a fourth signal — it does not appear in `signal_votes`, and its own confidence,
   which measures how peaked its answer was rather than how likely it is to be right, never
   becomes the routing confidence.
-- **Shadow mode** (the default when the judge is switched on) records what the judge would
+- Shadow mode (the default when the judge is switched on) records what the judge would
   have said and changes nothing. It also samples a small share of turns the gate did *not*
   fire, because agreement measured only inside the gate says nothing about what the gate let
   through. Turn it off once the verdicts have earned the decision.
-- **One extra call, on the operator's budget.** A judged turn makes exactly one upstream
+- One extra call, on the operator's budget. A judged turn makes exactly one upstream
   call, billed as input tokens on the judge model. The judge is warmed in the background at
   startup and again whenever the configuration changes, so a cold model is not the first
   judged turn's problem; `deadline_s` still has to cover the model's own response time on a
   cold prompt. A deadline that cannot be met does not fail loudly — that turn falls back to
   the ensemble, and `routing.judge.error` records why.
-- **Each call is its own log row.** The judge call lands in the log store under the
+- Each call is its own log row. The judge call lands in the log store under the
   `judge` log type — its own model, provider, tokens and cost, attributed to the request
   that triggered it — so judge spend shows up per model and counts toward that key's
   spend and budget. It is not a request the client made, so it stays out of the proxy
@@ -156,21 +156,21 @@ per-corpus cap (50,000 rows).
 Candidates must pass hard gates first: the key/user allowlist, context length, image
 capability, and budget. Then scoring combines:
 
-- **Predicted cost** from the model's effective pricing.
-- **Served quality alignment** — the mapping from complexity to the configured
+- Predicted cost from the model's effective pricing.
+- Served quality alignment: the mapping from complexity to the configured
   `quality_tier`. Per-mode quality weights set how strongly quality dominates cost:
   `fast 0.35`, `auto 0.65`, `best 1.0` (configurable), rising with complexity.
   A relative quality gate excludes candidates below 50% (fast), 60% (auto), or 85%
   (best) of the best available quality.
-- **Learned experience** — a Thompson-sampling bandit over per-model outcomes
+- Learned experience: a Thompson-sampling bandit over per-model outcomes
   (`model_experience`: reward mean, reliability, latency, explicit feedback, cache
   affinity), plus in-memory latency statistics.
-- **Continuity** — the previous model for the same conversation is preferred
+- Continuity: the previous model for the same conversation is preferred
   (Redis key `routing:conv:<conversation>:last_model`, 30-minute TTL). The
   retained provider-side prefix cache is priced too: the incumbent's observed
   cache affinity estimates the share of the input that bills at the cache-read
   ratio instead of full price, so a switch pays the cache it loses.
-- **Exploration** — new or under-sampled models get trial pulls; exploration is
+- Exploration: new or under-sampled models get trial pulls; exploration is
   disabled for tool/agent steps so multi-step flows stay coherent.
 
 If nothing qualifies, the request fails with a routing constraint error — a

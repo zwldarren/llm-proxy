@@ -115,9 +115,9 @@ No credential is required for:
 
 - `GET /api/health`, `/api/health/ready`, `/api/health/live`
 - `POST /api/auth/setup`, `GET /api/auth/setup-status`, `POST /api/auth/login`
-- `GET /api/auth/capabilities` — what the sign-in screen may offer here
+- `GET /api/auth/capabilities`: what the sign-in screen may offer here
   (`password_reset` is true only when SMTP delivery and a public base URL are set)
-- `POST /api/auth/password/forgot`, `POST /api/auth/password/reset` — the reset
+- `POST /api/auth/password/forgot`, `POST /api/auth/password/reset`: the reset
   request always answers `202 {"requested": true}` and never discloses whether an
   account exists; the reset link is the credential on the confirm step
 - `GET /api/auth/session` (optional credential: returns `{ "authenticated": false }`
@@ -151,5 +151,5 @@ Failed authentication attempts, lockouts, and logins are recorded in the audit l
 
 ## Related
 
-- [API Keys](../admin/api-keys.md) — creating keys with budgets and allowlists
-- [Errors & Rate Limits](errors.md) — exact response bodies
+- [API Keys](../admin/api-keys.md): creating keys with budgets and allowlists
+- [Errors & Rate Limits](errors.md): exact response bodies

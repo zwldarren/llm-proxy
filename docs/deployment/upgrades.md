@@ -10,8 +10,8 @@ docker compose up -d
 ```
 
 - `stable` follows the newest tagged release; pin an exact tag
-  (`ghcr.io/zwldarren/llm-proxy:0.2.3`) if you want upgrades to be a conscious act.
-- **Migrations run automatically at startup** and move the schema to `head`. If a
+  (`ghcr.io/zwldarren/llm-proxy:0.5.3`) if you want upgrades to be a conscious act.
+- Migrations run automatically at startup and move the schema to `head`. If a
   migration fails, the container exits and stays down — read the logs, fix the
   database, then start again.
 - There is **no downgrade path**: schema migrations are forward-only.
@@ -26,10 +26,10 @@ uv run llm-proxy --build-frontend
 
 ### Before you upgrade
 
-1. **Back up the database** (below). This is the only irreversible part.
+1. Back up the database (below). This is the only irreversible part.
 2. Read the [CHANGELOG](https://github.com/zwldarren/llm-proxy/blob/main/CHANGELOG.md)
    for breaking changes in the target version.
-3. If you pin tags, note the current one so you can roll back the *image* — the
+3. If you pin tags, note the current one so you can roll back the *image*: the
    schema will not roll back with it.
 
 ### Version awareness

@@ -45,5 +45,5 @@ for model in client.models.list():
 
 ## Related
 
-- [Virtual Models & Routing](routing.md) — the `auto` / `fast` / `best` virtual models
-- [Endpoint Index](endpoints.md) — every route, including `GET /v1/protocols`
+- [Virtual Models & Routing](routing.md): the `auto` / `fast` / `best` virtual models
+- [Endpoint Index](endpoints.md): every route, including `GET /v1/protocols`

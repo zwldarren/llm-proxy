@@ -1,7 +1,7 @@
 # Monitoring & Alerting
 
-Everything the proxy knows about its own behavior is queryable through the API, so
-you can build dashboards and alerts without touching the internals.
+The proxy exposes health and traffic data through its API. You can build dashboards and
+alerts from those endpoints.
 
 ## Health
 
@@ -30,11 +30,11 @@ curl -s http://localhost:8080/api/health/ready | jq .
 
 ::: note Averages, not percentiles
 Latency and throughput reporting is average-based; there are no p50/p95/p99
-endpoints in v0.2.3. For percentiles, export request logs
+endpoints. For percentiles, export request logs
 (`GET /api/logs`, cursor pagination, up to 200 per page) into your own store.
 :::
 
-## Things worth alerting on
+## What to alert on
 
 | Condition | Why |
 | --- | --- |
@@ -64,7 +64,7 @@ curl -s "http://localhost:8080/api/logs/audit/verify-integrity" \
 | **Langfuse** | Per-user tracing (Account → Preferences → Tracing). One observation per request, carrying that type's own content: messages in / assistant message out for chat, texts in / response shape for `/v1/embeddings` (an `embedding` observation), query+documents in / ranking out for rerank, prompt in / image URLs out for images, script or audio file in / text or media summary out for audio, plus usage and cost details and user/session ids |
 | **OpenTelemetry (OTLP)** | Per-user tracing to any OTLP collector over HTTP/protobuf or gRPC. One `CLIENT` span per request with the GenAI semconv attributes, the projected input/output, and the proxy's facts under `llm_proxy.*` — see [Logs, Usage & Tracing](../admin/observability.md#tracing) |
 | **LangSmith** | Per-user tracing to LangSmith's OTLP/HTTP gateway. Same span, plus `gen_ai.system`, flattened message attributes and `langsmith.*` run correlation |
-| **Log aggregation** | The proxy does not push logs anywhere (Redis log shipping is not implemented in v0.2.3). Pull from `GET /api/logs`, or scrape the application log output |
+| **Log aggregation** | The proxy does not push logs anywhere (Redis log shipping is not implemented). Pull from `GET /api/logs`, or scrape the application log output |
 | **Application logs** | `LOG_LEVEL` (startup), `--log-file`, container stdout |
 
 Trace correlation: send `x-langfuse-trace-id` (or `x-trace-id`) on a request and it
@@ -73,13 +73,13 @@ are CORS-exposed for browser clients.
 
 ## Operational hygiene
 
-- **Retention**: logs default to 30 days, audit inherits that, and usage records share the
+- Retention: logs default to 30 days, audit inherits that, and usage records share the
   same window. Adjust in [Settings → Log Management](../admin/settings.md#log-management),
   or delete manually with `DELETE /api/logs/cleanup?older_than_days=N` (admin-only;
   without the parameter it applies the configured retention window).
-- **Sampling**: keep `sampling_rate` at 1.0 while investigating; lower it to cut
+- Sampling: keep `sampling_rate` at 1.0 while investigating; lower it to cut
   storage without losing metadata.
-- **Backups**: usage and logs live in the database — see
+- Backups: usage and logs live in the database: see
   [Upgrades & Backups](../deployment/upgrades.md#backups).
-- **Queue drops**: if you see dropped-record warnings, increase
+- Queue drops: if you see dropped-record warnings, increase
   `LOG_WRITE_QUEUE_SIZE` / `USAGE_WRITE_QUEUE_SIZE` (restart required).

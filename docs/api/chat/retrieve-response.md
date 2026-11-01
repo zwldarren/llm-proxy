@@ -56,13 +56,13 @@ print(resp.status)
 ## Notes
 
 - The internal `input` is stripped from the stored representation.
-- Background responses are overwritten with the final result on completion — poll this
+- Background responses are overwritten with the final result on completion: poll this
   endpoint until `status` leaves `queued` / `in_progress`.
 - `store: false` responses (and streamed responses without an API key) are never
   persisted and return 404 here.
 
 ## Related
 
-- [Create response](create-response.md) — `store`, background mode
+- [Create response](create-response.md): `store`, background mode
 - [Delete response](delete-response.md) · [Cancel response](cancel-response.md) ·
   [List input items](list-input-items.md)

@@ -109,6 +109,132 @@ const reference = [
   { text: 'FAQ', link: '/reference/faq' },
 ]
 
+// Chinese locale. Every page exists under /zh/ with the same path as its English
+// original; keep the two trees and both sets of navigation in sync.
+const zhGettingStarted = [
+  { text: '安装', link: '/zh/getting-started/installation' },
+  { text: '首次设置', link: '/zh/getting-started/first-setup' },
+  { text: '接入客户端', link: '/zh/getting-started/connect-a-client' },
+  { text: '接入 AI 编程代理', link: '/zh/getting-started/connect-an-agent' },
+  { text: '核心概念', link: '/zh/getting-started/concepts' },
+]
+
+const zhDeployment = [
+  { text: 'Docker Compose', link: '/zh/deployment/docker' },
+  { text: 'PostgreSQL 与 Redis', link: '/zh/deployment/databases' },
+  { text: '反向代理与 TLS', link: '/zh/deployment/reverse-proxy' },
+  { text: '升级与备份', link: '/zh/deployment/upgrades' },
+  { text: '故障排查', link: '/zh/deployment/troubleshooting' },
+]
+
+const zhAdmin = [
+  { text: '控制台总览', link: '/zh/admin/overview' },
+  { text: '提供商', link: '/zh/admin/providers' },
+  { text: '模型与定价', link: '/zh/admin/models' },
+  { text: 'API 密钥', link: '/zh/admin/api-keys' },
+  { text: '用户与角色', link: '/zh/admin/users' },
+  { text: 'MCP 服务器', link: '/zh/admin/mcp' },
+  { text: '服务器设置', link: '/zh/admin/settings' },
+  { text: '日志、用量与追踪', link: '/zh/admin/observability' },
+]
+
+const zhApi = [
+  {
+    text: '概览',
+    items: [
+      { text: 'API 参考', link: '/zh/api/' },
+      { text: 'OpenAPI 规范', link: '/zh/api/openapi' },
+      { text: '认证', link: '/zh/api/authentication' },
+      { text: '端点索引', link: '/zh/api/endpoints' },
+      { text: '流式响应', link: '/zh/api/streaming' },
+      { text: '错误与速率限制', link: '/zh/api/errors' },
+    ],
+  },
+  {
+    text: '聊天',
+    items: [
+      { text: '创建聊天补全', link: '/zh/api/chat/create-completion' },
+      { text: '创建响应', link: '/zh/api/chat/create-response' },
+      { text: '检索响应', link: '/zh/api/chat/retrieve-response' },
+      { text: '删除响应', link: '/zh/api/chat/delete-response' },
+      { text: '取消响应', link: '/zh/api/chat/cancel-response' },
+      { text: '列出输入条目', link: '/zh/api/chat/list-input-items' },
+      { text: '压缩响应', link: '/zh/api/chat/compact-response' },
+      { text: 'Anthropic Messages', link: '/zh/api/chat/messages' },
+      { text: 'Token 计数', link: '/zh/api/chat/count-tokens' },
+    ],
+  },
+  {
+    text: '图像',
+    items: [
+      { text: '生成图像', link: '/zh/api/images/create' },
+      { text: '编辑图像', link: '/zh/api/images/edit' },
+    ],
+  },
+  {
+    text: '音频',
+    items: [
+      { text: '生成语音', link: '/zh/api/audio/speech' },
+      { text: '语音转写', link: '/zh/api/audio/transcription' },
+      { text: '语音翻译', link: '/zh/api/audio/translation' },
+    ],
+  },
+  {
+    text: 'Embeddings',
+    items: [{ text: '创建 Embeddings', link: '/zh/api/embeddings' }],
+  },
+  {
+    text: 'Rerank',
+    items: [{ text: '重排文档', link: '/zh/api/rerank' }],
+  },
+  {
+    text: '评估',
+    items: [
+      { text: 'System One 评估', link: '/zh/api/systemone' },
+      { text: 'Decisions', link: '/zh/api/decisions' },
+    ],
+  },
+  {
+    text: '模型',
+    items: [{ text: '列出模型', link: '/zh/api/models' }],
+  },
+  {
+    text: '进阶',
+    items: [
+      { text: '工具、推理与网络搜索', link: '/zh/api/tools' },
+      { text: '虚拟模型与路由', link: '/zh/api/routing' },
+    ],
+  },
+]
+
+const zhGuides = [
+  { text: '成本控制', link: '/zh/guides/cost-control' },
+  { text: '监控与告警', link: '/zh/guides/monitoring' },
+  { text: '安全加固', link: '/zh/guides/security' },
+]
+
+const zhReference = [
+  { text: '环境变量', link: '/zh/reference/environment' },
+  { text: '常见问题', link: '/zh/reference/faq' },
+]
+
+const zhNav = [
+  { text: '快速开始', link: '/zh/getting-started/installation' },
+  { text: '部署', link: '/zh/deployment/docker' },
+  { text: '管理控制台', link: '/zh/admin/overview' },
+  { text: 'API', link: '/zh/api/' },
+  { text: '指南', link: '/zh/guides/cost-control' },
+  {
+    text: '更多',
+    items: [
+      { text: '环境变量', link: '/zh/reference/environment' },
+      { text: '常见问题', link: '/zh/reference/faq' },
+      { text: '更新日志', link: `${repo}/blob/main/CHANGELOG.md` },
+      { text: 'GitHub', link: repo },
+    ],
+  },
+]
+
 /**
  * The markdown-it instance VitePress hands to `markdown.config`.
  *
@@ -285,9 +411,61 @@ export default defineConfig({
   base,
   lang: 'en-US',
   title: 'LLM Proxy',
-  titleTemplate: '%s · LLM Proxy',
-  description: 'Self-hostable LLM API gateway — any client protocol in, any provider out.',
+  titleTemplate: ':title · LLM Proxy',
+  description: 'Self-hostable LLM gateway — OpenAI, Anthropic, and Cohere-compatible rerank wire formats in; built-in provider adapters out.',
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }]],
+  // English is the source language and lives at the site root; Chinese translations
+  // live under /zh/. Untranslated pages are linked from the Chinese navigation to
+  // their English original rather than generated as empty mirrors.
+  locales: {
+    root: {
+      label: 'English',
+      lang: 'en-US',
+    },
+    zh: {
+      label: '简体中文',
+      lang: 'zh-CN',
+      link: '/zh/',
+      title: 'LLM Proxy',
+      titleTemplate: ':title · LLM Proxy',
+      description: '可自托管的 LLM 网关：OpenAI、Anthropic 与 Cohere 兼容 rerank 协议接入，内置提供商适配器出站。',
+      themeConfig: {
+        nav: zhNav,
+        sidebar: {
+          '/zh/getting-started/': zhGettingStarted,
+          '/zh/deployment/': zhDeployment,
+          '/zh/admin/': zhAdmin,
+          '/zh/api/': zhApi,
+          '/zh/guides/': zhGuides,
+          '/zh/reference/': zhReference,
+        },
+        editLink: {
+          pattern: `${repo}/edit/main/docs/:path`,
+          text: '在 GitHub 上编辑此页',
+        },
+        footer: {
+          message: 'MIT 许可',
+          copyright: 'LLM Proxy',
+        },
+        outlineTitle: '本页目录',
+        docFooter: { prev: '上一页', next: '下一页' },
+        lastUpdated: { text: '最后更新于' },
+        returnToTopLabel: '回到顶部',
+        sidebarMenuLabel: '菜单',
+        darkModeSwitchLabel: '外观',
+        lightModeSwitchTitle: '切换到浅色模式',
+        darkModeSwitchTitle: '切换到深色模式',
+        langMenuLabel: '切换语言',
+        skipToContentLabel: '跳转到正文',
+        notFound: {
+          title: '页面不存在',
+          quote: '页面可能已移动，或只提供英文版本。',
+          linkLabel: '返回首页',
+          linkText: '返回首页',
+        },
+      },
+    },
+  },
   // Internal, non-user-facing docs stay in the repo but out of the published site.
   srcExclude: ['**/adr/**', '**/agents/**'],
   // Example URLs that point at a running proxy (http://localhost:8080) are
@@ -322,9 +500,28 @@ export default defineConfig({
       provider: 'local',
       options: {
         detailedView: false,
+        locales: {
+          zh: {
+            translations: {
+              button: { buttonText: '搜索', buttonAriaLabel: '搜索' },
+              modal: {
+                noResultsText: '未找到结果',
+                resetButtonTitle: '清除条件',
+                footer: {
+                  selectText: '选择',
+                  navigateText: '切换',
+                  closeText: '关闭',
+                },
+              },
+            },
+          },
+        },
       },
     },
     socialLinks: [{ icon: 'github', link: repo }],
+    // Both trees mirror each other page for page, so the language switcher can
+    // keep the reader on the same page instead of dropping them at the home page.
+    i18nRouting: true,
     editLink: {
       pattern: `${repo}/edit/main/docs/:path`,
       text: 'Edit this page on GitHub',

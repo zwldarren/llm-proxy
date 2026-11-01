@@ -8,8 +8,8 @@ aside: false
 Answer a list of typed questions about shared evidence and get one typed answer
 per question. This is OpenAI's Decisions endpoint (`POST /v1/decisions`,
 model `gpt-6-luna`), and it is also served by the decision models the proxy
-already reaches through [System One](systemone.md) — the two endpoints are one
-capability in two envelopes, and the proxy translates between them.
+already reaches through [System One](systemone.md). Both endpoints provide the same
+capability in different envelopes, and the proxy translates between them.
 
 ::: endpoint POST /v1/decisions
 :::
@@ -169,7 +169,7 @@ The proxy rejects a malformed request up front with a `422` naming the offending
 question. Where the upstreams disagree on a limit, the proxy accepts the union
 and lets the upstream that does not support the request answer for itself:
 
-- `score` takes 2–26 ordered levels — Ollama's ceiling. TypeSafe and OpenRouter
+- `score` takes 2–26 ordered levels: Ollama's ceiling. TypeSafe and OpenRouter
   stop at 10, so a rubric above that is served by Ollama and rejected upstream
   by the other two.
 - `choice` takes 2–255 options.
@@ -251,7 +251,7 @@ Both directions are lossless except where one envelope has no field for a fact:
 - `score` level `description`s move into the question text (as a numbered
   rubric) because System One's `criteria` array holds the level strings the
   answer legend echoes. The labels the client sent come back unchanged.
-- Conversation items are flattened into one text `state` in request order — a
+- Conversation items are flattened into one text `state` in request order: a
   message's parts as they read, a tool call or output as its own JSON — because
   System One evaluates one state and has no field for a role, a call or an
   output.
@@ -277,6 +277,6 @@ Both directions are lossless except where one envelope has no field for a fact:
 
 ## Related
 
-- [System One evaluation](systemone.md) — the sibling envelope
+- [System One evaluation](systemone.md): the sibling envelope
 - [Endpoint Index](endpoints.md)
 - [Errors & Rate Limits](errors.md)

@@ -79,5 +79,5 @@ Pass the last item's id as `after` to fetch the next page while `has_more` is tr
 
 ## Related
 
-- [Create response](create-response.md) — storage model
+- [Create response](create-response.md): storage model
 - [Retrieve response](retrieve-response.md)

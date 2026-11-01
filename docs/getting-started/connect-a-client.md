@@ -1,7 +1,7 @@
 # Connect a Client
 
 Any OpenAI-compatible or Anthropic-compatible client works: the only change is the
-base URL and the API key. Create a key in **API Keys** first — see
+base URL and the API key. Create a key in **API Keys** first; see
 [API Keys](../admin/api-keys.md).
 
 ```bash
@@ -13,7 +13,7 @@ export LLM_PROXY_URL=http://localhost:8080
 Smart routing is **off by default**, so a new install rejects `auto` (and `fast`/`best`)
 with HTTP 500 `configuration_error`. To use the virtual models, enable
 **Settings → Advanced → Smart Routing** and mark at least one model
-`auto_eligible` — or send a concrete configured model name instead.
+`auto_eligible`, or send a concrete configured model name instead.
 :::
 
 ## curl
@@ -42,8 +42,8 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
-Streaming, tools, vision, JSON mode, and the Responses API all work the same way —
-they are translated to whatever the selected upstream provider supports.
+Streaming, tools, vision, JSON mode, and the Responses API all work the same way: the
+proxy translates them to whatever the selected upstream provider supports.
 
 ## Anthropic SDK (Python)
 
@@ -70,17 +70,17 @@ Note the different base URL: the Anthropic SDK appends `/v1/messages` itself, so
 | `Authorization: Bearer sk-…` | `/v1/*`, `/servers/*` |
 | `x-api-key: sk-…` | `/v1/*`, `/servers/*` |
 
-Console JWTs are **not** accepted on proxy routes — always use an API key. WebSocket
+Console JWTs are not accepted on proxy routes. Use an API key. WebSocket
 clients (`/v1/responses`, `/v1/realtime`) can also pass `?api_key=…`, though headers
 are preferred because query strings can end up in access logs.
 
 ## Which model name do I send?
 
-- A **configured model name** — routed straight to its provider, with retries and
+- A configured model name is routed straight to its provider, with retries and
   fallback on failure.
-- A **virtual model** — `auto`, `fast`, or `best` — when smart routing is enabled and
+- A virtual model (`auto`, `fast`, or `best`) works when smart routing is enabled and
   at least one model is marked `auto_eligible`; the proxy classifies the request and
-  picks a real model. Otherwise these names fail with `500 configuration_error` — see
+  picks a real model. Otherwise these names fail with `500 configuration_error`. See
   the warning at the top of this page.
 
 List what a key may use:

@@ -47,12 +47,12 @@ Window semantics are UTC calendar-based:
 The effective window start is the later of the calendar boundary and the last manual
 reset. Budget checks fail closed: if spend cannot be read, the request is rejected.
 
-- **Reset** — `Reset` on the key stamps the reset time; the window then counts only
+- Reset: `Reset` on the key stamps the reset time; the window then counts only
   usage after that point and a budget-blocked key becomes usable again. Key budgets
   are self-service: the owner can raise, lower, clear, or reset them at any time.
-- **Spend readout** — `GET /api/api-keys/spend/summary` (all keys) and
+- Spend readout: `GET /api/api-keys/spend/summary` (all keys) and
   `GET /api/api-keys/{name}/usage` (per key, with a date range).
-- **Account budgets** — an admin can also set a per-user cap that spans all of that
+- Account budgets: an admin can also set a per-user cap that spans all of that
   user's keys. It can only be reset from **Team**; see [Users & Roles](users.md#account-budgets).
 
 ::: note Reporting range vs enforced window
@@ -86,6 +86,6 @@ old key keeps working until it is disabled or deleted, so rotation needs no down
 
 ## Related
 
-- [Users & Roles](users.md) — account budgets and model allowlists per user
-- [Errors & Rate Limits](../api/errors.md) — the exact 429 responses clients see
-- [Cost Control](../guides/cost-control.md) — a practical budgeting workflow
+- [Users & Roles](users.md): account budgets and model allowlists per user
+- [Errors & Rate Limits](../api/errors.md): the exact 429 responses clients see
+- [Cost Control](../guides/cost-control.md): a practical budgeting workflow

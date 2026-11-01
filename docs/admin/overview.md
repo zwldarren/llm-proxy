@@ -1,8 +1,8 @@
 # Admin Console Overview
 
-The admin console is a Vue 3 single-page app served by the proxy itself — open
-`http://localhost:8080` (or your proxy's URL) in a browser. This page is a tour of
-every screen; each configuration screen is documented in its own page.
+The admin console is a Vue 3 single-page app served by the proxy. Open
+`http://localhost:8080` (or your proxy's URL) in a browser. This page summarizes each
+screen; every configuration screen has its own documentation page.
 
 ![Settings screen](../screenshots/settings.png)
 
@@ -24,7 +24,7 @@ Your console login (JWT session) works only on `/api/*` endpoints and is held in
 `HttpOnly` cookie. When the Chat and Images playgrounds call `/v1/*`, they use a
 short-lived *session API key* delivered in a second `HttpOnly` cookie; neither
 credential is readable by page JavaScript. Real client traffic uses the API keys you
-create in **API Keys** — see [API Keys](api-keys.md).
+create in **API Keys**. See [API Keys](api-keys.md).
 :::
 
 ## What each role can do
@@ -75,9 +75,9 @@ create in **API Keys** — see [API Keys](api-keys.md).
 ## Configuration changes are hot-reloaded
 
 Everything you change on the Providers, Models, API Keys, MCP, Team, and Settings
-screens is written to the database and applied immediately. There is no restart step
-— the only settings that require a restart are the
-[environment variables](../reference/environment.md) set at startup.
+screens is written to the database and applied immediately. No restart is needed. The
+only settings that require a restart are the
+[environment variables](../reference/environment.md) read at startup.
 
 ::: warning Destructive actions
 Deleting an API key, provider, MCP server, model, or team member is permanent.
@@ -85,5 +85,5 @@ Deleting an API key, provider, MCP server, model, or team member is permanent.
 than the chosen age. The console asks for confirmation before each of these.
 :::
 
-Ready to configure? Start with [Providers](providers.md), then
+To configure an instance, start with [Providers](providers.md), then
 [Models & Pricing](models.md), then [API Keys](api-keys.md).

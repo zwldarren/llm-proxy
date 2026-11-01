@@ -27,7 +27,7 @@ are catalog/display metadata.
 
 ## Provider priority and fallback
 
-- Selection uses the **mapping's** `priority` (higher wins) — the provider's own
+- Selection uses the **mapping's** `priority` (higher wins): the provider's own
   `priority` field is not consulted.
 - Candidates are grouped by mapping priority; the highest non-empty group is tried
   first, then the rest in order.
@@ -35,7 +35,7 @@ are catalog/display metadata.
   orders candidates (`session_sticky` by default, or random/cost-optimized/balanced).
 - Each mapping is attempted once per request. Failures retry within the provider
   (`max_retries`) and then fall back across providers (`max_fallback_attempts`).
-- **Any** provider error falls back to the next mapping while one remains. The
+- Any provider error falls back to the next mapping while one remains. The
   upstream status/error type never blocks a fallback, since providers routinely
   misreport errors (e.g. a context-window rejection arriving as a generic `400`).
 - Retries happen for `408/429/500/502/503/504` and network/timeout errors before
@@ -59,13 +59,13 @@ All prices are **USD**. Rates are per 1M tokens unless stated otherwise:
 
 Details that affect the bill:
 
-- **Resolution order**: a mapping's rate wins over the model-level rate, field by
+- Resolution order: a mapping's rate wins over the model-level rate, field by
   field; provider-level `pricing_tiers` win over model-level tiers.
-- **Tiers** (`pricing_tiers`) bill by input-token threshold: the highest tier whose
+- Tiers (`pricing_tiers`) bill by input-token threshold: the highest tier whose
   `threshold <= input tokens` applies; unset dimensions inherit the base rate.
   Thresholds must be unique. Unit-based rates (images, audio minutes, TTS chars,
   searches) are never tiered.
-- **Time windows** (`pricing_time_windows`) bill by the clock, for peak/off-peak
+- Time windows (`pricing_time_windows`) bill by the clock, for peak/off-peak
   pricing (Volcengine Ark, DeepSeek's former overnight discount). A window is a
   `start`/`end` pair of `HH:MM` plus an optional `days` list (ISO weekdays, empty
   means every day) and an IANA `timezone` (default `UTC`). It applies to a request
@@ -75,29 +75,29 @@ Details that affect the bill:
   in real (UTC) time, across timezones too — the whole request is repriced by the
   first match, so an overlap would make the bill depend on list order. models.dev
   does not publish these — enter them by hand.
-- **Service tiers** (`service_tier_pricing`) bill by the tier the request was
+- Service tiers (`service_tier_pricing`) bill by the tier the request was
   served at: a map from mode name (`flex`, `priority`, …) to rates, selected by the
   request's `service_tier` (the provider's reported tier wins over the requested
   one). A tier with no entry keeps the rates the earlier overlays resolved (the
   standard rates when no window applies). Synced from models.dev
   `experimental.modes`.
-- **Provider overrides**: for tiers, windows and service tiers a provider mapping
+- Provider overrides: for tiers, windows and service tiers a provider mapping
   has three states — absent/`null` inherits the model-level value, a non-empty
   value replaces it, and an empty list/map disables the overlay for that provider.
-- **Overlay order**: base rates → context tier → time window → service tier. Each
+- Overlay order: base rates → context tier → time window → service tier. Each
   overlay replaces only the dimensions it sets and the whole request is repriced;
   none of them is a marginal rate.
-- **Reasoning tokens** are already counted in `output_tokens`; when
+- Reasoning tokens are already counted in `output_tokens`; when
   `reasoning_cost_per_1m` is set they are carved out and charged at that rate,
   otherwise they bill at the output rate.
-- **Cache tokens** are re-priced from the base input rate to the cached read/write
+- Cache tokens are re-priced from the base input rate to the cached read/write
   rate, and the difference is recorded as `cache_savings_usd`. Without a base input
   rate, cache tokens are charged at the cache rates directly.
-- **Audio/image tokens** are carved out of prompt/completion tokens when a dedicated
+- Audio/image tokens are carved out of prompt/completion tokens when a dedicated
   rate exists, so they are not double-charged.
-- **Provider-reported cost wins** for `openrouter` and `nanogpt` — their own figures
+- Provider-reported cost wins for `openrouter` and `nanogpt`: their own figures
   replace the computed cost.
-- **`cost_usd = null` means "unknown", not free** — it is null when there is no
+- `cost_usd = null` means "unknown", not free: it is null when there is no
   billable usage or no rate configured at any level. For chat requests without upstream
   usage, tokens are estimated before pricing.
 
@@ -108,9 +108,9 @@ and **Capabilities**. The **Pricing** tab pulls from the
 [models.dev](https://models.dev) catalog (`POST /api/config/models/sync-pricing`;
 cached in-process for 1 hour, with a 5-minute stale grace if upstream fails):
 
-1. **Preview** (`dry_run: true`) shows per-mapping diffs, matched by
+1. Preview (`dry_run: true`) shows per-mapping diffs, matched by
    `provider_model_name` (falling back to the proxy model name).
-2. **Apply** writes to **mapping-level** pricing only, leaving model-level rates
+2. Apply writes to **mapping-level** pricing only, leaving model-level rates
    untouched. Mappings that already carry custom rates or tiers are skipped unless you
    turn off *preserve custom pricing*.
 3. Hand-tune individual rows afterwards via the model editor or
@@ -135,10 +135,8 @@ data never counts as a change.
 | **Models** screen (admin) | Full management view |
 | **Models** screen (viewer) | Read-only catalog of what that account may use |
 
-![Model catalog for a viewer account](../screenshots/model-catalog.png)
-
 ## Related
 
-- [Providers](providers.md) — the upstreams these models point at
-- [Virtual Models & Routing](../api/routing.md) — `auto`/`fast`/`best`
-- [Cost Control](../guides/cost-control.md) — prices → budgets → enforcement
+- [Providers](providers.md): the upstreams these models point at
+- [Virtual Models & Routing](../api/routing.md): `auto`/`fast`/`best`
+- [Cost Control](../guides/cost-control.md): prices → budgets → enforcement

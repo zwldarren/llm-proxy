@@ -70,9 +70,9 @@ body is returned verbatim instead.
 
 Errors:
 
-- **400** `previous_response_not_found` — `previous_response_id` is set but not in
+- 400 `previous_response_not_found`: `previous_response_id` is set but not in
   the store.
-- **503** `redis_not_available` — `previous_response_id` is used without Redis.
+- 503 `redis_not_available`: `previous_response_id` is used without Redis.
 
 ## How it works
 
@@ -82,7 +82,7 @@ Errors:
   plus the new `input` into a `compaction` item locally
   (`encrypted_content: "llm-proxy-compaction:v1:…"`), which rehydrates when
   sent back as input.
-- Foreign (e.g. Codex) compaction blobs stay opaque — they pass through unmodified.
+- Foreign (e.g. Codex) compaction blobs stay opaque: they pass through unmodified.
 
 Send the returned compaction item back as part of the next [Create response](create-response.md)
 call's `input` to continue the conversation with a smaller footprint.

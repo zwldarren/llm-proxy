@@ -6,7 +6,7 @@ No. Console JWTs are accepted only on `/api/*`. Clients must use an API key
 (`sk-…`) on `/v1/*` and `/servers/*`. The reverse is also true: API keys are rejected
 on `/api/*`.
 
-## My key is lost — can I recover it?
+## My key is lost: can I recover it?
 
 No. Keys are bcrypt-hashed and shown once at creation. Create a replacement, switch
 clients, delete the old key. There is no rotate endpoint, but rotation without downtime
@@ -14,7 +14,7 @@ is simply: create new → switch → delete old.
 
 ## Can one model name map to several providers?
 
-Yes — that is the point of provider mappings. Give each mapping a `priority`; higher
+Yes. A model mapping can point to several providers. Give each mapping a `priority`; higher
 priority is preferred, and failures fall back down the chain. See
 [Models & Pricing](../admin/models.md#provider-priority-and-fallback).
 
@@ -22,7 +22,7 @@ priority is preferred, and failures fall back down the chain. See
 
 Null means *unknown*, not free: no rate is configured for the model/mapping, or the
 request had nothing billable. Configure pricing (manually or via the models.dev sync)
-to get real numbers. See [Cost Control](../guides/cost-control.md#1-prices).
+and the cost reflects the configured rates. See [Cost Control](../guides/cost-control.md#1-prices).
 
 ## Why did I get HTTP 200 with an error JSON body?
 
@@ -50,15 +50,15 @@ The proxy renders each part in whatever form the upstream accepts, so the same
 `input_image` / `input_file` / `input_audio` part may arrive as inline bytes, a remote
 URI, or an uploaded-file reference. Worth knowing:
 
-- **`file_id` is passed through as-is.** There is no `/v1/files` store, so an id must
+- `file_id` is passed through as-is. There is no `/v1/files` store, so an id must
   have been issued by the upstream it is sent to. An OpenAI Files-API id sent to Gemini
   (or the reverse) fails upstream.
-- **HTTP(S) image URIs are sent as native URL sources** where the upstream has one
+- HTTP(S) image URIs are sent as native URL sources where the upstream has one
   (Anthropic `image` URL sources, Gemini `file_data.file_uri`, OpenAI / OpenRouter
   `image_url`); where it does not, the URL is downloaded and inlined before
   forwarding, so any publicly reachable URL works. SSRF protection applies to the
   download path.
-- **Document URLs on Chat Completions are provider-specific.** Chat Completions has no
+- Document URLs on Chat Completions are provider-specific. Chat Completions has no
   single `file` shape and not every upstream accepts a URL: OpenRouter carries the URL
   in `file.file_data`, Zhipu / Z.AI (GLM) in `file.file_url`, and Mistral in a flat
   `document_url`. OpenAI and the generic `openai-compatible` adapter accept no file
@@ -68,28 +68,28 @@ URI, or an uploaded-file reference. Worth knowing:
   PDF-only. DeepSeek's `file` part carries images and Files-API ids only, so a document
   routed there degrades. OpenRouter, Zhipu and Mistral accept the document types they
   document.
-- **Zhipu / Z.AI (GLM) cannot mix a `file` part with an image or video part.** A
+- Zhipu / Z.AI (GLM) cannot mix a `file` part with an image or video part. A
   message carrying both is split into separate messages (`file` on one, `image_url` /
   `video_url` on the other) so the upstream does not reject the request; text parts stay
   with the neighbouring part and ordering is preserved.
-- **Video URIs are not downloaded.** Gemini fetches video itself and reliably accepts
+- Video URIs are not downloaded. Gemini fetches video itself and reliably accepts
   only YouTube URLs (or File API / `gs://` URIs); an arbitrary `https://…/v.mp4` is
   rejected upstream.
-- **Anthropic has no `file` content block.** A Responses `input_file` is mapped onto
+- Anthropic has no `file` content block. A Responses `input_file` is mapped onto
   the block Anthropic actually accepts: `application/pdf` (base64 or URL) and plain
   text (`.txt` / `.md` / `.csv` / … decoded into a `text` source) become `document`
   blocks, image payloads become `image` blocks, and `file_id` becomes a
   `document`/`image` `file` source. Media types Anthropic cannot represent (`.docx`,
   `.xlsx`, …) follow the `unsupported_block_policy`.
-- **Anthropic has no audio content block.** Audio routed there degrades to an
+- Anthropic has no audio content block. Audio routed there degrades to an
   `[Audio: …]` text placeholder (never an `audio` block the API rejects).
-- **Audio has no OpenAI Responses content type.** The Responses API accepts message
+- Audio has no OpenAI Responses content type. The Responses API accepts message
   content of `input_text` / `input_image` / `input_file` only, so audio routed to the
   built-in `openai` provider (which targets `/responses`) degrades to an
   `[Audio: …]` text placeholder instead of being sent as an `input_audio` part the API
   rejects. Audio passes through verbatim on the native Responses passthrough path, and
   Chat Completions upstreams keep their `input_audio` support.
-- **Multimodal tool results** stay structured where the upstream supports it (Responses
+- Multimodal tool results stay structured where the upstream supports it (Responses
   `function_call_output.output`, Gemini 3 `functionResponse.parts`); elsewhere the media
   is degraded to a text placeholder rather than dropped.
 - A block the target provider cannot represent at all follows the
@@ -100,7 +100,7 @@ URI, or an uploaded-file reference. Worth knowing:
 
 ## Can I export logs to my own system?
 
-There is no export endpoint in v0.2.3; use `GET /api/logs` with cursor pagination
+There is no export endpoint; use `GET /api/logs` with cursor pagination
 (max 200 per page) or scrape container logs. Per-user tracing to Langfuse,
 OpenTelemetry or LangSmith covers LLM-level observability.
 

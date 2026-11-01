@@ -5,9 +5,9 @@ covers what the proxy needs from the proxy in front.
 
 ## What the app expects
 
-- **TLS termination**: uvicorn is started without certificate options, so the reverse
+- TLS termination: uvicorn is started without certificate options, so the reverse
   proxy (nginx, Caddy, Traefik, Cloudflare Tunnel…) owns HTTPS.
-- **Forwarded headers**: only peers listed in `TRUSTED_PROXIES` may set
+- Forwarded headers: only peers listed in `TRUSTED_PROXIES` may set
   `X-Forwarded-For` / `X-Real-IP`. The default is the RFC1918 + loopback + link-local
   set:
 
@@ -20,15 +20,16 @@ covers what the proxy needs from the proxy in front.
   `X-Forwarded-For` is absent. Spoofed headers from untrusted peers cannot influence
   rate limiting, lockouts, or audit attribution.
 
-  !!! warning "`TRUSTED_PROXIES` replaces the default list"
-      Setting it drops the built-in ranges — always include your local/Docker
-      networks. Setting it to an empty value trusts nobody (the TCP peer address is
-      used). Invalid CIDRs fail startup.
+  ::: warning `TRUSTED_PROXIES` replaces the default list
+  Setting it drops the built-in ranges — always include your local/Docker networks.
+  Setting it to an empty value trusts nobody (the TCP peer address is used). Invalid
+  CIDRs fail startup.
+  :::
 
-- **HTTP/1.1 to the app** (HTTP/2 terminates at the proxy): WebSocket upgrade paths
+- HTTP/1.1 to the app (HTTP/2 terminates at the proxy): WebSocket upgrade paths
   (`/v1/responses`, `/v1/realtime`) must be passed through, and SSE streaming must not
   be buffered.
-- **Keep-alive**: `UVICORN_TIMEOUT_KEEPALIVE` defaults to 600 seconds.
+- Keep-alive: `UVICORN_TIMEOUT_KEEPALIVE` defaults to 600 seconds.
 
 ## Cloudflare and other impatient CDNs
 

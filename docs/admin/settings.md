@@ -1,13 +1,13 @@
 # Server Settings
 
 **Settings** holds everything that is not a provider, model, key, or user: logging,
-features, resilience, and security policy. Every section here is written to the
-database and **hot-reloaded** — no restart, ever.
+features, resilience, and security policy. Every section is written to the database and
+reloaded when it changes. No restart is needed.
 
 Hot reload covers every worker process, not just the one that served the request:
 a peer picks up the shared revision on its next request (checked at most once per
-second) and re-applies the setting, including the state that is not part of the
-config row itself — the web search interceptor, circuit-breaker thresholds, MCP
+second) and re-applies the setting, including state that is not part of the config
+row: the web search interceptor, circuit-breaker thresholds, MCP
 server processes, and personal tracing registries. API-key and team-role edits
 propagate the same way, so a revoked key or a demoted role takes effect on every
 worker in about a second instead of waiting out the in-process cache TTL. This
@@ -58,7 +58,7 @@ Search credentials are write-only in the API: they are encrypted at rest (when
 `ENCRYPTION_KEY` is configured) and reads return `****`. Submitting the mask or a
 blank field keeps the stored secret; to remove one, clear the whole provider
 block. A value that looks like the mask but is not exactly `****` is rejected
-with `422` instead of silently replacing the stored credential — clear the field
+with `422` instead of silently replacing the stored credential. Clear the field
 and enter the full new secret to rotate it.
 
 Details and client-visible behavior: [Tools, Reasoning & Web Search](../api/tools.md#web-search).
@@ -91,11 +91,11 @@ provider's own default.
 Unknown-fields policy applies to **top-level** request fields the internal model does
 not recognize; unknown fields nested inside messages are handled by each serializer.
 Requests that take the native-passthrough tier (Anthropic and Responses clients on
-supporting providers) bypass it — their bodies are forwarded verbatim.
+supporting providers) bypass it; their bodies are forwarded verbatim.
 
 For content blocks, lossless conversion runs first: a block the provider can represent
 (after conversion) is never affected by the policy. The policy governs the residual
-blocks with no representation — `drop` removes them, `degrade` keeps a text placeholder
+blocks with no representation: `drop` removes them, `degrade` keeps a text placeholder
 (`[Image: …]`), and `error` rejects the request. `degrade` never silently falls back to
 dropping: a block with no specific placeholder gets a generic `[<TypeName> block]`.
 
@@ -112,7 +112,7 @@ dropping: a block with no specific placeholder gets a generic `[<TypeName> block
 The signal ensemble runs in-process (metadata + structural signals; the embedding
 signal was removed with the heavy ML stack that backed it). The optional routing
 judge is the only part of smart routing that makes an extra
-upstream call — one short System One request per judged turn, bounded by its gate
+upstream call. One short System One request per judged turn, bounded by its gate
 and deadline, with the verdict and its cost recorded in the request's routing
 metadata. Each such call is also a row of its own in Logs → **Judge Calls**
 (log type `judge`), attributed to the request that triggered it; that row is what
@@ -256,4 +256,4 @@ auth failures.
 ## Related
 
 - [Logs, Usage & Tracing](observability.md)
-- [Environment Variables](../reference/environment.md) — the startup-only settings
+- [Environment Variables](../reference/environment.md): the startup-only settings

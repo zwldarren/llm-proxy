@@ -9,7 +9,7 @@ The first time you open the proxy there are no accounts, so the console shows a
 2. Enter a username and password. The password must be **8–72 characters** with at
    least one uppercase letter, one lowercase letter, one digit, and one special
    character.
-3. Submit — the account is created with the `admin` role and you are signed in
+3. Submit. The account is created with the `admin` role, and you are signed in
    immediately.
 
 Notes:
@@ -25,7 +25,7 @@ Notes:
 | --- | --- | --- |
 | 1. Add a provider | [Providers](../admin/providers.md) | No models exist until a provider and its models are configured |
 | 2. Check models and pricing | [Models & Pricing](../admin/models.md) | Model names are what clients send; pricing drives cost tracking and budgets |
-| 3. Create an API key | [API Keys](../admin/api-keys.md) | Clients authenticate with API keys — console logins do not work on `/v1/*` |
+| 3. Create an API key | [API Keys](../admin/api-keys.md) | Clients authenticate with API keys; console logins do not work on `/v1/*` |
 
 Optional next steps: enable [smart routing](../api/routing.md) for the virtual models
 `auto`/`fast`/`best`, wire up [MCP servers](../admin/mcp.md), or configure
@@ -34,8 +34,8 @@ your account (Account → Preferences).
 
 ## Sessions and security
 
-- Console sessions are JWTs valid for **24 hours**; there is no refresh token — sign in
-  again when one expires. `POST /api/auth/logout` ends the session and deactivates its
+- Console sessions are JWTs valid for **24 hours**. There is no refresh token, so sign
+  in again when one expires. `POST /api/auth/logout` ends the session and deactivates its
   playground keys.
 - Failed sign-ins lock the **username** after 5 attempts for 15 minutes (configurable
   defaults; see [Server Settings](../admin/settings.md#security-rate-limiting)).

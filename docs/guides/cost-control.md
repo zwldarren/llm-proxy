@@ -1,8 +1,7 @@
 # Cost Control
 
-Cost control has three layers in LLM Proxy: **prices** (what a token costs), **budgets**
-(what a key or account may spend), and **visibility** (logs and analytics that show
-where the money went).
+Cost control in LLM Proxy rests on model prices, key and account budgets, and the logs
+and analytics that record spend.
 
 ## 1. Prices
 
@@ -12,7 +11,7 @@ are documented in [Models & Pricing](../admin/models.md#pricing).
 
 Fastest way to populate prices for existing models:
 
-1. **Models → Sync from models.dev → Pricing** with a dry run, to preview models.dev diffs.
+1. Models → Sync from models.dev → Pricing with a dry run, to preview models.dev diffs.
 2. Apply for mapping-level pricing (your manual values are preserved by default).
 3. Hand-fix anything the catalog does not cover.
 
@@ -79,14 +78,14 @@ skipped (with a warning in the app log).
 
 ## 4. Reduce spend structurally
 
-- **Smart routing** — `fast`/`auto`/`best` pick cheaper models for simple requests;
+- Smart routing: `fast`/`auto`/`best` pick cheaper models for simple requests;
   log metadata records `routing_savings` per request, and feedback (`weak`/`strong`)
   tunes the choice over time. See [Virtual Models & Routing](../api/routing.md).
-- **Provider selection** — `cost_optimized` orders equal-priority providers by price;
+- Provider selection: `cost_optimized` orders equal-priority providers by price;
   `balanced` blends price with observed latency.
-- **Caching** — configure cache read/write rates so cache hits are billed correctly
+- Caching: configure cache read/write rates so cache hits are billed correctly
   and savings show up.
-- **Model allowlists** — restrict a key to the cheap models it actually needs.
+- Model allowlists: restrict a key to the cheap models it actually needs.
 
 ## Example: audit yesterday's spend
 
@@ -103,6 +102,6 @@ curl -s "http://localhost:8080/api/logs/usage-stats?start_date=2026-09-12&end_da
 
 ## Related
 
-- [Users & Roles](../admin/users.md#account-budgets) — account-level caps
-- [API Keys](../admin/api-keys.md) — key-level caps and limits
-- [Monitoring & Alerting](monitoring.md) — watch spend and health over time
+- [Users & Roles](../admin/users.md#account-budgets): account-level caps
+- [API Keys](../admin/api-keys.md): key-level caps and limits
+- [Monitoring & Alerting](monitoring.md): watch spend and health over time

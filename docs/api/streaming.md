@@ -20,7 +20,7 @@ Connection: keep-alive
 Access-Control-Allow-Origin: *
 ```
 
-**Heartbeats**: whenever the upstream is silent for the keepalive interval (default
+Heartbeats: whenever the upstream is silent for the keepalive interval (default
 15 s), the proxy emits an SSE comment frame:
 
 ```
@@ -45,7 +45,7 @@ data: [DONE]
 - A final usage-only chunk is emitted when the upstream supplied usage (relocated to
   the end of the stream, before `data: [DONE]`); if the upstream sent none, no usage
   chunk appears.
-- `stream_options` is not a client-facing knob: on converted/streaming requests the
+- `stream_options` is not a client option: on converted/streaming requests the
   proxy forces `include_usage: true` upstream itself and the client-facing stream is
   re-serialized from the parsed chunks.
 
@@ -58,7 +58,7 @@ for chunk in stream:
 
 ## Anthropic Messages
 
-Named events, no `[DONE]` — the stream simply ends:
+Named events, no `[DONE]`; the stream simply ends:
 
 ```
 event: message_start
@@ -73,13 +73,13 @@ event: message_stop
 
 Mid-stream failures arrive as `event: error`. Usage (including cache read/creation
 tokens) is reported in `message_delta`, where `usage` carries only the official
-`MessageDeltaUsage` keys — no OpenAI-dialect `prompt_tokens_details`/`total_tokens`.
+`MessageDeltaUsage` keys, with no OpenAI-dialect `prompt_tokens_details`/`total_tokens`.
 
 On the [converted tier](../getting-started/concepts.md#protocol-in-protocol-out)
 the upstream's own prompt count only arrives with `message_delta`, so
 `message_start.usage.input_tokens` carries the proxy's o200k-based estimate of the
 request (the same heuristic `count_tokens` falls back to) rather than zero. On the
-native tier the upstream's real value is forwarded untouched.
+native tier the upstream value is forwarded untouched.
 
 ## OpenAI Responses API
 
@@ -107,7 +107,7 @@ Usage arrives in `response.completed.response.usage`: `input_tokens`, `output_to
 
 When the request takes the verbatim tier (Anthropic or Responses client on a compatible
 provider), the upstream stream is forwarded with minimal mediation. If the upstream
-ends without a `[DONE]` sentinel, the proxy appends one — except Anthropic streams,
+ends without a `[DONE]` sentinel, the proxy appends one. Anthropic streams are the exception,
 which end by closing the connection.
 
 ## WebSocket transports
@@ -120,19 +120,19 @@ which end by closing the connection.
 WebSocket limits: 64 MiB per message, 60-minute connection cap. Auth via
 `Authorization`/`x-api-key` header, `?api_key=`, or (Realtime)
 `openai-insecure-api-key.<key>` subprotocol. Close codes differ per transport:
-`/v1/responses` only ever closes with `4401` (unauthorized — other failures arrive as
-error frames); the Realtime relay additionally uses `4403` forbidden (allowlist),
+`/v1/responses` only ever closes with `4401` (unauthorized; other failures arrive as
+error frames); the Realtime relay also uses `4403` forbidden (allowlist),
 `4004` invalid model, `4007` rate limited, and `1011` upstream failure.
 
 ## Non-streaming keepalive
 
 Long non-streaming responses are protected against CDN idle timeouts (Cloudflare 524)
 by the keepalive mechanism: after the grace period the proxy returns HTTP 200 and
-writes whitespace heartbeats until the real body is ready. Two consequences for
+writes whitespace heartbeats until the response body is ready. Two consequences for
 clients:
 
 - A failure after that point arrives as **200 + error JSON**.
-- Prefer `stream: true` for anything that can run for minutes — streaming avoids the
+- Prefer `stream: true` for anything that can run for minutes; streaming avoids the
   tradeoff entirely.
 
 Configuration and caveats: [Reverse Proxy & TLS](../deployment/reverse-proxy.md#cloudflare-and-other-impatient-cdns).
@@ -147,7 +147,7 @@ closed browser tab, `proxy_read_timeout` in nginx and a Cloudflare 524 are
 indistinguishable from the origin's side. The error text names Cloudflare because its
 524 is the classic case, not because a CDN is involved.
 
-A close that lands once the response is complete is a clean success, not a 499 — the
+A close that lands once the response is complete is a clean success, not a 499. The
 terminal `[DONE]` / `message_stop` frame is out, or the provider's last chunk was
 delivered with nothing left queued. SSE clients routinely drop the connection the
 moment they have what they came for. The response is still finalized for the request

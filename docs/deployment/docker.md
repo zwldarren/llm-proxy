@@ -34,19 +34,19 @@ volume.
 
 ## Key details
 
-- **Database URL is wired for you**: `postgresql+asyncpg://llmproxy:<POSTGRES_PASSWORD>@db:5432/llmproxy`.
-- **`POSTGRES_PASSWORD` defaults to `llmproxy`** — compose interpolates it into the
+- Database URL is wired for you: `postgresql+asyncpg://llmproxy:<POSTGRES_PASSWORD>@db:5432/llmproxy`.
+- `POSTGRES_PASSWORD` defaults to `llmproxy`: compose interpolates it into the
   proxy's `DATABASE_URL` and the database's bootstrap. Override it in `.env`.
-- **`.env` is optional** (`env_file` with `required: false`): without it, the
+- `.env` is optional (`env_file` with `required: false`): without it, the
   service starts on the built-in defaults.
-- **Startup order** is enforced with healthchecks: the proxy starts only after
+- Startup order is enforced with healthchecks: the proxy starts only after
   `pg_isready` succeeds and `redis-cli ping` answers.
-- **Redis is enabled** (`REDIS_ENABLED=true`, `REDIS_URL=redis://redis:6379`) with
+- Redis is enabled (`REDIS_ENABLED=true`, `REDIS_URL=redis://redis:6379`) with
   shared rate limiting and the config cache already on
   (`REDIS_RATE_LIMIT_ENABLED=true`, `REDIS_CACHE_ENABLED=true`) — the
   prerequisite for the auto-selected multi-worker default. See
   [PostgreSQL & Redis](databases.md).
-- **Redis eviction** is `allkeys-lru` with AOF persistence — safe for the
+- Redis eviction is `allkeys-lru` with AOF persistence: safe for the
   reconstructible data the proxy stores there.
 
 ## Environment
@@ -65,7 +65,7 @@ Published to GHCR by CI:
 | --- | --- |
 | `stable` | Newest tagged release — what compose pins. Recommended for production |
 | `latest` | Newest build from `main` |
-| `0.2.3` (pep440) | Exact release, best for pinning |
+| `0.5.3` (pep440) | Exact release, best for pinning |
 | `main` | Branch build |
 | `pr-<n>` | Pull-request builds (build-only, not pushed) |
 

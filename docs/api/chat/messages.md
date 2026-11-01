@@ -97,7 +97,7 @@ Claude-specific details:
 Standard Messages shape: `id`, `type: "message"`, `role: "assistant"`, `content`,
 `model`, `stop_reason` (defaults to `end_turn`), `usage`.
 
-- `usage.input_tokens` **excludes** cache tokens — it is
+- `usage.input_tokens` **excludes** cache tokens: it is
   `input_tokens − cache_read_input_tokens − cache_creation_input_tokens`.
   `cache_read_input_tokens` / `cache_creation_input_tokens` appear when the upstream
   reports them.

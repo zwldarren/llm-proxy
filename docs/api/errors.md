@@ -97,8 +97,9 @@ the server-generated id.
 | Failed API-key attempts | Client IP | **Off by default.** When `api_key_lockout_enabled`: 10 failures → 300 s lockout (`too_many_auth_failures`) |
 | Failed logins | Username | Off by default; when enabled, 5 failures → 900 s lockout (`account_locked`) |
 
-Every row above is bypassed by `rate_limit_disabled` (Settings → Security), which
-also skips the auth failure delay. Budget caps are not bypassed.
+Every row above is bypassed by `rate_limit_disabled`
+(Settings → Advanced → Security & Rate Limiting), which also skips the auth failure
+delay. Budget caps are not bypassed.
 
 Each rate-limit row is its own sliding window per client IP: polling
 `auth.setup_status` never spends the `auth.login` budget, and the per-key RPM cap

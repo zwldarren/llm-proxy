@@ -35,5 +35,5 @@ print(result.deleted)
 
 ## Related
 
-- [Create response](create-response.md) — storage model (Redis, 24 h TTL)
+- [Create response](create-response.md): storage model (Redis, 24 h TTL)
 - [Retrieve response](retrieve-response.md) · [Cancel response](cancel-response.md)

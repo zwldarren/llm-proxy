@@ -1,7 +1,6 @@
 # Connect an AI Agent
 
-Coding agents are just API clients — they work through the proxy like any SDK
-call. Create an [API key](../admin/api-keys.md), pick a model, then point the
+Coding agents are API clients. They work through the proxy like any SDK call. Create an [API key](../admin/api-keys.md), pick a model, then point the
 agent's provider config at the proxy.
 
 Every agent below uses one of the two wire formats the proxy already serves:
@@ -17,16 +16,16 @@ Every agent below uses one of the two wire formats the proxy already serves:
 
 ## Before you start
 
-1. **Create an API key** in **Configuration → API Keys** — see
+1. Create an API key in **Access → API Keys**: see
    [API Keys](../admin/api-keys.md). Agents authenticate with it exactly like an SDK.
-2. **Note the model name to use** — a configured model name, or the virtual models
+2. Note the model name to use: a configured model name, or the virtual models
    `auto` / `fast` / `best` when [smart routing](../api/routing.md) is enabled:
 
    ```bash
    curl http://localhost:8080/v1/models -H "Authorization: Bearer sk-your-proxy-key"
    ```
 
-3. **Base URL** — `http://localhost:8080/v1` for OpenAI-wire agents,
+3. Base URL: `http://localhost:8080/v1` for OpenAI-wire agents,
    `http://localhost:8080` for Anthropic-wire agents (they append `/v1/messages`
    themselves). Replace `localhost` with the host running the proxy if the agent
    runs in a container, VM, or another machine.
@@ -179,7 +178,7 @@ pi --model llm-proxy/your-model-name
 ```
 
 - `apiKey` supports `$ENV_VAR` interpolation, so the key stays out of the file.
-- The file is re-read whenever `/model` opens — no restart needed after edits.
+- The file is re-read whenever `/model` opens: no restart needed after edits.
 - `api` also accepts `openai-responses` or `anthropic-messages` if you prefer a
   different wire per provider.
 
@@ -266,7 +265,7 @@ to switch immediately.
 
 ## Related
 
-- [API Keys](../admin/api-keys.md) — create and scope the key agents authenticate with
-- [Models & Pricing](../admin/models.md) — client-facing names, mappings, pricing
-- [Virtual Models & Routing](../api/routing.md) — `auto` / `fast` / `best`
-- [Streaming](../api/streaming.md) — SSE details, heartbeats, cancellation
+- [API Keys](../admin/api-keys.md): create and scope the key agents authenticate with
+- [Models & Pricing](../admin/models.md): client-facing names, mappings, pricing
+- [Virtual Models & Routing](../api/routing.md): `auto` / `fast` / `best`
+- [Streaming](../api/streaming.md): SSE details, heartbeats, cancellation

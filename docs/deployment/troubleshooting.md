@@ -31,7 +31,7 @@ container/console logs:
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `401 authorization header missing` / `invalid authorization header format` | No key sent, or `Authorization` does not use `Bearer` | Send `Authorization: Bearer sk-…` or `x-api-key: sk-…`. Console JWTs do **not** work on `/v1/*` |
-| `429 too_many_auth_failures` with `Retry-After` | API-key IP lockout is enabled (off by default) and this address passed `max_failed_api_key_attempts` invalid keys | Wait out `Retry-After`; fix the key. Because the lockout is keyed by IP, one bad client blocks everyone sharing that address — on a dev machine, that is every request from `127.0.0.1`. Turn it off under Settings → Security, or flip **Disable Throttling** (counters are in-process, so a restart clears them too) |
+| `429 too_many_auth_failures` with `Retry-After` | API-key IP lockout is enabled (off by default) and this address passed `max_failed_api_key_attempts` invalid keys | Wait out `Retry-After`; fix the key. Because the lockout is keyed by IP, one bad client blocks everyone sharing that address — on a dev machine, that is every request from `127.0.0.1`. Turn it off under Settings → Advanced → Security & Rate Limiting, or flip **Disable Throttling** (counters are in-process, so a restart clears them too) |
 | `403 model_not_allowed` | Key or user allowlist excludes the model | Adjust the allowlist, or use an allowed model. Remember: empty allowlist = deny all |
 | `404 model_not_found` | Model name is not in the model mappings | Add the mapping (or fix the name). Virtual models need smart routing enabled |
 | `500 configuration_error` mentioning a virtual model | `auto`/`fast`/`best` used while smart routing is **disabled**, or on a non-chat endpoint | Enable smart routing, or use a concrete model name |
@@ -66,13 +66,13 @@ as token usage — and shows a notice the first time it would have checked an ac
 
 Nothing breaks when this happens; auto mode keeps working.
 
-- **Non-Anthropic upstreams cannot serve this at all** — Ollama, vLLM, SGLang, and the
+- Non-Anthropic upstreams cannot serve this at all: Ollama, vLLM, SGLang, and the
   third-party Claude-compatible providers (z.ai, Kimi, MiniMax, Moonshot, DeepSeek,
   Qwen) have no server-side check. The notice is expected on those routes.
-- **An Anthropic-format upstream** works when the fields survive end to end. This proxy's
+- An Anthropic-format upstream works when the fields survive end to end. This proxy's
   native Anthropic passthrough forwards `safeguards`, the full `anthropic-beta` value,
   and every response key verbatim; the converted path keeps `safeguard_results` too.
-- **Silence the notice** by setting `CLAUDE_CODE_AUTO_MODE_SERVER=0` in the environment
+- Silence the notice by setting `CLAUDE_CODE_AUTO_MODE_SERVER=0` in the environment
   Claude Code starts from. It then never asks for server-side checks and the notice
   disappears.
 
@@ -82,12 +82,12 @@ To confirm which state a session is in, run `/status` in Claude Code and check t
 
 ## Getting more detail
 
-- **Request id** — every response carries `X-Request-Id`; search the Logs screen for
+- Request id: every response carries `X-Request-Id`; search the Logs screen for
   it. Note that an inbound `x-request-id` is used as the tracing/routing id, while the
   response header is always the server-generated id.
-- **Application logs** — `LOG_LEVEL=DEBUG` (restart required) or `--log-file`.
-- **Audit trail** — admin operations and security events are in Logs → Audit Logs, with
+- Application logs: `LOG_LEVEL=DEBUG` (restart required) or `--log-file`.
+- Audit trail: admin operations and security events are in Logs → Audit Logs, with
   **Verify Integrity** to prove the chain is intact.
-- **Provider failures** — errors surface with the upstream status and message; 502
+- Provider failures: errors surface with the upstream status and message; 502
   means provider/network/parse failure, 504 a timeout (upstream calls use a fixed
   600 s read timeout with a 10 s connect; the provider `timeout` field is not applied).

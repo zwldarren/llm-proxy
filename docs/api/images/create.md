@@ -66,7 +66,7 @@ reachable without `extra_body` (which the OpenAI SDK offers for chat, not images
 
 `qwen` / `qwen-intl` (DashScope) accept:
 
-- `image` — a public image URL, a base64 data URL, or an array of either. Supplying
+- `image`: a public image URL, a base64 data URL, or an array of either. Supplying
   it turns the call into image-to-image; omitting it is text-to-image.
 - `negative_prompt`, `seed`, `prompt_extend`, `prompt_extend_mode`, `enable_thinking`,
   `watermark` — forwarded into DashScope's `parameters` block.
@@ -86,7 +86,7 @@ proxy rejects unknown fields instead of forwarding them (per-provider
 `usage` (`input_tokens`, `output_tokens`,
 `input_tokens_details.{text_tokens,image_tokens}`).
 
-- **There is no `model` field in image responses**, and the proxy does not convert
+- There is no `model` field in image responses, and the proxy does not convert
   between `url` and `b64_json` — you get whatever the provider produced.
 - `stream: true` emits SSE events `image_generation.partial_image` (with `b64_json`,
   `partial_image_index`) and `image_generation.completed`, then `[DONE]`.

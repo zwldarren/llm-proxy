@@ -11,7 +11,7 @@ source. Both end at the same place: a first-run setup screen at
 | Docker Compose | Docker Engine 24+ with Compose v2 |
 | From source | Python **3.15+**, [uv](https://docs.astral.sh/uv/), [bun](https://bun.sh) (to build the admin UI, and required by the dev servers) |
 
-## Option A — Docker Compose (recommended)
+## Option A: Docker Compose (recommended)
 
 ```bash
 git clone https://github.com/zwldarren/llm-proxy.git
@@ -23,8 +23,8 @@ Open **http://localhost:8080**.
 
 Compose starts the proxy together with PostgreSQL and Redis. The database password
 defaults to `llmproxy`, so a local trial needs no configuration at all. Change it
-in a `.env` file **before the first start** — Postgres applies the password when the
-volume is initialized, so changing it later means recreating the volume:
+in a `.env` file before the first start. Postgres applies the password when the volume
+is initialized, so changing it later means recreating the volume:
 
 ```bash
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > .env
@@ -38,7 +38,7 @@ The image ships the built admin UI and smart routing, and bundles
 `bun`/`bunx` and `uv`/`uvx` so stdio MCP servers can run `bunx`- or `uvx`-style
 commands inside the container. (`npx` is not included.)
 
-## Option B — From source
+## Option B: From source
 
 ```bash
 git clone https://github.com/zwldarren/llm-proxy.git
@@ -49,7 +49,7 @@ uv run llm-proxy --build-frontend
 ```
 
 `--build-frontend` runs `bun install` (if needed) and `bun run build`, producing
-`frontend/dist`. The server serves that directory at `/` — if `dist` is missing at
+`frontend/dist`. The server serves that directory at `/`. If `dist` is missing at
 startup, the API works but the admin UI is not mounted until you rebuild and restart.
 
 ## Server options
@@ -100,7 +100,7 @@ host/port it started, so the two stay in sync automatically.
 
 ## Next steps
 
-1. [First Setup](first-setup.md) — create the admin account.
-2. [Providers](../admin/providers.md) — add your first upstream.
-3. [Connect a Client](connect-a-client.md) — point an SDK at the proxy.
-4. [Connect an AI Agent](connect-an-agent.md) — Claude Code, Codex, OpenCode, Pi, OMP, Hermes.
+1. [First Setup](first-setup.md): create the admin account.
+2. [Providers](../admin/providers.md): add your first upstream.
+3. [Connect a Client](connect-a-client.md): point an SDK at the proxy.
+4. [Connect an AI Agent](connect-an-agent.md): Claude Code, Codex, OpenCode, Pi, OMP, Hermes.

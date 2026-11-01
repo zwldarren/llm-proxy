@@ -1,7 +1,7 @@
 # Logs, Usage & Tracing
 
-Every request through the proxy produces a log row, a usage record, and — when it is
-an administrative or security event — a tamper-evident audit entry.
+Every request through the proxy produces a log row and a usage record. Administrative
+and security events also produce a tamper-evident audit entry.
 
 ![Request logs](../screenshots/logs.png)
 
@@ -53,7 +53,7 @@ the filter panel.
 
 Configured in [Settings → Log Management](settings.md#log-management):
 
-- **Bodies** (`log_input_output`, default **off**) is the master switch for persisting
+- Bodies (`log_input_output`, default **off**) is the master switch for persisting
   request/response bodies. Off, every row is still written (status, tokens, cost,
   routing, audit metadata, and headers) but every content payload is replaced by
   `{"_bodies_disabled": true}`: the request and response bodies, **upstream error
@@ -72,17 +72,17 @@ Configured in [Settings → Log Management](settings.md#log-management):
   `error_message` column is empty, so the attempt timeline is the *only* place the
   failure is recorded. The upstream payload those messages can echo lives in
   `log_metadata.error_details`, which *is* scrubbed.
-- **Tracing content** is configured separately on the tracing provider. The Langfuse
+- Tracing content is configured separately on the tracing provider. The Langfuse
   exporter's `send_content` setting defaults to `full`, so traces carry the prompt and
   completion. `inherit` instead makes these switches govern tracing too: with bodies
   off it exports **no** prompt/completion content (usage, cost, identity, timing and
   metadata are still exported), and with masking on it exports the same masked values
   the log row stores. `none` never exports content. See [Tracing](#tracing).
-- **Sampling** (`sampling_rate`, default 1.0) limits **body capture** for requests that
+- Sampling (`sampling_rate`, default 1.0) limits **body capture** for requests that
   do have bodies enabled: sampled-out bodies are stored as `{"_sampled_out": true}` (a
   distinct marker, so the UI never reports "sampled out" when bodies are simply disabled)
   while metadata is still recorded. `x-log-full: true` forces full capture for one request.
-- **Raw stream** (`log_raw_stream`, default off) controls how a *streaming* response is
+- Raw stream (`log_raw_stream`, default off) controls how a *streaming* response is
   stored. Off, the accumulated content blocks are reassembled through the protocol
   serializer into the exact JSON a non-streaming call would have returned — the SSE
   envelope (`id`, `model`, `object`, `choices[0].index`, …) repeats on every delta, so
@@ -105,19 +105,19 @@ Configured in [Settings → Log Management](settings.md#log-management):
   streams (image generation and edit) whose payloads carry no content model. A stream
   whose body cannot be rebuilt stores `{"streaming": true, "_assembled": false}`, and
   nothing is stored when the request was sampled out or `log_input_output` is off.
-- **Body cap** (`max_logged_body_bytes`, default `1048576` = 1 MiB; `0` = unlimited) limits
+- Body cap (`max_logged_body_bytes`, default `1048576` = 1 MiB; `0` = unlimited) limits
   body **size** at write time: a request or response body bigger than the cap is stored as
   `{"_truncated": true, "size": N}` (the original serialized size in bytes) instead of the
   payload. Since the cap is applied when the log row is built, it also truncates requests
   that forced capture with `x-log-full: true`; metadata is always recorded.
-- **Masking** (`mask_sensitive_data`, default on) replaces credentials in headers,
+- Masking (`mask_sensitive_data`, default on) replaces credentials in headers,
   bodies, and MCP/tool arguments. Values ≤ 8 chars become `***`; longer values keep
   their first 3 and last 4 characters. Add your own field names via **Extra Sensitive Keys**.
   One policy applies to every row that stores content: ordinary requests, requests that
   failed before the pipeline started (backfilled from the request), admin/audit payloads,
   and MCP arguments. Admin payloads are masked even when `mask_sensitive_data` is off,
   because they carry credentials.
-- **Retention** (`log_retention_days`, default 30; `0` = forever) is enforced by a
+- Retention (`log_retention_days`, default 30; `0` = forever) is enforced by a
   sweep per log type that runs once a day. The sweep deletes in bounded
   batches, looping until exhausted — including request logs and usage
   records — so it never holds a single long write lock on a large store. A sweep that
@@ -179,11 +179,11 @@ reveals, and every non-`/v1/` admin operation) are written to a **hash-chained**
 log — each row's hash includes the previous row's, so removing or editing history is
 detectable.
 
-- **Chain**: `content_hash` = SHA-256 over a canonical JSON dump of the event,
+- Chain: `content_hash` = SHA-256 over a canonical JSON dump of the event,
   outcome, resource, model/provider, cost, tokens, and bodies. The stored link hash is
   SHA-256 of `"{sequence}:{content_hash}:{previous_hash}"`, with `GENESIS` as the seed
   of the chain.
-- **Verify**: Logs → Audit Logs → **Verify Integrity**
+- Verify: Logs → Audit Logs → **Verify Integrity**
   (`GET /api/logs/audit/verify-integrity`, admin only, optional sequence range)
   recomputes every hash and checks the linkage, returning `valid`, `verified_count`,
   and any errors.
@@ -227,32 +227,32 @@ address, while an admin keeps the permissive format-only check (hosts in
 When enabled, each request exports one observation, named after its endpoint and
 carrying that request type's own content:
 
-- **chat** (OpenAI, Anthropic and Responses wire): a `generation` whose `input` is the
+- chat (OpenAI, Anthropic and Responses wire): a `generation` whose `input` is the
   messages (or `{tools, messages}` when tools are present) and whose `output` is the
   assistant message with tool calls separated out. When the client and the provider
   speak the same wire the response is passed through unparsed, so no content blocks
   exist to render: the trace uses the response body's wire shape, passed through the
   same bounded rendering as every other trace payload (long text, inline binary data
   and unbounded lists are summarized) and the standard masking policy.
-- **embeddings** (`/v1/embeddings`): an **`embedding`** observation. `input` is the
+- embeddings (`/v1/embeddings`): an **`embedding`** observation. `input` is the
   text (or list of texts) being embedded; `output` is the response shape (`count`,
   `dimensions`, `model` and a preview of the first vectors) rather than the vectors
   themselves — a single vector is 768–3072 floats and a batch is unbounded, so
   exporting them whole would dwarf the span. `usage_details` carries the `input`
   bucket only, since an embedding bills no output tokens.
-- **rerank** (`/v1/rerank`, `/v2/rerank`): `input` is `{query, documents}` (documents
+- rerank (`/v1/rerank`, `/v2/rerank`): `input` is `{query, documents}` (documents
   capped at the first 20, long ones cut at 2000 characters, with the true count
   reported); `output` is the ranking — `index`, `relevance_score`, and the echoed
   document when the upstream returns one.
-- **images** (`/v1/images/generations`, `/v1/images/edits`): `input` is the prompt plus
+- images (`/v1/images/generations`, `/v1/images/edits`): `input` is the prompt plus
   the image parameters, and an edit's source images and mask are summarized by
   filename, content type, size or URL. `output` keeps the result URLs; base64 image
   data appears as a length.
-- **audio** (`/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations`):
+- audio (`/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/audio/translations`):
   a speech request's `input` is the script and its `output` the media type and byte
   count; a transcription or translation `input` is the uploaded file's name and size
   and its `output` the transcribed text (segments are counted, not repeated).
-- **systemone**/**decisions**: `input` is the evaluation's `state`/`input` plus its
+- systemone/**decisions**: `input` is the evaluation's `state`/`input` plus its
   `questions`, and `output` is its `answers`.
 - No binary payload ever reaches a trace: audio, image bytes, inline data URIs and
   base64 vectors are reported by media type, length or URL. Every text leaf of a
@@ -323,5 +323,5 @@ Langfuse trace can be found from either side (the logs API filters on `trace_id`
 
 ## Related
 
-- [Settings](settings.md#log-management) — retention, masking, sampling
-- [Cost Control](../guides/cost-control.md) — turning usage data into budgets
+- [Settings](settings.md#log-management): retention, masking, sampling
+- [Cost Control](../guides/cost-control.md): turning usage data into budgets
