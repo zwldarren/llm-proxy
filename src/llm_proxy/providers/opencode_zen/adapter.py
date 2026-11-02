@@ -1,12 +1,15 @@
 """OpenCode Zen provider adapter (the Console pay-as-you-go lane).
 
-Serves the Console model catalog (models.dev entry ``opencode``) on the Zen
-gateway root: every wire dialect hangs off one flat base URL
-(``/chat/completions``, ``/messages``, ``/responses``, ``/systemone``) — see
+Serves the Console model catalog (models.dev entry ``opencode``) on the v2
+pay-as-you-go root, where each wire dialect hangs off its own path segment
+(``/openai/v1/chat/completions``, ``/openai/v1/responses``,
+``/anthropic/v1/messages``, ``/google/v1beta/models/{model}:generateContent``,
+``/systemone/v1/systemone``) — see
 ``llm_proxy.providers.opencode.adapter`` for the per-model dialect dispatch.
-Operators pointing at the Console lane's dialect-prefixed paths directly set
-``base_url`` to ``https://opencode.ai/inference/v1`` (or pin endpoints via
-``endpoint_base_urls``).
+Operators pointing at a legacy root set ``base_url`` to
+``https://opencode.ai/zen/v1`` (flat) or ``https://opencode.ai/inference/v1``
+(dialect-prefixed, chat at the base), or pin endpoints via
+``endpoint_base_urls``.
 """
 
 from llm_proxy.core.adapter import register_adapter
@@ -23,7 +26,7 @@ class OpenCodeZenAdapter(OpenCodeGatewayAdapter):
     LOBE_ICON_ID = "opencode"
     LOBE_ICON_VARIANT = "color"
 
-    DEFAULT_BASE_URL = "https://opencode.ai/zen/v1"
+    DEFAULT_BASE_URL = "https://opencode.ai/inference"
 
     #: The Console models: the same catalog the OpenCode CLI reads.
     CATALOG_ENTRY = "opencode"

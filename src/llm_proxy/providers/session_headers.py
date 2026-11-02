@@ -6,9 +6,12 @@ pin a conversation to one backend so its prompt cache stays warm. Every
 coding agent names that conversation differently: Codex sends
 ``session_id`` / ``thread-id``, Claude Code ``x-claude-code-session-id``,
 Pi ``x-session-affinity`` (or its native ``n-session``), DeepSeek Harness
-``x-deepseek-harness-session-id``, and generic clients ``x-session-id`` or
-``x-conversation-id``. The OpenCode edge also recognizes these native forms,
-so a proxy should preserve them *and* translate the first one to
+``x-deepseek-harness-session-id``, Goose ``agent-session-id``, Amp
+``x-amp-thread-id``, and generic clients ``x-session-id`` or
+``x-conversation-id`` (ZCode, OpenClaw, Crush). The generic spellings are not
+all conversation-scoped — ZCode's is process-wide — which is why they rank
+below the client-specific thread ids. The OpenCode edge also recognizes these
+native forms, so a proxy should preserve them *and* translate the first one to
 ``x-opencode-session``.
 
 This is the **upstream** session id: a provider-scoped affinity key, not the
@@ -37,12 +40,21 @@ from typing import Any
 
 #: Session headers, highest priority first. A client-sent
 #: ``x-opencode-session`` is authoritative and always wins. The rest are the
-#: native headers the OpenCode edge documents as recognized, plus the common
-#: generic spellings used by coding agents. Deliberately excluded:
-#: ``x-client-request-id`` (some clients mint it per request),
-#: ``acp-connection-id`` (one id per editor connection, not per conversation),
-#: and ``x-amp-thread-id`` / ``x-omp-session-id`` (no documented affinity
-#: contract).
+#: native headers the OpenCode edge documents as recognized, plus the spellings
+#: coding agents actually use: Codex's ``session_id`` / ``thread-id`` and
+#: ``x-codex-turn-metadata`` envelope, Claude Code's
+#: ``x-claude-code-session-id``, Pi's ``x-session-affinity`` / ``n-session``,
+#: DeepSeek Harness's ``x-deepseek-harness-session-id``, Goose's
+#: ``agent-session-id``, Amp's ``x-amp-thread-id``, and the generic
+#: ``x-session-id`` / conversation-id forms (ZCode, OpenClaw, Crush, ...).
+#: The generic spellings sit below the client-specific thread ids because they
+#: are not always conversation-scoped — ZCode's is process-wide — whereas
+#: Amp's ``x-amp-thread-id`` names one thread, and a thread is one
+#: conversation.
+#: Deliberately excluded: ``x-client-request-id`` (some clients mint it per
+#: request), ``acp-connection-id`` (one id per editor connection, not per
+#: conversation), and ``x-omp-session-id`` (no client sends it; OMP carries its
+#: session only in the body's ``prompt_cache_key``).
 SESSION_HEADER_PRIORITY: tuple[str, ...] = (
     "x-opencode-session",
     "x-claude-code-session-id",
@@ -51,8 +63,10 @@ SESSION_HEADER_PRIORITY: tuple[str, ...] = (
     "thread-id",
     "thread_id",
     "x-deepseek-harness-session-id",
+    "agent-session-id",
     "x-session-affinity",
     "n-session",
+    "x-amp-thread-id",
     "x-session-id",
     "x-conversation-id",
     "conversation_id",

@@ -5,6 +5,7 @@ import pytest
 from llm_proxy.providers.opencode.dialect import (
     Dialect,
     derive_dialect_roots,
+    derive_models_url,
     infer_dialect_from_id,
 )
 
@@ -12,6 +13,8 @@ CONSOLE_BASE = "https://opencode.ai/inference/v1"
 ZEN_BASE = "https://opencode.ai/zen/v1"
 GO_ZEN_BASE = "https://opencode.ai/zen/go/v1"
 GO_CONSOLE_BASE = "https://opencode.ai/inference/go/v1"
+V2_CONSOLE_BASE = "https://opencode.ai/inference"
+V2_GO_BASE = "https://opencode.ai/inference/go"
 
 
 class TestInferDialectFromId:
@@ -62,7 +65,20 @@ class TestInferDialectFromId:
 
 
 class TestDeriveDialectRoots:
-    """Console lane prefixes dialects into the path; the others are flat."""
+    """The v2 roots prefix every dialect (chat included); the legacy ones do not."""
+
+    @pytest.mark.parametrize("base", [V2_CONSOLE_BASE, V2_GO_BASE])
+    def test_v2_lane_roots(self, base: str):
+        roots = derive_dialect_roots(base)
+        assert roots[Dialect.CHAT] == f"{base}/openai/v1"
+        assert roots[Dialect.RESPONSES] == f"{base}/openai/v1"
+        assert roots[Dialect.ANTHROPIC] == f"{base}/anthropic/v1"
+        assert roots[Dialect.GOOGLE] == f"{base}/google/v1beta"
+        assert roots[Dialect.SYSTEMONE] == f"{base}/systemone/v1"
+
+    def test_v2_lane_trailing_slash(self):
+        roots = derive_dialect_roots(f"{V2_GO_BASE}/")
+        assert roots[Dialect.ANTHROPIC] == f"{V2_GO_BASE}/anthropic/v1"
 
     def test_console_lane(self):
         roots = derive_dialect_roots(CONSOLE_BASE)
@@ -86,3 +102,24 @@ class TestDeriveDialectRoots:
         ``endpoint_base_urls`` overrides are the operator's control there."""
         roots = derive_dialect_roots("https://mirror.example.com/inference/v1")
         assert set(roots.values()) == {"https://mirror.example.com/inference/v1"}
+
+
+class TestDeriveModelsUrl:
+    """The model list is versioned under the v2 lane roots, flat elsewhere."""
+
+    @pytest.mark.parametrize("base", [V2_CONSOLE_BASE, V2_GO_BASE])
+    def test_v2_lanes(self, base: str):
+        assert derive_models_url(base) == f"{base}/v1/models"
+
+    def test_v2_lane_trailing_slash(self):
+        assert derive_models_url(f"{V2_GO_BASE}/") == f"{V2_GO_BASE}/v1/models"
+
+    @pytest.mark.parametrize("base", [CONSOLE_BASE, ZEN_BASE, GO_ZEN_BASE, GO_CONSOLE_BASE])
+    def test_legacy_lanes(self, base: str):
+        assert derive_models_url(base) == f"{base}/models"
+
+    def test_a_relay_host_keeps_the_flat_shape(self):
+        assert (
+            derive_models_url("https://mirror.example.com/inference/go")
+            == "https://mirror.example.com/inference/go/models"
+        )

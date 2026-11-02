@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted (2026-10).
+Accepted (2026-10). The lane base URLs and the flat-root URL shape settled here
+were superseded by [ADR-0055](0055-opencode-v2-lane-roots.md): the lanes default
+to the v2 roots (`/inference`, `/inference/go`), where every dialect — Chat
+Completions included — owns a path segment. The decision below to route by
+model rather than by adapter type stands, as does the per-model dialect
+resolution it describes.
 
 ## Context
 

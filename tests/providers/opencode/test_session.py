@@ -76,6 +76,25 @@ class TestResolution:
 
         assert resolve_upstream_session_id(request) == "ses_client"
 
+    def test_goose_session_header_is_used(self):
+        capture_session_headers({"agent-session-id": "goose-session"})
+        request = make_request(("user", "hello"))
+
+        assert resolve_upstream_session_id(request) == "goose-session"
+
+    def test_amp_thread_header_is_used(self):
+        capture_session_headers({"x-amp-thread-id": "T-7873e6bd"})
+        request = make_request(("user", "hello"))
+
+        assert resolve_upstream_session_id(request) == "T-7873e6bd"
+
+    def test_amp_thread_wins_over_the_process_wide_generic_header(self):
+        """Amp's thread id is conversation-scoped; ``x-session-id`` is not."""
+        capture_session_headers({"x-session-id": "process-wide", "x-amp-thread-id": "T-1"})
+        request = make_request(("user", "hello"))
+
+        assert resolve_upstream_session_id(request) == "T-1"
+
     def test_explicit_metadata_session_wins_over_prompt_cache_key(self):
         """An explicit id is more trustworthy than a possibly per-request key."""
         request = make_request(

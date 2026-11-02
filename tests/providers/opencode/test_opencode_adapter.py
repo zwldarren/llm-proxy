@@ -35,18 +35,13 @@ from llm_proxy.providers.session_headers import (
     clear_session_headers,
 )
 
-ZEN_BASE = "https://opencode.ai/zen/v1"
-#: The Zen lane keeps every dialect on the base root: these ARE base + path.
-ANTHROPIC_URL = f"{ZEN_BASE}/messages"
-RESPONSES_URL = f"{ZEN_BASE}/responses"
-GOOGLE_URL = f"{ZEN_BASE}/models/gemini-3.6-flash:generateContent"
-SYSTEMONE_URL = f"{ZEN_BASE}/systemone"
-#: The Console lane prefixes dialects into the path: the ``/v1`` of the chat
-#: root is replaced by ``/{dialect}/v1``, so these are NOT ``CONSOLE_BASE + path``.
-ANTHROPIC_URL = f"{ZEN_BASE}/messages"
-RESPONSES_URL = f"{ZEN_BASE}/responses"
-GOOGLE_URL = f"{ZEN_BASE}/models/gemini-3.6-flash:generateContent"
-SYSTEMONE_URL = f"{ZEN_BASE}/systemone"
+#: The Zen lane's v2 root: each dialect hangs off its own path segment.
+ZEN_BASE = "https://opencode.ai/inference"
+CHAT_URL = f"{ZEN_BASE}/openai/v1/chat/completions"
+ANTHROPIC_URL = f"{ZEN_BASE}/anthropic/v1/messages"
+RESPONSES_URL = f"{ZEN_BASE}/openai/v1/responses"
+GOOGLE_URL = f"{ZEN_BASE}/google/v1beta/models/gemini-3.6-flash:generateContent"
+SYSTEMONE_URL = f"{ZEN_BASE}/systemone/v1/systemone"
 
 ANTHROPIC_UPSTREAM = {
     "id": "msg_1",
@@ -129,7 +124,7 @@ class TestDeclaration:
 
     def test_default_base_urls(self):
         assert OpenCodeZenAdapter(api_key="k")._base_url == ZEN_BASE
-        assert OpenCodeGoAdapter(api_key="k")._base_url == "https://opencode.ai/zen/go/v1"
+        assert OpenCodeGoAdapter(api_key="k")._base_url == "https://opencode.ai/inference/go"
 
     def test_catalog_entry_follows_the_type(self):
         """The Go lane's models live under their own models.dev entry — the
@@ -150,11 +145,45 @@ class TestDeclaration:
             assert gated.supports_native_streaming("openresponses") is False
             assert gated.supports_native_streaming("openai") is False
 
-    def test_go_lane_dialect_urls_are_flat(self):
+    def test_go_lane_dialect_urls_are_prefixed(self):
         adapter = OpenCodeGoAdapter(api_key="k")
+        base = "https://opencode.ai/inference/go"
 
-        assert adapter._anthropic_messages_url("m") == "https://opencode.ai/zen/go/v1/messages"
-        assert adapter._responses_url("m") == "https://opencode.ai/zen/go/v1/responses"
+        assert adapter._dialect_url(Dialect.CHAT, "m", stream=False) == (
+            f"{base}/openai/v1/chat/completions"
+        )
+        assert adapter._anthropic_messages_url("m") == f"{base}/anthropic/v1/messages"
+        assert adapter._responses_url("m") == f"{base}/openai/v1/responses"
+        assert adapter._dialect_url(Dialect.GOOGLE, "m", stream=False) == (
+            f"{base}/google/v1beta/models/m:generateContent"
+        )
+        assert adapter._dialect_url(Dialect.GOOGLE, "m", stream=True) == (
+            f"{base}/google/v1beta/models/m:streamGenerateContent?alt=sse"
+        )
+        assert adapter._dialect_url(Dialect.SYSTEMONE, "m", stream=False) == (
+            f"{base}/systemone/v1/systemone"
+        )
+        assert adapter._models_url() == f"{base}/v1/models"
+
+    def test_a_legacy_flat_base_url_still_works(self):
+        """An operator who pinned the old root keeps the flat layout."""
+        adapter = OpenCodeZenAdapter(api_key="k", base_url="https://opencode.ai/zen/v1")
+
+        assert adapter._dialect_url(Dialect.CHAT, "m", stream=False) == (
+            "https://opencode.ai/zen/v1/chat/completions"
+        )
+        assert adapter._anthropic_messages_url("m") == "https://opencode.ai/zen/v1/messages"
+        assert adapter._models_url() == "https://opencode.ai/zen/v1/models"
+
+    def test_chat_completion_override_wins_over_the_dialect_root(self):
+        adapter = OpenCodeZenAdapter(
+            api_key="k",
+            endpoint_base_urls={"chat_completion": "https://override.example.com/v1/chat"},
+        )
+
+        assert adapter._dialect_url(Dialect.CHAT, "m", stream=False) == (
+            "https://override.example.com/v1/chat"
+        )
 
 
 class TestDialectDispatch:
@@ -167,7 +196,7 @@ class TestDialectDispatch:
 
         await adapter.chat_completion(chat_request("glm-5.3"))
 
-        assert post_url(adapter) == f"{ZEN_BASE}/chat/completions"
+        assert post_url(adapter) == CHAT_URL
         headers = post_headers(adapter)
         assert headers["Authorization"] == "Bearer sk-test"
         assert "x-api-key" not in headers
@@ -327,6 +356,25 @@ class TestIdentityHeaders:
         assert headers["x-opencode-session"] == "claude-session-1"
         # The edge also recognizes the native header, so it rides along.
         assert headers["x-claude-code-session-id"] == "claude-session-1"
+
+    @pytest.mark.parametrize(
+        ("header", "value"),
+        [("agent-session-id", "goose-session"), ("x-amp-thread-id", "T-7873e6bd")],
+    )
+    async def test_more_agent_session_headers_are_translated_and_forwarded(
+        self, mock_response_cls, make_mock_client, header: str, value: str
+    ):
+        """Goose and Amp name their conversation in their own header."""
+        capture_session_headers({header: value})
+        adapter = make_adapter(
+            mock_response_cls, make_mock_client(mock_response_cls(json_data=CHAT_UPSTREAM))
+        )
+
+        await adapter.chat_completion(chat_request("glm-5.3"))
+
+        headers = post_headers(adapter)
+        assert headers["x-opencode-session"] == value
+        assert headers[header] == value
 
     async def test_protocol_capture_feeds_the_adapter(self, mock_response_cls, make_mock_client):
         """The real protocol middleware path (not just the session module) works."""
@@ -721,7 +769,7 @@ class TestDialectCorrection:
         await adapter.chat_completion(chat_request("claude-x"))
 
         assert adapter_module._corrected_dialect(ZEN_BASE, "claude-x") is Dialect.CHAT
-        assert post_url(adapter) == f"{ZEN_BASE}/chat/completions"
+        assert post_url(adapter) == CHAT_URL
 
     async def test_learned_correction_skips_the_failed_dialect(
         self, mock_response_cls, make_mock_client
@@ -733,7 +781,7 @@ class TestDialectCorrection:
 
         await adapter.chat_completion(chat_request("claude-x"))
 
-        assert post_url(adapter) == f"{ZEN_BASE}/chat/completions"
+        assert post_url(adapter) == CHAT_URL
 
     async def test_chain_continues_past_a_chat_rejection(self, mock_response_cls, make_mock_client):
         """A model served only on a native dialect is found below chat."""

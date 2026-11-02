@@ -27,12 +27,20 @@ Completions, the dialect the gateway normalizes everything to.
 import re
 from enum import StrEnum
 
-# The Console lane prefixes the dialect into the path
-# (``/inference/<dialect>/<version>/...``); the Zen and Go lanes keep every
-# dialect on one flat root (``/zen/v1/messages``, ``/zen/go/v1/responses``).
-# Only this exact documented lane shape triggers prefix derivation; anything
-# else (mirrors, /zen/v1, /inference/go/v1) derives flat paths, and
-# ``endpoint_base_urls`` overrides win over both.
+#: The v2 lane roots: the pay-as-you-go lane at ``/inference`` and the Go
+#: subscription lane at ``/inference/go``. Each wire dialect hangs off its own
+#: segment there (``/openai/v1``, ``/anthropic/v1``, ``/google/v1beta``,
+#: ``/systemone/v1``) and the model list moves to ``<root>/v1/models``. Chat
+#: Completions shares the OpenAI segment with Responses, so — unlike the
+#: legacy ``/inference/v1`` root — it is not served at the base URL itself.
+_V2_LANE_RE = re.compile(r"^(?P<root>https?://(?:[^/@]+\.)?opencode\.ai/inference(?:/go)?)/?$")
+
+#: The legacy Console root prefixes the non-chat dialects into the path
+#: (``/inference/<dialect>/<version>/...``) but keeps Chat Completions at the
+#: base; the Zen (``/zen/v1``) and legacy Go (``/zen/go/v1``,
+#: ``/inference/go/v1``) roots keep every dialect on one flat base. Only these
+#: exact documented shapes trigger derivation; anything else (mirrors) derives
+#: flat paths, and ``endpoint_base_urls`` overrides win over all of it.
 _CONSOLE_LANE_RE = re.compile(r"^https?://(?:[^/@]+\.)?opencode\.ai/inference/v1/?$")
 
 
@@ -105,16 +113,38 @@ def dialect_from_npm(npm: str | None) -> Dialect:
     return NPM_DIALECTS.get(npm, DEFAULT_DIALECT)
 
 
+def _normalize_base(base_url: str | None) -> str:
+    """A configured base URL without surrounding space or a trailing slash."""
+    return (base_url or "").strip().rstrip("/")
+
+
+def _v2_root(base: str) -> str | None:
+    """The v2 lane root ``base`` names, or None when it names a legacy one."""
+    match = _V2_LANE_RE.match(base)
+    return match.group("root") if match else None
+
+
 def derive_dialect_roots(base_url: str | None) -> dict[Dialect, str]:
     """Derive the per-dialect endpoint roots from the configured base URL.
 
-    Chat always rides the base URL itself. On the documented Console lane
-    (``https://opencode.ai/inference/v1``) the other dialects hang off their
-    own segment roots (``/inference/anthropic/v1/messages``, ...); on every
-    other lane (Zen ``/zen/v1``, Go ``/zen/go/v1``, ``/inference/go/v1``)
-    they hang off the same flat root (``/messages``, ``/responses``, ...).
+    On the v2 lane roots (``https://opencode.ai/inference``,
+    ``https://opencode.ai/inference/go``) every dialect hangs off its own
+    segment, Chat Completions included
+    (``/openai/v1/chat/completions``). On the legacy Console root
+    (``https://opencode.ai/inference/v1``) the non-chat dialects hang off
+    their own segments while Chat Completions rides the base URL; on every
+    other lane (Zen ``/zen/v1``, legacy Go ``/zen/go/v1``) they all share one
+    flat root (``/messages``, ``/responses``, ...).
     """
-    base = (base_url or "").strip().rstrip("/")
+    base = _normalize_base(base_url)
+    if root := _v2_root(base):
+        return {
+            Dialect.CHAT: f"{root}/openai/v1",
+            Dialect.RESPONSES: f"{root}/openai/v1",
+            Dialect.ANTHROPIC: f"{root}/anthropic/v1",
+            Dialect.GOOGLE: f"{root}/google/v1beta",
+            Dialect.SYSTEMONE: f"{root}/systemone/v1",
+        }
     if _CONSOLE_LANE_RE.match(base):
         root = base[: -len("/v1")]
         return {
@@ -127,6 +157,18 @@ def derive_dialect_roots(base_url: str | None) -> dict[Dialect, str]:
     return {dialect: base for dialect in Dialect}
 
 
+def derive_models_url(base_url: str | None) -> str:
+    """The gateway's model-list URL for one configured base URL.
+
+    The v2 lanes version it under the root (``/inference/go/v1/models``);
+    every other root serves it flat (``/zen/go/v1/models``).
+    """
+    base = _normalize_base(base_url)
+    if root := _v2_root(base):
+        return f"{root}/v1/models"
+    return f"{base}/models"
+
+
 __all__ = [
     "CATALOG_ENTRY_CONSOLE",
     "CATALOG_ENTRY_GO",
@@ -136,5 +178,6 @@ __all__ = [
     "NPM_DIALECTS",
     "dialect_from_npm",
     "derive_dialect_roots",
+    "derive_models_url",
     "infer_dialect_from_id",
 ]

@@ -60,8 +60,8 @@ variable makes stored keys undecryptable.
 | `mistral` | Chat Completions | `https://api.mistral.ai/v1` |
 | `cohere` | Native Cohere v2 (`/v2/chat`, `/v2/embed`, `/v2/rerank`, `/v2/audio/transcriptions`) | `https://api.cohere.com` |
 | `nanogpt` | Chat Completions | `https://nano-gpt.com/api/v1` |
-| `opencode-zen` | Per-model dialect: Chat Completions / Anthropic / Responses / Google / System One (see below) | `https://opencode.ai/zen/v1` |
-| `opencode-go` | Same gateway, subscription lane (own model catalog) | `https://opencode.ai/zen/go/v1` |
+| `opencode-zen` | Per-model dialect: Chat Completions / Anthropic / Responses / Google / System One (see below) | `https://opencode.ai/inference` |
+| `opencode-go` | Same gateway, subscription lane (own model catalog) | `https://opencode.ai/inference/go` |
 
 **Native protocol** means the proxy can forward a request *verbatim* to that upstream
 when the client speaks the same protocol (Anthropic clients hitting a native-Anthropic
@@ -89,12 +89,18 @@ endpoint only — chat requests for Jev models are rejected with a pointer there
 everything else on Chat Completions.
 
 - Types = lanes: `opencode-zen` is the Console pay-as-you-go lane
-  (`https://opencode.ai/zen/v1`), `opencode-go` the subscription lane
-  (`https://opencode.ai/zen/go/v1`) — the two lanes serve different model catalogs
+  (`https://opencode.ai/inference`), `opencode-go` the subscription lane
+  (`https://opencode.ai/inference/go`) — the two lanes serve different model catalogs
   (the same id can even speak a different dialect on each; the adapter reads the
-  lane's own models.dev entry). Both keep every dialect on one flat root under the
-  base URL. The Console lane's dialect-prefixed paths (`https://opencode.ai/inference/v1`)
-  are reachable by setting `base_url` to it.
+  lane's own models.dev entry). Each lane root hangs every wire dialect off its own
+  path segment: `/openai/v1` for Chat Completions and Responses, `/anthropic/v1` for
+  Messages, `/google/v1beta` for Gemini, `/systemone/v1` for System One; the model
+  list is at `<root>/v1/models`. The legacy flat roots are still selectable by setting
+  `base_url` to `https://opencode.ai/zen/v1` or `https://opencode.ai/zen/go/v1` (all
+  dialects under the base URL), and the older Console root
+  `https://opencode.ai/inference/v1` keeps Chat Completions at the base while the
+  other dialects get their segment prefix. See
+  [ADR-0055](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0055-opencode-v2-lane-roots.md).
 - Headers: `Authorization: Bearer` everywhere, plus the dialect's auth header where
   the gateway reads one (`x-api-key` on the Anthropic route, `x-goog-api-key` on the
   Google route). The identity headers (`x-opencode-client`, `x-opencode-project`, a
@@ -108,7 +114,8 @@ everything else on Chat Completions.
   its prompt cache based on it. The proxy takes the client's own session header when it
   sent one (`x-opencode-session`, or the native `x-claude-code-session-id` / Codex
   `session_id` / `thread-id` / Pi `x-session-affinity` / DeepSeek Harness
-  `x-deepseek-harness-session-id` forms), then an explicit body-level `session_id` /
+  `x-deepseek-harness-session-id` / Goose `agent-session-id` / Amp `x-amp-thread-id`
+  forms), then an explicit body-level `session_id` /
   `conversation_id` / `thread_id`, then the Anthropic `metadata.user_id` session or
   `prompt_cache_key`, then a deterministic fingerprint of the first real user message.
   Copilot-style `<environment_info>` / `<context>` blocks are stripped even when the
@@ -118,7 +125,9 @@ everything else on Chat Completions.
   cannot make the edge choose a different conversation. Set `x-opencode-session` in
   **Custom headers** to pin one id deliberately (this disables per-conversation
   affinity). See
-  [ADR-0052](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0052-opencode-session-affinity.md).
+  [ADR-0052](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0052-opencode-session-affinity.md)
+  and
+  [ADR-0056](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0056-goose-and-amp-session-headers.md).
 - Self-healing: when the gateway rejects a model with a model-flavored 400/404, the
   request is retried on the remaining dialects (Chat Completions first) and the working
   dialect is remembered for the process lifetime.

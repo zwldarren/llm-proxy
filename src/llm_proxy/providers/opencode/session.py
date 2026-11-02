@@ -6,7 +6,7 @@ but throws the cache benefit away, which is the whole reason the header
 exists. This module picks the most truthful stable id available, in order:
 
 1. the client's own session header (``x-opencode-session``, then the native
-   headers Codex/Claude Code/Pi/DeepSeek Harness send — see
+   headers Codex/Claude Code/Pi/DeepSeek Harness/Goose/Amp send — see
    :mod:`llm_proxy.providers.session_headers`);
 2. request metadata: an explicit session/conversation/thread id, then the
    session embedded in Anthropic ``metadata.user_id``, then an explicit

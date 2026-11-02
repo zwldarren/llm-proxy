@@ -1034,20 +1034,29 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
     CHAT_ENDPOINT: str = ""
 
+    def _endpoint_base(self, endpoint_type: str) -> str | None:
+        """The base URL an endpoint's ``default_path`` is appended to.
+
+        Every endpoint hangs off the configured base URL unless an adapter
+        says otherwise: the OpenCode v2 lanes serve Chat Completions from a
+        dialect segment (``/openai/v1``) rather than from the lane root.
+        """
+        return self._base_url
+
     def _resolve_endpoint_url(
         self, endpoint_type: str, default_path: str, model: str | None = None
     ) -> str:
         """Resolve a provider endpoint URL, preferring an explicit override.
 
-        ``default_path`` is appended to the configured base URL. An
-        ``endpoint_base_urls`` override wins and is used as-is, which is how an
-        endpoint reached on another host — or outside the base URL's versioned
-        prefix — is configured.
+        ``default_path`` is appended to the endpoint's base URL
+        (:meth:`_endpoint_base`). An ``endpoint_base_urls`` override wins and
+        is used as-is, which is how an endpoint reached on another host — or
+        outside the base URL's versioned prefix — is configured.
         """
         if self._endpoint_base_urls and endpoint_type in self._endpoint_base_urls:
             url = self._endpoint_base_urls[endpoint_type].rstrip("/")
         else:
-            url = f"{self._base_url}{default_path}"
+            url = f"{self._endpoint_base(endpoint_type)}{default_path}"
         if model and "{model}" in url:
             url = url.replace("{model}", model)
         return url

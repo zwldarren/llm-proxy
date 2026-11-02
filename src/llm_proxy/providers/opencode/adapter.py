@@ -19,13 +19,19 @@ runtime: the request is rebuilt for Chat Completions and re-sent once, and
 the correction is remembered for the process lifetime, so an unknown or
 reclassified model self-heals instead of failing.
 
-Lanes. The Console lane (default base URL ``https://opencode.ai/inference/v1``)
-prefixes dialects into the path (``/inference/anthropic/v1/messages``); the
-Zen (``/zen/v1``) and Go (``/zen/go/v1``, ``/inference/go/v1``) lanes keep
-every dialect on one flat root. :func:`.dialect.derive_dialect_roots`
-derives the right shape, and every dialect's URL is overridable through the
-provider's ``endpoint_base_urls`` (keys ``chat_completion``, ``responses``,
-``anthropic_messages``, ``google_generate``, ``systemone``).
+Lanes. The v2 lane roots serve each dialect from its own path segment:
+``https://opencode.ai/inference`` (pay-as-you-go) and
+``https://opencode.ai/inference/go`` (subscription), where Chat Completions
+and Responses live under ``/openai/v1``, Messages under
+``/anthropic/v1``, Gemini under ``/google/v1beta`` and System One under
+``/systemone/v1`` — the model list moves to ``<root>/v1/models``. The
+legacy roots (Zen ``/zen/v1``, Go ``/zen/go/v1``) keep every dialect on one
+flat base URL; the legacy Console root (``/inference/v1``) prefixes the
+non-chat dialects but keeps Chat Completions at the base.
+:func:`.dialect.derive_dialect_roots` derives the right shape, and every
+dialect's URL is overridable through the provider's ``endpoint_base_urls``
+(keys ``chat_completion``, ``responses``, ``anthropic_messages``,
+``google_generate``, ``systemone``).
 
 Headers. Chat/Responses/System One authenticate with ``Authorization:
 Bearer``; the gateway's Anthropic route reads ``x-api-key`` and its Google
@@ -69,6 +75,7 @@ from llm_proxy.providers.opencode.dialect import (
     DEFAULT_DIALECT,
     Dialect,
     derive_dialect_roots,
+    derive_models_url,
     infer_dialect_from_id,
 )
 from llm_proxy.providers.opencode.identity import (
@@ -118,6 +125,7 @@ _PROTOCOL_DIALECT: dict[str, Dialect] = {
 
 #: Endpoint keys of the provider's ``endpoint_base_urls`` overrides, per dialect.
 _DIALECT_OVERRIDE_KEYS: dict[Dialect, str] = {
+    Dialect.CHAT: "chat_completion",
     Dialect.RESPONSES: "responses",
     Dialect.ANTHROPIC: "anthropic_messages",
     Dialect.GOOGLE: "google_generate",
@@ -276,6 +284,10 @@ class OpenCodeGatewayAdapter(
     # Model catalog
     # ------------------------------------------------------------------
 
+    def _models_url(self) -> str:
+        """The model-list URL: versioned under the v2 lane roots, flat elsewhere."""
+        return derive_models_url(self._base_url)
+
     async def list_models(self, client: Any = None) -> list[Any]:
         """List the gateway's models, enriched from the models.dev catalog.
 
@@ -380,9 +392,17 @@ class OpenCodeGatewayAdapter(
     # ------------------------------------------------------------------
 
     def _dialect_url(self, dialect: Dialect, model: str | None, *, stream: bool) -> str:
-        """The upstream URL for one dialect."""
-        override_key = _DIALECT_OVERRIDE_KEYS.get(dialect)
-        if override_key and override_key in self._endpoint_base_urls:
+        """The upstream URL for one dialect.
+
+        The dialect root carries the lane's path shape: ``/openai/v1``,
+        ``/anthropic/v1``, ``/google/v1beta`` and ``/systemone/v1`` under a v2
+        lane root, a plain base URL on the legacy flat roots. The legacy
+        Console root prefixes the non-chat dialects but keeps Chat Completions
+        at the base; the v2 lanes prefix chat too, so a chat request reaches
+        ``/openai/v1/chat/completions`` there.
+        """
+        override_key = _DIALECT_OVERRIDE_KEYS[dialect]
+        if override_key in self._endpoint_base_urls:
             url = self._resolve_endpoint_url(override_key, "", model=model)
             if dialect is Dialect.GOOGLE and url.endswith(":generateContent") and stream:
                 # Streaming rides the same route with a different method
@@ -400,7 +420,23 @@ class OpenCodeGatewayAdapter(
                 return f"{root}/models/{model}:{method}"
             case Dialect.SYSTEMONE:
                 return f"{root}/systemone"
-        return self._resolve_endpoint_url("chat_completion", self.CHAT_ENDPOINT, model=model)
+        return self._resolve_endpoint_url(
+            _DIALECT_OVERRIDE_KEYS[Dialect.CHAT], self.CHAT_ENDPOINT, model=model
+        )
+
+    def _endpoint_base(self, endpoint_type: str) -> str | None:
+        """Chat Completions rides the dialect root, not the configured base.
+
+        On the v2 lane roots chat hangs off ``/openai/v1``, so appending the
+        path to the base URL would reach the wrong route. Resolving the base
+        here covers every chat entry point (blocking, streaming, native
+        passthrough) at once, and ``_resolve_endpoint_url`` still checks the
+        ``chat_completion`` override first, so an operator can pin chat on
+        another host.
+        """
+        if endpoint_type == _DIALECT_OVERRIDE_KEYS[Dialect.CHAT]:
+            return self._dialect_roots[Dialect.CHAT]
+        return super()._endpoint_base(endpoint_type)
 
     def _responses_url(self, model: str | None = None) -> str:
         return self._dialect_url(Dialect.RESPONSES, model, stream=False)

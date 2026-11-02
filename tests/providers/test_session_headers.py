@@ -40,8 +40,10 @@ class TestPriority:
             ({"thread-id": "thread-1"}, "thread-1"),
             ({"thread_id": "thread-2"}, "thread-2"),
             ({"x-deepseek-harness-session-id": "dsh-1"}, "dsh-1"),
+            ({"agent-session-id": "goose-1"}, "goose-1"),
             ({"x-session-affinity": "pi-1"}, "pi-1"),
             ({"n-session": "pi-native-1"}, "pi-native-1"),
+            ({"x-amp-thread-id": "T-amp-1"}, "T-amp-1"),
             ({"x-session-id": "generic-1"}, "generic-1"),
             ({"x-conversation-id": "conv-1"}, "conv-1"),
             ({"conversation_id": "conv-2"}, "conv-2"),
@@ -58,12 +60,11 @@ class TestPriority:
         [
             {"x-client-request-id": "per-request-nonce"},
             {"acp-connection-id": "one-per-editor-connection"},
-            {"x-amp-thread-id": "thread"},
-            {"x-omp-session-id": "session"},
+            {"x-omp-session-id": "no-client-sends-this"},
         ],
     )
-    def test_ambiguous_or_per_request_headers_are_ignored(self, headers):
-        """These are not documented as per-conversation affinity keys."""
+    def test_per_request_or_nonexistent_headers_are_ignored(self, headers):
+        """These are not per-conversation affinity keys."""
         capture_session_headers(headers)
 
         assert get_client_upstream_session_id() is None

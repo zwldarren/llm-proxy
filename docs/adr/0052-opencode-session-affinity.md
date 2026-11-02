@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted (2026-10).
+Accepted (2026-10). The native header list below was amended by
+[ADR-0056](0056-goose-and-amp-session-headers.md): Goose's `agent-session-id`
+and Amp's `x-amp-thread-id` joined the priority order (`x-amp-thread-id` above
+the generic `x-session-id`), and the OMP exclusion gained the reason it lacked.
+The resolution order and every other decision here stand.
 
 ## Context
 

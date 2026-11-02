@@ -58,8 +58,8 @@
 | `mistral` | Chat Completions | `https://api.mistral.ai/v1` |
 | `cohere` | 原生 Cohere v2（`/v2/chat`、`/v2/embed`、`/v2/rerank`、`/v2/audio/transcriptions`） | `https://api.cohere.com` |
 | `nanogpt` | Chat Completions | `https://nano-gpt.com/api/v1` |
-| `opencode-zen` | 按模型选择方言：Chat Completions / Anthropic / Responses / Google / System One（见下文） | `https://opencode.ai/zen/v1` |
-| `opencode-go` | 同一网关，订阅线路（自有模型目录） | `https://opencode.ai/zen/go/v1` |
+| `opencode-zen` | 按模型选择方言：Chat Completions / Anthropic / Responses / Google / System One（见下文） | `https://opencode.ai/inference` |
+| `opencode-go` | 同一网关，订阅线路（自有模型目录） | `https://opencode.ai/inference/go` |
 
 **原生协议**指：当客户端使用的协议与上游一致时，代理可以把请求*原样*转发给该上游
 （Anthropic 客户端打到原生 Anthropic 提供商，Responses 客户端打到原生 Responses
@@ -83,11 +83,16 @@ generateContent，Jev 走 System One（仅 `/v1/systemone` 端点——Jev 模�
 拒绝，并指向那里），其余全部走 Chat Completions。
 
 - 类型即线路：`opencode-zen` 是 Console 按量付费线路
-  （`https://opencode.ai/zen/v1`），`opencode-go` 是订阅线路
-  （`https://opencode.ai/zen/go/v1`）——两条线路提供不同的模型目录（同一个 id 在两条
-  线路上甚至可能使用不同方言；适配器读取的是所属线路在 models.dev 的条目）。两者都把
-  所有方言放在 base URL 下的同一个扁平根路径上。Console 线路的方言前缀路径
-  （`https://opencode.ai/inference/v1`）可以通过把 `base_url` 设为它来访问。
+  （`https://opencode.ai/inference`），`opencode-go` 是订阅线路
+  （`https://opencode.ai/inference/go`）——两条线路提供不同的模型目录（同一个 id 在
+  两条线路上甚至可能使用不同方言；适配器读取的是所属线路在 models.dev 的条目）。每条
+  线路的根路径下，每一种 wire 方言各占一段：Chat Completions 与 Responses 用
+  `/openai/v1`，Messages 用 `/anthropic/v1`，Gemini 用 `/google/v1beta`，System One 用
+  `/systemone/v1`；模型列表在 `<root>/v1/models`。旧的扁平根路径仍可通过把 `base_url`
+  设为 `https://opencode.ai/zen/v1` 或 `https://opencode.ai/zen/go/v1` 使用（所有方言都
+  在 base URL 下）；更早的 Console 根路径 `https://opencode.ai/inference/v1` 则把
+  Chat Completions 留在 base、其余方言带各自的段前缀。见
+  [ADR-0055](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0055-opencode-v2-lane-roots.md)。
 - 请求头：统一使用 `Authorization: Bearer`，另外在网关会读取授权头的方言上再加该
   方言的头（Anthropic 路由用 `x-api-key`，Google 路由用 `x-goog-api-key`）。身份头
   （`x-opencode-client`、`x-opencode-project`、按会话固定的 `x-opencode-session`、
@@ -99,7 +104,8 @@ generateContent，Jev 走 System One（仅 `/v1/systemone` 端点——Jev 模�
   OpenCode 据此把一个对话固定到同一后端并复用它提示缓存。客户端自己发了会话头时，
   代理采用它（`x-opencode-session`，或原生的 `x-claude-code-session-id`、Codex 的
   `session_id` / `thread-id`、Pi 的 `x-session-affinity`、DeepSeek Harness 的
-  `x-deepseek-harness-session-id` 形式）；否则取请求体中显式的 `session_id` /
+  `x-deepseek-harness-session-id`、Goose 的 `agent-session-id`、Amp 的
+  `x-amp-thread-id` 形式）；否则取请求体中显式的 `session_id` /
   `conversation_id` / `thread_id`，再否则取 Anthropic 的 `metadata.user_id` 会话或
   `prompt_cache_key`，最后取第一条真实用户消息的确定性指纹。Copilot 风格的
   `<environment_info>` / `<context>` 块即使出现在同一条消息的提示前面也会被剥掉。只有
@@ -107,7 +113,9 @@ generateContent，Jev 走 System One（仅 `/v1/systemone` 端点——Jev 模�
   Codex，还会加上它的 `x-codex-turn-metadata`），因此客户端互相冲突的写法不会让边缘
   选择另一个对话。想要刻意固定一个 id，可以在**自定义请求头**里设置
   `x-opencode-session`（这会关闭按对话的亲和行为）。见
-  [ADR-0052](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0052-opencode-session-affinity.md)。
+  [ADR-0052](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0052-opencode-session-affinity.md)
+  与
+  [ADR-0056](https://github.com/zwldarren/llm-proxy/blob/main/docs/adr/0056-goose-and-amp-session-headers.md)。
 - 自愈：当网关以带模型语义的 400/404 拒绝某个模型时，请求会在其余方言上重试
   （优先 Chat Completions），并在进程存活期内记住可用的方言。
 - 模型列表：网关的 `/v1/models` 只返回裸 id；显示名、上下文窗口和定价从
