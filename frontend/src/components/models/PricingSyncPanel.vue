@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { RefreshCw, Search } from "@lucide/vue";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { toast } from "vue-sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -24,9 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { pricingApi } from "@/services/api/config";
-import { useErrorHandler } from "@/composables/useErrorHandler";
 import { TIER_RATE_KEYS, tierThresholdLabel } from "@/utils/pricingTiers";
 
+import type { SyncSectionState } from "./syncSection";
 import type {
   PricingTier,
   PricingUpdateItem,
@@ -36,26 +34,26 @@ import type {
   SyncPricingResponse,
 } from "@/types/schemas";
 
+/**
+ * Pricing review section of the models.dev sync wizard.
+ *
+ * Owns its own preview fetch, rows, source switching and selection, and
+ * exposes them through `summary`; the wizard reads that to show the overview,
+ * gate the steps and collect `buildUpdates()` for the single apply. The panel
+ * never writes anything itself.
+ */
 defineOptions({ name: "PricingSyncPanel" });
 
-const props = defineProps<{ open: boolean }>();
-const emit = defineEmits<{
-  applied: [];
-  close: [];
-}>();
-
 const { t } = useI18n();
-const { handleError } = useErrorHandler();
 
-// ---- State machine ----
-type Step = "idle" | "fetching" | "review" | "applying";
-const step = ref<Step>("idle");
+// ---- Fetch state ----
+const status = ref<"idle" | "loading" | "ready" | "error">("idle");
 const fetchError = ref<string | null>(null);
 
 // ---- Review rows ----
 type RowStatus = "new" | "changed" | "unchanged" | "nodata";
-type PriceField =
-  "input" | "output" | "cachedRead" | "cachedWrite" | "reasoning" | "audioInput" | "audioOutput";
+type PriceField = "input" | "output" | "reasoning" | "audioInput" | "audioOutput";
+type ExtraField = PriceField | "cachedRead" | "cachedWrite";
 type FilterKey = "changes" | "unchanged" | "nodata";
 
 interface Candidate {
@@ -83,6 +81,16 @@ interface ReviewRow {
   candidate: Candidate;
 }
 
+/** Rate dimensions shown as chips, with their short labels. */
+const EXTRA_DIMS: { field: ExtraField; labelKey: string }[] = [
+  { field: "cachedRead", labelKey: "models.pricingSync.dimCacheRead" },
+  { field: "cachedWrite", labelKey: "models.pricingSync.dimCacheWrite" },
+  { field: "reasoning", labelKey: "models.pricingSync.dimReasoning" },
+  { field: "audioInput", labelKey: "models.pricingSync.dimAudioInput" },
+  { field: "audioOutput", labelKey: "models.pricingSync.dimAudioOutput" },
+];
+
+/** Dimensions listed in the confirmation step, in billing order. */
 const rows = ref<ReviewRow[]>([]);
 const activeFilter = ref<FilterKey>("changes");
 const searchQuery = ref("");
@@ -250,23 +258,27 @@ function buildRows(response: SyncPricingResponse): ReviewRow[] {
 
 // ---- Fetch ----
 async function fetchPreview() {
-  step.value = "fetching";
+  status.value = "loading";
   fetchError.value = null;
   try {
     const response = await pricingApi.fetchPreview();
     if (!response.success) {
       fetchError.value = response.error ?? t("models.pricingSync.fetchFailed");
-      step.value = "idle";
+      status.value = "error";
       return;
     }
     rows.value = buildRows(response);
     activeFilter.value = "changes";
-    step.value = "review";
+    status.value = "ready";
   } catch (error) {
     fetchError.value = error instanceof Error ? error.message : String(error);
-    step.value = "idle";
+    status.value = "error";
   }
 }
+
+// The wizard mounts this panel once and drives nothing else: the preview is
+// fetched as soon as the dialog opens, so the overview can show its counts.
+onMounted(fetchPreview);
 
 // ---- Source switching ----
 function onSourceChange(row: ReviewRow, source: string) {
@@ -366,16 +378,15 @@ const counts = computed(() => ({
 }));
 
 const actionableCount = computed(() => counts.value.new + counts.value.changed);
-const totalActionable = computed(() => rows.value.filter(isActionable).length);
 
-interface FilterTab {
+interface FilterOption {
   key: FilterKey;
   label: string;
   count: number;
   visible: boolean;
 }
 
-const filterTabs = computed<FilterTab[]>(() => [
+const filterOptions = computed<FilterOption[]>(() => [
   {
     key: "changes",
     label: t("models.pricingSync.tabChanges"),
@@ -395,6 +406,8 @@ const filterTabs = computed<FilterTab[]>(() => [
     visible: counts.value.nodata > 0,
   },
 ]);
+
+const selectableFilters = computed(() => filterOptions.value.filter((option) => option.visible));
 
 const displayedRows = computed(() => {
   const base =
@@ -428,14 +441,18 @@ const emptyStateMessage = computed(() => {
 });
 
 // ---- Selection ----
-const selectedCount = computed(() => rows.value.filter((r) => r.selected).length);
 // Rows that will actually be written when applied: selected AND carrying a
 // real diff vs. the stored values. Selecting an "Up to date" row without
 // editing it is harmless but contributes nothing here.
 const applicableCount = computed(
   () => rows.value.filter((r) => r.selected && rowHasDiff(r)).length
 );
-const selectedWithoutChange = computed(() => selectedCount.value - applicableCount.value);
+// A "changed" row replaces rates you already store, so it is never
+// preselected. The dialog reports how many of those are still unchecked; that
+// number is the visible half of the preselect rule.
+const blockedCount = computed(
+  () => rows.value.filter((r) => !r.selected && r.status === "changed" && rowHasDiff(r)).length
+);
 
 const allVisibleSelected = computed(
   () => visibleActionable.value.length > 0 && visibleActionable.value.every((r) => r.selected)
@@ -447,17 +464,7 @@ function onSelectAll(checked: boolean | "indeterminate") {
   for (const row of visibleActionable.value) row.selected = value;
 }
 
-function clearSelection() {
-  for (const row of rows.value) row.selected = false;
-}
-
-function selectAllActionable() {
-  for (const row of rows.value) {
-    if (isActionable(row)) row.selected = true;
-  }
-}
-
-// ---- Apply ----
+// ---- Apply payload & wizard contract ----
 function buildUpdates(): PricingUpdateItem[] {
   const updates: PricingUpdateItem[] = [];
   for (const row of rows.value) {
@@ -499,48 +506,24 @@ function buildUpdates(): PricingUpdateItem[] {
   return updates;
 }
 
-async function applySelected() {
-  const updates = buildUpdates();
-  if (updates.length === 0) return;
-  step.value = "applying";
-  try {
-    const response = await pricingApi.applyPricing({ updates });
-    if (response.applied_count > 0) {
-      toast.success(t("models.pricingSync.applied", { count: response.applied_count }));
-    }
-    if (response.failed_count > 0) {
-      toast.error(t("models.pricingSync.applyFailed", { count: response.failed_count }));
-      step.value = "review";
-      return;
-    }
-    emit("applied");
-    emit("close");
-  } catch (error) {
-    handleError(error);
-    step.value = "review";
-  }
-}
-
-// ---- Dialog lifecycle ----
-// The panel mounts inside the shell's DialogContent, so it only exists while
-// the dialog is open; `immediate` covers the mount-with-open=true case.
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      step.value = "idle";
-      fetchError.value = null;
-      rows.value = [];
-      activeFilter.value = "changes";
-      searchQuery.value = "";
-      editingCell.value = null;
-      // Fetch immediately — the review table is the point of the dialog,
-      // an extra confirmation click only adds friction.
-      fetchPreview();
-    }
-  },
-  { immediate: true }
+// Named rows only: the confirmation bar says how many, and these lines say
+// which. The diffs themselves stay in the table, one click away.
+const pending = computed<string[]>(() =>
+  rows.value
+    .filter((row) => row.selected && rowHasDiff(row))
+    .map((row) => `${row.result.model_name} · ${row.result.provider}`)
 );
+
+const summary = computed<SyncSectionState>(() => ({
+  status: status.value,
+  error: fetchError.value,
+  changedCount: actionableCount.value,
+  applicableCount: applicableCount.value,
+  blockedCount: blockedCount.value,
+  pending: pending.value,
+}));
+
+defineExpose({ fetchPreview, buildUpdates, summary });
 
 // ---- Formatting ----
 function fmt(v: number | null): string {
@@ -563,18 +546,11 @@ interface ExtraChip {
 
 function extraChips(row: ReviewRow): ExtraChip[] {
   const chips: ExtraChip[] = [];
-  const dims: Array<{ label: string; field: Exclude<PriceField, "input" | "output"> }> = [
-    { label: "cache r", field: "cachedRead" },
-    { label: "cache w", field: "cachedWrite" },
-    { label: "reason", field: "reasoning" },
-    { label: "audio i", field: "audioInput" },
-    { label: "audio o", field: "audioOutput" },
-  ];
-  for (const d of dims) {
-    const newV = row.candidate[d.field];
-    const oldV = row.old[d.field];
+  for (const dim of EXTRA_DIMS) {
+    const newV = row.candidate[dim.field];
+    const oldV = row.old[dim.field];
     if (newV === null && oldV === null) continue;
-    chips.push({ label: d.label, oldV, newV });
+    chips.push({ label: t(dim.labelKey), oldV, newV });
   }
   return chips;
 }
@@ -653,79 +629,64 @@ const hasRows = computed(() => displayedRows.value.length > 0);
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
-    <!-- Step: idle — only reachable after a fetch error; offer retry -->
+    <!-- Defensive: the wizard only routes here once the preview is ready. -->
     <div
-      v-if="step === 'idle'"
-      class="flex-1 flex flex-col items-center justify-center gap-4 py-16 text-center px-6"
+      v-if="status !== 'ready'"
+      class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
     >
-      <p class="text-sm text-muted-foreground max-w-md">
-        {{ t("models.pricingSync.idleDescription") }}
-      </p>
-      <p v-if="fetchError" class="text-sm text-status-error">{{ fetchError }}</p>
-      <Button class="btn-action" @click="fetchPreview">
-        <RefreshCw class="w-4 h-4 mr-2" />
-        {{ t("models.pricingSync.retry") }}
-      </Button>
+      <template v-if="status === 'error'">
+        <p class="max-w-md text-sm text-status-error">
+          {{ fetchError ?? t("models.pricingSync.fetchFailed") }}
+        </p>
+        <Button variant="outline" size="sm" @click="fetchPreview">
+          <RefreshCw class="h-3.5 w-3.5" />
+          {{ t("common.retry") }}
+        </Button>
+      </template>
+      <template v-else>
+        <RefreshCw class="h-4 w-4 animate-spin text-muted-foreground" />
+        <span class="text-sm text-muted-foreground">{{ t("models.pricingSync.fetching") }}</span>
+      </template>
     </div>
 
-    <!-- Step: fetching -->
-    <div
-      v-else-if="step === 'fetching'"
-      class="flex-1 flex items-center justify-center gap-3 py-20"
-    >
-      <RefreshCw class="w-4 h-4 animate-spin text-muted-foreground" />
-      <span class="text-sm text-muted-foreground">{{ t("models.pricingSync.fetching") }}</span>
-    </div>
-
-    <!-- Step: review / applying -->
     <template v-else>
-      <!-- Toolbar: filter tabs + search -->
-      <div class="px-6 py-3 border-b border-border flex flex-wrap items-center gap-3">
-        <div class="flex items-center gap-1 rounded-md bg-muted/40 p-0.5">
-          <button
-            v-for="tab in filterTabs"
-            :key="tab.key"
-            v-show="tab.visible"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors"
-            :class="
-              activeFilter === tab.key
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            @click="activeFilter = tab.key"
+      <!-- Toolbar: bucket filter + search. The filter is a select so it never
+           competes visually with the section tabs above it. -->
+      <div class="flex flex-wrap items-center gap-3 border-b border-border px-6 py-2.5">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-muted-foreground">{{ t("models.sync.filterLabel") }}</span>
+          <Select
+            :model-value="activeFilter"
+            @update:model-value="(v) => (activeFilter = String(v) as FilterKey)"
           >
-            {{ tab.label }}
-            <span
-              class="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
-              :class="
-                activeFilter === tab.key
-                  ? 'bg-muted text-muted-foreground'
-                  : 'bg-muted/50 text-muted-foreground'
-              "
-            >
-              {{ tab.count }}
-            </span>
-          </button>
+            <SelectTrigger class="h-8 w-[190px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="option in selectableFilters" :key="option.key" :value="option.key">
+                {{ option.label }} · {{ option.count }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <div class="ml-auto relative">
+        <div class="relative ml-auto">
           <Search
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground"
+            class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
           />
           <Input
             v-model="searchQuery"
-            :placeholder="t('common.searchPlaceholder')"
+            :placeholder="t('models.sync.searchPlaceholder')"
             class="h-8 w-56 pl-8 text-sm"
           />
         </div>
       </div>
 
       <!-- Review table -->
-      <div class="flex-1 min-h-0 overflow-auto">
+      <div class="min-h-0 flex-1 overflow-auto">
         <Table v-if="hasRows" class="w-max min-w-full">
           <TableHeader class="sticky top-0 z-10">
-            <TableRow class="hover:bg-transparent hover:border-l-transparent">
+            <TableRow class="hover:border-l-transparent hover:bg-transparent">
               <TableHead class="w-10">
                 <Checkbox
                   v-if="visibleActionable.length > 0"
@@ -751,7 +712,7 @@ const hasRows = computed(() => displayedRows.value.length > 0);
             >
               <TableCell>
                 <Checkbox
-                  v-if="step !== 'applying' && isActionable(row)"
+                  v-if="isActionable(row)"
                   v-model="row.selected"
                   :aria-label="row.result.model_name"
                 />
@@ -759,29 +720,29 @@ const hasRows = computed(() => displayedRows.value.length > 0);
               <TableCell>
                 <div class="flex items-center gap-2">
                   <div class="min-w-0">
-                    <div class="font-medium truncate">{{ row.result.model_name }}</div>
-                    <div class="text-xs text-muted-foreground truncate">
+                    <div class="truncate font-medium">{{ row.result.model_name }}</div>
+                    <div class="truncate text-xs text-muted-foreground">
                       {{ row.result.provider }} · {{ row.result.provider_model_name }}
                     </div>
                   </div>
                   <Badge
                     v-if="row.status === 'new'"
                     variant="outline"
-                    class="shrink-0 text-status-success border-status-success/40"
+                    class="shrink-0 border-status-success/40 text-status-success"
                   >
                     {{ t("models.pricingSync.badgeNew") }}
                   </Badge>
                   <Badge
                     v-else-if="row.status === 'changed'"
                     variant="outline"
-                    class="shrink-0 text-action-amber border-action-amber/40"
+                    class="shrink-0 border-action-amber/40 text-action-amber"
                   >
-                    {{ t("models.pricingSync.badgeChanged") }}
+                    {{ t("models.pricingSync.badgeOverwrite") }}
                   </Badge>
                   <Badge
                     v-else-if="row.status === 'nodata'"
                     variant="outline"
-                    class="shrink-0 text-muted-foreground border-border"
+                    class="shrink-0 border-border text-muted-foreground"
                   >
                     {{ t("models.pricingSync.badgeNoData") }}
                   </Badge>
@@ -789,11 +750,7 @@ const hasRows = computed(() => displayedRows.value.length > 0);
               </TableCell>
               <TableCell>
                 <Select
-                  v-if="
-                    step !== 'applying' &&
-                    isActionable(row) &&
-                    row.result.available_sources.length > 1
-                  "
+                  v-if="isActionable(row) && row.result.available_sources.length > 1"
                   :model-value="row.sourceKey ?? undefined"
                   @update:model-value="(v) => onSourceChange(row, String(v))"
                 >
@@ -817,11 +774,14 @@ const hasRows = computed(() => displayedRows.value.length > 0);
               <!-- Input price: old → new (click new value to edit) -->
               <TableCell class="text-right">
                 <div class="flex items-center justify-end gap-1.5 text-data">
-                  <span class="text-muted-foreground">{{ fmt(row.old.input) }}</span>
-                  <span class="text-muted-foreground">→</span>
+                  <!-- The arrow only appears when the rate actually moves; an
+                       unchanged "3 → 3" is noise in a diff table. -->
+                  <template v-if="!samePrice(row.candidate.input, row.old.input)">
+                    <span class="text-muted-foreground">{{ fmt(row.old.input) }}</span>
+                    <span class="text-muted-foreground">→</span>
+                  </template>
                   <input
                     v-if="
-                      step !== 'applying' &&
                       isActionable(row) &&
                       editingCell?.key === row.key &&
                       editingCell.field === 'input'
@@ -830,19 +790,19 @@ const hasRows = computed(() => displayedRows.value.length > 0);
                     type="number"
                     step="any"
                     min="0"
-                    class="w-20 h-7 px-1.5 text-right text-data bg-background border border-ring rounded outline-none"
+                    class="h-7 w-20 rounded border border-ring bg-background px-1.5 text-right text-data outline-none"
                     autofocus
                     @blur="commitEdit(row)"
                     @keydown.enter="commitEdit(row)"
                     @keydown.esc="cancelEdit"
                   />
                   <button
-                    v-else-if="step !== 'applying' && isActionable(row)"
+                    v-else-if="isActionable(row)"
                     type="button"
-                    class="hover:bg-muted rounded px-1 -mx-1 cursor-text"
+                    class="-mx-1 cursor-text rounded px-1 hover:bg-muted"
                     :class="
                       samePrice(row.candidate.input, row.old.input)
-                        ? ''
+                        ? 'text-muted-foreground'
                         : row.candidate.input !== null &&
                             row.old.input !== null &&
                             row.candidate.input > row.old.input
@@ -870,11 +830,12 @@ const hasRows = computed(() => displayedRows.value.length > 0);
               <!-- Output price -->
               <TableCell class="text-right">
                 <div class="flex items-center justify-end gap-1.5 text-data">
-                  <span class="text-muted-foreground">{{ fmt(row.old.output) }}</span>
-                  <span class="text-muted-foreground">→</span>
+                  <template v-if="!samePrice(row.candidate.output, row.old.output)">
+                    <span class="text-muted-foreground">{{ fmt(row.old.output) }}</span>
+                    <span class="text-muted-foreground">→</span>
+                  </template>
                   <input
                     v-if="
-                      step !== 'applying' &&
                       isActionable(row) &&
                       editingCell?.key === row.key &&
                       editingCell.field === 'output'
@@ -883,19 +844,19 @@ const hasRows = computed(() => displayedRows.value.length > 0);
                     type="number"
                     step="any"
                     min="0"
-                    class="w-20 h-7 px-1.5 text-right text-data bg-background border border-ring rounded outline-none"
+                    class="h-7 w-20 rounded border border-ring bg-background px-1.5 text-right text-data outline-none"
                     autofocus
                     @blur="commitEdit(row)"
                     @keydown.enter="commitEdit(row)"
                     @keydown.esc="cancelEdit"
                   />
                   <button
-                    v-else-if="step !== 'applying' && isActionable(row)"
+                    v-else-if="isActionable(row)"
                     type="button"
-                    class="hover:bg-muted rounded px-1 -mx-1 cursor-text"
+                    class="-mx-1 cursor-text rounded px-1 hover:bg-muted"
                     :class="
                       samePrice(row.candidate.output, row.old.output)
-                        ? ''
+                        ? 'text-muted-foreground'
                         : row.candidate.output !== null &&
                             row.old.output !== null &&
                             row.candidate.output > row.old.output
@@ -977,65 +938,12 @@ const hasRows = computed(() => displayedRows.value.length > 0);
         </Table>
 
         <!-- Empty state for the active filter -->
-        <div v-else class="flex flex-col items-center gap-2 py-16 text-center px-6">
+        <div v-else class="flex flex-col items-center gap-2 px-6 py-16 text-center">
           <p class="text-sm font-medium">{{ emptyStateMessage.title }}</p>
-          <p class="text-sm text-muted-foreground max-w-sm">
+          <p class="max-w-sm text-sm text-muted-foreground">
             {{ emptyStateMessage.description }}
           </p>
         </div>
-      </div>
-
-      <!-- Selection hint + footer -->
-      <div class="px-6 py-3 border-t border-border">
-        <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-3">
-          <span class="font-medium text-foreground">
-            {{
-              t("models.pricingSync.selectionSummary", {
-                selected: selectedCount,
-                applicable: applicableCount,
-              })
-            }}
-          </span>
-          <span v-if="selectedWithoutChange > 0" class="text-status-warning">
-            {{ t("models.pricingSync.noChangeHint") }}
-          </span>
-          <template v-if="totalActionable > 0">
-            <span>·</span>
-            <button
-              type="button"
-              class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
-              @click="selectAllActionable"
-            >
-              {{ t("models.pricingSync.selectAllActionable") }}
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
-              @click="clearSelection"
-            >
-              {{ t("models.pricingSync.clearSelection") }}
-            </button>
-          </template>
-          <span class="ml-auto">{{ t("models.pricingSync.reviewHint") }}</span>
-        </div>
-        <DialogFooter class="gap-2 sm:gap-2">
-          <Button variant="outline" :disabled="step === 'applying'" @click="emit('close')">
-            {{ t("common.cancel") }}
-          </Button>
-          <Button
-            class="btn-action"
-            :disabled="applicableCount === 0 || step === 'applying'"
-            @click="applySelected"
-          >
-            <RefreshCw v-if="step === 'applying'" class="w-4 h-4 mr-2 animate-spin" />
-            {{
-              step === "applying"
-                ? t("models.pricingSync.applying")
-                : t("models.pricingSync.apply", { count: applicableCount })
-            }}
-          </Button>
-        </DialogFooter>
       </div>
     </template>
   </div>

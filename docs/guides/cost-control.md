@@ -11,8 +11,10 @@ are documented in [Models & Pricing](../admin/models.md#pricing).
 
 Fastest way to populate prices for existing models:
 
-1. Models → Sync from models.dev → Pricing with a dry run, to preview models.dev diffs.
-2. Apply for mapping-level pricing (your manual values are preserved by default).
+1. Models → Sync from models.dev, then review the pricing section: it previews the
+   models.dev diffs without writing anything.
+2. Confirm once to write mapping-level pricing; rows you leave unchecked keep their
+   manual values.
 3. Hand-fix anything the catalog does not cover.
 
 ::: warning `cost_usd: null` is not $0

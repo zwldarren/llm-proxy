@@ -103,28 +103,46 @@ Details that affect the bill:
 
 ### Sync from models.dev
 
-The **Sync from models.dev** dialog on the Models screen has two tabs, **Pricing**
-and **Capabilities**. The **Pricing** tab pulls from the
-[models.dev](https://models.dev) catalog (`POST /api/config/models/sync-pricing`;
-cached in-process for 1 hour, with a 5-minute stale grace if upstream fails):
+The **Sync from models.dev** dialog on the Models screen covers the two independent
+field sets models.dev publishes — **Pricing** (per provider mapping) and
+**Capabilities** (per model) — as two tabs over one review surface. Both previews load
+when the dialog opens (`POST /api/config/models/sync-pricing` with `dry_run: true`,
+cached in-process for 1 hour with a 5-minute stale grace if upstream fails, and `POST
+/api/config/models/sync-metadata`), so each tab shows up front how many rows it would
+change. A section whose fetch fails shows the error and a retry of its own; the other
+section stays usable.
 
-1. Preview (`dry_run: true`) shows per-mapping diffs, matched by
-   `provider_model_name` (falling back to the proxy model name).
-2. Apply writes to **mapping-level** pricing only, leaving model-level rates
-   untouched. Mappings that already carry custom rates or tiers are skipped unless you
-   turn off *preserve custom pricing*.
-3. Hand-tune individual rows afterwards via the model editor or
-   `POST /api/config/models/pricing/apply` (partial updates; `null` clears a field).
+Each tab reviews one section:
 
-The sync also pulls `cost.reasoning` (reasoning-token rate), the `reasoning` rate of
-each context tier, and `experimental.modes` (the service-tier price lists). It never
-writes `pricing_time_windows`: the catalog cannot express time-of-day pricing, so a
-sync leaves a hand-authored window list untouched.
+- Pricing diffs are matched by `provider_model_name` (falling back to the proxy model
+  name). Every row offers the catalog sources it could come from, so switching the
+  source previews what that catalog would write, and clicking a rate overrides it by
+  hand.
+- Capability rows list each field that moves as "old → new".
 
-The **Capabilities** tab compares capability/catalog fields against models.dev and
-applies the reviewed diff (`POST /api/config/models/metadata/apply`;
-`supports_images` derives from whether the model accepts image input). Missing catalog
-data never counts as a change.
+A row is badged with what writing it does: **New** and **Fill** rows only set values
+you never configured, while **Overwrite** rows replace or clear a value you already
+store. Only the first kind is checked by default, and the bottom bar names how many
+Overwrite rows are still unchecked, so accepting one stays a decision. An unchecked row
+is skipped.
+
+The bottom bar states what the current selection would write ("3 rows will be written").
+Its Apply button expands in place into the confirmation — mappings repriced, models
+updated, and the affected rows by name — and that one action writes both sections. There
+is no separate confirmation page and no per-section apply.
+
+Pricing writes to **mapping-level** rates only, leaving model-level rates untouched
+(`POST /api/config/models/pricing/apply`, partial updates; `null` clears a field). The
+dialog requests the preview with `preserve_custom_pricing: false`, so mappings that
+already carry custom rates or tiers appear as ordinary diffs and only change if you
+select them. The sync pulls `cost.reasoning` (reasoning-token rate), the `reasoning`
+rate of each context tier, and `experimental.modes` (the service-tier price lists). It
+never writes `pricing_time_windows`: the catalog cannot express time-of-day pricing, so
+a sync leaves a hand-authored window list untouched.
+
+Capabilities applies the reviewed diff through
+`POST /api/config/models/metadata/apply`; `supports_images` derives from whether the
+model accepts image input. Missing catalog data never counts as a change.
 
 ## Seeing what clients can use
 

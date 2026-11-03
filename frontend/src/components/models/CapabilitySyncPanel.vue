@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { RefreshCw, Search } from "@lucide/vue";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { toast } from "vue-sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -24,8 +22,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { metadataApi } from "@/services/api/config";
-import { useErrorHandler } from "@/composables/useErrorHandler";
 
+import type { SyncSectionState } from "./syncSection";
 import type {
   MetadataUpdateItem,
   ModelMetadataOption,
@@ -34,22 +32,17 @@ import type {
 } from "@/types/schemas";
 
 /**
- * Review-and-apply panel for models.dev metadata/capability fields, mirroring
- * the pricing panel's state machine: fetch preview → review per-model diffs →
- * apply only the selected rows. Metadata lives on the model (not per provider
- * mapping), so rows are keyed by model name; ambiguous catalog entries are
- * resolved through a per-row source switch.
+ * Capability/metadata review section of the models.dev sync wizard.
+ *
+ * Metadata lives on the model (not per provider mapping), so rows are keyed by
+ * model name and ambiguous catalog entries are resolved through a per-row
+ * source switch. Like the pricing section it owns its fetch, rows and
+ * selection, and exposes them through `summary` for the wizard's overview,
+ * step gating and single apply.
  */
 defineOptions({ name: "CapabilitySyncPanel" });
 
-const props = defineProps<{ open: boolean }>();
-const emit = defineEmits<{
-  applied: [];
-  close: [];
-}>();
-
 const { t } = useI18n();
-const { handleError } = useErrorHandler();
 
 // ---- Field catalog ----
 // Synced fields must mirror the backend `_SYNCED_FIELDS` order; bool labels
@@ -98,7 +91,6 @@ const FIELD_DEFS: FieldDef[] = [
 ];
 
 // ---- State machine ----
-type Step = "idle" | "fetching" | "review" | "applying";
 type RowStatus = "changed" | "unchanged" | "nodata";
 type FilterKey = "changes" | "unchanged" | "nodata";
 
@@ -109,6 +101,8 @@ interface FieldChange {
   rawNew: boolean | string | number | null;
   oldLabel: string;
   newLabel: string;
+  /** Nothing stored in this field yet, so the chip shows only the new value. */
+  noOld: boolean;
 }
 
 interface ReviewRow {
@@ -128,7 +122,7 @@ interface ReviewRow {
 const rows = ref<ReviewRow[]>([]);
 const activeFilter = ref<FilterKey>("changes");
 const searchQuery = ref("");
-const step = ref<Step>("idle");
+const status = ref<"idle" | "loading" | "ready" | "error">("idle");
 const fetchError = ref<string | null>(null);
 
 // ---- Diff helpers ----
@@ -154,6 +148,7 @@ function computeChanges(old: ModelMetadataOption, candidate: ModelMetadataOption
       rawNew: newV,
       oldLabel: formatField(def, oldV),
       newLabel: formatField(def, newV),
+      noOld: oldV === null || oldV === undefined,
     });
   }
   return changes;
@@ -201,23 +196,27 @@ function buildRows(response: SyncMetadataResponse): ReviewRow[] {
 
 // ---- Fetch ----
 async function fetchPreview() {
-  step.value = "fetching";
+  status.value = "loading";
   fetchError.value = null;
   try {
     const response = await metadataApi.fetchPreview();
     if (!response.success) {
       fetchError.value = response.error ?? t("models.capabilitySync.fetchFailed");
-      step.value = "idle";
+      status.value = "error";
       return;
     }
     rows.value = buildRows(response);
     activeFilter.value = "changes";
-    step.value = "review";
+    status.value = "ready";
   } catch (error) {
     fetchError.value = error instanceof Error ? error.message : String(error);
-    step.value = "idle";
+    status.value = "error";
   }
 }
+
+// The wizard mounts this panel once and drives nothing else: the preview is
+// fetched as soon as the dialog opens, so the overview can show its counts.
+onMounted(fetchPreview);
 
 // ---- Source switching ----
 function onSourceChange(row: ReviewRow, source: string) {
@@ -254,14 +253,14 @@ const counts = computed(() => ({
 
 const changedCount = computed(() => counts.value.changed);
 
-interface FilterTab {
+interface FilterOption {
   key: FilterKey;
   label: string;
   count: number;
   visible: boolean;
 }
 
-const filterTabs = computed<FilterTab[]>(() => [
+const filterOptions = computed<FilterOption[]>(() => [
   {
     key: "changes",
     label: t("models.capabilitySync.tabChanges"),
@@ -281,6 +280,8 @@ const filterTabs = computed<FilterTab[]>(() => [
     visible: counts.value.nodata > 0,
   },
 ]);
+
+const selectableFilters = computed(() => filterOptions.value.filter((option) => option.visible));
 
 const displayedRows = computed(() => {
   const base =
@@ -314,13 +315,19 @@ const emptyStateMessage = computed(() => {
 });
 
 // ---- Selection ----
-const selectedCount = computed(() => rows.value.filter((r) => r.selected).length);
 // Rows that will actually be written when applied: selected AND carrying a
 // real diff against the stored values.
 const applicableCount = computed(
   () => rows.value.filter((r) => r.selected && r.changes.length > 0).length
 );
-const selectedWithoutChange = computed(() => selectedCount.value - applicableCount.value);
+// Rows that replace or clear a value you already store are never preselected.
+// The dialog reports how many of those are still unchecked, so the preselect
+// rule is stated rather than guessed at.
+const blockedCount = computed(
+  () =>
+    rows.value.filter((r) => !r.selected && r.changes.length > 0 && !isPureAddition(r.changes))
+      .length
+);
 
 const allVisibleSelected = computed(
   () => visibleActionable.value.length > 0 && visibleActionable.value.every((r) => r.selected)
@@ -332,17 +339,7 @@ function onSelectAll(checked: boolean | "indeterminate") {
   for (const row of visibleActionable.value) row.selected = value;
 }
 
-function clearSelection() {
-  for (const row of rows.value) row.selected = false;
-}
-
-function selectAllActionable() {
-  for (const row of rows.value) {
-    if (isActionable(row)) row.selected = true;
-  }
-}
-
-// ---- Apply ----
+// ---- Apply payload & wizard contract ----
 function buildUpdates(): MetadataUpdateItem[] {
   const updates: MetadataUpdateItem[] = [];
   for (const row of rows.value) {
@@ -358,136 +355,97 @@ function buildUpdates(): MetadataUpdateItem[] {
   return updates;
 }
 
-async function applySelected() {
-  const updates = buildUpdates();
-  if (updates.length === 0) return;
-  step.value = "applying";
-  try {
-    const response = await metadataApi.applyMetadata({ updates });
-    if (response.applied_count > 0) {
-      toast.success(t("models.capabilitySync.applied", { count: response.applied_count }));
-    }
-    if (response.failed_count > 0) {
-      toast.error(t("models.capabilitySync.applyFailed", { count: response.failed_count }));
-      step.value = "review";
-      return;
-    }
-    emit("applied");
-    emit("close");
-  } catch (error) {
-    handleError(error);
-    step.value = "review";
-  }
-}
-
-// ---- Panel lifecycle ----
-// Mounted inside the shell's DialogContent: only exists while the dialog is
-// open; `immediate` covers the mount-with-open=true case.
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      step.value = "idle";
-      fetchError.value = null;
-      rows.value = [];
-      activeFilter.value = "changes";
-      searchQuery.value = "";
-      // Fetch immediately — the review table is the point of the panel.
-      fetchPreview();
-    }
-  },
-  { immediate: true }
+// Named rows only: the confirmation bar says how many, and these lines say
+// which. The changes themselves stay in the table, one click away.
+const pending = computed<string[]>(() =>
+  rows.value.filter((row) => row.selected && row.changes.length > 0).map((row) => row.modelName)
 );
+
+const summary = computed<SyncSectionState>(() => ({
+  status: status.value,
+  error: fetchError.value,
+  changedCount: changedCount.value,
+  applicableCount: applicableCount.value,
+  blockedCount: blockedCount.value,
+  pending: pending.value,
+}));
+
+defineExpose({ fetchPreview, buildUpdates, summary });
 </script>
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
-    <!-- Step: idle — only reachable after a fetch error; offer retry -->
+    <!-- Defensive: the wizard only routes here once the preview is ready. -->
     <div
-      v-if="step === 'idle'"
-      class="flex-1 flex flex-col items-center justify-center gap-4 py-16 text-center px-6"
+      v-if="status !== 'ready'"
+      class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
     >
-      <p class="text-sm text-muted-foreground max-w-md">
-        {{ t("models.capabilitySync.idleDescription") }}
-      </p>
-      <p v-if="fetchError" class="text-sm text-status-error">{{ fetchError }}</p>
-      <Button class="btn-action" @click="fetchPreview">
-        <RefreshCw class="w-4 h-4 mr-2" />
-        {{ t("models.capabilitySync.retry") }}
-      </Button>
+      <template v-if="status === 'error'">
+        <p class="max-w-md text-sm text-status-error">
+          {{ fetchError ?? t("models.capabilitySync.fetchFailed") }}
+        </p>
+        <Button variant="outline" size="sm" @click="fetchPreview">
+          <RefreshCw class="h-3.5 w-3.5" />
+          {{ t("common.retry") }}
+        </Button>
+      </template>
+      <template v-else>
+        <RefreshCw class="h-4 w-4 animate-spin text-muted-foreground" />
+        <span class="text-sm text-muted-foreground">{{ t("models.capabilitySync.fetching") }}</span>
+      </template>
     </div>
 
-    <!-- Step: fetching -->
-    <div
-      v-else-if="step === 'fetching'"
-      class="flex-1 flex items-center justify-center gap-3 py-20"
-    >
-      <RefreshCw class="w-4 h-4 animate-spin text-muted-foreground" />
-      <span class="text-sm text-muted-foreground">{{ t("models.capabilitySync.fetching") }}</span>
-    </div>
-
-    <!-- Step: review / applying -->
     <template v-else>
-      <!-- Toolbar: filter tabs + search -->
-      <div class="px-6 py-3 border-b border-border flex flex-wrap items-center gap-3">
-        <div class="flex items-center gap-1 rounded-md bg-muted/40 p-0.5">
-          <button
-            v-for="tab in filterTabs"
-            :key="tab.key"
-            v-show="tab.visible"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors"
-            :class="
-              activeFilter === tab.key
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            @click="activeFilter = tab.key"
+      <!-- Toolbar: bucket filter + search. The filter is a select so it never
+           competes visually with the section tabs above it. -->
+      <div class="flex flex-wrap items-center gap-3 border-b border-border px-6 py-2.5">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-muted-foreground">{{ t("models.sync.filterLabel") }}</span>
+          <Select
+            :model-value="activeFilter"
+            @update:model-value="(v) => (activeFilter = String(v) as FilterKey)"
           >
-            {{ tab.label }}
-            <span
-              class="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
-              :class="
-                activeFilter === tab.key
-                  ? 'bg-muted text-muted-foreground'
-                  : 'bg-muted/50 text-muted-foreground'
-              "
-            >
-              {{ tab.count }}
-            </span>
-          </button>
+            <SelectTrigger class="h-8 w-[190px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="option in selectableFilters" :key="option.key" :value="option.key">
+                {{ option.label }} · {{ option.count }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <div class="ml-auto relative">
+        <div class="relative ml-auto">
           <Search
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground"
+            class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
           />
           <Input
             v-model="searchQuery"
-            :placeholder="t('common.searchPlaceholder')"
+            :placeholder="t('models.sync.searchPlaceholder')"
             class="h-8 w-56 pl-8 text-sm"
           />
         </div>
       </div>
 
       <!-- Review table -->
-      <div class="flex-1 min-h-0 overflow-auto">
+      <div class="min-h-0 flex-1 overflow-auto">
         <Table v-if="displayedRows.length > 0" class="w-max min-w-full">
           <TableHeader class="sticky top-0 z-10">
-            <TableRow class="hover:bg-transparent hover:border-l-transparent">
+            <TableRow class="hover:border-l-transparent hover:bg-transparent">
               <TableHead class="w-10">
                 <Checkbox
                   v-if="visibleActionable.length > 0"
                   :model-value="
                     allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false
                   "
-                  :aria-label="t('models.capabilitySync.selectAllActionable')"
+                  :aria-label="t('models.capabilitySync.selectAll')"
                   @update:model-value="onSelectAll"
                 />
               </TableHead>
               <TableHead class="min-w-[220px]">{{ t("models.capabilitySync.colModel") }}</TableHead>
               <TableHead class="w-40">{{ t("models.capabilitySync.colSource") }}</TableHead>
-              <TableHead class="min-w-[320px]">{{
+              <TableHead class="min-w-[320px] max-w-[640px]">{{
                 t("models.capabilitySync.colChanges")
               }}</TableHead>
             </TableRow>
@@ -500,7 +458,7 @@ watch(
             >
               <TableCell>
                 <Checkbox
-                  v-if="step !== 'applying' && isActionable(row)"
+                  v-if="isActionable(row)"
                   v-model="row.selected"
                   :aria-label="row.modelName"
                 />
@@ -508,7 +466,7 @@ watch(
               <TableCell>
                 <div class="flex items-center gap-2">
                   <div class="min-w-0">
-                    <div class="font-medium truncate">{{ row.modelName }}</div>
+                    <div class="truncate font-medium">{{ row.modelName }}</div>
                     <div v-if="row.status === 'nodata'" class="text-xs text-muted-foreground">
                       {{ t("models.capabilitySync.nodataHint") }}
                     </div>
@@ -516,14 +474,23 @@ watch(
                   <Badge
                     v-if="row.status === 'changed'"
                     variant="outline"
-                    class="shrink-0 text-action-amber border-action-amber/40"
+                    class="shrink-0"
+                    :class="
+                      isPureAddition(row.changes)
+                        ? 'border-status-success/40 text-status-success'
+                        : 'border-action-amber/40 text-action-amber'
+                    "
                   >
-                    {{ t("models.capabilitySync.badgeChanged") }}
+                    {{
+                      isPureAddition(row.changes)
+                        ? t("models.capabilitySync.badgeFill")
+                        : t("models.capabilitySync.badgeOverwrite")
+                    }}
                   </Badge>
                   <Badge
                     v-else-if="row.status === 'nodata'"
                     variant="outline"
-                    class="shrink-0 text-muted-foreground border-border"
+                    class="shrink-0 border-border text-muted-foreground"
                   >
                     {{ t("models.capabilitySync.badgeNoData") }}
                   </Badge>
@@ -531,7 +498,7 @@ watch(
               </TableCell>
               <TableCell>
                 <Select
-                  v-if="step !== 'applying' && isActionable(row) && row.sourceOptions.length > 1"
+                  v-if="isActionable(row) && row.sourceOptions.length > 1"
                   :model-value="row.sourceKey ?? undefined"
                   @update:model-value="(v) => onSourceChange(row, String(v))"
                 >
@@ -552,8 +519,10 @@ watch(
                   {{ row.sourceKey ?? "—" }}
                 </span>
               </TableCell>
-              <!-- Changed fields as old → new chips -->
-              <TableCell>
+              <!-- Changed fields as old → new chips. A max width keeps long
+                   field lists wrapping inside the column instead of pushing the
+                   table into horizontal scroll. -->
+              <TableCell class="min-w-[320px] max-w-[640px]">
                 <div class="flex flex-wrap gap-1">
                   <span
                     v-for="change in row.changes"
@@ -561,11 +530,14 @@ watch(
                     class="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-data"
                   >
                     <span class="text-muted-foreground">{{ t(change.labelKey) }}</span>
-                    <span class="text-muted-foreground">{{ change.oldLabel }}</span>
-                    <span class="text-muted-foreground">→</span>
+                    <!-- "— → 16,384" is noise: a gap-fill shows only what it sets. -->
+                    <template v-if="!change.noOld">
+                      <span class="text-muted-foreground">{{ change.oldLabel }}</span>
+                      <span class="text-muted-foreground">→</span>
+                    </template>
                     <span>{{ change.newLabel }}</span>
                   </span>
-                  <span v-if="row.changes.length === 0" class="text-muted-foreground text-[11px]">
+                  <span v-if="row.changes.length === 0" class="text-[11px] text-muted-foreground">
                     —
                   </span>
                 </div>
@@ -575,65 +547,12 @@ watch(
         </Table>
 
         <!-- Empty state for the active filter -->
-        <div v-else class="flex flex-col items-center gap-2 py-16 text-center px-6">
+        <div v-else class="flex flex-col items-center gap-2 px-6 py-16 text-center">
           <p class="text-sm font-medium">{{ emptyStateMessage.title }}</p>
-          <p class="text-sm text-muted-foreground max-w-sm">
+          <p class="max-w-sm text-sm text-muted-foreground">
             {{ emptyStateMessage.description }}
           </p>
         </div>
-      </div>
-
-      <!-- Selection hint + footer -->
-      <div class="px-6 py-3 border-t border-border">
-        <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-3">
-          <span class="font-medium text-foreground">
-            {{
-              t("models.capabilitySync.selectionSummary", {
-                selected: selectedCount,
-                applicable: applicableCount,
-              })
-            }}
-          </span>
-          <span v-if="selectedWithoutChange > 0" class="text-status-warning">
-            {{ t("models.capabilitySync.noChangeHint") }}
-          </span>
-          <template v-if="changedCount > 0">
-            <span>·</span>
-            <button
-              type="button"
-              class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
-              @click="selectAllActionable"
-            >
-              {{ t("models.capabilitySync.selectAllActionable") }}
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              class="underline-offset-2 hover:underline hover:text-foreground transition-colors"
-              @click="clearSelection"
-            >
-              {{ t("models.capabilitySync.clearSelection") }}
-            </button>
-          </template>
-          <span class="ml-auto">{{ t("models.capabilitySync.reviewHint") }}</span>
-        </div>
-        <DialogFooter class="gap-2 sm:gap-2">
-          <Button variant="outline" :disabled="step === 'applying'" @click="emit('close')">
-            {{ t("common.cancel") }}
-          </Button>
-          <Button
-            class="btn-action"
-            :disabled="applicableCount === 0 || step === 'applying'"
-            @click="applySelected"
-          >
-            <RefreshCw v-if="step === 'applying'" class="w-4 h-4 mr-2 animate-spin" />
-            {{
-              step === "applying"
-                ? t("models.capabilitySync.applying")
-                : t("models.capabilitySync.apply", { count: applicableCount })
-            }}
-          </Button>
-        </DialogFooter>
       </div>
     </template>
   </div>
