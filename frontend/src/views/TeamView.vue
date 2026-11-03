@@ -2,6 +2,7 @@
 import {
   Boxes,
   Check,
+  EllipsisVertical,
   Fingerprint,
   Gauge,
   KeyRound,
@@ -42,12 +43,13 @@ import SortableHead from "@/components/common/SortableHead.vue";
 import TableCellActions from "@/components/common/TableCellActions.vue";
 import TableCellName from "@/components/common/TableCellName.vue";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -1154,165 +1156,110 @@ onMounted(() => {
                   {{ formatDate(member.created_at) }}
                 </TableCell>
                 <TableCellActions>
-                  <div
-                    class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-                  >
-                    <Tooltip v-if="member.role !== 'admin'">
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.manageModels')"
-                          @click="openModelsDialog(member)"
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9"
+                        :aria-label="t('team.memberActions')"
+                      >
+                        <EllipsisVertical class="h-4 w-4 icon-btn-muted" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-56">
+                      <DropdownMenuLabel
+                        class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                      >
+                        {{ t("team.groupAccess") }}
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem
+                        v-if="member.role !== 'admin'"
+                        class="cursor-pointer"
+                        @click="openModelsDialog(member)"
+                      >
+                        <Boxes class="h-4 w-4" />
+                        {{ t("team.manageModels") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="cursor-pointer" @click="openBudgetDialog(member)">
+                        <Wallet class="h-4 w-4" />
+                        {{ t("team.manageBudget") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="cursor-pointer" @click="openRateLimitDialog(member)">
+                        <Gauge class="h-4 w-4" />
+                        {{ t("team.manageRateLimit") }}
+                      </DropdownMenuItem>
+
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel
+                        class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                      >
+                        {{ t("team.groupAccount") }}
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem class="cursor-pointer" @click="openRenameDialog(member)">
+                        <UserPen class="h-4 w-4" />
+                        {{ t("team.renameUsername") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="cursor-pointer" @click="openEmailDialog(member)">
+                        <Mail class="h-4 w-4" />
+                        {{ t("team.setEmail") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="cursor-pointer" @click="openResetDialog(member)">
+                        <KeyRound class="h-4 w-4" />
+                        {{ t("team.resetPassword") }}
+                      </DropdownMenuItem>
+
+                      <template v-if="!isSelf(member)">
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel
+                          class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
                         >
-                          <Boxes class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.manageModels") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.manageBudget')"
-                          @click="openBudgetDialog(member)"
-                        >
-                          <Wallet class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.manageBudget") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.manageRateLimit')"
-                          @click="openRateLimitDialog(member)"
-                        >
-                          <Gauge class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.manageRateLimit") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.renameUsername')"
-                          @click="openRenameDialog(member)"
-                        >
-                          <UserPen class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.renameUsername") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.setEmail')"
-                          @click="openEmailDialog(member)"
-                        >
-                          <Mail class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.setEmail") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.resetPassword')"
-                          @click="openResetDialog(member)"
-                        >
-                          <KeyRound class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.resetPassword") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip v-if="!isSelf(member)">
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.resetTwoFactor')"
+                          {{ t("team.groupSecurity") }}
+                        </DropdownMenuLabel>
+                        <DropdownMenuItem
+                          class="cursor-pointer"
                           @click="openSecurityAction(member, '2fa')"
                         >
-                          <ShieldCheck class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.resetTwoFactor") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip v-if="!isSelf(member)">
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.revokePasskeys')"
+                          <ShieldCheck class="h-4 w-4" />
+                          {{ t("team.resetTwoFactor") }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          class="cursor-pointer"
                           @click="openSecurityAction(member, 'passkeys')"
                         >
-                          <Fingerprint class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.revokePasskeys") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip v-if="member.is_active">
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :disabled="isSelf(member)"
-                          :aria-label="t('team.deactivateMember')"
-                          @click="openDeactivateDialog(member)"
-                        >
-                          <UserX class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.deactivateMember") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip v-else>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9"
-                          :aria-label="t('team.reactivateMember')"
-                          @click="openReactivateDialog(member)"
-                        >
-                          <UserCheck class="h-4 w-4 icon-btn-muted" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.reactivateMember") }}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          :aria-label="t('team.deleteMember')"
-                          @click="openDeleteDialog(member)"
-                        >
-                          <Trash2 class="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("team.deleteMember") }}</TooltipContent>
-                    </Tooltip>
-                  </div>
+                          <Fingerprint class="h-4 w-4" />
+                          {{ t("team.revokePasskeys") }}
+                        </DropdownMenuItem>
+                      </template>
+
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        v-if="member.is_active"
+                        class="cursor-pointer"
+                        :disabled="isSelf(member)"
+                        @click="openDeactivateDialog(member)"
+                      >
+                        <UserX class="h-4 w-4" />
+                        {{ t("team.deactivateMember") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-else
+                        class="cursor-pointer"
+                        @click="openReactivateDialog(member)"
+                      >
+                        <UserCheck class="h-4 w-4" />
+                        {{ t("team.reactivateMember") }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        class="cursor-pointer"
+                        @click="openDeleteDialog(member)"
+                      >
+                        <Trash2 class="h-4 w-4" />
+                        {{ t("team.deleteMember") }}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </TableCellActions>
               </TableRow>
               <EmptyTableRow v-if="sortedMembers.length === 0" :colspan="8" @clear="clearFilters" />

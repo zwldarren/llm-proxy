@@ -1423,6 +1423,10 @@ export default {
   team: {
     title: "团队",
     description: "管理团队成员及其权限",
+    memberActions: "成员操作",
+    groupAccess: "访问权限",
+    groupAccount: "账户",
+    groupSecurity: "登录安全",
     addMember: "添加成员",
     inviteMember: "邀请成员",
     inviteDescription: "生成一个一次性链接，邀请他人加入控制台。",

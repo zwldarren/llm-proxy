@@ -1486,6 +1486,10 @@ export default {
   team: {
     title: "Team",
     description: "Manage team members and their permissions",
+    memberActions: "Member actions",
+    groupAccess: "Access",
+    groupAccount: "Account",
+    groupSecurity: "Sign-in security",
     addMember: "Add Member",
     inviteMember: "Invite Member",
     inviteDescription: "Create a single-use link for someone to join the console.",
