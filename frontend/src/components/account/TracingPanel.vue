@@ -64,7 +64,7 @@ const hasProviders = computed(() => state.value.providers.length > 0);
         <p class="mt-0.5 text-xs text-muted-foreground">
           {{ t("tracing.enableTracingDescription") }}
         </p>
-        <p v-if="error" class="mt-1 text-xs text-destructive">{{ error }}</p>
+        <p v-if="error" role="alert" class="mt-1 text-xs text-destructive">{{ error }}</p>
       </div>
       <Switch v-model="state.enabled" :aria-label="t('tracing.enableTracing')" class="shrink-0" />
     </div>

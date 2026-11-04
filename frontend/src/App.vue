@@ -12,6 +12,9 @@ const router = useRouter();
 
 watchEffect(() => {
   document.documentElement.lang = i18n.global.locale.value;
+  const titleKey = route.meta.titleKey;
+  const appName = i18n.global.t("app.name");
+  document.title = titleKey ? `${i18n.global.t(titleKey)} · ${appName}` : appName;
 });
 
 const keepAliveNames = [

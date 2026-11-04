@@ -52,8 +52,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
+import { Sheet, SheetContent, SheetFooter, SheetHeader } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -1265,7 +1264,10 @@ onMounted(() => {
               <EmptyTableRow v-if="sortedMembers.length === 0" :colspan="8" @clear="clearFilters" />
             </TableBody>
           </Table>
-          <footer class="flex-none border-t border-border/60 bg-muted/15 px-4 sm:px-6 py-2">
+          <footer
+            v-if="sortedMembers.length > 0"
+            class="flex-none border-t border-border/60 bg-muted/15 px-4 sm:px-6 py-2"
+          >
             <PaginationBar
               :current-page="currentPage"
               :total-pages="totalPages"
@@ -1282,14 +1284,12 @@ onMounted(() => {
 
     <!-- Create Member Sheet (slides in from the right) -->
     <Sheet v-model:open="showCreateDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="Users">
-          <template #title>{{ t("team.createMember") }}</template>
-          <template #description>{{ t("team.description") }}</template>
-        </SheetHeaderBand>
+      <SheetContent side="right" size="sm">
+        <SheetHeader
+          :icon="Users"
+          :title="t('team.createMember')"
+          :description="t('team.description')"
+        />
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="create-username">{{ t("team.username") }}</Label>
@@ -1298,6 +1298,8 @@ onMounted(() => {
               v-model="createUsername"
               :placeholder="t('auth.username')"
               :disabled="isCreating"
+              :aria-invalid="!!createError"
+              :aria-describedby="createError ? 'create-error' : undefined"
               @keydown.enter="handleCreate"
             />
           </div>
@@ -1308,9 +1310,13 @@ onMounted(() => {
               v-model="createPassword"
               type="password"
               :disabled="isCreating"
+              :aria-invalid="!!createError"
+              :aria-describedby="createError ? 'create-error' : undefined"
               @keydown.enter="handleCreate"
             />
-            <p v-if="createError" class="text-destructive text-xs">{{ createError }}</p>
+            <p v-if="createError" id="create-error" role="alert" class="text-destructive text-xs">
+              {{ createError }}
+            </p>
             <p v-else-if="createPassword" class="text-xs text-muted-foreground">
               {{ passwordRequirementsText() }}
             </p>
@@ -1358,9 +1364,7 @@ onMounted(() => {
             />
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isCreating" @click="showCreateDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1368,20 +1372,18 @@ onMounted(() => {
             <Loader2 v-if="isCreating" class="h-4 w-4 animate-spin" />
             {{ t("team.addMember") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Invite Member Sheet -->
     <Sheet v-model:open="showInviteDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="Mail">
-          <template #title>{{ t("team.inviteMember") }}</template>
-          <template #description>{{ t("team.inviteDescription") }}</template>
-        </SheetHeaderBand>
+      <SheetContent side="right" size="sm">
+        <SheetHeader
+          :icon="Mail"
+          :title="t('team.inviteMember')"
+          :description="t('team.inviteDescription')"
+        />
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="invite-email">{{ t("team.inviteEmail") }}</Label>
@@ -1470,7 +1472,7 @@ onMounted(() => {
             <span>{{ t("apiKeys.resetDaySuffix") }}</span>
           </div>
           <p class="text-xs text-muted-foreground">{{ t("team.invitePresetsHelp") }}</p>
-          <p v-if="inviteError" class="text-destructive text-xs">{{ inviteError }}</p>
+          <p v-if="inviteError" role="alert" class="text-destructive text-xs">{{ inviteError }}</p>
           <div v-if="inviteUrl" class="space-y-2">
             <Label>{{ t("team.inviteLink") }}</Label>
             <div class="flex gap-2">
@@ -1482,9 +1484,7 @@ onMounted(() => {
             <p class="text-xs text-muted-foreground">{{ t("team.inviteLinkHelp") }}</p>
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isInviting" @click="showInviteDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1492,23 +1492,19 @@ onMounted(() => {
             <Loader2 v-if="isInviting" class="h-4 w-4 animate-spin" />
             {{ t("team.inviteCreate") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Admin-attested login email (used when SMTP verification is off) -->
     <Sheet v-model:open="showEmailDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="Mail">
-          <template #title>{{ t("team.setEmail") }}</template>
+      <SheetContent side="right" size="sm">
+        <SheetHeader :icon="Mail" :title="t('team.setEmail')">
           <template #description>
             {{ t("team.setEmailDescription") }} —
             <span class="font-medium">{{ emailMember?.username }}</span>
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="member-email">{{ t("accountSecurity.email") }}</Label>
@@ -1517,17 +1513,24 @@ onMounted(() => {
               v-model="emailAddress"
               type="email"
               :disabled="isSavingEmail"
+              :aria-invalid="!!emailError"
+              :aria-describedby="emailError ? 'member-email-error' : 'member-email-help'"
               @keydown.enter="saveMemberEmail"
             />
-            <p v-if="emailError" class="text-destructive text-xs">{{ emailError }}</p>
-            <p v-else class="text-xs text-muted-foreground">
+            <p
+              v-if="emailError"
+              id="member-email-error"
+              role="alert"
+              class="text-destructive text-xs"
+            >
+              {{ emailError }}
+            </p>
+            <p v-else id="member-email-help" class="text-xs text-muted-foreground">
               {{ t("team.setEmailHelp") }}
             </p>
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isSavingEmail" @click="showEmailDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1535,23 +1538,19 @@ onMounted(() => {
             <Loader2 v-if="isSavingEmail" class="h-4 w-4 animate-spin" />
             {{ t("common.save") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Rename Username Sheet (slides in from the right) -->
     <Sheet v-model:open="showRenameDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="UserPen">
-          <template #title>{{ t("team.renameUsername") }}</template>
+      <SheetContent side="right" size="sm">
+        <SheetHeader :icon="UserPen" :title="t('team.renameUsername')">
           <template #description>
             {{ t("team.renameUsernameDescription") }} —
             <span class="font-medium">{{ renamingMember?.username }}</span>
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="rename-username">{{ t("team.newUsername") }}</Label>
@@ -1560,17 +1559,19 @@ onMounted(() => {
               v-model="renameUsername"
               :placeholder="renamingMember?.username ?? ''"
               :disabled="isRenaming"
+              :aria-invalid="!!renameError"
+              :aria-describedby="renameError ? 'rename-error' : 'rename-hint'"
               @keydown.enter="handleRename"
             />
-            <p v-if="renameError" class="text-destructive text-xs">{{ renameError }}</p>
-            <p v-else class="text-xs text-muted-foreground">
+            <p v-if="renameError" id="rename-error" role="alert" class="text-destructive text-xs">
+              {{ renameError }}
+            </p>
+            <p v-else id="rename-hint" class="text-xs text-muted-foreground">
               {{ t("team.usernameFormatHint") }}
             </p>
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isRenaming" @click="showRenameDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1578,23 +1579,19 @@ onMounted(() => {
             <Loader2 v-if="isRenaming" class="h-4 w-4 animate-spin" />
             {{ t("team.renameUsername") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Reset Password Sheet (slides in from the right) -->
     <Sheet v-model:open="showResetDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="KeyRound">
-          <template #title>{{ t("team.resetPassword") }}</template>
+      <SheetContent side="right" size="sm">
+        <SheetHeader :icon="KeyRound" :title="t('team.resetPassword')">
           <template #description>
             {{ t("team.resetPassword") }} —
             <span class="font-medium">{{ resettingMember?.username }}</span>
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="reset-password">{{ t("team.newPassword") }}</Label>
@@ -1603,9 +1600,13 @@ onMounted(() => {
               v-model="resetPassword"
               type="password"
               :disabled="isResetting"
+              :aria-invalid="!!resetError"
+              :aria-describedby="resetError ? 'reset-error' : undefined"
               @keydown.enter="handleReset"
             />
-            <p v-if="resetError" class="text-destructive text-xs">{{ resetError }}</p>
+            <p v-if="resetError" id="reset-error" role="alert" class="text-destructive text-xs">
+              {{ resetError }}
+            </p>
             <p v-else-if="resetPassword" class="text-xs text-muted-foreground">
               {{ passwordRequirementsText() }}
             </p>
@@ -1621,9 +1622,7 @@ onMounted(() => {
             />
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isResetting" @click="showResetDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1631,23 +1630,19 @@ onMounted(() => {
             <Loader2 v-if="isResetting" class="h-4 w-4 animate-spin" />
             {{ t("team.resetPassword") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Manage Allowed Models Sheet (slides in from the right) -->
     <Sheet v-model:open="showModelsDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[480px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="Boxes">
-          <template #title>{{ t("team.manageModels") }}</template>
+      <SheetContent side="right" size="md">
+        <SheetHeader :icon="Boxes" :title="t('team.manageModels')">
           <template #description>
             {{ t("team.manageModelsDescription") }} —
             <span class="font-medium">{{ editingMember?.username }}</span>
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <AccessScopePicker
             v-model="memberModels"
@@ -1662,9 +1657,7 @@ onMounted(() => {
             mono
           />
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isSavingModels" @click="showModelsDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1672,23 +1665,19 @@ onMounted(() => {
             <Loader2 v-if="isSavingModels" class="h-4 w-4 animate-spin" />
             {{ t("common.save") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Manage Account Budget Sheet (slides in from the right) -->
     <Sheet v-model:open="showBudgetDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="Wallet">
-          <template #title>{{ t("team.manageBudget") }}</template>
+      <SheetContent side="right" size="sm">
+        <SheetHeader :icon="Wallet" :title="t('team.manageBudget')">
           <template #description>
             {{ t("team.manageBudgetDescription") }} —
             <span class="font-medium">{{ budgetMember?.username }}</span>
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="member-budget-usd">{{ t("apiKeys.budget") }}</Label>
@@ -1768,9 +1757,7 @@ onMounted(() => {
             </Button>
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" :disabled="isSavingBudget" @click="showBudgetDialog = false">
             {{ t("common.cancel") }}
           </Button>
@@ -1778,23 +1765,19 @@ onMounted(() => {
             <Loader2 v-if="isSavingBudget" class="h-4 w-4 animate-spin" />
             {{ t("common.save") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Manage Account Rate Limit Sheet (slides in from the right) -->
     <Sheet v-model:open="showRateLimitDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[440px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <SheetHeaderBand :icon="Gauge">
-          <template #title>{{ t("team.manageRateLimit") }}</template>
+      <SheetContent side="right" size="sm">
+        <SheetHeader :icon="Gauge" :title="t('team.manageRateLimit')">
           <template #description>
             {{ t("team.manageRateLimitDescription") }} —
             <span class="font-medium">{{ rateLimitMember?.username }}</span>
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="member-rate-limit">{{ t("team.rateLimit") }}</Label>
@@ -1811,9 +1794,7 @@ onMounted(() => {
             <p class="text-xs text-muted-foreground">{{ t("team.rateLimitEmptyHint") }}</p>
           </div>
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button
             variant="outline"
             :disabled="isSavingRateLimit"
@@ -1825,7 +1806,7 @@ onMounted(() => {
             <Loader2 v-if="isSavingRateLimit" class="h-4 w-4 animate-spin" />
             {{ t("common.save") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 

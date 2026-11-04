@@ -127,6 +127,7 @@ const invalidBuckets = computed(() =>
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('rateLimits.title')"
     :icon="Gauge"
     :description="t('rateLimits.description')"

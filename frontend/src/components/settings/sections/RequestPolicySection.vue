@@ -24,6 +24,7 @@ const { t } = useI18n();
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('requestPolicy.title')"
     :icon="Settings"
     :description="t('requestPolicy.description')"

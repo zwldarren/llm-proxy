@@ -2,7 +2,9 @@
 import { CheckCircle2, Clock, Cpu, DollarSign, Package, Activity, Zap } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { RouterLink } from "vue-router";
 import {
+  ABSENT_METRIC,
   formatCostWithPrecision,
   formatDuration,
   formatNumberWithSuffix,
@@ -67,9 +69,24 @@ const cacheHitRate = computed(() => {
 
 // Success tier → semantic status tokens. Color is never the sole signal:
 // the percentage, the tier label, and the pulse dot carry the same tier.
-type SuccessTier = "success" | "warning" | "error";
+// A range with no requests has no success rate to judge, so it gets a neutral
+// tier instead of inheriting the "0% ⇒ critical" reading.
+type SuccessTier = "success" | "warning" | "error" | "noTraffic";
+
+const hasTraffic = computed(() => props.summary.total_requests > 0);
+const hasErrors = computed(() => hasTraffic.value && props.summary.success_rate < 100);
+
+const successActionLabel = computed(() =>
+  hasErrors.value ? t("home.viewErrors") : t("home.viewRequests")
+);
+const successActionAriaLabel = computed(() =>
+  hasErrors.value
+    ? t("home.viewErrorsForRate", { rate: formatPercentage(props.summary.success_rate) })
+    : t("home.viewRequestsForRate", { rate: formatPercentage(props.summary.success_rate) })
+);
 
 const successTier = computed<SuccessTier>(() => {
+  if (!hasTraffic.value) return "noTraffic";
   const r = props.summary.success_rate;
   if (r >= 99) return "success";
   if (r >= 95) return "warning";
@@ -111,20 +128,28 @@ const tierStyles: Record<
     ping: "bg-status-error/75",
     label: "home.statusCritical",
   },
+  noTraffic: {
+    text: "text-status-unknown",
+    meter: "bg-status-unknown",
+    badge: "bg-status-unknown/15 text-status-unknown border-status-unknown/30",
+    dot: "bg-status-unknown",
+    ping: "bg-status-unknown/75",
+    label: "home.statusNoTraffic",
+  },
 };
 
 const tier = computed(() => tierStyles[successTier.value]);
 </script>
 
 <template>
-  <section class="flex flex-col">
+  <section class="@container flex flex-col">
     <!-- Primary metric strip: 6 flush cells, hairline-separated. No cards.
          The page gutter lives on the cells, not the strip: padding the strip
          and the cells would inset the first metric 16px past every section
          title below it. `px-1 sm:px-2` + cell `px-3 sm:px-4` = the page's
          16/24px gutter, so the strip shares a left edge with the bands under it. -->
     <div
-      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-y sm:divide-y-0 lg:divide-y-0 divide-border/60 border-b border-border/60 px-1 sm:px-2"
+      class="grid grid-cols-1 @[20rem]:grid-cols-2 @[28rem]:grid-cols-3 @[64rem]:grid-cols-6 divide-x divide-y @[64rem]:divide-y-0 divide-border/60 border-b border-border/60 px-1 sm:px-2"
     >
       <!-- Requests -->
       <div class="px-3 sm:px-4 py-3">
@@ -170,22 +195,36 @@ const tier = computed(() => tierStyles[successTier.value]);
         </div>
       </div>
 
-      <!-- Success (value + tier chip + status-tinted meter + pulse). The whole
-           cell is a link to the proxy error log so a degraded rate is never a
-           dead end — operators land on the failing 5xx requests in one click. -->
-      <RouterLink
-        :to="{ path: '/logs', query: { tab: 'proxy', status: '5xx' } }"
-        class="px-3 sm:px-4 py-3 block transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-        :aria-label="t('home.viewErrors') + ': ' + formatPercentage(summary.success_rate)"
-        :title="t('home.viewErrors')"
+      <!-- Success (value + tier chip + status-tinted meter + pulse). With
+           traffic, the whole cell links to the matching slice of the proxy log.
+           The rate counts 2xx rows only, so a dip can come from client errors as
+           well as server errors; the filter stays off the status column because
+           pinning it to 5xx would land a 4xx-only dip on an empty page. With no
+           traffic, it stays a plain cell: an empty range has nothing to inspect. -->
+      <component
+        :is="hasTraffic ? RouterLink : 'div'"
+        :to="hasTraffic ? { path: '/logs', query: { tab: 'proxy' } } : undefined"
+        class="px-3 sm:px-4 py-3 block"
+        :class="
+          hasTraffic
+            ? 'transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60'
+            : ''
+        "
+        :aria-label="hasTraffic ? successActionAriaLabel : undefined"
+        :title="hasTraffic ? successActionLabel : undefined"
       >
         <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground font-medium">
-          <CheckCircle2 class="w-3.5 h-3.5 text-status-success" />
+          <CheckCircle2
+            class="w-3.5 h-3.5"
+            :class="hasTraffic ? 'text-status-success' : 'text-status-unknown'"
+          />
           {{ t("home.successRate") }}
         </div>
-        <div class="flex items-center gap-1.5 mt-1">
+        <div class="flex flex-wrap items-center gap-1.5 mt-1">
           <span class="text-metric" :class="tier.text">
-            <ValueSwap :value="formatPercentage(summary.success_rate)" />
+            <ValueSwap
+              :value="hasTraffic ? formatPercentage(summary.success_rate) : ABSENT_METRIC"
+            />
           </span>
           <span class="text-[11px] px-1.5 py-0.5 rounded-full border" :class="tier.badge">
             {{ t(tier.label) }}
@@ -195,10 +234,10 @@ const tier = computed(() => tierStyles[successTier.value]);
           <div
             class="h-full w-full origin-left rounded-full transition-transform duration-500"
             :class="tier.meter"
-            :style="{ transform: `scaleX(${summary.success_rate / 100})` }"
+            :style="{ transform: `scaleX(${hasTraffic ? summary.success_rate / 100 : 0})` }"
           />
         </div>
-        <div class="flex items-center gap-1 mt-1">
+        <div v-if="hasTraffic" class="flex items-center gap-1 mt-1">
           <span class="relative flex h-2 w-2" aria-hidden="true">
             <span
               class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
@@ -206,9 +245,12 @@ const tier = computed(() => tierStyles[successTier.value]);
             />
             <span class="relative inline-flex rounded-full h-2 w-2" :class="tier.dot" />
           </span>
-          <span class="text-[11px] text-muted-foreground">{{ t("home.viewErrors") }} →</span>
+          <span class="text-[11px] text-muted-foreground">{{ successActionLabel }} →</span>
         </div>
-      </RouterLink>
+        <div v-else class="mt-1 text-[11px] text-muted-foreground">
+          {{ t("home.noTrafficInRange") }}
+        </div>
+      </component>
 
       <!-- Latency -->
       <div class="px-3 sm:px-4 py-3">

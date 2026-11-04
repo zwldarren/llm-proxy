@@ -14,8 +14,8 @@
 import { Download, ExternalLink, Maximize2 } from "@lucide/vue";
 import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { DialogContent, DialogDescription, DialogPortal, DialogRoot, DialogTitle } from "reka-ui";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ImageInfo } from "@/utils/logResponseParser";
 import { buildImageDataUrl } from "@/utils/logResponseParser";
@@ -218,45 +218,40 @@ function openInNewTab(url: string) {
        open, gives the dialog an accessible name and description, traps Tab
        inside, handles Escape (top layer only), and restores focus to the
        triggering thumbnail on close. -->
-  <DialogRoot :open="lightbox !== null">
-    <DialogPortal>
-      <DialogContent
-        class="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm p-4 animate-in fade-in"
-        @click="closeLightbox"
+  <Dialog :open="lightbox !== null" @update:open="(open) => !open && closeLightbox()">
+    <DialogContent variant="media" :show-close-button="false" @click="closeLightbox">
+      <DialogTitle class="sr-only">{{ t("logs.imagePreview") }}</DialogTitle>
+      <DialogDescription class="sr-only">
+        {{ t("logs.imageOfN", { n: (lightbox?.index ?? 0) + 1, total: resolved.length }) }}
+      </DialogDescription>
+      <button
+        type="button"
+        class="focus-visible-ring absolute top-6 right-6 p-2 rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        :aria-label="t('common.close')"
+        @click.stop="closeLightbox"
       >
-        <DialogTitle class="sr-only">{{ t("logs.imagePreview") }}</DialogTitle>
-        <DialogDescription class="sr-only">
-          {{ t("logs.imageOfN", { n: (lightbox?.index ?? 0) + 1, total: resolved.length }) }}
-        </DialogDescription>
-        <button
-          type="button"
-          class="focus-visible-ring absolute top-6 right-6 p-2 rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          :aria-label="t('common.close')"
-          @click.stop="closeLightbox"
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </button>
-        <img
-          v-if="lightbox"
-          :src="lightbox.url"
-          :alt="lightbox.image.revisedPrompt || t('logs.imageAltN', { n: lightbox.index + 1 })"
-          class="max-w-full max-h-[90vh] object-contain shadow-lg animate-in zoom-in-95 duration-200"
-          @click.stop
-        />
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      </button>
+      <img
+        v-if="lightbox"
+        :src="lightbox.url"
+        :alt="lightbox.image.revisedPrompt || t('logs.imageAltN', { n: lightbox.index + 1 })"
+        class="max-w-full max-h-[90vh] object-contain shadow-lg animate-in zoom-in-95 duration-200"
+        @click.stop
+      />
+    </DialogContent>
+  </Dialog>
 </template>

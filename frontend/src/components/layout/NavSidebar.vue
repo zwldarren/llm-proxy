@@ -58,21 +58,12 @@ import { useStorage } from "@vueuse/core";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { useAuthStore } from "@/stores/auth";
 import { useSystemStore } from "@/stores/system";
-import { useProviderStore } from "@/stores/providers";
-import { useModelStore } from "@/stores/models";
-import { useCatalogStore } from "@/stores/catalog";
-import { useApiKeyStore } from "@/stores/apiKeys";
-import { useMcpServerStore } from "@/stores/mcpServers";
+import { prefetchRoute } from "@/router/prefetch";
 
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 const authStore = useAuthStore();
-const providerStore = useProviderStore();
-const modelStore = useModelStore();
-const catalogStore = useCatalogStore();
-const apiKeyStore = useApiKeyStore();
-const mcpServerStore = useMcpServerStore();
 const { state, isMobile, openMobile, toggleSidebar } = useSidebar();
 const systemStore = useSystemStore();
 const navigationEl = ref<HTMLElement | null>(null);
@@ -239,49 +230,6 @@ const handleLogout = async () => {
   await router.push("/login");
 };
 
-const PREFETCH_ROUTES: Record<string, () => void> = {
-  "/config/providers": () => {
-    providerStore.prefetch();
-    import("@/views/config/ProvidersView.vue");
-  },
-  "/config/api-keys": () => {
-    apiKeyStore.prefetch();
-    import("@/views/config/ApiKeysView.vue");
-  },
-  "/config/mcp-servers": () => {
-    mcpServerStore.prefetch();
-    import("@/views/config/McpServersView.vue");
-  },
-  "/logs": () => import("@/views/LogsView.vue"),
-  "/models": () => {
-    // The route lazy-loads a role-appropriate inner view, so warm that chunk
-    // too — warming only the dispatcher leaves first paint waiting on a
-    // second fetch. The admin store warms only for admins (the config API
-    // rejects viewers).
-    import("@/views/ModelsView.vue");
-    if (authStore.isAdmin) {
-      modelStore.prefetch();
-      import("@/views/config/ModelsView.vue");
-    } else {
-      catalogStore.prefetch();
-      import("@/views/ModelPlazaView.vue");
-    }
-  },
-  "/chat": () => import("@/views/ChatView.vue"),
-  "/images": () => import("@/views/ImagesView.vue"),
-  "/": () => import("@/views/HomeView.vue"),
-  "/config/settings": () => import("@/views/config/SettingsView.vue"),
-  "/config/console-auth": () => import("@/views/config/ConsoleAuthView.vue"),
-  "/account": () => import("@/views/AccountView.vue"),
-  "/account/preferences": () => import("@/views/PreferencesView.vue"),
-  "/account/security": () => import("@/views/SecurityView.vue"),
-  "/team": () => import("@/views/TeamView.vue"),
-};
-
-const prefetchRoute = (href: string) => {
-  PREFETCH_ROUTES[href]?.();
-};
-
 /** The badge is a RouterLink to the About card, but a click that does not change
  * the URL (already on Settings, same hash) never fires the view's hash watcher.
  * Scroll directly in that case so the jump always happens. The helper retries
@@ -295,25 +243,47 @@ const handleVersionBadgeClick = () => {
 
 <template>
   <Sidebar collapsible="icon" class="border-r border-sidebar-border">
+    <template #edge>
+      <!-- Floating Expand/Collapse Toggle Button for Desktop. The visual disc is
+           24px at every pointer type; only the hit area grows on touch (the
+           `after` box), so the handle never changes size between devices. -->
+      <button
+        v-if="!isMobile"
+        type="button"
+        class="absolute top-5 right-0 z-50 hidden size-6 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-sidebar-border bg-background text-sidebar-foreground shadow-xs transition-colors duration-200 after:absolute after:-inset-2.5 after:content-[''] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring md:flex"
+        :aria-label="toggleLabel"
+        :title="toggleLabel"
+        @click="toggleSidebar"
+      >
+        <component :is="ToggleIcon" class="size-3.5" />
+      </button>
+    </template>
+
     <!-- Brand header -->
     <SidebarHeader class="h-16 border-b border-sidebar-border justify-center relative">
       <div
         class="flex h-full items-center w-full transition-opacity duration-200"
-        :class="isCollapsed ? 'justify-center px-0' : 'justify-between pl-2.5 pr-7'"
+        :class="isCollapsed ? 'justify-center' : 'justify-between pl-2.5 pr-7'"
       >
         <div class="flex items-center gap-2 min-w-0">
           <RouterLink
             to="/"
-            class="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            class="touch-target flex shrink-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             :aria-label="t('home.title')"
             :title="isCollapsed ? t('home.title') : undefined"
             @click="closeMobileSidebar"
             @mouseenter="prefetchRoute('/')"
           >
+            <!-- Collapsed, the mark drops its tile and shrinks to the icon rail's
+                 glyph size: a 32px box would run into the collapse handle that
+                 straddles the rail edge. -->
             <span
-              class="flex size-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border/60 bg-sidebar-accent/45 text-sidebar-foreground"
+              class="flex shrink-0 items-center justify-center rounded-md text-sidebar-foreground"
+              :class="
+                isCollapsed ? '' : 'size-8 border border-sidebar-border/60 bg-sidebar-accent/45'
+              "
             >
-              <LogoIcon class="size-5" />
+              <LogoIcon :class="isCollapsed ? 'size-4' : 'size-5'" />
             </span>
             <span
               v-if="!isCollapsed"
@@ -323,7 +293,9 @@ const handleVersionBadgeClick = () => {
             </span>
           </RouterLink>
           <!-- Instance version badge — links to the About section in Settings.
-               Renders nothing while the info is loading or when the fetch failed. -->
+               Renders nothing while the info is loading or when the fetch failed.
+               The lockup above is `shrink-0`, so the badge is what gives way
+               first: it truncates instead of sliding under the wordmark. -->
           <RouterLink
             v-if="!isCollapsed && systemStore.info"
             to="/config/settings#about"
@@ -361,25 +333,15 @@ const handleVersionBadgeClick = () => {
           <X class="size-5" />
         </Button>
       </div>
-
-      <!-- Floating Expand/Collapse Toggle Button for Desktop -->
-      <button
-        v-if="!isMobile"
-        type="button"
-        class="absolute top-5 right-0 z-50 hidden md:flex h-6 w-6 translate-x-1/2 items-center justify-center rounded-full border border-sidebar-border bg-background text-sidebar-foreground shadow-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring transition-transform duration-200 cursor-pointer [@media(hover:none)]:h-11 [@media(hover:none)]:w-11"
-        :aria-label="toggleLabel"
-        :title="toggleLabel"
-        @click="toggleSidebar"
-      >
-        <component :is="ToggleIcon" class="size-3.5" />
-      </button>
     </SidebarHeader>
 
     <!-- Navigation -->
-    <SidebarContent class="py-4">
-      <!-- Navigation sections -->
-      <nav ref="navigationEl" :aria-label="t('nav.mainNavigation')" class="flex flex-col gap-2">
-        <SidebarGroup v-for="section in visibleSections" :key="section.title">
+    <SidebarContent class="py-3">
+      <!-- Section seams are 4(prev group) + 4(nav gap) + 4(next group): enough
+           to read as a break without the 24px band the primitives' p-2 defaults
+           produced. -->
+      <nav ref="navigationEl" :aria-label="t('nav.mainNavigation')" class="flex flex-col gap-1">
+        <SidebarGroup v-for="section in visibleSections" :key="section.title" class="py-1">
           <SidebarGroupLabel
             class="text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70"
           >
@@ -393,7 +355,7 @@ const handleVersionBadgeClick = () => {
                     as-child
                     :is-active="isCurrent(item.href!)"
                     :tooltip="t(item.name)"
-                    class="max-md:h-11"
+                    class="max-md:min-h-11"
                   >
                     <RouterLink
                       :to="item.href!"
@@ -409,7 +371,7 @@ const handleVersionBadgeClick = () => {
                 <template v-else>
                   <Collapsible v-model:open="expandedGroups[item.name]" class="group/collapsible">
                     <CollapsibleTrigger as-child>
-                      <SidebarMenuButton class="max-md:h-11" :tooltip="t(item.name)">
+                      <SidebarMenuButton class="max-md:min-h-11" :tooltip="t(item.name)">
                         <component :is="item.icon" v-if="item.icon" />
                         <span>{{ t(item.name) }}</span>
                         <ChevronRight
@@ -423,7 +385,7 @@ const handleVersionBadgeClick = () => {
                           <SidebarMenuSubButton
                             as-child
                             :is-active="isCurrent(sub.href)"
-                            class="max-md:h-11"
+                            class="max-md:min-h-11"
                           >
                             <RouterLink
                               :to="sub.href"
@@ -506,18 +468,30 @@ const handleVersionBadgeClick = () => {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem @click="navigateTo('/account')" class="cursor-pointer">
+                <DropdownMenuItem
+                  @click="navigateTo('/account')"
+                  @mouseenter="prefetchRoute('/account')"
+                  @focus="prefetchRoute('/account')"
+                  class="cursor-pointer"
+                >
                   <UserRound class="mr-2 size-4 text-muted-foreground" />
                   <span>{{ t("nav.account") }}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   @click="navigateTo('/account/preferences')"
+                  @mouseenter="prefetchRoute('/account/preferences')"
+                  @focus="prefetchRoute('/account/preferences')"
                   class="cursor-pointer"
                 >
                   <SlidersHorizontal class="mr-2 size-4 text-muted-foreground" />
                   <span>{{ t("nav.preferences") }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem @click="navigateTo('/account/security')" class="cursor-pointer">
+                <DropdownMenuItem
+                  @click="navigateTo('/account/security')"
+                  @mouseenter="prefetchRoute('/account/security')"
+                  @focus="prefetchRoute('/account/security')"
+                  class="cursor-pointer"
+                >
                   <ShieldCheck class="mr-2 size-4 text-muted-foreground" />
                   <span>{{ t("nav.security") }}</span>
                 </DropdownMenuItem>

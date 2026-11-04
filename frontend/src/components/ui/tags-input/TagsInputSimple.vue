@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, type HTMLAttributes } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   TagsInput,
   TagsInputInput,
@@ -36,6 +37,8 @@ const emit = defineEmits<{
   (e: "update:modelValue", value: string[]): void;
 }>();
 
+const { t } = useI18n();
+
 const tags = computed({
   get: () => props.modelValue,
   set: (val) => {
@@ -70,11 +73,13 @@ const delimiterRegExp = /[,\n;]+/;
       v-for="(item, index) in tags"
       :key="`${item}-${index}`"
       :value="item"
-      class="font-mono text-xs border border-border/50 bg-secondary/80 hover:bg-secondary py-0.5 pl-2 pr-1 h-6 rounded-md"
+      :title="item"
+      class="font-mono text-xs border border-border/50 bg-secondary/80 hover:bg-secondary py-0.5 pl-2 pr-1 h-6 max-w-full min-w-0 rounded-md"
     >
-      <TagsInputItemText class="px-0.5 text-xs text-foreground" />
+      <TagsInputItemText class="min-w-0 truncate px-0.5 text-xs text-foreground" />
       <TagsInputItemDelete
-        class="ml-1 text-muted-foreground hover:text-foreground hover:bg-muted-foreground/10 rounded-sm p-0.5"
+        :aria-label="t('common.removeItem', { name: item })"
+        class="ml-1 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted-foreground/10 rounded-sm p-0.5"
       />
     </TagsInputItem>
 

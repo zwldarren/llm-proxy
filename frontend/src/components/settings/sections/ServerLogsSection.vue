@@ -28,6 +28,7 @@ const { t } = useI18n();
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('settings.serverLogs')"
     :icon="Server"
     :description="t('settings.serverLogsDescription')"
@@ -126,7 +127,12 @@ const { t } = useI18n();
         :description="t('settings.cleanOldLogsDescription')"
       >
         <template #action>
-          <Button variant="destructive" size="sm" @click="emit('cleanup')">
+          <Button
+            variant="destructive"
+            size="sm"
+            class="h-auto min-h-9 max-w-full whitespace-normal py-2 text-center max-sm:min-h-11"
+            @click="emit('cleanup')"
+          >
             <Trash2 class="size-4 mr-2" />
             {{ t("settings.cleanupLogs") }}
           </Button>

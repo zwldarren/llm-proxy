@@ -18,6 +18,7 @@ const { t } = useI18n();
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('resilience.title')"
     :icon="RefreshCw"
     :description="t('resilience.description')"

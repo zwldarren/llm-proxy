@@ -6,14 +6,19 @@ import { defineComponent, h, nextTick, type Component } from "vue";
 const ctl = vi.hoisted(() => ({
   path: "/",
   setPath: (_path: string) => {},
+  setTitleKey: (_key: string) => {},
+  locale: { value: "en" },
   replace: vi.fn(async () => {}),
 }));
 
 vi.mock("vue-router", async () => {
   const { reactive: reactiveImpl } = await import("vue");
-  const route = reactiveImpl({ fullPath: "/" });
+  const route = reactiveImpl({ fullPath: "/", meta: { titleKey: "nav.usage" } });
   ctl.setPath = (path: string) => {
     route.fullPath = path;
+  };
+  ctl.setTitleKey = (key: string) => {
+    route.meta.titleKey = key;
   };
   return {
     useRoute: () => route,
@@ -31,9 +36,22 @@ vi.mock("@/components/ui/sonner", () => ({ Toaster: { template: "<div />" } }));
 vi.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: { template: "<div><slot /></div>" },
 }));
-vi.mock("@/i18n", () => ({
-  default: { global: { locale: { value: "en" } } },
-}));
+vi.mock("@/i18n", async () => {
+  const { reactive: reactiveImpl } = await import("vue");
+  const locale: { value: string } = reactiveImpl({ value: "en" });
+  ctl.locale = locale;
+  return {
+    default: {
+      global: {
+        locale,
+        t: (key: string) => {
+          if (key === "app.name") return "LLM Proxy";
+          return locale.value === "en" ? key : `zh:${key}`;
+        },
+      },
+    },
+  };
+});
 
 import App from "./App.vue";
 
@@ -70,6 +88,24 @@ function mountApp() {
 }
 
 describe("App error boundary", () => {
+  it("derives the browser title from the route and active locale", async () => {
+    document.title = "LLM Proxy";
+    mountApp();
+    await nextTick();
+
+    expect(document.title).toBe("nav.usage · LLM Proxy");
+
+    ctl.locale.value = "zh";
+    await nextTick();
+
+    expect(document.title).toBe("zh:nav.usage · LLM Proxy");
+
+    ctl.setTitleKey("nav.logs");
+    await nextTick();
+
+    expect(document.title).toBe("zh:nav.logs · LLM Proxy");
+  });
+
   it("replaces the broken view with the recovery surface", async () => {
     const wrapper = mountApp();
     await nextTick();

@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import type { SidebarProps } from ".";
+import { computed } from "vue";
 import { cn } from "@/lib/utils";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetDescription from "@/components/ui/sheet/SheetDescription.vue";
-import SheetHeader from "@/components/ui/sheet/SheetHeader.vue";
-import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
+import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { SIDEBAR_WIDTH_MOBILE, useSidebar } from "./utils";
 
 defineOptions({
@@ -18,6 +16,30 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 });
 
 const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+
+// The rail slides on transform; the desktop gap snaps to the new width once.
+// Animating width/left/right forced layout on every frame and moved the whole
+// inset with it. Keeping the fixed panel at full width and shifting it left
+// lets the content stay put while only the visible edge moves.
+const collapsedWidth = computed(() =>
+  props.variant === "floating" || props.variant === "inset"
+    ? "calc(var(--sidebar-width-icon) + 1rem + 2px)"
+    : "var(--sidebar-width-icon)"
+);
+
+const collapsedTransform = computed(() =>
+  props.side === "left"
+    ? "group-data-[collapsible=icon]:translate-x-[calc(var(--sidebar-collapsed-width)-var(--sidebar-width))]"
+    : "group-data-[collapsible=icon]:translate-x-[calc(var(--sidebar-width)-var(--sidebar-collapsed-width))]"
+);
+
+// On the left, the content travels back the same distance the rail slides out
+// so icons stay put while the panel edge moves; the width itself snaps once.
+const collapsedContentTransform = computed(() =>
+  props.side === "left"
+    ? "group-data-[collapsible=icon]:translate-x-[calc(var(--sidebar-width)-var(--sidebar-collapsed-width))]"
+    : ""
+);
 </script>
 
 <template>
@@ -38,15 +60,14 @@ const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
       data-slot="sidebar"
       data-mobile="true"
       :side="side"
-      class="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+      size="none"
+      variant="sidebar"
+      :show-close-button="false"
       :style="{
         '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
       }"
     >
-      <SheetHeader class="sr-only">
-        <SheetTitle>Sidebar</SheetTitle>
-        <SheetDescription>Displays the mobile sidebar.</SheetDescription>
-      </SheetHeader>
+      <SheetHeader variant="sr-only" title="Sidebar" description="Displays the mobile sidebar." />
       <div class="flex h-full w-full flex-col">
         <slot />
       </div>
@@ -76,30 +97,45 @@ const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
       "
     />
     <div
+      :style="{ '--sidebar-collapsed-width': collapsedWidth }"
       :class="
         cn(
-          'fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex',
+          // Above page chrome: a sticky page header also carries z-10 and, being
+          // later in the DOM, would paint over the edge controls that straddle
+          // the rail.
+          'fixed inset-y-0 z-30 hidden h-svh w-(--sidebar-width) transition-transform duration-200 ease-linear md:flex',
           side === 'left'
-            ? 'left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]'
-            : 'right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]',
+            ? 'left-0 group-data-[collapsible=offcanvas]:-translate-x-full'
+            : 'right-0 group-data-[collapsible=offcanvas]:translate-x-full',
+          collapsedTransform,
           // Adjust the padding for floating and inset variants.
           variant === 'floating' || variant === 'inset'
-            ? 'p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]'
-            : 'group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l',
+            ? 'p-2'
+            : 'bg-sidebar group-data-[side=left]:border-r group-data-[side=right]:border-l',
           props.class
         )
       "
       v-bind="$attrs"
     >
-      <div
-        data-sidebar="sidebar"
-        role="complementary"
-        class="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm relative"
-      >
-        <!-- The rail is a landmark so the brand header and the account footer
-             (which sit outside the inner <nav>) are reachable when navigating
-             by landmark; the <nav> inside remains the navigation landmark. -->
-        <slot />
+      <!-- Keep edge controls outside the clipped content layer so a control
+           straddling the rail edge is never cut in half mid-transition. -->
+      <slot name="edge" />
+      <div class="h-full w-full overflow-hidden">
+        <div
+          data-sidebar="sidebar"
+          role="complementary"
+          :class="
+            cn(
+              'bg-sidebar group-data-[variant=floating]:border-sidebar-border relative flex h-full w-full flex-col transition-transform duration-200 ease-linear group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm group-data-[collapsible=icon]:w-[var(--sidebar-collapsed-width)]',
+              collapsedContentTransform
+            )
+          "
+        >
+          <!-- The rail is a landmark so the brand header and the account footer
+               (which sit outside the inner <nav>) are reachable when navigating
+               by landmark; the <nav> inside remains the navigation landmark. -->
+          <slot />
+        </div>
       </div>
     </div>
   </div>

@@ -7,6 +7,8 @@ import type { TooltipItem } from "chart.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
+import ChartDataTable, { type ChartDataTableRow } from "./ChartDataTable.vue";
 import { baseBarChartOptions, useChartTheme } from "@/composables/useChartTheme";
 import { formatChartDate, formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
 import { createCategoricalColorScale } from "@/utils/colorPalette";
@@ -144,17 +146,45 @@ const displayModels = computed(() => {
 // popover become disabled until the user deselects something.
 const selectionAtCap = computed(() => selectedModels.value.size >= MAX_DISPLAY_MODELS);
 
-// Accessible label for screen readers
+// Accessible label for screen readers. The range and series count are spelled
+// out in the active locale — this string is the chart's name in the a11y tree.
 const chartAriaLabel = computed(() => {
   const typeLabel = chartTypeLabel(chartType.value);
   const modelCount = displayModels.value.length;
   const dateRange =
     series.value.length > 0
-      ? `${fullBucketLabel(series.value[0]!.key)} to ${fullBucketLabel(
-          series.value[series.value.length - 1]!.key
-        )}`
+      ? t("home.trendsChartRange", {
+          start: fullBucketLabel(series.value[0]!.key),
+          end: fullBucketLabel(series.value[series.value.length - 1]!.key),
+        })
       : "";
-  return `${typeLabel} chart showing ${modelCount} models from ${dateRange}`;
+  return t("home.trendsChartSummary", {
+    type: typeLabel,
+    count: modelCount,
+    range: dateRange,
+  });
+});
+
+/**
+ * Text alternative for the canvas: one row per bucket with the stacked total,
+ * formatted like the tooltip and keyed by the bucket so an hourly range
+ * spanning days cannot collide on a repeated "00:00".
+ */
+const chartA11yRows = computed<ChartDataTableRow[]>(() => {
+  const formatTotal = (total: number) =>
+    chartType.value === "cost" ? formatCostWithPrecision(total) : formatNumberWithSuffix(total);
+  return series.value.map((bucket, index) => ({
+    key: bucket.key,
+    label: fullBucketLabel(bucket.key),
+    values: [
+      formatTotal(
+        chartData.value.datasets.reduce(
+          (sum, dataset) => sum + (Number(dataset.data[index]) || 0),
+          0
+        )
+      ),
+    ],
+  }));
 });
 
 /** Short axis label: "14:00" for hourly buckets, "Sep 27" for daily. */
@@ -287,30 +317,27 @@ const chartOptions = computed(() =>
 <template>
   <section class="flex flex-col">
     <!-- Section header row (toolbar-style, hairline beneath) -->
-    <div class="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/60">
-      <h2 class="flex items-center gap-1.5 text-sm md:text-base font-semibold text-foreground">
+    <div
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 sm:px-6 py-3 border-b border-border/60"
+    >
+      <h2
+        class="flex items-center gap-1.5 text-sm md:text-base font-semibold text-foreground min-w-0"
+      >
         <TrendingUp class="w-4 h-4 text-action-amber" />
         {{ t("home.usageTrends") }}
       </h2>
 
-      <div class="flex items-center gap-2">
-        <!-- Monochrome segmented chart-type toggle (replaces per-type rainbow tabs) -->
-        <div class="inline-flex items-center rounded-md border border-border/60 bg-muted/40 p-0.5">
-          <button
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <SegmentedControl :aria-label="t('home.usageTrends')" size="sm">
+          <SegmentedControlItem
             v-for="opt in ['requests', 'cost', 'tokens'] as const"
             :key="opt"
-            class="px-2.5 py-1 text-xs font-medium rounded-[6px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            :class="
-              chartType === opt
-                ? 'bg-background text-foreground font-semibold shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            :aria-pressed="chartType === opt"
+            :active="chartType === opt"
             @click="chartType = opt"
           >
             {{ chartTypeLabel(opt) }}
-          </button>
-        </div>
+          </SegmentedControlItem>
+        </SegmentedControl>
 
         <!-- Model filter (unchanged behavior) -->
         <Popover v-if="allModels.length > 0">
@@ -424,7 +451,15 @@ const chartOptions = computed(() =>
     <!-- Chart panel (flush, no Card) -->
     <div class="px-4 sm:px-6 pb-4 pt-3">
       <div v-if="series.length > 0" class="relative w-full h-72 md:h-85">
-        <Bar :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
+        <Bar role="img" :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
+        <!-- The canvas becomes one image with a name; the table is what carries
+             the numbers. -->
+        <ChartDataTable
+          :caption="chartAriaLabel"
+          :row-header="t('logs.timestamp')"
+          :columns="[chartTypeLabel(chartType)]"
+          :rows="chartA11yRows"
+        />
       </div>
       <div v-else class="py-12 text-center text-muted-foreground text-sm">
         {{ t("logs.noLogs") }}

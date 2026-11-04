@@ -84,7 +84,7 @@ function onInput(value: string | number | null) {
       @update:model-value="onInput"
     />
     <div
-      class="flex flex-col items-center justify-center border-l border-border/40 h-full px-0.5 gap-0.5"
+      class="flex flex-col items-center justify-center border-l border-border/40 self-stretch px-0.5 gap-0.5 [@media(pointer:coarse)]:hidden"
     >
       <button
         type="button"

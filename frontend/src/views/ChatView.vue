@@ -615,7 +615,61 @@ const handleScroll = useThrottleFn(() => {
   isAutoScroll.value = isNearBottom();
 }, 100);
 
-const { messages, isLoading, sendMessage, clearChat, stopGeneration } = useChat();
+const { messages, isLoading, error, sendMessage, clearChat, stopGeneration } = useChat();
+
+// The stop button aborts the stream, which drops `isLoading` to false without a
+// completed answer; the announcement has to say so instead of "Response
+// complete". Reset on the next run.
+const stopRequested = ref(false);
+
+const handleStopGeneration = () => {
+  stopRequested.value = true;
+  stopGeneration();
+};
+
+const lastAssistantMessage = computed<ChatMessageType | undefined>(() => {
+  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+    const message = messages.value[index];
+    if (message?.role === "assistant") return message;
+  }
+  return undefined;
+});
+
+const messageText = (message: ChatMessageType): string => {
+  const content = message.content;
+  if (typeof content === "string") return content;
+  return content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+};
+
+/** What the live region says about the current turn. */
+const liveStatus = computed(() => {
+  if (isLoading.value) return t("chat.responseInProgress");
+  const last = lastAssistantMessage.value;
+  if (!last) return "";
+  if (error.value || last.failed) return t("chat.responseFailed");
+  if (stopRequested.value) return t("chat.responseStopped");
+  return t("chat.responseComplete");
+});
+
+// The transcript is `aria-live="off"` while tokens stream (and content added
+// during that window is never re-read when the region settles), so a finished
+// answer is announced through its own region instead of relying on the log.
+const announcedAnswer = ref("");
+
+watch(isLoading, (loading, wasLoading) => {
+  if (loading) {
+    stopRequested.value = false;
+    announcedAnswer.value = "";
+    return;
+  }
+  if (!wasLoading) return;
+  const last = lastAssistantMessage.value;
+  if (!last || last.failed || stopRequested.value || error.value) return;
+  announcedAnswer.value = messageText(last).trim();
+});
 
 const isSubmitting = ref(false);
 
@@ -1078,14 +1132,28 @@ watch(
     <div class="brand-main-shell flex-1 flex relative overflow-hidden">
       <!-- Chat Area -->
       <div class="flex-1 flex flex-col overflow-hidden">
+        <!-- One live region owns the announcement. While tokens stream the log
+             region stays `aria-live="off"`: otherwise every appended chunk is
+             announced and a reader hears the answer one token at a time. This
+             says what is happening, and the region below reads the finished
+             answer once. The region is always mounted so it never appears with
+             stale text from a restored transcript. -->
+        <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {{ liveStatus }}
+        </div>
+        <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {{ announcedAnswer }}
+        </div>
+
         <!-- Messages -->
         <div
           ref="messagesContainer"
           class="flex-1 overflow-y-auto px-4 scroll-smooth"
           @scroll="handleScroll"
-          aria-live="polite"
+          aria-live="off"
           aria-atomic="false"
-          aria-label="Chat messages"
+          :aria-busy="isLoading"
+          :aria-label="t('chat.messagesLabel')"
           role="log"
           tabindex="0"
         >
@@ -1310,7 +1378,7 @@ watch(
                         type="button"
                         @click="triggerFileInput"
                         :disabled="selectedEndpoint === '/v1/audio/speech'"
-                        class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        class="touch-target touch-target-square h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         :aria-label="
                           selectedEndpoint === '/v1/audio/speech'
                             ? t('chat.attachmentsNotSupportedForSpeech')
@@ -1333,7 +1401,7 @@ watch(
                       <button
                         type="button"
                         @click="webSearch.enabled = !webSearch.enabled"
-                        class="h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer"
+                        class="touch-target touch-target-square h-8.5 w-8.5 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 shrink-0 cursor-pointer"
                         :class="{
                           'text-foreground bg-muted/40 ring-1 ring-border': webSearch.enabled,
                         }"
@@ -1367,7 +1435,7 @@ watch(
                     v-if="isLoading"
                     type="button"
                     size="icon"
-                    @click="stopGeneration"
+                    @click="handleStopGeneration"
                     class="h-11 w-11 shrink-0 flex items-center justify-center transition-[transform,colors] duration-200 active:scale-95 rounded-md bg-foreground text-background hover:bg-foreground/90"
                     :aria-label="t('chat.stopGeneration')"
                   >

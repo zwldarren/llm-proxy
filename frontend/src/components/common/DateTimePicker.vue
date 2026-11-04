@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CalendarDate, getLocalTimeZone, today } from "@internationalized/date";
 import { Calendar as CalendarIcon, Clock, X } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
@@ -105,43 +105,63 @@ const timeValue = computed<string>({
 // Past dates cannot be picked: an expiry in the past would be dead on arrival.
 const minDate = today(getLocalTimeZone());
 
+const triggerRef = ref<{ $el?: HTMLElement } | HTMLElement | null>(null);
+
+/** Return focus to the field after clearing; the clear button unmounts itself. */
+const focusTrigger = () => {
+  const trigger = triggerRef.value;
+  const element = trigger instanceof HTMLElement ? trigger : trigger?.$el;
+  element?.focus();
+};
+
 const clear = () => {
   emit("update:modelValue", null);
   open.value = false;
+  void nextTick(focusTrigger);
 };
 </script>
 
 <template>
-  <Popover v-model:open="open">
-    <PopoverTrigger as-child>
-      <Button
-        variant="outline"
-        class="w-full justify-start text-left font-normal px-3"
-        :class="{ 'text-muted-foreground': !displayText }"
-        :disabled="disabled"
-      >
-        <CalendarIcon class="mr-2 h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden="true" />
-        <span class="flex-1 truncate font-mono text-xs">{{ displayText ?? placeholder }}</span>
-        <X
-          v-if="displayText && !disabled"
-          class="ml-2 h-3.5 w-3.5 shrink-0 opacity-60 hover:opacity-100 cursor-pointer"
-          :aria-label="clearLabel"
-          @click.stop="clear"
-        />
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent class="w-auto p-0" align="start">
-      <Calendar v-model="calendarValue" :min-value="minDate" />
-      <div class="flex items-center gap-2 border-t border-border/60 px-3 py-2">
-        <Clock class="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden="true" />
-        <Input
-          v-model="timeValue"
-          type="time"
-          class="h-8 font-mono text-xs"
-          :aria-label="timeLabel"
-          :disabled="!localDate"
-        />
-      </div>
-    </PopoverContent>
-  </Popover>
+  <div class="relative w-full">
+    <Popover v-model:open="open">
+      <PopoverTrigger as-child>
+        <Button
+          ref="triggerRef"
+          variant="outline"
+          class="w-full justify-start text-left font-normal px-3 pr-9 [@media(any-pointer:coarse)]:pr-12"
+          :class="{ 'text-muted-foreground': !displayText }"
+          :disabled="disabled"
+        >
+          <CalendarIcon class="mr-2 h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden="true" />
+          <span class="flex-1 truncate font-mono text-xs">{{ displayText ?? placeholder }}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent class="w-auto p-0" align="start">
+        <Calendar v-model="calendarValue" :min-value="minDate" />
+        <div class="flex items-center gap-2 border-t border-border/60 px-3 py-2">
+          <Clock class="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden="true" />
+          <Input
+            v-model="timeValue"
+            type="time"
+            class="h-8 font-mono text-xs"
+            :aria-label="timeLabel"
+            :disabled="!localDate"
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+
+    <!-- Clear is a real sibling button, not an icon nested inside the trigger:
+         a click handler on an <svg> is pointer-only (no tab stop, no Enter, no
+         Space) and its aria-label is dropped because a bare SVG has no role. -->
+    <button
+      v-if="displayText && !disabled"
+      type="button"
+      class="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors touch-target touch-target-square hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+      :aria-label="clearLabel"
+      @click.stop="clear"
+    >
+      <X class="size-3.5" aria-hidden="true" />
+    </button>
+  </div>
 </template>

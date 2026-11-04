@@ -13,11 +13,12 @@ import {
   RotateCcw,
 } from "@lucide/vue";
 import MarkdownIt from "markdown-it";
-import { computed, ref, onUnmounted, watch } from "vue";
+import { computed, nextTick, ref, onUnmounted, watch } from "vue";
 import { highlightCode } from "@/utils/highlighter";
 import { useI18n } from "vue-i18n";
 
 import type { ChatMessage } from "@/types/schemas";
+import { vInertBackground } from "@/components/ui/dialog/inertBackground";
 import { sanitizeMarkdownHtml } from "@/utils/sanitize";
 import { useChatStore } from "@/stores/chat";
 import { csrfHeaders } from "@/services/csrf";
@@ -27,11 +28,18 @@ import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { copyToClipboard } from "@/utils/clipboard";
 
 const previewImageUrl = ref<string | null>(null);
+// The element that opened the lightbox, so focus can come back to it: the
+// scrim covers the page and nothing else would return the caret.
+let lightboxOpener: HTMLElement | null = null;
 const openImageModal = (url: string) => {
+  lightboxOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   previewImageUrl.value = url;
 };
 const closeImageModal = () => {
   previewImageUrl.value = null;
+  const opener = lightboxOpener;
+  lightboxOpener = null;
+  void nextTick(() => opener?.focus());
 };
 
 const props = defineProps<{
@@ -42,13 +50,49 @@ const emit = defineEmits<{
   (e: "retry", message: ChatMessage): void;
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+
+/**
+ * The author label is user-facing text, so it is translated. It also names the
+ * per-message group below: a scroll region full of unnamed groups is a
+ * tab-stop maze for a screen reader.
+ */
+const roleLabel = computed(() =>
+  props.message.role === "user"
+    ? t("chat.roleHuman")
+    : props.message.role === "tool"
+      ? t("chat.roleTool")
+      : t("chat.roleModel")
+);
+
+/** Escape closes the lightbox — a modal surface needs a keyboard exit. */
+const onLightboxKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Escape") closeImageModal();
+};
+
+const lightboxClose = ref<HTMLButtonElement | null>(null);
+
+watch(previewImageUrl, (url) => {
+  if (url) {
+    window.addEventListener("keydown", onLightboxKeydown);
+    // Move focus into the surface that just covered the page, so the next Tab
+    // does not land somewhere behind the scrim.
+    void nextTick(() => lightboxClose.value?.focus());
+  } else {
+    window.removeEventListener("keydown", onLightboxKeydown);
+  }
+});
+
+onUnmounted(() => window.removeEventListener("keydown", onLightboxKeydown));
 
 const md = new MarkdownIt({
   html: true,
   linkify: true,
   breaks: true,
 });
+
+const escapeAttr = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const renderCodeBlock = (code: string, lang: string) => {
   // Escape HTML to prevent injection issues in code content
@@ -65,10 +109,10 @@ const renderCodeBlock = (code: string, lang: string) => {
   return `<div class="code-block-wrapper my-4 overflow-hidden rounded-xl border border-code-border bg-code-bg font-mono">
   <div class="flex items-center justify-between px-4 py-2 border-b border-code-border bg-code-header-bg text-xs text-muted-foreground select-none">
     <span class="font-medium lowercase">${langLabel}</span>
-    <button type="button" class="code-copy-btn flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer max-sm:min-h-11 max-sm:px-3" aria-label="Copy code">
+    <button type="button" class="code-copy-btn flex items-center gap-1 min-h-6 px-2 rounded hover:text-foreground transition-colors cursor-pointer max-sm:min-h-11 max-sm:px-3" aria-label="${escapeAttr(t("chat.copyCode"))}">
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="copy-icon"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="check-icon hidden text-status-success"><polyline points="20 6 9 17 4 12"/></svg>
-      <span class="copy-text text-[11px] font-sans">Copy</span>
+      <span class="copy-text text-[11px] font-sans">${escapeAttr(t("common.copy"))}</span>
     </button>
   </div>
   <pre class="p-4 overflow-x-auto text-[13px] leading-relaxed text-foreground/90"><code class="language-${langLabel}">${highlighted}</code></pre>
@@ -85,9 +129,6 @@ md.renderer.rules.code_block = (tokens, idx) => {
   const token = tokens[idx];
   return renderCodeBlock(token.content, "");
 };
-
-const escapeAttr = (value: string) =>
-  value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // Markdown images are zoomable. Wrap the rendered image element in a real
 // button so the lightbox stays reachable by keyboard (the same pattern
@@ -286,6 +327,11 @@ watch(
     if (!loading) renderFull();
   }
 );
+
+// The rendered HTML carries translated chrome (the code block's copy label), so
+// a locale switch has to rebuild it; otherwise the block keeps the old language
+// until the message streams again.
+watch(locale, () => renderFull());
 
 const isTtsLoading = ref(false);
 const isCopied = ref(false);
@@ -497,6 +543,8 @@ const handleReadAloud = async () => {
   <div
     class="flex flex-col gap-3 group py-6 border-b border-border/20 last:border-0 relative outline-none focus-visible:ring-1 focus-visible:ring-border/50"
     tabindex="0"
+    role="group"
+    :aria-label="roleLabel"
   >
     <!-- Header: Meta & Actions -->
     <div class="flex items-center justify-between">
@@ -509,7 +557,7 @@ const handleReadAloud = async () => {
           'text-action-amber': message.role === 'tool',
         }"
       >
-        {{ message.role === "user" ? "Human" : message.role === "tool" ? "Tool" : "Model" }}
+        {{ roleLabel }}
       </span>
 
       <!-- Actions (Visible on hover; always visible on touch devices) -->
@@ -520,8 +568,12 @@ const handleReadAloud = async () => {
         <button
           type="button"
           @click="handleReadAloud"
-          class="p-1.5 rounded-md hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors relative group/btn flex items-center justify-center"
-          :aria-label="chatStore.currentlyPlayingId === message.id ? 'Stop' : 'Read Aloud'"
+          class="touch-target touch-target-square p-1.5 rounded-md hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors relative group/btn flex items-center justify-center"
+          :aria-label="
+            chatStore.currentlyPlayingId === message.id
+              ? t('chat.stopReading')
+              : t('chat.readAloud')
+          "
         >
           <Loader2 v-if="isTtsLoading" class="w-3.5 h-3.5 animate-spin text-primary" />
           <VolumeX
@@ -531,13 +583,14 @@ const handleReadAloud = async () => {
           <Volume2 v-else class="w-3.5 h-3.5" />
           <span
             class="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[11px] px-2 py-0.5 rounded-md shadow-sm opacity-0 group-hover/btn:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-border z-10 hidden sm:block font-mono"
+            aria-hidden="true"
           >
             {{
               chatStore.currentlyPlayingId === message.id
-                ? "Stop"
+                ? t("chat.stopReading")
                 : isTtsLoading
-                  ? "Generating..."
-                  : "Read Aloud"
+                  ? t("chat.generatingSpeech")
+                  : t("chat.readAloud")
             }}
           </span>
         </button>
@@ -545,22 +598,23 @@ const handleReadAloud = async () => {
         <button
           type="button"
           @click="handleCopy"
-          class="p-1.5 rounded-md hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors relative group/btn flex items-center justify-center"
-          aria-label="Copy message"
+          class="touch-target touch-target-square p-1.5 rounded-md hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors relative group/btn flex items-center justify-center"
+          :aria-label="t('chat.copyMessage')"
         >
           <Check v-if="isCopied" class="w-3.5 h-3.5 text-status-success" />
           <Copy v-else class="w-3.5 h-3.5" />
           <span
             class="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[11px] px-2 py-0.5 rounded-md shadow-sm opacity-0 group-hover/btn:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-border z-10 hidden sm:block font-mono"
+            aria-hidden="true"
           >
-            {{ isCopied ? "Copied!" : "Copy" }}
+            {{ isCopied ? t("common.copied") : t("common.copy") }}
           </span>
         </button>
 
         <button
           type="button"
           @click="emit('retry', message)"
-          class="p-1.5 rounded-md hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors relative group/btn flex items-center justify-center"
+          class="touch-target touch-target-square p-1.5 rounded-md hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors relative group/btn flex items-center justify-center"
           :aria-label="t('chat.retry')"
         >
           <RotateCcw class="w-3.5 h-3.5" />
@@ -600,15 +654,17 @@ const handleReadAloud = async () => {
           class="w-full rounded-md border border-border/40 bg-muted/5 p-3"
         >
           <button
+            type="button"
             @click="isThinkingExpanded = !isThinkingExpanded"
+            :aria-expanded="isThinkingExpanded"
             class="flex items-center gap-2 text-[11px] font-mono tracking-widest transition-colors w-full text-left uppercase text-muted-foreground hover:text-foreground"
           >
-            <Brain class="w-3 h-3 text-action-violet animate-pulse" />
-            <span>Reasoning Trace</span>
+            <Brain class="w-3 h-3 text-action-violet animate-pulse" aria-hidden="true" />
+            <span>{{ t("chat.reasoningTrace") }}</span>
             <span class="opacity-50 lowercase ml-2"
-              >({{ message.reasoning_content?.length || 0 }} chars)</span
+              >({{ t("chat.charCount", { count: message.reasoning_content?.length || 0 }) }})</span
             >
-            <span class="ml-auto">{{ isThinkingExpanded ? "[-]" : "[+]" }}</span>
+            <span class="ml-auto" aria-hidden="true">{{ isThinkingExpanded ? "[-]" : "[+]" }}</span>
           </button>
           <div
             v-if="isThinkingExpanded"
@@ -621,13 +677,17 @@ const handleReadAloud = async () => {
         <!-- Tool Calls Traces -->
         <div v-if="hasToolCalls" class="w-full rounded-md border border-border/40 bg-muted/5 p-3">
           <button
+            type="button"
             @click="isToolCallsExpanded = !isToolCallsExpanded"
+            :aria-expanded="isToolCallsExpanded"
             class="flex items-center gap-2 text-[11px] font-mono tracking-widest transition-colors w-full text-left uppercase text-muted-foreground hover:text-foreground"
           >
-            <Wrench class="w-3 h-3 text-action-blue" />
-            <span>Tool Calls</span>
+            <Wrench class="w-3 h-3 text-action-blue" aria-hidden="true" />
+            <span>{{ t("chat.toolCalls") }}</span>
             <span class="opacity-50 lowercase ml-2">({{ activeToolCalls.length }})</span>
-            <span class="ml-auto">{{ isToolCallsExpanded ? "[-]" : "[+]" }}</span>
+            <span class="ml-auto" aria-hidden="true">{{
+              isToolCallsExpanded ? "[-]" : "[+]"
+            }}</span>
           </button>
           <div v-if="isToolCallsExpanded" class="mt-3 space-y-3 pt-3 border-t border-border/40">
             <div v-for="(toolCall, index) in activeToolCalls" :key="toolCall.id ?? `tool-${index}`">
@@ -647,10 +707,15 @@ const handleReadAloud = async () => {
           class="w-full rounded-md border border-border/40 bg-muted/5 p-3"
         >
           <button
+            type="button"
             @click="isToolCallsExpanded = !isToolCallsExpanded"
+            :aria-expanded="isToolCallsExpanded"
             class="flex items-center gap-2 text-[11px] font-mono tracking-widest transition-colors w-full text-left uppercase text-muted-foreground hover:text-foreground"
           >
-            <span class="w-3 h-3 flex items-center justify-center text-action-blue">
+            <span
+              class="w-3 h-3 flex items-center justify-center text-action-blue"
+              aria-hidden="true"
+            >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
@@ -666,8 +731,10 @@ const handleReadAloud = async () => {
                 <path d="M2 12h20" />
               </svg>
             </span>
-            <span>Web Search</span>
-            <span class="ml-auto">{{ isToolCallsExpanded ? "[-]" : "[+]" }}</span>
+            <span>{{ t("chat.webSearch") }}</span>
+            <span class="ml-auto" aria-hidden="true">{{
+              isToolCallsExpanded ? "[-]" : "[+]"
+            }}</span>
           </button>
           <div v-if="isToolCallsExpanded" class="mt-3 space-y-3 pt-3 border-t border-border/40">
             <div
@@ -681,9 +748,11 @@ const handleReadAloud = async () => {
                 <span
                   v-if="call.status === 'in_progress'"
                   class="text-[11px] font-mono text-action-amber animate-pulse"
-                  >SEARCHING</span
+                  >{{ t("chat.searching") }}</span
                 >
-                <span v-else class="text-[11px] font-mono text-status-success">COMPLETED</span>
+                <span v-else class="text-[11px] font-mono text-status-success">{{
+                  t("chat.completed")
+                }}</span>
               </div>
               <div class="text-xs font-mono text-muted-foreground pl-2">"{{ call.query }}"</div>
             </div>
@@ -696,13 +765,17 @@ const handleReadAloud = async () => {
           class="w-full rounded-md border border-border/40 bg-muted/5 p-3"
         >
           <button
+            type="button"
             @click="isToolCallsExpanded = !isToolCallsExpanded"
+            :aria-expanded="isToolCallsExpanded"
             class="flex items-center gap-2 text-[11px] font-mono tracking-widest transition-colors w-full text-left uppercase text-muted-foreground hover:text-foreground"
           >
-            <Wrench class="w-3 h-3 text-action-blue" />
-            <span>Tool Use</span>
+            <Wrench class="w-3 h-3 text-action-blue" aria-hidden="true" />
+            <span>{{ t("chat.toolUse") }}</span>
             <span class="opacity-50 lowercase ml-2">({{ toolUseCalls.length }})</span>
-            <span class="ml-auto">{{ isToolCallsExpanded ? "[-]" : "[+]" }}</span>
+            <span class="ml-auto" aria-hidden="true">{{
+              isToolCallsExpanded ? "[-]" : "[+]"
+            }}</span>
           </button>
           <div v-if="isToolCallsExpanded" class="mt-3 space-y-3 pt-3 border-t border-border/40">
             <div v-for="(toolUse, index) in toolUseCalls" :key="toolUse.id ?? `tooluse-${index}`">
@@ -791,7 +864,7 @@ const handleReadAloud = async () => {
           <button
             type="button"
             @click="emit('retry', message)"
-            class="shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md border border-status-error/40 text-status-error text-xs font-medium hover:bg-status-error/10 transition-colors cursor-pointer"
+            class="touch-target shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md border border-status-error/40 text-status-error text-xs font-medium hover:bg-status-error/10 transition-colors cursor-pointer"
             :aria-label="t('chat.retry')"
           >
             <RotateCcw class="w-3.5 h-3.5" />
@@ -850,15 +923,21 @@ const handleReadAloud = async () => {
     <Teleport to="body">
       <div
         v-if="previewImageUrl"
+        v-inert-background
         class="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm p-4 transition-all duration-300 animate-in fade-in"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('chat.imagePreviewAlt')"
         @click.stop="closeImageModal"
       >
         <button
+          ref="lightboxClose"
           type="button"
           class="absolute top-6 right-6 text-muted-foreground hover:text-foreground p-2 transition-colors cursor-pointer"
+          :aria-label="t('common.close')"
           @click.stop="closeImageModal"
         >
-          <X class="w-6 h-6" />
+          <X class="w-6 h-6" aria-hidden="true" />
         </button>
         <img
           :src="previewImageUrl"

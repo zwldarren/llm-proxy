@@ -58,6 +58,7 @@ const options: StrategyOption[] = [
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('providerSelection.title')"
     :icon="Waypoints"
     :description="t('providerSelection.description')"

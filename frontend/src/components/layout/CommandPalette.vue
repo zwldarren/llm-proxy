@@ -195,11 +195,28 @@ const move = (delta: number) => {
   el?.scrollIntoView({ block: "nearest" });
 };
 
-const runActive = () => {
-  const cmd = filtered.value[activeIndex.value];
-  if (!cmd) return;
+const setActive = (index: number) => {
+  // `End` on an empty result set (log suggestions are still loading) would store
+  // -1 and survive the async resolution: the list then becomes non-empty while
+  // the query is unchanged, leaving no highlighted row and a dangling
+  // aria-activedescendant.
+  if (index < 0 || index >= filtered.value.length) return;
+  // pointermove fires continuously; re-scrolling on every pass would fight the
+  // user's own scroll.
+  if (index === activeIndex.value) return;
+  activeIndex.value = index;
+  const el = document.querySelector<HTMLElement>(`[data-cmd-index="${index}"]`);
+  el?.scrollIntoView({ block: "nearest" });
+};
+
+const runCommand = (cmd: Command) => {
   open.value = false;
   cmd.run();
+};
+
+const runActive = () => {
+  const cmd = filtered.value[activeIndex.value];
+  if (cmd) runCommand(cmd);
 };
 
 const onKeydown = (e: KeyboardEvent) => {
@@ -209,6 +226,14 @@ const onKeydown = (e: KeyboardEvent) => {
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     move(-1);
+  } else if (e.key === "Home" && (e.ctrlKey || e.metaKey)) {
+    // Focus stays in the search field, so a bare Home/End belongs to the caret;
+    // only the modified jump targets the option list.
+    e.preventDefault();
+    setActive(0);
+  } else if (e.key === "End" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    setActive(filtered.value.length - 1);
   } else if (e.key === "Enter") {
     e.preventDefault();
     runActive();
@@ -228,22 +253,30 @@ whenever(keys["meta_k"], () => {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent
-      class="sm:max-w-xl p-0 gap-0 overflow-hidden top-[20%] translate-y-0 block"
-      @keydown="onKeydown"
-    >
-      <DialogTitle class="sr-only">{{ t("nav.commandPalette") }}</DialogTitle>
-      <DialogDescription class="sr-only">{{
+    <DialogContent size="xl" layout="flush" variant="palette" @keydown="onKeydown">
+      <DialogTitle id="command-palette-title" class="sr-only">{{
+        t("nav.commandPalette")
+      }}</DialogTitle>
+      <DialogDescription id="command-palette-description" class="sr-only">{{
         t("nav.commandPaletteDescription")
       }}</DialogDescription>
 
       <!-- Search field -->
       <div class="flex items-center gap-2.5 px-3.5 h-13 border-b border-border/60">
-        <Search class="size-4 text-muted-foreground shrink-0" />
+        <Search class="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
         <input
           ref="inputEl"
           v-model="query"
           type="text"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="command-palette-list"
+          aria-autocomplete="list"
+          :aria-activedescendant="
+            filtered.length > 0 ? `command-palette-option-${activeIndex}` : undefined
+          "
+          aria-labelledby="command-palette-title"
+          aria-describedby="command-palette-description"
           :placeholder="t('nav.commandPalettePlaceholder')"
           class="flex-1 bg-transparent outline-none text-sm text-foreground placeholder:text-muted-foreground/70"
           autocomplete="off"
@@ -256,8 +289,16 @@ whenever(keys["meta_k"], () => {
         </kbd>
       </div>
 
-      <!-- Results -->
-      <div class="max-h-80 overflow-y-auto py-1.5">
+      <!-- Results. A listbox driven by a roving aria-activedescendant, not a
+           stack of buttons: focus stays in the input, and ↑/↓/Home/End move the
+           selection the way a combobox is expected to behave. -->
+      <div
+        id="command-palette-list"
+        role="listbox"
+        aria-labelledby="command-palette-title"
+        :aria-busy="loadingLogs"
+        class="max-h-80 overflow-y-auto py-1.5"
+      >
         <div
           v-if="filtered.length === 0"
           class="px-4 py-8 text-center text-sm text-muted-foreground"
@@ -265,19 +306,21 @@ whenever(keys["meta_k"], () => {
           {{ t("common.noResults") }}
         </div>
         <template v-else>
-          <button
+          <div
             v-for="(cmd, idx) in filtered"
+            :id="`command-palette-option-${idx}`"
             :key="cmd.id"
-            type="button"
+            role="option"
+            :aria-selected="idx === activeIndex"
             :data-cmd-index="idx"
-            class="flex w-full items-center gap-3 px-3.5 py-2 text-left text-sm transition-colors outline-none"
+            class="flex w-full items-center gap-3 px-3.5 py-2 text-left text-sm transition-colors outline-none cursor-pointer"
             :class="
               idx === activeIndex
                 ? 'bg-muted/60 text-foreground'
                 : 'text-foreground/80 hover:bg-muted/40'
             "
-            @mousemove="activeIndex = idx"
-            @click="runActive"
+            @pointermove="setActive(idx)"
+            @click="runCommand(cmd)"
           >
             <span class="flex-1 min-w-0">
               <span class="block truncate font-medium">{{ cmd.label }}</span>
@@ -289,11 +332,17 @@ whenever(keys["meta_k"], () => {
               </span>
             </span>
             <span class="text-[11px] text-muted-foreground shrink-0">{{ cmd.group }}</span>
-          </button>
+          </div>
         </template>
         <div v-if="loadingLogs" class="px-4 py-2 text-[11px] text-muted-foreground">
           {{ t("common.loading") }}…
         </div>
+      </div>
+
+      <!-- The result count is the palette's only live output: announcing rows
+           individually would talk over the query the operator is typing. -->
+      <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {{ t("nav.commandPaletteResultCount", { count: filtered.length }) }}
       </div>
 
       <!-- Footer hint -->

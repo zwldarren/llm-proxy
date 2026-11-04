@@ -95,6 +95,7 @@ const {
   newPassword,
   confirmPassword,
   error: passwordError,
+  errorField: passwordErrorField,
   loading: savingPassword,
   passwordHint,
   submit: submitPasswordForm,
@@ -568,6 +569,10 @@ function formatDate(value: string): string {
                 v-model="currentPassword"
                 type="password"
                 autocomplete="current-password"
+                :aria-invalid="passwordErrorField === 'current'"
+                :aria-describedby="
+                  passwordErrorField === 'current' ? 'security-password-error' : undefined
+                "
               />
             </div>
             <div class="flex flex-col gap-2">
@@ -577,6 +582,10 @@ function formatDate(value: string): string {
                 v-model="newPassword"
                 type="password"
                 autocomplete="new-password"
+                :aria-invalid="passwordErrorField === 'new'"
+                :aria-describedby="
+                  passwordErrorField === 'new' ? 'security-password-error' : undefined
+                "
               />
             </div>
             <div class="flex flex-col gap-2">
@@ -586,11 +595,22 @@ function formatDate(value: string): string {
                 v-model="confirmPassword"
                 type="password"
                 autocomplete="new-password"
+                :aria-invalid="passwordErrorField === 'confirm'"
+                :aria-describedby="
+                  passwordErrorField === 'confirm' ? 'security-password-error' : undefined
+                "
               />
             </div>
           </div>
           <p class="text-xs text-muted-foreground">{{ passwordHint }}</p>
-          <p v-if="passwordError" class="text-xs text-destructive">{{ passwordError }}</p>
+          <p
+            v-if="passwordError"
+            id="security-password-error"
+            role="alert"
+            class="text-xs text-destructive"
+          >
+            {{ passwordError }}
+          </p>
           <p v-else-if="!hasPassword" class="text-xs text-muted-foreground">
             {{ t("accountSecurity.stepUpRequired") }}
           </p>

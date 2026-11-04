@@ -1,7 +1,7 @@
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { meApi } from "@/services/api/me";
-import { getErrorMessage } from "@/utils/error";
+import { apiErrorCode, getErrorMessage } from "@/utils/error";
 import { passwordRequirementsText, validatePasswordStrength } from "@/utils/password";
 
 interface ChangePasswordOptions {
@@ -21,6 +21,8 @@ interface ChangePasswordOptions {
  * caller decides what happens on success (end the session and redirect); the
  * form only reports whether the change landed.
  */
+export type PasswordErrorField = "current" | "new" | "confirm" | null;
+
 export function useChangePassword(options: ChangePasswordOptions = {}) {
   const { t } = useI18n();
 
@@ -28,6 +30,9 @@ export function useChangePassword(options: ChangePasswordOptions = {}) {
   const newPassword = ref("");
   const confirmPassword = ref("");
   const error = ref("");
+  // Which field the message belongs to, so the form can mark (and describe)
+  // the input the user has to fix instead of all three.
+  const errorField = ref<PasswordErrorField>(null);
   const loading = ref(false);
   const passwordHint = passwordRequirementsText();
 
@@ -38,6 +43,7 @@ export function useChangePassword(options: ChangePasswordOptions = {}) {
     newPassword.value = "";
     confirmPassword.value = "";
     error.value = "";
+    errorField.value = null;
     loading.value = false;
   }
 
@@ -50,23 +56,28 @@ export function useChangePassword(options: ChangePasswordOptions = {}) {
 
     if (needsCurrentPassword && !currentPassword.value) {
       error.value = t("profile.passwordRequired");
+      errorField.value = "current";
       return false;
     }
     if (newPassword.value.length < 8) {
       error.value = t("auth.passwordTooShort");
+      errorField.value = "new";
       return false;
     }
     if (newPassword.value !== confirmPassword.value) {
       error.value = t("profile.passwordMismatch");
+      errorField.value = "confirm";
       return false;
     }
     const strengthError = validatePasswordStrength(newPassword.value);
     if (strengthError) {
       error.value = strengthError;
+      errorField.value = "new";
       return false;
     }
 
     error.value = "";
+    errorField.value = null;
     loading.value = true;
     try {
       await meApi.changePassword(
@@ -76,6 +87,11 @@ export function useChangePassword(options: ChangePasswordOptions = {}) {
       return true;
     } catch (e: unknown) {
       error.value = getErrorMessage(e) || t("errors.saveFailed");
+      // The backend rejects a wrong current password (or a missing step-up) on
+      // this call; point the message at the field that can fix it.
+      const code = apiErrorCode(e);
+      errorField.value =
+        code === "invalid_current_password" || code === "step_up_required" ? "current" : null;
       return false;
     } finally {
       loading.value = false;
@@ -87,6 +103,7 @@ export function useChangePassword(options: ChangePasswordOptions = {}) {
     newPassword,
     confirmPassword,
     error,
+    errorField,
     loading,
     passwordHint,
     reset,

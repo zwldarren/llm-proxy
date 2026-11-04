@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import { Plus, Trash2, Code2, ListTree } from "@lucide/vue";
 import type { ParameterOverridesConfig } from "@/types/parameterOverrides";
 
@@ -110,26 +111,16 @@ const getSimpleValueDisplay = (value: unknown): string => {
   <div class="space-y-3">
     <!-- View Mode Toggle -->
     <div class="flex items-center justify-between">
-      <div class="flex items-center gap-1 bg-muted rounded-md p-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          :class="['h-7 px-2 text-xs', viewMode === 'visual' && 'bg-background shadow-sm']"
-          @click="viewMode = 'visual'"
-        >
-          <ListTree class="w-3.5 h-3.5 mr-1" />
+      <SegmentedControl :aria-label="t('parameterOverrides.viewMode')" size="sm">
+        <SegmentedControlItem :active="viewMode === 'visual'" @click="viewMode = 'visual'">
+          <ListTree class="w-3.5 h-3.5" />
           {{ t("parameterOverrides.visualView") }}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          :class="['h-7 px-2 text-xs', viewMode === 'json' && 'bg-background shadow-sm']"
-          @click="viewMode = 'json'"
-        >
-          <Code2 class="w-3.5 h-3.5 mr-1" />
+        </SegmentedControlItem>
+        <SegmentedControlItem :active="viewMode === 'json'" @click="viewMode = 'json'">
+          <Code2 class="w-3.5 h-3.5" />
           {{ t("parameterOverrides.jsonView") }}
-        </Button>
-      </div>
+        </SegmentedControlItem>
+      </SegmentedControl>
       <Button
         v-if="viewMode === 'visual'"
         variant="outline"

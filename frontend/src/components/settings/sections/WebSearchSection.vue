@@ -68,6 +68,7 @@ watch(
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('settings.webSearch')"
     :icon="Search"
     :description="t('settings.webSearchDescription')"

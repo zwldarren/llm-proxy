@@ -9,6 +9,12 @@ interface Props {
   httpMethod?: string;
   /** Set the slot in the mono voice (IBM Plex Mono, tabular-nums) for numeric/technical tokens. */
   mono?: boolean;
+  /**
+   * Announce the label as a live status. Off by default: repeated labels (log
+   * rows, tables) would fire a live region per instance on every poll. Turn it
+   * on where the badge is the only status signal on screen.
+   */
+  live?: boolean;
   class?: string;
 }
 
@@ -16,6 +22,7 @@ const props = withDefaults(defineProps<Props>(), {
   variant: "default",
   status: "unknown",
   mono: false,
+  live: false,
   class: "",
 });
 
@@ -61,10 +68,14 @@ const monoClasses = computed(() =>
 </script>
 
 <template>
+  <!-- A static tinted label by default, not a live region: a log table renders
+       these by the hundred, and `role="status"` would announce every one of
+       them on each page or poll. Pass `live` where the badge is the only
+       status signal (e.g. the playground run state). -->
   <Badge
     variant="outline"
+    :role="live ? 'status' : undefined"
     :class="cn(statusClasses, 'px-2 py-0.5 text-xs max-w-full', monoClasses, props.class)"
-    role="status"
   >
     <span class="truncate"><slot /></span>
   </Badge>

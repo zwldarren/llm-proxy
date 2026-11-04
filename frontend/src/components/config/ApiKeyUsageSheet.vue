@@ -3,10 +3,9 @@ import { AlertTriangle, BarChart3, Gauge, Inbox } from "@lucide/vue";
 import { computed, defineAsyncComponent, defineComponent, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
-import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiKeysApi, type ApiKeyRead, type ApiKeyUsageResponse } from "@/services/api/apiKeys";
 import { useApiKeyStore } from "@/stores/apiKeys";
@@ -187,14 +186,12 @@ const modelRows = computed(() => {
 
 <template>
   <Sheet v-model:open="open">
-    <SheetContent
-      side="right"
-      class="w-full sm:max-w-[640px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-    >
-      <SheetHeaderBand :icon="BarChart3">
-        <template #title>{{ t("apiKeys.usageTitle") }}</template>
-        <template #description>{{ apiKey?.name ?? "" }}</template>
-      </SheetHeaderBand>
+    <SheetContent side="right" size="xl">
+      <SheetHeader
+        :icon="BarChart3"
+        :title="t('apiKeys.usageTitle')"
+        :description="apiKey?.name ?? ''"
+      />
 
       <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-5">
         <!-- Range selector (matches dashboard preset buttons) -->

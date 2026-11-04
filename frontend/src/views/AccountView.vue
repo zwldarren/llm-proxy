@@ -22,18 +22,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { meApi, type MeBudget, type MeProfile } from "@/services/api/me";
 import { HttpError } from "@/services/http";
 import { useAuthStore } from "@/stores/auth";
-import { getErrorMessage } from "@/utils/error";
+import { apiErrorCode, getErrorMessage } from "@/utils/error";
 
 const { t, locale } = useI18n();
 const authStore = useAuthStore();
@@ -51,6 +44,9 @@ const showUsernameDialog = ref(false);
 const usernameNew = ref("");
 const usernamePassword = ref("");
 const usernameError = ref("");
+// Which input the message belongs to: a wrong current password must not mark the
+// username field invalid (and vice versa).
+const usernameErrorField = ref<"username" | "password">("username");
 const savingUsername = ref(false);
 
 const showEmailDialog = ref(false);
@@ -99,11 +95,13 @@ function openUsernameDialog() {
   usernameNew.value = "";
   usernamePassword.value = "";
   usernameError.value = "";
+  usernameErrorField.value = "username";
   showUsernameDialog.value = true;
 }
 
 async function changeUsername() {
   usernameError.value = "";
+  usernameErrorField.value = "username";
   const newName = usernameNew.value.trim();
 
   if (!newName || newName.length > 64 || !/^[a-zA-Z0-9_-]+$/.test(newName)) {
@@ -116,6 +114,7 @@ async function changeUsername() {
   }
   if (hasPassword.value && !usernamePassword.value) {
     usernameError.value = t("profile.passwordRequired");
+    usernameErrorField.value = "password";
     return;
   }
 
@@ -136,6 +135,10 @@ async function changeUsername() {
       usernameError.value = t("profile.usernameTaken");
     } else {
       usernameError.value = getErrorMessage(e) || t("errors.saveFailed");
+      const code = apiErrorCode(e);
+      if (code === "invalid_current_password" || code === "step_up_required") {
+        usernameErrorField.value = "password";
+      }
     }
   } finally {
     savingUsername.value = false;
@@ -374,11 +377,11 @@ function authMethodLabel(method: string): string {
 
     <!-- Change username -->
     <Dialog v-model:open="showUsernameDialog">
-      <DialogContent class="brand-panel">
-        <DialogHeader>
-          <DialogTitle>{{ t("profile.changeUsername") }}</DialogTitle>
-          <DialogDescription>{{ t("profile.changeUsernameDescription") }}</DialogDescription>
-        </DialogHeader>
+      <DialogContent>
+        <DialogHeader
+          :title="t('profile.changeUsername')"
+          :description="t('profile.changeUsernameDescription')"
+        />
         <form class="flex flex-col gap-4 py-2" @submit.prevent="changeUsername">
           <div class="flex flex-col gap-2">
             <Label for="account-new-username">{{ t("profile.newUsername") }}</Label>
@@ -387,6 +390,12 @@ function authMethodLabel(method: string): string {
               v-model="usernameNew"
               :placeholder="profile?.username ?? ''"
               :disabled="savingUsername"
+              :aria-invalid="!!usernameError && usernameErrorField === 'username'"
+              :aria-describedby="
+                usernameError && usernameErrorField === 'username'
+                  ? 'account-username-error'
+                  : undefined
+              "
             />
             <p class="text-xs text-muted-foreground">{{ t("profile.usernameFormatHint") }}</p>
           </div>
@@ -398,12 +407,25 @@ function authMethodLabel(method: string): string {
               type="password"
               autocomplete="current-password"
               :disabled="savingUsername"
+              :aria-invalid="usernameErrorField === 'password' && !!usernameError"
+              :aria-describedby="
+                usernameError && usernameErrorField === 'password'
+                  ? 'account-username-error'
+                  : undefined
+              "
             />
           </div>
           <p v-else class="text-xs text-muted-foreground">
             {{ t("profile.reauthRequired") }}
           </p>
-          <p v-if="usernameError" class="text-xs text-destructive">{{ usernameError }}</p>
+          <p
+            v-if="usernameError"
+            id="account-username-error"
+            role="alert"
+            class="text-xs text-destructive"
+          >
+            {{ usernameError }}
+          </p>
           <DialogFooter>
             <Button
               type="button"
@@ -424,11 +446,11 @@ function authMethodLabel(method: string): string {
 
     <!-- Login email: the address changes only after the verification link is opened. -->
     <Dialog v-model:open="showEmailDialog">
-      <DialogContent class="brand-panel">
-        <DialogHeader>
-          <DialogTitle>{{ t("account.emailTitle") }}</DialogTitle>
-          <DialogDescription>{{ t("accountSecurity.emailHelp") }}</DialogDescription>
-        </DialogHeader>
+      <DialogContent>
+        <DialogHeader
+          :title="t('account.emailTitle')"
+          :description="t('accountSecurity.emailHelp')"
+        />
         <form class="flex flex-col gap-4 py-2" @submit.prevent="sendEmailVerification">
           <div class="flex flex-col gap-2">
             <Label for="account-login-email">{{ t("account.email") }}</Label>

@@ -75,6 +75,7 @@ function formatCooldown(key: string): string {
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('circuitBreaker.title')"
     :icon="Zap"
     :description="t('circuitBreaker.description')"
@@ -137,12 +138,12 @@ function formatCooldown(key: string): string {
           class="px-5.5 py-4 border-b border-border/40 bg-muted/10 flex items-center justify-between gap-4"
         >
           <div class="space-y-0.5">
-            <h4 class="text-sm font-semibold text-foreground">
+            <h3 class="text-sm font-semibold text-foreground">
               {{ t("circuitBreaker.circuits") }}
               <Badge variant="outline" class="ml-1.5 font-mono">
                 {{ sortedCircuits.length }}
               </Badge>
-            </h4>
+            </h3>
             <p class="text-xs text-muted-foreground">
               {{ t("circuitBreaker.circuitsDescription") }}
             </p>

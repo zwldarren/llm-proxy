@@ -70,9 +70,9 @@ const isMono = computed(() => resolveIsMono(props.provider));
       <!-- Name + type + base url (stacked, matching the other list items) -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 min-w-0">
-          <h3 class="text-sm font-medium text-foreground truncate" :title="provider.name">
+          <h2 class="text-sm font-medium text-foreground truncate" :title="provider.name">
             {{ provider.name }}
-          </h3>
+          </h2>
           <Badge variant="secondary" class="text-[11px] uppercase font-medium px-1.5 py-0 shrink-0">
             {{ provider.type }}
           </Badge>

@@ -13,10 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetHeader from "@/components/ui/sheet/SheetHeader.vue";
-import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
-import SheetDescription from "@/components/ui/sheet/SheetDescription.vue";
+import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { type TracingProviderEditor } from "@/composables/useTracingProviders";
 import type { TracingProvider, TracingProviderField } from "@/types/schemas";
@@ -175,17 +172,11 @@ function removeHeader(provider: TracingProvider, field: TracingProviderField, ke
       }
     "
   >
-    <SheetContent
-      class="w-full sm:max-w-[480px] flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-    >
-      <SheetHeader class="px-5 py-4 border-b border-border/60 bg-muted/10 shrink-0 pr-12">
-        <SheetTitle class="text-base font-semibold tracking-tight">
-          {{ t("tracing.editProvider") }}
-        </SheetTitle>
-        <SheetDescription class="text-xs leading-normal">
-          {{ t("tracing.editProviderDescription") }}
-        </SheetDescription>
-      </SheetHeader>
+    <SheetContent side="right" size="md">
+      <SheetHeader
+        :title="t('tracing.editProvider')"
+        :description="t('tracing.editProviderDescription')"
+      />
 
       <div v-if="provider" class="flex-1 overflow-y-auto p-5 space-y-4">
         <!-- Name -->

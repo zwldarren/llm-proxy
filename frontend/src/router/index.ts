@@ -1,11 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { IDLE_PREFETCH_ROUTES, prefetchRouteChunk } from "./prefetch";
 
 // Augment RouteMeta for type-safe meta fields
 declare module "vue-router" {
   interface RouteMeta {
     requiresAuth?: boolean;
     adminOnly?: boolean;
+    /** i18n key for the browser tab title. */
+    titleKey?: string;
   }
 }
 
@@ -16,26 +19,31 @@ const router = createRouter({
       path: "/login",
       name: "login",
       component: () => import("@/views/LoginView.vue"),
+      meta: { titleKey: "auth.loginTitle" },
     },
     {
       path: "/setup",
       name: "setup",
       component: () => import("@/views/SetupView.vue"),
+      meta: { titleKey: "auth.setupTitle" },
     },
     {
       path: "/invite/:token",
       name: "invite",
       component: () => import("@/views/InviteAcceptView.vue"),
+      meta: { titleKey: "auth.inviteTitle" },
     },
     {
       path: "/oauth/complete",
       name: "oauthComplete",
       component: () => import("@/views/OAuthCompleteView.vue"),
+      meta: { titleKey: "auth.oauthTitle" },
     },
     {
       path: "/verify-email",
       name: "verifyEmail",
       component: () => import("@/views/VerifyEmailView.vue"),
+      meta: { titleKey: "accountSecurity.emailVerificationTitle" },
     },
     {
       // Where the emailed reset link lands. The token in the query string is
@@ -43,11 +51,13 @@ const router = createRouter({
       path: "/reset-password",
       name: "resetPassword",
       component: () => import("@/views/ResetPasswordView.vue"),
+      meta: { titleKey: "auth.resetTitle" },
     },
     {
       path: "/forgot-password",
       name: "forgotPassword",
       component: () => import("@/views/ForgotPasswordView.vue"),
+      meta: { titleKey: "auth.forgotTitle" },
     },
     {
       // Forced password change: reachable only while authenticated with the
@@ -56,31 +66,31 @@ const router = createRouter({
       path: "/force-change-password",
       name: "forceChangePassword",
       component: () => import("@/views/ForceChangePasswordView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "auth.forcedPasswordTitle" },
     },
     {
       path: "/",
       name: "home",
       component: () => import("@/views/HomeView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.usage" },
     },
     {
       path: "/chat",
       name: "chat",
       component: () => import("@/views/ChatView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.chat" },
     },
     {
       path: "/images",
       name: "images",
       component: () => import("@/views/ImagesView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.images" },
     },
     {
       path: "/logs",
       name: "logs",
       component: () => import("@/views/LogsView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.logs" },
     },
     {
       // Single models entry point: admins get the management UI, other
@@ -88,13 +98,13 @@ const router = createRouter({
       path: "/models",
       name: "models",
       component: () => import("@/views/ModelsView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.models" },
     },
     {
       path: "/config/providers",
       name: "providers",
       component: () => import("@/views/config/ProvidersView.vue"),
-      meta: { requiresAuth: true, adminOnly: true },
+      meta: { requiresAuth: true, adminOnly: true, titleKey: "nav.providers" },
     },
     {
       // Legacy admin URL kept as a redirect so old bookmarks keep working.
@@ -107,44 +117,44 @@ const router = createRouter({
       component: () => import("@/views/config/SettingsView.vue"),
       // Instance-wide configuration: theme, language and personal tracing moved
       // to the account workspace, so nothing on this page is a member's.
-      meta: { requiresAuth: true, adminOnly: true },
+      meta: { requiresAuth: true, adminOnly: true, titleKey: "nav.settings" },
     },
     {
       path: "/config/console-auth",
       name: "consoleAuth",
       component: () => import("@/views/config/ConsoleAuthView.vue"),
-      meta: { requiresAuth: true, adminOnly: true },
+      meta: { requiresAuth: true, adminOnly: true, titleKey: "nav.consoleAuth" },
     },
 
     {
       path: "/config/api-keys",
       name: "apiKeys",
       component: () => import("@/views/config/ApiKeysView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.apiKeys" },
     },
     {
       path: "/config/mcp-servers",
       name: "mcpServers",
       component: () => import("@/views/config/McpServersView.vue"),
-      meta: { requiresAuth: true, adminOnly: true },
+      meta: { requiresAuth: true, adminOnly: true, titleKey: "nav.mcpServers" },
     },
     {
       path: "/team",
       name: "team",
       component: () => import("@/views/TeamView.vue"),
-      meta: { requiresAuth: true, adminOnly: true },
+      meta: { requiresAuth: true, adminOnly: true, titleKey: "nav.team" },
     },
     {
       path: "/account",
       name: "account",
       component: () => import("@/views/AccountView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.account" },
     },
     {
       path: "/account/security",
       name: "security",
       component: () => import("@/views/SecurityView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.security" },
     },
     {
       // Personal preferences (theme, language, per-user tracing) are an
@@ -152,12 +162,13 @@ const router = createRouter({
       path: "/account/preferences",
       name: "preferences",
       component: () => import("@/views/PreferencesView.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, titleKey: "nav.preferences" },
     },
     {
       path: "/:pathMatch(.*)*",
       name: "notFound",
       component: () => import("@/views/NotFoundView.vue"),
+      meta: { titleKey: "notFound.title" },
     },
   ],
 });
@@ -221,79 +232,17 @@ router.beforeEach(async (to, _from) => {
   }
 });
 
-// Smart preloading based on current route - sequentially prefetch other main pages when idle
-type ViewName =
-  | "HomeView"
-  | "ChatView"
-  | "ImagesView"
-  | "LogsView"
-  | "ModelsView"
-  | "config/ProvidersView"
-  | "config/ApiKeysView"
-  | "config/McpServersView"
-  | "config/SettingsView"
-  | "TeamView";
-
-const VIEW_IMPORTS: Record<ViewName, () => Promise<unknown>> = {
-  HomeView: () => import("@/views/HomeView.vue"),
-  ChatView: () => import("@/views/ChatView.vue"),
-  ImagesView: () => import("@/views/ImagesView.vue"),
-  LogsView: () => import("@/views/LogsView.vue"),
-  ModelsView: async () => {
-    // /models renders a role-switched dispatcher that lazy-loads its inner
-    // view; warm the role-appropriate inner chunk too, or first paint waits
-    // on a second sequential fetch.
-    const authStore = useAuthStore();
-    await Promise.all([
-      import("@/views/ModelsView.vue"),
-      authStore.isAdmin
-        ? import("@/views/config/ModelsView.vue")
-        : import("@/views/ModelPlazaView.vue"),
-    ]);
-  },
-  "config/ProvidersView": () => import("@/views/config/ProvidersView.vue"),
-  "config/ApiKeysView": () => import("@/views/config/ApiKeysView.vue"),
-  "config/McpServersView": () => import("@/views/config/McpServersView.vue"),
-  "config/SettingsView": () => import("@/views/config/SettingsView.vue"),
-  TeamView: () => import("@/views/TeamView.vue"),
-} satisfies Record<ViewName, () => Promise<unknown>>;
-
 router.afterEach((to) => {
   const authStore = useAuthStore();
-  const allViews = [
-    { name: "home", view: "HomeView" },
-    { name: "chat", view: "ChatView" },
-    { name: "images", view: "ImagesView" },
-    { name: "logs", view: "LogsView" },
-    { name: "models", view: "ModelsView" },
-    { name: "providers", view: "config/ProvidersView" },
-    { name: "apiKeys", view: "config/ApiKeysView" },
-    { name: "mcpServers", view: "config/McpServersView" },
-    { name: "settings", view: "config/SettingsView" },
-    { name: "team", view: "TeamView" },
-  ];
 
-  // Define which routes are admin-only
-  const ADMIN_ROUTES: Record<string, true> = {
-    providers: true,
-    mcpServers: true,
-    settings: true,
-    team: true,
-    circuitBreaker: true,
-  };
-
-  // Filter out the page we just navigated to, and admin-only pages for non-admins
-  const viewsToPrefetch = allViews.filter(
-    (v) =>
-      v.name !== to.name && (!Object.hasOwn(ADMIN_ROUTES, v.name as string) || authStore.isAdmin)
+  // Filter out the page we just navigated to, and admin-only pages for non-admins.
+  const routesToPrefetch = IDLE_PREFETCH_ROUTES.filter(
+    (route) => route.name !== to.name && (!route.adminOnly || authStore.isAdmin)
   );
 
-  // Prefetch them sequentially with staggered timeouts when browser is idle
-  viewsToPrefetch.forEach((v, index) => {
-    const importer = VIEW_IMPORTS[v.view];
-    if (importer) {
-      schedulePrefetch(importer, 2000 + index * 1000);
-    }
+  // Stagger the idle work. Each route's own prefetch chains its lazy children.
+  routesToPrefetch.forEach((route, index) => {
+    schedulePrefetch(() => prefetchRouteChunk(route.path), 2000 + index * 1000);
   });
 });
 

@@ -5,14 +5,7 @@ import { useI18n } from "vue-i18n";
 import LoadingState from "@/components/common/LoadingState.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { logsApi } from "@/services/api/logs";
 import type { AuditIntegrityError, AuditIntegrityResult } from "@/types/schemas";
@@ -68,23 +61,14 @@ const errorType = (e: AuditIntegrityError): "warning" | "error" => {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-2xl gap-0 p-0 overflow-hidden border-border/80 bg-card">
+    <DialogContent size="lg" layout="flush">
       <!-- Header -->
       <DialogHeader
-        class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border/60 bg-muted/10 space-y-0"
-      >
-        <DialogTitle class="flex items-center gap-2.5 text-base font-semibold text-foreground">
-          <div
-            class="p-2 rounded-md bg-muted border border-border/40 text-muted-foreground shrink-0 flex items-center justify-center"
-          >
-            <Fingerprint class="size-4" />
-          </div>
-          {{ t("logs.audit.verifyIntegrityTitle") }}
-        </DialogTitle>
-        <DialogDescription class="text-xs text-muted-foreground pt-1">
-          {{ t("logs.audit.verifyIntegrityDescription") }}
-        </DialogDescription>
-      </DialogHeader>
+        variant="band"
+        :icon="Fingerprint"
+        :title="t('logs.audit.verifyIntegrityTitle')"
+        :description="t('logs.audit.verifyIntegrityDescription')"
+      />
 
       <!-- Body -->
       <div class="p-4 sm:p-6 min-h-[180px]">
@@ -196,9 +180,7 @@ const errorType = (e: AuditIntegrityError): "warning" | "error" => {
       </div>
 
       <!-- Footer -->
-      <DialogFooter
-        class="px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 justify-between sm:justify-between"
-      >
+      <DialogFooter variant="bar" justify="between">
         <Button
           variant="ghost"
           size="sm"

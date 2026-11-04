@@ -17,7 +17,12 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <SettingsSection :title="t('cors.title')" :icon="Globe" :description="t('cors.description')">
+  <SettingsSection
+    :error="error"
+    :title="t('cors.title')"
+    :icon="Globe"
+    :description="t('cors.description')"
+  >
     <SettingsItem
       :title="t('cors.allowedOrigins')"
       :description="t('cors.allowedOriginsDescription')"

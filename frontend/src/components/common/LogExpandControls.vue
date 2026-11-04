@@ -14,7 +14,7 @@ const { t } = useI18n();
   <div class="ml-auto flex items-center gap-1">
     <button
       type="button"
-      class="text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-md transition-colors px-1.5 py-1 cursor-pointer"
+      class="inline-flex min-h-6 items-center text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-md transition-colors px-1.5 py-1 cursor-pointer"
       @click="$emit('expand')"
     >
       {{ t("logs.expandAll") }}
@@ -22,7 +22,7 @@ const { t } = useI18n();
     <span class="text-border">·</span>
     <button
       type="button"
-      class="text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-md transition-colors px-1.5 py-1 cursor-pointer"
+      class="inline-flex min-h-6 items-center text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-md transition-colors px-1.5 py-1 cursor-pointer"
       @click="$emit('collapse')"
     >
       {{ t("logs.collapseAll") }}

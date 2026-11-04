@@ -36,9 +36,7 @@ import {
 import CapabilityIcons from "@/components/plaza/CapabilityIcons.vue";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetDescription from "@/components/ui/sheet/SheetDescription.vue";
-import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
+import { Sheet, SheetContent, SheetFooter, SheetHeader } from "@/components/ui/sheet";
 import { NumberInput } from "@/components/ui/number-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -510,30 +508,12 @@ const confirmDelete = async () => {
 
     <!-- Create/Edit Sheet (slides in from the right) -->
     <Sheet v-model:open="showCreateDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[640px] lg:max-w-[760px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card transition-colors duration-300 pb-[env(safe-area-inset-bottom\,0px)]"
-      >
-        <!-- Header band -->
-        <div
-          class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border/60 bg-muted/10 shrink-0 relative pr-16"
-        >
-          <div class="flex items-center gap-3">
-            <div
-              class="p-2.5 rounded-md bg-muted border border-border/40 text-muted-foreground shrink-0 flex items-center justify-center"
-            >
-              <Box class="size-5" />
-            </div>
-            <div class="flex flex-col min-w-0">
-              <SheetTitle class="text-sm sm:text-base font-semibold text-foreground">
-                {{ isEditing ? t("models.editModel") : t("models.addModel") }}
-              </SheetTitle>
-              <SheetDescription class="text-xs text-muted-foreground mt-1 truncate">
-                {{ isEditing ? editingModelName : t("models.description") }}
-              </SheetDescription>
-            </div>
-          </div>
-        </div>
+      <SheetContent side="right" size="xl">
+        <SheetHeader
+          :icon="Box"
+          :title="isEditing ? t('models.editModel') : t('models.addModel')"
+          :description="isEditing ? editingModelName : t('models.description')"
+        />
 
         <Tabs default-value="general" class="flex-1 flex flex-col min-h-0 w-full">
           <div class="px-4 sm:px-6 pt-4 shrink-0">
@@ -1357,46 +1337,27 @@ const confirmDelete = async () => {
           </div>
         </Tabs>
 
-        <!-- Footer -->
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" @click="showCreateDialog = false">{{
             t("common.cancel")
           }}</Button>
           <Button @click="saveModel" :disabled="isSaving || isLoading">{{
             t("common.save")
           }}</Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <!-- Provider Edit Sheet (nested, slides in from the right above the model sheet) -->
     <Sheet v-model:open="showProviderEditDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[520px] lg:max-w-[600px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card transition-colors duration-300 pb-[env(safe-area-inset-bottom\,0px)]"
-      >
-        <!-- Header band -->
-        <div
-          class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border/60 bg-muted/10 shrink-0 relative pr-16"
-        >
-          <div class="flex items-center gap-3">
-            <div
-              class="p-2.5 rounded-md bg-muted border border-border/40 text-muted-foreground shrink-0 flex items-center justify-center"
-            >
-              <Settings class="size-5" />
-            </div>
-            <div class="flex flex-col min-w-0">
-              <SheetTitle class="text-sm sm:text-base font-semibold text-foreground">
-                {{ t("models.editProvider") }}
-              </SheetTitle>
-              <SheetDescription class="text-xs text-muted-foreground mt-1 truncate font-mono">
-                {{ editingProviderData.provider_name || t("models.provider") }}
-              </SheetDescription>
-            </div>
-          </div>
-        </div>
+      <SheetContent side="right" size="lg">
+        <SheetHeader :icon="Settings" :title="t('models.editProvider')">
+          <template #description>
+            <span class="font-mono">
+              {{ editingProviderData.provider_name || t("models.provider") }}
+            </span>
+          </template>
+        </SheetHeader>
 
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="grid grid-cols-2 gap-4">
@@ -1647,9 +1608,7 @@ const confirmDelete = async () => {
         </div>
 
         <!-- Footer -->
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button
             variant="outline"
             @click="
@@ -1659,7 +1618,7 @@ const confirmDelete = async () => {
             >{{ t("common.cancel") }}</Button
           >
           <Button @click="saveProviderEdit">{{ t("common.save") }}</Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
   </AppLayout>

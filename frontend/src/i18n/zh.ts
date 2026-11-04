@@ -52,6 +52,7 @@ export default {
     commandPaletteDescription: "搜索路由与最近日志并快速跳转。",
     commandPalettePlaceholder: "搜索路由或最近日志…",
     commandPaletteNav: "移动",
+    commandPaletteResultCount: "{count} 个结果",
   },
 
   a11y: {
@@ -98,6 +99,7 @@ export default {
     undefined: "undefined",
     empty: "（空）",
     close: "关闭",
+    morePages: "更多页",
     allTypes: "所有类型",
     clearFilters: "清除筛选",
     showingResults: "显示 {count} / {total} 条结果",
@@ -112,15 +114,18 @@ export default {
     sortedDescending: "降序",
     listView: "列表视图",
     tableView: "表格视图",
+    viewMode: "视图模式",
     reload: "重新加载",
     increment: "增加",
     decrement: "减少",
+    removeItem: "移除 {name}",
     // 紧凑时长单位，例如 "42s"
     secondsShort: "{n}s",
   },
 
   // 共享访问范围选择器（全部 / 自定义允许列表编辑器）
   accessPicker: {
+    scope: "访问范围",
     custom: "自定义",
     selectAll: "全选",
     clear: "清空",
@@ -172,14 +177,21 @@ export default {
     tokenBreakdownTitle: "Token 用量",
     tokenBreakdownEmpty: "此时间范围内没有 Token 用量。",
     tokenBreakdownAria: "Token 明细：{buckets} 个时间桶，共 {total} Token",
+    trendsChartSummary: "{type}（按模型），{count} 个模型，{range}",
+    trendsChartRange: "{start} 至 {end}",
     avgThroughput: "平均吞吐量",
     throughputCaption: "tokens / second",
     // Status labels
     statusOptimal: "健康",
     statusDegraded: "降级",
     statusCritical: "严重",
+    statusNoTraffic: "无流量",
     // Error drill-down (dashboard success-rate cell links here)
     viewErrors: "查看错误",
+    viewErrorsForRate: "查看错误（成功率 {rate}）",
+    viewRequests: "查看请求",
+    viewRequestsForRate: "查看请求（成功率 {rate}）",
+    noTrafficInRange: "此时间范围内没有请求",
     // Abbreviated labels
     avgAbbr: "平均",
     inAbbr: "入",
@@ -218,6 +230,22 @@ export default {
     templateMultiTurnDesc: "构建对话以测试上下文保持能力。",
     runTemplate: "发送",
     typeMessage: "输入消息...",
+    messagesLabel: "聊天消息",
+    roleHuman: "用户",
+    roleModel: "模型",
+    roleTool: "工具",
+    readAloud: "朗读",
+    stopReading: "停止",
+    generatingSpeech: "生成中...",
+    copyMessage: "复制消息",
+    copyCode: "复制代码",
+    reasoningTrace: "推理过程",
+    toolUse: "工具使用",
+    charCount: "{count} 字符",
+    responseInProgress: "模型正在回复",
+    responseComplete: "回复完成",
+    responseStopped: "回复已停止",
+    responseFailed: "回复失败",
     disclaimer: "LLM 可能会出错，请核实重要信息。",
     thinking: "思考过程",
     toolCalls: "工具调用",
@@ -876,6 +904,7 @@ export default {
   },
 
   parameterOverrides: {
+    viewMode: "参数覆盖视图",
     simpleModeHelp: "输入 JSON 键值对来覆盖请求参数 (例如 temperature, max_tokens)",
     jsonModeHelp: "输入 JSON 键值对来覆盖请求参数",
     addSimpleEntry: "添加参数",
@@ -1747,6 +1776,7 @@ export default {
     cost: "成本",
     user: "用户",
     viewDetails: "查看详情",
+    viewDetailsFor: "查看 {target} 的详情",
     failed: "失败",
     feedbackLabel: "评价此次路由",
     feedbackOk: "路由合适",
@@ -1974,6 +2004,7 @@ export default {
     filterByTrace: "按此追踪 ID 筛选",
     traceFilterChip: "追踪: {id}",
     clearTraceFilter: "清除追踪 ID 筛选",
+    clearDateRange: "清除日期范围",
     // MCP logs specific
     mcpDescription: "监控 MCP 服务器工具调用和资源访问",
     mcpServer: "服务器",
@@ -2395,5 +2426,6 @@ export default {
     retry: "重试",
     updateChecksDisabled: "管理员已禁用更新检查。",
     viewReleases: "在 GitHub 上查看发布页",
+    viewReleasesForVersion: "在 GitHub 上查看 v{version} 的发布页",
   },
 };

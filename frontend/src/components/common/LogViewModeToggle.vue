@@ -9,7 +9,7 @@
  */
 import type { AcceptableValue } from "reka-ui";
 import { useI18n } from "vue-i18n";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 
 defineProps<{
   modelValue: "formatted" | "raw";
@@ -29,26 +29,22 @@ function onUpdate(value: AcceptableValue | AcceptableValue[]) {
 </script>
 
 <template>
-  <ToggleGroup
-    :model-value="modelValue"
-    type="single"
-    :spacing="1"
-    class="shrink-0 rounded-lg border border-border/60 bg-background/70 p-0.5 shadow-[inset_0_1px_0_hsl(var(--background)/0.7)]"
-    @update:model-value="onUpdate"
-  >
-    <ToggleGroupItem
-      value="formatted"
+  <SegmentedControl :aria-label="t('common.viewMode')" size="sm">
+    <SegmentedControlItem
+      :active="modelValue === 'formatted'"
       :aria-label="t('logs.formatted')"
-      class="h-7 rounded-md px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground data-[state=on]:bg-primary/12 data-[state=on]:text-primary data-[state=on]:hover:text-primary"
+      caps
+      @click="onUpdate('formatted')"
     >
       {{ t("logs.formatted") }}
-    </ToggleGroupItem>
-    <ToggleGroupItem
-      value="raw"
+    </SegmentedControlItem>
+    <SegmentedControlItem
+      :active="modelValue === 'raw'"
       :aria-label="t('logs.raw')"
-      class="h-7 rounded-md px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground data-[state=on]:bg-primary/12 data-[state=on]:text-primary data-[state=on]:hover:text-primary"
+      caps
+      @click="onUpdate('raw')"
     >
       {{ t("logs.raw") }}
-    </ToggleGroupItem>
-  </ToggleGroup>
+    </SegmentedControlItem>
+  </SegmentedControl>
 </template>

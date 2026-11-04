@@ -3,14 +3,7 @@ import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Fingerprint, Loader2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authApi } from "@/services/api/auth";
@@ -76,11 +69,8 @@ async function usePasskey() {
 
 <template>
   <Dialog :open="stepUp.required" @update:open="(open) => !open && stepUp.cancel()">
-    <DialogContent class="z-[100]" overlay-class="z-[100]">
-      <DialogHeader>
-        <DialogTitle>{{ t("auth.stepUpTitle") }}</DialogTitle>
-        <DialogDescription>{{ t("auth.stepUpDescription") }}</DialogDescription>
-      </DialogHeader>
+    <DialogContent layer="top">
+      <DialogHeader :title="t('auth.stepUpTitle')" :description="t('auth.stepUpDescription')" />
       <form class="flex flex-col gap-3" @submit.prevent="submit">
         <div class="flex flex-col gap-1.5">
           <Label for="global-step-up-password">{{ t("auth.password") }}</Label>
@@ -90,10 +80,14 @@ async function usePasskey() {
             type="password"
             autocomplete="current-password"
             :disabled="loading"
+            :aria-invalid="!!error"
+            :aria-describedby="error ? 'step-up-error' : undefined"
           />
         </div>
-        <p v-if="error" class="text-xs text-destructive">{{ error }}</p>
-        <DialogFooter class="gap-2">
+        <p v-if="error" id="step-up-error" role="alert" class="text-xs text-destructive">
+          {{ error }}
+        </p>
+        <DialogFooter>
           <Button
             type="button"
             variant="outline"

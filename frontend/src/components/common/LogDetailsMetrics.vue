@@ -74,7 +74,7 @@ const providerModelName = computed(() => {
 
 // TTFT, token chips and TPS all resolve through logEntryAccessors so the
 // metrics panel agrees with the list rows and the response view. A missing
-// count renders "-" (formatTokens) and the tooltip says it was not reported,
+// count renders an em dash (formatTokens) and the tooltip says it was not reported,
 // so a provider-reported zero is never mistaken for an absent measurement.
 const tokenLabel = (value: number | null): string =>
   value == null ? t("logs.notReported") : formatTokens(value);

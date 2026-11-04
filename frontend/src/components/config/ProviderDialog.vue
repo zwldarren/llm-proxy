@@ -16,8 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
+import { Sheet, SheetContent, SheetFooter, SheetHeader } from "@/components/ui/sheet";
 import { useProviderTypes } from "@/composables/useProviderTypes";
 import { configApi } from "@/services/api/config";
 import { providerFormSchema, type ProviderFormValues } from "@/schemas/providerForm";
@@ -371,19 +370,15 @@ const onSubmit = handleSubmit(async (values) => {
 
 <template>
   <Sheet :open="open" @update:open="(val) => emit('update:open', val)">
-    <SheetContent
-      side="right"
-      class="w-full sm:max-w-[520px] lg:max-w-[600px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card transition-colors duration-300 pb-[env(safe-area-inset-bottom\,0px)]"
-    >
-      <!-- Header band -->
-      <SheetHeaderBand :icon="Server">
+    <SheetContent side="right" size="lg">
+      <SheetHeader :icon="Server">
         <template #title>
           {{ isEditing ? t("providers.editProvider") : t("providers.addProvider") }}
         </template>
         <template #description>
           {{ isEditing ? provider?.name : t("providers.description") }}
         </template>
-      </SheetHeaderBand>
+      </SheetHeader>
 
       <form @submit="onSubmit" class="flex-1 flex flex-col min-h-0">
         <Tabs default-value="general" class="flex-1 flex flex-col min-h-0 w-full">
@@ -757,12 +752,10 @@ const onSubmit = handleSubmit(async (values) => {
           </div>
         </Tabs>
 
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" type="button" @click="close">{{ t("common.cancel") }}</Button>
           <Button type="submit" :disabled="isLoading">{{ t("common.save") }}</Button>
-        </div>
+        </SheetFooter>
       </form>
     </SheetContent>
   </Sheet>

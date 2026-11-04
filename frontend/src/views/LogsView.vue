@@ -56,6 +56,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useAuditLabels } from "@/composables/useAuditLabels";
+import { useHorizontalOverflow } from "@/composables/useHorizontalOverflow";
 import { CONSOLE_DESKTOP_QUERY } from "@/composables/useViewMode";
 import { useDebounceFn, useEventListener, useMediaQuery } from "@vueuse/core";
 import { logsApi } from "@/services/api/logs";
@@ -100,6 +101,14 @@ const router = useRouter();
 const authStore = useAuthStore();
 
 const isDesktop = useMediaQuery(CONSOLE_DESKTOP_QUERY);
+
+// The log tab strip keeps one hairline row and hides its scrollbar. The edge
+// fade is the only cue that more tabs are reachable on narrow screens and at
+// 200% text zoom, so derive it from the real scroll geometry instead of always
+// dimming the last tab.
+const tabStripEl = ref<HTMLElement | null>(null);
+const { hasOverflowLeft: tabStripHasLeft, hasOverflowRight: tabStripHasRight } =
+  useHorizontalOverflow(tabStripEl);
 
 // Log tab type
 const LOG_TABS = ["proxy", "audit", "mcp", "websearch", "judge"] as const;
@@ -587,6 +596,22 @@ const handleViewDetails = async (log: LogListItemType) => {
   }
 };
 
+/**
+ * Accessible name for a row's action button. The row itself is no longer
+ * focusable, so this button is the only thing a screen reader hears about the
+ * row; the label has to say which log it opens, not just "View details".
+ */
+const rowActionLabel = (log: LogListItemType): string => {
+  const parts: string[] = [];
+  if (activeTab.value === "audit") parts.push(auditListAction(log));
+  else if (log.model) parts.push(log.model);
+  if (log.status_code !== null && log.status_code !== undefined) {
+    parts.push(String(log.status_code));
+  }
+  parts.push(formatDate(log.timestamp));
+  return t("logs.viewDetailsFor", { target: parts.join(" · ") });
+};
+
 // Power-user keyboard layer for the logs table:
 //   `/` focuses the search field (opening the filters panel if collapsed)
 //   `j` / `k` move row focus down/up; Enter (already bound on rows) opens detail.
@@ -607,12 +632,17 @@ const focusLogSearch = () => {
 };
 
 const moveRowFocus = (direction: 1 | -1) => {
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-log-row][tabindex="0"]'));
+  const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-log-row]"));
   if (rows.length === 0) return;
-  const current = rows.findIndex((r) => r === document.activeElement);
+  const current = rows.findIndex(
+    (row) => row === document.activeElement || row.contains(document.activeElement)
+  );
   const nextIndex =
     current === -1 ? 0 : Math.min(rows.length - 1, Math.max(0, current + direction));
-  rows[nextIndex]?.focus();
+  const row = rows[nextIndex];
+  // The row itself is not focusable; its action button is the keyboard stop.
+  const target = row?.querySelector<HTMLElement>("[data-row-action]") ?? row;
+  target?.focus();
 };
 
 useEventListener("keydown", (e: KeyboardEvent) => {
@@ -638,7 +668,7 @@ useEventListener("keydown", (e: KeyboardEvent) => {
 });
 
 // Pagination handler - unified via go-to-page event
-const totalPages = computed(() => Math.ceil(totalLogs.value / pageSize.value));
+const totalPages = computed(() => Math.max(1, Math.ceil(totalLogs.value / pageSize.value)));
 
 const goToPage = (page: number) => {
   currentPage.value = page;
@@ -740,7 +770,7 @@ const formatTTFT = (log: LogListItemType): string => {
 };
 
 // A 5xx row that records 0/1ms or no timing didn't really complete a round
-// trip — render "failed" instead of a misleading "0ms" / "-".
+// trip — render "failed" instead of a misleading "0ms" / em dash.
 const isFailedRequest = (log: LogListItemType): boolean => (log.status_code ?? 0) >= 500;
 
 const formatDurationOrFailed = (log: LogListItemType, ms: number | null | undefined): string => {
@@ -856,8 +886,13 @@ const auditListAction = (log: LogListItemType): string => {
             <Button
               variant="secondary"
               size="sm"
-              class="h-9 transition-colors"
+              class="touch-target-square h-9 min-w-11 transition-colors"
               @click="showFilters = !showFilters"
+              :aria-label="
+                activeFilterCount
+                  ? `${t('logs.filters')} (${activeFilterCount})`
+                  : t('logs.filters')
+              "
               :class="{
                 'bg-foreground text-background hover:bg-foreground/90 hover:text-background':
                   showFilters,
@@ -878,31 +913,39 @@ const auditListAction = (log: LogListItemType): string => {
         </div>
 
         <!-- Inline Navigation Tabs aligned with the bottom border of the header -->
-        <div class="-mb-[1px] flex items-center overflow-x-auto scrollbar-none">
-          <Tabs v-model="activeTab" class="w-auto">
-            <TabsList class="h-10 p-0 bg-transparent flex gap-6 rounded-none border-b-0">
-              <TabsTrigger value="proxy" :class="tabTriggerClass">
-                <Activity class="w-3.5 h-3.5" />
-                <span>{{ t("nav.proxyLogs") }}</span>
-              </TabsTrigger>
-              <TabsTrigger v-if="authStore.isAdmin" value="audit" :class="tabTriggerClass">
-                <Shield class="w-3.5 h-3.5" />
-                <span>{{ t("nav.auditLogs") }}</span>
-              </TabsTrigger>
-              <TabsTrigger value="mcp" :class="tabTriggerClass">
-                <Wrench class="w-3.5 h-3.5" />
-                <span>{{ t("nav.mcpLogs") }}</span>
-              </TabsTrigger>
-              <TabsTrigger value="websearch" :class="tabTriggerClass">
-                <Globe class="w-3.5 h-3.5" />
-                <span>{{ t("nav.webSearchLogs") }}</span>
-              </TabsTrigger>
-              <TabsTrigger value="judge" :class="tabTriggerClass">
-                <Scale class="w-3.5 h-3.5" />
-                <span>{{ t("nav.judgeLogs") }}</span>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+        <div
+          class="relative -mb-[1px]"
+          :class="{
+            'tab-strip-fade-left': tabStripHasLeft,
+            'tab-strip-fade-right': tabStripHasRight,
+          }"
+        >
+          <div ref="tabStripEl" class="flex items-center overflow-x-auto scrollbar-none">
+            <Tabs v-model="activeTab" class="w-auto">
+              <TabsList class="h-10 p-0 bg-transparent flex gap-6 rounded-none border-b-0">
+                <TabsTrigger value="proxy" :class="tabTriggerClass">
+                  <Activity class="w-3.5 h-3.5" />
+                  <span>{{ t("nav.proxyLogs") }}</span>
+                </TabsTrigger>
+                <TabsTrigger v-if="authStore.isAdmin" value="audit" :class="tabTriggerClass">
+                  <Shield class="w-3.5 h-3.5" />
+                  <span>{{ t("nav.auditLogs") }}</span>
+                </TabsTrigger>
+                <TabsTrigger value="mcp" :class="tabTriggerClass">
+                  <Wrench class="w-3.5 h-3.5" />
+                  <span>{{ t("nav.mcpLogs") }}</span>
+                </TabsTrigger>
+                <TabsTrigger value="websearch" :class="tabTriggerClass">
+                  <Globe class="w-3.5 h-3.5" />
+                  <span>{{ t("nav.webSearchLogs") }}</span>
+                </TabsTrigger>
+                <TabsTrigger value="judge" :class="tabTriggerClass">
+                  <Scale class="w-3.5 h-3.5" />
+                  <span>{{ t("nav.judgeLogs") }}</span>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
       </header>
     </template>
@@ -988,13 +1031,8 @@ const auditListAction = (log: LogListItemType): string => {
                   v-for="log in logs"
                   :key="log.request_id"
                   :data-log-row="log.request_id"
-                  :aria-label="`${t('logs.viewDetails')} — ${log.model || log.endpoint || log.request_id} (${log.status_code ?? '—'})`"
                   @click="handleViewDetails(log)"
                   class="table-row-hover relative"
-                  tabindex="0"
-                  role="button"
-                  @keydown.enter="handleViewDetails(log)"
-                  @keydown.space.prevent="handleViewDetails(log)"
                 >
                   <TableCellTimestamp>{{ formatDate(log.timestamp) }}</TableCellTimestamp>
                   <TableCell class="text-xs hidden md:table-cell">
@@ -1126,15 +1164,19 @@ const auditListAction = (log: LogListItemType): string => {
                           </Tooltip>
                         </template>
                       </div>
-                      <!-- Visual/mouse affordance of the row control: the row
-                           itself is the interactive element, so this is a
-                           non-interactive span and clicks bubble to it. -->
-                      <span
-                        class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
-                        :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
+                      <!-- The row's keyboard path: a real button. Clicking the
+                           row still opens the same sheet for the mouse. -->
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        class="h-11 w-11 min-h-11 min-w-11"
+                        data-row-action
+                        :aria-label="rowActionLabel(log)"
+                        :disabled="isLoadingDetail"
+                        @click.stop="handleViewDetails(log)"
                       >
-                        <Eye class="size-5 text-muted-foreground" />
-                      </span>
+                        <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
+                      </Button>
                     </div>
                   </TableCellActions>
                 </TableRow>
@@ -1172,13 +1214,8 @@ const auditListAction = (log: LogListItemType): string => {
                   v-for="log in logs"
                   :key="log.request_id"
                   :data-log-row="log.request_id"
-                  :aria-label="`${t('logs.viewDetails')} — ${log.model || log.endpoint || log.request_id} (${log.status_code ?? '—'})`"
                   @click="handleViewDetails(log)"
                   class="table-row-hover relative"
-                  tabindex="0"
-                  role="button"
-                  @keydown.enter="handleViewDetails(log)"
-                  @keydown.space.prevent="handleViewDetails(log)"
                 >
                   <TableCellTimestamp>{{ formatDate(log.timestamp) }}</TableCellTimestamp>
                   <TableCell>
@@ -1218,15 +1255,19 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
-                    <!-- Visual/mouse affordance of the row control: the row
-                         itself is the interactive element, so this is a
-                         non-interactive span and clicks bubble to it. -->
-                    <span
-                      class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
-                      :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
+                    <!-- The row's keyboard path: a real button. Clicking
+                         the row still opens the same sheet for the mouse. -->
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      class="h-11 w-11 min-h-11 min-w-11"
+                      data-row-action
+                      :aria-label="rowActionLabel(log)"
+                      :disabled="isLoadingDetail"
+                      @click.stop="handleViewDetails(log)"
                     >
-                      <Eye class="size-5 text-muted-foreground" />
-                    </span>
+                      <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
+                    </Button>
                   </TableCellActions>
                 </TableRow>
               </TableBody>
@@ -1262,13 +1303,8 @@ const auditListAction = (log: LogListItemType): string => {
                   v-for="log in logs"
                   :key="log.request_id"
                   :data-log-row="log.request_id"
-                  :aria-label="`${t('logs.viewDetails')} — ${log.model || log.endpoint || log.request_id} (${log.status_code ?? '—'})`"
                   @click="handleViewDetails(log)"
                   class="table-row-hover relative"
-                  tabindex="0"
-                  role="button"
-                  @keydown.enter="handleViewDetails(log)"
-                  @keydown.space.prevent="handleViewDetails(log)"
                 >
                   <TableCellTimestamp>{{ formatDate(log.timestamp) }}</TableCellTimestamp>
                   <TableCell class="text-xs">
@@ -1296,15 +1332,19 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
-                    <!-- Visual/mouse affordance of the row control: the row
-                         itself is the interactive element, so this is a
-                         non-interactive span and clicks bubble to it. -->
-                    <span
-                      class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
-                      :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
+                    <!-- The row's keyboard path: a real button. Clicking
+                         the row still opens the same sheet for the mouse. -->
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      class="h-11 w-11 min-h-11 min-w-11"
+                      data-row-action
+                      :aria-label="rowActionLabel(log)"
+                      :disabled="isLoadingDetail"
+                      @click.stop="handleViewDetails(log)"
                     >
-                      <Eye class="size-5 text-muted-foreground" />
-                    </span>
+                      <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
+                    </Button>
                   </TableCellActions>
                 </TableRow>
               </TableBody>
@@ -1340,13 +1380,8 @@ const auditListAction = (log: LogListItemType): string => {
                   v-for="log in logs"
                   :key="log.request_id"
                   :data-log-row="log.request_id"
-                  :aria-label="`${t('logs.viewDetails')} — ${log.model || log.endpoint || log.request_id} (${log.status_code ?? '—'})`"
                   @click="handleViewDetails(log)"
                   class="table-row-hover relative"
-                  tabindex="0"
-                  role="button"
-                  @keydown.enter="handleViewDetails(log)"
-                  @keydown.space.prevent="handleViewDetails(log)"
                 >
                   <TableCellTimestamp>{{ formatDate(log.timestamp) }}</TableCellTimestamp>
                   <TableCell class="text-xs overflow-hidden">
@@ -1391,15 +1426,19 @@ const auditListAction = (log: LogListItemType): string => {
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
-                    <!-- Visual/mouse affordance of the row control: the row
-                         itself is the interactive element, so this is a
-                         non-interactive span and clicks bubble to it. -->
-                    <span
-                      class="flex h-11 w-11 min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-muted"
-                      :class="isLoadingDetail ? 'pointer-events-none opacity-50' : ''"
+                    <!-- The row's keyboard path: a real button. Clicking
+                         the row still opens the same sheet for the mouse. -->
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      class="h-11 w-11 min-h-11 min-w-11"
+                      data-row-action
+                      :aria-label="rowActionLabel(log)"
+                      :disabled="isLoadingDetail"
+                      @click.stop="handleViewDetails(log)"
                     >
-                      <Eye class="size-5 text-muted-foreground" />
-                    </span>
+                      <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
+                    </Button>
                   </TableCellActions>
                 </TableRow>
               </TableBody>
@@ -1422,9 +1461,10 @@ const auditListAction = (log: LogListItemType): string => {
         </div>
       </div>
 
-      <!-- Fixed Footer with Pagination (Always Visible) -->
+      <!-- Fixed Footer with Pagination -->
       <footer
-        class="h-14 flex-none border-t border-border/60 bg-muted/15 px-4 sm:px-6 flex items-center justify-between z-10"
+        v-if="totalLogs > 0"
+        class="min-h-14 flex-none border-t border-border/60 bg-muted/15 px-4 sm:px-6 flex items-center justify-between z-10"
       >
         <PaginationBar
           :current-page="currentPage"
@@ -1460,6 +1500,30 @@ const auditListAction = (log: LogListItemType): string => {
 .animate-loading-bar {
   width: 25%;
   animation: loading-bar-slide 1.2s ease-in-out infinite;
+}
+
+/* The tab strip hides its scrollbar to keep the header's single hairline.
+ * Fade the edge only when the strip actually has tabs beyond it, so 200% text
+ * zoom and narrow screens advertise the overflow without dimming a strip that
+ * already fits. */
+.tab-strip-fade-left::before,
+.tab-strip-fade-right::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  z-index: 1;
+  width: 2rem;
+  pointer-events: none;
+}
+
+.tab-strip-fade-left::before {
+  left: 0;
+  background: linear-gradient(to right, hsl(var(--background)), transparent);
+}
+
+.tab-strip-fade-right::after {
+  right: 0;
+  background: linear-gradient(to left, hsl(var(--background)), transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

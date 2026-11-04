@@ -21,6 +21,7 @@ const { t } = useI18n();
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('security.title')"
     :icon="ShieldCheck"
     :description="t('security.description')"

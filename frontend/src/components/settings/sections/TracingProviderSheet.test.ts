@@ -10,12 +10,7 @@ vi.mock("vue-i18n", () => ({ useI18n: () => ({ t: (k: string) => k, te: () => tr
 vi.mock("@/components/ui/sheet", () => ({
   Sheet: { template: "<div><slot /></div>" },
   SheetContent: { template: "<div><slot /></div>" },
-}));
-vi.mock("@/components/ui/sheet/SheetTitle.vue", () => ({
-  default: { template: "<div><slot /></div>" },
-}));
-vi.mock("@/components/ui/sheet/SheetDescription.vue", () => ({
-  default: { template: "<div><slot /></div>" },
+  SheetHeader: { template: "<div />" },
 }));
 vi.mock("@/components/ui/select", () => ({
   Select: {

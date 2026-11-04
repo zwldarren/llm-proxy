@@ -51,6 +51,7 @@ export default {
     commandPaletteDescription: "Search routes and recent logs, then jump to them.",
     commandPalettePlaceholder: "Search routes or recent logs…",
     commandPaletteNav: "navigate",
+    commandPaletteResultCount: "{count} result|{count} results",
   },
 
   a11y: {
@@ -98,6 +99,7 @@ export default {
     undefined: "undefined",
     empty: "Empty",
     close: "Close",
+    morePages: "More pages",
     allTypes: "All Types",
     clearFilters: "Clear Filters",
     showingResults: "Showing {count} of {total} results",
@@ -112,15 +114,18 @@ export default {
     sortedDescending: "descending",
     listView: "List view",
     tableView: "Table view",
+    viewMode: "View mode",
     reload: "Reload",
     increment: "Increment",
     decrement: "Decrement",
+    removeItem: "Remove {name}",
     // Compact duration unit, e.g. "42s"
     secondsShort: "{n}s",
   },
 
   // Shared access-scope picker (All / Custom allowlist editor)
   accessPicker: {
+    scope: "Access scope",
     custom: "Custom",
     selectAll: "Select all",
     clear: "Clear",
@@ -172,14 +177,21 @@ export default {
     tokenBreakdownTitle: "Tokens",
     tokenBreakdownEmpty: "No token usage in this range.",
     tokenBreakdownAria: "Token breakdown: {buckets} buckets, {total} tokens in total",
+    trendsChartSummary: "{type} by model, {count} model|{count} models, {range}",
+    trendsChartRange: "{start} to {end}",
     avgThroughput: "Avg Throughput",
     throughputCaption: "tokens / second",
     // Status labels
     statusOptimal: "Optimal",
     statusDegraded: "Degraded",
     statusCritical: "Critical",
+    statusNoTraffic: "No traffic",
     // Error drill-down (dashboard success-rate cell links here)
     viewErrors: "View errors",
+    viewErrorsForRate: "View errors (success rate {rate})",
+    viewRequests: "View requests",
+    viewRequestsForRate: "View requests (success rate {rate})",
+    noTrafficInRange: "No requests in this range",
     // Abbreviated labels
     avgAbbr: "Avg",
     inAbbr: "In",
@@ -219,6 +231,22 @@ export default {
     templateMultiTurnDesc: "Build a conversation to test context retention.",
     runTemplate: "Send",
     typeMessage: "Type a message...",
+    messagesLabel: "Chat messages",
+    roleHuman: "Human",
+    roleModel: "Model",
+    roleTool: "Tool",
+    readAloud: "Read Aloud",
+    stopReading: "Stop",
+    generatingSpeech: "Generating...",
+    copyMessage: "Copy message",
+    copyCode: "Copy code",
+    reasoningTrace: "Reasoning Trace",
+    toolUse: "Tool Use",
+    charCount: "{count} char|{count} chars",
+    responseInProgress: "Model is responding",
+    responseComplete: "Response complete",
+    responseStopped: "Response stopped",
+    responseFailed: "Response failed",
     disclaimer: "LLM can make mistakes. Check important info.",
     thinking: "Thinking",
     toolCalls: "Tool Calls",
@@ -908,6 +936,7 @@ export default {
   },
 
   parameterOverrides: {
+    viewMode: "Override editor view",
     simpleModeHelp:
       "Enter JSON key-value pairs to override request parameters (e.g., temperature, max_tokens)",
     jsonModeHelp: "Enter JSON in key-value format to override request parameters",
@@ -1719,6 +1748,7 @@ export default {
     cost: "Cost",
     user: "User",
     viewDetails: "View Details",
+    viewDetailsFor: "View details for {target}",
     failed: "failed",
     feedbackLabel: "Rate this routing",
     feedbackOk: "Good routing",
@@ -1952,6 +1982,7 @@ export default {
     filterByTrace: "Filter by this trace",
     traceFilterChip: "Trace: {id}",
     clearTraceFilter: "Clear the trace filter",
+    clearDateRange: "Clear the date range",
     // MCP logs specific
     mcpDescription: "Monitor MCP server tool calls and resource access",
     mcpServer: "Server",
@@ -2510,5 +2541,6 @@ export default {
     retry: "Retry",
     updateChecksDisabled: "Update checks are disabled by the administrator.",
     viewReleases: "View releases on GitHub",
+    viewReleasesForVersion: "View releases on GitHub for v{version}",
   },
 };

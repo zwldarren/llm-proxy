@@ -75,15 +75,10 @@ export default defineConfig({
 						{ name: "chunk-markdown", test: /node_modules[\\/]markdown-it[\\/]/, priority: 90 },
 						{ name: "chunk-i18n", test: /node_modules[\\/]vue-i18n[\\/]/, priority: 90 },
 						{ name: "chunk-sanitizer", test: /node_modules[\\/]dompurify[\\/]/, priority: 90 },
-						{
-							// @fontsource CSS must follow its importer instead of the vendor chunk:
-							// the CJK faces are imported dynamically and belong on a lazy stylesheet
-							// rather than the render-blocking one.
-							name: (id: string) => (id.includes("@fontsource") ? null : "chunk-vendor"),
-							test: /node_modules[\\/]/,
-							priority: 1,
-						},
-					]
+						// No catch-all vendor group: Rolldown already co-locates remaining
+						// dependencies with their importers. A blanket group hoisted all of
+						// them into one render-blocking chunk on every route.
+					],
 				},
 			},
 			onwarn(warning, warn) {

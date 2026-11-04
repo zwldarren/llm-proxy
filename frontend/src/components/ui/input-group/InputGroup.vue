@@ -14,7 +14,7 @@ const props = defineProps<{
     :class="
       cn(
         'group/input-group border-input/80 dark:bg-input/40 relative flex w-full items-center overflow-hidden rounded-md border bg-background/75 shadow-[inset_0_1px_0_hsl(var(--background)/0.9)] backdrop-blur-sm transition-[color,box-shadow] outline-none',
-        'h-10 min-w-0 has-[>textarea]:h-auto',
+        'min-h-10 min-w-0 has-[>textarea]:h-auto',
 
         // Variants based on alignment.
         'has-[>[data-align=inline-start]]:[&>input]:pl-2',

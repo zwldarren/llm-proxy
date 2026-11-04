@@ -103,7 +103,7 @@ const TooltipContentStub = defineComponent({
   },
 });
 
-// reka-ui ToggleGroup needs app-level providers; the toggle is inert here.
+// The view toggle has no app-level dependencies to exercise in this test.
 const ViewToggleStub = defineComponent({
   name: "ViewToggle",
   props: ["modelValue"],

@@ -471,7 +471,7 @@ onUnmounted(() => {
         <span class="truncate">{{ filters.trace_id }}</span>
         <button
           type="button"
-          class="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
+          class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
           :aria-label="t('logs.clearTraceFilter')"
           @click="clearTraceFilter"
         >
@@ -493,7 +493,6 @@ onUnmounted(() => {
           v-model="searchText"
           class="w-full min-w-0 h-10 border-border/60"
           :placeholder="t('logs.search')"
-          aria-label="Search logs"
           data-log-search
           @keydown="onSearchKeydown"
         />
@@ -528,60 +527,68 @@ onUnmounted(() => {
 
       <!-- Date range -->
       <div class="flex flex-col">
-        <label class="text-xs font-medium text-muted-foreground mb-1.5">{{
+        <label id="filter-date-range" class="text-xs font-medium text-muted-foreground mb-1.5">{{
           t("logs.dateRange")
         }}</label>
 
-        <Popover v-model:open="isDatePickerOpen">
-          <PopoverTrigger as-child>
-            <Button
-              variant="outline"
-              class="w-full justify-start text-left font-normal px-3 h-10 border-border/60 transition-colors"
-              :class="{ 'border-foreground text-foreground font-medium': hasDateRange }"
-              :aria-label="t('logs.dateRange')"
-            >
-              <CalendarIcon
-                class="mr-2 h-4 w-4 shrink-0 text-muted-foreground/80"
-                aria-hidden="true"
-              />
-              <span class="truncate flex-1 text-xs font-mono">{{ dateRangeText }}</span>
-              <X
-                v-if="hasDateRange"
-                class="ml-2 h-4 w-4 opacity-60 hover:opacity-100 shrink-0 cursor-pointer"
-                @click.stop="clearDateRange"
-                :aria-label="t('common.clearFilters')"
-              />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent class="w-auto p-0" align="start">
-            <div class="flex flex-col gap-3 p-3">
-              <RangeCalendar
-                v-model="tempDateRange"
-                :number-of-months="windowWidth >= 640 ? 2 : 1"
-                class="rounded-md border border-border/40"
-              />
-              <div class="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="flex-1 text-xs cursor-pointer"
-                  @click="clearDateRange"
-                  :disabled="!hasDateRange && !tempDateRange.start && !tempDateRange.end"
-                >
-                  {{ t("common.clearFilters") }}
-                </Button>
-                <Button
-                  size="sm"
-                  class="flex-1 text-xs cursor-pointer"
-                  :disabled="!tempDateRange.start || !tempDateRange.end"
-                  @click="applyCustomRange"
-                >
-                  {{ t("home.apply") }}
-                </Button>
+        <div class="relative">
+          <Popover v-model:open="isDatePickerOpen">
+            <PopoverTrigger as-child>
+              <Button
+                variant="outline"
+                class="w-full justify-start text-left font-normal px-3 pr-9 h-10 border-border/60 transition-colors"
+                :class="{ 'border-foreground text-foreground font-medium': hasDateRange }"
+                aria-labelledby="filter-date-range"
+              >
+                <CalendarIcon
+                  class="mr-2 h-4 w-4 shrink-0 text-muted-foreground/80"
+                  aria-hidden="true"
+                />
+                <span class="truncate flex-1 text-xs font-mono">{{ dateRangeText }}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent class="w-auto p-0" align="start">
+              <div class="flex flex-col gap-3 p-3">
+                <RangeCalendar
+                  v-model="tempDateRange"
+                  :number-of-months="windowWidth >= 640 ? 2 : 1"
+                  class="rounded-md border border-border/40"
+                />
+                <div class="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="flex-1 text-xs cursor-pointer"
+                    @click="clearDateRange"
+                    :disabled="!hasDateRange && !tempDateRange.start && !tempDateRange.end"
+                  >
+                    {{ t("common.clearFilters") }}
+                  </Button>
+                  <Button
+                    size="sm"
+                    class="flex-1 text-xs cursor-pointer"
+                    :disabled="!tempDateRange.start || !tempDateRange.end"
+                    @click="applyCustomRange"
+                  >
+                    {{ t("home.apply") }}
+                  </Button>
+                </div>
               </div>
-            </div>
-          </PopoverContent>
-        </Popover>
+            </PopoverContent>
+          </Popover>
+
+          <!-- Sibling of the trigger, never a child of it: an <svg> with a click
+               handler is pointer-only and announces nothing. -->
+          <button
+            v-if="hasDateRange"
+            type="button"
+            class="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+            :aria-label="t('logs.clearDateRange')"
+            @click.stop="clearDateRange"
+          >
+            <X class="size-3.5" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <!-- Proxy-specific filters (judge rows carry the same columns) -->
@@ -667,7 +674,6 @@ onUnmounted(() => {
             v-model="userText"
             placeholder="admin"
             class="w-full h-10 border-border/60"
-            aria-label="Filter by user"
           />
         </div>
       </template>

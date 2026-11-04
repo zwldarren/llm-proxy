@@ -108,8 +108,13 @@ onActivated(triggerReveal);
            same one used by the full layout — so every page animates consistently
            and re-animates on revisit. -->
       <div v-if="layoutMode === 'default'" class="flex-1 overflow-y-auto">
-        <div ref="revealEl" class="w-full px-4 sm:px-6 py-5 sm:py-6" @animationend="onRevealEnd">
+        <div
+          ref="revealEl"
+          class="w-full px-4 sm:px-6 pt-4 pb-5 sm:pb-6"
+          @animationend="onRevealEnd"
+        >
           <div
+            v-if="$slots.header"
             class="flex flex-col sm:flex-row justify-between items-start gap-4 sm:gap-0 mb-4 sm:mb-5"
           >
             <div class="flex-1 w-full">

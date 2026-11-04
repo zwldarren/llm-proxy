@@ -6,6 +6,7 @@ import { Bar } from "vue-chartjs";
 import type { TooltipItem } from "chart.js";
 import { baseBarChartOptions, useChartTheme } from "@/composables/useChartTheme";
 import { formatChartDate, formatNumberWithSuffix, formatTokens } from "@/utils/format";
+import ChartDataTable, { type ChartDataTableRow } from "./ChartDataTable.vue";
 import type { HourlyUsageBucket } from "@/types/schemas";
 import { registerBarChart } from "@/lib/charts";
 
@@ -124,6 +125,15 @@ const chartAriaLabel = computed(() =>
     total: formatTokens(totalTokens.value),
   })
 );
+
+/** Non-visual twin of the stacked bars, with the same number formatting. */
+const chartA11yRows = computed<ChartDataTableRow[]>(() =>
+  rows.value.map((row) => ({
+    key: row.key,
+    label: rangeLabel(row.key),
+    values: [formatTokens(row.cacheHit), formatTokens(row.cacheMiss), formatTokens(row.output)],
+  }))
+);
 </script>
 
 <template>
@@ -140,7 +150,19 @@ const chartAriaLabel = computed(() =>
 
     <div class="px-4 sm:px-6 pb-4 pt-3">
       <div v-if="rows.length > 0" class="relative w-full h-72 md:h-85">
-        <Bar :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
+        <Bar role="img" :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
+        <!-- The canvas is one image with a name; this table is what carries the
+             per-bucket values to a non-visual reader. -->
+        <ChartDataTable
+          :caption="chartAriaLabel"
+          :row-header="t('logs.timestamp')"
+          :columns="[
+            t('home.inputCacheHit'),
+            t('home.inputCacheMiss'),
+            t('home.outputTokensShort'),
+          ]"
+          :rows="chartA11yRows"
+        />
       </div>
       <div v-else class="py-12 text-center text-muted-foreground text-sm">
         {{ t("home.tokenBreakdownEmpty") }}

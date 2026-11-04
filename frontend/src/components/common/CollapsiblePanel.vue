@@ -25,7 +25,7 @@ const panelClass = computed(() =>
 </script>
 
 <template>
-  <div class="grid transition-all duration-300 ease-in-out" :class="panelClass">
+  <div class="grid transition-all duration-300 ease-in-out" :class="panelClass" :inert="!open">
     <div class="overflow-hidden">
       <slot />
     </div>

@@ -24,6 +24,7 @@ import McpSecuritySection from "@/components/settings/sections/McpSecuritySectio
 import AboutSection from "@/components/settings/sections/AboutSection.vue";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -610,38 +611,20 @@ onUnmounted(() => {
             :icon="Settings2"
           >
             <template #actions>
-              <div
-                class="flex items-center bg-muted/60 p-[3px] rounded-lg border border-border/55"
-                :aria-label="t('settings.title')"
-                role="group"
-              >
-                <button
-                  type="button"
-                  :aria-pressed="activeSection === 'general'"
-                  class="max-md:min-h-11 max-md:px-4 px-3 py-1.5 text-xs rounded-md border transition-all duration-200 cursor-pointer focus-visible-ring"
-                  :class="
-                    activeSection === 'general'
-                      ? 'bg-accent text-foreground font-semibold border-border/70 shadow-xs'
-                      : 'border-transparent text-muted-foreground font-medium hover:bg-accent/40 hover:text-foreground'
-                  "
+              <SegmentedControl :aria-label="t('settings.title')">
+                <SegmentedControlItem
+                  :active="activeSection === 'general'"
                   @click="switchTab('general')"
                 >
                   {{ t("nav.general") }}
-                </button>
-                <button
-                  type="button"
-                  :aria-pressed="activeSection === 'advanced'"
-                  class="max-md:min-h-11 max-md:px-4 px-3 py-1.5 text-xs rounded-md border transition-all duration-200 cursor-pointer focus-visible-ring"
-                  :class="
-                    activeSection === 'advanced'
-                      ? 'bg-accent text-foreground font-semibold border-border/70 shadow-xs'
-                      : 'border-transparent text-muted-foreground font-medium hover:bg-accent/40 hover:text-foreground'
-                  "
+                </SegmentedControlItem>
+                <SegmentedControlItem
+                  :active="activeSection === 'advanced'"
                   @click="switchTab('advanced')"
                 >
                   {{ t("nav.advanced") }}
-                </button>
-              </div>
+                </SegmentedControlItem>
+              </SegmentedControl>
 
               <DropdownMenu v-if="navItems.length > 1" :modal="false">
                 <DropdownMenuTrigger as-child>

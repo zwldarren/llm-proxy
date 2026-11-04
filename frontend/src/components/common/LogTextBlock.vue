@@ -63,14 +63,14 @@ onBeforeUnmount(() => {
       <button
         v-if="!expanded"
         type="button"
-        class="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        class="inline-flex min-h-6 items-center text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
         @click="expanded = true"
       >
         {{ t("logs.showAllText") }}
       </button>
       <button
         type="button"
-        class="text-[11px] font-medium transition-colors cursor-pointer"
+        class="inline-flex min-h-6 items-center text-[11px] font-medium transition-colors cursor-pointer"
         :class="copied ? 'text-status-success' : 'text-muted-foreground hover:text-foreground'"
         @click="copyAll"
       >

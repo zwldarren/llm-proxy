@@ -68,7 +68,7 @@ const getShare = (requests: number): string => {
         </div>
         <div class="flex items-center gap-6 shrink-0 font-sans">
           <button
-            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer focus:outline-none"
+            class="hover:text-foreground transition-colors flex items-center gap-0.5 min-h-6 px-1 -mx-1 rounded cursor-pointer focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
             :class="{ 'text-foreground font-semibold': sortBy === 'requests' }"
             @click="sortBy = 'requests'"
           >
@@ -76,7 +76,7 @@ const getShare = (requests: number): string => {
             <ArrowDown v-if="sortBy === 'requests'" class="w-3.5 h-3.5 text-action-blue" />
           </button>
           <button
-            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer focus:outline-none w-20 justify-end"
+            class="hover:text-foreground transition-colors flex items-center gap-0.5 min-h-6 px-1 -mx-1 rounded cursor-pointer focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none w-20 justify-end"
             :class="{ 'text-foreground font-semibold': sortBy === 'cost' }"
             @click="sortBy = 'cost'"
           >
@@ -129,7 +129,10 @@ const getShare = (requests: number): string => {
               >
             </div>
 
-            <div class="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              class="relative h-1.5 w-full rounded-full bg-muted overflow-hidden"
+              aria-hidden="true"
+            >
               <div
                 class="h-full rounded-full transition-all duration-500 bg-foreground/70"
                 :style="{ width: `${Math.max((item.requests / totalRequests) * 100, 2)}%` }"

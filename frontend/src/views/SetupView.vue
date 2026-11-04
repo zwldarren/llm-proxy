@@ -173,6 +173,7 @@ const handleSetup = async () => {
         <p
           v-if="usernameError"
           id="username-error"
+          :role="username ? 'alert' : undefined"
           class="mt-1 text-xs"
           :class="username ? 'text-destructive' : 'text-muted-foreground'"
         >
@@ -198,7 +199,12 @@ const handleSetup = async () => {
           :aria-describedby="passwordError ? 'password-error' : undefined"
           class="auth-input h-11"
         />
-        <p v-if="passwordError" id="password-error" class="mt-1 text-xs text-destructive">
+        <p
+          v-if="passwordError"
+          id="password-error"
+          role="alert"
+          class="mt-1 text-xs text-destructive"
+        >
           {{ passwordError }}
         </p>
         <p v-else-if="password" id="password-hint" class="mt-1 text-xs text-muted-foreground">
@@ -224,6 +230,7 @@ const handleSetup = async () => {
         <p
           v-if="confirmPasswordError"
           id="confirm-password-error"
+          role="alert"
           class="mt-1 text-xs text-destructive"
         >
           {{ confirmPasswordError }}

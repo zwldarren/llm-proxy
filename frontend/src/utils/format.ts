@@ -1,5 +1,9 @@
 // Intl.NumberFormat instance cache to avoid repeated instantiation in tight loops
 const formatterCache = new Map<string, Intl.NumberFormat>();
+
+/** Placeholder for a measurement the backend did not report. */
+export const ABSENT_METRIC = "—";
+
 function getFormatter(locale: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
   const key = `${locale}:${JSON.stringify(options)}`;
   let formatter = formatterCache.get(key);
@@ -55,7 +59,7 @@ export const getStatusType = (
 };
 
 export const formatCost = (cost?: number | null, locale?: string) => {
-  if (cost === undefined || cost === null) return "-";
+  if (cost === undefined || cost === null) return ABSENT_METRIC;
   if (!locale) return `$${cost.toFixed(6)}`;
   try {
     return getFormatter(locale, {
@@ -70,27 +74,21 @@ export const formatCost = (cost?: number | null, locale?: string) => {
 };
 
 /**
- * Format latency in milliseconds.
- * Returns the raw value with 'ms' suffix or '-' if null/undefined.
- * Use this for displaying raw latency values (e.g., in audit logs).
- */
-
-/**
  * Format duration in ms or seconds with appropriate precision.
  *
  * @example
  * formatDuration(500) -> "500ms"
  * formatDuration(1500) -> "1.5s"
- * formatDuration(null) -> "-"
+ * formatDuration(null) -> "—"
  */
 export const formatDuration = (ms: number | null | undefined): string => {
-  if (ms === null || ms === undefined) return "-";
+  if (ms === null || ms === undefined) return ABSENT_METRIC;
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 };
 
 export const formatTokens = (tokens?: number | null, locale?: string) => {
-  if (tokens === undefined || tokens === null) return "-";
+  if (tokens === undefined || tokens === null) return ABSENT_METRIC;
   if (!locale) return tokens.toLocaleString();
   try {
     return getFormatter(locale, {}).format(tokens);
@@ -176,7 +174,7 @@ export const formatNumberWithSuffix = (num: number, locale?: string): string => 
  * Format a model context length compactly (e.g. 200000 -> "200K", 1000000 -> "1M").
  */
 export const formatContextLength = (length?: number | null): string => {
-  if (length === null || length === undefined || length <= 0) return "-";
+  if (length === null || length === undefined || length <= 0) return ABSENT_METRIC;
   if (length >= 1_000_000) {
     const m = length / 1_000_000;
     return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;

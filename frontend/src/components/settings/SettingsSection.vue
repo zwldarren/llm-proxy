@@ -5,16 +5,24 @@ interface Props {
   title: string;
   icon?: Component;
   description?: string;
+  /**
+   * The section's shared save error. Rendered once, as the section's only live
+   * region: the same message is painted in every row of the section, so
+   * per-row alerts would announce it once per row.
+   */
+  error?: string | null;
 }
 
 withDefaults(defineProps<Props>(), {
   icon: undefined,
   description: "",
+  error: null,
 });
 </script>
 
 <template>
   <div class="space-y-4">
+    <p v-if="error" role="alert" class="sr-only">{{ error }}</p>
     <!-- Section Header -->
     <div class="flex flex-col gap-1.5 pb-1 px-1">
       <div class="flex items-center justify-between">

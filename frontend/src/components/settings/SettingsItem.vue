@@ -9,12 +9,19 @@ interface Props {
   variant?: "row" | "full-width" | "nested";
   loading?: boolean;
   error?: string | null;
+  /**
+   * Announce this row's error as a live alert. Off by default: the section
+   * paints its shared save error in every row, and the section owns one live
+   * region for it (see SettingsSection). Set it on a row whose error is its own.
+   */
+  errorLive?: boolean;
 }
 
 withDefaults(defineProps<Props>(), {
   variant: "row",
   loading: false,
   error: null,
+  errorLive: false,
 });
 </script>
 
@@ -40,21 +47,27 @@ withDefaults(defineProps<Props>(), {
       </div>
 
       <div class="flex-1 min-w-0" :class="variant === 'full-width' ? 'w-full' : ''">
-        <div class="text-sm font-semibold text-foreground tracking-tight">{{ title }}</div>
+        <div class="text-sm font-semibold text-foreground tracking-tight break-words">
+          {{ title }}
+        </div>
         <div
           v-if="description"
-          class="text-xs text-muted-foreground mt-0.5 leading-normal max-w-[60ch]"
+          class="text-xs text-muted-foreground mt-0.5 leading-normal max-w-[60ch] break-words"
         >
           {{ description }}
         </div>
-        <div v-if="error" class="text-xs text-destructive mt-1 flex items-center gap-1">
-          <span>{{ error }}</span>
+        <div
+          v-if="error"
+          :role="errorLive ? 'alert' : undefined"
+          class="text-xs text-destructive mt-1 flex items-center gap-1 min-w-0"
+        >
+          <span class="break-words min-w-0">{{ error }}</span>
         </div>
       </div>
     </div>
 
     <div
-      class="shrink-0 flex items-center gap-2"
+      class="shrink-0 flex min-w-0 max-w-full flex-wrap items-center gap-2"
       :class="[
         variant === 'full-width'
           ? 'w-full justify-end'

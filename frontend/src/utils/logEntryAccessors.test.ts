@@ -187,8 +187,8 @@ describe("tokenBreakdown", () => {
     expect(tokenBreakdown(log({ total_tokens: 900 }))).toBe("900");
   });
 
-  it('renders "-" only when nothing was recorded', () => {
-    expect(tokenBreakdown(log({}))).toBe("-");
-    expect(tokenBreakdown(log({ prompt_tokens: null, completion_tokens: null }))).toBe("-");
+  it("renders an em dash only when nothing was recorded", () => {
+    expect(tokenBreakdown(log({}))).toBe("—");
+    expect(tokenBreakdown(log({ prompt_tokens: null, completion_tokens: null }))).toBe("—");
   });
 });

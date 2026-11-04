@@ -55,7 +55,7 @@ const hasMetadata = computed((): boolean => {
     </div>
 
     <!-- JsonViewer for non-empty metadata -->
-    <div v-else class="metadata-viewer" role="region" aria-label="Log metadata JSON">
+    <div v-else class="metadata-viewer" role="region" aria-labelledby="metadata-heading">
       <JsonViewer :data="log.log_metadata" maxHeight="max-h-[600px]" :deep="4" />
     </div>
   </div>

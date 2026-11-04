@@ -101,14 +101,16 @@ const statusLabel = computed(() => {
               <div class="icon-container p-1.5">
                 <Activity class="w-4 h-4 text-primary" />
               </div>
-              <h3 class="font-semibold text-sm font-mono truncate">
+              <h2 class="font-semibold text-sm font-mono truncate">
                 {{
                   runNumber !== undefined
                     ? t("playground.runNumber", { n: String(runNumber).padStart(2, "0") })
                     : t("playground.inspector")
                 }}
-              </h3>
-              <StatusBadge variant="status" :status="statusVariant">{{ statusLabel }}</StatusBadge>
+              </h2>
+              <StatusBadge variant="status" :status="statusVariant" live>{{
+                statusLabel
+              }}</StatusBadge>
             </div>
             <Button variant="ghost" size="icon" class="h-10 w-10 shrink-0" @click="close">
               <X class="w-4 h-4" />

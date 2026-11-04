@@ -2,13 +2,7 @@
 import { copyToClipboard } from "@/utils/clipboard";
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -50,6 +44,9 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const activeTab = ref<"tools" | "prompts" | "resources">("tools");
+const activeCapabilityIcon = computed(() =>
+  activeTab.value === "tools" ? Wrench : activeTab.value === "prompts" ? MessageSquare : FolderOpen
+);
 const searchQuery = ref("");
 const copiedName = ref<string | null>(null);
 
@@ -122,27 +119,13 @@ const handleCopy = async (text: string) => {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent
-      class="brand-panel sm:max-w-2xl max-h-[85vh] flex flex-col p-6 gap-4"
-      :show-close-button="true"
-    >
-      <DialogHeader class="pb-2 border-b">
-        <div class="flex items-center gap-3">
-          <div class="p-2 bg-primary/10 rounded-lg text-primary shrink-0">
-            <Wrench v-if="activeTab === 'tools'" class="w-5 h-5" />
-            <MessageSquare v-else-if="activeTab === 'prompts'" class="w-5 h-5" />
-            <FolderOpen v-else class="w-5 h-5" />
-          </div>
-          <div class="min-w-0">
-            <DialogTitle class="text-xl font-bold flex items-center gap-2 truncate">
-              {{ serverName }}
-            </DialogTitle>
-            <DialogDescription class="text-xs text-muted-foreground mt-0.5">
-              {{ t("mcpServers.allCapabilities") }}
-            </DialogDescription>
-          </div>
-        </div>
-      </DialogHeader>
+    <DialogContent size="lg" scroll>
+      <DialogHeader
+        variant="divided"
+        :icon="activeCapabilityIcon"
+        :title="serverName"
+        :description="t('mcpServers.allCapabilities')"
+      />
 
       <!-- Search and Filters -->
       <div class="relative w-full shrink-0 flex items-center">
@@ -156,10 +139,11 @@ const handleCopy = async (text: string) => {
           v-if="searchQuery"
           variant="ghost"
           size="icon"
-          class="absolute right-1.5 h-6 w-6 text-muted-foreground hover:text-foreground z-10"
+          class="absolute right-1.5 size-6 text-muted-foreground hover:text-foreground z-10"
+          :aria-label="t('common.clear')"
           @click="searchQuery = ''"
         >
-          <X class="w-3 h-3" />
+          <X class="w-3 h-3" aria-hidden="true" />
         </Button>
       </div>
 

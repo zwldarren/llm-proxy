@@ -1,3 +1,5 @@
+import { ABSENT_METRIC } from "@/utils/format";
+
 /**
  * Single read contract for log-entry usage fields (tokens, TTFT, cost).
  *
@@ -138,20 +140,20 @@ export const costUsd = (log: LogUsageSource): number | null =>
  * row, the mobile card and the details panel can never disagree about which
  * token counts a request consumed.
  *
- * Returns "-" only when nothing was recorded. A recorded zero is rendered as
- * "0" — the whole prompt served from cache and an empty completion are facts,
- * not missing measurements — and when just one side is recorded only that
- * figure is shown ("12,500 → 0" would read as an empty completion even though
- * the backend reported nothing for it).
+ * Returns an em dash only when nothing was recorded. A recorded zero is
+ * rendered as "0" — the whole prompt served from cache and an empty completion
+ * are facts, not missing measurements — and when just one side is recorded only
+ * that figure is shown ("12,500 → 0" would read as an empty completion even
+ * though the backend reported nothing for it).
  */
 export const tokenBreakdown = (log: LogUsageSource): string => {
   const input = promptTokens(log);
   const output = completionTokens(log);
   const total = totalTokens(log);
-  if (input == null && output == null && total == null) return "-";
+  if (input == null && output == null && total == null) return ABSENT_METRIC;
   if (input == null || output == null) {
     const recorded = input ?? output ?? total;
-    return recorded == null ? "-" : recorded.toLocaleString();
+    return recorded == null ? ABSENT_METRIC : recorded.toLocaleString();
   }
   return `${input.toLocaleString()} → ${output.toLocaleString()}`;
 };

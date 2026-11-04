@@ -49,9 +49,9 @@ const capabilities = computed(() =>
         <div class="flex items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger as-child>
-              <h3 class="truncate font-mono text-[13px] font-medium text-foreground">
+              <h2 class="truncate font-mono text-[13px] font-medium text-foreground">
                 {{ model.name }}
-              </h3>
+              </h2>
             </TooltipTrigger>
             <TooltipContent>{{ model.name }}</TooltipContent>
           </Tooltip>

@@ -20,6 +20,7 @@ const { t } = useI18n();
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('keepalive.title')"
     :icon="HeartPulse"
     :description="t('keepalive.description')"

@@ -55,8 +55,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
+import { Sheet, SheetContent, SheetFooter, SheetHeader } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -782,15 +781,12 @@ onMounted(() => {
     </div>
 
     <Sheet v-model:open="showCreateDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[480px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <!-- Header band -->
-        <SheetHeaderBand :icon="KeyRound">
-          <template #title>{{ t("apiKeys.create") }}</template>
-          <template #description>{{ t("apiKeys.createDescription") }}</template>
-        </SheetHeaderBand>
+      <SheetContent side="right" size="md">
+        <SheetHeader
+          :icon="KeyRound"
+          :title="t('apiKeys.create')"
+          :description="t('apiKeys.createDescription')"
+        />
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="name">{{ t("apiKeys.name") }}</Label>
@@ -908,9 +904,7 @@ onMounted(() => {
             v-model="newKeyRateLimitRpm"
           />
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" @click="showCreateDialog = false">{{
             t("common.cancel")
           }}</Button>
@@ -918,20 +912,17 @@ onMounted(() => {
             <Key class="w-4 h-4 mr-2" />
             {{ t("apiKeys.generate") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <Sheet v-model:open="showEditDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[480px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <!-- Header band -->
-        <SheetHeaderBand :icon="Pencil">
-          <template #title>{{ t("apiKeys.edit") }}</template>
-          <template #description>{{ editingKey?.name || t("apiKeys.editDescription") }}</template>
-        </SheetHeaderBand>
+      <SheetContent side="right" size="md">
+        <SheetHeader
+          :icon="Pencil"
+          :title="t('apiKeys.edit')"
+          :description="editingKey?.name || t('apiKeys.editDescription')"
+        />
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="space-y-2">
             <Label for="edit-name">{{ t("apiKeys.name") }}</Label>
@@ -1076,9 +1067,7 @@ onMounted(() => {
             v-model="editRateLimitRpm"
           />
         </div>
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" @click="showEditDialog = false">{{
             t("common.cancel")
           }}</Button>
@@ -1086,14 +1075,14 @@ onMounted(() => {
             <Pencil class="w-4 h-4 mr-2" />
             {{ t("apiKeys.save") }}
           </Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
 
     <Dialog v-model:open="showKeyRevealDialog">
-      <DialogContent class="brand-panel max-w-md">
+      <DialogContent size="sm">
         <DialogHeader>
-          <DialogTitle class="flex items-center gap-2">
+          <DialogTitle>
             <Key class="w-5 h-5 text-status-success" />
             {{ t("apiKeys.createdTitle") }}
           </DialogTitle>
@@ -1104,7 +1093,7 @@ onMounted(() => {
             <div class="break-all font-mono text-sm select-all">{{ createdKey?.key }}</div>
           </div>
         </div>
-        <DialogFooter class="sm:justify-end gap-2">
+        <DialogFooter>
           <Button @click="copyKey" variant="outline" class="w-full sm:w-auto">
             <Check v-if="copiedKey" class="w-4 h-4 mr-2 text-status-success" />
             <Copy v-else class="w-4 h-4 mr-2" />

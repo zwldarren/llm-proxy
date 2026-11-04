@@ -2,6 +2,15 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("vue-i18n", () => ({ useI18n: () => ({ t: (k: string) => k }) }));
+// The cell links through the real RouterLink component; a router instance is not
+// what this test is about, so the link is reduced to its element.
+vi.mock("vue-router", () => ({
+  RouterLink: {
+    name: "RouterLink",
+    props: { to: { type: [String, Object], default: null } },
+    template: "<a><slot /></a>",
+  },
+}));
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
   return {
@@ -75,7 +84,21 @@ describe("UsageMetricStrip", () => {
   });
 
   it("shows the optimal success tier at 100%", () => {
-    expect(mountStrip().text()).toContain("home.statusOptimal");
+    const text = mountStrip().text();
+    expect(text).toContain("home.statusOptimal");
+    // A perfect rate has no error set to inspect; the cell still offers the
+    // useful next step, the request log itself.
+    expect(text).toContain("home.viewRequests");
+    expect(text).not.toContain("home.viewErrors");
+  });
+
+  it("links to the error log once the rate drops below 100%", () => {
+    const wrapper = mount(UsageMetricStrip, {
+      props: { summary: { ...summary, success_rate: 99.9 }, byProvider },
+    });
+    const text = wrapper.text();
+    expect(text).toContain("home.viewErrors");
+    expect(text).not.toContain("home.viewRequests");
   });
 
   it("shows the critical success tier below 95%", () => {
@@ -83,6 +106,29 @@ describe("UsageMetricStrip", () => {
       props: { summary: { ...summary, success_rate: 90 }, byProvider },
     });
     expect(wrapper.text()).toContain("home.statusCritical");
+  });
+
+  it("shows a neutral no-traffic state instead of critical when nothing was requested", () => {
+    const wrapper = mount(UsageMetricStrip, {
+      props: {
+        summary: {
+          ...summary,
+          total_requests: 0,
+          success_rate: 0,
+          total_cost: 0,
+          total_input_tokens: 0,
+          total_output_tokens: 0,
+        },
+        byProvider: [],
+      },
+    });
+    const text = wrapper.text();
+    expect(text).toContain("home.statusNoTraffic");
+    expect(text).not.toContain("home.statusCritical");
+    expect(text).toContain("—");
+    expect(text).toContain("home.noTrafficInRange");
+    expect(text).not.toContain("home.viewErrors");
+    expect(wrapper.find("[aria-label]").exists()).toBe(false);
   });
 
   it("renders the secondary strip (token distribution + cache, with savings)", () => {

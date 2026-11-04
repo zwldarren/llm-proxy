@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 
 /**
  * Allowlist editor with explicit scope semantics:
@@ -138,29 +138,24 @@ watch(
 <template>
   <div class="space-y-2.5">
     <!-- Scope toggle: All (unrestricted) vs Custom (allowlist) -->
-    <ToggleGroup
-      :model-value="mode"
-      type="single"
-      :spacing="1"
-      :disabled="disabled"
-      class="grid w-full grid-cols-2 rounded-lg border border-border/60 bg-muted/40 p-[3px]"
-      @update:model-value="onModeChange"
-    >
-      <ToggleGroupItem
-        value="all"
+    <SegmentedControl fill :aria-label="t('accessPicker.scope')">
+      <SegmentedControlItem
+        :active="mode === 'all'"
+        :disabled="disabled"
         :aria-label="allLabel"
-        class="h-8 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm"
+        @click="onModeChange('all')"
       >
         {{ allLabel }}
-      </ToggleGroupItem>
-      <ToggleGroupItem
-        value="custom"
+      </SegmentedControlItem>
+      <SegmentedControlItem
+        :active="mode === 'custom'"
+        :disabled="disabled"
         :aria-label="t('accessPicker.custom')"
-        class="h-8 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm"
+        @click="onModeChange('custom')"
       >
         {{ t("accessPicker.custom") }}
-      </ToggleGroupItem>
-    </ToggleGroup>
+      </SegmentedControlItem>
+    </SegmentedControl>
 
     <!-- Help text for the unrestricted state -->
     <p v-if="mode === 'all' && allHelpText" class="text-xs text-muted-foreground">

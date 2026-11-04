@@ -11,6 +11,7 @@ colors:
   sidebar-accent: "#22252B"  # --sidebar-accent  hsl(220 12% 15%) — active nav step
   sidebar-ink: "#EBEBEB"      # --sidebar-foreground  hsl(0 0% 92%)
   sidebar-accent-ink: "#F0F0F0"  # --sidebar-accent-foreground  hsl(0 0% 94%)
+  sidebar-border: "#2D3139"  # --sidebar-border  hsl(220 12% 20%)
   secondary: "#1E2024"        # --secondary     hsl(220 10% 13%)
   muted: "#23252A"            # --muted         hsl(220 9% 15%)
   muted-ink: "#999CA3"        # --muted-foreground  hsl(220 5% 62%)
@@ -103,9 +104,9 @@ typography:
     fontVariantNumeric: "tabular-nums slashed-zero"
 rounded:
   sm: "8px"     # calc(--radius - 4px)
-  md: "10px"    # calc(--radius - 2px) — buttons, inputs, badges
-  lg: "12px"    # --radius (0.75rem) — nav items, tooltips, code containers
-  xl: "16px"    # calc(--radius + 4px) — cards, panels, section containers, icon containers
+  md: "10px"    # calc(--radius - 2px) — buttons, inputs, nav items, popovers
+  lg: "12px"    # --radius (0.75rem) — segmented-control track, toasts, code utility
+  xl: "16px"    # calc(--radius + 4px) — cards, panels, dialogs, sheets, icon containers
   pill: "9999px" # tags, status chips, the range thumb
 spacing:
   "2": "8px"
@@ -166,8 +167,8 @@ components:
     rounded: "{rounded.xl}"
     padding: "20px"
   badge-status:
-    backgroundColor: "{colors.muted}"
-    textColor: "{colors.muted-ink}"
+    backgroundColor: "hsl(150 42% 58% / 0.15)"
+    textColor: "{colors.status-success}"
     typography: "{typography.label}"
     rounded: "{rounded.pill}"
     padding: "2px 8px"
@@ -175,9 +176,39 @@ components:
     backgroundColor: "transparent"
     textColor: "{colors.sidebar-ink}"
     typography: "{typography.label}"
-    rounded: "{rounded.lg}"
+    rounded: "{rounded.md}"
     padding: "8px"
     height: "32px"
+  nav-item-active:
+    backgroundColor: "{colors.sidebar-accent}"
+    textColor: "{colors.sidebar-accent-ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.md}"
+    padding: "8px"
+    height: "32px"
+  segmented-control:
+    backgroundColor: "{colors.muted}"
+    rounded: "{rounded.lg}"
+    padding: "3px"
+  segmented-control-item:
+    backgroundColor: "transparent"
+    textColor: "{colors.muted-ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.md}"
+    padding: "6px 12px"
+    height: "30px"
+  segmented-control-item-active:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.md}"
+    padding: "6px 12px"
+    height: "30px"
+  dialog:
+    backgroundColor: "{colors.card}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.xl}"
+    padding: "24px"
   code-block:
     backgroundColor: "{colors.code-bg}"
     textColor: "{colors.ink}"
@@ -201,11 +232,11 @@ This system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand wa
 **Key Characteristics:**
 - Dark-first monochrome with cool-neutral (220°) undertones; light mode is a crisp mirror.
 - Editorial type pairing: geometric Space Grotesk display + humanist Manrope body + IBM Plex Mono for data.
-- Flat-by-default surfaces; depth via tonal background steps + 1px hairline borders, never structural drop shadows.
+- Flat-by-default surfaces; depth via tonal background steps + 1px hairline borders, with ambient shadow only on the vestibule mark and transient toasts.
 - Low-saturation semantic tints (violet/blue/amber/rose/teal + status + syntax) — always paired with text or icon, never color-only.
 - Motion is exponential ease-out (`cubic-bezier(0.16, 1, 0.3, 1)`), 150–500ms, GPU-only, and globally neutralized under `prefers-reduced-motion`.
 - Tabular-numeric monospace for every metric, token count, cost, and timestamp.
-- Three structural grammars, chosen by task: the flush console (management tables), stacked hairline panels (settings and security forms), and the containerless vestibule (auth).
+- Four structural grammars, chosen by task: the flush management console, the configuration form in a centered reading column, stacked hairline panels for personal settings, and the containerless vestibule (auth).
 - The 11px tracked uppercase label is a **label rail** — an in-panel micro-heading — never a page-section kicker.
 
 ## Colors
@@ -226,23 +257,24 @@ A two-theme monochrome system with a cool-neutral (hue 220°) undertone. Dark mo
 - **Soft Slate** (`--muted-foreground`): secondary text, captions, metadata. Dark `hsl(220 5% 62%)` `#999CA3` / Light `hsl(220 4% 38%)` `#5D6065`. Tuned for WCAG AA against both surfaces — never lighten this "for elegance."
 - **Hairline Slate** (`--border`, `--input`): every 1px divider and input stroke. Dark `hsl(220 10% 22%)` `#32363E` / Light `hsl(220 4% 88%)` `#DFE0E2`.
 - **Active Step** (`--sidebar-accent`): the filled tonal step that marks the current nav item. Dark `hsl(220 12% 15%)` `#22252B` / Light `hsl(220 4% 93%)`. State is a step on this ramp, never a stripe or a color.
+- **Rail Hairline** (`--sidebar-border`): the navigation rail's 1px edge, the collapsed-rail outline, and the version chip's edge. Dark `hsl(220 12% 20%)` `#2D3139` / Light `hsl(220 4% 89%)` `#E2E3E4`.
 - **Scrim Black** (`--overlay`): the modal, sheet, and image-lightbox scrim, `hsl(0 0% 0%)` at dialog-managed opacity. It is the only true black in the system and it never appears as a surface.
 
 ### Action & HTTP Method Tints (Tertiary — semantic only)
 Muted but perceptible hues used to disambiguate HTTP methods, action types, and categorical data (usage bars, chart series). Chroma is tuned so each hue reads as its color while staying clearly muted — never decoration, never large-surface fills.
 - **Muted Azure** (`--action-blue` / `--http-get`, GET): Dark `hsl(210 26% 64%)` `#8BA3BB` / Light `hsl(210 22% 35%)` `#46596D`.
 - **Pale Iris** (`--action-violet` / `--http-post`, POST): Dark `hsl(260 24% 80%)` `#C8C0D8` / Light `hsl(260 22% 9%)` `#15121C`.
-- **Muted Amber** (`--action-amber` / `--http-put`, PUT/PATCH): Dark `hsl(35 28% 60%)` `#B69E7C` / Light `hsl(35 24% 38%)` `#78654A` (`--http-put` mirrors one step lighter at `hsl(35 24% 48%)`).
-- **Muted Coral** (`--action-rose` / `--http-delete`, DELETE): Dark `hsl(350 28% 64%)` `#BD8992` / Light `hsl(350 26% 45%)` `#91555F`.
+- **Muted Amber** (`--action-amber` / `--http-put`, PUT/PATCH): Dark `hsl(35 28% 60%)` `#B69E7C` / Light `hsl(35 24% 36%)` `#725F46`, shared by both tokens. The lighter pair they used to carry (`action-amber` at 38%, `http-put` at 48%) read 4.31:1 and 3.12:1 as badge text on their own tint — PUT/PATCH labels were the one method pair that failed AA. `--http-put` sits half a step lighter at `hsl(35 24% 37%)` `#756248` to keep the method distinguishable in a dense row.
+- **Muted Coral** (`--action-rose` / `--http-delete`, DELETE): Dark `hsl(350 28% 64%)` `#BD8992` / Light `hsl(350 26% 44%)` `#8D535D` — at 45% the DELETE label measured exactly 4.50:1 on its own `/15` tint, so it sat on the AA line rather than over it.
 - **Muted Teal** (`--action-teal`, embedding): the fifth capability tint in the model plaza — vision→azure, image generation→iris, TTS→amber, STT→coral, embedding→teal. Dark `hsl(180 26% 62%)` `#85B7B7` / Light `hsl(180 24% 30%)` `#3A5F5F`.
 
 ### Status Tints (Tertiary — semantic only)
-Desaturated but recognizable; always rendered as a tinted badge (`bg/15 text border/30`) with a text label and `role="status"`. Success and error pair across themes via light/dark aliases — `--status-success` resolves to `--success-light` in light mode and `--success-dark` in dark mode; `--status-error` resolves to `--error-light` / `--error-dark`. Surface code consumes the resolved `--status-*` token only: the light/dark halves exist to define it, never as a second encoding alongside it.
+Desaturated but recognizable; always rendered as a tinted badge (`bg/15 text border/30`) with a text label. The badge is a static label, so it carries no live region: a table of hundreds of rows must not mint hundreds of `role="status"` announcers. Live feedback belongs to the one `role="status"` region that reports the result count. Success and error pair across themes via light/dark aliases — `--status-success` resolves to `--success-light` in light mode and `--success-dark` in dark mode; `--status-error` resolves to `--error-light` / `--error-dark`. Surface code consumes the resolved `--status-*` token only: the light/dark halves exist to define it, never as a second encoding alongside it.
 - **Sage Mint** (`--status-success`): Dark `hsl(150 42% 58%)` `#67C194` / Light `hsl(150 42% 30%)` `#2C6D4D`.
 - **Muted Gold** (`--status-warning`): Dark `hsl(32 42% 58%)` `#C19767` / Light `hsl(32 42% 34%)` `#7B5932`.
   (Light-mode status lightness is set by the AA requirement against the badge's own `/15` tint, not against the page alone — see §Colors.)
 - **Salmon Rose** (`--status-error`): Dark `hsl(4 52% 72%)` `#DD9792` / Light `hsl(4 45% 45%)` `#A6463F`.
-- **Neutral Slate** (`--status-unknown`): Dark `hsl(220 5% 58%)` `#8F9299` / Light `hsl(220 3% 45%)` `#6F7276`.
+- **Neutral Slate** (`--status-unknown`): Dark `hsl(220 5% 58%)` `#8F9299` / Light `hsl(220 3% 40%)` `#636569`.
 - **Desaturated Rose** (`--destructive`): destructive actions and the logout hover. Dark `hsl(4 52% 52%)` `#C44D45` / Light `hsl(4 48% 46%)` `#AE453D`.
 
 ### Syntax & Code Palette (code surfaces only)
@@ -254,9 +286,9 @@ A separate low-chroma family for code and payload surfaces — JSON viewers, hig
 ### Named Rules
 **The Monochrome-First Rule.** Black, white, and the cool-neutral slate ramp carry 90%+ of any screen. The action/status tints are permitted only on badges, icon containers, metric values, and hover glows — never as section backgrounds, never as button colors (except `destructive`), never as large fills. If a screen reads as "colorful," it has failed this rule.
 
-**The Tint, Not the Hue Rule.** Status and HTTP colors render at low alpha (`/15` background, `/25–30` border) with the full token as text. The badge is a labeled chip, not a swatch. Color is redundant information; the text label and `role="status"` are the primary signal.
+**The Tint, Not the Hue Rule.** Status and HTTP colors render at low alpha (`/15` background, `/25–30` border) with the full token as text. The badge is a labeled chip, not a swatch. Color is redundant information; the text label is the primary signal, and the chip is static — never a live region.
 
-**The Cool-Neutral Undertone Rule.** Every neutral token carries hue 220° at very low chroma (3–14%). Never introduce a true-gray (`0 0%`) neutral or a warm-neutral (`hue 30–100`) — both break the cool-console atmosphere and edge toward the cream/SaaS default this system rejects.
+**The Cool-Neutral Undertone Rule.** Every surface, border, and mid-tone neutral carries hue 220° at very low chroma (3–14%). The extreme ink tokens (`--foreground`, `--primary`, `--ring`, `--sidebar-foreground`) may resolve to `0 0%` because hue is imperceptible at those lightnesses; those are the only true-gray values. Never introduce a true-gray mid-surface or a warm-neutral (`hue 30–100`) — both break the cool-console atmosphere and edge toward the cream/SaaS default this system rejects.
 
 **The Quiet Syntax Rule.** The JSON and code palettes differentiate structure at low chroma for scanning — and only on code surfaces (JSON viewers, highlighted snippets, code blocks). Never reuse syntax tokens for badges, chart series, or fills; a rainbow syntax theme is a defect, not a feature.
 
@@ -303,12 +335,13 @@ Dark mode adds 0.05 to body line-height for light-on-dark readability: `.dark bo
 
 A fixed left-rail / fluid-`main` app shell built for scan-first density, not marketing space.
 
-- **App shell:** `flex h-screen overflow-hidden`. Fixed `NavSidebar` (desktop `hidden md:flex`, mobile `Sheet` drawer) + `main` on a faint `bg-muted/5` page tint with responsive padding `px-4 sm:px-6 py-5 sm:py-6`. A `full` layout mode (no padding, child-managed) drives the console pages.
-- **Sidebar:** `16rem` expanded / `3rem` icon-collapsed (`--sidebar-width` → `--sidebar-width-icon`), `bg-sidebar` on a `border-r border-sidebar-border` rail. Collapsible with 200ms-delay tooltip labels in collapsed state.
+- **App shell:** `flex h-screen overflow-hidden`. Fixed `NavSidebar` (desktop `hidden md:flex`, mobile `Sheet` drawer) + `main` on a faint `bg-muted/5` page tint with responsive padding `px-4 sm:px-6 pt-4 pb-5 sm:pb-6`. A `full` layout mode (no padding, child-managed) drives the console pages.
+- **Sidebar:** `16rem` expanded / `3rem` icon-collapsed (`--sidebar-width` → `--sidebar-width-icon`), `bg-sidebar` on a `border-r border-sidebar-border` rail. The rail slides on `transform`; collapsed labels appear as immediate tooltips. The 64px brand header carries the mark/name lockup and the version chip; the footer carries the account menu.
 - **Page header:** one per page, the consistent anchor — `flex` row with an `.icon-container` at its `.icon-container-sm` page-header size (tinted tile, top sheen), a `.brand-heading` title (`text-xl sm:text-2xl`, `#page-title`), a `text-muted-foreground text-xs max-w-2xl` description, and an `actions` slot (`animate-in fade-in duration-300`, optionally in a `rounded-xl border-border/55 bg-card/76` toolbar).
 - **Grids:** Tailwind grid utilities, composed per surface — `grid-cols-1 lg:grid-cols-2` (gap 4/6), `md:grid-cols-3` (gap 4), `grid-cols-2 lg:grid-cols-4` (gap 4).
 - **Spacing rhythm:** Tailwind scale — 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64px. Page sections are `space-y-4 md:space-y-6`.
-- **Console layout (signature — management pages):** the "card wrapping card" anti-pattern is explicitly rejected. Providers, Models, API Keys, MCP Servers, Team, and Settings use a flush console: `config-header-bar` (sticky `bg-background` + `border-b/60`) + `config-toolbar` (flush `bg-background` + `border-b/60`) + `config-content` (scrollable) with a pinned `config-thead` (`bg-background`, header cells `bg-muted/50 border-b-2 border-border/70`). One seamless surface separated only by hairlines; table rows sit on the faint page tint. Settings replaces the toolbar with a two-segment tab strip inside the page header. Section jumps live beside that strip in a compact dropdown whose trigger names the section currently in view — a bare "Sections" label told the operator nothing about their position on a ten-section page, so the scrollspy drives the label (`Request Policy`, `Circuit Breaker`) and `Sections` survives only as the button's `title` and as the stem of its accessible name (`Sections: Request Policy`). General is a flat option list, Advanced groups its sections under Routing & models / Resilience & delivery / Access & limits. The page is instance-wide and admin-only: theme, language and per-user tracing are personal settings and live in the account workspace instead. The page header stays on the shared `px-4 sm:px-6` console gutter while the cards use one centered `max-w-4xl` column. There is no second left rail and no full-width navigation band above the content; the section menu is available from the persistent header without competing with the first section.
+- **Console layout (signature — management pages):** the "card wrapping card" anti-pattern is explicitly rejected. Providers, Models, API Keys, MCP Servers, and Team use a flush console: `config-header-bar` (sticky `bg-background` + `border-b/60`) + `config-toolbar` (flush `bg-background` + `border-b/60`) + `config-content` (scrollable) with a pinned `config-thead` (`bg-background`, header cells `bg-muted/50 border-b-2 border-border/70`). One seamless surface separated only by hairlines; table rows sit on the faint page tint.
+- **Configuration-form layout (signature — Settings and instance policy):** the standard full-width `config-header-bar` stays on the shared `px-4 sm:px-6` gutter, but the body is one centered reading column of stacked cards — `max-w-4xl` for Settings, `max-w-3xl` for `/config/console-auth`. Settings puts a two-segment General / Advanced `SegmentedControl` in the header beside a compact section-jump dropdown; the trigger names the section currently in view, not the menu, so the scrollspy drives the label (`Request Policy`, `Circuit Breaker`) and `Sections` survives only as the button's `title` and as the stem of its accessible name (`Sections: Request Policy`). General is a flat option list; Advanced groups its sections under Routing & models / Resilience & delivery / Access & limits. The page is instance-wide and admin-only: theme, language and per-user tracing are personal settings and live in the account workspace instead. There is no second left rail and no full-width navigation band above the content; the section menu is available from the persistent header without competing with the first section.
 - **Log Management grouping:** the settings panel divides its decisions into **Capture** (body/raw capture and masking), **Retention** (retention and manual cleanup), and **Audit** (body and audit sampling, size and retention). Each group exposes at most four primary controls; grouping changes reading order only, never the auto-save contract.
 - **Model list-row column grammar (signature — Models page, both roles):** list and table modes are one column grammar. List rows carry fixed-width data columns (`.model-col-ctx` 80px, `.model-col-price` 96px, `.model-col-tier` 80px, `.model-col-actions` 76px) under a pinned `ModelListHead` (sticky, `bg-muted/50` + the 2px bottom rule, same gutter/gap/widths as the rows) whose cells repeat the table's sort controls — so list mode sorts and scans exactly like the table. The name cell is indented by the icon footprint (`pl-11`); model names are mono `text-[13px]` in every mode (they are API identifiers, the Mono-Data Rule). Collapse is by tier: the full grammar shows at `lg`; `sm–lg` keeps IN/OUT only (CACHED lives in either's pricing popover); below `sm` columns hide and each row's meta line carries context inline.
 - **Tables:** dense, hairline-separated, `whitespace-nowrap` by default; touch cells are `min-h-11 min-w-11` (44px).
@@ -316,7 +349,7 @@ A fixed left-rail / fluid-`main` app shell built for scan-first density, not mar
 - **Personal-settings layout (Account):** one shared Account shell — a centered `max-w-4xl` column whose page header carries a three-segment **Profile / Preferences / Sign-in & security** tab strip (the same segmented control grammar as Settings). `/account`, `/account/preferences` and `/account/security` remain deep-linkable routes; the shell, not a per-page action button, is the navigation between them. Profile is identity only — a summary with editable username/email rows; Preferences holds what is personal but not identity (appearance: theme and language, stored in the browser; per-user tracing backends); Sign-in & security is every credential in strength order (passkeys → password → two-factor → linked providers → current session). See §Components → Personal-Settings Panels for the panel spec; personal settings are read top-to-bottom, not scanned as a grid.
 - **Instance sign-in (admin form):** `/config/console-auth` is instance-wide login policy, not personal security. It uses the single-form variant: the standard full-width `config-header-bar` stays on the shared console gutter, with one centered `max-w-3xl` form column, stacked panels and a sticky save bar. No section index; the security tab links admins here instead of merging the two scopes.
 - **Measure:** long-form body capped at 65ch (`max-w-[65ch]`), prose at 70ch (`max-w-[70ch]`).
-- **Responsive:** mobile-first; `sm:640 md:768 lg:1024 xl:1280`. Container queries (`@sm/@md/@lg`) exist for component-level responsiveness.
+- **Responsive:** mobile-first; `sm:640 md:768 lg:1024 xl:1280 2xl:1536`. Container queries (`@sm/@md/@lg`) exist for component-level responsiveness.
 - **Atmosphere layers:** two fixed `body::before`/`::after` layers behind every screen — a trio of soft radial foreground-glints (opacity 0.05–0.12) and a 42px grid masked toward viewport center (opacity 0.45–0.6), dimmer in dark mode. They never sit above content (`z-index: -2/-1`, `pointer-events: none`).
 
 ### Named Rules
@@ -324,14 +357,15 @@ A fixed left-rail / fluid-`main` app shell built for scan-first density, not mar
 
 **The Page-Header Anchor Rule.** Every route opens with exactly one `.page-header` (tinted icon container + `.brand-heading` title + muted description + actions). It is the consistent entry point a stranger trusts cold.
 
-**The Task-Shape Rule.** Structure follows the task, not the page: management tables are one flush console; settings and security are stacked hairline panels; auth is containerless. Three grammars, one per task shape — never two on one screen.
+**The Task-Shape Rule.** Structure follows the task, not the page: management tables are one flush console; instance configuration is a centered form column under the console header; personal settings are stacked hairline panels; auth is containerless. Four grammars, one per task shape — never two on one screen.
 
 ## Elevation & Depth
 
 Flat-by-default. Depth is conveyed by **tonal background steps** (`--card` over `--background`, the `--muted/5` page tint, `--muted/50` table hover) and **1px hairline borders**, not by structural drop shadows. Shadows, when they appear, are ambient and state-driven, never decorative.
 
 ### Shadow Vocabulary
-- **Rest card shadow** (`shadow-xs`): the lift on primary buttons, the active settings tab, and the sidebar collapse handle. Panels do **not** carry it — their 1px `border-border/60` does the elevation work. (The `.brand-panel` utility carries `shadow-sm` at 7 call sites; it is not part of this recipe.)
+- **Rest card shadow** (`shadow-xs`): the lift on primary buttons, the active segmented-control segment, and the sidebar collapse handle. Panels do **not** carry it — their 1px `border-border/60` does the elevation work. (The legacy `.brand-panel` utility carries `shadow-sm` at a few playground call sites; it is not part of this recipe.)
+- **Transient overlay shadow** (`shadow-lg`): toasts only. A toast is a detached floating layer with no tonal step beneath it, so it is the one bordered surface allowed a wide, soft shadow.
 - **Hover glow** (`0 0 20px -6px hsl(<color> / 0.35–0.4)`): `.hover-glow-primary/-blue/-amber/-success` — a constrained ambient halo on interactive elements in the matching semantic color.
 - **Inset top highlight** (`inset 0 1px 0 hsl(var(--foreground) / 0.06)` on cards; `inset 0 1px 0 hsl(var(--background) / 0.9)` on inputs): the single-pixel top sheen that reads as a lit edge on raised surfaces.
 - **Auth-mark shadow** (`0 18px 36px -20px hsl(var(--primary) / 0.55)` + inset): the floating vestibule mark — the single place where a shadow is ambient rather than state-driven, because the mark floats on the atmosphere instead of on a surface.
@@ -339,7 +373,7 @@ Flat-by-default. Depth is conveyed by **tonal background steps** (`--card` over 
 - **Anchor flash** (`0 0 0 2px hsl(var(--primary) / 0.32)`): the 900ms `anchor-target-flash` ring that marks a section reached by a deep link, holding as a static 2px ring under reduced motion.
 
 ### Named Rules
-**The Flat-By-Default Rule.** Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained auth-mark exception. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.
+**The Flat-By-Default Rule.** Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained auth-mark and toast exceptions. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.
 
 **The Tonal-Step Rule.** When you need to separate two surfaces, step the background token (`--background` → `--card` → `--muted`) before reaching for a shadow. A 1px `--border` hairline plus a tonal step is the default depth recipe.
 
@@ -348,16 +382,16 @@ Flat-by-default. Depth is conveyed by **tonal background steps** (`--card` over 
 Rounded, restrained, and tiered by component class. Corners never get loud.
 
 - **Base radius** (`--radius`): 0.75rem (12px). All other radii derive from it.
-- **Cards, panels, section containers, icon containers** (`rounded-xl`, 16px): the largest radius in the system. Cap for cards and panels is 16px — no 20/24/28/32/40px card radii.
-- **Buttons, inputs, badges' outer containers, code containers** (`rounded-md`, 10px): the control radius.
-- **Nav items, tooltips, code containers** (`rounded-lg`, 12px): nav items get a slightly softer corner than controls.
+- **Cards, panels, dialogs, sheets, code blocks, icon containers, identity tiles** (`rounded-xl`, 16px): the largest radius in the system. Cap for cards and panels is 16px — no 20/24/28/32/40px card radii.
+- **Buttons, inputs, nav items, menu/popover/tooltip surfaces** (`rounded-md`, 10px): the control radius.
+- **Segmented-control tracks, toasts, the legacy code-container utility** (`rounded-lg`, 12px): the mid-size shell radius.
 - **Tags, status chips, the range thumb** (`rounded-full` / pill, 9999px): full-pill is reserved for tags and status chips, never for cards or buttons.
 - **Identity tiles** (`rounded-xl`, 16px): the 48px `auth-mark` and the 56px account initials tile take the card corner, never the pill — an identity mark is a panel, not a chip.
-- **Control heights:** 36 / 40 / 44 / 48px — `h-9` compact, `h-10` default, `h-11` for auth fields, the auth CTA, and every touch target on small screens (`max-sm:h-11`), `h-12` for the MFA code field.
+- **Control heights:** 36 / 40 / 44 / 48px — `h-9` compact, `h-10` default, `h-11` for auth fields, the auth CTA, and every touch target; `h-12` for the MFA code field. Phones lift to 44px through `max-sm`, and every coarse-pointer viewport gets the same 44px floor without changing mouse-driven desktop density.
 - **Borders:** 1px `--border` everywhere by default. The only >1px rules are neutral 2px bottom rules on the pinned console header cells (`config-thead` / `ModelListHead`, `border-b-2 border-border/70`). A colored `border-left/right` accent stripe on cards, list items, or alerts is prohibited: active state is a tonal step, never a stripe.
 
 ### Named Rules
-**The Radius Cap Rule.** Cards and panels cap at `rounded-xl` (16px). Save full-pill for tags and status chips; `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii, no pill buttons.
+**The Radius Cap Rule.** Cards and panels cap at `rounded-xl` (16px). Save full-pill for tags and status chips; nav items use the control radius `rounded-md` (10px). No 24/28/32/40px card radii, no pill buttons.
 
 **The No-Stripe Rule.** A colored >1px stripe never marks state anywhere in the system — active nav items are a filled `--sidebar-accent` step plus `font-medium`, and the only >1px rules are the neutral 2px console header bottom rules. Never use a colored `border-left/right` accent stripe on cards, list items, or alerts.
 
@@ -375,19 +409,19 @@ Tactile and confident, but quiet — the primary CTA is the highest-contrast obj
 - **Ghost:** `hover:bg-accent/70 hover:text-accent-foreground` — no border, no fill at rest.
 - **Link:** `text-primary underline-offset-4 hover:underline`.
 - **Focus (all):** `focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]` — a 3px ring, the strongest focus signal in the system. `aria-invalid` switches the ring to `ring-destructive/20` (`/40` dark) and the border to `destructive`.
-- **Sizes:** default `h-10`; `sm` `h-9`; `lg` `h-11`; `icon` `size-10`; `icon-sm` `size-9`; `icon-lg` `size-11`. Default, `sm`, `icon` and `icon-sm` lift to a 44px floor on small screens (`max-sm:h-11` / `max-sm:size-11`), so no button sits under the touch minimum on a phone. Icons scale to `size-4` by default.
+- **Sizes:** default `h-10`; `sm` `h-9`; `lg` `h-11`; `icon` `size-10`; `icon-sm` `size-9`; `icon-lg` `size-11`. Default, `sm`, `icon` and `icon-sm` lift to a 44px floor on phones (`max-sm:h-11` / `max-sm:size-11`); on any coarse pointer the shared control-slot floor enforces 44px across all sizes. Icons scale to `size-4` by default.
 - **Auth CTA:** primary, `h-11 w-full gap-2` (with `.btn-press`) — 44px tall, full column width. The vestibule shows exactly one white button: the passkey button when the account has one, otherwise the password submit; whichever loses becomes `outline`.
 - **Press:** `.btn-press:active { transform: scale(0.98) }` (100ms), neutralized under reduced motion.
 
 ### Status Badge (signature)
-A labeled chip, not a swatch. Color is redundant; the text label and `role="status"` are the signal.
-- **Shape:** `rounded-full border px-2 py-0.5 text-xs font-medium`, `Badge variant="outline"`, `role="status"`, slot `truncate`.
+A labeled chip, not a swatch. Color is redundant; the text label is the signal, and the chip is static so it carries no live region.
+- **Shape:** `rounded-full border px-2 py-0.5 text-xs font-medium`, `Badge variant="outline"`, slot `truncate`. No `role="status"` on the chip; a table of hundreds of rows must not mint hundreds of announcers. The single result-count region owns live feedback.
 - **State:** rendered as `bg-<token>/15 text-<token> border-<token>/25–30`. Two families: `status` (success/warning/error/unknown) and `http` (GET→blue, POST→violet, PUT/PATCH→amber, DELETE→rose).
 - **Base badge variants** (non-status): `default` (primary), `secondary`, `destructive`, `warning` (`amber-500/15 text-amber-600 dark:text-amber-400`), `outline` (text-only, hover bg-accent).
 - **Voice:** chips carrying a **technical token** — HTTP method, status code, duration — set their slot in mono (`font-mono tabular-nums`); chips carrying a **word** — "Admin", "Viewer", "Success" — keep the sans voice. A word label in mono reads as a code value and is a defect.
 
 ### Cards / Containers
-Flat raised slates, hairline-edged, tonally stepped above the void. There is no `Card` component in this codebase — the recipe is a class string each surface repeats, so it is stated once, here.
+Flat raised slates, hairline-edged, tonally stepped above the void. There is no generic `Card` component; `PanelSection` owns the stacked personal-settings panel, while console cards repeat the same recipe as a class string. It is stated once, here.
 - **Recipe:** `rounded-xl border border-border/60 bg-card p-5` — `p-5 sm:p-6` when the panel is a page body, `px-4 py-3` for a compact row group.
 - **Corner:** `rounded-xl` (16px).
 - **Background:** `bg-card` (`--card`), one step lighter than `--background`.
@@ -396,21 +430,21 @@ Flat raised slates, hairline-edged, tonally stepped above the void. There is no 
 
 ### Inputs / Fields
 A lit-edge control with the strongest focus signal in the system.
-- **Style:** `h-10 rounded-md border border-input/80 bg-background/75 px-3.5 py-2 text-base md:text-sm`, `shadow-[inset_0_1px_0_hsl(var(--background)/0.9)]` (the inset top highlight), `backdrop-blur-sm`, `transition-[color,box-shadow,border-color,background-color]`. Dark mode lifts the fill to `dark:bg-input/40` so the field reads as a recess in the slate rather than a hole in it; small screens grow it to `h-11`.
+- **Style:** `h-10 rounded-md border border-input/80 bg-background/75 px-3.5 py-2 text-base md:text-sm`, `shadow-[inset_0_1px_0_hsl(var(--background)/0.9)]` (the inset top highlight), `backdrop-blur-sm`, `transition-[color,box-shadow,border-color,background-color]`. Dark mode lifts the fill to `dark:bg-input/40` so the field reads as a recess in the slate rather than a hole in it; phones grow it to `h-11`, and the shared coarse-pointer floor keeps it at 44px on touch laptops and tablets.
 - **Focus:** `focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]` — a 3px primary ring, the strongest focus signal in the system.
 - **Invalid:** `aria-invalid:border-destructive` + `ring-destructive/20`.
 - **Placeholder:** `text-muted-foreground` (tuned for AA contrast, not lightened).
 - **Auth input (login/setup):** the standard `Input` at `h-11` — same fill, same inset sheen — or `h-12 text-center font-mono text-lg tracking-[0.35em]` for the MFA code field. `.auth-input` in `main.css` changes only the **state** signals, and it is declared **outside `@layer components` on purpose**: `Input.vue` sets the same properties as utilities, and a utility layer outranks every earlier layer no matter how specific the selector is, so an in-layer version never reached the screen. What it owns: focus (`border-color` → `primary/0.65`, plus a 1px `primary/0.55` line and a 2px `primary/0.12` glow, with the `inset 0 1px 0 background/0.9` sheen restated so it survives), hover (`primary/0.28`, guarded with `:not(:disabled):not(:focus-visible):not([aria-invalid="true"])`), and invalid-while-focused (`destructive` border with the same glow shape). Every property the block overrides is restated inside it — hand one back to the utilities and the red error border silently disappears on all six auth screens. Never patch it with `!important`.
 
 ### Auth Screen — "The Vestibule" (signature surface)
-One centered column, no card, one white action. Every screen before the console opens renders through `AuthShell`: login, first-run setup, force-change-password, invite acceptance, OAuth completion, email verification.
+One centered column, no card, one white action. Every screen before the console opens renders through `AuthShell`: login, first-run setup, force-change-password, invite acceptance, OAuth completion, email verification, forgot-password, and reset-password.
 - **Shell:** `min-h-dvh` column, `px-4 py-8 sm:py-10`; block `max-w-sm` centered; the `.auth-enter` entrance (500ms `cubic-bezier(0.16, 1, 0.3, 1)`, a 14px rise plus fade, from an already-visible default).
 - **Atmosphere:** `.login-bg` — a 34px `primary/0.09` grid masked from `50% 20%` (35%) out to 90%, held at `0.45` opacity in dark mode and `0.32` in light (the identical stroke reads heavier once it is drawn in near-black), plus a 620px radial `primary/0.12 → action-blue/0.06 → transparent` at `top: 18%` with `blur(8px)`. Both sit behind the form and take no pointer events. Note this is a **different, tighter** grid than the 42px page atmosphere.
 - **Header — identity lockup:** the 48px `.auth-mark` (`rounded-xl`, `ring-1 ring-primary/25`, a 28px logo) sits **beside** the product name (`brand-heading text-sm text-foreground`, `gap-3`), so mark and name read as one lockup. The screen title follows as `.brand-heading mt-6 text-xl sm:text-2xl`, then an optional `mt-2 max-w-sm text-sm text-muted-foreground` description. The product name is never a stacked line above the title: a small label in that position is an eyebrow, and the system does not use one.
 - **Fields:** `.auth-input h-11` inside `flex flex-col gap-4` groups (`gap-1.5` within a group); labels `text-sm font-medium text-foreground/90`. The field keeps the console's fill and sheen; only its state signals are the vestibule's own — hover lifts the border to `primary/0.28`, focus sharpens it to `primary/0.65` with a faint glow instead of taking the 3px ring, so the white CTA stays the loudest object on the screen. A password field carries its recovery entry inline, right-aligned in the label row (`text-xs text-muted-foreground`, `hover:text-foreground hover:underline`), a trailing `w-11` reveal button (`Eye`/`EyeOff`, `aria-pressed`, `aria-label` naming the action), and a `text-xs text-muted-foreground` Caps Lock note while the hardware key is down.
 - **Credential order:** the passkey action leads — **primary** `h-11 w-full gap-2` with a `Fingerprint` `size-4` glyph on a browser that has proven a passkey, **outline** otherwise — then the hairline divider, then the **whole** password path (identifier, password, submit). The divider opens one branch and never splits the identifier off above it. The password submit is the **outline** twin when the passkey button is primary and **primary** otherwise; OIDC providers follow as `variant="outline" h-11 w-full gap-2` rows. The credential the operator is most likely to hold sits highest, and the white button follows it — never two whites on one screen.
 - **Dividers:** `h-px flex-1 bg-border` on either side of a `text-xs text-muted-foreground` label — a hairline with a word in it, never a bordered band.
-- **Utility row:** theme and language sit in a footer under the form (`mt-10`), held apart by space and a single `h-4 w-px` hairline — no rule across the column, no card. Both use the compact variant of their selector: `ThemeSelector compact` is icon-only (`Sun`/`Moon`/`Monitor`, `size-9`, `title` plus an `sr-only` label, active item on a `bg-muted` step) and `LanguageSelector compact` drops its border and height (`h-9`, borderless trigger). Both grow to 44px under `md`. The labelled forms stay in Account → Preferences.
+- **Utility row:** theme and language sit in a footer under the form (`mt-10`), held apart by space and a single `h-4 w-px` hairline — no rule across the column, no card. Both use the compact variant of their selector: `ThemeSelector compact` is icon-only (`Sun`/`Moon`/`Monitor`, 30px segments, `title` plus an `sr-only` label, active item on a `bg-muted` step) and `LanguageSelector compact` drops its border and height (`h-9`, borderless trigger). Both grow to 44px under `md`. The labelled forms stay in Account → Preferences.
 - **MFA challenge:** one `h-12` code field (`required` is semantic only — the form is `novalidate`), plus text-link actions at `h-8 px-0 text-xs text-muted-foreground` — the only `link` buttons in the vestibule. "Use a different account" and "go back" both return to the same column, never to a new screen.
 - **Errors and empty fields:** the server's verdict is a destructive `Alert` above the form (`mb-4`, `CircleAlert` glyph, `animate-in fade-in slide-in-from-top-2 duration-300`), and the session-ended notice takes the same shape with `Info`. A field the operator left empty is not an alert: it gets `aria-invalid`, focus, and a `text-xs text-destructive` hint beneath it, id-referenced from `aria-describedby`. Every auth form is `novalidate`, so the browser's own bubbles never mix with these. Editing a field retires both — a stale verdict never sits under corrected text.
 - **Loading copy:** a submit in flight names its action — "Signing in…", "Verifying…", "Waiting for passkey…" — never a generic "Loading…".
@@ -418,9 +452,9 @@ One centered column, no card, one white action. Every screen before the console 
 
 ### Navigation (`NavSidebar`)
 A recessed rail; items are quiet at rest and marked by a filled tonal step when active.
-- **Shell:** `--sidebar-width` 16rem / icon-collapsed 3rem / mobile drawer 18rem, `bg-sidebar`, `border-r border-sidebar-border` (left side), fixed `inset-y-0`, width transition 200ms ease-linear. The inner shell is a `role="complementary"` landmark so the brand header and account footer (which sit outside the inner `<nav>`) stay reachable by landmark navigation.
-- **Items:** shadcn `SidebarMenuButton` — `rounded-md p-2 text-sm`, `h-8` (`max-md:h-11` for touch), `SidebarMenu` `gap-0.5`, `transition-colors`. Active: `data-[active=true]:bg-sidebar-accent` (`#22252B` in dark) + `text-sidebar-accent-foreground` + `font-medium`, and the link itself is `aria-current="page"` — the tonal step plus the label carries the state, never a stripe. Hover uses the same step. Collapsed state shows the label as a tooltip.
-- **Brand header / account footer:** the version chip is a mono `text-[10px]` badge on `border-sidebar-border/60`, with a `bg-status-warning` dot plus `sr-only` text when an update is available. The footer is the account menu: a 32px `rounded-md bg-muted` initials tile + `text-xs font-semibold` name + `text-[11px]` role, opening an upward `DropdownMenu` (`w-56`, `slide-in-from-bottom-2 150ms`) that carries **Account**, **Preferences** and **Sign-in & security** as its first group, then logout as `text-destructive focus:bg-destructive/10`. The account workspace lives here, not in the nav sections — it is identity, not configuration.
+- **Shell:** `--sidebar-width` 16rem / icon-collapsed 3rem / mobile drawer 18rem, `bg-sidebar`, `border-r border-sidebar-border` (left side), fixed `inset-y-0`. Collapse slides the full-width rail on `transform` (200ms linear) while the desktop gap snaps to the new width once; width, `left` and `right` are never animated. A 24px circular handle straddles the rail edge and carries `shadow-xs`; it keeps that 24px disc at every pointer type and only its hit area grows (to 44px) on coarse pointers, so the handle never looks different on a touchscreen. The rail sits above page chrome (`z-30`) because a sticky page header also uses `z-10` and would otherwise paint over the half of the handle that crosses the edge. The inner shell is a `role="complementary"` landmark so the brand header and account footer (which sit outside the inner `<nav>`) stay reachable by landmark navigation.
+- **Items:** shadcn `SidebarMenuButton` — `rounded-md p-2 text-sm`, `min-h-8` (`max-md:min-h-11` for touch), `SidebarMenu` `gap-0.5`, `transition-colors`. Navigation rows are **exempt from the global coarse-pointer 44px floor** — that floor is for form and action controls, and applying it to the rail turns the menu into a scrolling band on any touchscreen laptop; the `max-md` floor covers phones. Section seams are `p-2` groups tightened to `py-1` inside a `gap-1` column (plus `py-3` on the scroll area), so a break reads as `4 + 4 + 4` rather than a 24px band. Active: `data-[active=true]:bg-sidebar-accent` (`#22252B` in dark) + `text-sidebar-accent-foreground` + `font-medium`, and the link itself is `aria-current="page"` — the tonal step plus the label carries the state, never a stripe. Hover uses the same step. Collapsed state shows the label as an immediate tooltip.
+- **Brand header / account footer:** the version chip is a mono `text-[10px]` badge on `border-sidebar-border/60`, with a `bg-status-warning` dot plus `sr-only` text when an update is available. The wordmark is `shrink-0` and the chip truncates, so the two never overlap at 16rem. Collapsed, the brand drops the 32px tile and shows the bare mark at the rail's 16px glyph size — a 32px box would run into the handle parked on the edge. The footer is the account menu: a 32px `rounded-md bg-muted` initials tile + `text-xs font-semibold` name + `text-[11px]` role, opening an upward `DropdownMenu` (`w-56`, `slide-in-from-bottom-2 150ms`) that carries **Account**, **Preferences** and **Sign-in & security** as its first group, then logout as `text-destructive focus:bg-destructive/10`. The account workspace lives here, not in the nav sections — it is identity, not configuration.
 - **Section labels:** `text-[11px] font-semibold tracking-[0.14em] uppercase text-sidebar-foreground/70` — the label rail at its widest tracking, used **only** for the nav section groups (Overview / Catalog for viewers / Playground / Access / Configuration). Access covers who may call the proxy (own API keys for everyone; Team and Instance sign-in for admins); Configuration is the admin-only instance surface (Providers, Models, MCP Servers, Settings). No group carries a single item whose name repeats the label.
 
 ### Personal-Settings Panels (Account)
@@ -437,12 +471,14 @@ The log-details metric grid is the densest thing in the product, and its cell is
 - **Label rail:** `text-[11px] font-semibold uppercase tracking-wider text-muted-foreground`, with a trailing icon slot.
 - **Value:** `.text-data` inline; `.text-metric` when the cell is the hero of its row. Semantic color (`.metric-blue`, `.metric-amber`, `.metric-success`, `.metric-rose`) is earned only when the value *is* a category, never to decorate a plain count.
 
-### Segmented Tab Strip (Settings)
-Two mutually-exclusive views of one page, chosen in place rather than by route.
-- **Shell:** `flex items-center gap-0 bg-muted/60 p-[3px] rounded-lg border border-border/55` — 36px tall, so it matches the `sm` ghost buttons sitting beside it in the header, `role="group"` with the page name as its accessible name.
-- **Segment:** `px-3 py-1.5 text-xs rounded-md border transition-all duration-200` (`max-md:min-h-11 max-md:px-4` for touch, which lifts the strip to 44px). Both states carry a border — active `bg-accent text-foreground border-border/70 shadow-xs`, inactive `border-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground` — so the label never shifts by a pixel when the selection moves.
-- **State:** `aria-pressed` on each segment. The active segment is a raised slate: deeper track, tonal step, hairline edge, drop shadow. It must read as lifted, not as a hole; `bg-background` on the pill is a defect because on this page `--background` *is* the page, which renders the selected segment identical to the surface behind the track.
+### Segmented Control
+Mutually-exclusive views chosen in place: page tabs, list/table switches, chart metrics, theme and scope pickers. One `SegmentedControl` / `SegmentedControlItem` pair owns the grammar.
+- **Track:** `raised` is the default — `flex items-center gap-0 bg-muted/60 p-[3px] rounded-lg border border-border/55`, 36px tall with `md` segments. `quiet` drops the track for the icon-only theme switcher; `fill` stretches every segment to the available width.
+- **Size:** `md` is the default 30px segment with `text-xs`; `sm` is the compact 11px form used by chart and log toggles; `icon` is a 30px square for glyph-only controls. Every size clears 44px on coarse pointers through the shared `.touch-target` floor.
+- **Segment:** `rounded-md border transition-all duration-200`, `px-3 py-1.5 text-xs` at `md` (`max-md:min-h-11 max-md:px-4` for phones); `caps` opts into uppercase tracking for compact mode toggles. Both states carry a border — active `bg-accent text-foreground border-border/70 shadow-xs font-semibold`, inactive `border-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground` — so the label never shifts by a pixel when the selection moves. The `quiet` variant is trackless: active `bg-muted text-foreground`, inactive `text-muted-foreground hover:bg-muted/60 hover:text-foreground`.
+- **State:** `aria-pressed` for toggles, `aria-current="page"` for route tabs. The active segment is a raised slate: deeper track, tonal step, hairline edge, drop shadow. It must read as lifted, not as a hole; `bg-background` on the pill is a defect because on this page `--background` *is* the page, which renders the selected segment identical to the surface behind the track.
 - **No 3:1 fill, on purpose:** on the `#090A0B` page no fill in this palette reaches 3:1 against a track (`--accent` tops out around 1.3:1, and 3:1 would need a `rgb(~98)` gray). The state therefore leans on three small cues together — the tonal step, the 1px edge, the drop shadow — plus the label moving from `text-muted-foreground` (6.7:1) to `text-foreground` (~17:1), which is what actually carries it. Do not "fix" the missing 3:1 by lightening the pill to a mid-gray: that promotes a header tab to primary-CTA weight.
+- **Rule:** callers use the primitive and its variants; a local button group or page-specific track class is a defect.
 
 ### Role-Switched Routes
 One route may render different views by role when both roles work on the same data: `/models` renders the management UI for admins and the read-only catalog for viewers. Rules for this pattern:
@@ -454,10 +490,18 @@ One route may render different views by role when both roles work on the same da
 `.icon-container` (and its `.icon-container-sm` page-header size, `h-8 w-8 rounded-md`): `p-2.5 rounded-xl min-h-11 min-w-11`, `bg-linear-to-br from-primary/20 via-primary/10 to-action-blue/12`, `ring-1 ring-primary/30`, `inset 0 1px 0 primary/0.26`. The signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen.
 
 ### Range Slider (signature control)
-Used by Smart Routing mode-weight sliders. `appearance-none` + `.range-thumb`; track `0.5rem rounded-full bg-muted`, thumb `1rem rounded-full border-2 bg-background bg-primary` with a `primary/40` glow; hover `scale(1.12)`, active `scale(0.96)`, focus `0 0 0 4px ring`. Reduced-motion removes the thumb transform.
+Used by Smart Routing mode-weight sliders. `appearance-none` + `.range-thumb`; track `0.5rem rounded-full bg-muted`, thumb `1rem rounded-full border-2 bg-background bg-primary` with a `primary/40` shadow; hover `scale(1.12)`, active `scale(0.96)`, focus `0 0 0 2px background, 0 0 0 4px ring`. Reduced-motion removes the thumb transform.
 
 ### Toasts (vue-sonner)
-Themed via the same tokens; sit on `--popover`, hairline `--border`, `rounded-lg`, with the semantic status tints for success/warning/error variants. No celebratory motion.
+Top-right, themed via the same tokens; sit on `--background`, hairline `--border`, `shadow-lg`, with the semantic status icons for success/info/warning/error. No celebratory motion.
+
+### Dialog / Sheet
+One overlay shell, two families: centered dialogs and edge sheets share the portal, scrim, close control, header and footer grammar.
+- **Dialog:** `bg-card`, `border-border/60`, `rounded-xl`, scrim `--overlay`, no shadow. Sizes `sm` (28rem), `md` (32rem, default), `lg` (42rem), `xl` (36rem) and `screen` (96vw × 86vh, capped at 1500px). Layout is `padded` (default) or `flush`; the `palette` and `media` variants cover the command palette and image lightbox without per-call positioning classes.
+- **Sheet:** side sheets fill the viewport height with `bg-card` and a hairline edge; top and bottom sheets size to content. Horizontal sizes are `sm` 440px, `md` 480px, `lg` 520–600px, `xl` 640–760px and `2xl` 550–1000px. The `sidebar` variant supplies the mobile nav's width and tone; `none` lets any other drawer supply its own width.
+- **Header:** Dialogs support `plain`, `band` (padded tonal strip with icon tile and reserved close-button space), `divided` (inline title with a bottom rule) or `sr-only`; Sheets use `band` or `sr-only`. Pass `icon`, `title` and `description`; the header owns the type scale. The shared close control is 44px on coarse pointers.
+- **Footer:** Dialog footers are `plain` actions or `bar` (hairline top, tonal fill, page gutter); sheet footers always use the bar treatment. `justify="between"` splits secondary and primary actions.
+- **Rule:** callers pass variants, not class strings. A recurring width or layout earns a variant; one-off shell classes belong in the primitive.
 
 ### Step-Up Dialog
 A reauthentication gate that interrupts without leaving the current page — the one dialog the console opens on its own.
@@ -485,12 +529,12 @@ Concrete visual guardrails grounded in the implemented system.
 
 ### Do:
 - **Do** set every numeric value — tokens, cost, latency, counts, timestamps, status codes — in IBM Plex Mono with `tabular-nums` (`.text-data` inline, `.text-metric` for large stats).
-- **Do** convey depth with tonal background steps (`--card` over `--background`, `--muted/5` page tint) and 1px `--border` hairlines; reserve shadow for `shadow-xs` at rest and ambient glow on hover.
-- **Do** render status and HTTP semantics as labeled `StatusBadge` chips at `/15` tint + `/25–30` border, with `role="status"` and a text label as the primary signal.
-- **Do** use the `config-page-reveal` entrance on every page and the `stagger-fast` / `row-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.
+- **Do** convey depth with tonal background steps (`--card` over `--background`, `--muted/5` page tint) and 1px `--border` hairlines; reserve shadow for `shadow-xs` at rest, ambient glow on hover, and the toast overlay exception.
+- **Do** render status and HTTP semantics as labeled `StatusBadge` chips at `/15` tint + `/25–30` border, with a text label as the primary signal; keep the chip static and leave live announcements to one result-count region.
+- **Do** use the `config-page-reveal` entrance on every page and the `stagger-fast` / `row-stagger` / `list-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.
 - **Do** keep display tracking at −0.02em (floor −0.04em), display weight 600 in-app, and page titles at `text-xl sm:text-2xl`.
 - **Do** hit WCAG AA on both themes: tune `--muted-foreground` for readability, never lighten muted text "for elegance," and bump dark-mode body line-height to 1.55–1.6.
-- **Do** keep touch targets ≥44px (`min-h-11 min-w-11`) on nav, mobile controls, and the `max-sm` floor the button and input components apply to themselves.
+- **Do** keep touch targets ≥44px (`min-h-11 min-w-11`) on nav, mobile controls, and every coarse-pointer viewport through the shared control-slot floor — tablets and touch laptops must clear 44px without enlarging mouse-driven desktop density.
 - **Do** render JSON and code with the syntax palette on code surfaces only — subtle chroma that reads as structure, never a rainbow theme.
 - **Do** build every pre-console screen through `AuthShell` and leave it containerless: one centered `max-w-sm` column, a 48px `auth-mark` locked up with the product name, 44px glass fields, and exactly one white CTA — the passkey button when the account has one, the password submit otherwise.
 - **Do** pick the structural grammar by task — flush console for management tables, full-width configuration headers with centered form columns for Settings and instance policy, stacked hairline panels in a centered column for personal settings, containerless for auth — and never mix two on one screen.
@@ -501,15 +545,16 @@ Concrete visual guardrails grounded in the implemented system.
 - **Don't** ship boring/outdated admin panels — no dense gray-on-gray tables, no circa-2008 enterprise chrome, no cluttered "everything on one screen" dashboards. *(PRODUCT.md anti-reference.)*
 - **Don't** use loud color accents — no saturated SaaS gradients, no neon, no rainbow status badges. Color is a subtle low-saturation tinting system for semantic differentiation, never decoration. *(PRODUCT.md anti-reference.)*
 - **Don't** ship the generic 2026 AI-tool aesthetic — no cream/sand warm-neutral body backgrounds, no gradient-text headlines, no identical icon+heading+text card grids, no big-number hero-metric template. This is monochrome editorial, not warm SaaS. *(PRODUCT.md anti-reference.)*
-- **Don't** pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern). Pick a tonal step or `shadow-xs`, never a wide decorative shadow.
-- **Don't** over-round — cards and panels cap at `rounded-xl` (16px); save full-pill for tags and status chips, `rounded-lg` (12px) for nav items. No 24/28/32/40px card radii.
+- **Don't** pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern). Pick a tonal step or `shadow-xs`, never a wide decorative shadow. The auth mark and toasts are the only ambient-shadow exceptions.
+- **Don't** over-round — cards and panels cap at `rounded-xl` (16px); save full-pill for tags and status chips; nav items use `rounded-md` (10px). No 24/28/32/40px card radii.
 - **Don't** use `border-left`/`border-right` greater than 1px as a colored accent stripe on cards, list items, or alerts. State is a tonal step, never a stripe.
-- **Don't** use glassmorphism decoratively. `backdrop-blur` appears only on `outline` buttons and inputs — two constrained sets, never a default card treatment. (`auth-mark` carries a gradient and a shadow, not a blur.)
+- **Don't** use glassmorphism decoratively. `backdrop-blur` is limited to controls and transient overlays — `outline` buttons, inputs/input groups, floating tooltips, and full-screen media lightboxes — never a default card or page treatment. (`auth-mark` carries a gradient and a shadow, not a blur.)
 - **Don't** use `background-clip: text` with a gradient. Display emphasis comes from weight and size, in a single solid color.
 - **Don't** put a tiny uppercase tracked eyebrow above a page or a page section. The label rail belongs inside a panel, above the value it names; a kicker above a heading is the pattern this system does not use.
 - **Don't** set a metric or number in Manrope, or introduce a fourth type family. Space Grotesk + Manrope + IBM Plex Mono is the whole system.
-- **Don't** introduce true-gray (`0 0%`) or warm-neutral (`hue 30–100`) tokens. Every neutral carries the 220° cool undertone.
+- **Don't** introduce true-gray (`0 0%`) mid-surfaces or warm-neutral (`hue 30–100`) tokens. Surface, border, and mid-tone neutrals carry the 220° undertone; only extreme ink tokens may sit at `0 0%` where hue is imperceptible.
 - **Don't** reuse the JSON/code syntax tokens outside code surfaces — no rainbow syntax themes, no syntax-colored badges or chart series.
 - **Don't** animate layout properties. Motion is `transform`/`opacity` only, exponential ease-out (`cubic-bezier(0.16, 1, 0.3, 1)`), 150–500ms, with a reduced-motion alternative on every animation.
+- **Don't** give a static status or HTTP chip `role="status"`. A table of hundreds of rows must not mint hundreds of live-region announcers; the result-count region owns that job.
 - **Don't** wrap an auth form in a card, panel, or bordered container. The vestibule has no chrome — a card there turns a threshold into an object on a page.
 - **Don't** wrap a flush console table in an outer card, and don't give a stacked settings panel the console's sticky header bar. Each grammar is complete on its own.

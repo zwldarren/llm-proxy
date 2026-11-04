@@ -228,7 +228,7 @@ const oversizeRequestBodyText = computed((): string | null =>
           <button
             v-if="parsed.objectParams.length > 0"
             type="button"
-            class="inline-flex items-center gap-1.5 text-[11px] font-mono bg-muted/50 rounded-full px-2.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+            class="inline-flex items-center gap-1.5 text-[11px] font-mono bg-muted/50 rounded-full px-2.5 py-1 min-h-6 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
             :aria-expanded="showAdvancedParams"
             @click="showAdvancedParams = !showAdvancedParams"
           >

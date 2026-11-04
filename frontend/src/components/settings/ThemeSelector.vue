@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { Monitor, Moon, Sun } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useTheme, type Theme } from "@/composables/useTheme";
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
+import { useTheme } from "@/composables/useTheme";
 
 interface Props {
   /**
@@ -27,30 +27,20 @@ const options = [
 </script>
 
 <template>
-  <ToggleGroup
-    type="single"
-    :class="
-      compact
-        ? 'inline-flex rounded-lg'
-        : 'inline-flex rounded-lg border border-border p-0.5 bg-muted/40'
-    "
-    :spacing="1"
-    :model-value="theme"
-    @update:model-value="(v) => v && setTheme(v as Theme)"
+  <SegmentedControl
+    :aria-label="t('settings.theme')"
+    :variant="compact ? 'quiet' : 'raised'"
+    :size="compact ? 'icon' : 'md'"
   >
-    <ToggleGroupItem
+    <SegmentedControlItem
       v-for="opt in options"
       :key="opt.value"
-      :value="opt.value"
+      :active="theme === opt.value"
       :title="compact ? t(opt.label) : undefined"
-      :class="
-        compact
-          ? 'flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:text-foreground max-md:size-11 data-[state=on]:bg-muted data-[state=on]:text-foreground'
-          : 'flex h-9 items-center gap-1.5 rounded-md border border-transparent px-3 py-1.5 text-xs font-medium transition-all duration-150 max-md:h-11 data-[state=on]:bg-accent data-[state=on]:border-border/70 data-[state=on]:text-foreground data-[state=on]:shadow-xs'
-      "
+      @click="setTheme(opt.value)"
     >
-      <component :is="opt.icon" :class="compact ? 'size-4' : 'size-3.5'" />
+      <component :is="opt.icon" />
       <span :class="compact ? 'sr-only' : undefined">{{ t(opt.label) }}</span>
-    </ToggleGroupItem>
-  </ToggleGroup>
+    </SegmentedControlItem>
+  </SegmentedControl>
 </template>

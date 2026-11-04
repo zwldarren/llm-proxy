@@ -125,7 +125,9 @@ const stubs = {
   // Keep the dialog body in the render tree instead of a body teleport.
   Dialog: { template: "<div><slot /></div>" },
   DialogContent: { template: "<div><slot /></div>" },
-  DialogHeader: { template: "<div><slot /></div>" },
+  // The header owns its actions slot; the stub has to render it or the refetch
+  // button never reaches the tree.
+  DialogHeader: { template: '<div><slot /><slot name="actions" /></div>' },
   DialogTitle: { template: "<h2><slot /></h2>" },
   DialogDescription: { template: "<p><slot /></p>" },
 };
@@ -180,6 +182,16 @@ describe("ModelsSyncDialog", () => {
     expect(wrapper.text()).toContain("1 row left unchecked (marked Overwrite)");
     // The row itself is badged with the effect of writing it.
     expect(wrapper.text()).toContain("Overwrite");
+  });
+
+  it("refetches both sections from the header action", async () => {
+    const wrapper = await mountDialog();
+
+    await buttonByText(wrapper, "Refetch").trigger("click");
+    await flushPromises();
+
+    expect(pricingPreview).toHaveBeenCalledTimes(2);
+    expect(metadataPreview).toHaveBeenCalledTimes(2);
   });
 
   it("reports a failed section without blocking the other one", async () => {

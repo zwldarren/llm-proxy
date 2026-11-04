@@ -6,7 +6,7 @@ import { useI18n } from "vue-i18n";
 import LogDetailsIO from "@/components/common/LogDetailsIO.vue";
 import LogDetailsMetrics from "@/components/common/LogDetailsMetrics.vue";
 import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LogRead } from "@/types/schemas";
 import { formatDate } from "@/utils/format";
@@ -62,135 +62,131 @@ const handleOpenAutoFocus = (event: Event) => {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetContent
-      class="w-full sm:max-w-[550px] md:max-w-[700px] lg:max-w-[850px] xl:max-w-[1000px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card transition-colors duration-300 pb-[env(safe-area-inset-bottom\,0px)]"
-      @open-auto-focus="handleOpenAutoFocus"
-    >
-      <!-- Header -->
-      <div
-        class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border/60 bg-muted/10 shrink-0 relative pr-16 flex flex-col gap-3 sm:gap-3.5"
-      >
-        <div class="flex items-start sm:items-center gap-2.5 sm:gap-3">
-          <div class="icon-container p-1.5 shrink-0 text-primary">
-            <Activity v-if="!isAuditLog && !isToolLog" class="size-4 sm:size-5" />
-            <Shield v-else-if="isAuditLog" class="size-4 sm:size-5" />
-            <Wrench v-else-if="isMcpLog" class="size-4 sm:size-5" />
-            <Globe v-else-if="isWebSearchLog" class="size-4 sm:size-5" />
-          </div>
+    <SheetContent side="right" size="2xl" @open-auto-focus="handleOpenAutoFocus">
+      <SheetHeader>
+        <div class="flex flex-col gap-3 sm:gap-3.5">
+          <div class="flex items-start sm:items-center gap-2.5 sm:gap-3">
+            <div class="icon-container p-1.5 shrink-0 text-primary">
+              <Activity v-if="!isAuditLog && !isToolLog" class="size-4 sm:size-5" />
+              <Shield v-else-if="isAuditLog" class="size-4 sm:size-5" />
+              <Wrench v-else-if="isMcpLog" class="size-4 sm:size-5" />
+              <Globe v-else-if="isWebSearchLog" class="size-4 sm:size-5" />
+            </div>
 
-          <div class="flex flex-col min-w-0">
-            <h2
-              ref="titleRef"
-              tabindex="-1"
-              class="text-sm sm:text-base font-semibold text-foreground flex flex-wrap items-center gap-x-2 gap-y-1 outline-none"
-            >
-              <span>{{ t("logs.viewDetails") }}</span>
-              <span
-                class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/70 px-2 py-0.5 rounded-full border border-border/40"
+            <div class="flex flex-col min-w-0">
+              <h2
+                ref="titleRef"
+                tabindex="-1"
+                class="text-sm sm:text-base font-semibold text-foreground flex flex-wrap items-center gap-x-2 gap-y-1 outline-none"
               >
-                {{
-                  isAuditLog
-                    ? t("nav.auditLogs")
-                    : isMcpLog
-                      ? t("nav.mcpLogs")
-                      : isWebSearchLog
-                        ? t("nav.webSearchLogs")
-                        : t("nav.proxyLogs")
-                }}
-              </span>
-            </h2>
-            <div class="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-              <Clock class="size-3.5 shrink-0" />
-              <span class="font-mono truncate">{{ formatDate(log?.timestamp) }}</span>
+                <span>{{ t("logs.viewDetails") }}</span>
+                <span
+                  class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/70 px-2 py-0.5 rounded-full border border-border/40"
+                >
+                  {{
+                    isAuditLog
+                      ? t("nav.auditLogs")
+                      : isMcpLog
+                        ? t("nav.mcpLogs")
+                        : isWebSearchLog
+                          ? t("nav.webSearchLogs")
+                          : t("nav.proxyLogs")
+                  }}
+                </span>
+              </h2>
+              <div class="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                <Clock class="size-3.5 shrink-0" />
+                <span class="font-mono truncate">{{ formatDate(log?.timestamp) }}</span>
+              </div>
             </div>
           </div>
+
+          <!-- Request ID and HTTP status -->
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs text-muted-foreground font-medium shrink-0">ID:</span>
+            <Badge
+              variant="outline"
+              class="font-mono text-xs bg-background text-muted-foreground py-1 sm:py-0.5 px-2.5 flex items-center gap-2 hover:border-muted-foreground/30 transition-colors border-border/70 min-h-8 sm:min-h-0 truncate max-w-full"
+            >
+              <span class="truncate">{{ log?.request_id }}</span>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <button
+                    @click="copyId"
+                    class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
+                    :aria-label="
+                      copiedId
+                        ? `${t('logs.requestId')}: ${t('common.copied')}`
+                        : `${t('logs.requestId')}: ${t('common.copy')}`
+                    "
+                  >
+                    <Check v-if="copiedId" class="w-3.5 h-3.5 text-status-success" />
+                    <Copy v-else class="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{{
+                  copiedId ? t("common.copied") : t("common.copy")
+                }}</TooltipContent>
+              </Tooltip>
+            </Badge>
+
+            <!-- Trace id: the join key to the exported trace, when the row has one -->
+            <Badge
+              v-if="log?.trace_id"
+              variant="outline"
+              class="font-mono text-xs bg-background text-muted-foreground py-1 sm:py-0.5 px-2.5 flex items-center gap-2 hover:border-muted-foreground/30 transition-colors border-border/70 min-h-8 sm:min-h-0 truncate max-w-full"
+            >
+              <span class="text-muted-foreground/70 shrink-0">{{ t("logs.traceId") }}:</span>
+              <span class="truncate">{{ log.trace_id }}</span>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <button
+                    @click="copyTraceId"
+                    class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
+                    :aria-label="
+                      copiedTraceId
+                        ? `${t('logs.traceId')}: ${t('common.copied')}`
+                        : `${t('logs.traceId')}: ${t('common.copy')}`
+                    "
+                  >
+                    <Check v-if="copiedTraceId" class="w-3.5 h-3.5 text-status-success" />
+                    <Copy v-else class="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{{
+                  copiedTraceId ? t("common.copied") : t("common.copy")
+                }}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <button
+                    @click="applyTraceFilter"
+                    class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
+                    :aria-label="t('logs.filterByTrace')"
+                  >
+                    <Filter class="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{{ t("logs.filterByTrace") }}</TooltipContent>
+              </Tooltip>
+            </Badge>
+
+            <Badge
+              v-if="log?.status_code"
+              :class="[
+                'text-xs font-semibold py-0.5 px-2.5 font-mono border',
+                log.status_code >= 200 && log.status_code < 300
+                  ? 'bg-status-success/15 border-status-success/30 text-status-success'
+                  : log.status_code >= 400 && log.status_code < 500
+                    ? 'bg-status-warning/15 border-status-warning/30 text-status-warning'
+                    : 'bg-status-error/15 border-status-error/30 text-status-error',
+              ]"
+            >
+              HTTP {{ log.status_code }}
+            </Badge>
+          </div>
         </div>
-
-        <!-- Request ID and HTTP status -->
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs text-muted-foreground font-medium shrink-0">ID:</span>
-          <Badge
-            variant="outline"
-            class="font-mono text-xs bg-background text-muted-foreground py-1 sm:py-0.5 px-2.5 flex items-center gap-2 hover:border-muted-foreground/30 transition-colors border-border/70 min-h-8 sm:min-h-0 truncate max-w-full"
-          >
-            <span class="truncate">{{ log?.request_id }}</span>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <button
-                  @click="copyId"
-                  class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
-                  :aria-label="
-                    copiedId
-                      ? `${t('logs.requestId')}: ${t('common.copied')}`
-                      : `${t('logs.requestId')}: ${t('common.copy')}`
-                  "
-                >
-                  <Check v-if="copiedId" class="w-3.5 h-3.5 text-status-success" />
-                  <Copy v-else class="w-3.5 h-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{{
-                copiedId ? t("common.copied") : t("common.copy")
-              }}</TooltipContent>
-            </Tooltip>
-          </Badge>
-
-          <!-- Trace id: the join key to the exported trace, when the row has one -->
-          <Badge
-            v-if="log?.trace_id"
-            variant="outline"
-            class="font-mono text-xs bg-background text-muted-foreground py-1 sm:py-0.5 px-2.5 flex items-center gap-2 hover:border-muted-foreground/30 transition-colors border-border/70 min-h-8 sm:min-h-0 truncate max-w-full"
-          >
-            <span class="text-muted-foreground/70 shrink-0">{{ t("logs.traceId") }}:</span>
-            <span class="truncate">{{ log.trace_id }}</span>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <button
-                  @click="copyTraceId"
-                  class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
-                  :aria-label="
-                    copiedTraceId
-                      ? `${t('logs.traceId')}: ${t('common.copied')}`
-                      : `${t('logs.traceId')}: ${t('common.copy')}`
-                  "
-                >
-                  <Check v-if="copiedTraceId" class="w-3.5 h-3.5 text-status-success" />
-                  <Copy v-else class="w-3.5 h-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{{
-                copiedTraceId ? t("common.copied") : t("common.copy")
-              }}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <button
-                  @click="applyTraceFilter"
-                  class="hover:text-foreground transition-colors cursor-pointer shrink-0 flex items-center justify-center min-h-8 min-w-8 sm:min-h-6 sm:min-w-6 p-1 sm:p-1"
-                  :aria-label="t('logs.filterByTrace')"
-                >
-                  <Filter class="w-3.5 h-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{{ t("logs.filterByTrace") }}</TooltipContent>
-            </Tooltip>
-          </Badge>
-
-          <Badge
-            v-if="log?.status_code"
-            :class="[
-              'text-xs font-semibold py-0.5 px-2.5 font-mono border',
-              log.status_code >= 200 && log.status_code < 300
-                ? 'bg-status-success/15 border-status-success/30 text-status-success'
-                : log.status_code >= 400 && log.status_code < 500
-                  ? 'bg-status-warning/15 border-status-warning/30 text-status-warning'
-                  : 'bg-status-error/15 border-status-error/30 text-status-error',
-            ]"
-          >
-            HTTP {{ log.status_code }}
-          </Badge>
-        </div>
-      </div>
+      </SheetHeader>
 
       <!-- Scrollable content area -->
       <div v-if="log" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">

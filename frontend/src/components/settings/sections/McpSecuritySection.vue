@@ -58,6 +58,7 @@ const envKeyOverlap = computed(() => {
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('mcpSecurity.title')"
     :icon="Shield"
     :description="t('mcpSecurity.description')"

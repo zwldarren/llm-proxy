@@ -13,8 +13,7 @@ import McpServerList from "@/components/mcp/McpServerList.vue";
 import McpServerTable from "@/components/mcp/McpServerTable.vue";
 import McpPolicyNotice from "@/components/mcp/McpPolicyNotice.vue";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import SheetHeaderBand from "@/components/common/SheetHeaderBand.vue";
+import { Sheet, SheetContent, SheetFooter, SheetHeader } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -438,19 +437,15 @@ onMounted(() => {
 
     <!-- Create/Edit Sheet (slides in from the right) -->
     <Sheet v-model:open="showCreateDialog">
-      <SheetContent
-        side="right"
-        class="w-full sm:max-w-[520px] h-full flex flex-col p-0 gap-0 overflow-hidden border-l border-border/80 bg-card"
-      >
-        <!-- Header band -->
-        <SheetHeaderBand :icon="Zap">
+      <SheetContent side="right" size="lg">
+        <SheetHeader :icon="Zap">
           <template #title>
             {{ isEditing ? t("mcpServers.editServer") : t("mcpServers.addServer") }}
           </template>
           <template #description>
             {{ isEditing ? newServer.name : t("mcpServers.description") }}
           </template>
-        </SheetHeaderBand>
+        </SheetHeader>
 
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           <div class="grid gap-2">
@@ -568,14 +563,12 @@ onMounted(() => {
           </div>
         </div>
 
-        <div
-          class="flex items-center justify-end gap-2 px-4 sm:px-6 py-4 border-t border-border/60 bg-muted/10 shrink-0"
-        >
+        <SheetFooter>
           <Button variant="outline" @click="showCreateDialog = false">{{
             t("common.cancel")
           }}</Button>
           <Button @click="saveServer" :disabled="isSaving">{{ t("common.save") }}</Button>
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
   </AppLayout>

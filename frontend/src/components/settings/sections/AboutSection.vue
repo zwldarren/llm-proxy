@@ -64,7 +64,7 @@ async function checkForUpdates() {
           :href="RELEASES_URL"
           target="_blank"
           rel="noopener noreferrer"
-          :aria-label="t('about.viewReleases')"
+          :aria-label="t('about.viewReleasesForVersion', { version: info.version })"
           class="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground"
         >
           <span class="text-data">v{{ info.version }}</span>
@@ -80,7 +80,7 @@ async function checkForUpdates() {
           :href="RELEASES_URL"
           target="_blank"
           rel="noopener noreferrer"
-          :aria-label="t('about.viewReleases')"
+          :aria-label="t('about.viewReleasesForVersion', { version: info.latest_version })"
           class="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground"
         >
           <span class="text-data">v{{ info.latest_version }}</span>
@@ -109,9 +109,16 @@ async function checkForUpdates() {
       :title="t('about.checkForUpdates')"
       :description="t('about.checkForUpdatesDescription')"
       :error="checkError ? t('about.checkFailed') : null"
+      error-live
     >
       <template #action>
-        <Button variant="outline" size="sm" :disabled="checking" @click="checkForUpdates">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-auto min-h-9 max-w-full whitespace-normal py-2 text-center max-sm:min-h-11"
+          :disabled="checking"
+          @click="checkForUpdates"
+        >
           <RefreshCw :class="['size-3.5', checking && 'animate-spin']" aria-hidden="true" />
           {{
             checking

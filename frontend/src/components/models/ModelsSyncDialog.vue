@@ -4,13 +4,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { metadataApi, pricingApi } from "@/services/api/config";
 import CapabilitySyncPanel from "./CapabilitySyncPanel.vue";
 import PricingSyncPanel from "./PricingSyncPanel.vue";
@@ -192,20 +186,18 @@ async function applyAll() {
 
 <template>
   <Dialog :open="open" @update:open="requestOpen">
-    <DialogContent
-      class="flex h-[86vh] w-[96vw] max-w-[96vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1500px]"
-    >
-      <DialogHeader class="border-b border-border px-6 pt-5 pb-4">
-        <div class="flex flex-wrap items-start justify-between gap-4 pr-8">
-          <div class="space-y-1.5">
-            <DialogTitle>{{ t("models.sync.title") }}</DialogTitle>
-            <DialogDescription>{{ t("models.sync.subtitle") }}</DialogDescription>
-          </div>
+    <DialogContent size="screen" layout="flush">
+      <DialogHeader
+        variant="band"
+        :title="t('models.sync.title')"
+        :description="t('models.sync.subtitle')"
+      >
+        <template #actions>
           <Button variant="outline" size="sm" :disabled="applying || loading" @click="refetch">
             <RefreshCw class="h-3.5 w-3.5" :class="loading ? 'animate-spin' : ''" />
             {{ t("models.sync.refetch") }}
           </Button>
-        </div>
+        </template>
       </DialogHeader>
 
       <!-- One navigation axis: the section tabs. A section's count is its
@@ -297,8 +289,8 @@ async function applyAll() {
 
       <!-- Bottom bar. Same place, same width, two states: what apply would
            write, and — after one click — the final confirm. -->
-      <div class="border-t border-border px-6 py-3">
-        <div v-if="confirming" class="flex flex-wrap items-center justify-between gap-3">
+      <DialogFooter variant="bar">
+        <div v-if="confirming" class="flex w-full flex-wrap items-center justify-between gap-3">
           <div class="min-w-0 flex-1">
             <p class="text-sm">
               <span class="font-medium">{{ t("models.sync.confirm.willWrite") }}</span>
@@ -307,7 +299,9 @@ async function applyAll() {
             <p class="truncate text-xs text-muted-foreground" :title="pending.join(', ')">
               {{ pending.join(", ") }}
             </p>
-            <p v-if="applyError" class="mt-1 text-xs text-status-error">{{ applyError }}</p>
+            <p v-if="applyError" role="alert" class="mt-1 text-xs text-status-error">
+              {{ applyError }}
+            </p>
           </div>
           <div class="flex items-center gap-2">
             <Button variant="outline" :disabled="applying" @click="confirming = false">
@@ -324,7 +318,7 @@ async function applyAll() {
           </div>
         </div>
 
-        <div v-else class="flex flex-wrap items-center justify-between gap-3">
+        <div v-else class="flex w-full flex-wrap items-center justify-between gap-3">
           <div class="min-w-0 flex-1 space-y-0.5">
             <p class="text-sm">
               {{
@@ -356,7 +350,7 @@ async function applyAll() {
             </Button>
           </div>
         </div>
-      </div>
+      </DialogFooter>
     </DialogContent>
   </Dialog>
 </template>

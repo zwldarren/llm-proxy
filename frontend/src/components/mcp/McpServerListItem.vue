@@ -49,9 +49,9 @@ const { isEnabled } = useMcpServerRow(
       <!-- Name + type + endpoint + capabilities -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 min-w-0">
-          <h3 class="text-sm font-medium text-foreground truncate" :title="server.name">
+          <h2 class="text-sm font-medium text-foreground truncate" :title="server.name">
             {{ server.name }}
-          </h3>
+          </h2>
           <Loader2 v-if="isLoading" class="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
           <McpTypeBadge :server="server" compact />
         </div>

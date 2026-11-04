@@ -39,6 +39,7 @@ function setModeWeight(key: ModeKey, value: number) {
 
 <template>
   <SettingsSection
+    :error="error"
     :title="t('smartRouting.title')"
     :icon="Shuffle"
     :description="t('smartRouting.description')"

@@ -115,6 +115,7 @@ const rangeText = computed(() => {
 
 <template>
   <div
+    v-if="totalItems > 0"
     :class="
       cn(
         'border-t border-border/40 bg-card/50 px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between',
@@ -123,17 +124,17 @@ const rangeText = computed(() => {
     "
   >
     <!-- Left: Pagination Info -->
-    <div class="text-sm text-muted-foreground font-medium hidden sm:block">
-      <span v-if="totalItems > 0">
+    <div class="text-sm text-muted-foreground font-medium text-center sm:text-left">
+      <span>
         {{ t("common.showingResults", { count: rangeText, total: totalItems }) }}
-      </span>
-      <span v-else>
-        {{ t("common.noResults") }}
       </span>
     </div>
 
     <!-- Right: Pagination controls & page input -->
-    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6">
+    <div
+      v-if="totalPages > 1"
+      class="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6"
+    >
       <Pagination
         :page="currentPage"
         :total="totalPages"
@@ -146,9 +147,7 @@ const rangeText = computed(() => {
         <div class="flex items-center justify-between gap-4 sm:hidden w-full px-2">
           <button
             type="button"
-            variant="outline"
-            size="sm"
-            class="flex-1 max-w-[120px] h-9 text-xs border border-input bg-background hover:bg-accent hover:text-accent-foreground rounded-md disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1 transition-colors"
+            class="touch-target flex-1 max-w-[120px] h-11 text-xs border border-input bg-background hover:bg-accent hover:text-accent-foreground rounded-md disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1 transition-colors"
             :disabled="disabled || !canGoPrev"
             @click="goToPrev"
           >
@@ -160,9 +159,7 @@ const rangeText = computed(() => {
           </span>
           <button
             type="button"
-            variant="outline"
-            size="sm"
-            class="flex-1 max-w-[120px] h-9 text-xs border border-input bg-background hover:bg-accent hover:text-accent-foreground rounded-md disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1 transition-colors"
+            class="touch-target flex-1 max-w-[120px] h-11 text-xs border border-input bg-background hover:bg-accent hover:text-accent-foreground rounded-md disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1 transition-colors"
             :disabled="disabled || !canGoNext"
             @click="goToNext"
           >
@@ -260,10 +257,7 @@ const rangeText = computed(() => {
       </Pagination>
 
       <!-- Page input (desktop only) -->
-      <div
-        v-if="totalPages > 1"
-        class="hidden sm:flex items-center gap-2 text-sm text-muted-foreground"
-      >
+      <div class="hidden sm:flex items-center gap-2 text-sm text-muted-foreground">
         <span class="text-xs">{{ t("common.goToPage") }}</span>
         <Input
           v-model="pageInput"

@@ -320,12 +320,8 @@ const totalRetryCount = computed(() => {
 <template>
   <article
     class="log-list-item group relative flex flex-col gap-2 p-3 rounded-xl border border-border bg-card shadow-xs hover:bg-muted/50 hover:border-border/80 transition-colors duration-200 cursor-pointer"
-    role="button"
-    tabindex="0"
     :aria-label="`${t('logs.viewDetails')} - ${primaryContent.value || '-'}`"
     @click="handleViewDetails"
-    @keydown.enter="handleViewDetails"
-    @keydown.space.prevent="handleViewDetails"
   >
     <header class="flex items-start justify-between gap-2">
       <div class="flex items-center gap-2 min-w-0 flex-1">
@@ -387,7 +383,10 @@ const totalRetryCount = computed(() => {
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-x-4 gap-y-2 overflow-hidden">
+    <!-- The two-column meta sheet collapses to one column when 200% text
+         makes a 9rem column floor wider than half the card. A fixed
+         `grid-cols-2` clipped the right column instead. -->
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-2 overflow-hidden">
       <template v-for="metric in secondaryMetrics" :key="metric.label">
         <div class="flex items-center gap-1.5 min-w-0">
           <div
@@ -421,16 +420,16 @@ const totalRetryCount = computed(() => {
     </div>
 
     <div
-      class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-focus:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
+      class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
     >
       <Button
         size="icon"
         variant="ghost"
         class="h-11 w-11 min-h-11 min-w-11"
-        :aria-label="t('logs.viewDetails')"
+        :aria-label="t('logs.viewDetailsFor', { target: primaryContent.value || '-' })"
         @click.stop="handleViewDetails"
       >
-        <ChevronRight class="size-5 text-muted-foreground" />
+        <ChevronRight class="size-5 text-muted-foreground" aria-hidden="true" />
       </Button>
     </div>
   </article>
