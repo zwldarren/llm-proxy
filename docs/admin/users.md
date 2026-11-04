@@ -110,11 +110,15 @@ only way back in.
   administrator reset.
 - Two-factor authentication is optional per user. Enrollment shows a QR code for
   the authenticator app, with the setup secret and `otpauth://` URI as the manual
-  fallback. When enabled, a TOTP code is required after *every* primary factor —
-  password, passkey or OIDC — otherwise the strongest factor would bypass 2FA. Ten
-  one-time recovery codes are shown once, with copy and download actions; the panel
-  keeps reminding you that this is the only time they are visible until you confirm
-  you stored them.
+  fallback. Once enabled, a password or OIDC sign-in is followed by a code prompt.
+  A passkey is not: the assertion already proves the device plus the person holding
+  it, so it satisfies two-factor authentication on its own and passkey sign-in stays
+  a single step. Ten one-time recovery codes are shown once, with copy and download
+  actions; the panel keeps reminding you that this is the only time they are visible
+  until you confirm you stored them.
+- An instance that has to show a code after every sign-in, passkey included, turns
+  on **Ask for a code after a passkey sign-in** in **Instance sign-in**. It is off by
+  default because the prompt adds friction without adding a factor.
 - Administrators can require TOTP for every admin in **Instance sign-in**. An admin
   who has not enrolled yet is redirected to **Account → Sign-in & security** and
   blocked from the rest of the console until they do; the panel explains why. The

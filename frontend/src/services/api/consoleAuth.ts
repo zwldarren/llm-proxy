@@ -24,6 +24,7 @@ export interface OidcProviderSettings {
 export interface ConsoleAuthSettings {
   public_base_url: string;
   require_2fa_for_admins: boolean;
+  require_2fa_after_passkey: boolean;
   smtp: SmtpSettings;
   oidc_providers: OidcProviderSettings[];
 }

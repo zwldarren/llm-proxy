@@ -344,6 +344,7 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
     stored = {
         "public_base_url": "https://proxy.example.com",
         "require_2fa_for_admins": False,
+        "require_2fa_after_passkey": False,
         "smtp": {
             "enabled": True,
             "host": "smtp.example.com",
@@ -397,6 +398,7 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
 
     rotated = {
         **unchanged,
+        "require_2fa_after_passkey": True,
         "smtp": {**unchanged["smtp"], "password": "new-smtp-password"},
         "oidc_providers": [
             {**unchanged["oidc_providers"][0], "client_secret": "new-client-secret"}
@@ -407,6 +409,7 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
     saved = repo.rows["console_auth"]
     assert saved["smtp"]["password"] == "enc:new-smtp-password"
     assert saved["oidc_providers"][0]["client_secret"] == "enc:new-client-secret"
+    assert saved["require_2fa_after_passkey"] is True
 
 
 def test_rate_limits_persist_overrides_only(client, repo):

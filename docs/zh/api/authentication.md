@@ -73,10 +73,13 @@ HS256，有效期 24 小时，没有刷新端点。修改密码、修改角色�
 两个请求头都不存在、且请求对不安全方法带有有效 CSRF 令牌时，才会接受会话密钥
 Cookie。
 
-登录标识可以是用户名，也可以是已验证的邮箱别名。如果账号启用了 TOTP，响应会是
-`{ "mfa_required": true, "challenge_token": "…" }` 而不是访问令牌；接着用
-`POST /api/auth/2fa/verify` 完成验证（一次性恢复码用
-`/api/auth/2fa/recover`）。通行密钥和 OIDC 登录也走同样的第二步。
+登录标识可以是用户名，也可以是已验证的邮箱别名。如果账号启用了 TOTP，用密码或 OIDC
+登录时响应是 `{ "mfa_required": true, "challenge_token": "…" }` 而不是访问令牌；接着用
+`POST /api/auth/2fa/verify` 完成验证（一次性恢复码用 `/api/auth/2fa/recover`）。
+通行密钥登录不在此列：断言本身就要求用户验证，单次登录已经同时证明了设备与持机人，
+因此直接返回访问令牌。如果部署方要求每种主因素之后都输一次验证码，可以设置
+`console_auth.require_2fa_after_passkey`（`PUT /api/config/server/console-auth`），
+把通行密钥登录重新纳入第二步。
 
 每个用户同时只有一个活动的控制台会话。JWT 里带 `sid` 声明；在另一台设备登录会轮换
 会话，并立刻使之前的 JWT 失效。敏感操作额外要求在 15 分钟内完成 step-up

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from llm_proxy.api.auth_session import (
     begin_mfa_challenge,
     issue_login_response,
-    user_needs_second_factor,
+    second_factor_required,
 )
 from llm_proxy.api.dependencies import (
     get_async_session_dep,
@@ -461,7 +461,7 @@ async def finish_login(
         credential=data.credential,
         purpose=PASSKEY_LOGIN_PURPOSE,
     )
-    if await user_needs_second_factor(session, user):
+    if await second_factor_required(request, session, user, auth_method="passkey"):
         return await begin_mfa_challenge(request, user, auth_method="passkey")
     record_auth_event(
         request,
@@ -469,7 +469,9 @@ async def finish_login(
         client_ip=get_client_ip(request),
         outcome=Outcome.SUCCESS,
         auth_method="passkey",
-        metadata_extra={"operation": "passkey_login"},
+        # The passkey satisfied both factors, so this event names the second
+        # factor explicitly instead of leaving it to be inferred from the flow.
+        metadata_extra={"operation": "passkey_login", "second_factor": "none"},
     )
     return await issue_login_response(request, response, session, user, auth_method="passkey")
 

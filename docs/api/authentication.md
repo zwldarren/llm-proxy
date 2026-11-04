@@ -77,10 +77,15 @@ when neither header is present and the request carries a valid CSRF token for un
 methods.
 
 The login identifier is either a username or a verified email alias. If the account
-has TOTP enabled, the response is `{ "mfa_required": true, "challenge_token": "…" }`
-instead of an access token; complete it with `POST /api/auth/2fa/verify` (or
-`/api/auth/2fa/recover` for a one-time recovery code). Passkey and OIDC logins use the
-same second step.
+has TOTP enabled, a password or OIDC sign-in answers
+`{ "mfa_required": true, "challenge_token": "…" }` instead of an access token;
+complete it with `POST /api/auth/2fa/verify` (or `/api/auth/2fa/recover` for a
+one-time recovery code). A passkey sign-in is exempt: the assertion already required
+user verification, so one step proves both the credential and the person holding the
+device, and the response carries the access token. Deployments that must show a code
+after every primary factor set `console_auth.require_2fa_after_passkey`
+(`PUT /api/config/server/console-auth`), which puts passkey sign-ins back on the
+challenge step.
 
 Only one console session is active per user. The JWT carries a `sid` claim; signing in
 on another device rotates the session and immediately invalidates the previous JWT.

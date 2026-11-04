@@ -167,6 +167,7 @@ reset. Counters are per process and reset on restart.
 | --- | --- | --- |
 | Public base URL | empty | Canonical external URL (`https://proxy.example.com`). WebAuthn RP ID and OAuth redirect URIs derive from it. Must be HTTPS, or `http://localhost` for development. Changing it invalidates registered passkeys |
 | Require admins to use 2FA | off | Blocks admins that have not confirmed TOTP; the console funnels them to **Account → Sign-in & security** |
+| Ask for a code after a passkey sign-in | off | Also require TOTP after a passkey sign-in. A passkey assertion already proves possession plus user verification, so leave this off unless a compliance regime demands a code after every sign-in |
 | SMTP enabled | off | Send invitation, email-verification and password-reset messages. Without it, invitations are copyable links and a forgotten password goes to an administrator |
 | SMTP host / port / username / password / from address | empty / `587` / empty / empty / empty | Standard SMTP delivery. The password is encrypted at rest and masked in the API response |
 | STARTTLS / TLS (SMTPS) | on / off | Transport security for the SMTP connection |

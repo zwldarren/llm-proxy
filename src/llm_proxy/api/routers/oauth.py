@@ -13,7 +13,11 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from llm_proxy.api.auth_session import begin_mfa_challenge, issue_login_response
+from llm_proxy.api.auth_session import (
+    begin_mfa_challenge,
+    issue_login_response,
+    second_factor_required,
+)
 from llm_proxy.api.dependencies import (
     get_async_session_dep,
     get_config_from_state,
@@ -44,7 +48,6 @@ from llm_proxy.database import (
     InvitationRepository,
     OAuthIdentityRepository,
     PasskeyRepository,
-    TotpRepository,
     UserRecord,
     UserRepository,
 )
@@ -784,10 +787,9 @@ async def complete_login(
         await session.commit()
 
     # The completion token is only a bridge from the browser redirect to this
-    # JSON call. A 2FA-enabled account still needs the normal second factor.
-    totp_repo = TotpRepository(session)
-    record = await totp_repo.get(user.id)
-    if record is not None and record.confirmed_at is not None:
+    # JSON call. A 2FA-enabled account still needs the normal second factor:
+    # an external IdP's assurance is not ours to judge.
+    if await second_factor_required(request, session, user, auth_method="oidc"):
         return await begin_mfa_challenge(request, user, auth_method="oidc")
     return await issue_login_response(request, response, session, user, auth_method="oidc")
 

@@ -25,6 +25,7 @@ const { copy } = useClipboard({ legacy: true, copiedDuring: 1500 });
 const settings = ref<ConsoleAuthSettings>({
   public_base_url: "",
   require_2fa_for_admins: false,
+  require_2fa_after_passkey: false,
   smtp: {
     enabled: false,
     host: "",
@@ -401,6 +402,20 @@ onUnmounted(() => {
             <p v-if="settings.require_2fa_for_admins" class="mt-3 text-xs text-status-warning">
               {{ t("consoleAuth.requireAdmin2faWarning") }}
             </p>
+            <div
+              class="mt-5 flex items-center justify-between gap-4 border-t border-border/50 pt-5"
+            >
+              <div>
+                <p class="text-sm font-medium">{{ t("consoleAuth.require2faAfterPasskey") }}</p>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  {{ t("consoleAuth.require2faAfterPasskeyHelp") }}
+                </p>
+              </div>
+              <Switch
+                v-model="settings.require_2fa_after_passkey"
+                :aria-label="t('consoleAuth.require2faAfterPasskey')"
+              />
+            </div>
           </section>
 
           <section class="rounded-xl border border-border/60 bg-card p-5 sm:p-6">

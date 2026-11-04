@@ -1331,6 +1331,9 @@ export default {
     requireAdmin2faHelp: "Admins must enroll TOTP before they can use the console.",
     requireAdmin2faWarning:
       "Admins who have not enrolled will be locked out of the console until they enable TOTP. Turn this on only when every admin can enroll.",
+    require2faAfterPasskey: "Ask for a code after a passkey sign-in",
+    require2faAfterPasskeyHelp:
+      "A passkey verifies you on the device, so it already counts as two factors. Turn this on only when a compliance regime requires a code after every sign-in.",
     smtp: "Email delivery",
     smtpHelp: "Optional SMTP for invitation, email-verification and password-reset links.",
     smtpEnabled: "Enable SMTP delivery",
@@ -1435,7 +1438,8 @@ export default {
     passwordNotSet: "Not set",
     setPassword: "Set password",
     twoFactor: "Two-factor authentication",
-    twoFactorDescription: "Require a time-based code after your password, passkey or OIDC sign-in.",
+    twoFactorDescription:
+      "Require a time-based code after your password or OIDC sign-in. A passkey counts as two factors on its own unless the instance overrides it.",
     enableTwoFactor: "Enable two-factor authentication",
     disableTwoFactor: "Disable two-factor authentication",
     code: "Authentication code",

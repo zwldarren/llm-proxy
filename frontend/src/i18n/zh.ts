@@ -1276,6 +1276,9 @@ export default {
     requireAdmin2faHelp: "管理员必须先绑定 TOTP 才能使用控制台。",
     requireAdmin2faWarning:
       "尚未绑定的管理员将被挡在控制台之外，直到他们启用 TOTP。请先确认所有管理员都能完成绑定，再开启此项。",
+    require2faAfterPasskey: "passkey 登录后仍要求验证码",
+    require2faAfterPasskeyHelp:
+      "passkey 已在设备上完成身份验证，本身即满足两步验证。只有在合规要求每次登录都必须输入验证码时才需要开启。",
     smtp: "邮件投递",
     smtpHelp: "可选的 SMTP，用于发送邀请、邮箱验证和密码重置链接。",
     smtpEnabled: "启用 SMTP 投递",
@@ -1377,7 +1380,8 @@ export default {
     passwordNotSet: "未设置",
     setPassword: "设置密码",
     twoFactor: "两步验证",
-    twoFactorDescription: "在密码、passkey 或 OIDC 登录后要求输入基于时间的验证码。",
+    twoFactorDescription:
+      "在密码或 OIDC 登录后要求输入基于时间的验证码。passkey 本身即满足两步验证，除非实例另行要求。",
     enableTwoFactor: "启用两步验证",
     disableTwoFactor: "关闭两步验证",
     code: "验证码",

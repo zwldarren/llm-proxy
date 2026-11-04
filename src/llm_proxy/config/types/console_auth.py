@@ -65,6 +65,15 @@ class ConsoleAuthSettings(BaseModel):
         default=False,
         description="Require every admin account to enroll TOTP before using the console",
     )
+    require_2fa_after_passkey: bool = Field(
+        default=False,
+        description=(
+            "Also ask for a TOTP or recovery code after a passkey sign-in. A passkey "
+            "assertion already proves possession plus user verification, so this is off "
+            "by default; turn it on only when a compliance regime demands a second "
+            "prompt regardless of the primary factor"
+        ),
+    )
     smtp: SmtpSettings = Field(default_factory=SmtpSettings)
     oidc_providers: list[OidcProviderSettings] = Field(default_factory=list)
 

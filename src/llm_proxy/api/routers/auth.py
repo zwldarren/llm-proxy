@@ -16,7 +16,7 @@ from llm_proxy.api.auth_session import (
     begin_mfa_challenge,
     complete_mfa_challenge,
     issue_login_response,
-    user_needs_second_factor,
+    second_factor_required,
 )
 from llm_proxy.api.dependencies import (
     get_async_session_dep,
@@ -165,7 +165,7 @@ async def login(
         outcome=Outcome.SUCCESS,
     )
 
-    if await user_needs_second_factor(session, user):
+    if await second_factor_required(request, session, user, auth_method="password"):
         return await begin_mfa_challenge(request, user, auth_method="password")
     return await issue_login_response(request, response, session, user, auth_method="password")
 

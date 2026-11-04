@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10).
+Accepted (2026-10). Amended 2026-11-04: a passkey satisfies the second factor.
 
 ## Context
 
@@ -30,8 +30,11 @@ them independently would produce conflicting recovery and session semantics.
   user verification. Multiple named credentials per user; synced passkeys allowed; no
   attestation requirement. The last passkey cannot be removed without another usable
   primary factor (a password or a linked OIDC provider).
-- **TOTP.** Optional per user, enforceable for admins. It applies after every primary
-  factor, so a passkey cannot bypass it. Ten hashed, one-time recovery codes are
+- **TOTP.** Optional per user, enforceable for admins. It applies after a password or
+  an OIDC sign-in. A passkey assertion already proves possession plus user
+  verification, so it satisfies the second factor by itself; instances that must
+  show a code regardless set `console_auth.require_2fa_after_passkey` (see the
+  amendment at the end of this record). Ten hashed, one-time recovery codes are
   generated on enrollment.
 - **OIDC.** Generic, configurable providers (issuer, client ID/secret, scopes). Login
   requires either a matching invitation or an authenticated link; conflicts are
@@ -101,4 +104,36 @@ single-use without server-side state.
   rejected OIDC callbacks are recorded as `Outcome.FAILURE`, not just successes.
 - **Step-up covers every write that weakens a control**, including the `logging` and
   `rate_limits` settings (full prompt logging; relaxing the login lockout bucket).
+
+## Amendment (2026-11-04) — a passkey satisfies the second factor
+
+The decision above applied TOTP "after every primary factor, so a passkey cannot
+bypass it". The factor that must not bypass the second step is a password, which
+proves one thing. A passkey assertion with required user verification already proves
+possession and inherence in a single step, so demanding a TOTP code after it adds no
+assurance: both authenticators sit at AAL2, and chaining them does not reach AAL3,
+which needs a hardware-bound authenticator with verifier-impersonation resistance.
+What the extra prompt does cost is the acceptance criterion this initiative set for
+itself ("日常 passkey 一键登录", daily passkey sign-in in one tap) and the sign-in
+page's own promise that a passkey means signing in without a password. An account
+that also enrolled TOTP went back to two prompts, which is exactly the friction that
+makes operators switch 2FA off or stop using passkeys.
+
+What the decision says now:
+
+- Password and OIDC sign-ins keep the code prompt. A password proves one secret, and
+  an external IdP's assurance level is not ours to judge.
+- A passkey sign-in finishes in one step. Its audit event records
+  `second_factor: "none"`; a sign-in completed with a code records `"totp"` or
+  `"recovery_code"`, so the log states how many factors a session actually used
+  instead of leaving it to be inferred from the flow.
+- `console_auth.require_2fa_after_passkey` (default off, **Instance sign-in**) puts the
+  prompt back for deployments whose compliance regime demands a code after every
+  primary factor. It is an opt-in rather than the default because the second prompt
+  in that combination is friction, not a control.
+
+The rule lives in one place, `second_factor_required()` in `api/auth_session.py`.
+Before this amendment the password, passkey and OIDC paths each decided for
+themselves — the OIDC path carried its own copy of the check — which is how the
+"every factor" rule drifted away from what the product wanted.
 

@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from llm_proxy.api.dependencies import get_auth_config
+from llm_proxy.api.dependencies import get_auth_config, get_config_from_state
 from llm_proxy.api.schemas.auth import LoginResponse
 from llm_proxy.api.session_cookies import set_login_cookies
 from llm_proxy.core.exceptions import AuthenticationFailedError
@@ -84,10 +84,40 @@ async def begin_mfa_challenge(
     )
 
 
-async def user_needs_second_factor(session: AsyncSession, user: UserRecord) -> bool:
+async def _has_confirmed_totp(session: AsyncSession, user: UserRecord) -> bool:
     """Whether this account has a confirmed TOTP credential."""
     record = await TotpRepository(session).get(user.id)
     return record is not None and isinstance(record.confirmed_at, datetime)
+
+
+async def second_factor_required(
+    request: Request,
+    session: AsyncSession,
+    user: UserRecord,
+    *,
+    auth_method: str,
+) -> bool:
+    """Whether this sign-in still needs a TOTP or recovery code.
+
+    A passkey assertion already carries both factors: the login flow requests
+    user verification and rejects an assertion without it, so the browser
+    proved possession of the credential and the person holding the device. A
+    code prompt after that adds friction without adding assurance, so a passkey
+    satisfies two-factor authentication on its own (ADR-0049 amendment) and
+    keeps the "one-tap passkey sign-in" promise for accounts that also enroll
+    TOTP. Instances whose compliance regime insists on a code after every
+    primary factor re-enable the prompt with
+    ``console_auth.require_2fa_after_passkey``.
+
+    Password and OIDC sign-ins always keep the second step, because neither
+    proves anything beyond a single secret.
+    """
+    if not await _has_confirmed_totp(session, user):
+        return False
+    if auth_method != "passkey":
+        return True
+    console_auth = (await get_config_from_state(request)).server_params.console_auth
+    return console_auth.require_2fa_after_passkey is True
 
 
 async def complete_mfa_challenge(
@@ -172,6 +202,9 @@ async def complete_mfa_challenge(
         client_ip=get_client_ip(request),
         outcome=Outcome.SUCCESS,
         auth_method=auth_method,
-        metadata_extra={"operation": "mfa_recover" if recovery_code is not None else "mfa_verify"},
+        metadata_extra={
+            "operation": "mfa_recover" if recovery_code is not None else "mfa_verify",
+            "second_factor": "recovery_code" if recovery_code is not None else "totp",
+        },
     )
     return await issue_login_response(request, response, session, user, auth_method=auth_method)

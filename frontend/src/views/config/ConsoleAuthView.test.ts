@@ -37,6 +37,7 @@ function makeSettings(): ConsoleAuthSettings {
   return {
     public_base_url: "https://proxy.example.com",
     require_2fa_for_admins: false,
+    require_2fa_after_passkey: false,
     smtp: {
       enabled: false,
       host: "",
