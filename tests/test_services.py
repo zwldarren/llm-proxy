@@ -113,14 +113,6 @@ class TestOwnedSlots:
 
         assert services.background_tasks() is first
 
-    def test_the_judge_warmup_task_round_trips(self) -> None:
-        services = services_for()
-        task = MagicMock()
-
-        assert services.judge_warmup_task() is None
-        services.set_judge_warmup_task(task)
-        assert services.judge_warmup_task() is task
-
 
 class TestInstallers:
     """Installers are the only writers, and they keep the storage names stable."""

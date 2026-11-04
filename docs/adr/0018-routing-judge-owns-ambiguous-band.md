@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-10).
+Accepted (2026-10). The startup/reload warm-up this ADR introduced was
+removed by [ADR-0057](0057-drop-judge-warm-up.md); every other rule stands.
 
 ## Context
 

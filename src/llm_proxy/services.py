@@ -106,9 +106,9 @@ class RuntimeServices:
         """Like :meth:`http_client`, for the callers that may run without the pool.
 
         The routing judge reads the pool defensively: a judge call is internal
-        and optional, and the background warm-up also runs where the shared pool
-        is not set up (early startup, tests). It degrades to opening its own
-        client rather than refusing to consult the judge.
+        and optional, and it can run where the shared pool is not set up (early
+        startup, tests). It degrades to opening its own client rather than
+        refusing to consult the judge.
         """
         return self._read("http_client")
 
@@ -214,23 +214,15 @@ class RuntimeServices:
 
         The event loop only holds weak references to tasks, so every detached
         task needs a strong reference or it may be garbage collected mid-run.
-        One set is shared by every producer (the lifespan's judge warm-up, the
-        background OpenResponses responses) and drained at shutdown, so this
-        accessor — not its callers — owns creating it.
+        One set is shared by every producer (the background OpenResponses
+        responses) and drained at shutdown, so this accessor — not its callers —
+        owns creating it.
         """
         tasks: set[asyncio.Task[Any]] | None = self._read("background_tasks")
         if tasks is None:
             tasks = set()
             self._state.background_tasks = tasks
         return tasks
-
-    def judge_warmup_task(self) -> asyncio.Task[Any] | None:
-        """The in-flight judge warm-up task, or ``None`` when none is running."""
-        return self._read("judge_warmup_task")
-
-    def set_judge_warmup_task(self, task: asyncio.Task[Any]) -> None:
-        """Record the in-flight judge warm-up task (at most one at a time)."""
-        self._state.judge_warmup_task = task
 
     def url_validation_executor(self) -> ThreadPoolExecutor | None:
         """The bounded pool for blocking URL/DNS validation, or ``None``.

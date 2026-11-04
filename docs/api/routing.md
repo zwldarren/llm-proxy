@@ -115,11 +115,11 @@ What matters operationally:
   fire, because agreement measured only inside the gate says nothing about what the gate let
   through. Turn it off once the verdicts have earned the decision.
 - One extra call, on the operator's budget. A judged turn makes exactly one upstream
-  call, billed as input tokens on the judge model. The judge is warmed in the background at
-  startup and again whenever the configuration changes, so a cold model is not the first
-  judged turn's problem; `deadline_s` still has to cover the model's own response time on a
-  cold prompt. A deadline that cannot be met does not fail loudly — that turn falls back to
-  the ensemble, and `routing.judge.error` records why.
+  call, billed as input tokens on the judge model. The judge is not warmed: startup makes no
+  judge call, so `deadline_s` has to cover the model's own response time, including its cold
+  start on the first judged turn after a local model is loaded. A deadline that cannot be
+  met does not fail loudly — that turn falls back to the ensemble, and `routing.judge.error`
+  records why.
 - Each call is its own log row. The judge call lands in the log store under the
   `judge` log type — its own model, provider, tokens and cost, attributed to the request
   that triggered it — so judge spend shows up per model and counts toward that key's

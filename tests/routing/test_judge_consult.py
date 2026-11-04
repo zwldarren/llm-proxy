@@ -223,60 +223,6 @@ async def test_junk_answers_abstain_rather_than_guess(monkeypatch):
     assert consultation.owns_tier is False
 
 
-# ─── Warm-up: the judge must be loaded before a real turn needs it ───
-
-
-def _warm_config(*, smart_routing_enabled=True, **judge_overrides):
-    from types import SimpleNamespace
-
-    from llm_proxy.config.types.server import ProxyAuthConfig, ServerParams
-    from llm_proxy.config.types.smart_routing import RoutingJudgeConfig, SmartRoutingConfig
-
-    kwargs = {"enabled": True, "model": "judge"}
-    kwargs.update(judge_overrides)
-    return SimpleNamespace(
-        models={"judge": _model_config()},
-        provider_configs={"local": ProviderConfig(name="local", type="ollama")},
-        server_params=ServerParams(auth=ProxyAuthConfig(jwt_secret="a" * 32)),
-        smart_routing=SmartRoutingConfig(
-            enabled=smart_routing_enabled, judge=RoutingJudgeConfig(**kwargs)
-        ),
-    )
-
-
-async def test_warmup_calls_the_judge_with_a_deadline_that_can_finish_a_cold_load(monkeypatch):
-    from llm_proxy.routing.judge.consult import JUDGE_WARMUP_DEADLINE_S, warm_judge
-
-    captured: dict = {}
-    _patch_seam(monkeypatch, _outcome(), captured)
-
-    consultation = await warm_judge(config=_warm_config(), services=services_for())
-
-    assert consultation is not None
-    assert consultation.plan.reason == "warm-up"
-    assert captured["deadline_s"] == JUDGE_WARMUP_DEADLINE_S
-    assert captured["model_config"] is not None
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        pytest.param(_warm_config(smart_routing_enabled=False), id="routing-off"),
-        pytest.param(_warm_config(enabled=False), id="judge-off"),
-        pytest.param(_warm_config(model="  "), id="no-model"),
-    ],
-)
-async def test_an_inert_judge_is_not_warmed(monkeypatch, config):
-    from llm_proxy.routing.judge.consult import warm_judge
-
-    async def fail(*args, **kwargs):  # pragma: no cover - must not run
-        raise AssertionError("an inert judge must not be called")
-
-    monkeypatch.setattr("llm_proxy.routing.judge.consult.call_systemone", fail)
-
-    assert await warm_judge(config=config, services=services_for()) is None
-
-
 # ─── Accounting: judge spend is attributed, never double-counted ───
 
 
@@ -358,18 +304,6 @@ async def test_an_unpriceable_call_reports_no_cost_rather_than_zero(monkeypatch,
     assert meta["cost_source"] is None
 
 
-async def test_an_unreachable_judge_does_not_break_the_caller(monkeypatch):
-    """The warm-up runs at startup: it may fail, it may not raise."""
-    from llm_proxy.routing.judge.consult import warm_judge
-
-    async def boom(*args, **kwargs):
-        raise RuntimeError("connection reset")
-
-    monkeypatch.setattr("llm_proxy.routing.judge.consult.call_systemone", boom)
-
-    assert await warm_judge(config=_warm_config(), services=services_for()) is None
-
-
 def test_call_kwargs_come_from_config_and_services():
     from types import SimpleNamespace
 
@@ -400,7 +334,7 @@ def test_call_kwargs_come_from_config_and_services():
     assert kwargs["unknown_fields_policy"] == "passthrough"
     assert kwargs["unsupported_block_policy"] == "error"
 
-    # A worker without a pool (tests, warm-up during startup) is tolerated.
+    # A caller without a pool (tests, early startup) is tolerated.
     bare = judge_call_kwargs(config, services_for())
     assert bare["http_client_manager"] is None
     assert bare["stats_store"] is None

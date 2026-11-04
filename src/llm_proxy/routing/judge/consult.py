@@ -36,11 +36,6 @@ from llm_proxy.services import RuntimeServices
 
 logger = logging.getLogger("llm-proxy.routing.judge")
 
-#: Deadline for the background warm-up. Deliberately far above the request-path
-#: ceiling: the point is to let a cold model *finish* loading, once, off the
-#: request path, so the first real gated turn can meet its own deadline.
-JUDGE_WARMUP_DEADLINE_S = 60.0
-
 
 def judge_call_cost(
     outcome: InternalCallOutcome,
@@ -84,14 +79,13 @@ async def consult_judge(
     stats_store: ProviderStatsStore | None = None,
     unknown_fields_policy: str | None = None,
     unsupported_block_policy: str | None = None,
-    deadline_s: float | None = None,
 ) -> JudgeConsultation:
     """Ask the judge to classify one turn.
 
     ``plan`` comes from :func:`~llm_proxy.routing.judge.policy.plan_judge_consult`;
     a plan that says not to consult returns immediately, so callers may invoke
-    this unconditionally. ``deadline_s`` overrides the configured deadline, which
-    the background warm-up uses to let a cold model finish loading once.
+    this unconditionally. The deadline is the configured one, ``judge.deadline_s``:
+    the call runs while a client waits, so no caller gets to extend it.
     """
     consultation = JudgeConsultation(
         plan=plan,
@@ -137,7 +131,7 @@ async def consult_judge(
         stats_store=stats_store,
         unknown_fields_policy=unknown_fields_policy,
         unsupported_block_policy=unsupported_block_policy,
-        deadline_s=deadline_s if deadline_s is not None else judge.deadline_s,
+        deadline_s=judge.deadline_s,
     )
     finished_at = time.time()
 
@@ -193,15 +187,14 @@ def judge_call_kwargs(
 ) -> dict[str, Any]:
     """Everything one judge call needs, read from the proxy config and the services.
 
-    Both callers — the request path and the background warm-up — assemble their
-    call here, so "where does the judge get its provider" has one answer
-    (ADR-0018). ``judge`` is the configuration the caller is about to consult and
-    defaults to the one on the config, which is what both call sites pass: taking
-    it as an argument is what keeps the model resolved here the same model the
-    plan was drawn for. The shared services are read defensively
-    (:meth:`RuntimeServices.http_client_or_none`): the warm-up also runs in
-    contexts (and tests) where the HTTP pool is not set up yet, and a judge call
-    may open its own client rather than not happen at all.
+    Assembling the call here is what keeps "where does the judge get its provider"
+    a single answer (ADR-0018). ``judge`` is the configuration the caller is about
+    to consult and defaults to the one on the config; taking it as an argument is
+    what keeps the model resolved here the same model the plan was drawn for. The
+    shared services are read defensively
+    (:meth:`RuntimeServices.http_client_or_none`): a judge call is internal and
+    optional, so in contexts where the pool is not set up yet (early startup,
+    tests) it opens its own client rather than not happen at all.
     """
     judge = judge if judge is not None else config.smart_routing.judge
     return {
@@ -217,41 +210,8 @@ def judge_call_kwargs(
     }
 
 
-async def warm_judge(*, config: ProxyConfig, services: RuntimeServices) -> JudgeConsultation | None:
-    """Load the judge model before a real turn needs it. Returns None if inert.
-
-    A judged turn is rare by construction — the gate exists to keep it that way —
-    and a call cancelled at its deadline does not leave the model loaded. Without a
-    warm-up, a proxy whose gate fires every few minutes pays the model load on every
-    judged turn and loses it, so the judge never answers at all: the feature is on,
-    the ensemble decides, and only the log says why.
-
-    The warm-up therefore uses a deadline generous enough to *finish* a cold load
-    rather than the request-path deadline, and it never raises: the app must start
-    (and reload) even when the judge model is unreachable.
-    """
-    judge = config.smart_routing.judge
-    if not (config.smart_routing.enabled and judge.is_configured):
-        return None
-
-    plan = JudgeConsultPlan(consult=True, reason="warm-up")
-    try:
-        return await consult_judge(
-            plan,
-            messages=[{"role": "user", "content": "Warm-up request."}],
-            judge=judge,
-            deadline_s=JUDGE_WARMUP_DEADLINE_S,
-            **judge_call_kwargs(config, services, judge=judge),
-        )
-    except Exception:  # noqa: BLE001 - a warm-up must never break startup
-        logger.warning("Routing judge warm-up failed", exc_info=True)
-        return None
-
-
 __all__ = [
-    "JUDGE_WARMUP_DEADLINE_S",
     "consult_judge",
     "judge_call_cost",
     "judge_call_kwargs",
-    "warm_judge",
 ]

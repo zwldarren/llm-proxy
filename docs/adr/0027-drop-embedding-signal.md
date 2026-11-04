@@ -61,7 +61,8 @@ judge was built to own.
   excluded dependency, and the Docker image no longer carries a partial ML
   stack.
 - Startup drops the per-worker BGE/ONNX warm-up; `startup_judge_warmup`
-  remains the only model warm-up smart routing performs.
+  remains the only model warm-up smart routing performs (itself removed later by
+  [ADR-0057](0057-drop-judge-warm-up.md)).
 - Routing quality on obvious ends rests on A+B (they were adequate there per
   ADR-0018's port measurements); the MEDIUM boundary is delegated to the
   judge, which is the band it owns by construction.
