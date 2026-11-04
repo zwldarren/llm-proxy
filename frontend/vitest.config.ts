@@ -17,5 +17,6 @@ export default defineConfig({
 	},
 	test: {
 		environment: "happy-dom",
+		setupFiles: [path.resolve(__dirname, "./src/test/setup.ts")],
 	},
 });

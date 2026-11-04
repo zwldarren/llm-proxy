@@ -37,6 +37,12 @@
 ## Tests
 
 - **Run**: `bun run test` (Vitest + happy-dom)
+- `src/test/setup.ts` installs happy-dom `Storage` instances over `globalThis.localStorage`
+  and `sessionStorage` for every test file. Node's own Web Storage globals shadow the
+  environment's (`localStorage` resolves to `undefined` without `--localstorage-file`),
+  and Vitest skips window keys that already exist on `globalThis`, so without the setup
+  file every suite that imports `src/i18n/index.ts` fails at import with
+  `Cannot read properties of undefined (reading 'getItem')`.
 - Views mount their children through `defineAsyncComponent`, so mounting one in a test
   starts module transforms that can still be running when the test ends. CI fails the
   whole run for that, even when every test passed:
