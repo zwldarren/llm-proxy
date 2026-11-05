@@ -226,8 +226,10 @@ const displayValue = computed(() => {
     </PopoverTrigger>
     <PopoverContent class="w-80 p-0" align="start" @keydown="handleListKeydown">
       <div class="flex flex-col">
-        <!-- Search header -->
-        <div class="flex items-center border-b h-9">
+        <!-- Search header. `min-h-9` (not `h-9`): a coarse pointer lifts the
+             field and the refresh button to 44px, and a fixed track would let
+             them hang over the hairline instead of growing with them. -->
+        <div class="flex items-center border-b min-h-9">
           <div class="flex items-center flex-1 gap-2 px-2">
             <Search class="size-4 shrink-0 opacity-50" />
             <Input

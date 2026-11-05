@@ -1751,17 +1751,25 @@
 }
 
 /* Touch-target floor. Tailwind's `max-sm` lifts controls only on phone-width
- * viewports; a tablet or touch laptop is wider than that and still needs the
- * 44px minimum. Keep this unlayered so it wins over the control height
- * utilities. `any-pointer` (not `pointer`) also covers hybrid touch laptops
- * whose primary device is a trackpad but whose screen is still a finger
- * target; mouse-only desktops keep their density.
+ * viewports; a tablet is wider than that and still needs the 44px minimum.
+ * Keep this unlayered so it wins over the control height utilities.
  *
- * Navigation rows are deliberately exempt: a nav rail is a dense desktop
- * surface and lifting every row to 44px on a touch-capable laptop turns the
- * menu into a scrolling band. They carry `min-h-8` with `max-md:min-h-11`
- * instead, so phones still get the floor. */
-@media (any-pointer: coarse) {
+ * `pointer`, never `any-pointer`: the floor follows the *primary* input device.
+ * `any-pointer: coarse` also matches a laptop that merely has a digitizer —
+ * a touchscreen, a pen display — and then inflates every control on a machine
+ * the operator drives with a mouse: `h-7` row buttons, `h-8` triggers, the
+ * `h-9` tab strip and popover bars all jump to 44px, overflowing the
+ * fixed-height rows they live in. That is not a touch layout, and the same
+ * mistake is why the nav rail is exempt below. A hybrid laptop driven by
+ * trackpad keeps its density; its compact controls still sit at 28–36px,
+ * above the 24px WCAG 2.5.8 floor. Tablets and phones report a coarse
+ * *primary* pointer and keep the floor.
+ *
+ * Navigation rows are exempt from the height lift even then: a nav rail is a
+ * dense desktop surface and lifting every row to 44px turns the menu into a
+ * scrolling band. They carry `min-h-8` with `max-md:min-h-11` instead, so
+ * phones still get the floor. */
+@media (pointer: coarse) {
   [data-slot="button"],
   [data-slot="input"],
   [data-slot="select-trigger"],
