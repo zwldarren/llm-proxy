@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.4](https://github.com/zwldarren/llm-proxy/compare/v0.5.3...v0.5.4) (2026-11-05)
+
+
+### Features
+
+* **billing:** price peak/off-peak windows and service tiers (ADR-0053) ([7cbc431](https://github.com/zwldarren/llm-proxy/commit/7cbc4311b321d492a55d66f7701825922c65ff74))
+* **console:** build the dialog, sheet and tab shells once, and close the a11y audit ([1f70d99](https://github.com/zwldarren/llm-proxy/commit/1f70d993ccafff3c978bce343940fed62e89ec72))
+* **console:** give each team member one labeled actions menu ([8c74112](https://github.com/zwldarren/llm-proxy/commit/8c74112692562f06418ab80fe0eef25464bacade))
+* **console:** let a passkey satisfy the second factor (ADR-0049) ([a9bafa4](https://github.com/zwldarren/llm-proxy/commit/a9bafa470c21180e34d09a46409a91e28b467c1a))
+* **console:** make the models.dev sync one review surface and one write ([b2e5ff3](https://github.com/zwldarren/llm-proxy/commit/b2e5ff39c7079093ea250be29a2403c9580ca248))
+* **images:** accept GPT Image 2.6 GIF and SVG output on generations ([3d25c20](https://github.com/zwldarren/llm-proxy/commit/3d25c20a10a5c3341ba85e626a7baa6e4123e2d1))
+* **opencode:** default to the v2 lane roots and honor Goose/Amp sessions (ADR-0055, ADR-0056) ([6be883b](https://github.com/zwldarren/llm-proxy/commit/6be883b662c2a10f283eebb5b168a03ba0a06ef4))
+* **provider-selection:** pin each conversation to one provider by default (ADR-0054) ([a28d835](https://github.com/zwldarren/llm-proxy/commit/a28d8351e9b31dc42d7bda26a85c8b9ee24bf2d9))
+
+
+### Bug Fixes
+
+* **frontend:** restore Web Storage in the vitest environment ([22766f4](https://github.com/zwldarren/llm-proxy/commit/22766f4035714e27996bdd5ab29957634163d318))
+
+
+### Documentation
+
+* rewrite the README and publish a Simplified Chinese docs site ([d190cef](https://github.com/zwldarren/llm-proxy/commit/d190cef0065e6a0c333e1148393be981ebe7769c))
+
 ## [0.5.3](https://github.com/zwldarren/llm-proxy/compare/v0.5.2...v0.5.3) (2026-10-31)
 
 
