@@ -58,6 +58,7 @@ from llm_proxy.observability.content.registry import format_output_blocks
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.observation.model import RequestObservation
 from llm_proxy.observability.observation.policy import SendContent, cap_payload
+from llm_proxy.observability.sinks.export_failures import forget_export_target
 from llm_proxy.observability.sinks.send_content import SendContentProjector
 
 if TYPE_CHECKING:
@@ -701,6 +702,7 @@ class OtlpExporter(SendContentProjector):
     async def close(self) -> None:
         provider = self._provider
         self._provider = None
+        forget_export_target(self.name)
         if provider is None:
             return
         try:

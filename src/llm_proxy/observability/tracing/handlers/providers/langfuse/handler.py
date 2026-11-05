@@ -20,6 +20,7 @@ from llm_proxy.observability.observation.policy import (
     parse_send_content,
     send_content_field_metadata,
 )
+from llm_proxy.observability.sinks.export_failures import register_export_target
 from llm_proxy.observability.sinks.langfuse import LangfuseExporter, sampled_tracer_provider
 from llm_proxy.observability.tracing.handlers.exporter_handler import ExporterBackedHandler
 
@@ -170,9 +171,15 @@ class LangfuseTracingHandler(ExporterBackedHandler):
             logger.error(f"Failed to initialize Langfuse client: {e}")
             raise
 
+        name = str(settings.get("name") or "langfuse")
+        # The SDK exports over OTLP/HTTP underneath, and its rejected batches are
+        # logged by the OTel exporter with no backend or endpoint attached; the
+        # bridge needs both from here (see sinks/export_failures).
+        register_export_target(name, base_url)
+
         return cls(
             enabled=True,
-            name=settings.get("name", "langfuse"),
+            name=name,
             client=client,
             base_url=base_url,
             version=settings.get("version", "1.0"),

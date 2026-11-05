@@ -321,6 +321,31 @@ trace id header on responses and both headers are CORS-exposed. A generated trac
 also a 32-character hex id and is stored on the log row as `trace_id`, so a row and its
 Langfuse trace can be found from either side (the logs API filters on `trace_id`).
 
+### When a backend rejects a batch
+
+A batch the collector refuses is reported once in the proxy log, not once per request:
+
+```text
+[2026-11-05 07:15:01] WARNING [llm_proxy.observability.sinks.export_failures:83] Tracing export rejected | status=403 reason=Forbidden batches=1 backends=langfuse → https://cloud.langfuse.com hint=the endpoint refused the credentials — …
+```
+
+The same failure is summarised at most once every five minutes, and `batches` counts
+what it covered, so a backend left misconfigured does not bury the rest of the log.
+The SDK's own line for that batch is suppressed: it names neither the backend nor the
+endpoint.
+
+- `401` — the credential was rejected. Check the Langfuse public/secret pair, or the
+  `Authorization` header of a generic OTLP backend.
+- `403` — the credential is not valid for this host. Langfuse keys are regional: a key
+  from one region sent to another deployment's `base_url` answers 403, as does an
+  organisation-scoped key without a workspace id. For LangSmith the same trap applies,
+  and its key needs `X-Tenant-Id` when it is scoped to an organisation.
+- `404` — an OTLP/HTTP endpoint must be the full traces path (`…/v1/traces`,
+  `…/otel/v1/traces`); the exporter does not append it.
+- `413` — the batch exceeded the collector's request-size limit.
+- A connection error or timeout usually means the collector is unreachable from the
+  proxy rather than a credential problem.
+
 ## Related
 
 - [Settings](settings.md#log-management): retention, masking, sampling

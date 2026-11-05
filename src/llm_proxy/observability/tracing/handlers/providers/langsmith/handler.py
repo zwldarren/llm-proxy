@@ -18,6 +18,7 @@ from llm_proxy.observability.observation.policy import (
     parse_send_content,
     send_content_field_metadata,
 )
+from llm_proxy.observability.sinks.export_failures import register_export_target
 from llm_proxy.observability.sinks.otlp import (
     LANGSMITH_OTLP_ENDPOINT,
     LANGSMITH_PROJECT_HEADER,
@@ -147,6 +148,11 @@ class LangsmithTracingHandler(OtlpTracingHandler):
         if not isinstance(endpoint, str) or not endpoint:
             endpoint = LANGSMITH_OTLP_ENDPOINT
 
+        name = str(settings.get("name") or cls.provider_name)
+        # The SDK logs a rejected batch with no backend and no endpoint, so the
+        # bridge that reports it needs both from here (see sinks/export_failures).
+        register_export_target(name, endpoint)
+
         provider = build_tracer_provider(
             endpoint=endpoint,
             protocol="http",
@@ -157,7 +163,7 @@ class LangsmithTracingHandler(OtlpTracingHandler):
         )
         return cls(
             enabled=True,
-            name=settings.get("name", cls.provider_name),
+            name=name,
             provider=provider,
             backend=cls.backend,
             send_content=parse_send_content(settings),

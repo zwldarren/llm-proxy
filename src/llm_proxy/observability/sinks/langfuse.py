@@ -37,6 +37,7 @@ from llm_proxy.observability.content.registry import (
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.observation.model import RequestObservation
 from llm_proxy.observability.observation.policy import SendContent
+from llm_proxy.observability.sinks.export_failures import forget_export_target
 from llm_proxy.observability.sinks.send_content import SendContentProjector
 
 if TYPE_CHECKING:
@@ -628,6 +629,7 @@ class LangfuseExporter(SendContentProjector):
     async def close(self) -> None:
         client = self.client
         self.client = None
+        forget_export_target(self.name)
         if client is None:
             return
         try:

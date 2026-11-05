@@ -263,6 +263,28 @@ LangSmith 后端还会额外输出它的摄取端所读取的写法：上游提�
 的追踪 ID 也是 32 位十六进制，并作为 `trace_id` 存到日志行上，因此从日志行或
 Langfuse 追踪任意一侧都能找到对方（日志 API 按 `trace_id` 筛选）。
 
+### 后端拒收批次时
+
+collector 拒收的批次只在代理日志里报一次，而不是每个请求报一次：
+
+```text
+[2026-11-05 07:15:01] WARNING [llm_proxy.observability.sinks.export_failures:83] Tracing export rejected | status=403 reason=Forbidden batches=1 backends=langfuse → https://cloud.langfuse.com hint=the endpoint refused the credentials — …
+```
+
+同一失败最多每五分钟汇总一行，`batches` 是这一行覆盖的批次数，所以一个持续配错的
+后端不会把其余日志淹没。SDK 自己为同一批次打印的那一行会被抑制：它既没有后端名，
+也没有端点。
+
+- `401`——凭证被拒。检查 Langfuse 的 public/secret 密钥对，或通用 OTLP 后端的
+  `Authorization` 头。
+- `403`——凭证对该主机无效。Langfuse 的密钥按区域划分：把某个区域的密钥发给另一个
+  部署的 `base_url` 会得到 403，绑定在组织级、未指定 workspace 的密钥同理。LangSmith
+  有同样的坑，它的密钥绑定组织时还需要 `X-Tenant-Id`。
+- `404`——OTLP/HTTP 端点必须写全 traces 路径（`…/v1/traces`、`…/otel/v1/traces`），
+  exporter 不会自动补上。
+- `413`——批次超过 collector 的请求体上限。
+- 连接错误或超时通常是代理到 collector 不通，而不是凭证问题。
+
 ## 相关阅读
 
 - [设置](/zh/admin/settings#log-management)：保留期、脱敏、采样

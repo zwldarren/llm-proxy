@@ -17,6 +17,7 @@ from llm_proxy.observability.observation.policy import (
     parse_send_content,
     send_content_field_metadata,
 )
+from llm_proxy.observability.sinks.export_failures import register_export_target
 from llm_proxy.observability.sinks.otlp import (
     OtlpBackend,
     OtlpExporter,
@@ -206,6 +207,11 @@ class OtlpTracingHandler(ExporterBackedHandler):
         if not isinstance(endpoint, str) or not endpoint:
             raise ValueError("OTLP handler requires a non-empty string 'endpoint' in settings")
 
+        name = str(settings.get("name") or cls.provider_name)
+        # The SDK logs a rejected batch with no backend and no endpoint, so the
+        # bridge that reports it needs both from here (see sinks/export_failures).
+        register_export_target(name, endpoint)
+
         provider = build_tracer_provider(
             endpoint=endpoint,
             protocol=cls.parse_protocol(settings),
@@ -217,7 +223,7 @@ class OtlpTracingHandler(ExporterBackedHandler):
         )
         return cls(
             enabled=True,
-            name=settings.get("name", cls.provider_name),
+            name=name,
             provider=provider,
             backend=cls.backend,
             send_content=parse_send_content(settings),
