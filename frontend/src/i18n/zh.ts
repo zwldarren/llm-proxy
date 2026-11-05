@@ -462,6 +462,11 @@ export default {
     outputFormatPNG: "PNG",
     outputFormatJPEG: "JPEG",
     outputFormatWebP: "WebP",
+    outputFormatGIF: "GIF（动图）",
+    outputFormatSVG: "SVG（矢量）",
+    envelopeHint: "GIF 与 SVG 不支持流式、部分图像或压缩；SVG 每次只返回一张图。",
+    frameCount: "帧数",
+    frameDurationMs: "帧时长（毫秒）",
     partialImages: "部分图像",
     // Results
     results: "结果",

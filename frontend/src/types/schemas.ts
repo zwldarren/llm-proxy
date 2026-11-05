@@ -1009,6 +1009,12 @@ interface BaseImageRequest {
 }
 
 export interface ImageGenerationRequest extends BaseImageRequest {
+  /** GPT Image 2.6 planning effort before rendering. */
+  complexity?: "low" | "medium" | "high";
+  /** Animated GIF frame count (2-64). */
+  frame_count?: number;
+  /** Animated GIF per-frame duration in milliseconds (20-2000). */
+  frame_duration_ms?: number;
   response_format?: "url" | "b64_json";
 }
 

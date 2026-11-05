@@ -57,6 +57,10 @@ reach the provider as extension parameters (see
 those include `watermark`, `seed`, `bbox_list`, `color_palette` and
 `enable_sequential`.
 
+`output_format` on this endpoint is limited to `png`, `jpeg` and `webp`; `gif`
+and `svg` are generation-only (see
+[Animated GIF and SVG output](create.md#animated-gif-and-svg-output)).
+
 ## Multipart
 
 File parts `image` and `image[]` (up to 16) plus a `mask` file; other fields as form

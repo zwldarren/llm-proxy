@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ImageInfo } from "@/utils/logResponseParser";
 import { buildImageDataUrl } from "@/utils/logResponseParser";
+import { safeImageUrl } from "@/utils/safeUrl";
 
 const props = defineProps<{
   images: ImageInfo[];
@@ -96,8 +97,16 @@ function downloadImage(img: ResolvedImage, index: number) {
   document.body.removeChild(a);
 }
 
-function openInNewTab(url: string) {
-  window.open(url, "_blank", "noopener,noreferrer");
+function openInNewTab(url: string | undefined) {
+  // Base64 SVG is untrusted markup: `safeImageUrl` rejects it, so the button is
+  // only offered for navigable sources (see `isNavigable`).
+  const safe = safeImageUrl(url);
+  if (safe) window.open(safe, "_blank", "noopener,noreferrer");
+}
+
+/** True when the display URL can be opened as a top-level document. */
+function isNavigable(img: ResolvedImage): boolean {
+  return Boolean(img.displayUrl && safeImageUrl(img.displayUrl));
 }
 </script>
 
@@ -154,7 +163,7 @@ function openInNewTab(url: string) {
               #{{ index + 1 }}
             </span>
             <div class="flex items-center gap-1">
-              <Tooltip v-if="img.displayUrl">
+              <Tooltip v-if="isNavigable(img)">
                 <TooltipTrigger as-child>
                   <Button
                     variant="ghost"

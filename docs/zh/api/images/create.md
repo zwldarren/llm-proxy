@@ -55,7 +55,28 @@ print(img.data[0].url)
 - `n`：schema 接受 1–12（各提供商公开的最宽范围）。实际生效的上限由提供商自己决定，
   见[厂商扩展字段](#vendor-extension-fields)。
 - `gpt-image-*` 系列的模型还会收到 `background`、`moderation`、`output_compression`、
-  `output_format`、`partial_images`；对它们不下发 `response_format` 和 `style`。
+  `output_format`、`complexity`、`frame_count`、`frame_duration_ms`、
+  `partial_images`；对它们不下发 `response_format` 和 `style`。
+
+## GIF 与 SVG 输出 {#animated-gif-and-svg-output}
+
+GPT Image 2.6（`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`）在
+`/v1/images/generations` 的 `output_format` 上增加了 `gif` 和 `svg`。
+
+- `gif`：`frame_count` 为 2–64（默认 9），`frame_duration_ms` 为 20–2000（默认 200，
+  提供商按 10 ms 取整）。`size` 取 `auto`，或两条边都是 16 的倍数的 `宽x高`。
+- `svg`：`n` 必须为 `1`。
+- 两种格式都不接受 `stream`、`partial_images` 和 `output_compression`，带上会返回
+  **400** `invalid_request_error`；它们也不在 `/v1/images/edits` 上提供，该端点仍是
+  `png`、`jpeg`、`webp`。
+- `frame_count` 和 `frame_duration_ms` 只对 GIF 有效：与其它 `output_format` 一起发送
+  返回 **400**。
+
+`complexity`（`low`、`medium`、`high`，上游默认 `high`）控制模型渲染前的规划量，对任何
+`gpt-image-*` 模型都会下发。
+
+代理原样透传媒体字节：GIF 或 SVG 就是提供商产出的内容，放在 `b64_json` 还是 `url` 里
+取决于请求本身。
 
 ## 厂商扩展字段 {#vendor-extension-fields}
 

@@ -13,7 +13,7 @@ import {
 } from "@lucide/vue";
 
 defineOptions({ name: "ImagesView" });
-import { computed, onActivated, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import EmptyState from "@/components/common/EmptyState.vue";
@@ -26,6 +26,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { imagesApi } from "@/services/api/images";
 import { getErrorMessage } from "@/utils/error";
 import { safeImageUrl } from "@/utils/safeUrl";
+import {
+  imageFileExtension,
+  imageMimeType,
+  isEnvelopeOutputFormat,
+} from "@/utils/imageOutputFormat";
+import { buildImageEditBody, buildImageGenerationBody } from "@/utils/imageRequest";
+import type { ImageRequestSettings } from "@/utils/imageRequest";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { formatLatency, makeRunId } from "@/utils/runs";
 import { useAuthStore } from "@/stores/auth";
@@ -83,6 +90,13 @@ const moderation = ref<string | null>(null);
 const outputCompression = ref<number | null>(null);
 const outputFormat = ref<string | null>(null);
 const partialImages = ref<number | null>(null);
+const frameCount = ref<number | null>(null);
+const frameDurationMs = ref<number | null>(null);
+
+// GIF and SVG responses use a different envelope: no streaming, no partial
+// images, no compression (and SVG requires exactly one image). The request
+// builders in utils/imageRequest enforce the same rules.
+const isEnvelopeFormat = computed(() => isEnvelopeOutputFormat(outputFormat.value));
 
 // Results — the canvas renders the latest generation/edit run.
 const currentRun = ref<ImageRun | null>(null);
@@ -90,6 +104,14 @@ const isGenerating = ref(false);
 
 // Computed
 const isEditMode = computed(() => uploadedImages.value.length > 0);
+
+// The edits endpoint documents png/jpeg/webp only; drop a format that the
+// generation endpoint allowed once the canvas switches to edit mode.
+watch(isEditMode, (editing) => {
+  if (editing && isEnvelopeFormat.value) {
+    outputFormat.value = null;
+  }
+});
 
 // The run inspector opens from the canvas readout.
 const showInspector = ref(false);
@@ -179,6 +201,8 @@ function resetSettings() {
   outputCompression.value = null;
   outputFormat.value = null;
   partialImages.value = null;
+  frameCount.value = null;
+  frameDurationMs.value = null;
 }
 
 async function handleSubmit() {
@@ -193,64 +217,58 @@ async function handleSubmit() {
 
   isGenerating.value = true;
 
-  // Deposit the run immediately — it settles to ok or error.
-  const run: ImageRun = {
-    id: makeRunId(),
-    mode: isEditMode.value ? "edits" : "generations",
+  // Read the settings once; the builders apply the envelope rules, so the run
+  // below records exactly what goes on the wire.
+  const settings: ImageRequestSettings = {
     model: selectedModel.value,
     prompt: prompt.value.trim(),
     n: numberOfImages.value,
     size: size.value,
     quality: quality.value,
+    background: background.value,
+    moderation: moderation.value,
+    outputFormat: outputFormat.value,
+    outputCompression: outputCompression.value,
+    partialImages: partialImages.value,
+    frameCount: frameCount.value,
+    frameDurationMs: frameDurationMs.value,
+  };
+  // Built before the run is deposited so the readout shows the sent count
+  // (SVG pins it to 1).
+  const generationBody = isEditMode.value ? null : buildImageGenerationBody(settings);
+
+  // Deposit the run immediately — it settles to ok or error.
+  const run: ImageRun = {
+    id: makeRunId(),
+    mode: isEditMode.value ? "edits" : "generations",
+    model: settings.model,
+    prompt: settings.prompt,
+    n: generationBody?.n ?? settings.n,
+    size: settings.size,
+    quality: settings.quality,
     startedAt: Date.now(),
     status: "streaming",
     payload: {},
     images: [],
+    outputFormat: settings.outputFormat,
   };
   currentRun.value = run;
   const runStart = performance.now();
 
   try {
-    const model = selectedModel.value;
-    const trimmedPrompt = prompt.value.trim();
-
     let images: ImageData[];
-    if (run.mode === "edits") {
-      const body = {
-        model,
-        prompt: trimmedPrompt,
-        images: uploadedImages.value.map((img) => ({
-          image_url: img.base64,
-        })),
-        mask: maskImage.value ? { image_url: maskImage.value.base64 } : undefined,
-        background: background.value || undefined,
-        moderation: moderation.value || undefined,
-        n: numberOfImages.value,
-        output_compression: outputCompression.value ?? undefined,
-        output_format: outputFormat.value || undefined,
-        partial_images: partialImages.value ?? undefined,
-        quality: quality.value,
-        size: size.value !== "auto" ? size.value : undefined,
-      };
-      run.payload = JSON.parse(JSON.stringify(body));
-      const response = await imagesApi.editImage(body);
+    if (generationBody) {
+      run.payload = JSON.parse(JSON.stringify(generationBody));
+      const response = await imagesApi.generateImage(generationBody);
       images = response.data || [];
     } else {
-      const body = {
-        prompt: trimmedPrompt,
-        model,
-        n: numberOfImages.value,
-        size: size.value !== "auto" ? size.value : undefined,
-        quality: quality.value,
-        background: background.value || undefined,
-        moderation: moderation.value || undefined,
-        output_compression: outputCompression.value ?? undefined,
-        output_format: outputFormat.value || undefined,
-        partial_images: partialImages.value ?? undefined,
-        response_format: "url" as const,
-      };
+      const body = buildImageEditBody(
+        settings,
+        uploadedImages.value.map((img) => img.base64),
+        maskImage.value?.base64 ?? null
+      );
       run.payload = JSON.parse(JSON.stringify(body));
-      const response = await imagesApi.generateImage(body);
+      const response = await imagesApi.editImage(body);
       images = response.data || [];
     }
 
@@ -271,12 +289,26 @@ async function handleSubmit() {
   }
 }
 
+/** Base64 payload as a data URL in the format the run requested. */
+function b64DataUrl(image: ImageData): string {
+  return `data:${imageMimeType(currentRun.value?.outputFormat)};base64,${image.b64_json}`;
+}
+
 function getImageSource(image: ImageData): string | null {
   // Provider-controlled URL: never hand a javascript:/data:text scheme to
   // window.open or fetch.
   if (image.url) return safeImageUrl(image.url) ?? null;
-  if (image.b64_json) return `data:image/png;base64,${image.b64_json}`;
+  if (image.b64_json) return b64DataUrl(image);
   return null;
+}
+
+/**
+ * True when the image can be opened as a top-level document. Base64 SVG bytes
+ * are deliberately excluded: `safeImageUrl` rejects `data:image/svg+xml`, and a
+ * generated SVG is untrusted markup that would run in the dashboard origin.
+ */
+function canOpenInNewTab(image: ImageData): boolean {
+  return Boolean(safeImageUrl(getImageSource(image)));
 }
 
 async function downloadImage(image: ImageData, index: number) {
@@ -285,7 +317,7 @@ async function downloadImage(image: ImageData, index: number) {
     if (image.b64_json) {
       const binaryStr = atob(image.b64_json);
       const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
-      blob = new Blob([bytes], { type: "image/png" });
+      blob = new Blob([bytes], { type: imageMimeType(currentRun.value?.outputFormat) });
     } else if (image.url) {
       const source = safeImageUrl(image.url);
       if (!source) return;
@@ -297,7 +329,7 @@ async function downloadImage(image: ImageData, index: number) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `image-${index + 1}.png`;
+    a.download = `image-${index + 1}.${imageFileExtension(currentRun.value?.outputFormat)}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -308,7 +340,8 @@ async function downloadImage(image: ImageData, index: number) {
 }
 
 function openInNewTab(image: ImageData) {
-  const src = getImageSource(image);
+  // SVG bytes have no navigable form here; the download button covers them.
+  const src = safeImageUrl(getImageSource(image));
   if (src) window.open(src, "_blank", "noopener,noreferrer");
 }
 
@@ -754,7 +787,7 @@ onActivated(async () => {
                   />
                   <img
                     v-else-if="image.b64_json"
-                    :src="`data:image/png;base64,${image.b64_json}`"
+                    :src="b64DataUrl(image)"
                     :alt="`Generated image: ${currentRun.prompt}`"
                     loading="lazy"
                     class="w-full aspect-square object-cover"
@@ -763,7 +796,7 @@ onActivated(async () => {
                     class="hidden sm:flex absolute inset-0 bg-overlay/50 opacity-0 group-hover:opacity-100 transition-opacity items-center justify-center gap-2"
                   >
                     <Button
-                      v-if="image.url || image.b64_json"
+                      v-if="canOpenInNewTab(image)"
                       variant="secondary"
                       size="sm"
                       class="h-10 px-4"
@@ -786,6 +819,7 @@ onActivated(async () => {
                     class="flex sm:hidden items-center justify-center gap-2 p-2 border-t border-border bg-muted/50"
                   >
                     <Button
+                      v-if="canOpenInNewTab(image)"
                       variant="secondary"
                       size="sm"
                       class="h-10 px-4 flex-1"
@@ -843,6 +877,9 @@ onActivated(async () => {
         v-model:outputCompression="outputCompression"
         v-model:outputFormat="outputFormat"
         v-model:partialImages="partialImages"
+        v-model:frameCount="frameCount"
+        v-model:frameDurationMs="frameDurationMs"
+        :allow-envelope-formats="!isEditMode"
         @reset="resetSettings"
       />
     </div>

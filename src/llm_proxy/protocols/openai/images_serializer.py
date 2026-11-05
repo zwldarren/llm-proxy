@@ -249,14 +249,72 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
             "moderation",
             "output_format",
             "output_compression",
+            "complexity",
+            "frame_count",
+            "frame_duration_ms",
             "partial_images",
             "stream",
         }
     )
 
+    #: Still-image formats. GPT Image 2.6 adds `gif` and `svg`, which OpenAI
+    #: documents for generation only — the edits endpoint stays on these three.
+    _STILL_FORMATS = frozenset({"png", "jpeg", "webp"})
+    _OUTPUT_FORMATS = _STILL_FORMATS | frozenset({"gif", "svg"})
+    #: Formats whose envelope cannot stream, return partial images, or compress.
+    _ENVELOPE_FORMATS = frozenset({"gif", "svg"})
+
     @property
     def protocol_name(self) -> str:
         return "image_generations"
+
+    def _validate_output_format_constraints(
+        self,
+        *,
+        output_format: str | None,
+        n: int,
+        stream: bool,
+        partial_images: int | None,
+        output_compression: int | None,
+        frame_count: int | None,
+        frame_duration_ms: int | None,
+    ) -> None:
+        """Enforce the GPT Image 2.6 cross-field rules for gif/svg output."""
+        has_frame_params = frame_count is not None or frame_duration_ms is not None
+        if has_frame_params and output_format != "gif":
+            raise ValidationError(
+                message=(
+                    "frame_count and frame_duration_ms are for GIF output only; "
+                    f"output_format is {output_format!r}"
+                ),
+                code="invalid_request_error",
+                status_code=400,
+            )
+        if output_format not in self._ENVELOPE_FORMATS:
+            return
+        unsupported = []
+        if stream:
+            unsupported.append("stream")
+        if partial_images:
+            # 0 already means "no partial images", so only a positive count
+            # contradicts the format.
+            unsupported.append("partial_images")
+        if output_compression is not None:
+            unsupported.append("output_compression")
+        if unsupported:
+            raise ValidationError(
+                message=(
+                    f"output_format '{output_format}' does not support {', '.join(unsupported)}"
+                ),
+                code="invalid_request_error",
+                status_code=400,
+            )
+        if output_format == "svg" and n != 1:
+            raise ValidationError(
+                message="output_format 'svg' requires n to be 1",
+                code="invalid_request_error",
+                status_code=400,
+            )
 
     def parse_request(self, data: dict[str, Any]) -> InternalImageRequest:
         size_raw = data.get("size")
@@ -277,14 +335,51 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
             data.get("moderation"), "moderation", frozenset({"low", "auto"})
         )
         output_format = self._validate_choice(
-            data.get("output_format"), "output_format", frozenset({"png", "jpeg", "webp"})
+            data.get("output_format"), "output_format", self._OUTPUT_FORMATS
+        )
+        complexity = self._validate_choice(
+            data.get("complexity"), "complexity", frozenset({"low", "medium", "high"})
+        )
+        n = self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=12) or 1
+        stream = bool(data.get("stream", False))
+        output_compression = self._parse_int_range(
+            data.get("output_compression"),
+            field="output_compression",
+            default=None,
+            minimum=0,
+            maximum=100,
+        )
+        partial_images = self._parse_int_range(
+            data.get("partial_images"),
+            field="partial_images",
+            default=None,
+            minimum=0,
+            maximum=3,
+        )
+        frame_count = self._parse_int_range(
+            data.get("frame_count"), field="frame_count", default=None, minimum=2, maximum=64
+        )
+        frame_duration_ms = self._parse_int_range(
+            data.get("frame_duration_ms"),
+            field="frame_duration_ms",
+            default=None,
+            minimum=20,
+            maximum=2000,
+        )
+        self._validate_output_format_constraints(
+            output_format=output_format,
+            n=n,
+            stream=stream,
+            partial_images=partial_images,
+            output_compression=output_compression,
+            frame_count=frame_count,
+            frame_duration_ms=frame_duration_ms,
         )
         return InternalImageRequest(
             model=data.get("model", ""),
             prompt=data.get("prompt", ""),
-            stream=data.get("stream", False),
-            n=self._parse_int_range(data.get("n"), field="n", default=1, minimum=1, maximum=12)
-            or 1,
+            stream=stream,
+            n=n,
             size=size,
             size_auto=size_raw == "auto",
             quality=quality,
@@ -293,21 +388,12 @@ class ImageGenerationsSerializer(BaseOpenAIImagesSerializer):
             user=data.get("user"),
             background=background,
             moderation=moderation,
-            output_compression=self._parse_int_range(
-                data.get("output_compression"),
-                field="output_compression",
-                default=None,
-                minimum=0,
-                maximum=100,
-            ),
+            output_compression=output_compression,
             output_format=output_format,
-            partial_images=self._parse_int_range(
-                data.get("partial_images"),
-                field="partial_images",
-                default=None,
-                minimum=0,
-                maximum=3,
-            ),
+            complexity=complexity,
+            frame_count=frame_count,
+            frame_duration_ms=frame_duration_ms,
+            partial_images=partial_images,
             extra=self._parse_extra(data),
         )
 

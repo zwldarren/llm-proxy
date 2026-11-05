@@ -83,7 +83,10 @@ class InternalImageRequest:
         response_format: Format for returned images ("url" or "b64_json").
         user: A unique identifier representing the end-user.
         background: Background type for images ("transparent" or "opaque").
-        output_format: Output format ("png", "webp", "jpg").
+        output_format: Output format ("png", "webp", "jpg", "gif", "svg").
+        complexity: Planning effort before rendering ("low", "medium", "high").
+        frame_count: Animated GIF frame count (2-64).
+        frame_duration_ms: Animated GIF per-frame duration in milliseconds (20-2000).
         request_id: Optional request identifier for tracking.
         extra: Additional provider-specific parameters.
     """
@@ -107,6 +110,9 @@ class InternalImageRequest:
     moderation: str | None = None
     output_compression: int | None = None
     output_format: str | None = None
+    complexity: str | None = None
+    frame_count: int | None = None
+    frame_duration_ms: int | None = None
     partial_images: int | None = None
     request_id: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)

@@ -541,4 +541,16 @@ describe("buildImageDataUrl", () => {
   it("drops an unsafe URL with no base64 payload", () => {
     expect(buildImageDataUrl({ url: "javascript:alert(1)" })).toBeUndefined();
   });
+
+  it("uses the response output_format for the data URL MIME", () => {
+    expect(buildImageDataUrl({ b64Json: "R0lGOD", outputFormat: "gif" })).toBe(
+      "data:image/gif;base64,R0lGOD"
+    );
+    expect(buildImageDataUrl({ b64Json: "PHN2Zz4", outputFormat: "svg" })).toBe(
+      "data:image/svg+xml;base64,PHN2Zz4"
+    );
+    expect(buildImageDataUrl({ b64Json: "AAAA", outputFormat: "webp" })).toBe(
+      "data:image/webp;base64,AAAA"
+    );
+  });
 });

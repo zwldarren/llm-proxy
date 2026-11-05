@@ -28,6 +28,7 @@ import {
 } from "@/utils/sse";
 import { asString, bodySentinel, isRecord, parseToolArgs, safeStringify } from "@/utils/logFormat";
 import type { BodySentinel } from "@/utils/logFormat";
+import { imageMimeType } from "@/utils/imageOutputFormat";
 import { formatProbability } from "@/utils/format";
 import { safeImageUrl } from "@/utils/safeUrl";
 
@@ -224,21 +225,6 @@ const empty = (overrides: Partial<ParsedResponse> = {}): ParsedResponse => ({
 });
 
 // --- Helpers -----------------------------------------------------------
-
-/** Inferred MIME type for a base64 image data URL. */
-function imageMimeType(format?: string): string {
-  switch (format) {
-    case "jpeg":
-    case "jpg":
-      return "image/jpeg";
-    case "webp":
-      return "image/webp";
-    case "gif":
-      return "image/gif";
-    default:
-      return "image/png";
-  }
-}
 
 /** Build a data: URL for a base64 image. Returns undefined when no b64 payload. */
 export function buildImageDataUrl(img: ImageInfo): string | undefined {

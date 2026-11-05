@@ -12,7 +12,10 @@ from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.image import ImageData, ImageEditSource, InternalImageResponse
 from llm_proxy.models.types import PromptTokensDetails, Usage
 from llm_proxy.protocols.openai.images_edits_handler import parse_image_edit_request
-from llm_proxy.protocols.openai.images_serializer import ImageGenerationsSerializer
+from llm_proxy.protocols.openai.images_serializer import (
+    ImageEditsSerializer,
+    ImageGenerationsSerializer,
+)
 from llm_proxy.protocols.openai.schemas import (
     ImageEditRequestSchema,
     ImageGenerationRequestSchema,
@@ -171,6 +174,105 @@ def test_edit_accepts_gpt_image_2_5_quality():
     )
     assert request.quality == "xhigh"
     assert request.size == "2048x2048"
+
+
+def test_generation_forwards_gpt_image_2_6_gif_params():
+    """GIF output keeps its animation controls all the way to the upstream body."""
+    request = ImageGenerationRequestSchema.model_validate(
+        {
+            "prompt": "a looping mascot",
+            "model": "gpt-image-2.6-flare",
+            "output_format": "gif",
+            "frame_count": 16,
+            "frame_duration_ms": 120,
+            "complexity": "low",
+        }
+    )
+    assert request.output_format == "gif"
+
+    internal = ImageGenerationsSerializer().parse_request(request.model_dump(exclude_none=True))
+    assert internal.frame_count == 16
+    assert internal.frame_duration_ms == 120
+    assert internal.complexity == "low"
+    # Frame controls are first-class fields, so they survive the adapter's
+    # unknown-fields policy instead of riding ``extra``.
+    assert internal.extra == {}
+
+    adapter = OpenAICompatibleBase(api_key="test-key", base_url="https://api.openai.com/v1")
+    outbound = adapter._build_outbound_body(internal, request_type="image_generation")
+    assert outbound.json_body["output_format"] == "gif"
+    assert outbound.json_body["frame_count"] == 16
+    assert outbound.json_body["frame_duration_ms"] == 120
+    assert outbound.json_body["complexity"] == "low"
+
+
+def test_generation_accepts_svg_with_single_image():
+    serializer = ImageGenerationsSerializer()
+    result = serializer.parse_request(
+        {"prompt": "a logo", "model": "gpt-image-2.6-sunburst", "output_format": "svg"}
+    )
+    assert result.output_format == "svg"
+    assert result.n == 1
+
+    with pytest.raises(ValidationError) as excinfo:
+        serializer.parse_request({"prompt": "a logo", "output_format": "svg", "n": 2})
+    assert "requires n to be 1" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("stream", True),
+        ("partial_images", 1),
+        ("output_compression", 80),
+    ],
+)
+@pytest.mark.parametrize("output_format", ["gif", "svg"])
+def test_generation_rejects_streaming_and_compression_for_gif_svg(output_format, field, value):
+    serializer = ImageGenerationsSerializer()
+    with pytest.raises(ValidationError) as excinfo:
+        serializer.parse_request({"prompt": "x", "output_format": output_format, field: value})
+    assert f"output_format '{output_format}' does not support {field}" in str(excinfo.value)
+
+
+def test_generation_allows_zero_partial_images_for_gif():
+    """`partial_images: 0` already means none, so it does not contradict GIF."""
+    serializer = ImageGenerationsSerializer()
+    result = serializer.parse_request({"prompt": "x", "output_format": "gif", "partial_images": 0})
+    assert result.partial_images == 0
+
+
+def test_generation_rejects_frame_params_without_gif_output():
+    serializer = ImageGenerationsSerializer()
+    with pytest.raises(ValidationError) as excinfo:
+        serializer.parse_request({"prompt": "x", "output_format": "webp", "frame_count": 9})
+    assert "frame_count and frame_duration_ms are for GIF output only" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as frame_range:
+        serializer.parse_request({"prompt": "x", "output_format": "gif", "frame_count": 1})
+    assert "frame_count must be between 2 and 64" in str(frame_range.value)
+
+
+@pytest.mark.parametrize("output_format", ["gif", "svg"])
+def test_edits_still_reject_animated_and_vector_formats(output_format):
+    """OpenAI documents gif/svg output for generation only."""
+    with pytest.raises(PydanticValidationError):
+        ImageEditRequestSchema.model_validate(
+            {
+                "prompt": "edit",
+                "images": [{"image_url": "https://example.com/a.png"}],
+                "output_format": output_format,
+            }
+        )
+    with pytest.raises(ValidationError) as excinfo:
+        ImageEditsSerializer().parse_request(
+            {
+                "prompt": "edit",
+                "images": [{"image_url": "https://example.com/a.png"}],
+                "output_format": output_format,
+            }
+        )
+    assert "Invalid output_format" in str(excinfo.value)
 
 
 @pytest.mark.asyncio

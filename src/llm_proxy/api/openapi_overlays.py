@@ -452,7 +452,9 @@ COMPONENTS: frozendict[str, Any] = frozendict(
                     "The proxy never converts between `url` and `b64_json`.",
                 ),
                 "background": _nullable(_str()),
-                "output_format": _nullable(_str()),
+                "output_format": _nullable(
+                    _str("Echoes the requested output format (`gif` and `svg` included).")
+                ),
                 "quality": _nullable(_str()),
                 "size": _nullable(_str()),
                 "usage": _nullable(_passthrough({})),

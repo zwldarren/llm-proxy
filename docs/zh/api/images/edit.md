@@ -55,6 +55,9 @@ print(img.data[0].url)
 `qwen`/`qwen-intl` 来说，这些扩展字段包括 `watermark`、`seed`、`bbox_list`、
 `color_palette` 和 `enable_sequential`。
 
+本端点的 `output_format` 只有 `png`、`jpeg`、`webp`；`gif` 和 `svg` 仅用于生成端点
+（见 [GIF 与 SVG 输出](/zh/api/images/create#animated-gif-and-svg-output)）。
+
 ## Multipart
 
 文件字段 `image` 和 `image[]`（最多 16 个），外加一个 `mask` 文件；其他字段以表单字符串

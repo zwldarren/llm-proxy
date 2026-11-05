@@ -314,6 +314,12 @@ class ImageCapabilityMixin:
                 body["output_compression"] = request.output_compression
             if request.output_format:
                 body["output_format"] = request.output_format
+            if request.complexity:
+                body["complexity"] = request.complexity
+            if request.frame_count is not None:
+                body["frame_count"] = request.frame_count
+            if request.frame_duration_ms is not None:
+                body["frame_duration_ms"] = request.frame_duration_ms
             if request.partial_images is not None:
                 body["partial_images"] = request.partial_images
 

@@ -473,6 +473,12 @@ export default {
     outputFormatPNG: "PNG",
     outputFormatJPEG: "JPEG",
     outputFormatWebP: "WebP",
+    outputFormatGIF: "GIF (animated)",
+    outputFormatSVG: "SVG (vector)",
+    envelopeHint:
+      "GIF and SVG cannot stream, return partial images, or compress; SVG returns one image.",
+    frameCount: "Frames",
+    frameDurationMs: "Frame duration (ms)",
     partialImages: "Partial Images",
     // Results
     results: "Results",

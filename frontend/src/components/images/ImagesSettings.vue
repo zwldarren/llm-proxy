@@ -4,10 +4,12 @@
  * grammar (fixed overlay on mobile, relative lane on desktop).
  */
 import { Sliders, Paintbrush, X } from "@lucide/vue";
+import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
+import { isEnvelopeOutputFormat, isGifOutputFormat } from "@/utils/imageOutputFormat";
 import {
   Select,
   SelectContent,
@@ -25,6 +27,13 @@ const moderation = defineModel<string | null>("moderation", { required: true });
 const outputCompression = defineModel<number | null>("outputCompression", { required: true });
 const outputFormat = defineModel<string | null>("outputFormat", { required: true });
 const partialImages = defineModel<number | null>("partialImages", { required: true });
+const frameCount = defineModel<number | null>("frameCount", { required: true });
+const frameDurationMs = defineModel<number | null>("frameDurationMs", { required: true });
+
+const props = defineProps<{
+  /** GIF/SVG output is generation-only; the edits endpoint rejects both. */
+  allowEnvelopeFormats?: boolean;
+}>();
 
 const emit = defineEmits<{
   reset: [];
@@ -35,6 +44,31 @@ const { t } = useI18n();
 const close = () => {
   open.value = false;
 };
+
+// Animated GIF and vector SVG change the response envelope: they cannot
+// stream, return partial images, or compress. SVG also requires exactly one
+// image per request. The shared predicates mirror the backend format sets.
+const isGifOutput = computed(() => isGifOutputFormat(outputFormat.value));
+const isEnvelopeFormat = computed(() => isEnvelopeOutputFormat(outputFormat.value));
+const countLocked = computed(() => outputFormat.value === "svg");
+
+// SVG locks the count to 1; picking a raster format again restores the user's
+// own choice instead of leaving the field stuck on 1.
+let countBeforeLock = numberOfImages.value;
+watch(countLocked, (locked) => {
+  if (locked) {
+    countBeforeLock = numberOfImages.value;
+    numberOfImages.value = 1;
+  } else {
+    numberOfImages.value = countBeforeLock;
+  }
+});
+
+watch(isEnvelopeFormat, (locked) => {
+  if (!locked) return;
+  outputCompression.value = null;
+  partialImages.value = null;
+});
 
 const sizeOptions = [
   { value: "auto", label: t("images.sizeAuto") },
@@ -111,7 +145,7 @@ const sizeOptions = [
             <Label class="text-xs font-medium text-muted-foreground">{{
               t("images.numberOfImages")
             }}</Label>
-            <Select v-model="numberOfImages">
+            <Select v-model="numberOfImages" :disabled="countLocked">
               <SelectTrigger class="h-9" :aria-label="t('images.numberOfImages')">
                 <SelectValue />
               </SelectTrigger>
@@ -197,8 +231,45 @@ const sizeOptions = [
                 <SelectItem value="png">{{ t("images.outputFormatPNG") }}</SelectItem>
                 <SelectItem value="jpeg">{{ t("images.outputFormatJPEG") }}</SelectItem>
                 <SelectItem value="webp">{{ t("images.outputFormatWebP") }}</SelectItem>
+                <SelectItem v-if="props.allowEnvelopeFormats !== false" value="gif">
+                  {{ t("images.outputFormatGIF") }}
+                </SelectItem>
+                <SelectItem v-if="props.allowEnvelopeFormats !== false" value="svg">
+                  {{ t("images.outputFormatSVG") }}
+                </SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="isEnvelopeFormat" class="text-xs text-muted-foreground">
+              {{ t("images.envelopeHint") }}
+            </p>
+          </div>
+
+          <div v-if="isGifOutput" class="space-y-2">
+            <Label class="text-xs font-medium text-muted-foreground">{{
+              t("images.frameCount")
+            }}</Label>
+            <NumberInput
+              v-model.number="frameCount"
+              :aria-label="t('images.frameCount')"
+              class="h-9"
+              :placeholder="t('common.optional')"
+              min="2"
+              max="64"
+            />
+          </div>
+
+          <div v-if="isGifOutput" class="space-y-2">
+            <Label class="text-xs font-medium text-muted-foreground">{{
+              t("images.frameDurationMs")
+            }}</Label>
+            <NumberInput
+              v-model.number="frameDurationMs"
+              :aria-label="t('images.frameDurationMs')"
+              class="h-9"
+              :placeholder="t('common.optional')"
+              min="20"
+              max="2000"
+            />
           </div>
 
           <div class="space-y-2">
@@ -210,6 +281,7 @@ const sizeOptions = [
               :aria-label="t('images.outputCompression')"
               class="h-9"
               :placeholder="t('common.optional')"
+              :disabled="isEnvelopeFormat"
             />
           </div>
 
@@ -222,6 +294,7 @@ const sizeOptions = [
               :aria-label="t('images.partialImages')"
               class="h-9"
               :placeholder="t('common.optional')"
+              :disabled="isEnvelopeFormat"
               min="0"
               max="3"
             />

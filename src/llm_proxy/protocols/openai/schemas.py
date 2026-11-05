@@ -113,11 +113,28 @@ class ImageGenerationRequestSchema(BaseModel):
     moderation: Literal["low", "auto"] | None = Field(
         None, description="Content moderation level (e.g., low, auto)"
     )
-    output_format: Literal["png", "jpeg", "webp"] | None = Field(
-        None, description="Output format (e.g., png, jpeg, webp)"
+    # GPT Image 2.6 adds animated GIF and vector SVG output on top of the
+    # still-image formats. Cross-field rules (SVG needs n == 1; GIF/SVG reject
+    # streaming, partial images and compression) live in the serializer.
+    output_format: Literal["png", "jpeg", "webp", "gif", "svg"] | None = Field(
+        None, description="Output format (png, jpeg, webp, gif, or svg)"
     )
     output_compression: int | None = Field(
         None, ge=0, le=100, description="Compression level 0-100%"
+    )
+    #: GIF-only animation controls.
+    frame_count: int | None = Field(
+        None, ge=2, le=64, description="Animated GIF frame count (2-64, default 9)"
+    )
+    frame_duration_ms: int | None = Field(
+        None,
+        ge=20,
+        le=2000,
+        description="Animated GIF per-frame duration in milliseconds (20-2000, default 200)",
+    )
+    #: GPT Image 2.6 planning effort before rendering.
+    complexity: Literal["low", "medium", "high"] | None = Field(
+        None, description="How much planning the model does before rendering"
     )
     partial_images: int | None = Field(
         None, ge=0, le=3, description="Number of partial images for streaming"

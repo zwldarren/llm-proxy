@@ -55,8 +55,31 @@ print(img.data[0].url)
 - `n`: the schema accepts 1–12 (the widest documented provider range). Providers
   apply their own caps; see [Vendor extension fields](#vendor-extension-fields).
 - `gpt-image-*` models additionally receive `background`, `moderation`,
-  `output_compression`, `output_format`, `partial_images`; `response_format` and
-  `style` are omitted for them.
+  `output_compression`, `output_format`, `complexity`, `frame_count`,
+  `frame_duration_ms`, `partial_images`; `response_format` and `style` are
+  omitted for them.
+
+## Animated GIF and SVG output
+
+GPT Image 2.6 (`gpt-image-2.6-flare`, `gpt-image-2.6-sunburst`) adds `gif` and
+`svg` to `output_format` on `/v1/images/generations`.
+
+- `gif`: `frame_count` is 2–64 (default 9) and `frame_duration_ms` is 20–2000
+  (default 200; the provider rounds it to 10 ms). `size` is `auto` or a
+  `WIDTHxHEIGHT` resolution whose edges are multiples of 16.
+- `svg`: `n` must be `1`.
+- Both formats reject `stream`, `partial_images` and `output_compression` with
+  **400** `invalid_request_error`, and neither is available on
+  `/v1/images/edits`, which keeps `png`, `jpeg` and `webp`.
+- `frame_count` and `frame_duration_ms` are GIF-only: sending either with another
+  `output_format` is a **400**.
+
+`complexity` (`low`, `medium`, `high`; upstream default `high`) controls how much
+planning the model does before rendering, and is forwarded for any `gpt-image-*`
+model.
+
+Media bytes pass through unchanged: a GIF or SVG is exactly what the provider
+produced, delivered as `b64_json` or `url` depending on the request.
 
 ## Vendor extension fields
 

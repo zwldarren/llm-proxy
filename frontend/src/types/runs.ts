@@ -26,5 +26,7 @@ export interface ImageRun {
   n: number;
   size: string;
   quality: string;
+  /** Requested `output_format` (png/jpeg/webp/gif/svg) — sets the preview MIME. */
+  outputFormat?: string | null;
   images: ImageData[];
 }
