@@ -25,23 +25,28 @@ defineProps<Props>();
 </script>
 
 <template>
-  <table class="sr-only">
-    <caption>
-      {{
-        caption
-      }}
-    </caption>
-    <thead>
-      <tr>
-        <th scope="col">{{ rowHeader }}</th>
-        <th v-for="column in columns" :key="column" scope="col">{{ column }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="row in rows" :key="row.key">
-        <th scope="row">{{ row.label }}</th>
-        <td v-for="(value, index) in row.values" :key="index">{{ value }}</td>
-      </tr>
-    </tbody>
-  </table>
+  <!-- `sr-only` sits on a wrapper, not on the table: Firefox ignores
+       `width`/`height`/`clip-path` on a table box, so a table carrying the class
+       still paints its caption and rows at full size. -->
+  <div class="sr-only">
+    <table>
+      <caption>
+        {{
+          caption
+        }}
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ rowHeader }}</th>
+          <th v-for="column in columns" :key="column" scope="col">{{ column }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in rows" :key="row.key">
+          <th scope="row">{{ row.label }}</th>
+          <td v-for="(value, index) in row.values" :key="index">{{ value }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </template>

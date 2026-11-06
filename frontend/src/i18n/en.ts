@@ -176,9 +176,10 @@ export default {
     // Token breakdown chart (cache hit / cache miss / output per bucket)
     tokenBreakdownTitle: "Tokens",
     tokenBreakdownEmpty: "No token usage in this range.",
-    tokenBreakdownAria: "Token breakdown: {buckets} buckets, {total} tokens in total",
-    trendsChartSummary: "{type} by model, {count} model|{count} models, {range}",
-    trendsChartRange: "{start} to {end}",
+    // Accessible names stay short: the range is in the page header, and the
+    // per-bucket numbers live in the charts' screen-reader data tables.
+    tokenBreakdownAria: "Token breakdown",
+    trendsChartSummary: "{type} by model",
     avgThroughput: "Avg Throughput",
     throughputCaption: "tokens / second",
     // Status labels

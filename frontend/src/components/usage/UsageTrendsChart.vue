@@ -146,24 +146,12 @@ const displayModels = computed(() => {
 // popover become disabled until the user deselects something.
 const selectionAtCap = computed(() => selectedModels.value.size >= MAX_DISPLAY_MODELS);
 
-// Accessible label for screen readers. The range and series count are spelled
-// out in the active locale — this string is the chart's name in the a11y tree.
-const chartAriaLabel = computed(() => {
-  const typeLabel = chartTypeLabel(chartType.value);
-  const modelCount = displayModels.value.length;
-  const dateRange =
-    series.value.length > 0
-      ? t("home.trendsChartRange", {
-          start: fullBucketLabel(series.value[0]!.key),
-          end: fullBucketLabel(series.value[series.value.length - 1]!.key),
-        })
-      : "";
-  return t("home.trendsChartSummary", {
-    type: typeLabel,
-    count: modelCount,
-    range: dateRange,
-  });
-});
+// Accessible label for screen readers: the chart's name in the a11y tree. The
+// date range and series count are deliberately left out — the page header
+// carries the range, and the data table below carries the numbers.
+const chartAriaLabel = computed(() =>
+  t("home.trendsChartSummary", { type: chartTypeLabel(chartType.value) })
+);
 
 /**
  * Text alternative for the canvas: one row per bucket with the stacked total,

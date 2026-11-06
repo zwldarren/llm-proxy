@@ -119,12 +119,7 @@ const chartOptions = computed(() =>
   })
 );
 
-const chartAriaLabel = computed(() =>
-  t("home.tokenBreakdownAria", {
-    buckets: rows.value.length,
-    total: formatTokens(totalTokens.value),
-  })
-);
+const chartAriaLabel = computed(() => t("home.tokenBreakdownAria"));
 
 /** Non-visual twin of the stacked bars, with the same number formatting. */
 const chartA11yRows = computed<ChartDataTableRow[]>(() =>

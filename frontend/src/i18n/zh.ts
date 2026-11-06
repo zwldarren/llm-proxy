@@ -176,9 +176,9 @@ export default {
     // Token breakdown chart (cache hit / cache miss / output per bucket)
     tokenBreakdownTitle: "Token 用量",
     tokenBreakdownEmpty: "此时间范围内没有 Token 用量。",
-    tokenBreakdownAria: "Token 明细：{buckets} 个时间桶，共 {total} Token",
-    trendsChartSummary: "{type}（按模型），{count} 个模型，{range}",
-    trendsChartRange: "{start} 至 {end}",
+    // 无障碍名称保持简短：日期范围在页头，逐个时间桶的数字在屏幕阅读器数据表里。
+    tokenBreakdownAria: "Token 明细",
+    trendsChartSummary: "{type}（按模型）",
     avgThroughput: "平均吞吐量",
     throughputCaption: "tokens / second",
     // Status labels
