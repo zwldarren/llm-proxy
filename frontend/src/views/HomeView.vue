@@ -421,32 +421,42 @@ onMounted(() => {
       </div>
 
       <template v-else-if="usageStats">
-        <div class="config-scroll stagger-fast">
-          <UsageMetricStrip :summary="usageStats.summary" :by-provider="usageStats.by_provider" />
+        <!-- The dashboard fills the content area instead of leaving a dead band
+             under the last row on a tall window: the metric strip and the chart
+             row keep their natural height, the provider/model row absorbs the
+             remainder and its lists scroll inside. -->
+        <div class="config-scroll">
+          <div class="flex min-h-full flex-col stagger-fast">
+            <UsageMetricStrip
+              class="flex-none"
+              :summary="usageStats.summary"
+              :by-provider="usageStats.by_provider"
+            />
 
-          <div
-            class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border/60 items-start border-b border-border/60"
-          >
-            <TokenBreakdownChart
-              :buckets="tokenBreakdownBuckets"
-              :granularity="useHourlyGranularity ? 'hour' : 'day'"
-            />
-            <UsageTrendsChart
-              :daily-usage="usageStats.daily_usage"
-              :hourly-buckets="hourlyBuckets"
-              :granularity="useHourlyGranularity ? 'hour' : 'day'"
-            />
-          </div>
+            <div
+              class="grid flex-none grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border/60 items-start border-b border-border/60"
+            >
+              <TokenBreakdownChart
+                :buckets="tokenBreakdownBuckets"
+                :granularity="useHourlyGranularity ? 'hour' : 'day'"
+              />
+              <UsageTrendsChart
+                :daily-usage="usageStats.daily_usage"
+                :hourly-buckets="hourlyBuckets"
+                :granularity="useHourlyGranularity ? 'hour' : 'day'"
+              />
+            </div>
 
-          <div
-            class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/60 items-start"
-          >
-            <UsageByProvider :by-provider="usageStats.by_provider" />
-            <UsageByModel
-              :by-model="usageStats.by_model"
-              :selected-model="selectedModel"
-              @select="selectModel"
-            />
+            <div
+              class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/60 lg:flex-1 lg:min-h-90"
+            >
+              <UsageByProvider :by-provider="usageStats.by_provider" />
+              <UsageByModel
+                :by-model="usageStats.by_model"
+                :selected-model="selectedModel"
+                @select="selectModel"
+              />
+            </div>
           </div>
         </div>
       </template>

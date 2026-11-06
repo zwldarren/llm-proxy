@@ -99,7 +99,7 @@ const truncateModelName = (name: string, maxLength = 28): string => {
       </h2>
     </div>
 
-    <div class="flex-1 min-h-0">
+    <div class="flex-1 min-h-0 flex flex-col">
       <!-- Interactive Column Headers (Table Style Click-to-Sort) -->
       <div
         v-if="sortedModels.length > 0"
@@ -137,7 +137,9 @@ const truncateModelName = (name: string, maxLength = 28): string => {
         </div>
       </div>
 
-      <ScrollArea class="h-90 w-full">
+      <!-- Fixed height on stacked layouts; fills the panel once the dashboard
+           row grows to the viewport (see HomeView). -->
+      <ScrollArea class="h-90 w-full lg:flex-1 lg:min-h-0">
         <div v-if="sortedModels.length > 0" class="px-4 sm:px-6 py-1 space-y-0.5">
           <div
             v-for="(item, index) in paginatedModels"
