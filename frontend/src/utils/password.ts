@@ -4,9 +4,9 @@ import i18n from "@/i18n";
  * Password strength policy — mirrors the backend
  * `llm_proxy.security.passwords.validate_password_strength`.
  *
- * At least 8 characters and at most 72 UTF-8 bytes (bcrypt's limit), with at
- * least one uppercase letter, one lowercase letter, one digit, and one special
- * character.
+ * At least 8 characters and at most 72 UTF-8 bytes (the legacy bcrypt limit,
+ * kept while bcrypt hashes remain verifiable), with at least one uppercase
+ * letter, one lowercase letter, one digit, and one special character.
  */
 
 const PASSWORD_MIN_LENGTH = 8;

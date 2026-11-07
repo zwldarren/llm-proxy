@@ -8,11 +8,14 @@ import pytest
 
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.core.exceptions import ConfigurationError
+from llm_proxy.database.tables import UserRecord
 from llm_proxy.security.jwt import JWTManager
 from llm_proxy.security.passwords import (
+    has_password_hash,
     hash_password,
     is_bcrypt_hash,
-    verify_admin_password,
+    password_needs_rehash,
+    verify_password,
 )
 
 _TEST_SECRET = "this_is_a_test_secret_key_that_is_32bytes_long_for_jwt"
@@ -129,26 +132,58 @@ class TestJWTManager:
 
 
 class TestAdminPasswordHashing:
-    """Tests for admin password hashing/verification (used by the users table)."""
+    """Tests for password hashing/verification (used by the users table)."""
 
-    def test_hash_password_produces_bcrypt(self):
-        """hash_password produces a valid bcrypt hash."""
+    def test_hash_password_produces_argon2id(self):
+        """hash_password produces a valid Argon2id hash."""
         hashed = hash_password("secret")
-        assert is_bcrypt_hash(hashed)
+        assert hashed.startswith("$argon2id$")
+        assert has_password_hash(hashed)
+        assert not is_bcrypt_hash(hashed)
+
+    def test_user_has_password_uses_the_supported_hash_predicate(self):
+        user = UserRecord(username="alice", password_hash=hash_password("secret"), role="admin")
+
+        assert user.has_password is True
+        user.password_hash = "$2b$12$" + "a" * 53
+        assert user.has_password is True
+        user.password_hash = ""
+        assert user.has_password is False
 
     def test_hash_password_is_salting(self):
         """Hashing the same password twice yields different hashes."""
         assert hash_password("secret") != hash_password("secret")
 
-    def test_verify_admin_password_success(self):
-        """A password verifies against its bcrypt hash."""
+    def test_verify_password_success(self):
+        """A password verifies against its hash."""
         hashed = hash_password("correct horse battery staple")
-        assert verify_admin_password("correct horse battery staple", hashed) is True
+        assert verify_password("correct horse battery staple", hashed) is True
 
-    def test_verify_admin_password_wrong(self):
+    def test_verify_password_wrong(self):
         """A wrong password does not verify against the hash."""
         hashed = hash_password("correct horse battery staple")
-        assert verify_admin_password("wrong password", hashed) is False
+        assert verify_password("wrong password", hashed) is False
+
+    def test_verify_password_accepts_legacy_bcrypt_hash(self):
+        """Hashes written before the Argon2id migration still verify."""
+        import bcrypt
+
+        legacy = bcrypt.hashpw(b"correct horse battery staple", bcrypt.gensalt(rounds=4))
+        legacy_hash = legacy.decode("utf-8")
+
+        assert verify_password("correct horse battery staple", legacy_hash) is True
+        assert verify_password("wrong password", legacy_hash) is False
+
+    def test_password_needs_rehash_flags_bcrypt_only(self):
+        """Only legacy bcrypt hashes ask to be replaced."""
+        import bcrypt
+
+        legacy = bcrypt.hashpw(b"secret", bcrypt.gensalt(rounds=4)).decode("utf-8")
+
+        assert password_needs_rehash(legacy) is True
+        assert password_needs_rehash(hash_password("secret")) is False
+        assert password_needs_rehash("") is False
+        assert password_needs_rehash("plaintext") is False
 
     def test_is_bcrypt_hash_rejects_non_bcrypt_strings(self):
         """is_bcrypt_hash returns False for plaintext and malformed values."""
@@ -158,7 +193,7 @@ class TestAdminPasswordHashing:
         assert is_bcrypt_hash("$2b$10$short") is False
         assert is_bcrypt_hash("not-a-hash") is False
 
-    def test_verify_admin_password_rejects_malformed_bcrypt_hash(self):
+    def test_verify_password_rejects_malformed_bcrypt_hash(self):
         """A malformed bcrypt-looking hash should be rejected, not fall back to plaintext.
 
         A malformed hash indicates data corruption or tampering and should
@@ -168,20 +203,20 @@ class TestAdminPasswordHashing:
         assert is_bcrypt_hash(malformed)
         # The function should return False for a malformed hash, not fall back
         # to plaintext comparison.
-        assert verify_admin_password("any-password", malformed) is False
-        assert verify_admin_password(malformed, malformed) is False
+        assert verify_password("any-password", malformed) is False
+        assert verify_password(malformed, malformed) is False
 
     def test_hash_password_empty_string(self):
-        """Hashing an empty string should produce a valid bcrypt hash."""
+        """Hashing an empty string should produce a valid hash."""
         hashed = hash_password("")
-        assert is_bcrypt_hash(hashed)
+        assert has_password_hash(hashed)
 
     def test_hash_password_long_string(self):
-        """Hashing a very long password should raise ValueError.
+        """Argon2id has no truncation limit, so a long secret still hashes.
 
-        bcrypt has a 72-byte limit and modern bindings reject longer inputs
-        explicitly rather than silently truncating.
+        The strength policy caps what a user may *set* at 72 UTF-8 bytes (the
+        legacy bcrypt limit); the hashing primitive itself is unbounded.
         """
         long_password = "x" * 1000
-        with pytest.raises(ValueError, match="cannot be longer than 72 bytes"):
-            hash_password(long_password)
+        hashed = hash_password(long_password)
+        assert verify_password(long_password, hashed) is True

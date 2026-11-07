@@ -55,7 +55,12 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import Outcome
 from llm_proxy.security.console_url import public_origin
 from llm_proxy.security.jwt import JWTManager
-from llm_proxy.security.passwords import hash_password, is_bcrypt_hash, verify_admin_password
+from llm_proxy.security.passwords import (
+    has_password_hash,
+    hash_password,
+    password_needs_rehash,
+    verify_password,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
@@ -64,12 +69,12 @@ limiter = get_rate_limiter()
 
 @lru_cache(maxsize=1)
 def _dummy_password_hash() -> str:
-    """Bcrypt hash of a throwaway password, for login timing equalization.
+    """Password hash of a throwaway value, for login timing equalization.
 
     Verifying against this dummy hash when the submitted username does not
     exist costs the same as a real password check, so an attacker cannot
     distinguish valid usernames from invalid ones by response time. Computed
-    lazily on first use so importing this module never pays bcrypt's cost.
+    lazily on first use so importing this module never pays the hashing cost.
     """
     return hash_password("dummy-password-for-timing-equalization")
 
@@ -128,15 +133,16 @@ async def login(
             lockout_key = canonical_key
 
     if user is None:
-        # Timing equalization: run a bcrypt verify against the precomputed
-        # dummy hash so unknown usernames cost the same as a real password
-        # check (prevents username enumeration via response time).
-        verify_admin_password(credentials.password, _dummy_password_hash())
+        # Timing equalization: run a verify against the precomputed dummy
+        # hash so unknown usernames cost the same as a real password check
+        # (prevents username enumeration via response time).
+        verify_password(credentials.password, _dummy_password_hash())
         auth_failed = True
     else:
-        # Always run bcrypt, even for a deactivated account: short-circuiting
-        # would make account state observable through response timing.
-        password_ok = verify_admin_password(credentials.password, user.password_hash)
+        # Always run the password hash, even for a deactivated account:
+        # short-circuiting would make account state observable through
+        # response timing.
+        password_ok = verify_password(credentials.password, user.password_hash)
         auth_failed = not user.is_active or not password_ok
 
     if auth_failed:
@@ -154,6 +160,13 @@ async def login(
 
     # The failure branch above always raises, so the user exists here.
     assert user is not None
+
+    if password_needs_rehash(user.password_hash):
+        # A legacy bcrypt hash can only be replaced while the plaintext is in
+        # hand: this is that moment. Committed here rather than with the login
+        # response so the MFA-challenge path (which writes nothing) keeps it.
+        await repo.update_password(user.id, hash_password(credentials.password))
+        await session.commit()
 
     lockout_manager.clear_failed_attempts(lockout_key)
     logger.info(f"Successful login for user: {credentials.username} from {client_ip}")
@@ -310,7 +323,7 @@ async def step_up(
         raise AuthenticationFailedError(message="Authentication required")
     if not data.password:
         return StepUpResponse(verified=False, passkey_required=True)
-    if not verify_admin_password(data.password, user.password_hash):
+    if not verify_password(data.password, user.password_hash):
         raise AuthenticationFailedError(message="Current password is incorrect")
     session_repo = UserSessionRepository(session)
     record = await session_repo.touch_verified(identity.console_session_id)
@@ -402,7 +415,7 @@ def _reset_recipient(user: UserRecord | None) -> tuple[UserRecord, str] | None:
 
     Each condition guards a lockout rather than a nicety. An unverified address
     would hand the account to whoever owns the mailbox, and an account without a
-    password (`is_bcrypt_hash` false) has nothing to reset — it recovers through
+    password (`has_password_hash` false) has nothing to reset — it recovers through
     a passkey or an administrator instead. A deactivated account must not be
     resurrected by a link minted before it was disabled.
     """
@@ -411,7 +424,7 @@ def _reset_recipient(user: UserRecord | None) -> tuple[UserRecord, str] | None:
         or not user.is_active
         or not user.email
         or user.email_verified_at is None
-        or not is_bcrypt_hash(user.password_hash)
+        or not has_password_hash(user.password_hash)
     ):
         return None
     return user, user.email

@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
-import bcrypt
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -91,16 +90,20 @@ def _per_test_db(monkeypatch):
 def _fast_test_overrides(monkeypatch):
     """Speed up the test suite by replacing expensive production defaults.
 
-    * Lower bcrypt rounds: password hashing/verification dominates per-test
-      runtime when every test seeds multiple users.
+    * Cheap password hashing: verification dominates per-test runtime when
+      every test seeds multiple users. The production Argon2id cost is
+      exercised in ``tests/security/test_passwords.py``; here the hasher is
+      swapped for a minimum-cost one so the seeded credentials still verify.
     * Disable background log/usage writers: these are not exercised by the
       assertions in this file, and their startup/cleanup loops add teardown
       latency to every request-driven test.
     """
-    _orig_gensalt = bcrypt.gensalt
+    from argon2 import PasswordHasher
+
+    _fast_hasher = PasswordHasher(time_cost=1, memory_cost=8 * 1024, parallelism=1)
     monkeypatch.setattr(
-        "llm_proxy.security.passwords._hash_with_bcrypt",
-        lambda value: bcrypt.hashpw(value.encode("utf-8"), _orig_gensalt(rounds=4)).decode("utf-8"),
+        "llm_proxy.security.passwords._password_hasher",
+        lambda: _fast_hasher,
     )
     monkeypatch.setattr(
         "llm_proxy.observability.service.start_background_log_writer",

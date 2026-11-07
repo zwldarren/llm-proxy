@@ -43,7 +43,7 @@ from llm_proxy.observability.log_intake import record_auth_event
 from llm_proxy.observability.types import Outcome
 from llm_proxy.security.base64url import b64url_decode, b64url_encode
 from llm_proxy.security.console_url import public_origin, rp_id
-from llm_proxy.security.passwords import is_bcrypt_hash
+from llm_proxy.security.passwords import has_password_hash
 
 router = APIRouter(prefix="/api/me/passkeys", tags=["Profile"])
 public_router = APIRouter(prefix="/api/auth/passkeys", tags=["authentication"])
@@ -286,7 +286,7 @@ async def delete_passkey(
     locked = await UserRepository(session).get_for_update(user.id)
     if locked is None or not locked.is_active:
         raise AuthenticationFailedError(message="Account is disabled")
-    if await repo.count_for_user(user.id) <= 1 and not is_bcrypt_hash(locked.password_hash):
+    if await repo.count_for_user(user.id) <= 1 and not has_password_hash(locked.password_hash):
         # OAuth is another usable primary factor, so a passkey-only account
         # with a linked provider may still remove its last passkey.
         identities = await OAuthIdentityRepository(session).list_for_user(user.id)

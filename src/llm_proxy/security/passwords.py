@@ -1,18 +1,24 @@
 """Security utilities."""
 
+import hashlib
+import hmac
 import re
 from collections.abc import Mapping
 from functools import lru_cache
 from secrets import token_hex
 from typing import Any
 
+lazy import argon2
 lazy import bcrypt
 
 from llm_proxy.observability.logger import get_logger
 
-# Password strength policy: at least 8 characters, at most 72 UTF-8 bytes
-# (bcrypt truncates at 72 bytes), with at least one uppercase letter, one
-# lowercase letter, one digit, and one special character.
+# Password strength policy: at least 8 characters, at most 72 UTF-8 bytes,
+# with at least one uppercase letter, one lowercase letter, one digit, and one
+# special character. The byte cap is bcrypt's truncation limit, kept while
+# legacy bcrypt hashes remain in the database (no bcrypt credential can be
+# longer, so a longer password is guaranteed to mismatch) and as a cheap bound
+# on request size.
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72
 _RE_UPPERCASE = re.compile(r"[A-Z]")
@@ -194,48 +200,117 @@ def generate_api_key() -> str:
     return f"sk-{token_hex(32)}"
 
 
-def _hash_with_bcrypt(value: str) -> str:
-    """Hash a string using bcrypt."""
-    return bcrypt.hashpw(value.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+# ── API keys ────────────────────────────────────────────────────────────
+#
+# An API key is 256 bits of randomness (``sk-`` + 32 random bytes), so there is
+# no low-entropy secret for an offline attacker to search: a fast digest is as
+# safe as a slow one here, and unlike bcrypt it can be looked up by index. The
+# gate resolves a key by its digest in one step; bcrypt had to be checked
+# against every stored key on a cache miss. Rows written before this change
+# still hold bcrypt hashes and are upgraded on first successful verification.
 
 
 def hash_api_key(key: str) -> str:
-    """Hash an API key using bcrypt."""
-    return _hash_with_bcrypt(key)
-
-
-def verify_api_key(key: str, key_hash: str) -> bool:
-    """Verify an API key against its bcrypt hash."""
-    return bcrypt.checkpw(key.encode("utf-8"), key_hash.encode("utf-8"))
+    """Return the digest stored for an API key (SHA-256, hex)."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
 _BCRYPT_PREFIXES: tuple[str, ...] = ("$2a$", "$2b$", "$2y$")
 
 
 def is_bcrypt_hash(value: str) -> bool:
-    """Check whether a string looks like a bcrypt hash."""
+    """Check whether a string looks like a bcrypt hash (a legacy format here)."""
     return isinstance(value, str) and value.startswith(_BCRYPT_PREFIXES) and len(value) == 60
 
 
+def api_key_matches_hash(key: str, key_hash: str) -> bool:
+    """Verify an API key against its stored digest or a legacy bcrypt hash."""
+    if is_bcrypt_hash(key_hash):
+        try:
+            return bcrypt.checkpw(key.encode("utf-8"), key_hash.encode("utf-8"))
+        except ValueError:
+            return False
+    return hmac.compare_digest(hash_api_key(key), key_hash)
+
+
+# ── Passwords ───────────────────────────────────────────────────────────
+#
+# Argon2id, at the OWASP baseline (19 MiB, two passes, one lane). The memory
+# cost bounds a login flood; the parameters are recorded inside each hash, so
+# raising them later rehashes on the next successful verification instead of
+# invalidating stored credentials.
+
+_ARGON2_TIME_COST = 2
+_ARGON2_MEMORY_COST_KIB = 19_456
+_ARGON2_PARALLELISM = 1
+_ARGON2_HASH_LEN = 32
+_ARGON2_SALT_LEN = 16
+_ARGON2ID_PREFIX = "$argon2id$"
+
+
+@lru_cache(maxsize=1)
+def _password_hasher() -> argon2.PasswordHasher:
+    """The process-wide Argon2id hasher."""
+    return argon2.PasswordHasher(
+        time_cost=_ARGON2_TIME_COST,
+        memory_cost=_ARGON2_MEMORY_COST_KIB,
+        parallelism=_ARGON2_PARALLELISM,
+        hash_len=_ARGON2_HASH_LEN,
+        salt_len=_ARGON2_SALT_LEN,
+    )
+
+
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt."""
-    return _hash_with_bcrypt(password)
+    """Hash a password using Argon2id."""
+    return _password_hasher().hash(password)
 
 
-def verify_admin_password(password: str, password_hash: str) -> bool:
-    """Verify an admin password against its bcrypt hash.
+def has_password_hash(password_hash: str | None) -> bool:
+    """Whether *password_hash* is a supported password hash.
 
-    A malformed or non-bcrypt hash indicates data corruption or tampering and
-    should never result in a successful authentication.
+    Accounts without a password (passkey-only, OIDC-only) store an empty
+    string. Callers use this to decide whether a password factor exists, not
+    to tell one hash format from another.
     """
-    if not is_bcrypt_hash(password_hash):
-        get_logger(__name__).warning(
-            "Admin password is stored in plaintext or an unsupported format."
-        )
+    if not isinstance(password_hash, str) or not password_hash:
+        return False
+    return password_hash.startswith(_ARGON2ID_PREFIX) or is_bcrypt_hash(password_hash)
+
+
+def password_needs_rehash(password_hash: str) -> bool:
+    """Whether a verified hash should be replaced with a current Argon2id one."""
+    if not isinstance(password_hash, str) or not password_hash:
+        return False
+    if is_bcrypt_hash(password_hash):
+        return True
+    try:
+        return _password_hasher().check_needs_rehash(password_hash)
+    except ValueError:
         return False
 
-    try:
-        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
-    except ValueError:
-        get_logger(__name__).warning("Admin password hash appears to be a malformed bcrypt hash.")
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verify a password against its Argon2id hash, or a legacy bcrypt hash.
+
+    A malformed or non-hash value indicates data corruption or tampering and
+    never results in a successful authentication.
+    """
+    if not isinstance(password_hash, str) or not password_hash:
+        get_logger(__name__).warning("Password is stored without a password hash.")
         return False
+
+    if password_hash.startswith(_ARGON2ID_PREFIX):
+        try:
+            return _password_hasher().verify(password_hash, password)
+        except argon2.exceptions.VerificationError, ValueError:
+            return False
+
+    if is_bcrypt_hash(password_hash):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except ValueError:
+            get_logger(__name__).warning("Password hash appears to be a malformed bcrypt hash.")
+            return False
+
+    get_logger(__name__).warning("Password is stored in plaintext or an unsupported format.")
+    return False

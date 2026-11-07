@@ -1,9 +1,12 @@
 """Tests for password security utilities."""
 
+import hashlib
+
 import pytest
 
 from llm_proxy.security.passwords import (
     SENSITIVE_KEYS,
+    api_key_matches_hash,
     generate_api_key,
     hash_api_key,
     hash_password,
@@ -11,8 +14,7 @@ from llm_proxy.security.passwords import (
     mask_headers,
     mask_sensitive,
     validate_password_strength,
-    verify_admin_password,
-    verify_api_key,
+    verify_password,
 )
 
 
@@ -50,22 +52,34 @@ class TestHashAndVerifyAPIKey:
         """Hashed key should verify correctly."""
         original = "sk-test-api-key-12345"
         hashed = hash_api_key(original)
-        assert verify_api_key(original, hashed)
+        assert api_key_matches_hash(original, hashed)
 
-    def test_hash_produces_bcrypt_hash(self):
-        """Hashed key should be a valid bcrypt hash."""
+    def test_hash_is_a_sha256_digest(self):
+        """The stored value is a bare SHA-256 hex digest, not a bcrypt hash."""
         hashed = hash_api_key("test-key")
-        assert is_bcrypt_hash(hashed)
+        assert len(hashed) == 64
+        int(hashed, 16)  # hex, so it parses
+        assert not is_bcrypt_hash(hashed)
+        assert hashed == hashlib.sha256(b"test-key").hexdigest()
 
     def test_verify_wrong_key_fails(self):
         """Wrong key should not verify."""
         hashed = hash_api_key("correct-key")
-        assert not verify_api_key("wrong-key", hashed)
+        assert not api_key_matches_hash("wrong-key", hashed)
 
     def test_verify_empty_key_fails(self):
         """Empty key should not verify against non-empty hash."""
         hashed = hash_api_key("some-key")
-        assert not verify_api_key("", hashed)
+        assert not api_key_matches_hash("", hashed)
+
+    def test_verify_accepts_legacy_bcrypt_hash(self):
+        """A key stored before the digest migration still verifies."""
+        import bcrypt
+
+        legacy = bcrypt.hashpw(b"sk-legacy-key", bcrypt.gensalt(rounds=4)).decode("utf-8")
+
+        assert api_key_matches_hash("sk-legacy-key", legacy)
+        assert not api_key_matches_hash("sk-other-key", legacy)
 
 
 class TestIsBcryptHash:
@@ -136,27 +150,27 @@ class TestIsBcryptHash:
         assert not is_bcrypt_hash(truncated)
 
 
-class TestBcrypt72ByteBoundary:
-    """Tests for bcrypt 72-byte boundary condition."""
+class TestPasswordLengthBoundary:
+    """Argon2id truncates nothing; the policy caps what users may set."""
 
     def test_72_byte_password(self):
-        """Password exactly 72 bytes should work (bcrypt limit)."""
+        """Password exactly 72 bytes hashes and verifies."""
         password = "a" * 72
         hashed = hash_password(password)
-        assert verify_admin_password(password, hashed)
+        assert verify_password(password, hashed)
 
     def test_over_72_bytes_password(self):
-        """Password over 72 bytes raises ValueError (bcrypt limit)."""
-        password = "a" * 73  # Just over 72 bytes
-        # bcrypt raises ValueError for passwords > 72 bytes
-        with pytest.raises(ValueError, match="cannot be longer than 72 bytes"):
-            hash_password(password)
+        """Hashing itself is unbounded; the strength policy enforces the cap."""
+        password = "a" * 200
+        hashed = hash_password(password)
+        assert verify_password(password, hashed)
+        assert verify_password("a" * 199, hashed) is False
 
     def test_71_byte_password(self):
         """Password just under 72 bytes should work."""
         password = "a" * 71
         hashed = hash_password(password)
-        assert verify_admin_password(password, hashed)
+        assert verify_password(password, hashed)
 
     def test_multibyte_password_is_bounded_by_encoded_bytes(self):
         """34 characters can still exceed bcrypt's 72-byte limit when UTF-8 encoded."""
@@ -327,13 +341,13 @@ class TestMaskSensitive:
         assert masked["level1"]["level2"]["level3"]["level4"]["password"] == "***"
 
 
-class TestVerifyAdminPasswordWarnings:
+class TestVerifyPasswordWarnings:
     """Warning messages must not prompt users to re-save or migrate."""
 
     def test_plaintext_hash_warning_does_not_mention_migration(self, caplog):
         """A plaintext hash logs a warning without migration instructions."""
         with caplog.at_level("WARNING"):
-            assert not verify_admin_password("secret", "plaintext-hash")
+            assert not verify_password("secret", "plaintext-hash")
 
         assert len(caplog.records) == 1
         assert "re-save" not in caplog.records[0].message.lower()
@@ -345,7 +359,7 @@ class TestVerifyAdminPasswordWarnings:
         assert is_bcrypt_hash(malformed)
 
         with caplog.at_level("WARNING"):
-            assert not verify_admin_password("secret", malformed)
+            assert not verify_password("secret", malformed)
 
         assert len(caplog.records) == 1
         assert "re-save" not in caplog.records[0].message.lower()
@@ -356,7 +370,7 @@ class TestVerifyAdminPasswordWarnings:
         hashed = hash_password("correct horse battery staple")
 
         with caplog.at_level("WARNING"):
-            assert verify_admin_password("correct horse battery staple", hashed)
+            assert verify_password("correct horse battery staple", hashed)
 
         assert not caplog.records
 
@@ -367,23 +381,23 @@ class TestVerifyAdminPassword:
     def test_verify_correct_password(self):
         """Correct password should verify successfully."""
         hashed = hash_password("my-secure-password")
-        assert verify_admin_password("my-secure-password", hashed)
+        assert verify_password("my-secure-password", hashed)
 
     def test_verify_wrong_password(self):
         """Wrong password should fail verification."""
         hashed = hash_password("correct-password")
-        assert not verify_admin_password("wrong-password", hashed)
+        assert not verify_password("wrong-password", hashed)
 
     def test_verify_empty_password(self):
         """Empty password should fail against non-empty hash."""
         hashed = hash_password("some-password")
-        assert not verify_admin_password("", hashed)
+        assert not verify_password("", hashed)
 
     def test_verify_plaintext_stored(self):
         """Plaintext-stored password should fail and log warning."""
         # "plaintext-hash" is not a valid bcrypt hash (too short, wrong format)
         # The function logs a warning and returns False
-        result = verify_admin_password("any-password", "plaintext-hash")
+        result = verify_password("any-password", "plaintext-hash")
         assert not result
 
     def test_verify_invalid_bcrypt_format(self, caplog):
@@ -392,7 +406,7 @@ class TestVerifyAdminPassword:
         invalid_hash = "$2x$10$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU"
 
         with caplog.at_level("WARNING"):
-            result = verify_admin_password("password", invalid_hash)
+            result = verify_password("password", invalid_hash)
 
         assert not result
         assert len(caplog.records) == 1

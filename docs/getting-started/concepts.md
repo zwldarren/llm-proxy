@@ -94,7 +94,7 @@ allowlist and the user allowlist.
 
 ## What happens to one request
 
-1. Authenticate: check the API key (bcrypt hash), the lockout and rate-limit buckets, and
+1. Authenticate: check the API key (SHA-256 digest), the lockout and rate-limit buckets, and
    the budget.
 2. Authorize: check the model allowlist against the requested model, after virtual-model
    resolution.

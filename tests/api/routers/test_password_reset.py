@@ -25,7 +25,7 @@ from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.config.types.console_auth import ConsoleAuthSettings, SmtpSettings
 from llm_proxy.database import get_async_session
 from llm_proxy.security.jwt import JWTManager
-from llm_proxy.security.passwords import hash_password, verify_admin_password
+from llm_proxy.security.passwords import hash_password, verify_password
 
 TEST_SECRET = "test-secret-at-least-32-characters-long-aaaaaa"
 OLD_PASSWORD = "Original-Password-123!"
@@ -216,7 +216,7 @@ class TestConfirmReset:
         assert response.json() == {"success": True}
         repo.update_password.assert_awaited_once()
         new_hash = repo.update_password.await_args.args[1]
-        assert verify_admin_password(NEW_PASSWORD, new_hash)
+        assert verify_password(NEW_PASSWORD, new_hash)
         # The user chose this password, so no forced change on top of it.
         repo.set_must_change_password.assert_awaited_once_with(user.id, False)
         # Stolen sessions and older JWTs must stop working immediately.

@@ -27,7 +27,7 @@ Authorization: Bearer sk-your-proxy-key
 x-api-key: sk-your-proxy-key
 ```
 
-- 格式：`sk-` 加 64 个十六进制字符。密钥以 bcrypt 哈希存储，明文只在创建时显示一次。
+- 格式：`sk-` 加 64 个十六进制字符。密钥以 SHA-256 摘要存储，明文只在创建时显示一次。
 - 控制台为游乐场创建的会话密钥（`sk-ui-…`）在代理路由上同样有效，并继承其所属
   用户的限制。
 - `Authorization` 的值不是 `Bearer` 形式 → `401 Invalid authorization header format`；

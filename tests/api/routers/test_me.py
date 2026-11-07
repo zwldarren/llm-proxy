@@ -24,7 +24,7 @@ CURRENT_PASSWORD = "current-password-123"
 
 
 def _mock_user(username: str = "admin") -> MagicMock:
-    """A mock user record with a real bcrypt hash so password verification works."""
+    """A mock user record with a real password hash so password verification works."""
     user = MagicMock()
     user.id = 1
     user.username = username

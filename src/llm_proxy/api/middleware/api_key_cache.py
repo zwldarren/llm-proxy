@@ -4,7 +4,6 @@ In-memory cache for API keys with TTL to reduce database lookups.
 """
 
 import asyncio
-import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,9 +19,10 @@ from llm_proxy.core.constants import API_KEY_CACHE_TTL_SECONDS
 BUDGET_SPEND_CACHE_TTL_SECONDS = 15.0
 
 # Short-lived negative cache for keys that failed verification. Repeating the
-# same bogus key (the cheap form of an auth-flood) must not re-run bcrypt over
-# every stored key each time. Kept deliberately short so a newly created key
-# is never locked out for long even if a cache invalidation is missed.
+# same bogus key (the cheap form of an auth-flood) must not re-run the
+# verification against every stored key each time. Kept deliberately short so
+# a newly created key is never locked out for long even if a cache
+# invalidation is missed.
 NEGATIVE_KEY_CACHE_TTL_SECONDS = 10.0
 NEGATIVE_KEY_CACHE_MAX = 4096
 
@@ -103,7 +103,7 @@ def get_api_key_refresh_lock() -> asyncio.Lock:
 
 
 def get_key_verification_lock() -> asyncio.Lock:
-    """Process-wide lock serializing bcrypt key verification on cache misses."""
+    """Process-wide lock serializing key verification on cache misses."""
     global _key_verification_lock
     if _key_verification_lock is None:
         _key_verification_lock = asyncio.Lock()
@@ -159,9 +159,10 @@ class VerifiedKeyInfo:
     # Snapshot of the owner's forced-password-change flag at verification.
     must_change_password: bool = False
     verified_at: float = field(default_factory=time.time)
-    # bcrypt hash of the key that matched. Retained so an expired entry can be
-    # re-validated by looking the hash up in the refreshed key snapshot
-    # instead of re-running bcrypt over every key.
+    # The stored ``key_hash`` this record matched: the key's digest, or a
+    # legacy bcrypt hash. Retained so an expired entry can be re-validated by
+    # looking the value up in the refreshed key snapshot instead of re-running
+    # the comparison.
     key_hash: str | None = None
 
 
@@ -170,8 +171,8 @@ class ApiKeyCache:
     """In-memory cache for API keys with TTL.
 
     Thread-safe with two-level caching:
-    1. _all_keys: All API keys from database (for bcrypt verification)
-    2. _verified_keys: SHA-256 hash -> verified key info (fast path for repeat requests)
+    1. _all_keys: All API keys from database (for verification)
+    2. _verified_keys: digest -> verified key info (fast path for repeat requests)
     """
 
     ttl: float = API_KEY_CACHE_TTL_SECONDS
@@ -201,13 +202,16 @@ class ApiKeyCache:
     def get_verified_key(
         self, api_key_sha256: str, *, allow_stale: bool = False
     ) -> VerifiedKeyInfo | None:
-        """Get verified key info from cache if available (O(1) lookup).
+        (
+            """Get verified key info from cache if available (O(1) lookup).
 
         With ``allow_stale`` the entry is returned even past its TTL, so the
-        caller can re-validate it cheaply (by recorded bcrypt hash) instead of
-        falling back to a full bcrypt search. A fresh lookup still evicts and
+        caller can re-validate it cheaply (by the recorded key hash) instead
+        of falling back to a full scan. A fresh lookup still evicts and
         returns ``None`` once expired.
         """
+            ""
+        )
         with self._lock:
             info = self._verified_keys.get(api_key_sha256)
             if info is None:
@@ -483,13 +487,3 @@ def get_budget_spend_cache() -> BudgetSpendCache:
                 _budget_spend_cache = BudgetSpendCache()
     assert _budget_spend_cache is not None
     return _budget_spend_cache
-
-
-def hash_api_key_for_cache(api_key: str) -> str:
-    """Create a fast hash of the API key for cache lookup.
-
-    Uses SHA-256 which is much faster than bcrypt for cache lookups.
-    This is safe because we're only using it as a cache key, not for
-    security verification.
-    """
-    return hashlib.sha256(api_key.encode()).hexdigest()

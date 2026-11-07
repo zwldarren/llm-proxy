@@ -8,7 +8,7 @@ on `/api/*`.
 
 ## My key is lost: can I recover it?
 
-No. Keys are bcrypt-hashed and shown once at creation. Create a replacement, switch
+No. Keys are stored as SHA-256 digests and shown once at creation. Create a replacement, switch
 clients, delete the old key. There is no rotate endpoint, but rotation without downtime
 is simply: create new → switch → delete old.
 

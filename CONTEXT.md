@@ -48,8 +48,9 @@ _Avoid_: session id (ambiguous on its own), session context, cache key
 
 **Key gate**:
 The single gate every protected transport passes through before its traffic
-proceeds: key extraction, verification (bcrypt against the cached key snapshot,
-stale-entry cheap revalidation, session-key fallback), per-key rate limit, key
+proceeds: key extraction, verification (a digest lookup against the cached key
+snapshot, a legacy bcrypt scan that upgrades the row on a match, stale-entry
+cheap revalidation, session-key fallback), per-key rate limit, key
 and user budget (fail-closed on a stats-DB error), lockout accounting, and the
 throttled last-used claim. One module (`llm_proxy.api.gate`) owns the sequence;
 each transport — the `/v1/*` middleware, the `/servers/*` MCP middleware, the

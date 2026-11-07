@@ -1,7 +1,8 @@
 """The API-key gate: one sequence every protected transport passes through.
 
-Key extraction, verification (bcrypt against the cached key snapshot with
-cheap revalidation and a session-key fallback), client-IP lockout accounting,
+Key extraction, verification (a digest lookup in the cached key snapshot,
+with a legacy-hash scan and a session-key fallback), client-IP lockout
+accounting,
 the auth-failure penalty, the per-key rate limit, the key and user budget
 (fail-closed), and the throttled last-used claim — one module owns the whole
 sequence (:func:`gate_request`). A transport declares a :class:`GatePolicy`
@@ -43,7 +44,6 @@ from llm_proxy.api.middleware.api_key_cache import (
     get_budget_spend_cache,
     get_cached_api_keys,
     get_key_verification_lock,
-    hash_api_key_for_cache,
 )
 from llm_proxy.api.middleware.api_key_cache import (
     persist_key_last_used as _update_key_last_used,
@@ -67,7 +67,8 @@ from llm_proxy.database import get_async_session_context
 from llm_proxy.observability.log_intake import record_failed_auth, record_rejection
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.security.model_acl import intersect_model_lists
-from llm_proxy.security.passwords import verify_api_key as key_matches_hash
+from llm_proxy.security.passwords import api_key_matches_hash as key_matches_hash
+from llm_proxy.security.passwords import hash_api_key, is_bcrypt_hash
 
 if TYPE_CHECKING:
     from llm_proxy.database.repositories.usage_repository import UsageRepository
@@ -299,11 +300,76 @@ def _cache_verified_key(
     )
 
 
+def _key_usable(key_record: CachedApiKey) -> bool:
+    """Whether a snapshot record may authenticate a request right now.
+
+    Keys owned by a disabled user are rejected alongside inactive keys;
+    expired keys and owners who must change their password are rejected too.
+    """
+    return (
+        key_record.is_active
+        and key_record.user_is_active
+        and not key_record.user_must_change_password
+        and not _is_key_expired(key_record.expires_at)
+    )
+
+
+def _split_snapshot(
+    cached_keys: list[CachedApiKey],
+) -> tuple[dict[str, CachedApiKey], list[CachedApiKey]]:
+    """Split the snapshot into digest-addressed keys and legacy bcrypt rows.
+
+    ``key_hash`` holds a SHA-256 digest of the key for everything created
+    since the digest migration, which makes the digest itself the lookup key;
+    only pre-migration rows still hold one of the bcrypt formats and need the
+    slow comparison path.
+    """
+    by_digest: dict[str, CachedApiKey] = {}
+    legacy: list[CachedApiKey] = []
+    for key_record in cached_keys:
+        if is_bcrypt_hash(key_record.key_hash):
+            legacy.append(key_record)
+        else:
+            by_digest[key_record.key_hash] = key_record
+    return by_digest, legacy
+
+
+async def _upgrade_key_hash(key_record: CachedApiKey, api_key_sha256: str) -> None:
+    """Replace a legacy bcrypt ``key_hash`` with the key's digest.
+
+    The plaintext is only available here, at verification time, so this is the
+    one moment the digest can be derived. Best effort: a failed write leaves
+    the row on the bcrypt path and is retried on the key's next cache miss.
+    """
+    try:
+        from llm_proxy.database import ApiKeyRepository
+
+        expected_hash = key_record.key_hash
+        async with get_async_session_context() as session:
+            updated = await ApiKeyRepository(session).set_key_hash(
+                key_record.name,
+                api_key_sha256,
+                expected_hash=expected_hash,
+            )
+    except Exception as exc:
+        logger.warning(
+            f"Could not upgrade the stored hash of API key '{key_record.name}' to a digest: {exc}"
+        )
+        return
+    if not updated:
+        # The row was rotated, deleted, or recreated after this snapshot was
+        # read. Keep the snapshot truthful and let the next verification reload it.
+        return
+    # The snapshot list is shared with the cache: mutating the record keeps it
+    # consistent without dropping (and refetching) every other key.
+    key_record.key_hash = api_key_sha256
+
+
 async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> VerifiedKeyAuth | None:
     """Resolve *api_key* from the verified cache, or verify it against the DB.
 
     Must be called with the key-verification lock held when the verified
-    cache is cold, so a TTL rollover cannot start one bcrypt burst per
+    cache is cold, so a TTL rollover cannot start one legacy-hash scan per
     in-flight request.
     """
     cache = get_api_key_cache()
@@ -322,55 +388,47 @@ async def _resolve_verified_key(api_key: str, api_key_sha256: str) -> VerifiedKe
         # else: the verified TTL lapsed — fall through to cheap revalidation.
 
     cached_keys = await get_cached_api_keys()
+    by_digest, legacy_keys = _split_snapshot(cached_keys)
 
-    # Cheap revalidation: an entry whose verified-TTL lapsed can be trusted
-    # again without bcrypt if the exact bcrypt hash it matched is still
-    # present, active, and unexpired in the refreshed snapshot. The key string
-    # cannot have changed (same sha256) and the record is the same one, so the
-    # prior verification still holds. Without this, every TTL rollover re-ran
-    # bcrypt over all keys and stalled the worker.
-    if entry is not None and entry.key_hash is not None:
-        match = next((k for k in cached_keys if k.key_hash == entry.key_hash), None)
-        if (
-            match is not None
-            and match.is_active
-            and match.user_is_active
-            and not match.user_must_change_password
-            and not _is_key_expired(match.expires_at)
-        ):
-            effective_models = intersect_model_lists(
-                match.allowed_models, match.user_allowed_models
-            )
-            _cache_verified_key(cache, api_key_sha256, match, effective_models)
-            return _verified_auth_from_key_record(match, effective_models)
-        # The recorded hash is gone or now invalid (key rotated/deactivated):
-        # fall through to a full verification against the current snapshot.
+    # One indexed lookup resolves a migrated key: the digest of the presented
+    # string *is* the stored value, so no hashing comparison is needed. A
+    # lapsed verified entry is revalidated the same way, which is why a TTL
+    # rollover no longer stalls the worker.
+    match = by_digest.get(api_key_sha256)
 
-    def _find_matching_key() -> CachedApiKey | None:
-        for key_record in cached_keys:
-            # Keys owned by a disabled user are rejected alongside inactive
-            # keys; expired keys are rejected as well.
-            if (
-                key_record.is_active
-                and key_record.user_is_active
-                and not key_record.user_must_change_password
-                and not _is_key_expired(key_record.expires_at)
-                and key_matches_hash(api_key, key_record.key_hash)
-            ):
+    # A legacy row can still be revalidated without bcrypt while its recorded
+    # hash is in the refreshed snapshot: the key string cannot have changed
+    # (same digest) and the record is the same one, so the prior verification
+    # still holds.
+    if match is None and entry is not None and entry.key_hash is not None:
+        match = next((k for k in legacy_keys if k.key_hash == entry.key_hash), None)
+
+    if match is not None:
+        if not _key_usable(match):
+            # Rotated, deactivated, or expired since it was verified.
+            cache.evict_verified_key(api_key_sha256)
+            return None
+        effective_models = intersect_model_lists(match.allowed_models, match.user_allowed_models)
+        _cache_verified_key(cache, api_key_sha256, match, effective_models)
+        return _verified_auth_from_key_record(match, effective_models)
+
+    def _find_legacy_match() -> CachedApiKey | None:
+        for key_record in legacy_keys:
+            if _key_usable(key_record) and key_matches_hash(api_key, key_record.key_hash):
                 return key_record
         return None
 
-    # bcrypt is CPU-bound and deliberately slow: run the scan off the event
-    # loop so an unknown key cannot stall every other request on the worker.
-    key_record = await asyncio.to_thread(_find_matching_key)
-    if key_record is not None:
-        # The effective model allowlist is the key's list intersected with
-        # the owning user's constraint (user constraint always wins).
-        effective_models = intersect_model_lists(
-            key_record.allowed_models, key_record.user_allowed_models
-        )
-        _cache_verified_key(cache, api_key_sha256, key_record, effective_models)
-        return _verified_auth_from_key_record(key_record, effective_models)
+    if legacy_keys:
+        # bcrypt is CPU-bound and deliberately slow: run the scan off the event
+        # loop so an unknown key cannot stall every other request on the worker.
+        legacy_match = await asyncio.to_thread(_find_legacy_match)
+        if legacy_match is not None:
+            await _upgrade_key_hash(legacy_match, api_key_sha256)
+            effective_models = intersect_model_lists(
+                legacy_match.allowed_models, legacy_match.user_allowed_models
+            )
+            _cache_verified_key(cache, api_key_sha256, legacy_match, effective_models)
+            return _verified_auth_from_key_record(legacy_match, effective_models)
 
     session_auth = await _verify_session_api_key(api_key)
     if session_auth is not None:
@@ -397,8 +455,8 @@ async def _verify_locked(api_key: str, api_key_sha256: str) -> VerifiedKeyAuth |
     The negative cache is re-checked *after* acquiring the lock: concurrent
     requests for the same bogus key all pass the lock-free check before the
     first one records the failure, so without this re-check each waiter would
-    still run a full bcrypt scan. The failure is recorded before the lock is
-    released, making the cache useful to every subsequent waiter.
+    still run a full legacy-hash scan. The failure is recorded before the lock
+    is released, making the cache useful to every subsequent waiter.
     """
     cache = get_api_key_cache()
     async with get_key_verification_lock():
@@ -422,20 +480,20 @@ async def verify_api_key(api_key: str) -> VerifiedKeyAuth | None:
     Verification is single-flight: a *fresh* verified-cache entry is served
     without locking; everything else (stale, missing, or invalid) is resolved
     under one lock so a burst of concurrent requests cannot multiply the
-    bcrypt + DB cost by the concurrency level.
+    verification + DB cost by the concurrency level.
 
     The locked work runs in a shielded task. A request cancellation therefore
-    cannot release the lock while a bcrypt scan continues in its worker
+    cannot release the lock while a legacy-hash scan continues in its worker
     thread; later requests still serialize behind that scan instead of
     starting overlapping ones.
     """
     if not api_key:
         return None
-    api_key_sha256 = hash_api_key_for_cache(api_key)
+    api_key_sha256 = hash_api_key(api_key)
     cache = get_api_key_cache()
 
     # Cheap rejection for a key that just failed: an auth flood that repeats
-    # the same string must not pay a full bcrypt scan every time.
+    # the same string must not pay a full scan every time.
     if cache.is_negative_key(api_key_sha256):
         return None
 

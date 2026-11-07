@@ -201,7 +201,7 @@ Safety rules enforced by the proxy:
   hard per-account lockout is itself a denial-of-service vector — anyone who knows
   the username can lock the account out. The per-IP limit above and the auth failure
   delay apply either way.
-- Usernames that do not exist still pay the same bcrypt cost, so timing does not
+- Usernames that do not exist still pay the same password-hash cost, so timing does not
   reveal whether an account exists.
 - Successful sign-in clears the failure counter and is recorded in the audit log.
 

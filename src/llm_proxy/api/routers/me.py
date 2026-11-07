@@ -46,7 +46,11 @@ from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import Outcome
 from llm_proxy.security.console_url import public_origin
 from llm_proxy.security.jwt import JWTManager
-from llm_proxy.security.passwords import hash_password, is_bcrypt_hash, verify_admin_password
+from llm_proxy.security.passwords import (
+    has_password_hash,
+    hash_password,
+    verify_password,
+)
 
 router = APIRouter(
     prefix="/api/me", tags=["Profile"], dependencies=[Depends(require_authenticated)]
@@ -67,8 +71,8 @@ async def _require_password_or_recent_auth(
     must instead have re-authenticated within the step-up window; this keeps the
     "set a password" and "rename" paths usable without weakening them.
     """
-    if is_bcrypt_hash(user.password_hash):
-        if not password or not verify_admin_password(password, user.password_hash):
+    if has_password_hash(user.password_hash):
+        if not password or not verify_password(password, user.password_hash):
             # The caller is already authenticated; only the body field is
             # wrong. A 401 here would make the console discard the live
             # session and hide the actionable form error.

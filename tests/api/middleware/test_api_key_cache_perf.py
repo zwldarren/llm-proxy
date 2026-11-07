@@ -27,9 +27,16 @@ from llm_proxy.api.middleware.api_key_cache import (
     claim_last_used_update,
     get_api_key_cache,
     get_budget_spend_cache,
-    hash_api_key_for_cache,
 )
 from llm_proxy.core.budget import BudgetEnvelope
+from llm_proxy.security.passwords import hash_api_key
+
+#: Bcrypt-shaped stored hashes: the legacy format the gate still has to scan
+#: for. Only the prefix and length matter to ``is_bcrypt_hash``; these tests
+#: patch the comparison itself.
+LEGACY_KEY_HASH = "$2b$12$" + "a" * 53
+LEGACY_KEY_HASH_OLD = "$2b$12$" + "b" * 53
+LEGACY_KEY_HASH_NEW = "$2b$12$" + "c" * 53
 
 
 def _cached_key(**overrides: Any) -> CachedApiKey:
@@ -114,9 +121,9 @@ async def test_get_cached_api_keys_refreshes_once_under_concurrency():
 async def test_stale_verified_entry_revalidates_without_bcrypt():
     """A lapsed verified entry whose bcrypt hash is still valid skips bcrypt."""
     cache = get_api_key_cache()
-    sha = hash_api_key_for_cache("sk-secret")
-    record = _cached_key(name="k", key_hash="hash123")
-    cache.set_verified_key(sha, "k", None, key_hash="hash123")
+    sha = hash_api_key("sk-secret")
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH)
+    cache.set_verified_key(sha, "k", None, key_hash=LEGACY_KEY_HASH)
     _make_stale(cache, sha)
 
     with (
@@ -136,10 +143,10 @@ async def test_stale_verified_entry_revalidates_without_bcrypt():
 async def test_revalidation_skipped_when_hash_rotated():
     """A rotated key hash forces the full bcrypt search (and can fail)."""
     cache = get_api_key_cache()
-    sha = hash_api_key_for_cache("sk-secret")
-    cache.set_verified_key(sha, "k", None, key_hash="old-hash")
+    sha = hash_api_key("sk-secret")
+    cache.set_verified_key(sha, "k", None, key_hash=LEGACY_KEY_HASH_OLD)
     _make_stale(cache, sha)
-    record = _cached_key(name="k", key_hash="new-hash")
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH_NEW)
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
@@ -154,33 +161,39 @@ async def test_revalidation_skipped_when_hash_rotated():
 
 @pytest.mark.asyncio
 async def test_stale_entry_without_hash_falls_back_to_bcrypt():
-    """Entries cached before key_hash tracking still authenticate via bcrypt."""
+    """Entries cached before key_hash tracking still authenticate via bcrypt.
+
+    The row's digest upgrade is patched out here (it needs a database); what
+    this pins is the fallback scan and that the re-verified entry records the
+    hash it matched.
+    """
     cache = get_api_key_cache()
-    sha = hash_api_key_for_cache("sk-secret")
+    sha = hash_api_key("sk-secret")
     cache.set_verified_key(sha, "k", None)  # no key_hash recorded
     _make_stale(cache, sha)
-    record = _cached_key(name="k", key_hash="hash123")
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH)
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
         patch.object(mcp_proxy_module, "key_matches_hash", return_value=True) as bcrypt,
+        patch.object(mcp_proxy_module, "_upgrade_key_hash", new=AsyncMock()),
     ):
         auth = await verify_api_key("sk-secret")
 
     assert auth is not None
     bcrypt.assert_called_once()
     # The re-verified entry now records the hash for future revalidation.
-    assert cache.get_verified_key(sha).key_hash == "hash123"
+    assert cache.get_verified_key(sha).key_hash == LEGACY_KEY_HASH
 
 
 @pytest.mark.asyncio
 async def test_expired_key_is_evicted_even_when_verified_entry_is_stale():
     """A key past its own expires_at is rejected before any revalidation."""
     cache = get_api_key_cache()
-    sha = hash_api_key_for_cache("sk-secret")
+    sha = hash_api_key("sk-secret")
     past = datetime.now(UTC) - timedelta(hours=1)
-    cache.set_verified_key(sha, "k", None, expires_at=past, key_hash="hash123")
-    record = _cached_key(name="k", key_hash="hash123", expires_at=past)
+    cache.set_verified_key(sha, "k", None, expires_at=past, key_hash=LEGACY_KEY_HASH)
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH, expires_at=past)
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
@@ -197,8 +210,8 @@ async def test_expired_key_is_evicted_even_when_verified_entry_is_stale():
 async def test_concurrent_invalid_keys_run_one_bcrypt_scan():
     """The negative cache is re-checked under the verification lock."""
     cache = get_api_key_cache()
-    record = _cached_key(name="k", key_hash="hash123")
-    sha = hash_api_key_for_cache("sk-bogus")
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH)
+    sha = hash_api_key("sk-bogus")
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
@@ -215,7 +228,7 @@ async def test_concurrent_invalid_keys_run_one_bcrypt_scan():
 @pytest.mark.asyncio
 async def test_must_change_password_blocks_regular_keys():
     """A forced password change applies to sk- keys, not only session keys."""
-    record = _cached_key(name="k", key_hash="hash123", user_must_change_password=True)
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH, user_must_change_password=True)
 
     with (
         patch.object(mcp_proxy_module, "get_cached_api_keys", new=AsyncMock(return_value=[record])),
@@ -229,7 +242,7 @@ async def test_must_change_password_blocks_regular_keys():
 async def test_must_change_password_blocks_fresh_verified_entry():
     """A cached verified entry cannot bypass the forced-change flag."""
     cache = get_api_key_cache()
-    sha = hash_api_key_for_cache("sk-secret")
+    sha = hash_api_key("sk-secret")
     cache.set_verified_key(sha, "k", None, must_change_password=True)
 
     with patch.object(
@@ -244,7 +257,7 @@ async def test_cancelled_verification_keeps_lock_until_scan_finishes():
     started = asyncio.Event()
     release = asyncio.Event()
     scans = 0
-    record = _cached_key(name="k", key_hash="hash123")
+    record = _cached_key(name="k", key_hash=LEGACY_KEY_HASH)
 
     async def fake_get_cached_api_keys():
         nonlocal scans

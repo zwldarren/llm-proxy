@@ -8,10 +8,10 @@ internet.
 
 | Credential | Storage | Notes |
 | --- | --- | --- |
-| API keys (`sk-…`) | bcrypt hash | Plaintext shown once; used on `/v1/*` and `/servers/*` only |
+| API keys (`sk-…`) | SHA-256 digest | Plaintext shown once; used on `/v1/*` and `/servers/*` only. Resolved by indexed lookup — a key is 256 random bits, so a slow hash adds nothing |
 | Console sessions | HS256 JWT, 24 h, no refresh, in an `HttpOnly` `/api` cookie | `/api/*` only; invalidated by password/role/deactivation changes; unsafe cookie calls require the `X-CSRF-Token` double-submit header |
 | Playground session keys | `HttpOnly` `/v1` cookie, 24 h | Browser-only transport for the console; explicit `Authorization`/`x-api-key` headers still win |
-| User passwords | bcrypt, policy 8–72 chars with mixed classes | Forced change for admin-created accounts |
+| User passwords | Argon2id (19 MiB), policy 8–72 chars with mixed classes | Forced change for admin-created accounts; a legacy bcrypt hash is rehashed on the next successful sign-in |
 | Provider API keys | Fernet-encrypted at rest (`enc:` prefix) | Reveal is admin-only and audited; rotating `ENCRYPTION_KEY` breaks them |
 | JWT / encryption secrets | Auto-generated, stored in the database | Keep the database; a backup contains both |
 

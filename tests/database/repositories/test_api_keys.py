@@ -62,6 +62,32 @@ class TestApiKeyRepository:
         assert result.user_id == 1
 
     @pytest.mark.asyncio
+    async def test_set_key_hash_guards_the_expected_value(self, repo, mock_session):
+        result = MagicMock()
+        result.rowcount = 1
+        mock_session.execute = AsyncMock(return_value=result)
+
+        updated = await repo.set_key_hash("test-key", "new-digest", expected_hash="legacy-hash")
+
+        assert updated is True
+        statement = mock_session.execute.await_args.args[0]
+        sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+        assert "api_keys.name = 'test-key'" in sql
+        assert "api_keys.key_hash = 'legacy-hash'" in sql
+        assert "'new-digest'" in sql
+        mock_session.flush.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_set_key_hash_reports_a_stale_match(self, repo, mock_session):
+        result = MagicMock()
+        result.rowcount = 0
+        mock_session.execute = AsyncMock(return_value=result)
+
+        assert (
+            await repo.set_key_hash("test-key", "new-digest", expected_hash="legacy-hash") is False
+        )
+
+    @pytest.mark.asyncio
     async def test_list_api_keys(self, repo, mock_session):
         """Test listing API keys."""
         mock_result = MagicMock()

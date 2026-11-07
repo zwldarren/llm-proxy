@@ -21,7 +21,7 @@ service, or environment so you can revoke, budget, and rate-limit them independe
 
 The plaintext key (`sk-` followed by 64 hex characters) is shown **once**, in a
 dialog that requires you to acknowledge "I have saved the key". The proxy stores only
-a bcrypt hash — if you lose it, delete the key and create a new one (there is no
+a SHA-256 digest of it — if you lose it, delete the key and create a new one (there is no
 rotate endpoint).
 
 ::: warning Keys are owner-scoped

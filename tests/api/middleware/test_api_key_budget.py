@@ -30,9 +30,9 @@ from llm_proxy.api.middleware.api_key_cache import (
     CachedApiKey,
     get_api_key_cache,
     get_budget_spend_cache,
-    hash_api_key_for_cache,
 )
 from llm_proxy.core.budget import BudgetEnvelope, get_effective_budget_start_ts
+from llm_proxy.security.passwords import hash_api_key
 
 
 def _cached_key(**overrides: Any) -> CachedApiKey:
@@ -44,7 +44,7 @@ def _cached_key(**overrides: Any) -> CachedApiKey:
     budget_fields, user_budget_fields, remaining = split_budget_fields(overrides)
     defaults = {
         "name": "test-key",
-        "key_hash": "hash123",
+        "key_hash": hash_api_key("sk-secret"),
         "is_active": True,
         "allowed_models": None,
         "allowed_mcp_servers": None,
@@ -107,7 +107,7 @@ class TestKeyExpiry:
     async def test_expired_verified_cache_entry_evicted(self):
         """A verified-cache entry that passes its expiry time is evicted."""
         cache = get_api_key_cache()
-        sha = hash_api_key_for_cache("sk-secret")
+        sha = hash_api_key("sk-secret")
         cache.set_verified_key(
             sha,
             "test-key",

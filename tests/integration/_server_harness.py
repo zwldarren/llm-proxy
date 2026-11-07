@@ -107,10 +107,7 @@ def reset_proxy_globals() -> None:
 def seed_proxy_db(db_path: Path, upstream_base_url: str, api_key: str) -> None:
     """Insert user + api key + provider + model directly into the SQLite DB."""
 
-    def _bcrypt(value: str) -> str:
-        import bcrypt
-
-        return bcrypt.hashpw(value.encode(), bcrypt.gensalt()).decode()
+    from llm_proxy.security.passwords import hash_api_key, hash_password
 
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -118,13 +115,13 @@ def seed_proxy_db(db_path: Path, upstream_base_url: str, api_key: str) -> None:
     cur.execute(
         "INSERT INTO users (username, password_hash, role, is_active, token_version, created_at) "
         "VALUES ('admin', ?, 'admin', 1, 0, ?)",
-        (_bcrypt("admin-password"), now),
+        (hash_password("admin-password"), now),
     )
     user_id = cur.lastrowid
     cur.execute(
         "INSERT INTO api_keys (name, key_hash, is_active, user_id, created_at) "
         "VALUES (?, ?, 1, ?, ?)",
-        ("it-key", _bcrypt(api_key), user_id, now),
+        ("it-key", hash_api_key(api_key), user_id, now),
     )
     cur.execute(
         "INSERT INTO providers (name, type, api_key, base_url, enabled, timeout, provider_models, "
@@ -180,6 +177,6 @@ def fetch_request_logs(db_path: Path) -> list[tuple]:
 
 
 def hash_api_key_raw(api_key: str) -> str:
-    import bcrypt
+    from llm_proxy.security.passwords import hash_api_key
 
-    return bcrypt.hashpw(api_key.encode(), bcrypt.gensalt()).decode()
+    return hash_api_key(api_key)

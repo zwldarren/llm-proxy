@@ -55,7 +55,7 @@ from llm_proxy.observability.log_intake import record_auth_event
 from llm_proxy.observability.types import Outcome
 from llm_proxy.security.base64url import b64url_encode
 from llm_proxy.security.console_url import is_secure_issuer, public_origin
-from llm_proxy.security.passwords import hash_password, is_bcrypt_hash
+from llm_proxy.security.passwords import has_password_hash, hash_password
 from llm_proxy.security.tokens import hash_token
 
 public_router = APIRouter(prefix="/api/auth/oauth", tags=["authentication"])
@@ -897,7 +897,7 @@ async def unlink_identity(
     # Lock the account before counting what is left: two concurrent unlinks
     # must not both observe a spare factor and both remove one.
     await UserRepository(session).get_for_update(user.id)
-    if not is_bcrypt_hash(user.password_hash):
+    if not has_password_hash(user.password_hash):
         remaining = await identities.list_for_user(user.id)
         passkeys = await PasskeyRepository(session).count_for_user(user.id)
         if len(remaining) <= 1 and passkeys == 0:

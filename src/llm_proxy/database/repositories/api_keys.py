@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from sqlalchemy import update
 from sqlalchemy.sql import select
 
 from llm_proxy.core.exceptions import ConflictError, NotFoundError
@@ -53,6 +54,26 @@ class ApiKeyRepository(BaseRepository):
         await self.session.flush()
         await self.session.refresh(api_key)
         return "", api_key
+
+    async def set_key_hash(self, name: str, key_hash: str, *, expected_hash: str) -> bool:
+        """Replace a legacy hash only while it still has the expected value.
+
+        The plaintext is available only at verification time, so this is the one
+        write that can move a row off the slow bcrypt path. The compare-and-set
+        guard prevents a stale verification from overwriting a concurrently
+        rotated hash; it returns whether the row was updated.
+        """
+        stmt = (
+            update(ApiKeyRecord)
+            .where(
+                ApiKeyRecord.name == name,
+                ApiKeyRecord.key_hash == expected_hash,
+            )
+            .values(key_hash=key_hash)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return bool(getattr(result, "rowcount", 0))
 
     async def list_api_keys(self) -> list[ApiKeyRecord]:
         """List all API keys."""

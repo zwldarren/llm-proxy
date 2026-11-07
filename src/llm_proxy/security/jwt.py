@@ -15,7 +15,7 @@ class JWTManager:
     The JWTManager only signs and verifies tokens using the configured JWT
     secret. Admin credential verification is performed by the login endpoint
     against the ``users`` table (see ``UserRepository`` and
-    ``verify_admin_password``), not here.
+    ``llm_proxy.security.passwords.verify_password``), not here.
     """
 
     _ALGORITHM = "HS256"

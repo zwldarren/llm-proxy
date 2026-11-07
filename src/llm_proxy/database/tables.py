@@ -22,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from llm_proxy.database.base import Base
+from llm_proxy.security.passwords import has_password_hash
 
 
 class ProviderRecord(Base):
@@ -375,8 +376,8 @@ class UserRecord(Base):
 
     @property
     def has_password(self) -> bool:
-        """Whether this account has a bcrypt password (OAuth/passkey-only accounts do not)."""
-        return isinstance(self.password_hash, str) and self.password_hash.startswith("$2")
+        """Whether this account has a password (OAuth/passkey-only accounts do not)."""
+        return has_password_hash(self.password_hash)
 
 
 class UserSessionRecord(Base):

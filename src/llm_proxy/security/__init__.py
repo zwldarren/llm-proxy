@@ -8,11 +8,11 @@ from llm_proxy.security.encryption import (
 )
 from llm_proxy.security.jwt import JWTManager
 from llm_proxy.security.passwords import (
+    api_key_matches_hash,
     generate_api_key,
     hash_api_key,
     mask_headers,
     mask_sensitive,
-    verify_api_key,
 )
 
 __all__ = [
@@ -23,7 +23,7 @@ __all__ = [
     "init_encryption",
     "generate_api_key",
     "hash_api_key",
-    "verify_api_key",
+    "api_key_matches_hash",
     "mask_headers",
     "mask_sensitive",
 ]

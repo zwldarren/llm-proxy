@@ -27,7 +27,7 @@ Authorization: Bearer sk-your-proxy-key
 x-api-key: sk-your-proxy-key
 ```
 
-- Format: `sk-` followed by 64 hex characters. Keys are stored bcrypt-hashed; the
+- Format: `sk-` followed by 64 hex characters. Keys are stored as SHA-256 digests; the
   plaintext is shown once at creation.
 - Session keys created by the console for the playgrounds (`sk-ui-…`) are also accepted
   on proxy routes and inherit their owner's restrictions.

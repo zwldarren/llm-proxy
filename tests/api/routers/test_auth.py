@@ -15,13 +15,13 @@ from llm_proxy.api.routers.auth import router
 from llm_proxy.config.types.auth import ProxyAuthConfig
 from llm_proxy.core.request_facts import RequestIdentity, set_request_identity
 from llm_proxy.database import get_async_session
-from llm_proxy.security.passwords import hash_password, verify_admin_password
+from llm_proxy.security.passwords import hash_password, verify_password
 
 TEST_SECRET = "test-secret-at-least-32-characters-long-aaaaaa"
 
 
 def _mock_user(username: str = "admin", password: str = "test-password-123") -> MagicMock:
-    """A mock user record with a real bcrypt hash so verify_admin_password works."""
+    """A mock user record with a real password hash so verify_password works."""
     user = MagicMock()
     user.id = 1
     user.username = username
@@ -146,10 +146,10 @@ class TestSetup:
         assert payload["sub"] == "admin"
         assert payload["type"] == "admin"
         mock_repo.create_initial_admin.assert_called_once()
-        # The password must be hashed (bcrypt), not stored in plain text.
+        # The password must be hashed (Argon2id), not stored in plain text.
         args, _ = mock_repo.create_initial_admin.call_args
         assert args[0] == "admin"
-        assert args[1].startswith("$2")  # bcrypt hash
+        assert args[1].startswith("$argon2id$")
 
     def test_rejects_when_already_complete(self, auth_client):
         client, mock_repo = auth_client
@@ -291,8 +291,8 @@ class TestLogin:
         mock_repo.get_by_username = AsyncMock(return_value=None)
 
         with patch(
-            "llm_proxy.api.routers.auth.verify_admin_password",
-            wraps=verify_admin_password,
+            "llm_proxy.api.routers.auth.verify_password",
+            wraps=verify_password,
         ) as spy:
             response = client.post(
                 "/api/auth/login",
@@ -301,10 +301,10 @@ class TestLogin:
 
         assert response.status_code == 401
         spy.assert_called_once()
-        # The verify ran against a real bcrypt hash (the precomputed dummy),
+        # The verify ran against a real password hash (the precomputed dummy),
         # so the timing cost matches the real-password path.
         _, password_hash = spy.call_args.args
-        assert password_hash.startswith("$2") and len(password_hash) == 60
+        assert password_hash.startswith("$argon2id$")
 
     def test_login_wrong_password(self, auth_client):
         client, mock_repo = auth_client

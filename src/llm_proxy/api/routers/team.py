@@ -49,7 +49,7 @@ from llm_proxy.observability.log_intake import record_member_action
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.types import ActionCategory, Outcome
 from llm_proxy.security.jwt import JWTManager
-from llm_proxy.security.passwords import hash_password, is_bcrypt_hash
+from llm_proxy.security.passwords import has_password_hash, hash_password
 
 router = APIRouter(
     prefix="/api/team",
@@ -769,7 +769,7 @@ async def revoke_member_passkeys(
     """Revoke every passkey for a member, refusing to remove their last factor."""
     repo = UserRepository(session)
     user = await _get_member_or_404(repo, user_id)
-    if not is_bcrypt_hash(user.password_hash):
+    if not has_password_hash(user.password_hash):
         identities = await OAuthIdentityRepository(session).list_for_user(user_id)
         if not identities:
             raise ValidationError(

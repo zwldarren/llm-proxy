@@ -71,7 +71,7 @@ Responses) and is persisted with AOF. Backing it up is optional.
 
 ### What a backup contains
 
-Everything the app knows: providers, models, pricing, API keys (bcrypt hashes),
+Everything the app knows: providers, models, pricing, API keys (SHA-256 digests),
 users, logs, usage records — **and the two auto-generated secrets**
 (`jwt_secret`, `encryption_key_store` rows in `server_config`). Restoring the backup
 restores working sessions and decryptable provider keys.
