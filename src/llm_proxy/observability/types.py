@@ -15,6 +15,11 @@ class LogType(StrEnum):
     #: the spend is visible per model, but it is not a client request, so it is
     #: kept out of the endpoint dashboards' request counts.
     JUDGE = "judge"
+    #: A batch job's spend, written once per batch when its results are
+    #: materialized (ADR-0058). Usage-only: a batch has no request log of its own,
+    #: and its token counts are an aggregate of every line, so counting it as one
+    #: request would misreport both request volume and latency.
+    BATCH = "batch"
 
 
 class EventType(StrEnum):

@@ -52,6 +52,10 @@ curl http://localhost:8080/v1/chat/completions \
 
 - [重排文档](/zh/api/rerank) — `POST /v1/rerank`
 
+## 批量
+
+- [批量模式](/zh/api/batch) — `POST /v1/batches` 配合 `/v1/files`，转发到 OpenAI、OpenRouter 或 Gemini
+
 ## 模型
 
 - [列出模型](/zh/api/models) — `GET /v1/models`

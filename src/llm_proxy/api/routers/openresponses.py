@@ -13,7 +13,7 @@ from starlette.requests import Request as StarletteRequest
 
 from llm_proxy.api import gate
 from llm_proxy.api.context import HasModel, build_request_context
-from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
+from llm_proxy.api.dependencies import get_request_identity, require_any_auth
 from llm_proxy.api.gate import GatePolicy, KeyExtraction
 from llm_proxy.api.middleware.model_restriction import check_and_record_model_restriction
 from llm_proxy.core.exceptions import (
@@ -49,13 +49,6 @@ from llm_proxy.services import runtime_services
 from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
 logger = logging.getLogger(__name__)
-
-
-async def require_any_auth(request: Request):
-    """Require either API key or admin JWT authentication."""
-    identity = get_request_identity(request)
-    if not identity.is_authenticated:
-        await require_api_key_auth(request)
 
 
 router = APIRouter(tags=["responses"], dependencies=[Depends(require_any_auth)])

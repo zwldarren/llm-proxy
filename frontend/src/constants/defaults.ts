@@ -31,6 +31,7 @@ export const DEFAULT_LOGGING: LoggingConfig = {
   sampling_rate: 1.0,
   audit_sampling_rate: null,
   audit_retention_days: null,
+  batch_retention_days: 30,
   sensitive_keys: "",
 };
 

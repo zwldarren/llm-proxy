@@ -32,6 +32,7 @@ from llm_proxy.providers.capabilities import (
     ImageCapabilityMixin,
     SystemOneOverDecisionsMixin,
 )
+from llm_proxy.providers.openai.batch import OpenAIBatchMixin
 from llm_proxy.providers.openai.client_headers import get_client_headers
 from llm_proxy.providers.openai.sse_fallback import parse_json_or_sse
 from llm_proxy.serialization.providers import get_provider_serializer
@@ -73,6 +74,7 @@ def _strip_input_item_id(item: Any) -> Any:
 
 @register_adapter("openai")
 class OpenAIAdapter(
+    OpenAIBatchMixin,
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
     ImageCapabilityMixin,

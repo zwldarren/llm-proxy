@@ -106,6 +106,14 @@ def safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def optional_int(value: Any) -> int | None:
+    """Coerce an optional upstream numeric field, tolerating strings and nulls."""
+    try:
+        return int(value)
+    except TypeError, ValueError:
+        return None
+
+
 def coerce_float(value: Any) -> float | None:
     """Best-effort float coercion for optional payload fields.
 

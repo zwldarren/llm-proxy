@@ -31,6 +31,7 @@ from llm_proxy.providers.capabilities.host import SystemOneSelf
 from llm_proxy.providers.headers import merge_passthrough_headers
 from llm_proxy.providers.openai.client_headers import get_openrouter_client_headers
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
+from llm_proxy.providers.openrouter.batch import OpenRouterBatchMixin
 from llm_proxy.serialization.providers.field_utils import reported_cost
 from llm_proxy.streaming.sse_parse import parse_sse_data_line
 
@@ -47,7 +48,10 @@ DEFAULT_ATTRIBUTION_TITLE = "LLM Proxy"
 
 @register_adapter("openrouter")
 class OpenRouterAdapter(
-    DecisionsOverSystemOneMixin, SystemOneCapabilityMixin, NativePassthroughChatBase
+    OpenRouterBatchMixin,
+    DecisionsOverSystemOneMixin,
+    SystemOneCapabilityMixin,
+    NativePassthroughChatBase,
 ):
     """OpenRouter provider using direct HTTP calls to OpenAI-compatible API.
 

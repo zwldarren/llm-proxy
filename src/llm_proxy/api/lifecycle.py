@@ -344,6 +344,15 @@ async def startup_background_services(app: FastAPI) -> None:
     # Usage records follow the same UI-managed retention window as the logs.
     start_background_usage_writer(logging_config.retention_days, config_manager)
 
+    # Batch storage has its own window: the sweeper owns the files and job rows,
+    # not the log writer, and re-reads the setting per sweep like the writers do.
+    from llm_proxy.batch.retention import BatchRetentionSweeper
+
+    services = runtime_services(app)
+    sweeper = BatchRetentionSweeper(logging_config.batch_retention_days, config_manager)
+    services.install_batch_retention_sweeper(sweeper)
+    sweeper.start()
+
 
 async def _sync_circuit_breaker_config(app: FastAPI, config: ProxyConfig) -> None:
     """Apply UI-managed circuit-breaker thresholds to this worker's store."""
@@ -433,6 +442,7 @@ async def shutdown_services(app: FastAPI) -> None:
     from llm_proxy.observability.observation.database import database_bus
     from llm_proxy.observability.tracing.handlers.registry import get_tracing_registry
 
+    services = runtime_services(app)
     tracing_registry = get_tracing_registry()
     await tracing_registry.shutdown()
 
@@ -452,7 +462,9 @@ async def shutdown_services(app: FastAPI) -> None:
     await stop_background_log_writer()
     await stop_background_usage_writer()
 
-    services = runtime_services(app)
+    if sweeper := services.batch_retention_sweeper():
+        await sweeper.stop()
+        services.install_batch_retention_sweeper(None)
 
     if executor := services.url_validation_executor():
         executor.shutdown(wait=False, cancel_futures=True)

@@ -951,6 +951,9 @@ export default {
     logRetentionDays: "日志保留期",
     days: "天",
     setZeroToKeepIndefinitely: "设置为 0 表示永久保留",
+    batchRetentionDays: "批量任务保留期",
+    batchRetentionDaysDescription:
+      "代理保存的批量文件（上传的请求文件与生成的结果文件）以及引用它们的作业记录保留多少天。不影响上游自己的副本。设置为 0 表示永久保留。",
     logInputOutput: "记录输入/输出",
     logInputOutputDescription:
       "默认关闭。启用或禁用请求与响应正文记录。禁用后日志行仍会写入，但所有内容都会被替换为标记：请求/响应正文、上游错误正文与消息，以及 MCP/网络搜索的参数与结果。请求头作为已脱敏的元数据保留，端点、路由与审计元数据同样保留；用量与费用统计不受影响。该开关优先级最高，x-log-full: true 也无法为单个请求重新开启正文记录。",

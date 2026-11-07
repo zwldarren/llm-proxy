@@ -92,6 +92,7 @@ export const useSettingsStore = defineStore("settings", () => {
       sampling_rate: data?.sampling_rate ?? DEFAULT_LOGGING.sampling_rate,
       audit_sampling_rate: data?.audit_sampling_rate ?? DEFAULT_LOGGING.audit_sampling_rate,
       audit_retention_days: data?.audit_retention_days ?? DEFAULT_LOGGING.audit_retention_days,
+      batch_retention_days: data?.batch_retention_days ?? DEFAULT_LOGGING.batch_retention_days,
       sensitive_keys: data?.sensitive_keys ?? DEFAULT_LOGGING.sensitive_keys,
     };
   }

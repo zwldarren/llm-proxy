@@ -986,6 +986,9 @@ export default {
     logRetentionDays: "Log Retention Period",
     days: "days",
     setZeroToKeepIndefinitely: "Set to 0 to keep logs indefinitely",
+    batchRetentionDays: "Batch Retention Period",
+    batchRetentionDaysDescription:
+      "How long the proxy keeps the batch files it stores (uploaded request files and materialized results) and the job rows that name them. Upstream copies are not affected. Set to 0 to keep them indefinitely.",
     logInputOutput: "Log Input/Output",
     logInputOutputDescription:
       "Off by default. Enable or disable logging of request and response bodies. When disabled, log rows are still written but every content payload is replaced by a marker: request/response bodies, upstream error bodies and messages, and MCP/web-search arguments and results. Headers are kept as masked metadata, as are endpoint, routing and audit metadata; usage/cost accounting is unaffected. This switch wins over x-log-full: true, so bodies cannot be re-enabled for a single request.",

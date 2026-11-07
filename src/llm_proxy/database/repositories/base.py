@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -15,6 +16,39 @@ class BaseRepository:
             session: SQLAlchemy async session
         """
         self.session = session
+
+    async def delete_in_batches(
+        self,
+        model: Any,
+        conditions: list[Any],
+        *,
+        size: int = 2000,
+    ) -> int:
+        """Delete rows matching ``conditions`` in bounded, separately committed batches.
+
+        Returns the total number of deleted rows. A single unbounded DELETE over
+        a large retention backlog holds the write lock for its whole duration and
+        journals every freed page into one WAL burst; deleting by primary key in
+        chunks keeps each transaction short and releases the lock between them.
+        Every batch is its own transaction, so a failure mid-way leaves the
+        already-deleted rows deleted (retention is idempotent and re-run daily).
+        """
+        total = 0
+        while True:
+            # SKIP LOCKED keeps concurrently running cleanup tasks (one per
+            # uvicorn worker) from locking the same candidate rows in a different
+            # order: each claim sees only rows no other worker is deleting. SQLite
+            # ignores the locking clause (single writer), so both backends share
+            # this path.
+            doomed = (
+                select(model.id).where(*conditions).limit(size).with_for_update(skip_locked=True)
+            )
+            result = await self.session.execute(delete(model).where(model.id.in_(doomed)))
+            deleted = int(getattr(result, "rowcount", 0) or 0)
+            await self.session.commit()
+            total += deleted
+            if deleted < size:
+                return total
 
     def _prepare_metadata_data(
         self,

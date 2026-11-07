@@ -164,6 +164,12 @@ async def require_api_key_auth(request: Request):
         )
 
 
+async def require_any_auth(request: Request) -> None:
+    """Require either API-key or console-JWT authentication."""
+    if not get_request_identity(request).is_authenticated:
+        await require_api_key_auth(request)
+
+
 STEP_UP_WINDOW = timedelta(minutes=15)
 
 

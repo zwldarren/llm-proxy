@@ -267,7 +267,7 @@ class TestVirtualModelsListing:
         mock_identity.is_authenticated = True
         mock_identity.api_key_name = "test-key"
 
-        with patch("llm_proxy.api.routers.models.get_request_identity", return_value=mock_identity):
+        with patch("llm_proxy.api.dependencies.get_request_identity", return_value=mock_identity):
             async with httpx2.AsyncClient(
                 transport=httpx2.ASGITransport(app=app_with_config), base_url="http://test"
             ) as client:
@@ -289,7 +289,7 @@ class TestVirtualModelsListing:
         mock_identity.is_authenticated = True
         mock_identity.api_key_name = "test-key"
 
-        with patch("llm_proxy.api.routers.models.get_request_identity", return_value=mock_identity):
+        with patch("llm_proxy.api.dependencies.get_request_identity", return_value=mock_identity):
             async with httpx2.AsyncClient(
                 transport=httpx2.ASGITransport(app=app_with_config), base_url="http://test"
             ) as client:
@@ -342,7 +342,7 @@ class TestApiKeyModelRestriction:
         mock_identity.is_authenticated = True
         mock_identity.api_key_name = "test-key"
 
-        with patch("llm_proxy.api.routers.models.get_request_identity", return_value=mock_identity):
+        with patch("llm_proxy.api.dependencies.get_request_identity", return_value=mock_identity):
             async with httpx2.AsyncClient(
                 transport=httpx2.ASGITransport(app=app_with_config), base_url="http://test"
             ) as client:
@@ -365,7 +365,7 @@ class TestApiKeyModelRestriction:
         mock_identity.is_authenticated = True
         mock_identity.api_key_name = "test-key"
 
-        with patch("llm_proxy.api.routers.models.get_request_identity", return_value=mock_identity):
+        with patch("llm_proxy.api.dependencies.get_request_identity", return_value=mock_identity):
             async with httpx2.AsyncClient(
                 transport=httpx2.ASGITransport(app=app_with_config), base_url="http://test"
             ) as client:
@@ -387,7 +387,7 @@ class TestApiKeyModelRestriction:
         mock_identity.is_authenticated = True
         mock_identity.api_key_name = "test-key"
 
-        with patch("llm_proxy.api.routers.models.get_request_identity", return_value=mock_identity):
+        with patch("llm_proxy.api.dependencies.get_request_identity", return_value=mock_identity):
             async with httpx2.AsyncClient(
                 transport=httpx2.ASGITransport(app=app_with_config), base_url="http://test"
             ) as client:

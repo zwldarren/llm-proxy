@@ -11,6 +11,7 @@ let an adapter that speaks one of them serve the other endpoint; see
 """
 
 from llm_proxy.providers.capabilities.audio import AudioCapabilityMixin
+from llm_proxy.providers.capabilities.batch import BatchCapabilityMixin
 from llm_proxy.providers.capabilities.chat import ChatCapabilityMixin
 from llm_proxy.providers.capabilities.decisions import (
     DecisionsCapabilityMixin,
@@ -24,6 +25,7 @@ from llm_proxy.providers.capabilities.systemone import SystemOneCapabilityMixin
 
 __all__ = [
     "AudioCapabilityMixin",
+    "BatchCapabilityMixin",
     "ChatCapabilityMixin",
     "DecisionsCapabilityMixin",
     "DecisionsOverSystemOneMixin",

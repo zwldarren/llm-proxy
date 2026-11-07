@@ -25,6 +25,15 @@ aside: false
 | POST | `/v1/messages/count_tokens` | X | Anthropic | 上游支持时用上游的原生计数，否则用本地 o200k_base 估算 |
 | POST | `/v1/embeddings` | X | OpenAI | Embeddings |
 | POST | `/v1/rerank` | X | Cohere 兼容 | 按查询语句重排文档（`/v2/rerank` 是给 Cohere SDK 用的别名）。指定的模型必须带 `supports_rerank` 标志，否则返回 `400 invalid_request_error` |
+| POST | `/v1/files` | X | OpenAI | multipart 上传批量 JSONL（`purpose=batch`） |
+| GET | `/v1/files` | X | OpenAI | 列出已存文件（`limit` 1–100、`after` 游标、`purpose` 过滤） |
+| GET | `/v1/files/{file_id}` | X | OpenAI | 文件元信息 |
+| GET | `/v1/files/{file_id}/content` | X | OpenAI | 下载文件的 JSONL |
+| DELETE | `/v1/files/{file_id}` | X | OpenAI | 删除文件 |
+| POST | `/v1/batches` | X | OpenAI | 用已上传的 JSONL 创建批量作业；只接受 `/v1/chat/completions` 行，一个作业一个模型 |
+| GET | `/v1/batches` | X | OpenAI | 列出批量作业的最后观察状态（不回源刷新） |
+| GET | `/v1/batches/{batch_id}` | X | OpenAI | 轮询作业；第一次读到终态时生成 `output_file_id`/`error_file_id` |
+| POST | `/v1/batches/{batch_id}/cancel` | X | OpenAI | 取消；上游不支持取消时返回 `400 batch_cancel_unsupported` |
 | POST | `/v1/systemone` | X | System One | TypeSafe Jev 评估（也可经 OpenRouter 和本地 Ollama 模型）。指定的模型必须带 `supports_systemone` 标志，否则返回 `400 invalid_request_error` |
 | POST | `/v1/decisions` | X | Decisions | OpenAI 的 Decisions 端点（`gpt-6-luna`），System One 模型也可通过代理的桥接提供。受同一个 `supports_systemone` 标志约束 |
 | POST | `/v1/images/generations` | X | OpenAI | JSON 请求体 |
@@ -50,6 +59,7 @@ aside: false
 | Chat | 所有类型 |
 | Embeddings | `openai`、`openai-compatible` 系列（含 DeepSeek、Kimi、MiniMax、Moonshot、Qwen、xAI、vLLM、SGLang、Chutes、Mistral、NanoGPT、OpenRouter）、`gemini`、`ollama`、`cohere` |
 | Rerank | `cohere`（原生 `/v2/rerank`）、`openrouter`（`/api/v1/rerank`，例如 `cohere/rerank-v3.5`）、上游提供 `/rerank` 的 `openai-compatible` 系列（vLLM、SGLang、Jina）。受 `supports_rerank` 标志约束 |
+| 批量（聊天） | `openai`（Files + Batches）、`openrouter`（内联 `/batches`）、`gemini`（`models/{model}:batchGenerateContent`）。只接受 `/v1/chat/completions` 行，一个作业一个模型 |
 | 图像（生成 + 编辑） | `openai`、`openai-compatible` 系列、`gemini`、`qwen` |
 | 音频（语音、STT） | `openai`、`openai-compatible` 系列**但 `qwen`/`qwen-intl` 除外**（DashScope 只在原生端点上提供语音——见下文）、`gemini`（原生 TTS/STT）、`ollama`（仅语音，v0.40.8+——WAV/PCM）、`openrouter`（STT）、`cohere`（仅 STT——v2 没有语音合成） |
 | 音频（翻译） | `openai`、`openai-compatible` 系列**但 `qwen`/`qwen-intl` 除外**、`gemini`。`openrouter`、`cohere` 以及 `qwen`/`qwen-intl` 没有对应的上游端点，会以 `400` 拒绝请求 |

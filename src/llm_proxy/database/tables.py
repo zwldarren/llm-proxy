@@ -864,3 +864,119 @@ class FeedbackRecord(Base):
 
     def __repr__(self) -> str:
         return f"<FeedbackRecord(request_id='{self.request_id}', signal='{self.signal}')>"
+
+
+#: ``batch_files.id`` / ``batch_jobs.id`` width. Ids are proxy-minted as
+#: ``file-<32 hex>`` / ``batch_<32 hex>``, so the column is comfortably wider
+#: than anything this module writes.
+BATCH_ID_MAX_LENGTH = 64
+#: ``batch_files.filename`` width — the client's own upload name.
+BATCH_FILENAME_MAX_LENGTH = 255
+#: ``batch_files.owner`` width. An owner scope is an API key name or a console
+#: user identity, the same vocabulary ``request_logs.user_identity`` stores.
+BATCH_OWNER_MAX_LENGTH = 200
+
+
+class BatchFileRecord(Base):
+    """A JSONL file the batch surface stores on the client's behalf.
+
+    OpenAI's batch API is file-based and the other two are not, so the proxy has
+    to own this storage: an uploaded input file is what a client references by
+    ``input_file_id``, and a materialized output file is what it downloads from
+    ``GET /v1/files/{id}/content``. Content is kept verbatim because the batch
+    service may translate it again on a retry (and because a client may re-download
+    its own upload).
+
+    Only the proxy's own copy lives here. The upstream keeps whatever it stored
+    (OpenAI a file, OpenRouter and Gemini nothing), and the proxy neither records
+    nor deletes it — ``batch_jobs.upstream_file_id`` is where a provider-side
+    input file id is kept, for support.
+    """
+
+    __tablename__ = "batch_files"
+
+    __table_args__ = (Index("ix_batch_files_owner_created", "owner", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(BATCH_ID_MAX_LENGTH), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(BATCH_OWNER_MAX_LENGTH), nullable=False)
+    filename: Mapped[str] = mapped_column(String(BATCH_FILENAME_MAX_LENGTH), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<BatchFileRecord(id='{self.id}', filename='{self.filename}')>"
+
+
+class BatchJobRecord(Base):
+    """A batch job as the proxy knows it: one row per client-visible batch.
+
+    ``upstream_id`` is what the provider calls the job (OpenAI's ``batch_…``,
+    OpenRouter's ``batch_…``, Gemini's operation ``batches/…``); the row's own
+    ``id`` is what the client polls. Status names are normalized to OpenAI's
+    enum (ADR-0058) and timestamps are unix seconds, so rendering the wire object
+    is a straight read.
+
+    ``results_materialized_at`` is the proxy's own bookkeeping, not a wire field:
+    the first poll that observes a terminal status claims it, so a second poll
+    never downloads the same results again — including for a batch that finished
+    with no results at all, where the two file ids stay null forever.
+    """
+
+    __tablename__ = "batch_jobs"
+
+    __table_args__ = (Index("ix_batch_jobs_owner_created", "owner", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(BATCH_ID_MAX_LENGTH), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(BATCH_OWNER_MAX_LENGTH), nullable=False)
+    #: The user the job bills to, when the caller was authenticated as one (an
+    #: API key's owner or a console user). The usage row written at
+    #: materialization carries it so a user's own usage view and budget window
+    #: include batch spend; ``owner`` alone cannot express it.
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    #: Configured provider name (the operator's label), plus its adapter type —
+    #: the type is what decides which dialect reads the upstream back.
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    upstream_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    #: The input file the provider stored for this job, when it stores one
+    #: (OpenAI), e.g. ``file-abc``. Never exposed to clients; logged at submit so
+    #: support can find the upstream artefact.
+    upstream_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    #: The model the client asked for, and the upstream model name it maps to.
+    model: Mapped[str] = mapped_column(String(300), nullable=False)
+    upstream_model: Mapped[str] = mapped_column(String(300), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(100), nullable=False)
+    completion_window: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    input_file_id: Mapped[str] = mapped_column(String(BATCH_ID_MAX_LENGTH), nullable=False)
+    output_file_id: Mapped[str | None] = mapped_column(String(BATCH_ID_MAX_LENGTH), nullable=True)
+    error_file_id: Mapped[str | None] = mapped_column(String(BATCH_ID_MAX_LENGTH), nullable=True)
+    request_counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    #: Client-supplied ``metadata``. The attribute cannot be called ``metadata``:
+    #: SQLAlchemy's declarative base already owns that name.
+    batch_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    #: The batch's custom ids in submission order — the only way to name Gemini's
+    #: result entries, which carry no client id.
+    custom_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    errors: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    #: When the results pull was claimed (unix seconds). Null on a live job and
+    #: on a terminal one whose pull has not been attempted yet; a terminal job
+    #: with this set is never fetched from the upstream again.
+    results_materialized_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    in_progress_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    finalizing_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    failed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expired_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cancelling_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cancelled_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<BatchJobRecord(id='{self.id}', status='{self.status}')>"

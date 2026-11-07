@@ -126,6 +126,10 @@ Configured in [Settings → Log Management](settings.md#log-management):
   SQLite databases created with `auto_vacuum=INCREMENTAL`; existing database files
   keep their mode and reclaim space only via a one-time `VACUUM` (see
   [Databases](../deployment/databases.md)). Audit retention can be set separately.
+  Batch files and the job rows that name them have their own window
+  (`batch_retention_days`, default 30; `0` = forever) and their own sweep, run a few
+  times a day: a batch payload dwarfs a log row, and a sweep deletes jobs first so a
+  retained job never loses the file it names.
 
 ### Rejected requests
 
@@ -163,11 +167,16 @@ The **Usage** dashboard and `GET /api/logs/usage-stats` aggregate:
 Metrics come from the dedicated `usage_records` table, which is pruned on the same
 retention window as the logs and survives the manual **Cleanup Logs** action; request
 counts and success rate come from `request_logs` when available.
+A finished batch writes **one** `usage_records` row (log type `batch`, stamped with the
+batch's creation instant, priced over the lines the upstream reported), so a batch
+contributes cost and tokens without contributing one request per line.
 Budget windows, the per-key spend figures, and the per-key usage view include `judge`
-usage records — a routing-judge call is billed on the key whose request triggered it,
-so it appears in that key's by-model breakdown. The global **Usage** dashboard and the
-Logs request counters stay `endpoint`-only, because a judge call is not a request the
-client made.
+and `batch` usage records — a routing-judge call is billed on the key whose request
+triggered it and a batch on the key that created it, so both appear in that key's
+by-model breakdown. The global **Usage** dashboard aggregates the same three kinds
+of row, so its spend totals match what budgets deduct; request counts and success
+rate are counted from `endpoint` rows only, because neither a judge call nor a batch
+is a request the client made.
 Averages are the only latency/throughput statistics reported — no percentiles. Cache
 savings require a `cached_read_cost_per_1m` price on the model; without it the metric
 is skipped with a warning.

@@ -122,6 +122,24 @@ const { t } = useI18n();
       </SettingsItem>
 
       <SettingsItem
+        v-if="isAdmin"
+        :title="t('settings.batchRetentionDays')"
+        :description="t('settings.batchRetentionDaysDescription')"
+        :loading="pending"
+        :error="error"
+      >
+        <template #action>
+          <NumberStepper
+            :model-value="state.batch_retention_days"
+            :min="0"
+            :suffix="t('settings.days')"
+            :aria-label="t('settings.batchRetentionDays')"
+            @update:model-value="state.batch_retention_days = $event ?? 0"
+          />
+        </template>
+      </SettingsItem>
+
+      <SettingsItem
         :icon="Trash2"
         :title="t('settings.cleanOldLogs')"
         :description="t('settings.cleanOldLogsDescription')"

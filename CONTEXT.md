@@ -132,6 +132,36 @@ the candidates jointly against the query. The capability flag `supports_rerank`
 gates the endpoint. See ADR-0041.
 _Avoid_: ranker, scoring model, embedding model (that is `/v1/embeddings`)
 
+### Batch mode
+
+**Batch job**:
+One asynchronous, discounted run of many chat requests, submitted once and
+polled later. The client surface is OpenAI's (`/v1/files` + `/v1/batches`) but the
+job itself runs upstream: the proxy submits it to the provider's own batch API and
+keeps the mapping (proxy id ↔ upstream id) plus a status normalized to OpenAI's
+enum, so the same client code works against OpenAI, OpenRouter and Gemini.
+`llm_proxy.batch.service` owns it; `llm_proxy/providers/*/batch.py` own each
+dialect. See ADR-0058.
+_Avoid_: batch request (that is one line inside a job), queue (nothing is queued
+proxy-side), local batch (the proxy does not fan out)
+
+**Batch file**:
+A JSONL blob the proxy stores on the client's behalf: the uploaded requests, or
+the results it materializes after the job finishes. OpenAI's batch API is
+file-based and the other two are not, so storage has to be the proxy's — an
+upstream file id never reaches a client. Files are scoped to the API key that
+created them.
+_Avoid_: upload (that is the endpoint), artifact
+
+**Batch adapter seam**:
+The four-method contract between the batch service and an adapter — submit,
+fetch, fetch results, cancel — with one flag deciding whether the client's
+chat-completions line is forwarded verbatim (OpenAI, OpenRouter) or translated
+through the provider serializer and back (Gemini). The service never inspects an
+upstream payload; a provider without the mixin has no batch mode and is refused
+by name.
+_Avoid_: batch serializer, batch driver
+
 ### Smart routing
 
 **Virtual model**:

@@ -79,6 +79,7 @@ class TestOptionalServices:
         assert services.redis_client() is None
         assert services.circuit_breaker() is None
         assert services.provider_stats() is None
+        assert services.batch_retention_sweeper() is None
         assert services.mcp_manager() is None
         assert services.web_search_interceptor() is None
         assert services.protocol_processor("openai") is None
@@ -128,6 +129,8 @@ class TestInstallers:
         services.install_redis(None)
         services.install_circuit_breaker(MagicMock())
         services.install_provider_stats(MagicMock())
+        sweeper = MagicMock()
+        services.install_batch_retention_sweeper(sweeper)
         services.install_mcp_manager(MagicMock())
         services.install_protocol_processor("openai", MagicMock())
         services.install_web_search_interceptor(None)
@@ -138,6 +141,7 @@ class TestInstallers:
         assert state.redis_client is None
         assert state.circuit_breaker is not None
         assert state.provider_stats is not None
+        assert state.batch_retention_sweeper is sweeper
         assert state.mcp_manager is not None
         assert state.protocol_processors["openai"] is not None
         assert state.web_search_interceptor is None

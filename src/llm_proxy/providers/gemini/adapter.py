@@ -41,6 +41,7 @@ from llm_proxy.providers.capabilities import (
     EmbeddingCapabilityMixin,
 )
 from llm_proxy.providers.capabilities.image import normalize_image_stream_chunk
+from llm_proxy.providers.gemini.batch import GeminiBatchMixin
 from llm_proxy.serialization.gemini.model_family import normalize_family_overrides
 from llm_proxy.serialization.gemini.speech import (
     build_speech_config,
@@ -136,7 +137,11 @@ def _nearest_supported_aspect_ratio(width: int, height: int) -> str:
 
 @register_adapter("gemini")
 class GeminiAdapter(
-    ChatCapabilityMixin, EmbeddingCapabilityMixin, AudioCapabilityMixin, BaseHttpProvider
+    GeminiBatchMixin,
+    ChatCapabilityMixin,
+    EmbeddingCapabilityMixin,
+    AudioCapabilityMixin,
+    BaseHttpProvider,
 ):
     """Gemini provider using direct HTTP calls."""
 

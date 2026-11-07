@@ -13,9 +13,12 @@ from llm_proxy.database.tables import UsageRecord
 #: Log types whose cost is real spend on a key's or user's behalf, and therefore
 #: belongs in a budget window. ``judge`` is the routing judge's own row
 #: (ADR-0018): a model call made while the key's request waited, billed to the
-#: key like any other call. Request *counts* stay ``endpoint``-only — a judge call
-#: is not a request the client made, so counting it would inflate request volume.
-BILLABLE_SPEND_LOG_TYPES = ("endpoint", "judge")
+#: key like any other call. ``batch`` is the aggregate row a batch job writes when
+#: its results are materialized (ADR-0058) — it lands after the fact, so it
+#: consumes budget from the next request on rather than gating the batch. Request
+#: *counts* stay ``endpoint``-only — neither a judge call nor a batch is a request
+#: the client made, so counting either would inflate request volume.
+BILLABLE_SPEND_LOG_TYPES = ("endpoint", "judge", "batch")
 
 
 class UsageRepository(BaseUsageRepository):

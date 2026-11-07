@@ -17,9 +17,15 @@ checker validates.
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar
 
 if TYPE_CHECKING:
+    from llm_proxy.batch.types import (
+        BatchRequestItem,
+        BatchResultItem,
+        BatchSnapshot,
+        BatchSubmission,
+    )
     from llm_proxy.core.exceptions import ProviderError
     from llm_proxy.http.client import AsyncSession
     from llm_proxy.models import (
@@ -149,6 +155,80 @@ class RerankSelf(CapabilityHost, Protocol):
     def _rerank_headers(self) -> dict[str, str]: ...
 
 
+class BatchSelf(CapabilityHost, Protocol):
+    """Self-type for ``BatchCapabilityMixin``.
+
+    Batch transport is the host contract plus the mixin's own declaration of
+    which side of the translation seam the adapter sits on. The mixin's shared
+    HTTP helpers are declared here too, because the mixin calls them through
+    ``self`` and a dialect module overrides nothing but their arguments.
+    """
+
+    BATCH_FORWARDS_CHAT_BODY: ClassVar[bool]
+    FILES_ENDPOINT: ClassVar[str]
+    BATCHES_ENDPOINT: ClassVar[str]
+    BATCH_CREATE_ENDPOINT: ClassVar[str]
+
+    async def submit_batch(
+        self,
+        *,
+        model: str,
+        requests: list[BatchRequestItem],
+        display_name: str,
+        completion_window: str = ...,
+    ) -> BatchSubmission: ...
+
+    async def fetch_batch(self, upstream_id: str) -> BatchSnapshot: ...
+
+    async def fetch_batch_results(
+        self, snapshot: BatchSnapshot
+    ) -> list[BatchResultItem] | None: ...
+
+    async def cancel_batch(self, upstream_id: str) -> BatchSnapshot | None: ...
+
+    def build_batch_request(self, request: Any) -> dict[str, Any]: ...
+
+    def parse_batch_result(self, payload: dict[str, Any], model: str) -> Any: ...
+
+    def _files_url(self, suffix: str = "") -> str: ...
+
+    def _batches_url(self, suffix: str = "") -> str: ...
+
+    def _batch_create_url(self, model: str) -> str: ...
+
+    def _upload_headers(self) -> dict[str, str]: ...
+
+    async def _batch_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json_body: dict[str, Any] | None = None,
+        files: Any = None,
+        data: dict[str, Any] | None = None,
+    ) -> Any: ...
+
+    async def _batch_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json_body: dict[str, Any] | None = None,
+        files: Any = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    async def _batch_bytes(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> bytes: ...
+
+
 class SystemOneSelf(CapabilityHost, Protocol):
     """Self-type for ``SystemOneCapabilityMixin``.
 
@@ -265,6 +345,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AudioSelf",
+    "BatchSelf",
     "CapabilityHost",
     "ChatSelf",
     "DecisionsSelf",

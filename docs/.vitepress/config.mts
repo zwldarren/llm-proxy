@@ -80,6 +80,10 @@ const api = [
     items: [{ text: 'Rerank documents', link: '/api/rerank' }],
   },
   {
+    text: 'Batch',
+    items: [{ text: 'Batch mode', link: '/api/batch' }],
+  },
+  {
     text: 'Evaluation',
     items: [
       { text: 'System One evaluation', link: '/api/systemone' },
@@ -186,6 +190,10 @@ const zhApi = [
   {
     text: 'Rerank',
     items: [{ text: '重排文档', link: '/zh/api/rerank' }],
+  },
+  {
+    text: '批量',
+    items: [{ text: '批量模式', link: '/zh/api/batch' }],
   },
   {
     text: '评估',

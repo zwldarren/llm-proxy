@@ -5,20 +5,12 @@ from fastapi import APIRouter, Depends, Request
 from llm_proxy.api.dependencies import (
     get_config_from_state,
     get_config_manager,
-    get_request_identity,
-    require_api_key_auth,
+    require_any_auth,
 )
 from llm_proxy.api.schemas.models import OpenAIModel, OpenAIModelList
 from llm_proxy.core.request_facts import facts_for
 
 router = APIRouter(prefix="/v1", tags=["models"])
-
-
-async def require_any_auth(request: Request):
-    """Require either API key or admin JWT authentication."""
-    identity = get_request_identity(request)
-    if not identity.is_authenticated:
-        await require_api_key_auth(request)
 
 
 @router.get("/models", response_model=OpenAIModelList, dependencies=[Depends(require_any_auth)])

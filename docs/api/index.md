@@ -53,6 +53,10 @@ token counting.
 
 - [Rerank documents](rerank.md): `POST /v1/rerank`
 
+## Batch
+
+- [Batch mode](batch.md): `POST /v1/batches` over `/v1/files`, forwarded to OpenAI, OpenRouter or Gemini
+
 ## Models
 
 - [List models](models.md): `GET /v1/models`

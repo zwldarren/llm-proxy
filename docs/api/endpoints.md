@@ -25,6 +25,15 @@ Every route the proxy serves. `X` in the auth column means "API key
 | POST | `/v1/messages/count_tokens` | X | Anthropic | Native upstream count when available, otherwise a local o200k_base estimate |
 | POST | `/v1/embeddings` | X | OpenAI | Embeddings |
 | POST | `/v1/rerank` | X | Cohere-compatible | Rerank documents against a query (`/v2/rerank` is an alias for the Cohere SDK). The named model must carry the `supports_rerank` flag, otherwise `400 invalid_request_error` |
+| POST | `/v1/files` | X | OpenAI | Multipart batch JSONL upload (`purpose=batch`) |
+| GET | `/v1/files` | X | OpenAI | List stored files (`limit` 1–100, `after` cursor, `purpose` filter) |
+| GET | `/v1/files/{file_id}` | X | OpenAI | File metadata |
+| GET | `/v1/files/{file_id}/content` | X | OpenAI | Download the file's JSONL |
+| DELETE | `/v1/files/{file_id}` | X | OpenAI | Delete a file |
+| POST | `/v1/batches` | X | OpenAI | Create a batch from an uploaded JSONL; `/v1/chat/completions` lines only, one model per batch |
+| GET | `/v1/batches` | X | OpenAI | List batches in their last observed state (no upstream polling) |
+| GET | `/v1/batches/{batch_id}` | X | OpenAI | Poll a batch; the first terminal read materializes `output_file_id`/`error_file_id` |
+| POST | `/v1/batches/{batch_id}/cancel` | X | OpenAI | Cancel; `400 batch_cancel_unsupported` where the upstream has no cancel |
 | POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models). The named model must carry the `supports_systemone` flag, otherwise `400 invalid_request_error` |
 | POST | `/v1/decisions` | X | Decisions | OpenAI's Decisions endpoint (`gpt-6-luna`), also served by System One models through the proxy's bridge. Gated by the same `supports_systemone` flag |
 | POST | `/v1/images/generations` | X | OpenAI | JSON body |
@@ -50,6 +59,7 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Chat | All types |
 | Embeddings | `openai`, the `openai-compatible` family (including DeepSeek, Kimi, MiniMax, Moonshot, Qwen, xAI, vLLM, SGLang, Chutes, Mistral, NanoGPT, OpenRouter), `gemini`, `ollama`, `cohere` |
 | Rerank | `cohere` (native `/v2/rerank`), `openrouter` (`/api/v1/rerank`, e.g. `cohere/rerank-v3.5`), the `openai-compatible` family whose upstream serves `/rerank` (vLLM, SGLang, Jina). Gated by the `supports_rerank` flag |
+| Batch (chat) | `openai` (Files + Batches), `openrouter` (inline `/batches`), `gemini` (`models/{model}:batchGenerateContent`). Only `/v1/chat/completions` lines, one model per batch |
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
 | Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `ollama` (speech only, v0.40.8+ — WAV/PCM), `openrouter` (STT), `cohere` (STT only — v2 has no speech synthesis) |
 | Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter`, `cohere` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |

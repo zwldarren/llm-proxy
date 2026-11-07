@@ -1,9 +1,10 @@
-"""Judge spend is real spend: budget windows must include it.
+"""Judge and batch spend are real spend: budget windows must include both.
 
-A judge call is billed on the API key whose request triggered it, so it belongs
-in the spend aggregates budget enforcement reads. It is not a request the client
-made, so request counts stay endpoint-only. These tests pin both halves of that
-rule on the query shape (no database required).
+A judge call is billed on the API key whose request triggered it, and a batch's
+one aggregate row is billed the same way, so both belong in the spend aggregates
+budget enforcement reads. Neither is a request the client made, so request counts
+stay endpoint-only. These tests pin both halves of that rule on the query shape
+(no database required).
 """
 
 from typing import Any
@@ -43,7 +44,7 @@ async def test_key_budget_spend_includes_judge_rows() -> None:
 
     await UsageRepository(session).get_key_spend_since("key-1", 0.0)
 
-    assert _log_type_params(session) == [["endpoint", "judge"]]
+    assert _log_type_params(session) == [["endpoint", "judge", "batch"]]
 
 
 async def test_user_budget_spend_includes_judge_rows() -> None:
@@ -51,7 +52,7 @@ async def test_user_budget_spend_includes_judge_rows() -> None:
 
     await UsageRepository(session).get_user_spend_since(7, 0.0)
 
-    assert _log_type_params(session) == [["endpoint", "judge"]]
+    assert _log_type_params(session) == [["endpoint", "judge", "batch"]]
 
 
 async def test_key_spend_summary_adds_judge_cost_but_not_judge_requests() -> None:
@@ -61,7 +62,7 @@ async def test_key_spend_summary_adds_judge_cost_but_not_judge_requests() -> Non
 
     sql = _literal_sql(session)
     # Cost sums both log types...
-    assert "usage_records.log_type IN ('endpoint', 'judge')" in sql
+    assert "usage_records.log_type IN ('endpoint', 'judge', 'batch')" in sql
     # ...while the request count is a CASE over endpoint rows only: a judge call
     # must not inflate the key's request volume.
     assert "CASE WHEN (usage_records.log_type = 'endpoint') THEN 1 ELSE 0 END" in sql

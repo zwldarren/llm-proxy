@@ -16,6 +16,12 @@ if TYPE_CHECKING:
 #: a shorter window silently under-counts spend and stops enforcing budgets.
 DEFAULT_RETENTION_DAYS = 30
 
+#: Default window (days) for the proxy's own copies of batch files and job rows.
+#: Independent of the log window: an uploaded JSONL and its results are far larger
+#: than a log row, and a batch is a one-shot artefact nobody re-reads weeks later.
+#: ``0`` keeps them indefinitely.
+DEFAULT_BATCH_RETENTION_DAYS = 30
+
 #: Default cap (bytes) on the serialized size of a stored request/response body.
 #: Larger bodies are replaced by a ``{"_truncated": true, "size": N}`` marker so
 #: one oversized payload (a huge context, a base64 image) cannot dominate the
@@ -91,6 +97,13 @@ class LoggingWireConfig(BaseModel):
         ge=0,
         description="Retention days for audit logs (null = inherit log_retention_days)",
     )
+    batch_retention_days: int = Field(
+        default=DEFAULT_BATCH_RETENTION_DAYS,
+        ge=0,
+        description=(
+            "Retention days for the proxy's stored batch files and job rows (0 = keep indefinitely)"
+        ),
+    )
     sensitive_keys: str = Field(
         default="",
         description="Comma-separated extra key names to mask in logs",
@@ -146,6 +159,14 @@ class LoggingConfig(BaseModel):
         default=None,
         ge=0,
         description="Retention days for audit logs",
+    )
+    batch_retention_days: int = Field(
+        default=DEFAULT_BATCH_RETENTION_DAYS,
+        ge=0,
+        description=(
+            "How many days the proxy keeps its own copies of batch input and result "
+            "files, and the job rows that name them"
+        ),
     )
     sensitive_keys: list[str] = Field(
         default_factory=lambda: [

@@ -3,8 +3,8 @@
 Every subsystem that outlives a request is constructed once in
 :mod:`llm_proxy.api.lifecycle` and stored on FastAPI's ``app.state`` bag: the
 config manager, the pooled HTTP client, Redis, the circuit-breaker store, the
-provider-stats store, the MCP manager, one processor per protocol, and the
-web-search runtime. Consumers read them with
+provider-stats store, the MCP manager, the batch-retention sweeper, one processor
+per protocol, and the web-search runtime. Consumers read them with
 ``getattr(request.app.state, "name", None)`` — 43 such probes across 17 modules —
 which has three costs:
 
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI, Request, WebSocket
     from redis.asyncio import Redis
 
+    from llm_proxy.batch.retention import BatchRetentionSweeper
     from llm_proxy.config.manager import DatabaseConfigManager
     from llm_proxy.core.circuit_breaker import CircuitBreakerStore
     from llm_proxy.core.processing.unified import UnifiedProcessor
@@ -184,6 +185,10 @@ class RuntimeServices:
         """
         return self._read("experience_store")
 
+    def batch_retention_sweeper(self) -> BatchRetentionSweeper | None:
+        """The process-lifetime batch-retention sweeper, or ``None`` when uninstalled."""
+        return self._read("batch_retention_sweeper")
+
     def mcp_manager(self) -> MCPProxyManager | None:
         """The per-worker MCP server manager, or ``None`` when it was not built."""
         return self._read("mcp_manager")
@@ -265,6 +270,10 @@ class RuntimeServices:
     def install_experience_store(self, store: ModelExperienceStore) -> None:
         """Install the routing experience store (``startup_experience_store``)."""
         self._state.experience_store = store
+
+    def install_batch_retention_sweeper(self, sweeper: BatchRetentionSweeper | None) -> None:
+        """Install (or clear) the batch-retention sweeper (``startup_background_services``)."""
+        self._state.batch_retention_sweeper = sweeper
 
     def install_mcp_manager(self, manager: MCPProxyManager) -> None:
         """Install the MCP server manager (``startup_mcp_servers``)."""

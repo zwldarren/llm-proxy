@@ -192,6 +192,19 @@ class TestLoadLoggingConfig:
         with pytest.raises(ConfigurationError, match="Invalid audit_retention_days"):
             load_logging_config({"audit_retention_days": "abc"})
 
+    def test_batch_retention_days_defaults_to_thirty(self):
+        assert load_logging_config().batch_retention_days == 30
+
+    def test_with_batch_retention_days_override(self):
+        assert load_logging_config({"batch_retention_days": 7}).batch_retention_days == 7
+
+    def test_zero_batch_retention_days_keeps_files(self):
+        assert load_logging_config({"batch_retention_days": 0}).batch_retention_days == 0
+
+    def test_invalid_batch_retention_days_override_raises_error(self):
+        with pytest.raises(ConfigurationError, match="Invalid batch_retention_days"):
+            load_logging_config({"batch_retention_days": "abc"})
+
     def test_invalid_audit_sampling_rate_override_raises_error(self):
         with pytest.raises(ConfigurationError, match="Invalid audit_sampling_rate"):
             load_logging_config({"audit_sampling_rate": "abc"})

@@ -29,7 +29,7 @@ from llm_proxy.api.context import (
     build_transcription_request_context,
     build_translation_request_context,
 )
-from llm_proxy.api.dependencies import get_request_identity, require_api_key_auth
+from llm_proxy.api.dependencies import get_request_identity, require_any_auth
 from llm_proxy.api.fast_path import FastPathEntry
 from llm_proxy.api.keepalive import (
     await_with_disconnect_monitor,
@@ -72,13 +72,6 @@ _NON_CHAT_CONTEXT_BUILDERS: frozendict[str, Any] = frozendict(
         "translation": build_translation_request_context,
     }
 )
-
-
-async def require_any_auth(request: Request):
-    """Require either API key or admin JWT authentication."""
-    identity = get_request_identity(request)
-    if not identity.is_authenticated:
-        await require_api_key_auth(request)
 
 
 def _create_endpoint_fn(

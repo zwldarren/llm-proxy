@@ -268,6 +268,10 @@ text with a .kicker-<category> class in their frontmatter pageClass. */
   content: 'Rerank';
 }
 
+.kicker-batch .vp-doc > div > h1:first-child::before {
+  content: 'Batch';
+}
+
 .kicker-systemone .vp-doc > div > h1:first-child::before {
   content: 'Evaluation';
 }
@@ -302,6 +306,10 @@ html[lang^='zh'] .kicker-images .vp-doc > div > h1:first-child::before {
 
 html[lang^='zh'] .kicker-audio .vp-doc > div > h1:first-child::before {
   content: '音频';
+}
+
+html[lang^='zh'] .kicker-batch .vp-doc > div > h1:first-child::before {
+  content: '批量';
 }
 
 html[lang^='zh'] .kicker-systemone .vp-doc > div > h1:first-child::before,

@@ -387,6 +387,37 @@ otherwise forward.
 - Model list. `GET /v1/models` (Cohere documents no `/v2/models`), with its own
   `page_size`/`page_token` pagination rather than the OpenAI-style page tokens.
 
+### Gemini specifics
+
+The `gemini` provider type speaks `generateContent`, or the Interactions API when
+`metadata.api_variant` says so. Which request shape the family accepts is decided
+by the model version (see the family-override row in the table above).
+
+- Dropped parameters: `n > 1` (which would be `candidateCount`) and `logprobs` /
+  `top_logprobs` (which would be `responseLogprobs` / `logprobs`) are not sent,
+  and the log names them. Gemini answers both with a bare 400 ("Multiple
+  candidates is not enabled for this model", "Logprobs is not enabled for this
+  model") on the models reachable today. The client still gets a normal
+  single-choice answer.
+- Structured output: `response_format: {"type": "json_schema", …}` becomes
+  `generationConfig.responseFormat.text` — plain JSON Schema, `$ref` / `oneOf` /
+  `additionalProperties` intact — on Gemini 3 and later, and the sanitized
+  `responseMimeType` + `responseSchema` pair below that. The format member's MIME
+  field takes the enum member `APPLICATION_JSON`; the plain string
+  `application/json` is only accepted on the legacy `responseMimeType` and on the
+  Interactions API.
+- Gemini-native fields: `generationConfig`, `cachedContent`, `safetySettings` and
+  the rest have no surface on the client protocols. Inject them through a model
+  mapping's `parameter_overrides`: keys the proxy injected are exempt from the
+  unknown-fields policy and reach the upstream body. An injected
+  `generationConfig` replaces the one the proxy built, so it has to carry every
+  field the request needs.
+- Batch mode: `models/{model}:batchGenerateContent` is proxied through the
+  OpenAI-compatible batch surface (see [Batch mode](../api/batch.md)). The proxy
+  sends the batch's requests inline, which Gemini caps at 20 MB, and refuses a
+  batch on a provider configured with `api_variant: "interactions"`. For the
+  same 50% discount on the request path instead, use `service_tier: "flex"`.
+
 ## Web search: native or proxy-side
 
 Two systems can answer a `web_search` tool, and exactly one of them runs per request:

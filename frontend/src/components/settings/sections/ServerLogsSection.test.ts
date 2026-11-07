@@ -37,12 +37,13 @@ describe("ServerLogsSection", () => {
     expect(groups[0].text()).toContain("settings.sensitiveKeys");
 
     expect(groups[1].text()).toContain("settings.logRetentionDays");
+    expect(groups[1].text()).toContain("settings.batchRetentionDays");
     expect(groups[1].text()).toContain("settings.cleanOldLogs");
 
     expect(groups[2].text()).toContain("settings.samplingRate");
     expect(groups[2].text()).toContain("settings.maxLoggedBodySize");
     expect(groups[2].text()).toContain("settings.auditSamplingRate");
     expect(groups[2].text()).toContain("settings.auditRetentionDays");
-    expect(wrapper.findAllComponents(SettingsItem)).toHaveLength(10);
+    expect(wrapper.findAllComponents(SettingsItem)).toHaveLength(11);
   });
 });

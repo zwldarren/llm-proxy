@@ -1294,6 +1294,8 @@ export interface LoggingConfig {
   audit_sampling_rate: number | null;
   /** Audit-log retention days; null inherits log_retention_days. */
   audit_retention_days: number | null;
+  /** Days the proxy keeps its own copies of batch files and job rows; 0 = forever. */
+  batch_retention_days: number;
   /** Comma-separated extra key names to mask in logs. */
   sensitive_keys: string;
   /** Store raw SSE text for streaming responses instead of the reassembled JSON. */

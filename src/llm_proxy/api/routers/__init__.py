@@ -10,6 +10,7 @@ from llm_proxy.api.routers.protocol import (
 # Import routers
 from .api_keys import router as api_keys_router
 from .auth import router as auth_router
+from .batches import router as batches_router
 from .catalog import router as catalog_router
 from .config import router as config_router
 from .feedback import router as feedback_router
@@ -43,6 +44,7 @@ __all__ = [
     # Router exports
     "api_keys_router",
     "auth_router",
+    "batches_router",
     "catalog_router",
     "config_router",
     "feedback_router",

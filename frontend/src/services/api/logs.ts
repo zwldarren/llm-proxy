@@ -12,6 +12,17 @@ import { http } from "../http";
 const BASE_URL = "/api/logs";
 
 /**
+ * Log types a spend aggregate spans. Keep in sync with the backend's canonical
+ * `BILLABLE_SPEND_LOG_TYPES` (database/repositories/usage_repository.py): the
+ * dashboard's totals must deduct the same spend budgets do. `endpoint` is the
+ * ordinary request path, `judge` the routing judge's own call row and `batch`
+ * the one aggregate row a finished batch writes when its results materialize.
+ * Request *counts* still come from request_logs / endpoint rows, so judge and
+ * batch add cost without inflating request volume or latency averages.
+ */
+const SPEND_LOG_TYPES = "endpoint,judge,batch";
+
+/**
  * Build URLSearchParams from LogFilter.
  * The 'search' field is appended by callers so it can be sent to the unified
  * `/api/logs` endpoint.
@@ -82,7 +93,7 @@ export const logsApi = {
     const params = new URLSearchParams();
     if (filter.start_date) params.append("start_date", filter.start_date);
     if (filter.end_date) params.append("end_date", filter.end_date);
-    if (filter.log_type) params.append("log_type", filter.log_type);
+    params.append("log_type", filter.log_type?.trim() || SPEND_LOG_TYPES);
     if (filter.model) params.append("model", filter.model);
     return http.get<UsageStatsResponse>(`${BASE_URL}/usage-stats?${params.toString()}`);
   },
@@ -91,7 +102,7 @@ export const logsApi = {
     const params = new URLSearchParams();
     if (filter.start_date) params.append("start_date", filter.start_date);
     if (filter.end_date) params.append("end_date", filter.end_date);
-    if (filter.log_type) params.append("log_type", filter.log_type);
+    params.append("log_type", filter.log_type?.trim() || SPEND_LOG_TYPES);
     if (filter.model) params.append("model", filter.model);
     return http.get<HourlyUsageResponse>(`${BASE_URL}/usage-stats/hourly?${params.toString()}`);
   },

@@ -141,6 +141,21 @@ async def _get_user_filter(request: Request, session: AsyncSession) -> int | Non
     return user_id
 
 
+def _parse_log_type_filter(raw: str | None) -> str | tuple[str, ...] | None:
+    """Turn the ``log_type`` query value into the filter the repositories take.
+
+    One name stays a string (the repositories' exact-match path); several —
+    ``endpoint,judge,batch``, which the usage views send so a spend figure spans
+    every row kind that carries cost — become a tuple, which they compile to ``IN``.
+    """
+    if not raw:
+        return None
+    names = tuple(part.strip() for part in raw.split(",") if part.strip())
+    if not names:
+        return None
+    return names[0] if len(names) == 1 else names
+
+
 def _parse_iso_datetime_to_ts(value: str | None, is_end_date: bool = False) -> float | None:
     """Parse ISO datetime string to Unix timestamp.
 
@@ -359,6 +374,29 @@ async def _fetch_usage_from_repo(
     return summary, by_provider, by_model, daily_usage
 
 
+def _usage_summary_is_empty(summary: dict) -> bool:
+    """Whether a usage aggregate contains no cost or token evidence at all.
+
+    ``total_requests`` alone is not enough: on a spend view it is intentionally
+    zero when the window contains only batch or judge rows, which still carry
+    billable cost and tokens.
+    """
+    return (
+        all(
+            safe_int(summary.get(field, 0)) == 0
+            for field in (
+                "total_requests",
+                "total_input_tokens",
+                "total_output_tokens",
+                "total_cache_creation_tokens",
+                "total_cache_read_tokens",
+                "total_cached_prompt_tokens",
+            )
+        )
+        and safe_float(summary.get("total_cost", 0.0)) == 0.0
+    )
+
+
 def _token_breakdown(item: dict) -> dict[str, int]:
     """The cache-token quintet shared by every usage row shape in this module.
 
@@ -381,7 +419,14 @@ async def get_usage_stats(
     session: AsyncSession = get_async_session_dep,
     start_date: str | None = Query(None, description="ISO8601 start datetime"),
     end_date: str | None = Query(None, description="ISO8601 end datetime"),
-    log_type: str | None = Query("endpoint", description="Filter by log type (audit, endpoint)"),
+    log_type: str | None = Query(
+        "endpoint",
+        description=(
+            "Filter by log type (audit, endpoint), or a comma-separated list such as "
+            "'endpoint,judge,batch' to aggregate spend across request, judge and batch "
+            "rows. Requests are always counted from endpoint rows only"
+        ),
+    ),
     model: str | None = Query(None, description="Filter by model name"),
 ) -> UsageStatsResponse:
     """Get aggregated usage statistics including totals, costs, and token usage.
@@ -393,11 +438,12 @@ async def get_usage_stats(
     user_filter = await _get_user_filter(request, session)
     start_ts = _parse_iso_datetime_to_ts(start_date)
     end_ts = _parse_iso_datetime_to_ts(end_date, is_end_date=True)
+    log_types = _parse_log_type_filter(log_type)
 
     usage_filters: dict[str, Any] = {
         "start_ts": start_ts,
         "end_ts": end_ts,
-        "log_type": log_type,
+        "log_type": log_types,
         "user_id": user_filter,
         "model": model,
     }
@@ -414,7 +460,7 @@ async def get_usage_stats(
         _on_own_session(
             LogRepository,
             lambda repo: repo.get_usage_stats(
-                start_ts=start_ts, end_ts=end_ts, log_type=log_type, user_id=user_filter
+                start_ts=start_ts, end_ts=end_ts, log_type=log_types, user_id=user_filter
             ),
         ),
     )
@@ -432,9 +478,11 @@ async def get_usage_stats(
         summary_dict["total_requests"] = log_summary["total_requests"]
         summary_dict["success_rate"] = log_summary["success_rate"]
 
-    # Backward compatibility: if usage_records has no rows for the query window,
-    # fall back to request_logs aggregation so historical stats remain visible.
-    if safe_int(summary_dict.get("total_requests", 0)) == 0:
+    # Backward compatibility: if usage_records has no cost or token evidence for
+    # the window, fall back to request_logs so historical stats remain visible.
+    # A zero request count alone is not empty: batch/judge spend carries no
+    # request, and request_logs cannot reproduce that cost.
+    if _usage_summary_is_empty(summary_dict):
         (
             summary_dict,
             by_provider_dicts,
@@ -506,7 +554,14 @@ async def get_hourly_usage_stats(
     session: AsyncSession = get_async_session_dep,
     start_date: str | None = Query(None, description="ISO8601 start datetime"),
     end_date: str | None = Query(None, description="ISO8601 end datetime"),
-    log_type: str | None = Query("endpoint", description="Filter by log type (audit, endpoint)"),
+    log_type: str | None = Query(
+        "endpoint",
+        description=(
+            "Filter by log type (audit, endpoint), or a comma-separated list such as "
+            "'endpoint,judge,batch' to aggregate spend across request, judge and batch "
+            "rows. Requests are always counted from endpoint rows only"
+        ),
+    ),
     model: str | None = Query(None, description="Filter by model name"),
 ) -> HourlyUsageResponse:
     """Get usage statistics bucketed by hour, with cache token breakdown.
@@ -521,7 +576,7 @@ async def get_hourly_usage_stats(
     filters: dict[str, Any] = {
         "start_ts": start_ts,
         "end_ts": end_ts,
-        "log_type": log_type,
+        "log_type": _parse_log_type_filter(log_type),
         "user_id": user_filter,
         "model": model,
     }

@@ -19,7 +19,7 @@ from llm_proxy.core.conversion import (
 from llm_proxy.core.errors.utils import extract_retry_after
 from llm_proxy.core.exceptions import ProviderError
 from llm_proxy.core.request_type import RequestType
-from llm_proxy.core.utils import quiet_aclose
+from llm_proxy.core.utils import optional_int, quiet_aclose
 from llm_proxy.http.client import AsyncSession
 from llm_proxy.models import (
     ConversionTier,
@@ -993,7 +993,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
             name=raw.get("name") or model_id,
             description=raw.get("description"),
             owned_by=raw.get("owned_by"),
-            context_length=_as_int(raw.get("context_length")),
+            context_length=optional_int(raw.get("context_length")),
             architecture=(
                 ProviderModelArchitecture(
                     input_modalities=_as_str_list(architecture.get("input_modalities")),
@@ -1060,14 +1060,6 @@ class BaseHttpProvider(BaseAdapter, ABC):
         if model and "{model}" in url:
             url = url.replace("{model}", model)
         return url
-
-
-def _as_int(value: Any) -> int | None:
-    """Coerce an upstream numeric field, tolerating strings and nulls."""
-    try:
-        return int(value)
-    except TypeError, ValueError:
-        return None
 
 
 def _as_str_list(value: Any) -> list[str]:

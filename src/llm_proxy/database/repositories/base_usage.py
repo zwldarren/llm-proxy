@@ -4,14 +4,15 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
-from sqlalchemy import Date, and_, delete, func, select
+from sqlalchemy import Date, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import case
 
 from llm_proxy.database import is_sqlite
+from llm_proxy.database.repositories.base import BaseRepository
 
 
-class BaseUsageRepository:
+class BaseUsageRepository(BaseRepository):
     """Base class providing shared usage statistics query logic.
 
     This class encapsulates the common query building patterns used by both
@@ -30,7 +31,7 @@ class BaseUsageRepository:
     _MAX_FILL_BUCKETS = 24 * 62
 
     def __init__(self, session: AsyncSession, model_class: Any):
-        self.session = session
+        super().__init__(session)
         self.model = model_class
 
     #: Rows removed per statement by :meth:`_delete_in_batches`. Rows here carry
@@ -39,36 +40,22 @@ class BaseUsageRepository:
     #: lock is held on a store that has grown to many GB.
     DELETE_BATCH_SIZE = 2000
 
-    async def _delete_in_batches(self, conditions: list[Any]) -> int:
-        """Delete rows matching ``conditions`` in bounded, separately committed batches.
+    #: The log type a row must carry to count as a *request*. See
+    #: :meth:`_requests_aggregate`.
+    REQUEST_LOG_TYPE = "endpoint"
 
-        Returns the total number of deleted rows. A single unbounded DELETE over
-        a multi-GB retention backlog holds the write lock for its whole duration
-        and journals every freed page into one WAL burst; deleting by primary key
-        in chunks keeps each transaction short and releases the lock between
-        them. Every batch is its own transaction, so a failure mid-way leaves the
-        already-deleted rows deleted (retention is idempotent and re-run daily).
+    #: Spend-bearing kinds that are never requests: a judge row is a routing
+    #: decision and a batch row is one aggregate standing for many requests.
+    NON_REQUEST_LOG_TYPES: frozenset[str] = frozenset({"judge", "batch"})
+
+    async def _delete_in_batches(self, conditions: list[Any]) -> int:
+        """Delete rows matching ``conditions`` in bounded batches; returns rowcount.
+
+        Thin delegation to the shared helper, which owns the batching and the
+        ``SKIP LOCKED`` claim; ``DELETE_BATCH_SIZE`` here is smaller because these
+        rows carry request/response bodies.
         """
-        size = self.DELETE_BATCH_SIZE
-        total = 0
-        while True:
-            # SKIP LOCKED keeps concurrently running cleanup tasks (one per
-            # uvicorn worker) from locking the same candidate rows in a
-            # different order: each claim sees only rows no other worker is
-            # deleting. SQLite ignores the locking clause (single writer), so
-            # both backends share this path.
-            doomed = (
-                select(self.model.id)
-                .where(*conditions)
-                .limit(size)
-                .with_for_update(skip_locked=True)
-            )
-            result = await self.session.execute(delete(self.model).where(self.model.id.in_(doomed)))
-            deleted = int(getattr(result, "rowcount", 0) or 0)
-            await self.session.commit()
-            total += deleted
-            if deleted < size:
-                return total
+        return await super().delete_in_batches(self.model, conditions, size=self.DELETE_BATCH_SIZE)
 
     def _build_time_filters(
         self,
@@ -108,10 +95,56 @@ class BaseUsageRepository:
             filters.append(self.model.model == model)
         return filters
 
-    def _usage_aggregates(self) -> list[Any]:
-        """The per-group aggregates shared by every grouped usage query."""
+    def _counts_only_endpoint_rows(self, log_type: str | Sequence[str] | None) -> bool:
+        """Whether request counts must include only ``endpoint`` rows.
+
+        A spend view (``endpoint``, ``judge``, ``batch``) does, and so does a
+        single non-request kind such as ``batch``: those rows carry cost without
+        being work a client asked for. A homogeneous audit or endpoint view keeps
+        its historical row-count behavior.
+        """
+        if isinstance(log_type, str):
+            return log_type in self.NON_REQUEST_LOG_TYPES
+        return log_type is not None and bool(log_type)
+
+    def _requests_aggregate(self, log_type: str | Sequence[str] | None) -> Any:
+        """The ``requests`` aggregate for the query's log-type filter.
+
+        A homogeneous view counts its rows — an audit view counts audit rows, an
+        endpoint view counts requests. A spend view, or a non-request-only view,
+        counts only ``endpoint`` rows, because the others carry cost without being
+        work a client asked for (ADR-0018, ADR-0058).
+        """
+        if not self._counts_only_endpoint_rows(log_type):
+            return func.count()
+        return func.coalesce(
+            func.sum(
+                case(
+                    (self.model.log_type == self.REQUEST_LOG_TYPE, 1),
+                    else_=0,
+                )
+            ),
+            0,
+        )
+
+    def _success_aggregate(self, log_type: str | Sequence[str] | None) -> Any:
+        """The ``success_count`` aggregate, narrowed the same way requests are."""
+        conditions: list[Any] = [
+            self.model.status_code >= 200,
+            self.model.status_code < 300,
+        ]
+        if self._counts_only_endpoint_rows(log_type):
+            conditions.append(self.model.log_type == self.REQUEST_LOG_TYPE)
+        return func.coalesce(func.sum(case((and_(*conditions), 1), else_=0)), 0)
+
+    def _usage_aggregates(self, log_type: str | Sequence[str] | None = "endpoint") -> list[Any]:
+        """The per-group aggregates shared by every grouped usage query.
+
+        ``log_type`` is the query's own filter because the ``requests`` count
+        depends on it: see :meth:`_requests_aggregate`.
+        """
         aggregates = {
-            "requests": func.count(),
+            "requests": self._requests_aggregate(log_type),
             "cost": func.coalesce(func.sum(self.model.cost_usd), 0.0),
             "input_tokens": func.coalesce(func.sum(self.model.prompt_tokens), 0),
             "output_tokens": func.coalesce(func.sum(self.model.completion_tokens), 0),
@@ -162,9 +195,10 @@ class BaseUsageRepository:
         bucket_expr: Any,
         key_name: str,
         filters: list[Any],
+        log_type: str | Sequence[str] | None = "endpoint",
     ) -> dict[str, dict[str, Any]]:
         """Group usage rows by `bucket_expr`, keyed by the rendered bucket."""
-        stmt = select(bucket_expr.label(key_name), *self._usage_aggregates())
+        stmt = select(bucket_expr.label(key_name), *self._usage_aggregates(log_type))
         if filters:
             stmt = stmt.where(*filters)
         stmt = stmt.group_by(key_name).order_by(key_name)
@@ -233,6 +267,11 @@ class BaseUsageRepository:
 
         Returns:
             Dictionary with aggregated stats
+
+        ``total_requests``/``success_rate`` count only ``endpoint`` rows when the
+        filter spans several row kinds: a spend view also reads judge calls and
+        batch aggregates, which carry cost but are not requests (ADR-0018,
+        ADR-0058).
         """
         filters = self._build_time_filters(
             start_ts=start_ts,
@@ -244,26 +283,12 @@ class BaseUsageRepository:
         )
 
         select_columns = [
-            func.count().label("total_requests"),
+            self._requests_aggregate(log_type).label("total_requests"),
             func.coalesce(func.sum(self.model.cost_usd), 0.0).label("total_cost"),
             func.coalesce(func.sum(self.model.prompt_tokens), 0).label("total_input_tokens"),
             func.coalesce(func.sum(self.model.completion_tokens), 0).label("total_output_tokens"),
             func.coalesce(func.avg(self.model.response_time_ms), 0.0).label("avg_response_time_ms"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                self.model.status_code >= 200,
-                                self.model.status_code < 300,
-                            ),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("success_count"),
+            self._success_aggregate(log_type).label("success_count"),
             func.coalesce(func.sum(self.model.cache_creation_input_tokens), 0).label(
                 "total_cache_creation_tokens"
             ),
@@ -375,7 +400,7 @@ class BaseUsageRepository:
             model=model,
         )
 
-        select_columns: list[Any] = [self.model.provider, *self._usage_aggregates()]
+        select_columns: list[Any] = [self.model.provider, *self._usage_aggregates(log_type)]
 
         if include_ttft and hasattr(self.model, "ttft_ms"):
             select_columns.append(
@@ -431,7 +456,7 @@ class BaseUsageRepository:
         select_columns: list[Any] = [
             self.model.model,
             self.model.provider,
-            *self._usage_aggregates(),
+            *self._usage_aggregates(log_type),
         ]
 
         if include_ttft and hasattr(self.model, "ttft_ms"):
@@ -489,12 +514,12 @@ class BaseUsageRepository:
         else:
             date_func = func.to_timestamp(self.model.timestamp).cast(Date)
 
-        data_by_date = await self._aggregate_by_bucket(date_func, "date", filters)
+        data_by_date = await self._aggregate_by_bucket(date_func, "date", filters, log_type)
 
         model_stmt = select(
             date_func.label("date"),
             self.model.model.label("model"),
-            *self._usage_aggregates(),
+            *self._usage_aggregates(log_type),
         )
         model_filters = [*filters, self.model.model.isnot(None)]
         model_stmt = model_stmt.where(*model_filters)
@@ -568,12 +593,12 @@ class BaseUsageRepository:
                 "YYYY-MM-DD HH24:00",
             )
 
-        data_by_bucket = await self._aggregate_by_bucket(hour_func, "bucket", filters)
+        data_by_bucket = await self._aggregate_by_bucket(hour_func, "bucket", filters, log_type)
 
         model_stmt = select(
             hour_func.label("bucket"),
             self.model.model.label("model"),
-            *self._usage_aggregates(),
+            *self._usage_aggregates(log_type),
         )
         model_filters = [*filters, self.model.model.isnot(None)]
         model_stmt = model_stmt.where(*model_filters)

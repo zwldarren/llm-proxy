@@ -76,7 +76,9 @@ are CORS-exposed for browser clients.
 - Retention: logs default to 30 days, audit inherits that, and usage records share the
   same window. Adjust in [Settings → Log Management](../admin/settings.md#log-management),
   or delete manually with `DELETE /api/logs/cleanup?older_than_days=N` (admin-only;
-  without the parameter it applies the configured retention window).
+  without the parameter it applies the configured retention window). Batch files and job
+  rows have their own window (**Batch Retention Period**, default 30 days) and are never
+  touched by the manual log cleanup.
 - Sampling: keep `sampling_rate` at 1.0 while investigating; lower it to cut
   storage without losing metadata.
 - Backups: usage and logs live in the database: see

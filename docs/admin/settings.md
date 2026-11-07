@@ -35,6 +35,7 @@ Grouping does not change the underlying hot-reloaded settings.
 | **Log Raw Stream** | off | Store the raw SSE text of streaming responses. Off, a streamed response is reassembled into the same JSON a non-streaming call would return — smaller, masked like any other body, and rendered without SSE parsing. The native-passthrough tiers are reassembled too (Chat Completions, Anthropic and Responses frames are each rebuilt into their non-streaming shape); generic image streams keep their raw frames, since they have no non-streaming shape to rebuild. Turn on (or send `x-log-full: true` for one request) to inspect the exact wire frames |
 | **Log Retention Period** | `30` | Rows older than this are deleted by a sweep per log type that runs once a day, deleting in bounded batches (looped until exhausted) instead of one unbounded one; `0` keeps logs forever. Usage records (the numbers behind the dashboard) share this window. Keep this at ≥ 31 days while monthly or lifetime budgets are in use: budget enforcement sums spend from `usage_records` over the whole calendar budget window (a monthly budget can look back up to 31 days), so a shorter window silently under-counts spend and budgets stop being enforced reliably. Without a monthly/lifetime budget, shorter values are fine |
 | **Audit Retention Days** | inherits | Separate retention for audit rows |
+| **Batch Retention Period** | `30` | Days the proxy keeps its own copies of batch files (uploaded request files and materialized results) and the job rows that name them. A sweep deletes jobs past the window first, then the files nothing references any more, so a retained job never loses its input or result file; `0` keeps them forever. Upstream copies are unaffected |
 | **Body Sampling Rate** | `1.0` | Fraction of requests whose bodies are stored, once **Log Input/Output** is on. Sampling gates **body capture only** — metadata is always recorded, and a sampled-out body is stored as `{"_sampled_out": true}` (distinct from the disabled marker). A client can force full capture for one request with `x-log-full: true` |
 | **Max Logged Body Bytes** | `1048576` (1 MiB) | Cap on stored request/response bodies. A body bigger than the cap is stored as `{"_truncated": true, "size": N}` (the original serialized size in bytes) instead of the payload. Enforced at write time, so it also applies to requests that forced capture with `x-log-full: true`. `0` = unlimited |
 | **Audit Sampling Rate** | inherits | Same, for audit rows |
@@ -43,7 +44,9 @@ Grouping does not change the underlying hot-reloaded settings.
 | **Manual Cleanup** | — | The **Cleanup Logs** action permanently deletes rows older than the chosen age. Irreversible |
 
 Usage records (the numbers behind the dashboard) are stored separately but pruned on the
-same window as the logs; set **Log Retention Period** to `0` to keep both forever.
+same window as the logs; set **Log Retention Period** to `0` to keep them forever. Batch
+files and job rows follow their own window instead (**Batch Retention Period**), because a
+batch payload is far larger than a log row and nobody re-reads it weeks later.
 
 ### Web Search
 

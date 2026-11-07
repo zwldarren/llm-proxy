@@ -83,12 +83,14 @@ class TestStartupBackgroundServices:
         app = FastAPI()
         logging_config = MagicMock()
         logging_config.retention_days = 45
+        logging_config.batch_retention_days = 30
         with (
             patch.object(lifecycle, "start_background_log_writer", MagicMock()) as start_log,
             patch.object(lifecycle, "start_background_usage_writer", MagicMock()) as start_usage,
             patch.object(
                 lifecycle, "resolve_logging_config", MagicMock(return_value=logging_config)
             ),
+            patch("llm_proxy.batch.retention.BatchRetentionSweeper") as sweeper_cls,
         ):
             await lifecycle.startup_background_services(app)
 
@@ -96,6 +98,9 @@ class TestStartupBackgroundServices:
         # Usage records share the UI-managed retention window and get the config
         # manager so later settings changes are picked up per sweep.
         start_usage.assert_called_once_with(45, None)
+        sweeper_cls.assert_called_once_with(30, None)
+        sweeper_cls.return_value.start.assert_called_once()
+        assert app.state.batch_retention_sweeper is sweeper_cls.return_value
 
 
 class TestShutdownServices:
@@ -114,6 +119,9 @@ class TestShutdownServices:
         app.state.web_search_interceptor.close = AsyncMock()
         app.state.mcp_manager = MagicMock()
         app.state.mcp_manager.shutdown_all = AsyncMock()
+        sweeper = MagicMock()
+        sweeper.stop = AsyncMock()
+        app.state.batch_retention_sweeper = sweeper
 
         tracing_registry = MagicMock()
         tracing_registry.shutdown = AsyncMock()
@@ -136,6 +144,8 @@ class TestShutdownServices:
         close_db.assert_awaited_once()
         app.state.http_client.close.assert_awaited_once()
         close_redis.assert_awaited_once()
+        sweeper.stop.assert_awaited_once()
+        assert app.state.batch_retention_sweeper is None
         app.state.mcp_manager.shutdown_all.assert_awaited_once()
 
     async def test_skips_absent_subsystems(self):

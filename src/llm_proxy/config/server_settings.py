@@ -725,6 +725,11 @@ def load_logging_config(overrides: dict[str, Any] | None = None) -> LoggingConfi
         overrides.get("audit_retention_days"), "audit_retention_days"
     )
 
+    try:
+        batch_retention_days = int(_wire_value(overrides, defaults, "batch_retention_days"))
+    except (ValueError, TypeError) as exc:
+        raise ConfigurationError(f"Invalid batch_retention_days: {exc}") from exc
+
     sensitive_keys = [
         "authorization",
         "api_key",
@@ -759,6 +764,7 @@ def load_logging_config(overrides: dict[str, Any] | None = None) -> LoggingConfi
         sampling_rate=sampling_rate,
         audit_sampling_rate=audit_sampling_rate,
         audit_retention_days=audit_retention_days,
+        batch_retention_days=batch_retention_days,
         sensitive_keys=sensitive_keys,
         verbose_routing_logs=verbose_routing_logs,
     )

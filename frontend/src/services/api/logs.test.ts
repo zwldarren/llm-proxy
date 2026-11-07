@@ -16,6 +16,15 @@ function parseUrl(value: string) {
   return new URL(value, "http://test");
 }
 
+function getLastCallUrl(mockFn: Mock): string {
+  const calls = mockFn.mock.calls;
+  const call = calls[calls.length - 1];
+  if (!call || call.length === 0) {
+    throw new Error("No calls recorded");
+  }
+  return call[0] as string;
+}
+
 function getCallUrl(mockFn: Mock, callIndex: number): string {
   const calls = mockFn.mock.calls;
   const call = calls[callIndex];
@@ -83,6 +92,38 @@ describe("logsApi", () => {
     await logsApi.getLogs({});
     const unfiltered = parseUrl(getCallUrl(http.get as Mock, 6));
     expect(unfiltered.searchParams.has("trace_id")).toBe(false);
+  });
+
+  it("getUsageStats spans every billable row kind by default", async () => {
+    await logsApi.getUsageStats();
+
+    const parsed = parseUrl(getLastCallUrl(http.get as Mock));
+    expect(parsed.pathname).toBe("/api/logs/usage-stats");
+    expect(parsed.searchParams.get("log_type")).toBe("endpoint,judge,batch");
+  });
+
+  it("getHourlyUsage spans the same row kinds by default", async () => {
+    await logsApi.getHourlyUsage();
+
+    const parsed = parseUrl(getLastCallUrl(http.get as Mock));
+    expect(parsed.pathname).toBe("/api/logs/usage-stats/hourly");
+    expect(parsed.searchParams.get("log_type")).toBe("endpoint,judge,batch");
+  });
+
+  it("getUsageStats keeps an explicit log type", async () => {
+    await logsApi.getUsageStats({ log_type: "audit" });
+
+    expect(parseUrl(getLastCallUrl(http.get as Mock)).searchParams.get("log_type")).toBe("audit");
+  });
+
+  it("getUsageStats treats a blank log type as unset", async () => {
+    // An empty value would reach the API as `log_type=` and mean "no filter",
+    // aggregating every log type instead of the spend ones.
+    await logsApi.getUsageStats({ log_type: "   " });
+
+    expect(parseUrl(getLastCallUrl(http.get as Mock)).searchParams.get("log_type")).toBe(
+      "endpoint,judge,batch"
+    );
   });
 
   it("deleteOldLogs calls the purge endpoint with older_than_days", async () => {

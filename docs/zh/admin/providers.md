@@ -326,6 +326,29 @@ OpenAI 字段。
 - 模型列表。 `GET /v1/models`（Cohere 没有文档化 `/v2/models`），使用自己的
   `page_size`/`page_token` 分页，而不是 OpenAI 风格的分页 Token。
 
+### Gemini 专属说明
+
+`gemini` 提供商类型默认走 `generateContent`，把 `metadata.api_variant` 设成接口方言后走
+Interactions API。上游接受哪种请求形状由模型版本决定（见上文表格里模型家族覆盖那一行）。
+
+- 会被丢弃的参数：`n > 1`（对应 `candidateCount`）和 `logprobs` / `top_logprobs`
+  （对应 `responseLogprobs` / `logprobs`）不会发往上游，日志里会点名它们。当前可用的模型
+  对上这两组字段都直接返回 400（"Multiple candidates is not enabled for this model"、
+  "Logprobs is not enabled for this model"）。客户端仍然会拿到正常的单候选回答。
+- 结构化输出：`response_format: {"type": "json_schema", …}` 在 Gemini 3 及以后映射为
+  `generationConfig.responseFormat.text`，传完整 JSON Schema（`$ref`、`oneOf`、
+  `additionalProperties` 都保留）；更早的家族用清洗后的 `responseMimeType` +
+  `responseSchema`。格式成员里的 MIME 字段要填枚举值 `APPLICATION_JSON`，字符串
+  `application/json` 只在旧的 `responseMimeType` 和 Interactions API 上有效。
+- Gemini 原生字段：`generationConfig`、`cachedContent`、`safetySettings` 这些字段在客户端
+  协议上没有入口。用模型映射的 `parameter_overrides` 注入：代理注入的键不受未知字段策略
+  约束，会进入发往上游的 body。注入的 `generationConfig` 会整体替换代理构建的那一份，
+  所以要把这次请求需要的字段都写全。
+- 批量模式：`models/{model}:batchGenerateContent` 已通过 OpenAI 兼容的批量接口代理
+  （见[批量模式](/zh/api/batch)）：代理把作业里的请求内联发给 Gemini，受其 20 MB 上限
+  约束；提供商配置成 `api_variant: "interactions"` 时批量会被拒绝。若想改在请求链路上拿
+  同样的 50% 折扣，用 `service_tier: "flex"`。
+
 ## 联网搜索：原生还是代理侧
 
 能应答 `web_search` 工具的机制有两套，每个请求只会运行其中一套：

@@ -50,6 +50,7 @@ from llm_proxy.api.middleware.security import (
 from llm_proxy.api.routers import (
     api_keys_router,
     auth_router,
+    batches_router,
     catalog_router,
     config_router,
     create_all_protocol_routers,
@@ -227,6 +228,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog_router)
     app.include_router(logs_router)
     app.include_router(api_keys_router)
+    app.include_router(batches_router)  # /v1/files + /v1/batches (batch mode)
     app.include_router(health_router)
     app.include_router(mcp_router)
     app.include_router(mcp_public_router)

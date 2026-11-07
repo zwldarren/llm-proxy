@@ -131,6 +131,13 @@ TAGS: list[dict[str, str]] = [
     {"name": "embeddings", "description": "Text embeddings."},
     {"name": "rerank", "description": "Document reranking."},
     {
+        "name": "batch",
+        "description": (
+            "Batch mode: upload a JSONL file and run its chat requests as one "
+            "asynchronous job on OpenAI, OpenRouter or Gemini."
+        ),
+    },
+    {
         "name": "systemone",
         "description": "System One evaluation (TypeSafe's Jev; also OpenRouter and Ollama).",
     },
@@ -599,6 +606,18 @@ _IMAGE_EDIT_FORM = _passthrough(
     description="Multipart form alternative to the JSON body.",
 )
 
+_BATCH_FILE_FORM = _passthrough(
+    {
+        "file": _str("JSONL batch input file. **Required.** One request per line."),
+        "purpose": _str(
+            "File purpose. `batch` for an input file; `batch_output` is what the proxy "
+            "writes for results.",
+            enum=["batch", "batch_output"],
+        ),
+    },
+    required=["file"],
+)
+
 MULTIPART_REQUEST_BODIES: frozendict[tuple[str, str], dict[str, Any]] = frozendict(
     {
         ("/v1/audio/transcriptions", "post"): {
@@ -612,6 +631,10 @@ MULTIPART_REQUEST_BODIES: frozendict[tuple[str, str], dict[str, Any]] = frozendi
         ("/v1/images/edits", "post"): {
             "required": True,
             "content": {"multipart/form-data": {"schema": _IMAGE_EDIT_FORM}},
+        },
+        ("/v1/files", "post"): {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _BATCH_FILE_FORM}},
         },
     }
 )
@@ -627,6 +650,124 @@ _OPENAI_STREAM_NOTE = (
 
 OPERATION_OVERLAYS: frozendict[tuple[str, str], dict[str, Any]] = frozendict(
     {
+        # ── batch mode ────────────────────────────────────────────────
+        ("/v1/files", "post"): {
+            "summary": "Upload a batch file",
+            "tags": ["batch"],
+            "description": (
+                "Upload a JSONL file of batch requests (one `{custom_id, method, url, body}` "
+                "object per line). The proxy stores it and every batch created from it is "
+                "forwarded to the upstream's own batch API. See [Batch mode](/api/batch)."
+            ),
+            "responses": {
+                "200": json_response("The stored file.", ref("FileObject")),
+            },
+        },
+        ("/v1/files", "get"): {
+            "summary": "List batch files",
+            "tags": ["batch"],
+            "description": (
+                "Files uploaded by this API key, newest first. `after` is an id cursor."
+            ),
+            "responses": {
+                "200": json_response("A page of files.", ref("FileList")),
+            },
+        },
+        ("/v1/files/{file_id}", "get"): {
+            "summary": "Retrieve a batch file",
+            "tags": ["batch"],
+            "description": "File metadata. Files are scoped to the API key that uploaded them.",
+            "responses": {
+                "200": json_response("The file.", ref("FileObject")),
+                "404": json_response("Unknown file id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/files/{file_id}", "delete"): {
+            "summary": "Delete a batch file",
+            "tags": ["batch"],
+            "description": (
+                "Delete a stored input or result file. An input file that a running batch "
+                "reads answers `400 file_in_use`; delete it once the batch is terminal."
+            ),
+            "responses": {
+                "200": json_response("Deletion confirmation.", ref("DeletedFileObject")),
+                "400": json_response(
+                    "The file is the input of a batch that has not finished.",
+                    ref("ErrorEnvelope"),
+                ),
+                "404": json_response("Unknown file id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/files/{file_id}/content", "get"): {
+            "summary": "Download a batch file",
+            "tags": ["batch"],
+            "description": (
+                "The file's content. An input file is the JSONL that was uploaded; an output "
+                "file is the materialized result JSONL."
+            ),
+            "responses": {
+                "200": binary_response("The file content (JSONL).", "application/jsonl"),
+                "404": json_response("Unknown file id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/batches", "post"): {
+            "summary": "Create a batch",
+            "tags": ["batch"],
+            "description": (
+                "Submit an uploaded JSONL file as one asynchronous job. Every line must "
+                "target `/v1/chat/completions` and name the same model; the job goes to the "
+                "highest-priority provider configured for that model when it supports batch "
+                "mode. See [Batch mode](/api/batch)."
+            ),
+            "responses": {
+                "200": json_response("The created batch.", ref("BatchObject")),
+                "400": json_response(
+                    "Invalid lines, mixed models, or an upstream without batch support.",
+                    ref("ErrorEnvelope"),
+                ),
+                "404": json_response("Unknown input file id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/batches", "get"): {
+            "summary": "List batches",
+            "tags": ["batch"],
+            "description": (
+                "Batches created by this API key, newest first, in their last observed state. "
+                "Listing does not poll upstreams."
+            ),
+            "responses": {
+                "200": json_response("A page of batches.", ref("BatchList")),
+            },
+        },
+        ("/v1/batches/{batch_id}", "get"): {
+            "summary": "Retrieve a batch",
+            "tags": ["batch"],
+            "description": (
+                "The batch's current state, refreshed from the upstream while it is "
+                "unfinished. The first read that observes a terminal status materializes the "
+                "results as `output_file_id` / `error_file_id`."
+            ),
+            "responses": {
+                "200": json_response("The batch.", ref("BatchObject")),
+                "404": json_response("Unknown batch id.", ref("ErrorEnvelope")),
+            },
+        },
+        ("/v1/batches/{batch_id}/cancel", "post"): {
+            "summary": "Cancel a batch",
+            "tags": ["batch"],
+            "description": (
+                "Ask the upstream to cancel. A terminal batch answers with its current "
+                "object; an upstream with no cancel endpoint (OpenRouter) answers "
+                "`400 batch_cancel_unsupported`."
+            ),
+            "responses": {
+                "200": json_response("The (possibly cancelling) batch.", ref("BatchObject")),
+                "400": json_response(
+                    "The upstream has no batch cancel endpoint.", ref("ErrorEnvelope")
+                ),
+                "404": json_response("Unknown batch id.", ref("ErrorEnvelope")),
+            },
+        },
         ("/v1/chat/completions", "post"): {
             "summary": "Create chat completion",
             "tags": ["chat"],
