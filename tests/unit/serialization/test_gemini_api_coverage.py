@@ -199,7 +199,7 @@ class TestStructuredOutput:
         assert "responseSchema" not in config
         assert "responseMimeType" not in config
         text_format = config["responseFormat"]["text"]
-        assert text_format["mimeType"] == "application/json"
+        assert text_format["mimeType"] == "APPLICATION_JSON"
         # Full JSON Schema survives: no sanitizing on the modern shape.
         assert text_format["schema"]["properties"]["role"]["oneOf"]
         assert text_format["schema"]["properties"]["manager"]["$ref"] == "#/$defs/person"
@@ -229,7 +229,7 @@ class TestStructuredOutput:
             response_format=ResponseFormat(type="json_object"),
         )
         config = serializer.build_provider_request(request)["generationConfig"]
-        assert config["responseFormat"] == {"text": {"mimeType": "application/json"}}
+        assert config["responseFormat"] == {"text": {"mimeType": "APPLICATION_JSON"}}
 
     def test_function_declaration_uses_parameters_json_schema(self, serializer):
         tool = FunctionTool(
@@ -265,6 +265,66 @@ class TestStructuredOutput:
         ][0]
         assert "parametersJsonSchema" not in declaration
         assert declaration["parameters"]["properties"]["q"]["type"] == "string"
+
+
+# ---------------------------------------------------------------------------
+# Parameters generateContent drops (the API answers them with a bare 400)
+# ---------------------------------------------------------------------------
+
+
+def _request_with_blocks(model: str, *, params: GenerationParams, n=None):
+    return InternalRequest(
+        model=model,
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="hi")])]
+        ),
+        params=params,
+        n=n,
+    )
+
+
+class TestDroppedParams:
+    """``n > 1`` and ``logprobs`` are not sent, and never dropped silently.
+
+    Live probes against ``generateContent`` (gemini-3.1-pro-preview,
+    3.5-flash, 3.8-flash) answer ``candidateCount: 2`` with "Multiple
+    candidates is not enabled for this model" and ``responseLogprobs`` with
+    "Logprobs is not enabled for this model", so forwarding either field would
+    turn an accepted request into a 400.
+    """
+
+    def test_n_above_one_warns_and_is_not_sent(self, serializer, caplog):
+        caplog.set_level(logging.WARNING)
+        request = _request_with_blocks("gemini-3.8-flash", params=GenerationParams(), n=2)
+        body = serializer.build_provider_request(request)
+
+        assert "candidateCount" not in body.get("generationConfig", {})
+        assert "n=2" in caplog.text
+        assert "candidateCount" in caplog.text
+
+    def test_params_n_still_reaches_candidate_count(self, serializer, caplog):
+        caplog.set_level(logging.WARNING)
+        request = _request_with_blocks("gemini-3.8-flash", params=GenerationParams(n=2))
+        body = serializer.build_provider_request(request)
+
+        assert body["generationConfig"]["candidateCount"] == 2
+        assert "candidateCount" not in caplog.text
+
+    def test_logprobs_warn_and_are_not_sent(self, serializer, caplog):
+        from llm_proxy.models.params import OpenAISpecificParams
+
+        caplog.set_level(logging.WARNING)
+        request = _request_with_blocks(
+            "gemini-3.8-flash",
+            params=GenerationParams(openai=OpenAISpecificParams(logprobs=True, top_logprobs=2)),
+        )
+        body = serializer.build_provider_request(request)
+
+        config = body.get("generationConfig", {})
+        assert "responseLogprobs" not in config
+        assert "logprobs" not in config
+        assert "logprobs" in caplog.text
+        assert "top_logprobs=2" in caplog.text
 
 
 # ---------------------------------------------------------------------------

@@ -258,6 +258,37 @@ class GeminiRequestBuilderMixin:
         return body
 
     @staticmethod
+    def _warn_unsupported_params(request: InternalRequest, model: str | None) -> None:
+        """Say out loud which requested parameters generateContent drops.
+
+        ``n > 1`` would be ``candidateCount`` and ``logprobs`` /
+        ``top_logprobs`` would be ``responseLogprobs`` / ``logprobs``, but the API
+        answers both with a bare 400 on every model reachable today ("Multiple
+        candidates is not enabled for this model", "Logprobs is not enabled for
+        this model"), so the fields are dropped instead of sent. A client that
+        asked for them otherwise gets no trace of the request it made.
+        ``params.n`` stays authoritative: a programmatic caller that sets it
+        still reaches ``candidateCount``.
+        """
+        params = request.params
+        dropped: list[str] = []
+        n = getattr(request, "n", None)
+        if n is not None and n > 1 and params.n is None:
+            dropped.append(f"n={n} (candidateCount)")
+        openai_params = params.openai
+        if openai_params is not None:
+            if openai_params.logprobs:
+                dropped.append("logprobs")
+            if openai_params.top_logprobs is not None:
+                dropped.append(f"top_logprobs={openai_params.top_logprobs}")
+        if dropped:
+            logger.warning(
+                "Gemini model %r does not support parameter(s): %s; ignoring them",
+                model,
+                ", ".join(dropped),
+            )
+
+    @staticmethod
     def _is_gemini_image_model(model: str | None) -> bool:
         """Check if the model name indicates a Gemini image generation model.
 
@@ -302,6 +333,8 @@ class GeminiRequestBuilderMixin:
         params = request.params
         effective_model = model or request.model
         config: dict[str, Any] = {}
+
+        self._warn_unsupported_params(request, effective_model)
 
         ignoring_sampling = ignores_sampling_params(effective_model, model_family_overrides)
         for attr, key in self._SIMPLE_PARAM_MAP.items():
@@ -380,9 +413,13 @@ class GeminiRequestBuilderMixin:
                 # this family understands. The modern shape takes plain JSON
                 # Schema, the legacy one the sanitized OpenAPI subset.
                 if supports_json_schema_fields(effective_model, model_family_overrides):
+                    # The enum slot only accepts APPLICATION_JSON: the API
+                    # answers `application/json` with a bare 400 ("Invalid
+                    # value at ...TextResponseFormat.MimeType"), and omitting
+                    # the member is rejected as an invalid argument.
                     config["responseFormat"] = {
                         "text": {
-                            "mimeType": "application/json",
+                            "mimeType": "APPLICATION_JSON",
                             "schema": params.gemini.response_schema,
                         }
                     }
@@ -450,7 +487,12 @@ class GeminiRequestBuilderMixin:
             return
 
         if supports_json_schema_fields(model):
-            text_format: dict[str, Any] = {"mimeType": "application/json"}
+            # ``TextResponseFormat.mime_type`` is a string enum, not a MIME
+            # string: generateContent rejects ``application/json`` with a bare
+            # 400 ("Invalid value at ...TextResponseFormat.MimeType") and
+            # rejects a member-less text object as an invalid argument. The
+            # plain string form lives on the legacy ``responseMimeType``.
+            text_format: dict[str, Any] = {"mimeType": "APPLICATION_JSON"}
             if schema is not None:
                 text_format["schema"] = schema
             config["responseFormat"] = {"text": text_format}
