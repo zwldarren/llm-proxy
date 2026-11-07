@@ -15,6 +15,7 @@ Covers three mechanisms at the integration seam:
 """
 
 import asyncio
+import time
 from pathlib import Path
 
 import httpx2
@@ -43,6 +44,45 @@ async def _poll_logs(db_path: Path, min_rows: int = 1, timeout: float = 25.0):
             return rows
         await asyncio.sleep(0.3)
     return fetch_request_logs(db_path)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def warm_request_path(proxy_stack):
+    """Serve one ordinary request before the module times anything.
+
+    The first request to a freshly booted proxy pays the API-key verification
+    (bcrypt over the stored hashes) and the processor warm-up. A loaded
+    full-suite run stretches that cost past ``CLIENT_TIMEOUT``, and then the
+    client is gone before the body is ever read: uvicorn answers the receive
+    with ``http.disconnect`` and drops the body it had buffered, so the model
+    restriction middleware buffers an empty body and FastAPI answers 422 for a
+    request it never touched. No row is logged, and the test measures startup
+    latency instead of abandonment handling.
+
+    One cheap request here leaves the API key cached
+    (``API_KEY_CACHE_TTL_SECONDS``) and the request path warm, so each test
+    measures the scenario it describes.
+    """
+    db_path, proxy, _upstream = proxy_stack
+    clear_request_logs(db_path)
+
+    with httpx2.Client(timeout=10.0) as client:
+        warm = client.post(
+            f"{proxy.base_url}/v1/chat/completions",
+            json={
+                "model": "mock-model",
+                "messages": [{"role": "user", "content": "warm"}],
+            },
+            headers={"Authorization": f"Bearer {PROXY_API_KEY}"},
+        )
+    assert warm.status_code == 200, f"warm-up request failed: {warm.text}"
+
+    # The row lands through the batched log writer, not with the response. Wait
+    # for it, then clear, so no test can count the warm-up as its own request.
+    deadline = time.monotonic() + 25.0
+    while time.monotonic() < deadline and not fetch_request_logs(db_path):
+        time.sleep(0.2)
+    clear_request_logs(db_path)
 
 
 class TestClientDisconnectLogged:

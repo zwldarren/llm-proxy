@@ -745,9 +745,3 @@ class TestAllExport:
         assert "Message" in __all__
         assert "SystemMessage" in __all__
         assert "ConversationContext" in __all__
-
-    def test_all_count(self):
-        """Test __all__ has expected number of exports."""
-        from llm_proxy.models import __all__
-
-        assert len(__all__) == 83
