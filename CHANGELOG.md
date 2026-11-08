@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.5](https://github.com/zwldarren/llm-proxy/compare/v0.5.4...v0.5.5) (2026-11-07)
+
+
+### Features
+
+* **batch:** run OpenAI-compatible batch jobs on three upstreams (ADR-0058) ([7005d4b](https://github.com/zwldarren/llm-proxy/commit/7005d4b1a54b74cb5db9113f218b9a95c582c1bb))
+* **security:** hash passwords with Argon2id and API keys as SHA-256 digests (ADR-0059) ([5b5ea41](https://github.com/zwldarren/llm-proxy/commit/5b5ea419706ae471433a86dc26fca64e7fa1ff46))
+
+
+### Bug Fixes
+
+* **frontend:** follow the primary pointer in the 44px touch floor ([12faa5d](https://github.com/zwldarren/llm-proxy/commit/12faa5deaaf8bb62514fcd67a92fbb97e492f1a9))
+* **frontend:** keep the usage chart data tables out of sight in Firefox ([4a32a6a](https://github.com/zwldarren/llm-proxy/commit/4a32a6af6245538ad896e1724785ca87400be45e))
+* **frontend:** let the usage dashboard fill the viewport ([1fbd117](https://github.com/zwldarren/llm-proxy/commit/1fbd117113dae074b333a31a426f7916a0b8491e))
+* **gemini:** stop sending parameters generateContent rejects ([a929a7e](https://github.com/zwldarren/llm-proxy/commit/a929a7e41134b5e13f49d96f873e17698224d9b5))
+* **observability:** report a rejected OTLP batch once, with the backend named ([611091a](https://github.com/zwldarren/llm-proxy/commit/611091a00da0add6e03495c526639ff2588d1444))
+
 ## [0.5.4](https://github.com/zwldarren/llm-proxy/compare/v0.5.3...v0.5.4) (2026-11-05)
 
 
