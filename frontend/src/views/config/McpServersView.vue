@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useErrorHandler } from "@/composables/useErrorHandler";
 import { useJsonField } from "@/composables/useJsonField";
 import { useTableFilter } from "@/composables/useTableFilter";
+import { useTableSort } from "@/composables/useTableSort";
 import { useViewMode } from "@/composables/useViewMode";
 import { useMcpServerStore } from "@/stores/mcpServers";
 import { useSettingsStore } from "@/stores/settings";
@@ -79,52 +80,42 @@ const {
 
 function clearFilters() {
   clearBaseFilters();
-  sortField.value = "name";
-  sortDir.value = "asc";
+  resetSort();
 }
 
 const viewMode = useViewMode(STORAGE_KEYS.MCP_SERVERS_VIEW_MODE);
 
 type SortField = "name" | "type" | "status";
-const sortField = ref<SortField>("name");
-const sortDir = ref<"asc" | "desc">("asc");
-
-function onSort(field: string) {
-  if (field === sortField.value) {
-    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-  } else {
-    sortField.value = field as SortField;
-    sortDir.value = "asc";
-  }
-}
 
 const statusRank = (status: string): number =>
   status === "running" ? 0 : status === "stopped" ? 1 : 2;
 
-const sortedServers = computed(() => {
-  const items = [...(filteredServers.value as unknown as McpServerRead[])];
-  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-  switch (sortField.value) {
-    case "status":
-      items.sort((a, b) => {
+const {
+  sortField,
+  sortDir,
+  onSort,
+  sortedItems: sortedServers,
+  resetSort,
+} = useTableSort<McpServerRead, SortField>({
+  items: filteredServers,
+  initialField: "name",
+  compare: (field, a, b, dir) => {
+    switch (field) {
+      case "status": {
         const ra = statusRank(serverStatuses.value[a.name]?.status || "stopped");
         const rb = statusRank(serverStatuses.value[b.name]?.status || "stopped");
         return (ra - rb || a.name.localeCompare(b.name)) * dir;
-      });
-      break;
-    case "type":
-      items.sort(
-        (a, b) =>
+      }
+      case "type":
+        return (
           ((a.type ?? "").localeCompare(b.type ?? "") ||
             (a.name ?? "").localeCompare(b.name ?? "")) * dir
-      );
-      break;
-    case "name":
-    default:
-      items.sort((a, b) => a.name.localeCompare(b.name) * dir);
-      break;
-  }
-  return items;
+        );
+      case "name":
+      default:
+        return a.name.localeCompare(b.name) * dir;
+    }
+  },
 });
 
 const newServer = ref<McpServerCreate>({

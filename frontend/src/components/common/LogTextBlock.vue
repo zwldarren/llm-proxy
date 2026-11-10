@@ -5,9 +5,9 @@ expand-on-demand for the tail, so the page stays * responsive by default and sta
 * * Typography/container classes are passed through via `class`; the shared *
 pre-wrap/break-all/leading behaviour is baked in. */
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { useClipboard } from "@vueuse/core";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { copyToClipboard } from "@/utils/clipboard";
 import { formatCharCount } from "@/utils/logFormat";
 
 const props = withDefaults(
@@ -24,28 +24,21 @@ const { t } = useI18n();
 defineOptions({ inheritAttrs: false });
 
 const expanded = ref(false);
-const copied = ref(false);
-let copyTimer: ReturnType<typeof setTimeout> | undefined;
+const { copy, copied } = useClipboard({
+  source: () => props.text,
+  legacy: true,
+  copiedDuring: 1500,
+});
 
 const isTruncated = computed(() => props.text.length > props.maxChars);
 const shown = computed(() =>
   isTruncated.value && !expanded.value ? props.text.slice(0, props.maxChars) : props.text
 );
 
-async function copyAll() {
-  try {
-    await copyToClipboard(props.text);
-    copied.value = true;
-    if (copyTimer) clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => (copied.value = false), 1500);
-  } catch {
-    // Clipboard unavailable (insecure context) — nothing to signal inline.
-  }
+function copyAll() {
+  // A failed copy leaves the inline state untouched.
+  void copy().catch(() => {});
 }
-
-onBeforeUnmount(() => {
-  if (copyTimer) clearTimeout(copyTimer);
-});
 </script>
 
 <template>

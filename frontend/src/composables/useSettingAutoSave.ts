@@ -1,3 +1,4 @@
+import { useDebounceFn } from "@vueuse/core";
 import { ref, toRaw, watch, onUnmounted, type Ref } from "vue";
 import { toast } from "vue-sonner";
 import { useI18n } from "vue-i18n";
@@ -17,12 +18,12 @@ export function useSettingAutoSave<T extends object>(
   options: { debounceMs?: number; toastThrottleMs?: number; showSuccessToast?: boolean } = {}
 ): AutoSaveState<T> {
   const { t } = useI18n();
-  const state = ref<T>(deepClone(initialValue)) as Ref<T>;
-  const lastSaved = ref<T>(deepClone(initialValue));
+  const state = ref<T>(structuredClone(initialValue)) as Ref<T>;
+  const lastSaved = ref<T>(structuredClone(initialValue));
   const pending = ref(false);
   const error = ref<string | null>(null);
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleSave = useDebounceFn(doSave, options.debounceMs ?? 300);
   let lastToastAt = 0;
   let isSaving = false;
 
@@ -31,7 +32,7 @@ export function useSettingAutoSave<T extends object>(
     isSaving = true;
     pending.value = true;
     error.value = null;
-    const snapshot = deepClone(toRaw(state.value) as T);
+    const snapshot = structuredClone(toRaw(state.value) as T);
     try {
       await saveFn(snapshot);
       lastSaved.value = snapshot;
@@ -47,41 +48,38 @@ export function useSettingAutoSave<T extends object>(
       return true;
     } catch (e) {
       error.value = getErrorMessage(e) || t("settings.saveFailed");
-      state.value = deepClone(lastSaved.value) as Ref<T>["value"];
+      state.value = structuredClone(toRaw(lastSaved.value) as T) as Ref<T>["value"];
       return false;
     } finally {
       pending.value = false;
       isSaving = false;
-      if (snapshotChecksum(state.value) !== snapshotChecksum(lastSaved.value)) {
-        scheduleSave();
-      }
+      scheduleSaveIfDirty();
     }
   }
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(doSave, options.debounceMs ?? 300);
+  function scheduleSaveIfDirty() {
+    if (snapshotChecksum(state.value) !== snapshotChecksum(lastSaved.value)) {
+      void scheduleSave();
+    }
   }
 
   watch(
     () => state.value,
     () => {
       if (isSaving) return;
-      if (snapshotChecksum(state.value) === snapshotChecksum(lastSaved.value)) return;
-      scheduleSave();
+      scheduleSaveIfDirty();
     },
     { deep: true }
   );
 
   function initialize(value: T) {
-    state.value = deepClone(value) as Ref<T>["value"];
-    lastSaved.value = deepClone(value);
+    state.value = structuredClone(toRaw(value)) as Ref<T>["value"];
+    lastSaved.value = structuredClone(toRaw(value));
   }
 
   onUnmounted(() => {
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
+    if (scheduleSave.isPending.value) {
+      scheduleSave.cancel();
       // Flush any pending save before the component is destroyed so changes
       // made just before navigation are not silently dropped.
       doSave().catch(() => {});
@@ -103,29 +101,4 @@ function snapshotChecksum(value: unknown): string {
   } catch {
     return "";
   }
-}
-
-function deepClone<T>(obj: T): T {
-  if (obj === null || typeof obj !== "object") return obj;
-  if (obj instanceof Date) return new Date(obj.getTime()) as unknown as T;
-  if (obj instanceof Set) return new Set([...obj].map(deepClone)) as unknown as T;
-  if (obj instanceof Map) {
-    return new Map([...obj].map(([k, v]) => [deepClone(k), deepClone(v)])) as unknown as T;
-  }
-  if (Array.isArray(obj)) {
-    const arr = obj.map(deepClone);
-    Object.keys(obj)
-      .filter((k) => !/^\d+$/.test(k))
-      .forEach((k) => {
-        (arr as unknown as Record<string, unknown>)[k] = deepClone(
-          (obj as Record<string, unknown>)[k]
-        );
-      });
-    return arr as unknown as T;
-  }
-  const cloned = {} as Record<string, unknown>;
-  for (const key of Object.keys(obj)) {
-    cloned[key] = deepClone((obj as Record<string, unknown>)[key]);
-  }
-  return cloned as T;
 }

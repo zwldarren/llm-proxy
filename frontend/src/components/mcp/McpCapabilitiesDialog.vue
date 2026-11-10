@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { copyToClipboard } from "@/utils/clipboard";
+import { useClipboard } from "@vueuse/core";
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
@@ -48,7 +48,13 @@ const activeCapabilityIcon = computed(() =>
   activeTab.value === "tools" ? Wrench : activeTab.value === "prompts" ? MessageSquare : FolderOpen
 );
 const searchQuery = ref("");
+const { copy, copied } = useClipboard({ legacy: true, copiedDuring: 1500 });
 const copiedName = ref<string | null>(null);
+
+// Clear the per-row check mark when the clipboard feedback window elapses.
+watch(copied, (isCopied) => {
+  if (!isCopied) copiedName.value = null;
+});
 
 // Reset tab & search when dialog opens
 watch(
@@ -104,13 +110,8 @@ const filteredResources = computed(() => {
 
 const handleCopy = async (text: string) => {
   try {
-    await copyToClipboard(text);
+    await copy(text);
     copiedName.value = text;
-    setTimeout(() => {
-      if (copiedName.value === text) {
-        copiedName.value = null;
-      }
-    }, 1500);
   } catch (err) {
     console.error("Failed to copy", err);
   }

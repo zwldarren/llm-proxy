@@ -20,11 +20,12 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTableFilter } from "@/composables/useTableFilter";
+import { useTableSort } from "@/composables/useTableSort";
 import { useViewMode } from "@/composables/useViewMode";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { useCatalogStore } from "@/stores/catalog";
 import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
-import type { ModelCapability } from "@/types/schemas";
+import type { ModelCapability, ModelCatalogEntry } from "@/types/schemas";
 
 defineOptions({ name: "ModelPlazaView" });
 
@@ -101,17 +102,19 @@ const visibleModels = computed(() => {
 });
 
 type SortField = "name" | "context";
-const sortField = ref<SortField>("name");
-const sortDir = ref<"asc" | "desc">("asc");
 
-function onSort(field: string) {
-  if (field === sortField.value) {
-    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-  } else {
-    sortField.value = field as SortField;
-    sortDir.value = field === "context" ? "desc" : "asc";
-  }
-}
+const {
+  sortField,
+  sortDir,
+  onSort,
+  sortedItems: sortedModels,
+} = useTableSort<ModelCatalogEntry, SortField>({
+  items: visibleModels,
+  initialField: "name",
+  defaultDirectionFor: (field) => (field === "context" ? "desc" : "asc"),
+  compare: (field, a, b, dir) =>
+    field === "context" ? compareModelsByContextLength(dir)(a, b) : compareModelsByName(dir)(a, b),
+});
 
 /**
  * List-mode column header: the same grammar as the table's SortableHeads so
@@ -134,15 +137,6 @@ const listColumns = computed<ModelListColumn[]>(() => [
     sortKey: "context",
   },
 ]);
-
-const sortedModels = computed(() => {
-  const items = [...visibleModels.value];
-  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-  items.sort(
-    sortField.value === "context" ? compareModelsByContextLength(dir) : compareModelsByName(dir)
-  );
-  return items;
-});
 </script>
 
 <template>

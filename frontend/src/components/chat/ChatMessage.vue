@@ -13,6 +13,7 @@ import {
   RotateCcw,
 } from "@lucide/vue";
 import MarkdownIt from "markdown-it";
+import { useClipboard, useEventListener } from "@vueuse/core";
 import { computed, nextTick, ref, onUnmounted, watch } from "vue";
 import { highlightCode } from "@/utils/highlighter";
 import { useI18n } from "vue-i18n";
@@ -25,7 +26,6 @@ import { csrfHeaders } from "@/services/csrf";
 import { useModelStore } from "@/stores/models";
 import { toast } from "vue-sonner";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
-import { copyToClipboard } from "@/utils/clipboard";
 
 const previewImageUrl = ref<string | null>(null);
 // The element that opened the lightbox, so focus can come back to it: the
@@ -65,25 +65,22 @@ const roleLabel = computed(() =>
       : t("chat.roleModel")
 );
 
-/** Escape closes the lightbox — a modal surface needs a keyboard exit. */
-const onLightboxKeydown = (event: KeyboardEvent) => {
-  if (event.key === "Escape") closeImageModal();
-};
-
 const lightboxClose = ref<HTMLButtonElement | null>(null);
 
 watch(previewImageUrl, (url) => {
   if (url) {
-    window.addEventListener("keydown", onLightboxKeydown);
     // Move focus into the surface that just covered the page, so the next Tab
     // does not land somewhere behind the scrim.
     void nextTick(() => lightboxClose.value?.focus());
-  } else {
-    window.removeEventListener("keydown", onLightboxKeydown);
   }
 });
 
-onUnmounted(() => window.removeEventListener("keydown", onLightboxKeydown));
+// Escape closes the lightbox — a modal surface needs a keyboard exit. The
+// handler is registered once for the component's lifetime and no-ops while the
+// lightbox is closed.
+useEventListener(window, "keydown", (event) => {
+  if (event.key === "Escape" && previewImageUrl.value) closeImageModal();
+});
 
 const md = new MarkdownIt({
   html: true,
@@ -91,20 +88,24 @@ const md = new MarkdownIt({
   breaks: true,
 });
 
+// The code-block copy buttons live inside v-html and render their own
+// feedback, so they only need the write half of the clipboard.
+const { copy: copyCode } = useClipboard({ legacy: true });
+
 const escapeAttr = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const renderCodeBlock = (code: string, lang: string) => {
-  // Escape HTML to prevent injection issues in code content
-  const escaped = code
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+/** Fence info may carry arbitrary text; keep the class-safe token only. */
+const languageLabel = (lang: string): string => {
+  const token = lang.trim().split(/\s+/)[0] ?? "";
+  return /^[\w+#.-]+$/.test(token) ? token : "code";
+};
 
-  const highlighted = highlightCode(escaped, lang);
-  const langLabel = lang || "code";
+const renderCodeBlock = (code: string, lang: string) => {
+  // highlight.js escapes the source it tokenizes; unknown languages come back
+  // as escaped plain text from highlightCode().
+  const langLabel = languageLabel(lang);
+  const highlighted = highlightCode(code, langLabel);
 
   return `<div class="code-block-wrapper my-4 overflow-hidden rounded-xl border border-code-border bg-code-bg font-mono">
   <div class="flex items-center justify-between px-4 py-2 border-b border-code-border bg-code-header-bg text-xs text-muted-foreground select-none">
@@ -152,7 +153,7 @@ const handleCodeCopy = async (btn: Element) => {
   if (!codeEl) return;
 
   try {
-    await copyToClipboard(codeEl.textContent || "");
+    await copyCode(codeEl.textContent || "");
     const copyText = btn.querySelector(".copy-text");
     const copyIcon = btn.querySelector(".copy-icon");
     const checkIcon = btn.querySelector(".check-icon");
@@ -334,7 +335,10 @@ watch(
 watch(locale, () => renderFull());
 
 const isTtsLoading = ref(false);
-const isCopied = ref(false);
+const { copy: copyMessage, copied: isCopied } = useClipboard({
+  legacy: true,
+  copiedDuring: 2000,
+});
 const ttsAbortController = ref<AbortController | null>(null);
 
 // Track available browser voices (populated asynchronously)
@@ -371,12 +375,7 @@ const getMessageText = (msg: ChatMessage): string => {
 
 const handleCopy = async () => {
   try {
-    const textToCopy = getMessageText(props.message);
-    await copyToClipboard(textToCopy);
-    isCopied.value = true;
-    setTimeout(() => {
-      isCopied.value = false;
-    }, 2000);
+    await copyMessage(getMessageText(props.message));
   } catch (err) {
     console.error("Failed to copy text:", err);
   }

@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ImageInfo } from "@/utils/logResponseParser";
 import { buildImageDataUrl } from "@/utils/logResponseParser";
+import { formatBytes } from "@/utils/logFormat";
 import { safeImageUrl } from "@/utils/safeUrl";
 
 const props = defineProps<{
@@ -73,13 +74,6 @@ function closeLightbox() {
   // The reka-ui dialog restores focus to the trigger on close; do it manually
   // as well so it also works when the trigger never held focus (e.g. Safari).
   nextTick(() => trigger?.focus({ preventScroll: true }));
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function downloadName(index: number, img: ResolvedImage): string {

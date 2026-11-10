@@ -186,9 +186,7 @@ const showIntegrityDialog = ref(false);
 const { autoRefresh, startAutoRefresh, stopAutoRefresh, toggleAutoRefresh } = useAutoRefresh({
   interval: 5000,
   shouldPauseRefresh: () => showDetailDialog.value,
-  onRefreshStateChange: () => {
-    checkAndRefresh();
-  },
+  onRefresh: () => void checkAndRefresh(),
 });
 
 const checkAndRefresh = async () => {

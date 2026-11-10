@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RangeCalendar } from "@/components/ui/range-calendar";
-import { useWindowSize } from "@vueuse/core";
+import { useDebounceFn, useWindowSize } from "@vueuse/core";
 import { CalendarDate, parseDate } from "@internationalized/date";
 import type { DateRange } from "reka-ui";
 import {
@@ -294,9 +294,6 @@ const isFilterEqual = (a: LogFilter, b: LogFilter) => {
   return keys.every((k) => String(a[k] ?? "") === String(b[k] ?? ""));
 };
 
-// Debounce timer for text inputs
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
 const emitFilterUpdate = () => {
   const nextFilters = buildFilter();
   if (!isFilterEqual(nextFilters, props.filters)) {
@@ -304,13 +301,11 @@ const emitFilterUpdate = () => {
   }
 };
 
-const emitDebounced = () => {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(emitFilterUpdate, 300);
-};
+// Text inputs are debounced so a burst of typing produces one query.
+const emitDebounced = useDebounceFn(emitFilterUpdate, 300);
 
 const emitImmediate = () => {
-  if (debounceTimer) clearTimeout(debounceTimer);
+  emitDebounced.cancel();
   emitFilterUpdate();
 };
 
@@ -432,11 +427,8 @@ const clearAllFilters = () => {
 defineExpose({ activeFilterCount, clearAllFilters });
 
 onUnmounted(() => {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-    emitFilterUpdate();
-    debounceTimer = null;
-  }
+  // Flush a filter edit typed just before navigation instead of dropping it.
+  if (emitDebounced.isPending.value) emitDebounced.flush();
 });
 </script>
 

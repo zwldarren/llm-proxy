@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AppErrorState from "./AppErrorState.vue";
 
@@ -15,6 +15,7 @@ function errorWith(message: string, stack?: string): Error {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("AppErrorState", () => {
@@ -61,19 +62,34 @@ describe("AppErrorState", () => {
   });
 
   it("copies the message and stack together", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    class ClipboardItemStub {
+      constructor(readonly items: Record<string, string>) {}
+    }
+    vi.stubGlobal("ClipboardItem", ClipboardItemStub);
+    const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
-      value: { writeText },
+      value: { write },
+      configurable: true,
+    });
+    // VueUse only takes the Clipboard API path when the permission is not
+    // denied; happy-dom ships no Permissions API, so report it as granted.
+    // The status must be an EventTarget because VueUse subscribes to `change`.
+    const permissionStatus = Object.assign(new EventTarget(), { state: "granted" });
+    Object.defineProperty(navigator, "permissions", {
+      value: { query: vi.fn().mockResolvedValue(permissionStatus) },
       configurable: true,
     });
 
     const wrapper = mount(AppErrorState, {
       props: { error: errorWith("boom", "Error: boom\n    at App.vue:1"), info: "render function" },
     });
+    await flushPromises();
 
     await wrapper.get("summary button").trigger("click");
-    expect(writeText).toHaveBeenCalledTimes(1);
-    expect(writeText.mock.calls[0]![0]).toContain("boom");
-    expect(writeText.mock.calls[0]![0]).toContain("at App.vue:1");
+    expect(write).toHaveBeenCalledTimes(1);
+    const [item] = write.mock.calls[0]![0] as unknown as ClipboardItemStub[];
+    const copied = item!.items["text/plain"];
+    expect(copied).toContain("boom");
+    expect(copied).toContain("at App.vue:1");
   });
 });

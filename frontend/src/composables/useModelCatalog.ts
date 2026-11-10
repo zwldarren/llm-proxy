@@ -1,3 +1,4 @@
+import { useStorage } from "@vueuse/core";
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -45,16 +46,12 @@ export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
   const modelStore = useModelStore();
 
   const models = ref<CatalogModel[]>([]);
-  const selectedModel = ref<string | null>(localStorage.getItem(options.storageKey));
+  // Persisted selection; `useStorage` writes through and keeps other tabs in sync.
+  const selectedModel = useStorage<string | null>(options.storageKey, null);
   const isLoadingModels = ref(false);
   const modelsError = ref<string | null>(null);
   /** Ticket of the newest in-flight call; an older caller must not write. */
   let requestTicket = 0;
-
-  watch(selectedModel, (value) => {
-    if (value) localStorage.setItem(options.storageKey, value);
-    else localStorage.removeItem(options.storageKey);
-  });
 
   /** Provider name from the model config, for models that omit it. */
   const providerFromConfig = (id: string): string =>
@@ -74,7 +71,7 @@ export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
       }));
 
       // Restore the saved model when it still exists, otherwise take the first.
-      const saved = localStorage.getItem(options.storageKey);
+      const saved = selectedModel.value;
       selectedModel.value =
         saved && models.value.some((m) => m.id === saved) ? saved : (models.value[0]?.id ?? null);
       return true;

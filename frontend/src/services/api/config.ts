@@ -88,68 +88,42 @@ export const meTracingApi = {
   getProviders: () => http.get<TracingProviders>("/api/me/tracing/providers"),
 };
 
-export const webSearchApi = {
-  getConfig: () => http.get<WebSearchConfig>(`${BASE_URL}/server/web-search`),
-  updateConfig: (data: WebSearchConfigUpdate) =>
-    http.put<WebSearchConfig>(`${BASE_URL}/server/web-search`, data),
-};
+/**
+ * One server-settings resource: a GET/PUT pair under `/api/server`.
+ *
+ * `TUpdate` is separate so endpoints that replace the whole document
+ * (security, keepalive, rate limits, CORS) keep their full-object contract,
+ * while partial-update endpoints accept a patch.
+ */
+function serverSettingsApi<TRead, TUpdate = Partial<TRead>>(path: string) {
+  return {
+    getConfig: () => http.get<TRead>(`${BASE_URL}/server/${path}`),
+    updateConfig: (data: TUpdate) => http.put<TRead>(`${BASE_URL}/server/${path}`, data),
+  };
+}
 
-export const smartRoutingApi = {
-  getConfig: () => http.get<SmartRoutingConfig>(`${BASE_URL}/server/smart-routing`),
-  updateConfig: (data: Partial<SmartRoutingConfig>) =>
-    http.put<SmartRoutingConfig>(`${BASE_URL}/server/smart-routing`, data),
-};
+export const webSearchApi = serverSettingsApi<WebSearchConfig, WebSearchConfigUpdate>("web-search");
 
-export const providerSelectionApi = {
-  getConfig: () => http.get<ProviderSelectionConfig>(`${BASE_URL}/server/provider-selection`),
-  updateConfig: (data: Partial<ProviderSelectionConfig>) =>
-    http.put<ProviderSelectionConfig>(`${BASE_URL}/server/provider-selection`, data),
-};
+export const smartRoutingApi = serverSettingsApi<SmartRoutingConfig>("smart-routing");
 
-export const requestPolicyApi = {
-  getConfig: () => http.get<RequestPolicyConfig>(`${BASE_URL}/server/request-policy`),
-  updateConfig: (data: Partial<RequestPolicyConfig>) =>
-    http.put<RequestPolicyConfig>(`${BASE_URL}/server/request-policy`, data),
-};
+export const providerSelectionApi =
+  serverSettingsApi<ProviderSelectionConfig>("provider-selection");
 
-export const mcpSecurityApi = {
-  getConfig: () => http.get<McpSecurityPolicyConfig>(`${BASE_URL}/server/mcp-security`),
-  updateConfig: (data: McpSecurityPolicyConfig) =>
-    http.put<McpSecurityPolicyConfig>(`${BASE_URL}/server/mcp-security`, data),
-};
+export const requestPolicyApi = serverSettingsApi<RequestPolicyConfig>("request-policy");
 
-export const resilienceApi = {
-  getConfig: () => http.get<ResilienceConfig>(`${BASE_URL}/server/resilience`),
-  updateConfig: (data: Partial<ResilienceConfig>) =>
-    http.put<ResilienceConfig>(`${BASE_URL}/server/resilience`, data),
-};
+export const mcpSecurityApi = serverSettingsApi<McpSecurityPolicyConfig, McpSecurityPolicyConfig>(
+  "mcp-security"
+);
 
-export const securityApi = {
-  getConfig: () => http.get<SecurityConfig>(`${BASE_URL}/server/security`),
-  // The backend performs a full replacement (`model_dump()` without
-  // `exclude_unset`), so callers must always send the complete object.
-  updateConfig: (data: SecurityConfig) =>
-    http.put<SecurityConfig>(`${BASE_URL}/server/security`, data),
-};
+export const resilienceApi = serverSettingsApi<ResilienceConfig>("resilience");
 
-export const keepaliveApi = {
-  getConfig: () => http.get<KeepaliveConfig>(`${BASE_URL}/server/keepalive`),
-  // The backend performs a full replacement (`model_dump()` without
-  // `exclude_unset`), so callers must always send the complete object.
-  updateConfig: (data: KeepaliveConfig) =>
-    http.put<KeepaliveConfig>(`${BASE_URL}/server/keepalive`, data),
-};
+export const securityApi = serverSettingsApi<SecurityConfig, SecurityConfig>("security");
 
-export const rateLimitsApi = {
-  getConfig: () => http.get<RateLimitsConfig>(`${BASE_URL}/server/rate-limits`),
-  updateConfig: (data: RateLimitsConfig) =>
-    http.put<RateLimitsConfig>(`${BASE_URL}/server/rate-limits`, data),
-};
+export const keepaliveApi = serverSettingsApi<KeepaliveConfig, KeepaliveConfig>("keepalive");
 
-export const corsApi = {
-  getConfig: () => http.get<CorsConfig>(`${BASE_URL}/server/cors`),
-  updateConfig: (data: CorsConfig) => http.put<CorsConfig>(`${BASE_URL}/server/cors`, data),
-};
+export const rateLimitsApi = serverSettingsApi<RateLimitsConfig, RateLimitsConfig>("rate-limits");
+
+export const corsApi = serverSettingsApi<CorsConfig, CorsConfig>("cors");
 
 export const circuitBreakerApi = {
   listStates: () => http.get<CircuitBreakerListResponse>(`${BASE_URL}/circuit-breaker`),

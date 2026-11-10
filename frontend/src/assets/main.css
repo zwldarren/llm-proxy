@@ -1824,3 +1824,72 @@
     border-radius: 9999px;
   }
 }
+
+/* highlight.js token colors, mapped onto the JSON palette the code blocks
+ * already use. The class names come from the renderer (`utils/highlighter.ts`),
+ * so they are not utilities and do not need to sit in a layer. */
+.hljs-comment,
+.hljs-quote {
+  color: hsl(var(--json-null));
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag {
+  color: hsl(var(--json-keyword));
+  font-weight: 600;
+}
+
+.hljs-literal {
+  color: hsl(var(--json-boolean));
+  font-weight: 600;
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-template-variable {
+  color: hsl(var(--json-string));
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-attribute,
+.hljs-meta {
+  color: hsl(var(--json-number));
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: hsl(var(--json-function));
+}
+
+.hljs-attr,
+.hljs-variable,
+.hljs-template-tag,
+.hljs-type,
+.hljs-built_in,
+.hljs-name,
+.hljs-class .hljs-title {
+  color: hsl(var(--json-key));
+}
+
+.hljs-punctuation,
+.hljs-operator {
+  color: hsl(var(--foreground) / 0.8);
+}
+
+.hljs-deletion {
+  color: hsl(var(--destructive));
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

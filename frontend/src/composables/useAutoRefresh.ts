@@ -1,3 +1,4 @@
+import { useIntervalFn } from "@vueuse/core";
 import { onUnmounted, ref } from "vue";
 
 /**
@@ -17,12 +18,14 @@ interface AutoRefreshOptions {
 /**
  * Composable for managing auto-refresh functionality.
  * Provides start, stop, and toggle controls for automated data fetching.
+ * The polling loop itself is VueUse's `useIntervalFn`: pausing and resuming
+ * are library operations rather than a hand-managed timer.
  *
  * @example
  * const { autoRefresh, startAutoRefresh, stopAutoRefresh, toggleAutoRefresh } = useAutoRefresh({
  *   interval: 5000,
  *   shouldPauseRefresh: () => showDetailDialog.value,
- *   onRefreshStateChange: (isRefreshing) => console.log('Refresh state:', isRefreshing)
+ *   onRefresh: () => checkAndRefresh(),
  * });
  *
  * // In template
@@ -30,38 +33,34 @@ interface AutoRefreshOptions {
  *   {{ autoRefresh ? 'Pause' : 'Resume' }}
  * </button>
  */
-export function useAutoRefresh(options?: AutoRefreshOptions) {
+export function useAutoRefresh(options: AutoRefreshOptions = {}) {
   const autoRefresh = ref(true);
-  const refreshInterval = options?.interval ?? 5000;
-  let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  const { pause, resume } = useIntervalFn(
+    () => {
+      if (!options.shouldPauseRefresh?.()) void options.onRefresh?.();
+    },
+    options.interval ?? 5000,
+    // The interval only starts when the consumer calls startAutoRefresh().
+    { immediate: false }
+  );
 
   /**
    * Start the auto-refresh timer.
-   * Only starts if autoRefresh is enabled and the pause condition is not met.
+   * Only starts if auto-refresh is enabled and the pause condition is not met.
    */
   const startAutoRefresh = () => {
-    if (refreshTimer) {
-      clearInterval(refreshTimer);
-    }
-    if (autoRefresh.value && !options?.shouldPauseRefresh?.()) {
-      options?.onRefreshStateChange?.(true);
-      refreshTimer = setInterval(() => {
-        if (!options?.shouldPauseRefresh?.()) {
-          options?.onRefresh?.();
-        }
-      }, refreshInterval);
-    }
+    if (!autoRefresh.value || options.shouldPauseRefresh?.()) return;
+    options.onRefreshStateChange?.(true);
+    resume();
   };
 
   /**
    * Stop the auto-refresh timer.
    */
   const stopAutoRefresh = () => {
-    if (refreshTimer) {
-      clearInterval(refreshTimer);
-      refreshTimer = null;
-    }
-    options?.onRefreshStateChange?.(false);
+    pause();
+    options.onRefreshStateChange?.(false);
   };
 
   /**
@@ -70,18 +69,12 @@ export function useAutoRefresh(options?: AutoRefreshOptions) {
    */
   const toggleAutoRefresh = () => {
     autoRefresh.value = !autoRefresh.value;
-    if (autoRefresh.value) {
-      startAutoRefresh();
-    } else {
-      stopAutoRefresh();
-    }
-    options?.onRefreshStateChange?.(autoRefresh.value);
+    if (autoRefresh.value) startAutoRefresh();
+    else stopAutoRefresh();
   };
 
   // Clean up timer on component unmount
-  onUnmounted(() => {
-    stopAutoRefresh();
-  });
+  onUnmounted(stopAutoRefresh);
 
   return {
     autoRefresh,

@@ -1,5 +1,6 @@
 import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
 import { useTableFilter } from "@/composables/useTableFilter";
+import { useTableSort } from "@/composables/useTableSort";
 import { compareModelsByCost, type ModelCostKey } from "@/utils/modelPricing";
 import { compareModelsByContextLength, compareModelsByName } from "@/utils/modelSort";
 import type { ModelRead } from "@/types/schemas";
@@ -27,18 +28,6 @@ function isCostSortField(field: ModelSortField): field is CostSortField {
 }
 
 export function useModelTable(models: MaybeRefOrGetter<ModelRead[]>) {
-  const sortField = ref<ModelSortField>("name");
-  const sortDir = ref<"asc" | "desc">("asc");
-
-  function onSort(field: string) {
-    if (field === sortField.value) {
-      sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-    } else {
-      sortField.value = field as ModelSortField;
-      sortDir.value = "asc";
-    }
-  }
-
   const {
     searchQuery,
     filteredItems: baseFilteredModels,
@@ -60,34 +49,37 @@ export function useModelTable(models: MaybeRefOrGetter<ModelRead[]>) {
     return Array.from(providerSet).sort();
   });
 
-  /** Combined pipeline: base filters + provider filter + sorting. */
-  const filteredAndSortedModels = computed(() => {
-    let items = [...baseFilteredModels.value];
+  /** Base filters plus the provider quick-filter; sorting happens below. */
+  const providerFilteredModels = computed(() => {
+    const items = [...baseFilteredModels.value];
+    if (!selectedProviderFilter.value) return items;
+    return items.filter((model) =>
+      model.providers?.some((p) => p.provider_name === selectedProviderFilter.value)
+    );
+  });
 
-    if (selectedProviderFilter.value) {
-      items = items.filter((model) =>
-        model.providers?.some((p) => p.provider_name === selectedProviderFilter.value)
-      );
-    }
-
-    const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-    const field = sortField.value;
-    if (isCostSortField(field)) {
-      items.sort(compareModelsByCost(COST_SORT_KEY[field], dir));
-    } else if (field === "context_length") {
-      items.sort(compareModelsByContextLength(dir));
-    } else {
-      items.sort(compareModelsByName(dir));
-    }
-
-    return items;
+  const {
+    sortField,
+    sortDir,
+    onSort,
+    sortedItems: filteredAndSortedModels,
+    resetSort,
+  } = useTableSort<ModelRead, ModelSortField>({
+    items: providerFilteredModels,
+    initialField: "name",
+    compare: (field, a, b, dir) => {
+      if (isCostSortField(field)) {
+        return compareModelsByCost(COST_SORT_KEY[field], dir)(a, b);
+      }
+      if (field === "context_length") return compareModelsByContextLength(dir)(a, b);
+      return compareModelsByName(dir)(a, b);
+    },
   });
 
   const clearFilters = () => {
     clearBaseFilters();
     selectedProviderFilter.value = "";
-    sortField.value = "name";
-    sortDir.value = "asc";
+    resetSort();
   };
 
   const handleProviderFilter = (provider: string) => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { CircleAlert, Copy, RotateCw } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { useClipboard } from "@vueuse/core";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
@@ -43,13 +44,11 @@ const stack = computed(() => {
   return origin.value ? `${origin.value}\n${frames}` : frames;
 });
 
-const copied = ref(false);
+const { copy, copied } = useClipboard({ legacy: true, copiedDuring: 2000 });
 
 async function copyDetails(): Promise<void> {
   try {
-    await navigator.clipboard.writeText(`${props.error.message}\n\n${stack.value}`);
-    copied.value = true;
-    setTimeout(() => (copied.value = false), 2000);
+    await copy(`${props.error.message}\n\n${stack.value}`);
   } catch {
     toast.error(t("common.copyFailed"));
   }

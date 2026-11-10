@@ -27,6 +27,7 @@ import {
 import { useErrorHandler } from "@/composables/useErrorHandler";
 import { useProviderTypes } from "@/composables/useProviderTypes";
 import { useTableFilter } from "@/composables/useTableFilter";
+import { useTableSort } from "@/composables/useTableSort";
 import { useViewMode } from "@/composables/useViewMode";
 import { useProviderStore } from "@/stores/providers";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
@@ -59,34 +60,6 @@ const isLoading = computed(() => providerStore.loading && !providerStore.ready);
 // dialog offers (pre-existing behavior, preserved by the shared list).
 const providerTypes = computed(() => typeOptions.value.filter(({ value }) => value !== "nanogpt"));
 
-type SortField = "name" | "type";
-const sortField = ref<SortField>("name");
-const sortDir = ref<"asc" | "desc">("asc");
-
-function onSort(field: string) {
-  if (field === sortField.value) {
-    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-  } else {
-    sortField.value = field as SortField;
-    sortDir.value = "asc";
-  }
-}
-
-const sortedProviders = computed(() => {
-  const items = [...(filteredProviders.value as unknown as ProviderRead[])];
-  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-  switch (sortField.value) {
-    case "type":
-      items.sort((a, b) => (a.type.localeCompare(b.type) || a.name.localeCompare(b.name)) * dir);
-      break;
-    case "name":
-    default:
-      items.sort((a, b) => a.name.localeCompare(b.name) * dir);
-      break;
-  }
-  return items;
-});
-
 const {
   searchQuery,
   typeFilter,
@@ -97,10 +70,28 @@ const {
   typeField: "type",
 });
 
+type SortField = "name" | "type";
+
+const {
+  sortField,
+  sortDir,
+  onSort,
+  sortedItems: sortedProviders,
+  resetSort,
+} = useTableSort<ProviderRead, SortField>({
+  items: filteredProviders,
+  initialField: "name",
+  compare: (field, a, b, dir) => {
+    if (field === "type") {
+      return (a.type.localeCompare(b.type) || a.name.localeCompare(b.name)) * dir;
+    }
+    return a.name.localeCompare(b.name) * dir;
+  },
+});
+
 const clearFilters = () => {
   clearBaseFilters();
-  sortField.value = "name";
-  sortDir.value = "asc";
+  resetSort();
 };
 
 const openCreateDialog = () => {

@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/table";
 import { useErrorHandler } from "@/composables/useErrorHandler";
 import { useTableFilter } from "@/composables/useTableFilter";
+import { useTableSort } from "@/composables/useTableSort";
 import { useViewMode } from "@/composables/useViewMode";
 import { getApiKeyStatus, isApiKeyExpired } from "@/utils/apiKeys";
 import {
@@ -153,58 +154,44 @@ const {
 const viewMode = useViewMode(STORAGE_KEYS.API_KEYS_VIEW_MODE);
 
 type SortField = "name" | "created" | "lastUsed";
-const sortField = ref<SortField>("name");
-const sortDir = ref<"asc" | "desc">("asc");
 
 // Date columns default to newest-first; name defaults to A->Z.
 const defaultDirFor = (field: SortField): "asc" | "desc" =>
   field === "created" || field === "lastUsed" ? "desc" : "asc";
 
-function onSort(field: string) {
-  if (field === sortField.value) {
-    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-  } else {
-    sortField.value = field as SortField;
-    sortDir.value = defaultDirFor(field as SortField);
-  }
+// null/empty timestamps sort last regardless of direction.
+function compareDate(
+  av: string | null | undefined,
+  bv: string | null | undefined,
+  dir: 1 | -1
+): number {
+  if (!av && !bv) return 0;
+  if (!av) return 1;
+  if (!bv) return -1;
+  return av.localeCompare(bv) * dir;
 }
+
+const {
+  sortField,
+  sortDir,
+  onSort,
+  sortedItems: sortedApiKeys,
+  resetSort,
+} = useTableSort<ApiKeyRead, SortField>({
+  items: filteredApiKeys,
+  initialField: "name",
+  defaultDirectionFor: defaultDirFor,
+  compare: (field, a, b, dir) => {
+    if (field === "created") return compareDate(a.created_at, b.created_at, dir);
+    if (field === "lastUsed") return compareDate(a.last_used_at, b.last_used_at, dir);
+    return a.name.localeCompare(b.name) * dir;
+  },
+});
 
 const clearFilters = () => {
   clearBaseFilters();
-  sortField.value = "name";
-  sortDir.value = "asc";
+  resetSort();
 };
-
-const sortedApiKeys = computed(() => {
-  const items = [...filteredApiKeys.value];
-  const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
-
-  // null/empty timestamps sort last regardless of direction.
-  const compareDate = (
-    av: string | null | undefined,
-    bv: string | null | undefined,
-    dir: 1 | -1
-  ): number => {
-    if (!av && !bv) return 0;
-    if (!av) return 1;
-    if (!bv) return -1;
-    return av.localeCompare(bv) * dir;
-  };
-
-  switch (sortField.value) {
-    case "created":
-      items.sort((a, b) => compareDate(a.created_at, b.created_at, dir));
-      break;
-    case "lastUsed":
-      items.sort((a, b) => compareDate(a.last_used_at, b.last_used_at, dir));
-      break;
-    case "name":
-    default:
-      items.sort((a, b) => a.name.localeCompare(b.name) * dir);
-      break;
-  }
-  return items;
-});
 
 // --- Status / expiry / spend helpers ---------------------------------------
 

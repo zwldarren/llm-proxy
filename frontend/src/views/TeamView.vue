@@ -18,6 +18,7 @@ import {
   UserX,
   Wallet,
 } from "@lucide/vue";
+import { useClipboard } from "@vueuse/core";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
@@ -26,7 +27,6 @@ import { invitationsApi } from "@/services/api/invitations";
 import type { Invitation } from "@/types/schemas";
 import { useModelStore } from "@/stores/models";
 import { getErrorMessage } from "@/utils/error";
-import { copyToClipboard } from "@/utils/clipboard";
 import { passwordRequirementsText, validatePasswordStrength } from "@/utils/password";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import AccessScopePicker from "@/components/common/AccessScopePicker.vue";
@@ -82,6 +82,7 @@ import { formatCost, formatDate } from "@/utils/format";
 defineOptions({ name: "TeamView" });
 
 const { t } = useI18n();
+const { copy } = useClipboard({ legacy: true });
 const authStore = useAuthStore();
 const modelStore = useModelStore();
 
@@ -744,11 +745,11 @@ async function createInvitation() {
 }
 
 async function copyInviteUrl() {
-  // copyToClipboard falls back to execCommand on plain-HTTP deployments, where
+  // `legacy` falls back to execCommand on plain-HTTP deployments, where
   // navigator.clipboard is unavailable — exactly those LAN setups this invite
   // flow targets.
   try {
-    await copyToClipboard(inviteUrl.value);
+    await copy(inviteUrl.value);
     toast.success(t("team.inviteCopied"));
   } catch {
     toast.error(t("errors.saveFailed"));

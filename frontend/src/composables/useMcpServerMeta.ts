@@ -1,13 +1,6 @@
-import { copyToClipboard } from "@/utils/clipboard";
 import { Terminal, Webhook } from "@lucide/vue";
-import {
-  computed,
-  onScopeDispose,
-  ref,
-  toValue,
-  type ComputedRef,
-  type MaybeRefOrGetter,
-} from "vue";
+import { useClipboard } from "@vueuse/core";
+import { computed, toValue, type ComputedRef, type MaybeRefOrGetter } from "vue";
 import type { Component } from "vue";
 import type { McpServerRead, McpServerStatus } from "@/types/schemas";
 
@@ -133,27 +126,19 @@ export function useMcpServerMeta(
     return `${window.location.origin}${srv.proxy_url}`;
   });
 
-  const copied = ref(false);
-  let copyTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  onScopeDispose(() => {
-    if (copyTimeout) clearTimeout(copyTimeout);
+  const { copy, copied } = useClipboard({
+    source: () => fullProxyUrl.value ?? "",
+    legacy: true,
+    copiedDuring: 2000,
   });
 
   async function copyProxyUrl() {
-    const url = fullProxyUrl.value;
-    if (!url) return;
+    if (!fullProxyUrl.value) return;
     try {
-      await copyToClipboard(url);
+      await copy();
     } catch {
-      copied.value = false;
-      return;
+      // Clipboard unavailable — leave the copied state untouched.
     }
-    copied.value = true;
-    copyTimeout = setTimeout(() => {
-      copied.value = false;
-      copyTimeout = null;
-    }, 2000);
   }
 
   return {

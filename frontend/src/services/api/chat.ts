@@ -1,3 +1,4 @@
+import { createParser } from "eventsource-parser";
 import { http, handleUnauthorized, TimeoutError } from "@/services/http";
 import { csrfHeaders } from "@/services/csrf";
 import { getAdapterForEndpoint } from "@/adapters";
@@ -102,12 +103,26 @@ export const chatApi = {
 
     if (!reader) return;
 
-    let buffer = "";
-    let currentEvent = "";
-
     // Get the protocol adapter for this endpoint
     const adapter = getAdapterForEndpoint(endpoint);
     const callbacks = { onChunk, onReasoningChunk, onToolCall, onError, onWebSearchCall };
+
+    // eventsource-parser owns the wire format: chunk boundaries, CRLF, comments
+    // and multi-line `data:` fields are handled by the spec rather than by a
+    // local line splitter. We only get complete events.
+    const parser = createParser({
+      onEvent(event) {
+        const dataStr = event.data.trim();
+        if (!dataStr || dataStr === "[DONE]") return;
+
+        try {
+          const parsedData = JSON.parse(dataStr) as Record<string, unknown>;
+          adapter.parseStreamChunk(parsedData, event.event ?? "", callbacks);
+        } catch (e) {
+          console.warn("Failed to parse SSE event:", dataStr, e);
+        }
+      },
+    });
 
     // Read the stream
     while (true) {
@@ -120,39 +135,7 @@ export const chatApi = {
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      // Keep the last line in the buffer because it might be incomplete
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        if (trimmed.startsWith("event: ")) {
-          currentEvent = trimmed.slice(7).trim();
-          continue;
-        }
-
-        if (trimmed.startsWith("data: ")) {
-          const dataStr = trimmed.slice(6).trim();
-          if (dataStr === "[DONE]") {
-            currentEvent = "";
-            continue;
-          }
-
-          try {
-            const parsedData = JSON.parse(dataStr) as Record<string, unknown>;
-
-            // Dispatch to the protocol adapter for parsing
-            adapter.parseStreamChunk(parsedData, currentEvent, callbacks);
-          } catch (e) {
-            console.warn("Failed to parse SSE line:", dataStr, e);
-          }
-
-          currentEvent = "";
-        }
-      }
+      parser.feed(decoder.decode(value, { stream: true }));
     }
   },
 

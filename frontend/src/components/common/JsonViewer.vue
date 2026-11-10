@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { copyToClipboard } from "@/utils/clipboard";
 import { Check, Copy, AlertTriangle, Loader2 } from "@lucide/vue";
+import { useClipboard } from "@vueuse/core";
 import { computed, ref, defineAsyncComponent, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const copyError = ref(false);
 const copyErrorMessage = ref("");
-const copied = ref(false);
+const { copy, copied } = useClipboard({ legacy: true, copiedDuring: 2000 });
 
 // Reset copy error when copied state changes
 watch(copied, (val) => {
@@ -99,13 +99,9 @@ const handleCopy = async () => {
     copyErrorMessage.value = "";
     const text = safeStringify(props.data);
 
-    await copyToClipboard(text);
+    await copy(text);
 
     emit("copy", text);
-    copied.value = true;
-    setTimeout(() => {
-      copied.value = false;
-    }, 2000);
   } catch (err) {
     copyError.value = true;
     copyErrorMessage.value = err instanceof Error ? err.message : "Copy failed";
