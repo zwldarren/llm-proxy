@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowDown, ChevronLeft, ChevronRight, Cpu } from "@lucide/vue";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Cpu } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
@@ -32,22 +32,40 @@ const currentPage = ref(1);
 
 type SortBy = "requests" | "cost" | "name";
 const sortBy = ref<SortBy>("requests");
+/**
+ * Sort direction, per column. Clicking the active column used to do nothing,
+ * so the table's only order was the one baked into each comparator, and the
+ * arrow never changed.
+ */
+const sortDir = ref<"asc" | "desc">("desc");
+
+/** First click on a column gives that column's useful order: numbers largest
+ *  first, names A to Z. Clicking it again flips it. */
+function setSort(column: SortBy) {
+  if (sortBy.value === column) {
+    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
+    return;
+  }
+  sortBy.value = column;
+  sortDir.value = column === "name" ? "asc" : "desc";
+}
 
 // Sort models
 const sortedModels = computed(() => {
   const result = [...(props.byModel ?? [])];
+  const direction = sortDir.value === "asc" ? 1 : -1;
 
   if (sortBy.value === "cost") {
-    result.sort((a, b) => b.cost - a.cost || b.requests - a.requests);
+    result.sort((a, b) => (a.cost - b.cost || a.requests - b.requests) * direction);
     return result;
   }
 
   if (sortBy.value === "name") {
-    result.sort((a, b) => a.model.localeCompare(b.model));
+    result.sort((a, b) => a.model.localeCompare(b.model) * direction);
     return result;
   }
 
-  result.sort((a, b) => b.requests - a.requests || b.cost - a.cost);
+  result.sort((a, b) => (a.requests - b.requests || a.cost - b.cost) * direction);
   return result;
 });
 
@@ -110,10 +128,14 @@ const truncateModelName = (name: string, maxLength = 28): string => {
           <button
             class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 truncate"
             :class="{ 'text-foreground font-semibold': sortBy === 'name' }"
-            @click="sortBy = 'name'"
+            @click="setSort('name')"
           >
             {{ t("logs.model") }}
-            <ArrowDown v-if="sortBy === 'name'" class="w-3.5 h-3.5 text-action-amber" />
+            <component
+              :is="sortDir === 'asc' ? ArrowUp : ArrowDown"
+              v-if="sortBy === 'name'"
+              class="w-3.5 h-3.5 text-action-amber"
+            />
           </button>
         </div>
 
@@ -121,18 +143,26 @@ const truncateModelName = (name: string, maxLength = 28): string => {
           <button
             class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             :class="{ 'text-foreground font-semibold': sortBy === 'requests' }"
-            @click="sortBy = 'requests'"
+            @click="setSort('requests')"
           >
             {{ t("home.totalRequests") }}
-            <ArrowDown v-if="sortBy === 'requests'" class="w-3.5 h-3.5 text-action-amber" />
+            <component
+              :is="sortDir === 'asc' ? ArrowUp : ArrowDown"
+              v-if="sortBy === 'requests'"
+              class="w-3.5 h-3.5 text-action-amber"
+            />
           </button>
           <button
             class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 w-20 justify-end"
             :class="{ 'text-foreground font-semibold': sortBy === 'cost' }"
-            @click="sortBy = 'cost'"
+            @click="setSort('cost')"
           >
             {{ t("home.costUsd") }}
-            <ArrowDown v-if="sortBy === 'cost'" class="w-3.5 h-3.5 text-action-amber" />
+            <component
+              :is="sortDir === 'asc' ? ArrowUp : ArrowDown"
+              v-if="sortBy === 'cost'"
+              class="w-3.5 h-3.5 text-action-amber"
+            />
           </button>
         </div>
       </div>

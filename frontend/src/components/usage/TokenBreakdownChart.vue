@@ -137,7 +137,12 @@ const chartA11yRows = computed<ChartDataTableRow[]>(() =>
 
 <template>
   <section class="flex flex-col">
-    <div class="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/60">
+    <!-- min-h-14 keeps this single-line header the same height as the usage
+         trends panel's toolbar beside it, so the two canvases start on one
+         line instead of 17px apart. -->
+    <div
+      class="flex min-h-14 items-center justify-between px-4 sm:px-6 py-3 border-b border-border/60"
+    >
       <h2 class="flex items-baseline gap-2 text-sm md:text-base font-semibold text-foreground">
         <BarChart3 class="w-4 h-4 self-center text-action-blue" />
         {{ t("home.tokenBreakdownTitle") }}

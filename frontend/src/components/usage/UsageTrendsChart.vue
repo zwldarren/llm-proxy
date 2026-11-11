@@ -268,10 +268,20 @@ const clearFilters = () => {
   showTopN.value = 5;
 };
 
-// Truncate model name for legend
+/**
+ * Shorten a model id for the legend without erasing what distinguishes it.
+ *
+ * Cutting the tail turned `claude-sonnet-4-20250514` and
+ * `claude-sonnet-4-5-20250929` into the same string, and the legend, the
+ * tooltip and the a11y table all key off this label. Middle truncation keeps
+ * both the family prefix and the version/date suffix, which is the part that
+ * differs.
+ */
 const truncateModelName = (name: string, maxLength = 20): string => {
   if (name.length <= maxLength) return name;
-  return `${name.slice(0, maxLength)}...`;
+  const head = Math.ceil((maxLength - 1) / 2);
+  const tail = maxLength - 1 - head;
+  return `${name.slice(0, head)}…${name.slice(name.length - tail)}`;
 };
 
 // Prepare chart data based on chart type

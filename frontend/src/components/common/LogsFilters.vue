@@ -426,7 +426,33 @@ const clearAllFilters = () => {
 
 defineExpose({ activeFilterCount, clearAllFilters });
 
+/**
+ * The status chip strip scrolls horizontally on narrow containers and used to
+ * carry a permanent right-edge fade: the last chip ("5xx") stayed dimmed by
+ * 24px even on a wide screen where nothing was cut off. The mask now applies
+ * only while the strip actually overflows.
+ */
+const statusStrip = ref<HTMLElement | null>(null);
+const statusStripScrollable = ref(false);
+
+function measureStatusStrip() {
+  const el = statusStrip.value;
+  statusStripScrollable.value = el !== null && el.scrollWidth > el.clientWidth + 1;
+}
+
+let statusStripObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  measureStatusStrip();
+  if (statusStrip.value && typeof ResizeObserver !== "undefined") {
+    statusStripObserver = new ResizeObserver(measureStatusStrip);
+    statusStripObserver.observe(statusStrip.value);
+  }
+});
+
 onUnmounted(() => {
+  statusStripObserver?.disconnect();
+  statusStripObserver = null;
   // Flush a filter edit typed just before navigation instead of dropping it.
   if (emitDebounced.isPending.value) emitDebounced.flush();
 });
@@ -496,7 +522,9 @@ onUnmounted(() => {
           t("logs.status")
         }}</span>
         <div
+          ref="statusStrip"
           class="status-chips-scroll flex gap-1.5 w-full"
+          :class="{ 'is-scrollable': statusStripScrollable }"
           role="group"
           aria-labelledby="status-filter-label"
         >
@@ -732,7 +760,10 @@ onUnmounted(() => {
   flex-wrap: nowrap;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
-  /* Fade hint on the right edge when scrollable */
+}
+
+/* Fade hint on the right edge, only while there is something past it. */
+.status-chips-scroll.is-scrollable {
   mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
   -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
 }

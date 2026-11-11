@@ -162,7 +162,15 @@ const tokenBreakdownBuckets = computed<HourlyUsageBucket[]>(() => {
   }));
 });
 
-async function fetchHourlyUsage() {
+/**
+ * Guards against a slow response from an earlier range landing on top of a
+ * newer one: two preset clicks in quick succession used to be a race, and the
+ * loser could repaint the dashboard with the range the operator had left.
+ * Same pattern as LogsView's fetchSequence.
+ */
+let fetchSequence = 0;
+
+async function fetchHourlyUsage(sequence: number) {
   if (!useHourlyGranularity.value) {
     hourlyBuckets.value = [];
     return;
@@ -173,8 +181,10 @@ async function fetchHourlyUsage() {
       end_date: formatDateValue(dateRange.value.end),
       model: selectedModel.value ?? undefined,
     });
+    if (sequence !== fetchSequence) return;
     hourlyBuckets.value = response.buckets;
   } catch (error) {
+    if (sequence !== fetchSequence) return;
     // Non-fatal: the breakdown chart degrades to the empty state.
     console.error("Failed to fetch hourly usage:", error);
     hourlyBuckets.value = [];
@@ -198,6 +208,7 @@ function onModelFilterChange(value: string) {
 }
 
 async function fetchUsageStats() {
+  const sequence = ++fetchSequence;
   try {
     isLoadingUsage.value = true;
     usageError.value = null;
@@ -211,8 +222,9 @@ async function fetchUsageStats() {
         end_date,
         model: selectedModel.value ?? undefined,
       }),
-      fetchHourlyUsage(),
+      fetchHourlyUsage(sequence),
     ]);
+    if (sequence !== fetchSequence) return;
     usageStats.value = stats;
 
     const merged = new Map(availableModels.value.map((m) => [m.model, m.provider]));
@@ -223,6 +235,7 @@ async function fetchUsageStats() {
       .map(([model, provider]) => ({ model, provider }))
       .sort((a, b) => a.model.localeCompare(b.model));
   } catch (error) {
+    if (sequence !== fetchSequence) return;
     console.error("Failed to fetch usage stats:", error);
     const message = error instanceof Error ? error.message : t("errors.fetchFailed");
     // Background refresh: when stale data is already on screen, keep the panel
@@ -233,7 +246,7 @@ async function fetchUsageStats() {
       usageError.value = message;
     }
   } finally {
-    isLoadingUsage.value = false;
+    if (sequence === fetchSequence) isLoadingUsage.value = false;
   }
 }
 
