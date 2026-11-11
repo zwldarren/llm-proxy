@@ -204,22 +204,26 @@ const chartAriaLabel = computed(() =>
  * formatted like the tooltip and keyed by the bucket so an hourly range
  * spanning days cannot collide on a repeated "00:00".
  */
-const chartA11yRows = computed<ChartDataTableRow[]>(() => {
-  const formatTotal = (total: number) =>
-    chartType.value === "cost" ? formatCostWithPrecision(total) : formatNumberWithSuffix(total);
-  return series.value.map((bucket, index) => ({
+/** One number formatted the way the active metric is read. */
+const formatMetric = (value: number): string =>
+  chartType.value === "cost" ? formatCostWithPrecision(value) : formatNumberWithSuffix(value);
+
+/**
+ * Bucket total across the plotted series (the displayed models, after any
+ * filter). The a11y table and the tooltip title both report it: the table used
+ * to carry it alone, so a sighted reader saw only the per-model split and never
+ * the number a screen-reader user was given.
+ */
+const bucketTotal = (index: number): number =>
+  chartData.value.datasets.reduce((sum, dataset) => sum + (Number(dataset.data[index]) || 0), 0);
+
+const chartA11yRows = computed<ChartDataTableRow[]>(() =>
+  series.value.map((bucket, index) => ({
     key: bucket.key,
     label: fullBucketLabel(bucket.key),
-    values: [
-      formatTotal(
-        chartData.value.datasets.reduce(
-          (sum, dataset) => sum + (Number(dataset.data[index]) || 0),
-          0
-        )
-      ),
-    ],
-  }));
-});
+    values: [formatMetric(bucketTotal(index))],
+  }))
+);
 
 /** Short axis label: "14:00" for hourly buckets, "Sep 27" for daily. */
 const axisLabel = (key: string): string => {
@@ -337,7 +341,10 @@ const chartOptions = computed(() =>
         const first = items[0];
         if (!first) return "";
         const bucket = series.value[first.dataIndex];
-        return bucket ? bucketTitle(bucket.key) : "";
+        if (!bucket) return "";
+        // Bucket range + bucket total, the same pair the breakdown chart's
+        // tooltip shows and the same total the a11y table reports.
+        return `${bucketTitle(bucket.key)}    ${formatMetric(bucketTotal(first.dataIndex))}`;
       },
       label: (context: TooltipItem<"bar">) => {
         const value = context.raw as number;

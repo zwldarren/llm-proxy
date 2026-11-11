@@ -3,6 +3,7 @@ import { AlertTriangle, BarChart3, Gauge, Inbox } from "@lucide/vue";
 import { computed, defineAsyncComponent, defineComponent, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
+import BudgetMeter from "@/components/common/BudgetMeter.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
@@ -250,19 +251,22 @@ const modelRows = computed(() => {
             :class="{ 'opacity-50 pointer-events-none': loading }"
             :aria-busy="loading"
           >
-            <!-- Summary stats -->
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <!-- Summary: one panel of labelled rows. Six identical cards in a
+                 grid is the template this console deliberately does not use,
+                 and it spent a card's worth of chrome on one number; the rows
+                 below (budget window, rate limit) already read this way. -->
+            <div class="rounded-lg border border-border/60 bg-muted/30 divide-y divide-border/40">
               <div
                 v-for="card in statCards"
                 :key="card.key"
-                class="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5"
+                class="flex items-baseline justify-between gap-3 px-3 py-1.5"
               >
-                <div class="text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
                   {{ card.label }}
-                </div>
-                <div class="mt-1 text-lg font-semibold text-data" :title="card.title">
+                </span>
+                <span class="text-data shrink-0 font-semibold" :title="card.title">
                   {{ card.value }}
-                </div>
+                </span>
               </div>
             </div>
 
@@ -287,20 +291,11 @@ const modelRows = computed(() => {
                   {{ formatCost(budgetSpend) }} / {{ formatCost(apiKey.budget_usd) }}
                 </span>
               </div>
-              <div
-                class="h-1.5 rounded-full bg-muted overflow-hidden"
-                role="progressbar"
-                :aria-label="t('apiKeys.budgetWindow')"
-                :aria-valuenow="Math.round((budgetRatio ?? 0) * 100)"
-                aria-valuemin="0"
-                aria-valuemax="100"
-              >
-                <div
-                  class="h-full rounded-full transition-all"
-                  :class="barClass"
-                  :style="{ width: `${(budgetRatio ?? 0) * 100}%` }"
-                />
-              </div>
+              <BudgetMeter
+                :ratio="budgetRatio"
+                :label="t('apiKeys.budgetWindow')"
+                :bar-class="barClass"
+              />
               <p class="text-[11px] text-muted-foreground">
                 {{ windowNote }}
               </p>

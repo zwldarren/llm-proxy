@@ -21,7 +21,18 @@ withDefaults(defineProps<Props>(), {
 </script>
 
 <template>
-  <Alert :variant="tone === 'error' ? 'destructive' : 'default'" :id="id">
+  <!-- A success confirmation is not an alert: it gets the success tint (so it
+       reads as success without relying on the glyph) and `role="status"`, which
+       does not interrupt what the reader is currently hearing. Info and error
+       keep `role="alert"`. -->
+  <Alert
+    :variant="tone === 'error' ? 'destructive' : 'default'"
+    :class="
+      tone === 'success' ? 'border-status-success/30 bg-status-success/10 text-status-success' : ''
+    "
+    :role="tone === 'success' ? 'status' : undefined"
+    :id="id"
+  >
     <AlertDescription>
       <span class="flex items-start gap-2">
         <CircleAlert v-if="tone === 'error'" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
