@@ -57,20 +57,35 @@ const breakdownDelay = (col: number, i: number) => delay(9 + (col - 1) * 4 + (i 
       </div>
     </div>
 
-    <!-- Trends chart: header row + chart panel -->
-    <div class="border-b border-border/60">
-      <div class="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/60">
-        <Skeleton class="h-4 w-32" :style="{ animationDelay: chartDelay }" />
-        <Skeleton class="h-7 w-24 rounded-md" :style="{ animationDelay: chartDelay }" />
-      </div>
-      <div class="px-4 sm:px-6 pb-4 pt-3">
-        <Skeleton class="h-72 md:h-85 w-full rounded-lg" :style="{ animationDelay: chartDelay }" />
+    <!-- Chart row: the two panels sit side by side from `lg` on, exactly as the
+         real row does, so nothing shifts sideways when the data arrives. -->
+    <div
+      class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border/60 items-start border-b border-border/60"
+    >
+      <div v-for="panel in 2" :key="panel">
+        <div
+          class="flex min-h-14 items-center justify-between px-4 sm:px-6 py-3 border-b border-border/60"
+        >
+          <Skeleton class="h-4 w-32" :style="{ animationDelay: chartDelay }" />
+          <Skeleton
+            v-if="panel === 2"
+            class="h-7 w-24 rounded-md"
+            :style="{ animationDelay: chartDelay }"
+          />
+        </div>
+        <div class="px-4 sm:px-6 pb-4 pt-3">
+          <Skeleton
+            class="h-72 md:h-85 w-full rounded-lg"
+            :style="{ animationDelay: chartDelay }"
+          />
+        </div>
       </div>
     </div>
 
-    <!-- Breakdown columns: provider / model lists with meters -->
+    <!-- Breakdown columns: provider / model lists with meters, two up from `md`
+         (the real row's breakpoint, not `lg`). -->
     <div
-      class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border/60 items-start"
+      class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/60 items-start"
     >
       <div v-for="col in 2" :key="col" class="px-4 sm:px-6 py-4 space-y-4">
         <Skeleton class="h-4 w-28" :style="{ animationDelay: breakdownDelay(col, 0) }" />

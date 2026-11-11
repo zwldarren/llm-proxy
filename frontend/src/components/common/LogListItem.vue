@@ -3,10 +3,14 @@ import {
   ChevronRight,
   Clock,
   Coins,
-  Cpu,
   CornerDownRight,
   DatabaseZap,
+  Globe,
+  KeyRound,
+  Plug,
   RotateCcw,
+  Search,
+  Server,
   User,
   Zap,
   type LucideIcon,
@@ -184,7 +188,7 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
     case "judge": {
       if (props.log.provider) {
         metrics.push({
-          icon: Cpu,
+          icon: Server,
           label: t("logs.provider"),
           value: props.log.provider,
           provider: props.log.provider,
@@ -199,7 +203,7 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
         });
       } else if (props.log.api_key_name) {
         metrics.push({
-          icon: Cpu,
+          icon: KeyRound,
           label: t("logs.apiKey"),
           value: formatApiKeyName(props.log.api_key_name),
           mono: true,
@@ -242,13 +246,13 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
     }
     case "audit":
       metrics.push({
-        icon: Cpu,
+        icon: User,
         label: t("logs.actor"),
         value: getActor(props.log),
       });
       if (props.log.client_ip) {
         metrics.push({
-          icon: Cpu,
+          icon: Globe,
           label: t("logs.ipAddress"),
           value: props.log.client_ip,
           mono: true,
@@ -264,7 +268,7 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
       break;
     case "mcp":
       metrics.push({
-        icon: Cpu,
+        icon: Plug,
         label: t("logs.mcpOperation"),
         value: getMcpOperation(props.log),
       });
@@ -278,7 +282,7 @@ const secondaryMetrics: ComputedRef<MetricItem[]> = computed(() => {
       break;
     case "websearch":
       metrics.push({
-        icon: Cpu,
+        icon: Search,
         label: t("logs.webSearchProvider"),
         value: props.log.provider || "searxng",
         provider: props.log.provider || "searxng",
