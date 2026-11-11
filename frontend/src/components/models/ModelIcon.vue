@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ImageOff } from "@lucide/vue";
+import { Cpu } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { getIconUrl, isMonoIcon } from "@/utils/icons";
 
 /**
  * Model icon tile: custom icon_url, then a well-known lobe icon derived from
- * the model name, then an ImageOff placeholder. The error state resets when
- * the name/icon changes so a fixed URL shows without a remount.
+ * the model name, then a neutral chip glyph. The error state resets when the
+ * name/icon changes so a fixed URL shows without a remount.
  */
 const props = withDefaults(
   defineProps<{
@@ -49,6 +49,6 @@ const mono = computed(() => isMonoIcon(props.name));
       loading="lazy"
       @error="failed = true"
     />
-    <ImageOff v-else class="w-4 h-4 text-muted-foreground" />
+    <Cpu v-else class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
   </span>
 </template>

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { loadLocaleMessages } from "@/i18n";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
+import { setActiveLocale } from "@/utils/locale";
 
 const { locale, t } = useI18n();
 
@@ -29,6 +30,7 @@ const changeLanguage = async (langCode: string) => {
   // Message bundles for non-default locales are loaded on demand.
   await loadLocaleMessages(langCode);
   locale.value = langCode;
+  setActiveLocale(langCode);
   localStorage.setItem(STORAGE_KEYS.LOCALE, langCode);
 };
 </script>
@@ -59,12 +61,10 @@ const changeLanguage = async (langCode: string) => {
       </div>
     </SelectTrigger>
     <SelectContent>
-      <SelectItem value="en">
-        {{ t("language.english") }}
-      </SelectItem>
-      <SelectItem value="zh">
-        {{ t("language.chinese") }}
-      </SelectItem>
+      <!-- Endonyms: a reader who cannot read the current UI language still
+           finds their own language in the list. -->
+      <SelectItem value="en">English</SelectItem>
+      <SelectItem value="zh">中文</SelectItem>
     </SelectContent>
   </Select>
 </template>

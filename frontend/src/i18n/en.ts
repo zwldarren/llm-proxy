@@ -176,6 +176,8 @@ export default {
     // Token breakdown chart (cache hit / cache miss / output per bucket)
     tokenBreakdownTitle: "Tokens",
     tokenBreakdownEmpty: "No token usage in this range.",
+    usageTrendsEmpty: "No usage in this range.",
+    noUsageInRange: "No usage data in this range.",
     // Accessible names stay short: the range is in the page header, and the
     // per-bucket numbers live in the charts' screen-reader data tables.
     tokenBreakdownAria: "Token breakdown",
@@ -425,9 +427,12 @@ export default {
     // once per session, so a failed call must remain retryable in place.
     retryModels: "Models unavailable — retry",
     noModelsAvailable: "No models available — retry",
+    noImageModels: "No image model configured",
     modelsLoadFailed: "Could not load the model list",
     enterPrompt: "Describe the image you want to create...",
     create: "Create",
+    hintNoModel: "Select an image model first",
+    hintNoPrompt: "Describe the image first",
     // Settings
     settings: "Settings",
     numberOfImages: "Number of Images",
@@ -504,6 +509,8 @@ export default {
     description: "Manage your LLM providers",
     addProvider: "Add Provider",
     editProvider: "Edit Provider",
+    addProviderDescription: "Connect an upstream API and the models it serves.",
+    editProviderDescription: "Change the connection, credentials and model list.",
     name: "Name",
     type: "Type",
     apiKey: "API Key",
@@ -615,6 +622,8 @@ export default {
     description: "Manage your LLM model mappings",
     addModel: "Add Model",
     editModel: "Edit Model",
+    addModelDescription: "Map a model name to a provider model and set its pricing.",
+    editModelDescription: "Change how this model is routed and billed.",
     name: "Name",
     provider: "Provider",
     providers: "Providers",
@@ -1272,6 +1281,7 @@ export default {
     setupDescription: "No admin account exists yet. Create one to finish setup.",
     setupButton: "Create Account & Sign In",
     confirmPassword: "Confirm Password",
+    confirmPasswordHint: "Enter the same password again.",
     setupError: "Failed to create admin account",
     setupAlreadyDone: "Setup is already complete. An admin account already exists.",
     setupUsernameTaken: "That username is unavailable. Please choose a different one.",
@@ -1295,6 +1305,8 @@ export default {
     forgotTitle: "Reset your password",
     forgotDescription:
       "Enter your username or verified email address. If it matches an account here, we send a reset link to the address on file.",
+    forgotDescriptionUnavailable:
+      "This instance does not send password reset emails. Recovery is handled by an administrator.",
     forgotSubmit: "Send reset link",
     forgotSent:
       "If that account has a verified email address, a reset link is on its way. It stays valid for 30 minutes.",
@@ -1305,10 +1317,13 @@ export default {
     resetDescription: "The link works once and expires 30 minutes after it was sent.",
     resetSubmit: "Set new password",
     resetMissingToken: "This link is missing its token. Request a new one.",
+    resetInvalidToken: "This reset link is invalid or has expired. Request a new one.",
+    resetRequestNew: "Request a new link",
     resetSuccess: "Password updated. Sign in with your new password.",
     inviteTitle: "Accept your invitation",
     inviteDescription: "Choose a username and password for the account invited as {email}.",
     inviteExpired: "This invitation is no longer valid.",
+    inviteContactAdmin: "Ask an administrator to send a new invitation.",
     inviteAccept: "Create account",
     inviteAccepted: "Account created.",
     invitePasswordHint:
@@ -1550,6 +1565,7 @@ export default {
     groupAccount: "Account",
     groupSecurity: "Sign-in security",
     addMember: "Add Member",
+    addMemberDescription: "Create the account here and set its first password yourself.",
     inviteMember: "Invite Member",
     inviteDescription: "Create a single-use link for someone to join the console.",
     inviteEmail: "Email address",
@@ -1802,7 +1818,9 @@ export default {
     completionTokens: "Completion",
     error: "Error",
     errorDetails: "Error Details",
-    noLogs: "No logs found matching your criteria.",
+    noLogs: "No logs recorded yet.",
+    noLogsYetDescription: "Requests through this proxy will appear here as soon as they arrive.",
+    noLogsFiltered: "No request matches the current filters. Clear them to see the full history.",
     noSearchResults:
       'No results found for "{query}". Try a different search term or clear filters.',
     noConversation: "No conversation data available",
@@ -2224,6 +2242,8 @@ export default {
     description: "Manage your MCP servers and proxy configurations",
     addServer: "Add Server",
     editServer: "Edit Server",
+    addServerDescription: "Register a stdio command or a remote HTTP MCP server.",
+    editServerDescription: "Change how this server is started and reached.",
     name: "Name",
     type: "Type",
     command: "Command",

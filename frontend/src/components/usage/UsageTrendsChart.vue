@@ -10,7 +10,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control";
 import ChartDataTable, { type ChartDataTableRow } from "./ChartDataTable.vue";
 import { baseBarChartOptions, useChartTheme } from "@/composables/useChartTheme";
-import { formatChartDate, formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
+import {
+  formatChartDate,
+  formatCostWithPrecision,
+  formatFullDate,
+  formatNumberWithSuffix,
+} from "@/utils/format";
 import { createCategoricalColorScale } from "@/utils/colorPalette";
 import type { HourlyUsageBucket } from "@/types/schemas";
 import { registerBarChart } from "@/lib/charts";
@@ -146,6 +151,19 @@ const displayModels = computed(() => {
 // popover become disabled until the user deselects something.
 const selectionAtCap = computed(() => selectedModels.value.size >= MAX_DISPLAY_MODELS);
 
+/**
+ * Whether the range carries any traffic.
+ *
+ * The backend returns a bucket for every hour of the range, so the bucket
+ * count is never zero even when nothing happened. An axis with no bars reads
+ * as a broken chart, so the empty state is keyed on the data itself.
+ */
+const hasData = computed(() =>
+  series.value.some((bucket) =>
+    bucket.by_model.some((model) => model.requests > 0 || model.cost > 0)
+  )
+);
+
 // Accessible label for screen readers: the chart's name in the a11y tree. The
 // date range and series count are deliberately left out — the page header
 // carries the range, and the data table below carries the numbers.
@@ -194,11 +212,7 @@ const bucketTitle = (key: string): string => {
     const range = `${hour}:00 ~ ${hour}:59`;
     return series.value.length > 24 ? `${formatChartDate(key.slice(0, 10))} ${range}` : range;
   }
-  return new Date(key).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatFullDate(key);
 };
 
 // Toggle model selection (adding is blocked once the cap is reached)
@@ -438,7 +452,7 @@ const chartOptions = computed(() =>
 
     <!-- Chart panel (flush, no Card) -->
     <div class="px-4 sm:px-6 pb-4 pt-3">
-      <div v-if="series.length > 0" class="relative w-full h-72 md:h-85">
+      <div v-if="hasData" class="relative w-full h-72 md:h-85">
         <Bar role="img" :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
         <!-- The canvas becomes one image with a name; the table is what carries
              the numbers. -->
@@ -450,7 +464,7 @@ const chartOptions = computed(() =>
         />
       </div>
       <div v-else class="py-12 text-center text-muted-foreground text-sm">
-        {{ t("logs.noLogs") }}
+        {{ t("home.usageTrendsEmpty") }}
       </div>
     </div>
   </section>

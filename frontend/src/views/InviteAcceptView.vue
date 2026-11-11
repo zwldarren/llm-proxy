@@ -5,6 +5,8 @@ import { useRoute, useRouter } from "vue-router";
 import { Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import AuthShell from "@/components/common/AuthShell.vue";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,9 +93,15 @@ async function accept() {
       <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
     </div>
 
-    <Alert v-else-if="error && !invitation" variant="destructive">
-      <AlertDescription>{{ error }}</AlertDescription>
-    </Alert>
+    <template v-else-if="error && !invitation">
+      <AuthStatusAlert tone="error" id="invite-invalid">{{ error }}</AuthStatusAlert>
+      <p class="mt-4 text-center text-xs text-muted-foreground">
+        {{ t("auth.inviteContactAdmin") }}
+      </p>
+      <Button variant="outline" class="mt-4 w-full" @click="router.push('/login')">
+        {{ t("auth.backToLogin") }}
+      </Button>
+    </template>
 
     <form v-else-if="invitation" class="flex flex-col gap-4" @submit.prevent="accept">
       <Alert v-if="error" variant="destructive">
@@ -113,10 +121,9 @@ async function accept() {
       </div>
       <div class="flex flex-col gap-1.5">
         <Label for="invite-password">{{ t("auth.password") }}</Label>
-        <Input
+        <PasswordInput
           id="invite-password"
           v-model="password"
-          type="password"
           autocomplete="new-password"
           required
           class="auth-input h-11"
@@ -127,10 +134,9 @@ async function accept() {
       </div>
       <div class="flex flex-col gap-1.5">
         <Label for="invite-confirm">{{ t("auth.confirmPassword") }}</Label>
-        <Input
+        <PasswordInput
           id="invite-confirm"
           v-model="confirmPassword"
-          type="password"
           autocomplete="new-password"
           required
           class="auth-input h-11"

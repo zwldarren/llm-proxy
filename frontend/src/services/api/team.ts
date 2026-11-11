@@ -87,7 +87,7 @@ export const teamApi = {
       { username }
     ),
 
-  // Set an admin-attested login email (used when SMTP verification is not
+  // Set an admin-attested login email (used when email verification is not
   // configured). The backend marks the address as verified by the admin.
   setMemberEmail: (userId: number, email: string) =>
     http.put<TeamMember>(`${BASE_URL}/members/${userId}/email`, { email }),

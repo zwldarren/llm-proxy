@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
+import McpIcon from "@/components/common/McpIcon.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
 import TableSkeleton from "@/components/common/TableSkeleton.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
@@ -33,6 +34,7 @@ import { useViewMode } from "@/composables/useViewMode";
 import { useMcpServerStore } from "@/stores/mcpServers";
 import { useSettingsStore } from "@/stores/settings";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
+import { isBlockedCommand, isCommandAllowed } from "@/utils/mcpPolicy";
 import type {
   McpServerCreate,
   McpServerRead,
@@ -56,6 +58,18 @@ const showCreateDialog = ref(false);
 const servers = computed(() => mcpStore.mcpServers);
 const isLoading = computed(() => mcpStore.loading && !mcpStore.ready);
 const isSaving = ref(false);
+
+// The policy warning already says the server cannot be created; leaving Save
+// enabled only produces a backend rejection after the operator fills the form.
+const stdioCommandUnavailable = computed(() => {
+  if (newServer.value.type !== "stdio") return false;
+  const policy = mcpSecurityPolicy.value;
+  if (!policy) return false;
+  if (!policy.allowed_commands.some((command) => command.trim())) return true;
+  const command = newServer.value.command?.trim() ?? "";
+  if (!command) return false;
+  return isBlockedCommand(command, policy) || !isCommandAllowed(command, argsList.value, policy);
+});
 
 const loadingServers = ref<Set<string>>(new Set());
 const showDeleteDialog = ref(false);
@@ -374,6 +388,7 @@ onMounted(() => {
         class="h-full flex items-center justify-center animate-fade-in px-6"
       >
         <EmptyState
+          :icon="McpIcon"
           :text="t('mcpServers.noServers')"
           :show-cta="true"
           :cta-text="t('mcpServers.addServer')"
@@ -434,7 +449,11 @@ onMounted(() => {
             {{ isEditing ? t("mcpServers.editServer") : t("mcpServers.addServer") }}
           </template>
           <template #description>
-            {{ isEditing ? newServer.name : t("mcpServers.description") }}
+            {{
+              isEditing
+                ? t("mcpServers.editServerDescription")
+                : t("mcpServers.addServerDescription")
+            }}
           </template>
         </SheetHeader>
 
@@ -558,7 +577,9 @@ onMounted(() => {
           <Button variant="outline" @click="showCreateDialog = false">{{
             t("common.cancel")
           }}</Button>
-          <Button @click="saveServer" :disabled="isSaving">{{ t("common.save") }}</Button>
+          <Button @click="saveServer" :disabled="isSaving || stdioCommandUnavailable">
+            {{ t("common.save") }}
+          </Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>

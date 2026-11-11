@@ -32,6 +32,7 @@ import TableCellName from "@/components/common/TableCellName.vue";
 import ApiKeyListItem from "@/components/common/ApiKeyListItem.vue";
 import ApiKeySpendCell from "@/components/common/ApiKeySpendCell.vue";
 import RateLimitBadge from "@/components/common/RateLimitBadge.vue";
+import StatusBadge from "@/components/common/StatusBadge.vue";
 import RateLimitField from "@/components/common/RateLimitField.vue";
 import ApiKeyUsageSheet from "@/components/config/ApiKeyUsageSheet.vue";
 import ViewToggle from "@/components/common/ViewToggle.vue";
@@ -557,7 +558,7 @@ onMounted(() => {
         <!-- Table view (default) -->
         <Table
           v-if="viewMode === 'table'"
-          class="table-modern"
+          class="table-modern table-sticky-actions"
           container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
         >
           <TableHeader class="config-thead">
@@ -609,23 +610,27 @@ onMounted(() => {
               </TableCellName>
               <TableCell>
                 <div class="flex flex-wrap items-center gap-1.5">
-                  <Badge
+                  <!-- One status component for every status in the console:
+                       the log table and the team table already use it. -->
+                  <StatusBadge
                     v-if="getApiKeyStatus(key) === 'active'"
-                    variant="secondary"
-                    class="font-medium text-[11px]"
+                    variant="status"
+                    status="success"
+                    class="text-[11px]"
                   >
                     {{ t("apiKeys.active") }}
-                  </Badge>
-                  <Badge
+                  </StatusBadge>
+                  <StatusBadge
                     v-else-if="getApiKeyStatus(key) === 'expired'"
-                    variant="outline"
-                    class="font-medium text-[11px] border-status-warning/60 text-status-warning"
+                    variant="status"
+                    status="warning"
+                    class="text-[11px]"
                   >
                     {{ t("apiKeys.expired") }}
-                  </Badge>
-                  <Badge v-else variant="destructive" class="font-medium text-[11px]">
+                  </StatusBadge>
+                  <StatusBadge v-else variant="status" status="error" class="text-[11px]">
                     {{ t("apiKeys.disabled") }}
-                  </Badge>
+                  </StatusBadge>
                   <RateLimitBadge v-if="key.rate_limit_rpm != null" :rpm="key.rate_limit_rpm" />
                 </div>
               </TableCell>

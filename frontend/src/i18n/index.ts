@@ -1,8 +1,13 @@
 import { createI18n } from "vue-i18n";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
+import { setActiveLocale } from "@/utils/locale";
 import en from "./en";
 
 const savedLocale = localStorage.getItem(STORAGE_KEYS.LOCALE) || "en";
+
+// Keep the standalone locale holder in sync with the i18n instance: the date
+// and number formatters read it without importing vue-i18n.
+setActiveLocale(savedLocale);
 
 const i18n = createI18n({
   legacy: false,

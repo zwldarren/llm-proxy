@@ -3,6 +3,7 @@ import { BarChart3, Edit, KeyRound, Server, Trash2 } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import RateLimitBadge from "@/components/common/RateLimitBadge.vue";
+import StatusBadge from "@/components/common/StatusBadge.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
@@ -92,23 +93,25 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
           <!-- Status chip: disabled wins over expired so the badge always
                matches the edit dialog's active toggle. Color is paired with a
                label so status is never color-only. -->
-          <Badge
+          <StatusBadge
             v-if="status === 'disabled'"
-            variant="destructive"
-            class="font-medium text-[11px] px-1.5 py-0"
+            variant="status"
+            status="error"
+            class="text-[11px] px-1.5 py-0"
           >
             {{ t("apiKeys.disabled") }}
-          </Badge>
-          <Badge
+          </StatusBadge>
+          <StatusBadge
             v-else-if="status === 'expired'"
-            variant="outline"
-            class="font-medium text-[11px] px-1.5 py-0 border-status-warning/60 text-status-warning"
+            variant="status"
+            status="warning"
+            class="text-[11px] px-1.5 py-0"
           >
             {{ t("apiKeys.expired") }}
-          </Badge>
-          <Badge v-else variant="secondary" class="font-medium text-[11px] px-1.5 py-0">
+          </StatusBadge>
+          <StatusBadge v-else variant="status" status="success" class="text-[11px] px-1.5 py-0">
             {{ t("apiKeys.active") }}
-          </Badge>
+          </StatusBadge>
           <Badge
             v-if="isBudgetExceeded"
             variant="destructive"
@@ -173,7 +176,9 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
       </div>
 
       <!-- Timestamps + spend: fixed-width, right-aligned stat columns so
-           values line up across rows and never wrap. -->
+           values line up across rows and never wrap. Below md these three
+           values move to their own line under the badges, so a phone still
+           shows the expiry, the spend and the last use. -->
       <div class="hidden md:flex items-center gap-4 xl:gap-6 shrink-0 text-right">
         <div v-if="spendLabel" class="flex flex-col w-28 xl:w-36" :title="spendTitle">
           <span class="text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -258,5 +263,40 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
         </Button>
       </div>
     </div>
+
+    <!-- Mobile meta line: the values the desktop table shows as columns.
+         Without it a phone loses the expiry, the spend and the last use. -->
+    <dl class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-12 md:hidden">
+      <div v-if="spendLabel" class="flex items-center gap-1.5">
+        <dt class="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {{ t("apiKeys.spend") }}
+        </dt>
+        <dd
+          class="text-data text-xs whitespace-nowrap"
+          :class="isBudgetExceeded ? 'text-destructive font-medium' : 'text-muted-foreground'"
+        >
+          {{ spendLabel }}
+        </dd>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <dt class="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {{ t("apiKeys.expires") }}
+        </dt>
+        <dd
+          class="text-data text-xs whitespace-nowrap"
+          :class="isExpired ? 'text-status-warning' : 'text-muted-foreground'"
+        >
+          {{ apiKey.expires_at ? formatDate(apiKey.expires_at) : t("apiKeys.never") }}
+        </dd>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <dt class="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {{ t("apiKeys.lastUsed") }}
+        </dt>
+        <dd class="text-data text-xs text-muted-foreground whitespace-nowrap">
+          {{ lastUsedLabel }}
+        </dd>
+      </div>
+    </dl>
   </article>
 </template>

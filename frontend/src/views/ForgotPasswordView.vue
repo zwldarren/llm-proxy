@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Loader2 } from "@lucide/vue";
 import AuthShell from "@/components/common/AuthShell.vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,13 @@ const submitted = ref(false);
 // instance can actually send mail: promising an email that never arrives is
 // the failure this page exists to prevent.
 const resetAvailable = ref<boolean | null>(null);
+// The default introduction promises an email. When the instance cannot send
+// one, say how recovery actually works here instead of contradicting the page.
+const pageDescription = computed(() =>
+  resetAvailable.value === false
+    ? t("auth.forgotDescriptionUnavailable")
+    : t("auth.forgotDescription")
+);
 
 onMounted(async () => {
   try {
@@ -58,15 +65,15 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <AuthShell :title="t('auth.forgotTitle')" :description="t('auth.forgotDescription')">
+  <AuthShell :title="t('auth.forgotTitle')" :description="pageDescription">
     <div v-if="resetAvailable === null" class="flex justify-center py-10">
       <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
     </div>
 
     <template v-else-if="resetAvailable === false">
-      <Alert id="forgot-unavailable">
-        <AlertDescription>{{ t("auth.forgotUnavailable") }}</AlertDescription>
-      </Alert>
+      <AuthStatusAlert id="forgot-unavailable" tone="info">
+        {{ t("auth.forgotUnavailable") }}
+      </AuthStatusAlert>
       <Button variant="outline" class="mt-4 w-full" @click="router.push('/login')">
         <ArrowLeft class="h-4 w-4" />
         {{ t("auth.backToLogin") }}
@@ -74,9 +81,9 @@ async function handleSubmit() {
     </template>
 
     <template v-else-if="submitted">
-      <Alert id="forgot-sent">
-        <AlertDescription>{{ t("auth.forgotSent") }}</AlertDescription>
-      </Alert>
+      <AuthStatusAlert id="forgot-sent" tone="success">
+        {{ t("auth.forgotSent") }}
+      </AuthStatusAlert>
       <Button class="mt-4 w-full" @click="router.push('/login')">
         {{ t("auth.backToLogin") }}
       </Button>
@@ -89,9 +96,9 @@ async function handleSubmit() {
       :aria-busy="loading"
       @submit.prevent="handleSubmit"
     >
-      <Alert v-if="error" variant="destructive" id="forgot-error">
-        <AlertDescription>{{ error }}</AlertDescription>
-      </Alert>
+      <AuthStatusAlert v-if="error" tone="error" id="forgot-error">
+        {{ error }}
+      </AuthStatusAlert>
 
       <div class="flex flex-col gap-1.5">
         <Label for="forgot-identifier" class="text-sm font-medium text-foreground/90">

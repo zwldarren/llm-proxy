@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { modelTierLabel } from "@/utils/modelTier";
 import type { ModelCatalogEntry } from "@/types/schemas";
 
 /**
@@ -51,7 +52,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
         :variant="tierBadgeVariant(model.quality_tier)"
         class="text-[11px] uppercase font-medium px-1.5 py-0"
       >
-        {{ model.quality_tier }}
+        {{ modelTierLabel(t, model.quality_tier) }}
       </Badge>
       <span v-else class="text-xs text-muted-foreground">–</span>
     </TableCell>
@@ -73,7 +74,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
     <!-- Actions -->
     <TableCell class="text-right">
       <div
-        class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+        class="flex items-center justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
       >
         <Tooltip>
           <TooltipTrigger as-child>

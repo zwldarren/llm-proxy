@@ -188,6 +188,28 @@ describe("ModelPlazaView", () => {
     });
   });
 
+  it("resets the active sort when filters are cleared", async () => {
+    vi.mocked(catalogApi.getModels).mockResolvedValue([
+      entry("beta", { context_length: 200, quality_tier: "ECONOMY" }),
+      entry("alpha", { context_length: 100, quality_tier: "ECONOMY" }),
+    ]);
+
+    const wrapper = mountPlaza();
+    await waitForText(wrapper, "alpha");
+
+    await wrapper.get('[data-testid="sort-context"]').trigger("click");
+    expect(wrapper.findAll(".plaza-row").map((row) => row.text())).toEqual(["beta", "alpha"]);
+
+    const tier = wrapper.findAll("button").find((button) => button.text() === "ECONOMY");
+    await tier!.trigger("click");
+    const clear = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("common.clearFilters"));
+    await clear!.trigger("click");
+
+    expect(wrapper.findAll(".plaza-row").map((row) => row.text())).toEqual(["alpha", "beta"]);
+  });
+
   it("shows the store error and recovers via retry", async () => {
     vi.mocked(catalogApi.getModels).mockRejectedValue(new Error("boom"));
 

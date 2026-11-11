@@ -28,6 +28,7 @@ import QrCode from "@/components/common/QrCode.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useChangePassword } from "@/composables/useChangePassword";
@@ -564,10 +565,9 @@ function formatDate(value: string): string {
           <div class="grid gap-3 sm:grid-cols-2">
             <div v-if="hasPassword" class="flex flex-col gap-2 sm:col-span-2">
               <Label for="security-current-password">{{ t("profile.currentPassword") }}</Label>
-              <Input
+              <PasswordInput
                 id="security-current-password"
                 v-model="currentPassword"
-                type="password"
                 autocomplete="current-password"
                 :aria-invalid="passwordErrorField === 'current'"
                 :aria-describedby="
@@ -577,10 +577,9 @@ function formatDate(value: string): string {
             </div>
             <div class="flex flex-col gap-2">
               <Label for="security-new-password">{{ t("profile.newPassword") }}</Label>
-              <Input
+              <PasswordInput
                 id="security-new-password"
                 v-model="newPassword"
-                type="password"
                 autocomplete="new-password"
                 :aria-invalid="passwordErrorField === 'new'"
                 :aria-describedby="
@@ -590,10 +589,9 @@ function formatDate(value: string): string {
             </div>
             <div class="flex flex-col gap-2">
               <Label for="security-confirm-password">{{ t("profile.confirmPassword") }}</Label>
-              <Input
+              <PasswordInput
                 id="security-confirm-password"
                 v-model="confirmPassword"
-                type="password"
                 autocomplete="new-password"
                 :aria-invalid="passwordErrorField === 'confirm'"
                 :aria-describedby="

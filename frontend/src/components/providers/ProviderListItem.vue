@@ -107,7 +107,7 @@ const isMono = computed(() => resolveIsMono(props.provider));
 
       <!-- Actions -->
       <div
-        class="flex items-center justify-end gap-1 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+        class="flex items-center justify-end gap-1 shrink-0 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
       >
         <Button
           variant="ghost"

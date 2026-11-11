@@ -376,7 +376,11 @@ const onSubmit = handleSubmit(async (values) => {
           {{ isEditing ? t("providers.editProvider") : t("providers.addProvider") }}
         </template>
         <template #description>
-          {{ isEditing ? provider?.name : t("providers.description") }}
+          {{
+            isEditing
+              ? t("providers.editProviderDescription")
+              : t("providers.addProviderDescription")
+          }}
         </template>
       </SheetHeader>
 

@@ -1,5 +1,5 @@
 import { useIntervalFn } from "@vueuse/core";
-import { onUnmounted, ref } from "vue";
+import { onUnmounted, ref, type Ref } from "vue";
 
 /**
  * Options for configuring auto-refresh behavior.
@@ -13,6 +13,14 @@ interface AutoRefreshOptions {
   onRefreshStateChange?: (isRefreshing: boolean) => void;
   /** Callback to execute the actual refresh operation */
   onRefresh?: () => void | Promise<void>;
+}
+
+/** Controls and state exposed by the auto-refresh composable. */
+export interface AutoRefreshControls {
+  autoRefresh: Ref<boolean>;
+  startAutoRefresh: () => void;
+  stopAutoRefresh: () => void;
+  toggleAutoRefresh: () => void;
 }
 
 /**
@@ -33,7 +41,7 @@ interface AutoRefreshOptions {
  *   {{ autoRefresh ? 'Pause' : 'Resume' }}
  * </button>
  */
-export function useAutoRefresh(options: AutoRefreshOptions = {}) {
+export function useAutoRefresh(options: AutoRefreshOptions = {}): AutoRefreshControls {
   const autoRefresh = ref(true);
 
   const { pause, resume } = useIntervalFn(

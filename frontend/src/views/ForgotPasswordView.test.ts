@@ -20,7 +20,15 @@ vi.mock("vue-router", () => ({
 vi.mock("@/services/api/auth", () => ({ authApi: api }));
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
-  return { ArrowLeft: Stub, Loader2: Stub };
+  return {
+    ArrowLeft: Stub,
+    Loader2: Stub,
+    CircleAlert: Stub,
+    CircleCheck: Stub,
+    Info: Stub,
+    Eye: Stub,
+    EyeOff: Stub,
+  };
 });
 vi.mock("@/components/common/AuthShell.vue", () => ({
   __esModule: true,

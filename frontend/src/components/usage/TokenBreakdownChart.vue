@@ -5,7 +5,12 @@ import { useI18n } from "vue-i18n";
 import { Bar } from "vue-chartjs";
 import type { TooltipItem } from "chart.js";
 import { baseBarChartOptions, useChartTheme } from "@/composables/useChartTheme";
-import { formatChartDate, formatNumberWithSuffix, formatTokens } from "@/utils/format";
+import {
+  formatChartDate,
+  formatFullDate,
+  formatNumberWithSuffix,
+  formatTokens,
+} from "@/utils/format";
 import ChartDataTable, { type ChartDataTableRow } from "./ChartDataTable.vue";
 import type { HourlyUsageBucket } from "@/types/schemas";
 import { registerBarChart } from "@/lib/charts";
@@ -52,6 +57,9 @@ const rows = computed<BreakdownRow[]>(() =>
 
 const totalTokens = computed(() => rows.value.reduce((sum, r) => sum + r.total, 0));
 
+/** Whether the range carries any token usage at all. */
+const hasData = computed(() => totalTokens.value > 0);
+
 /** Short axis label: "20:00" for hourly buckets, "Mar 1" for daily. */
 const axisLabel = (key: string): string => {
   if (isHourly.value) return key.slice(11, 16);
@@ -64,11 +72,7 @@ const rangeLabel = (key: string): string => {
     const hour = key.slice(11, 13);
     return `${hour}:00 ~ ${hour}:59`;
   }
-  return new Date(key).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatFullDate(key);
 };
 
 // Cache hit / cache miss / output get three different hues rather than one hue
@@ -144,7 +148,10 @@ const chartA11yRows = computed<ChartDataTableRow[]>(() =>
     </div>
 
     <div class="px-4 sm:px-6 pb-4 pt-3">
-      <div v-if="rows.length > 0" class="relative w-full h-72 md:h-85">
+      <!-- Buckets exist for every hour of the range even when nothing happened
+           in them. An axis with no bars reads as a broken chart, so the empty
+           state is keyed on the data, not on the bucket count. -->
+      <div v-if="hasData" class="relative w-full h-72 md:h-85">
         <Bar role="img" :data="chartData" :options="chartOptions" :aria-label="chartAriaLabel" />
         <!-- The canvas is one image with a name; this table is what carries the
              per-bucket values to a non-visual reader. -->

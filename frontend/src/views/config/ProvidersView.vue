@@ -187,7 +187,7 @@ onMounted(() => {
         <!-- Table view (default) -->
         <Table
           v-if="viewMode === 'table'"
-          class="table-modern"
+          class="table-modern table-sticky-actions"
           container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
         >
           <TableHeader class="config-thead">
@@ -264,7 +264,7 @@ onMounted(() => {
               </TableCell>
               <TableCell class="text-right">
                 <div
-                  class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+                  class="flex items-center justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
                 >
                   <Button
                     variant="ghost"

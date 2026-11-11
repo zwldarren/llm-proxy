@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ModelPricingCell from "@/components/models/ModelPricingCell.vue";
 import { formatContextLength } from "@/utils/format";
+import { modelTierLabel } from "@/utils/modelTier";
 import type { ModelRead } from "@/types/schemas";
 
 interface Props {
@@ -46,28 +47,35 @@ const capabilities = computed(() =>
 
       <!-- Name block: identifier line (name + chips) over the meta line -->
       <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-1.5">
+        <div class="flex min-w-0 items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger as-child>
-              <h2 class="truncate font-mono text-[13px] font-medium text-foreground">
+              <h2 class="min-w-0 truncate font-mono text-[13px] font-medium text-foreground">
                 {{ model.name }}
               </h2>
             </TooltipTrigger>
             <TooltipContent>{{ model.name }}</TooltipContent>
           </Tooltip>
-          <ModelStatusChip v-if="model.status" :status="model.status" />
-          <CapabilityIcons :capabilities="capabilities" />
+          <!-- The chips carry their own display class, so hiding them on a
+               phone needs a wrapper: a `hidden` on the component itself
+               loses to the `inline-flex` the component sets on its root. -->
+          <span v-if="model.status" class="hidden sm:inline-flex">
+            <ModelStatusChip :status="model.status" />
+          </span>
+          <span v-if="capabilities.length" class="hidden sm:inline-flex">
+            <CapabilityIcons :capabilities="capabilities" />
+          </span>
           <!-- Smart-routing chip: kept apart from the plain data, on the
                identifier line where it qualifies the model itself -->
           <template v-if="hasRoutingInfo">
             <Tooltip>
               <TooltipTrigger as-child>
                 <span
-                  class="inline-flex shrink-0 items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px text-[10px] font-medium text-status-success"
+                  class="hidden shrink-0 items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px text-[10px] font-medium text-status-success sm:inline-flex"
                 >
                   <Check class="size-2.5" aria-hidden="true" />
-                  <span v-if="model.quality_tier" class="capitalize">
-                    {{ model.quality_tier.toLowerCase() }}
+                  <span v-if="model.quality_tier">
+                    {{ modelTierLabel(t, model.quality_tier) }}
                   </span>
                   <span v-else>{{ t("common.routing") }}</span>
                 </span>
@@ -83,10 +91,25 @@ const capabilities = computed(() =>
           </template>
         </div>
         <!-- Meta line: providers · context (inline below lg; a column ≥lg) · description.
-             Providers keep their natural width; the description absorbs the shrink. -->
+             Providers keep their natural width; the description absorbs the shrink.
+             Chips that crowd the name on a phone move here, where they wrap instead
+             of squeezing the identifier down to one character. -->
         <div
-          class="mt-0.5 flex min-w-0 items-center gap-x-2 font-mono text-[11px] text-muted-foreground"
+          class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted-foreground"
         >
+          <span v-if="model.status" class="inline-flex sm:hidden">
+            <ModelStatusChip :status="model.status" />
+          </span>
+          <span v-if="capabilities.length" class="inline-flex sm:hidden">
+            <CapabilityIcons :capabilities="capabilities" />
+          </span>
+          <span
+            v-if="hasRoutingInfo"
+            class="inline-flex shrink-0 items-center gap-1 text-status-success sm:hidden"
+          >
+            <Check class="size-2.5" aria-hidden="true" />
+            {{ model.quality_tier ? modelTierLabel(t, model.quality_tier) : t("common.routing") }}
+          </span>
           <!-- Providers keep their natural width; the description absorbs the shrink. -->
           <div class="shrink-0 overflow-hidden">
             <ModelProviderList
@@ -128,7 +151,7 @@ const capabilities = computed(() =>
 
       <!-- Actions -->
       <div
-        class="model-col-actions flex items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+        class="model-col-actions flex items-center justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
       >
         <Button
           variant="ghost"

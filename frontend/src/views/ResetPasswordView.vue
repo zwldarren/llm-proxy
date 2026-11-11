@@ -5,12 +5,12 @@ import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import AuthShell from "@/components/common/AuthShell.vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authApi } from "@/services/api/auth";
-import { getErrorMessage } from "@/utils/error";
+import { apiErrorCode, getErrorMessage } from "@/utils/error";
 import { passwordRequirementsText, validatePasswordStrength } from "@/utils/password";
 
 const { t } = useI18n();
@@ -24,6 +24,9 @@ const newPassword = ref("");
 const confirmPassword = ref("");
 const error = ref("");
 const loading = ref(false);
+// A spent or superseded token is terminal: resubmitting the same form can
+// never succeed, so offer a fresh link instead of leaving a dead form up.
+const invalidToken = ref(false);
 const passwordHint = passwordRequirementsText();
 
 async function handleSubmit() {
@@ -50,6 +53,8 @@ async function handleSubmit() {
     // account had, so the new password has to be used to sign in again.
     await router.replace("/login");
   } catch (e: unknown) {
+    const code = apiErrorCode(e);
+    invalidToken.value = code === "password_reset_invalid" || code === "password_reset_superseded";
     error.value = getErrorMessage(e) || t("errors.saveFailed");
   } finally {
     loading.value = false;
@@ -60,11 +65,26 @@ async function handleSubmit() {
 <template>
   <AuthShell :title="t('auth.resetTitle')" :description="t('auth.resetDescription')">
     <template v-if="!token">
-      <Alert variant="destructive" id="reset-missing-token">
-        <AlertDescription>{{ t("auth.resetMissingToken") }}</AlertDescription>
-      </Alert>
+      <AuthStatusAlert tone="error" id="reset-missing-token">
+        {{ t("auth.resetMissingToken") }}
+      </AuthStatusAlert>
       <Button class="mt-4 w-full" @click="router.replace('/forgot-password')">
         {{ t("auth.forgotSubmit") }}
+      </Button>
+      <Button variant="ghost" class="mt-2 w-full" @click="router.replace('/login')">
+        {{ t("auth.backToLogin") }}
+      </Button>
+    </template>
+
+    <template v-else-if="invalidToken">
+      <AuthStatusAlert tone="error" id="reset-invalid-token">
+        {{ error || t("auth.resetInvalidToken") }}
+      </AuthStatusAlert>
+      <Button class="mt-4 w-full" @click="router.replace('/forgot-password')">
+        {{ t("auth.resetRequestNew") }}
+      </Button>
+      <Button variant="ghost" class="mt-2 w-full" @click="router.replace('/login')">
+        {{ t("auth.backToLogin") }}
       </Button>
     </template>
 
@@ -75,18 +95,17 @@ async function handleSubmit() {
       :aria-busy="loading"
       @submit.prevent="handleSubmit"
     >
-      <Alert v-if="error" variant="destructive" id="reset-error">
-        <AlertDescription>{{ error }}</AlertDescription>
-      </Alert>
+      <AuthStatusAlert v-if="error" tone="error" id="reset-error">
+        {{ error }}
+      </AuthStatusAlert>
 
       <div class="flex flex-col gap-1.5">
         <Label for="reset-new-password" class="text-sm font-medium text-foreground/90">
           {{ t("profile.newPassword") }}
         </Label>
-        <Input
+        <PasswordInput
           id="reset-new-password"
           v-model="newPassword"
-          type="password"
           autocomplete="new-password"
           required
           :disabled="loading"
@@ -101,10 +120,9 @@ async function handleSubmit() {
         <Label for="reset-confirm-password" class="text-sm font-medium text-foreground/90">
           {{ t("profile.confirmPassword") }}
         </Label>
-        <Input
+        <PasswordInput
           id="reset-confirm-password"
           v-model="confirmPassword"
-          type="password"
           autocomplete="new-password"
           required
           :disabled="loading"

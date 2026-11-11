@@ -4,7 +4,8 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { Loader2 } from "@lucide/vue";
 import AuthShell from "@/components/common/AuthShell.vue";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -185,9 +186,15 @@ async function submitOnboarding() {
 
 <template>
   <AuthShell :title="pageTitle" :description="pageDescription">
-    <Alert v-if="error" variant="destructive" class="mb-4">
-      <AlertDescription>{{ error }}</AlertDescription>
-    </Alert>
+    <!-- The terminal fallback below already prints the error; showing the
+         banner over it repeated the same sentence twice. -->
+    <AuthStatusAlert
+      v-if="error && (loading || challengeToken || onboarding)"
+      tone="error"
+      class="mb-4"
+    >
+      {{ error }}
+    </AuthStatusAlert>
     <div v-if="loading" class="flex flex-col items-center gap-3 py-10">
       <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
       <p class="text-sm text-muted-foreground">{{ t("auth.oauthCompleting") }}</p>
@@ -248,10 +255,9 @@ async function submitOnboarding() {
       </div>
       <div class="flex flex-col gap-1.5">
         <Label for="oauth-password">{{ t("auth.optionalPassword") }}</Label>
-        <Input
+        <PasswordInput
           id="oauth-password"
           v-model="password"
-          type="password"
           autocomplete="new-password"
           class="auth-input h-11"
         />
@@ -259,10 +265,9 @@ async function submitOnboarding() {
       </div>
       <div class="flex flex-col gap-1.5">
         <Label for="oauth-confirm-password">{{ t("auth.confirmPassword") }}</Label>
-        <Input
+        <PasswordInput
           id="oauth-confirm-password"
           v-model="confirmPassword"
-          type="password"
           autocomplete="new-password"
           class="auth-input h-11"
         />
@@ -274,7 +279,7 @@ async function submitOnboarding() {
       </Button>
     </form>
     <div v-else class="flex flex-col items-center gap-3 py-10">
-      <p class="text-sm text-muted-foreground">{{ t("auth.oauthError") }}</p>
+      <p class="text-sm text-muted-foreground">{{ error || t("auth.oauthError") }}</p>
       <Button variant="outline" @click="router.replace('/login')">
         {{ t("auth.backToLogin") }}
       </Button>

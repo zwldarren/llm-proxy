@@ -997,6 +997,33 @@
     @apply bg-muted/50 border-b-2 border-border/70;
   }
 
+  /* Sticky action column — the row's controls stay reachable when a wide
+   * table scrolls horizontally under a narrow console. The cell paints the
+   * page surface so the columns behind it do not show through, and a hairline
+   * marks the boundary. */
+  .table-sticky-actions {
+    @apply border-separate border-spacing-0;
+  }
+
+  .table-sticky-actions thead > tr > :last-child,
+  .table-sticky-actions tbody > tr > :last-child {
+    @apply sticky right-0;
+    box-shadow: -1px 0 0 hsl(var(--border));
+  }
+
+  .table-sticky-actions thead > tr > :last-child {
+    @apply bg-muted/50;
+    z-index: 20;
+  }
+
+  .table-sticky-actions tbody > tr > :last-child {
+    @apply bg-background;
+  }
+
+  .table-sticky-actions tbody > tr:hover > :last-child {
+    @apply bg-muted/50;
+  }
+
   /* Scrollable wrapper used by the list view inside the console content area */
   .config-scroll {
     @apply h-full overflow-y-auto;

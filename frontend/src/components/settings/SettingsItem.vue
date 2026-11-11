@@ -6,7 +6,7 @@ interface Props {
   icon?: Component;
   title: string;
   description?: string;
-  variant?: "row" | "full-width" | "nested";
+  variant?: "row" | "nested";
   loading?: boolean;
   error?: string | null;
   /**
@@ -26,52 +26,65 @@ withDefaults(defineProps<Props>(), {
 </script>
 
 <template>
+  <!--
+    Grid instead of a flex row: on a phone the control sits on the same line as
+    the title and the long description wraps underneath, so a switch never
+    drifts far away from the setting it belongs to. From sm up the description
+    stacks under the title and the control keeps the right edge, which is the
+    desktop row this component always had.
+  -->
   <div
-    class="group transition-colors duration-200"
+    class="group transition-colors duration-200 grid items-start gap-x-3.5 gap-y-1 sm:items-center sm:gap-x-6"
     :class="[
-      variant === 'row'
-        ? 'flex flex-col items-stretch gap-3 py-4.5 px-5.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6'
-        : variant === 'nested'
-          ? 'flex flex-col items-stretch gap-3 py-3.5 px-5.5 pl-6 sm:pl-11 sm:flex-row sm:items-center sm:justify-between sm:gap-6'
-          : 'flex flex-col gap-3.5 py-4.5 px-5.5',
+      variant === 'nested'
+        ? 'grid-cols-[minmax(0,1fr)_auto] py-3.5 px-5.5 pl-6 sm:pl-11'
+        : 'grid-cols-[auto_minmax(0,1fr)_auto] py-4.5 px-5.5',
       'hover:bg-muted/12 first:rounded-t-xl last:rounded-b-xl',
     ]"
   >
-    <div class="flex items-center gap-3.5 min-w-0 flex-1">
-      <div v-if="icon && variant !== 'nested'" class="shrink-0">
-        <div
-          class="flex items-center justify-center size-9 rounded-lg bg-muted text-foreground border border-border/40"
-        >
-          <component :is="icon" class="size-4.5 text-foreground/80" />
-        </div>
-      </div>
-
-      <div class="flex-1 min-w-0" :class="variant === 'full-width' ? 'w-full' : ''">
-        <div class="text-sm font-semibold text-foreground tracking-tight break-words">
-          {{ title }}
-        </div>
-        <div
-          v-if="description"
-          class="text-xs text-muted-foreground mt-0.5 leading-normal max-w-[60ch] break-words"
-        >
-          {{ description }}
-        </div>
-        <div
-          v-if="error"
-          :role="errorLive ? 'alert' : undefined"
-          class="text-xs text-destructive mt-1 flex items-center gap-1 min-w-0"
-        >
-          <span class="break-words min-w-0">{{ error }}</span>
-        </div>
+    <div v-if="icon && variant !== 'nested'" class="col-start-1 row-start-1 shrink-0">
+      <div
+        class="flex items-center justify-center size-9 rounded-lg bg-muted text-foreground border border-border/40"
+      >
+        <component :is="icon" class="size-4.5 text-foreground/80" />
       </div>
     </div>
 
     <div
-      class="shrink-0 flex min-w-0 max-w-full flex-wrap items-center gap-2"
+      class="min-w-0"
+      :class="variant === 'nested' ? 'col-start-1 row-start-1' : 'col-start-2 row-start-1'"
+    >
+      <div class="text-sm font-semibold text-foreground tracking-tight break-words">
+        {{ title }}
+      </div>
+    </div>
+
+    <div
+      v-if="description || error"
+      class="min-w-0"
+      :class="variant === 'nested' ? 'col-start-1 row-start-2' : 'col-start-2 row-start-2'"
+    >
+      <div
+        v-if="description"
+        class="text-xs text-muted-foreground leading-normal max-w-[60ch] break-words"
+      >
+        {{ description }}
+      </div>
+      <div
+        v-if="error"
+        :role="errorLive ? 'alert' : undefined"
+        class="text-xs text-destructive mt-1 flex items-center gap-1 min-w-0"
+      >
+        <span class="break-words min-w-0">{{ error }}</span>
+      </div>
+    </div>
+
+    <div
+      class="flex min-w-0 max-w-full flex-wrap items-center gap-2 justify-end self-start sm:self-center"
       :class="[
-        variant === 'full-width'
-          ? 'w-full justify-end'
-          : 'w-full justify-start sm:w-auto sm:justify-end',
+        variant === 'nested'
+          ? 'col-start-2 row-start-1 row-span-2'
+          : 'col-start-3 row-start-1 row-span-2',
         loading ? 'opacity-70 pointer-events-none' : '',
       ]"
     >

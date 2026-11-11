@@ -63,6 +63,47 @@ describe("chatApi.streamChatCompletion deadlines", () => {
     expect(chunks.join("")).toBe("hello world");
   });
 
+  it("parses comments, fragmented CRLF, and multiline data events", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      )
+    );
+
+    const chunks: string[] = [];
+    const done = chatApi.streamChatCompletion(
+      "/v1/chat/completions",
+      { model: "m", messages: [] },
+      (chunk) => chunks.push(chunk)
+    );
+
+    for (const wireChunk of [
+      ": ping\r\n\r\n",
+      'data: {"choices":[{"delta":{"content":"hel',
+      'lo"}}]}\r\n\r\n',
+      'data: {"choices":[\r\n',
+      'data: {"delta":{"content":" world"}}]}\r\n\r\ndata: [DONE]\r\n\r\n',
+    ]) {
+      streamController.enqueue(encoder.encode(wireChunk));
+    }
+    streamController.close();
+    await done;
+
+    expect(chunks.join("")).toBe("hello world");
+  });
+
   it("throws TimeoutError when the server never starts responding", async () => {
     vi.useFakeTimers();
 

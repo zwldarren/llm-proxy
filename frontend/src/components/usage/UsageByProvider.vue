@@ -141,7 +141,7 @@ const getShare = (requests: number): string => {
           </div>
         </div>
         <div v-else class="py-12 text-center text-muted-foreground text-sm">
-          {{ t("logs.noLogs") }}
+          {{ t("home.noUsageInRange") }}
         </div>
       </ScrollArea>
     </div>

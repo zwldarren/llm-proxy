@@ -20,7 +20,15 @@ vi.mock("vue-sonner", () => ({ toast }));
 vi.mock("@/services/api/auth", () => ({ authApi: api }));
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
-  return { ArrowLeft: Stub, Loader2: Stub };
+  return {
+    ArrowLeft: Stub,
+    Loader2: Stub,
+    CircleAlert: Stub,
+    CircleCheck: Stub,
+    Info: Stub,
+    Eye: Stub,
+    EyeOff: Stub,
+  };
 });
 vi.mock("@/components/common/AuthShell.vue", () => ({
   __esModule: true,
@@ -28,6 +36,7 @@ vi.mock("@/components/common/AuthShell.vue", () => ({
 }));
 
 import ResetPasswordView from "./ResetPasswordView.vue";
+import { HttpError } from "@/services/http";
 
 const NEW_PASSWORD = "Brand-New-Password-456!";
 
@@ -101,5 +110,25 @@ describe("ResetPasswordView", () => {
     expect(router.replace).not.toHaveBeenCalled();
     expect(wrapper.find("#reset-error").exists()).toBe(true);
     expect(wrapper.find("form").exists()).toBe(true);
+  });
+
+  it("offers a new link instead of a dead form when the token is rejected", async () => {
+    api.resetPassword.mockRejectedValue(
+      new HttpError(400, "Bad Request", { error: { code: "password_reset_invalid" } })
+    );
+    const wrapper = mount(ResetPasswordView);
+    await flushPromises();
+
+    await wrapper.find("#reset-new-password").setValue(NEW_PASSWORD);
+    await wrapper.find("#reset-confirm-password").setValue(NEW_PASSWORD);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    // The form is gone: resubmitting the same token can never succeed.
+    expect(wrapper.find("form").exists()).toBe(false);
+    expect(wrapper.find("#reset-invalid-token").exists()).toBe(true);
+    // …and there is a way out.
+    const buttons = wrapper.findAll("button");
+    expect(buttons.some((b) => b.text() === "auth.resetRequestNew")).toBe(true);
   });
 });

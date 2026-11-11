@@ -60,6 +60,7 @@ const {
 const clearFilters = () => {
   clearBaseFilters();
   capabilityFilters.value = [];
+  resetSort();
 };
 
 const availableTiers = computed(() => {
@@ -108,6 +109,7 @@ const {
   sortDir,
   onSort,
   sortedItems: sortedModels,
+  resetSort,
 } = useTableSort<ModelCatalogEntry, SortField>({
   items: visibleModels,
   initialField: "name",

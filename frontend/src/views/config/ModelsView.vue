@@ -71,6 +71,7 @@ import ParameterOverridesBuilder from "@/components/config/ParameterOverridesBui
 import ProviderModelSelector from "@/components/common/ProviderModelSelector.vue";
 import { getIconUrl, isMonoIcon } from "@/utils/icons";
 
+import { modelTierLabel } from "@/utils/modelTier";
 import type { ModelRead } from "@/types/schemas";
 
 // Rendered inside views/ModelsView.vue (the role dispatcher), which owns the
@@ -319,8 +320,8 @@ const confirmDelete = async () => {
         <!-- Table view (default) -->
         <Table
           v-if="viewMode === 'table'"
-          class="table-modern"
-          container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+          class="table-modern table-sticky-actions"
+          container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto @container"
         >
           <TableHeader class="config-thead">
             <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
@@ -362,6 +363,7 @@ const confirmDelete = async () => {
                 align="right"
                 :active-field="sortField"
                 :active-dir="sortDir"
+                class="hidden @min-[1100px]:table-cell"
                 @sort="onSort"
               />
               <TableHead class="w-24 text-right">{{ t("common.actions") }}</TableHead>
@@ -396,8 +398,8 @@ const confirmDelete = async () => {
                       </TooltipTrigger>
                       <TooltipContent>{{ t("models.autoEligible") }}</TooltipContent>
                     </Tooltip>
-                    <span v-if="model.quality_tier" class="text-xs font-medium capitalize">
-                      {{ model.quality_tier.toLowerCase() }}
+                    <span v-if="model.quality_tier" class="text-xs font-medium">
+                      {{ modelTierLabel(t, model.quality_tier) }}
                     </span>
                     <span
                       v-if="model.routing_assignments?.length"
@@ -426,12 +428,12 @@ const confirmDelete = async () => {
               <TableCell class="text-right">
                 <ModelPricingCell :model="model" field="output" />
               </TableCell>
-              <TableCell class="text-right">
+              <TableCell class="text-right hidden @min-[1100px]:table-cell">
                 <ModelPricingCell :model="model" field="cached" />
               </TableCell>
               <TableCell class="text-right">
                 <div
-                  class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
+                  class="flex items-center justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
                 >
                   <Button
                     variant="ghost"
@@ -512,7 +514,9 @@ const confirmDelete = async () => {
         <SheetHeader
           :icon="Box"
           :title="isEditing ? t('models.editModel') : t('models.addModel')"
-          :description="isEditing ? editingModelName : t('models.description')"
+          :description="
+            isEditing ? t('models.editModelDescription') : t('models.addModelDescription')
+          "
         />
 
         <Tabs default-value="general" class="flex-1 flex flex-col min-h-0 w-full">

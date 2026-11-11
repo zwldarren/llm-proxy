@@ -4,8 +4,8 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { Loader2 } from "@lucide/vue";
 import AuthShell from "@/components/common/AuthShell.vue";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { HttpError, NetworkError, TimeoutError } from "@/services/http";
 import { authApi } from "@/services/api/auth";
 
@@ -58,9 +58,7 @@ onMounted(async () => {
       </Button>
     </template>
     <template v-else>
-      <Alert variant="destructive">
-        <AlertDescription>{{ error }}</AlertDescription>
-      </Alert>
+      <AuthStatusAlert tone="error">{{ error }}</AuthStatusAlert>
       <Button variant="outline" class="mt-4 w-full" @click="router.push('/')">
         {{ t("common.back") }}
       </Button>

@@ -137,6 +137,9 @@ const totalLogs = ref(0);
 const currentPage = ref(1);
 const pageSize = ref(20);
 const isInitialLoad = ref(true);
+// A fetch with nothing on screen yet must show the skeleton, not an empty
+// table body: bare row separators read as a broken table.
+const showSkeleton = computed(() => isFetching.value && logs.value.length === 0);
 const isFetching = ref(false);
 const isLoadingDetail = ref(false);
 const isSwitchingTab = ref(false);
@@ -972,8 +975,11 @@ const auditListAction = (log: LogListItemType): string => {
           <div class="h-full bg-primary/60 animate-loading-bar" />
         </div>
 
-        <!-- Initial loading skeleton mirrors the table geometry -->
-        <div v-if="isInitialLoad && isFetching" class="flex-1 overflow-hidden animate-fade-in">
+        <!-- Loading skeleton mirrors the table geometry. It replaces the empty
+             table body whenever a fetch runs with no rows on screen, so the
+             console never shows bare row separators that read as a broken
+             table. -->
+        <div v-if="showSkeleton" class="flex-1 overflow-hidden animate-fade-in">
           <TableSkeleton :icon="false" :rows="10" />
         </div>
 
@@ -985,7 +991,15 @@ const auditListAction = (log: LogListItemType): string => {
           class="flex-1 animate-in fade-in duration-300"
           role="status"
           aria-live="polite"
-        />
+        >
+          <template #description>
+            <!-- "No logs yet" and "no logs match your filters" are different
+                 situations; the copy has to say which one this is. -->
+            <p class="text-muted-foreground text-sm max-w-md">
+              {{ hasAnyActiveFilter ? t("logs.noLogsFiltered") : t("logs.noLogsYetDescription") }}
+            </p>
+          </template>
+        </EmptyState>
 
         <!-- Scrollable data display: the table owns the scroll axis so its
              header can pin; the mobile card list keeps its own scroller. -->

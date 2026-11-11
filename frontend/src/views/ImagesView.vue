@@ -60,6 +60,9 @@ const {
 } = useModelCatalog({
   storageKey: STORAGE_KEYS.IMAGES_MODEL,
   namespace: "images",
+  // Only a model configured for image generation can serve /v1/images/*.
+  capability: "image_generation",
+  emptyLabelKey: "images.noImageModels",
 });
 
 const modelStore = useModelStore();
@@ -126,6 +129,15 @@ const clearRuns = () => {
 const isSubmitDisabled = computed(
   () => !prompt.value.trim() || isGenerating.value || !selectedModel.value
 );
+
+// The reason the Create button is disabled, in the user's words. A control
+// that is greyed out with no explanation reads as a broken console.
+const submitHint = computed(() => {
+  if (isGenerating.value) return "";
+  if (!selectedModel.value) return t("images.hintNoModel");
+  if (!prompt.value.trim()) return t("images.hintNoPrompt");
+  return "";
+});
 
 // File helpers
 function fileToBase64(file: File): Promise<string> {
@@ -649,6 +661,12 @@ onActivated(async () => {
 
                 <div class="flex-1"></div>
 
+                <!-- Why the button is disabled: a greyed-out control with no
+                     reason reads as broken. -->
+                <p v-if="submitHint" class="mr-2 hidden text-[11px] text-muted-foreground sm:block">
+                  {{ submitHint }}
+                </p>
+
                 <Button
                   size="sm"
                   :disabled="isSubmitDisabled"
@@ -702,6 +720,7 @@ onActivated(async () => {
           <div class="max-w-3xl mx-auto">
             <EmptyState
               v-if="!currentRun"
+              :icon="ImageIcon"
               :text="t('images.noResults')"
               :show-cta="false"
               class="py-16"

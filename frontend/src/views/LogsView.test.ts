@@ -257,6 +257,75 @@ describe("LogsView", () => {
     expect(wrapper.text()).toContain("logs.noLogs");
   });
 
+  it("shows a skeleton instead of bare row separators while the first fetch runs", async () => {
+    const { logsApi } = await import("@/services/api/logs");
+    // A request that never settles keeps the view in its loading state.
+    let release: (() => void) | undefined;
+    (logsApi.getLogs as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ items: [], total: 0, page: 1, page_size: 20 });
+        })
+    );
+
+    const wrapper = mount(LogsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          Card: CardStub,
+          Button: ButtonStub,
+          Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    // The skeleton stands in for the table: an empty table body reads as a
+    // broken console, a skeleton reads as loading.
+    expect(wrapper.find("[aria-busy='true']").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("logs.noLogs");
+
+    release?.();
+    await flushPromises();
+
+    // Once the request settles the empty state takes over.
+    expect(wrapper.text()).toContain("logs.noLogs");
+  });
+
+  it("polls through onRefresh while auto-refresh is enabled", async () => {
+    const { logsApi } = await import("@/services/api/logs");
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(LogsView, {
+        global: {
+          stubs: {
+            AppLayout: AppLayoutStub,
+            Card: CardStub,
+            Button: ButtonStub,
+            Input: InputStub,
+            Tooltip: TooltipStub,
+            TooltipTrigger: TooltipTriggerStub,
+            TooltipContent: TooltipContentStub,
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      vi.clearAllMocks();
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(logsApi.getLogs).toHaveBeenCalled();
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("applies a ?trace_id= deep link before the first fetch", async () => {
     const { logsApi } = await import("@/services/api/logs");
     vi.clearAllMocks();

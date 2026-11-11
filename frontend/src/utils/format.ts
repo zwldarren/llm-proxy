@@ -1,5 +1,10 @@
+import { getActiveLocale } from "@/utils/locale";
+
 // Intl.NumberFormat instance cache to avoid repeated instantiation in tight loops
 const formatterCache = new Map<string, Intl.NumberFormat>();
+
+/** The active console locale, so dates follow the UI language, not the OS. */
+const activeLocale = (): string => getActiveLocale();
 
 /** Placeholder for a measurement the backend did not report. */
 export const ABSENT_METRIC = "—";
@@ -14,7 +19,10 @@ function getFormatter(locale: string, options: Intl.NumberFormatOptions): Intl.N
   return formatter;
 }
 
-export const formatDate = (timestamp: number | string | null | undefined, locale?: string) => {
+export const formatDate = (
+  timestamp: number | string | null | undefined,
+  locale: string = activeLocale()
+) => {
   if (!timestamp) return "-";
 
   let date: Date;
@@ -41,8 +49,16 @@ export const formatDate = (timestamp: number | string | null | undefined, locale
 };
 
 /** Short "Mar 1" label for a usage-chart bucket date. */
-export const formatChartDate = (date: string): string =>
-  new Date(date).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+export const formatChartDate = (date: string, locale: string = activeLocale()): string =>
+  new Date(date).toLocaleDateString(locale, { month: "short", day: "numeric" });
+
+/** Long date for a chart tooltip header. */
+export const formatFullDate = (date: string, locale: string = activeLocale()): string =>
+  new Date(date).toLocaleDateString(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 
 /**
  * Get status type for StatusBadge component.

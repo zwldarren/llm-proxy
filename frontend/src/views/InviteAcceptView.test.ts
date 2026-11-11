@@ -29,7 +29,14 @@ vi.mock("@/stores/auth", () => ({
 }));
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
-  return { Loader2: Stub };
+  return {
+    Loader2: Stub,
+    CircleAlert: Stub,
+    CircleCheck: Stub,
+    Info: Stub,
+    Eye: Stub,
+    EyeOff: Stub,
+  };
 });
 vi.mock("@/components/common/AuthShell.vue", () => ({
   __esModule: true,

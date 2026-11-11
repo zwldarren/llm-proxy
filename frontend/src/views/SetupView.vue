@@ -4,6 +4,8 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { Loader2 } from "@lucide/vue";
 import AuthShell from "@/components/common/AuthShell.vue";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,23 +80,11 @@ const retryStatus = async () => {
 const handleSetup = async () => {
   if (loading.value) return; // Prevent multiple submissions
 
-  // Client-side validation
-  if (usernameError.value) {
-    error.value = usernameError.value;
-    return;
-  }
-  if (password.value.length < 8) {
-    error.value = t("auth.passwordTooShort");
-    return;
-  }
-  if (password.value !== confirmPassword.value) {
-    error.value = t("auth.passwordMismatch");
-    return;
-  }
-  if (passwordError.value) {
-    error.value = passwordError.value;
-    return;
-  }
+  // Client-side validation. Each failure is already shown under its own
+  // field, so it must not also be copied into the page-level banner.
+  if (usernameError.value || passwordError.value || confirmPasswordError.value) return;
+  if (password.value.length < 8) return;
+  if (password.value !== confirmPassword.value) return;
 
   error.value = "";
   loading.value = true;
@@ -142,16 +132,14 @@ const handleSetup = async () => {
       :aria-describedby="error ? 'setup-error' : undefined"
       :aria-busy="loading"
     >
-      <Alert
+      <AuthStatusAlert
         v-if="error"
-        variant="destructive"
+        tone="error"
         class="animate-in slide-in-from-top-2 fade-in duration-300"
         id="setup-error"
       >
-        <AlertDescription>
-          {{ error }}
-        </AlertDescription>
-      </Alert>
+        {{ error }}
+      </AuthStatusAlert>
 
       <div class="flex flex-col gap-1.5">
         <Label for="username" class="text-sm font-medium text-foreground/90">
@@ -188,10 +176,9 @@ const handleSetup = async () => {
         <Label for="password" class="text-sm font-medium text-foreground/90">
           {{ t("auth.password") }}
         </Label>
-        <Input
+        <PasswordInput
           id="password"
           v-model="password"
-          type="password"
           autocomplete="new-password"
           required
           :disabled="loading"
@@ -207,7 +194,9 @@ const handleSetup = async () => {
         >
           {{ passwordError }}
         </p>
-        <p v-else-if="password" id="password-hint" class="mt-1 text-xs text-muted-foreground">
+        <!-- The policy is stated before the first keystroke: a rule that only
+             appears after a failed submit is a rule met halfway. -->
+        <p v-else id="password-hint" class="mt-1 text-xs text-muted-foreground">
           {{ passwordHint }}
         </p>
       </div>
@@ -216,10 +205,9 @@ const handleSetup = async () => {
         <Label for="confirm-password" class="text-sm font-medium text-foreground/90">
           {{ t("auth.confirmPassword") }}
         </Label>
-        <Input
+        <PasswordInput
           id="confirm-password"
           v-model="confirmPassword"
-          type="password"
           autocomplete="new-password"
           required
           :disabled="loading"
@@ -234,6 +222,9 @@ const handleSetup = async () => {
           class="mt-1 text-xs text-destructive"
         >
           {{ confirmPasswordError }}
+        </p>
+        <p v-else class="mt-1 text-xs text-muted-foreground">
+          {{ t("auth.confirmPasswordHint") }}
         </p>
       </div>
 

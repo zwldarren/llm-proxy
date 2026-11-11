@@ -966,12 +966,12 @@ watch(
         class="config-header-bar flex items-center justify-between px-4 sm:px-6 h-14 z-20 shrink-0"
       >
         <h1 class="sr-only">{{ t("nav.chat") }}</h1>
-        <div class="flex items-center gap-2">
+        <div class="flex min-w-0 items-center gap-2">
           <!-- Model Selector -->
           <Select v-if="models.length > 0" v-model="selectedModel">
             <SelectTrigger
               :aria-label="t('chat.selectModel')"
-              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-3 transition-colors text-foreground flex items-center min-w-0 font-mono text-[11px]"
+              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-3 transition-colors text-foreground flex items-center min-w-0 max-w-[36vw] sm:max-w-none font-mono text-[11px]"
             >
               <div class="flex items-center gap-2 min-w-0">
                 <div
@@ -991,7 +991,10 @@ watch(
                   />
                   <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
                 </div>
-                <span class="font-medium truncate min-w-0 max-w-[200px]" v-if="selectedModel">
+                <span
+                  class="min-w-0 max-w-[30vw] truncate font-medium sm:max-w-[200px]"
+                  v-if="selectedModel"
+                >
                   {{ selectedModel }}
                 </span>
                 <span v-else class="text-muted-foreground">{{ t("chat.selectModel") }}</span>
@@ -1047,7 +1050,7 @@ watch(
           <!-- Endpoint Selector: protocol name first, wire path second -->
           <Select v-model="selectedEndpoint">
             <SelectTrigger
-              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground flex items-center text-[11px] max-w-[46vw] sm:max-w-none"
+              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground flex items-center text-[11px] max-w-[30vw] sm:max-w-none"
               :aria-label="t('chat.protocolEndpoint')"
             >
               <div class="flex items-center gap-2 min-w-0">
@@ -1079,7 +1082,7 @@ watch(
           </Select>
         </div>
 
-        <div class="flex items-center gap-1">
+        <div class="flex shrink-0 items-center gap-1">
           <!-- Settings Toggle -->
           <Tooltip>
             <TooltipTrigger asChild>

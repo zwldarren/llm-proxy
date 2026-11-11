@@ -13,7 +13,7 @@ import {
   RotateCcw,
 } from "@lucide/vue";
 import MarkdownIt from "markdown-it";
-import { useClipboard, useEventListener } from "@vueuse/core";
+import { useClipboard } from "@vueuse/core";
 import { computed, nextTick, ref, onUnmounted, watch } from "vue";
 import { highlightCode } from "@/utils/highlighter";
 import { useI18n } from "vue-i18n";
@@ -67,20 +67,23 @@ const roleLabel = computed(() =>
 
 const lightboxClose = ref<HTMLButtonElement | null>(null);
 
+/** Escape closes the lightbox — a modal surface needs a keyboard exit. */
+const onLightboxKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Escape") closeImageModal();
+};
+
 watch(previewImageUrl, (url) => {
   if (url) {
+    window.addEventListener("keydown", onLightboxKeydown);
     // Move focus into the surface that just covered the page, so the next Tab
     // does not land somewhere behind the scrim.
     void nextTick(() => lightboxClose.value?.focus());
+  } else {
+    window.removeEventListener("keydown", onLightboxKeydown);
   }
 });
 
-// Escape closes the lightbox — a modal surface needs a keyboard exit. The
-// handler is registered once for the component's lifetime and no-ops while the
-// lightbox is closed.
-useEventListener(window, "keydown", (event) => {
-  if (event.key === "Escape" && previewImageUrl.value) closeImageModal();
-});
+onUnmounted(() => window.removeEventListener("keydown", onLightboxKeydown));
 
 const md = new MarkdownIt({
   html: true,
@@ -89,8 +92,28 @@ const md = new MarkdownIt({
 });
 
 // The code-block copy buttons live inside v-html and render their own
-// feedback, so they only need the write half of the clipboard.
-const { copy: copyCode } = useClipboard({ legacy: true });
+// feedback. VueUse owns the feedback window so no per-click timer survives.
+const { copy: copyCode, copied: codeCopied } = useClipboard({
+  legacy: true,
+  copiedDuring: 2000,
+});
+let lastCodeCopyButton: Element | null = null;
+
+const setCodeCopyFeedback = (btn: Element, copied: boolean): void => {
+  const copyText = btn.querySelector(".copy-text");
+  const copyIcon = btn.querySelector(".copy-icon");
+  const checkIcon = btn.querySelector(".check-icon");
+  if (copyText) copyText.textContent = copied ? t("common.copied") : t("common.copy");
+  if (!copyIcon || !checkIcon) return;
+  copyIcon.classList.toggle("hidden", copied);
+  checkIcon.classList.toggle("hidden", !copied);
+};
+
+watch(codeCopied, (copied) => {
+  if (copied || !lastCodeCopyButton) return;
+  setCodeCopyFeedback(lastCodeCopyButton, false);
+  lastCodeCopyButton = null;
+});
 
 const escapeAttr = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -154,19 +177,11 @@ const handleCodeCopy = async (btn: Element) => {
 
   try {
     await copyCode(codeEl.textContent || "");
-    const copyText = btn.querySelector(".copy-text");
-    const copyIcon = btn.querySelector(".copy-icon");
-    const checkIcon = btn.querySelector(".check-icon");
-    if (copyText) copyText.textContent = t("common.copied");
-    if (copyIcon && checkIcon) {
-      copyIcon.classList.add("hidden");
-      checkIcon.classList.remove("hidden");
-      setTimeout(() => {
-        copyIcon.classList.remove("hidden");
-        checkIcon.classList.add("hidden");
-        if (copyText) copyText.textContent = t("common.copy");
-      }, 2000);
+    if (lastCodeCopyButton && lastCodeCopyButton !== btn) {
+      setCodeCopyFeedback(lastCodeCopyButton, false);
     }
+    lastCodeCopyButton = btn;
+    setCodeCopyFeedback(btn, true);
   } catch (err) {
     console.error("Failed to copy code snippet:", err);
   }

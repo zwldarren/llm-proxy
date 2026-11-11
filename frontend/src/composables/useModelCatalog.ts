@@ -2,9 +2,11 @@ import { useStorage } from "@vueuse/core";
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
+import { catalogApi } from "@/services/api/catalog";
 import { chatApi } from "@/services/api/chat";
 import { useModelStore } from "@/stores/models";
 import { getErrorMessage } from "@/utils/error";
+import type { ModelCapability } from "@/types/schemas";
 
 /** A model as the playground pickers show it: id plus provider for its icon. */
 export interface CatalogModel {
@@ -17,6 +19,20 @@ interface ModelCatalogOptions {
   storageKey: string;
   /** i18n namespace holding the retryModels/noModelsAvailable copy. */
   namespace: "chat" | "images";
+  /**
+   * Restrict the list to models carrying this capability.
+   *
+   * The plain `/v1/models` list knows nothing about what a model can do, so a
+   * picker that needs a specific capability (the Images playground needs a
+   * model that can generate images) has to read the catalog, which derives
+   * capabilities from the model configuration.
+   */
+  capability?: ModelCapability;
+  /**
+   * Copy for "the list is empty because nothing matches", which differs from
+   * the generic no-models message when a capability filter is in play.
+   */
+  emptyLabelKey?: string;
 }
 
 export interface ModelCatalog {
@@ -62,13 +78,27 @@ export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
     isLoadingModels.value = true;
     modelsError.value = null;
     try {
-      const res = await chatApi.getModels();
-      if (ticket !== requestTicket) return false;
+      if (options.capability) {
+        // The catalog derives capabilities from the model configuration, so it
+        // is the only list that can say which models can actually do the job.
+        const entries = await catalogApi.getModels();
+        if (ticket !== requestTicket) return false;
 
-      models.value = (res.data ?? []).map((m) => ({
-        id: m.id,
-        provider: m.provider || providerFromConfig(m.id),
-      }));
+        models.value = entries
+          .filter((entry) => entry.capabilities?.includes(options.capability!))
+          .map((entry) => ({
+            id: entry.name,
+            provider: entry.provider_names[0] || providerFromConfig(entry.name),
+          }));
+      } else {
+        const res = await chatApi.getModels();
+        if (ticket !== requestTicket) return false;
+
+        models.value = (res.data ?? []).map((m) => ({
+          id: m.id,
+          provider: m.provider || providerFromConfig(m.id),
+        }));
+      }
 
       // Restore the saved model when it still exists, otherwise take the first.
       const saved = selectedModel.value;
@@ -107,7 +137,9 @@ export function useModelCatalog(options: ModelCatalogOptions): ModelCatalog {
   const modelsPlaceholderLabel = computed(() =>
     modelsError.value
       ? t(`${options.namespace}.retryModels`)
-      : t(`${options.namespace}.noModelsAvailable`)
+      : options.emptyLabelKey
+        ? t(options.emptyLabelKey)
+        : t(`${options.namespace}.noModelsAvailable`)
   );
 
   return {

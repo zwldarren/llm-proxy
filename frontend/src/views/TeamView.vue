@@ -77,11 +77,11 @@ import {
   type TeamMemberBudgetUpdate,
   type TeamRole,
 } from "@/services/api/team";
-import { formatCost, formatDate } from "@/utils/format";
+import { formatCost, formatCostWithPrecision, formatDate, formatFullDate } from "@/utils/format";
 
 defineOptions({ name: "TeamView" });
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { copy } = useClipboard({ legacy: true });
 const authStore = useAuthStore();
 const modelStore = useModelStore();
@@ -138,7 +138,7 @@ function invitationStatusVariant(status: Invitation["status"]) {
 }
 
 function formatInvitationDate(value: string | null | undefined): string {
-  return value ? new Date(value).toLocaleDateString() : "";
+  return value ? new Date(value).toLocaleDateString(locale.value) : "";
 }
 
 /** The date that explains a non-pending invitation's current state. */
@@ -867,11 +867,20 @@ onMounted(() => {
       <header class="config-header-bar px-4 sm:px-6 py-4">
         <PageHeader :title="t('team.title')" :description="t('team.description')" :icon="Users">
           <template #actions>
-            <Button @click="openInviteDialog" class="btn-action">
+            <Button
+              @click="openInviteDialog"
+              class="btn-action"
+              :title="t('team.inviteDescription')"
+            >
               <Mail class="h-4 w-4 mr-2" />
               {{ t("team.inviteMember") }}
             </Button>
-            <Button variant="outline" @click="openCreateDialog" class="btn-action">
+            <Button
+              variant="outline"
+              @click="openCreateDialog"
+              class="btn-action"
+              :title="t('team.addMemberDescription')"
+            >
               <Plus class="h-4 w-4 mr-2" />
               {{ t("team.addMember") }}
             </Button>
@@ -982,7 +991,7 @@ onMounted(() => {
       <template v-else>
         <div class="flex h-full min-h-0 flex-col">
           <Table
-            class="table-modern"
+            class="table-modern table-sticky-actions"
             container-class="flex-1 min-h-0 border-0 bg-transparent rounded-none overflow-x-auto"
           >
             <TableHeader class="config-thead">
@@ -1026,7 +1035,7 @@ onMounted(() => {
             </TableHeader>
             <TableBody class="row-stagger">
               <TableRow v-for="member in sortedMembers" :key="member.id" class="group">
-                <TableCellName>
+                <TableCellName class="whitespace-normal">
                   <div class="truncate">{{ member.username }}</div>
                   <div
                     v-if="member.email"
@@ -1034,6 +1043,33 @@ onMounted(() => {
                   >
                     {{ member.email }}
                   </div>
+                  <!-- Phone: the columns the desktop table drops (scope, budget,
+                       created) come back on a second line, so a phone is not
+                       missing the member's permissions. The cell has to be
+                       allowed to wrap, or the nowrap rule widens the whole
+                       column past the viewport. -->
+                  <dl
+                    class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 whitespace-normal text-[11px] text-muted-foreground lg:hidden"
+                  >
+                    <!-- Compact values, no labels: the column headers they
+                         repeat are off-screen on a phone, and a label plus a
+                         value does not fit in the username column. -->
+                    <dd class="truncate">
+                      {{
+                        member.allowed_models == null
+                          ? t("team.allModels")
+                          : member.allowed_models.length === 0
+                            ? t("team.noModels")
+                            : member.allowed_models.slice(0, 2).join(", ")
+                      }}
+                    </dd>
+                    <dd v-if="member.budget_usd !== null" class="text-data">
+                      {{ formatCostWithPrecision(member.budget_spend_usd ?? 0, 2, locale) }}
+                      /
+                      {{ formatCostWithPrecision(member.budget_usd, 2, locale) }}
+                    </dd>
+                    <dd class="text-data">{{ formatFullDate(member.created_at) }}</dd>
+                  </dl>
                 </TableCellName>
                 <TableCell>
                   <!-- Role change: dropdown on the badge (hidden on the current
@@ -1045,7 +1081,7 @@ onMounted(() => {
                         class="cursor-pointer rounded-full transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         :aria-label="t('team.changeRole')"
                       >
-                        <Badge :variant="member.role === 'admin' ? 'default' : 'secondary'">
+                        <Badge variant="outline" class="font-medium">
                           {{ roleLabel(member.role) }}
                         </Badge>
                       </button>
@@ -1066,16 +1102,21 @@ onMounted(() => {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Badge v-else :variant="member.role === 'admin' ? 'default' : 'secondary'">
+                  <Badge v-else variant="outline" class="font-medium">
                     {{ roleLabel(member.role) }}
                   </Badge>
                 </TableCell>
                 <TableCell>
                   <div class="flex flex-wrap items-center gap-1.5">
-                    <Badge :variant="member.is_active ? 'default' : 'secondary'">
-                      <Check v-if="member.is_active" class="mr-1 h-3 w-3" />
+                    <!-- Same status component as the API-key table and the log
+                         table: one vocabulary for "active" across the console. -->
+                    <StatusBadge
+                      variant="status"
+                      :status="member.is_active ? 'success' : 'unknown'"
+                      class="text-[11px]"
+                    >
                       {{ member.is_active ? t("team.active") : t("team.inactive") }}
-                    </Badge>
+                    </StatusBadge>
                     <Badge
                       v-if="member.must_change_password"
                       variant="outline"

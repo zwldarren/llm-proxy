@@ -8,7 +8,6 @@ interface UseTableSortOptions<T, F extends string> {
   items: MaybeRefOrGetter<T[]>;
   /** Column key active on first render. */
   initialField: F;
-  initialDirection?: SortDirection;
   /**
    * Direction used the first time a column becomes active. Date columns
    * default to newest-first, labels to A→Z.
@@ -42,7 +41,7 @@ export function useTableSort<T, F extends string>(
   options: UseTableSortOptions<T, F>
 ): UseTableSortReturn<T, F> {
   const sortField = ref(options.initialField) as Ref<F>;
-  const sortDir = ref(options.initialDirection ?? "asc") as Ref<SortDirection>;
+  const sortDir = ref("asc") as Ref<SortDirection>;
 
   const sortedItems = useSorted(options.items, (a: T, b: T) => {
     const dir: 1 | -1 = sortDir.value === "asc" ? 1 : -1;
@@ -61,7 +60,7 @@ export function useTableSort<T, F extends string>(
 
   function resetSort() {
     sortField.value = options.initialField;
-    sortDir.value = options.initialDirection ?? "asc";
+    sortDir.value = "asc";
   }
 
   return { sortField, sortDir, onSort, sortedItems, resetSort };

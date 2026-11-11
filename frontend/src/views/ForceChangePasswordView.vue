@@ -4,10 +4,10 @@ import { useRouter } from "vue-router";
 import { Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import AuthShell from "@/components/common/AuthShell.vue";
+import AuthStatusAlert from "@/components/common/AuthStatusAlert.vue";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { useChangePassword } from "@/composables/useChangePassword";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthStore } from "@/stores/auth";
 
@@ -48,25 +48,22 @@ const handleSignOut = async () => {
       :aria-describedby="error ? 'forced-password-error' : undefined"
       :aria-busy="loading"
     >
-      <Alert
+      <AuthStatusAlert
         v-if="error"
-        variant="destructive"
+        tone="error"
         class="animate-in slide-in-from-top-2 fade-in duration-300"
         id="forced-password-error"
       >
-        <AlertDescription>
-          {{ error }}
-        </AlertDescription>
-      </Alert>
+        {{ error }}
+      </AuthStatusAlert>
 
       <div class="flex flex-col gap-1.5">
         <Label for="current-password" class="text-sm font-medium text-foreground/90">
           {{ t("profile.currentPassword") }}
         </Label>
-        <Input
+        <PasswordInput
           id="current-password"
           v-model="currentPassword"
-          type="password"
           autocomplete="current-password"
           required
           :disabled="loading"
@@ -78,10 +75,9 @@ const handleSignOut = async () => {
         <Label for="new-password" class="text-sm font-medium text-foreground/90">
           {{ t("profile.newPassword") }}
         </Label>
-        <Input
+        <PasswordInput
           id="new-password"
           v-model="newPassword"
-          type="password"
           autocomplete="new-password"
           required
           :disabled="loading"
@@ -96,10 +92,9 @@ const handleSignOut = async () => {
         <Label for="confirm-new-password" class="text-sm font-medium text-foreground/90">
           {{ t("profile.confirmPassword") }}
         </Label>
-        <Input
+        <PasswordInput
           id="confirm-new-password"
           v-model="confirmPassword"
-          type="password"
           autocomplete="new-password"
           required
           :disabled="loading"

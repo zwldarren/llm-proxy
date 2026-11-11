@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ModelCatalogEntry } from "@/types/schemas";
 import { formatContextLength, formatTokens } from "@/utils/format";
+import { modelTierLabel } from "@/utils/modelTier";
 
 interface Props {
   model: ModelCatalogEntry;
@@ -63,7 +64,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
             :variant="tierBadgeVariant(model.quality_tier)"
             class="shrink-0 px-1.5 py-0 text-[11px] font-medium uppercase sm:hidden"
           >
-            {{ model.quality_tier }}
+            {{ modelTierLabel(t, model.quality_tier) }}
           </Badge>
           <CapabilityIcons :capabilities="capabilities" />
         </span>
@@ -97,7 +98,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
           :variant="tierBadgeVariant(model.quality_tier)"
           class="px-1.5 py-0 text-[11px] font-medium uppercase"
         >
-          {{ model.quality_tier }}
+          {{ modelTierLabel(t, model.quality_tier) }}
         </Badge>
         <span v-else class="text-xs text-muted-foreground">–</span>
       </span>
