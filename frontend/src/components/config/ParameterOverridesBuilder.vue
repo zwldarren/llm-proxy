@@ -172,6 +172,8 @@ const getSimpleValueDisplay = (value: unknown): string => {
             variant="ghost"
             size="sm"
             class="h-8 w-8 p-0 text-muted-foreground hover:text-destructive shrink-0 self-center"
+            :aria-label="`${t('common.delete')} ${entry.key || index + 1}`"
+            :title="t('common.delete')"
             @click="removeSimpleEntry(index)"
           >
             <Trash2 class="w-4 h-4" />

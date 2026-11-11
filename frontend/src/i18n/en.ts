@@ -2560,6 +2560,7 @@ export default {
     cooldownRemaining: "Cooldown Remaining",
     probing: "Probing...",
     resetAll: "Reset All",
+    resetOne: "Reset circuit",
     resetOneSuccess: "Reset circuit for {key}",
     resetSuccess: "All circuits reset successfully",
     resetError: "Failed to reset circuit breaker",

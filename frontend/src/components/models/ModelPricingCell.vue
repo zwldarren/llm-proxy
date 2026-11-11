@@ -204,7 +204,6 @@ const hasAnyPricing = computed(
         type="button"
         class="rounded-md px-1.5 py-1 -my-1 cursor-pointer transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
         :class="field ? 'text-right' : 'w-full text-right'"
-        :aria-label="t('models.pricingDetails')"
       >
         <!-- Single-column mode: one clear mono value -->
         <template v-if="field">

@@ -214,6 +214,8 @@ function formatCooldown(key: string): string {
                 variant="ghost"
                 size="icon"
                 class="size-7 text-muted-foreground hover:text-foreground cursor-pointer"
+                :aria-label="`${t('circuitBreaker.resetOne')} ${circuit.provider}${circuit.model ? `:${circuit.model}:${circuit.index}` : ''}`"
+                :title="t('circuitBreaker.resetOne')"
                 @click="emit('resetOne', circuit.key)"
               >
                 <RotateCcw class="size-3.5" />

@@ -2442,6 +2442,7 @@ export default {
     cooldownRemaining: "剩余冷却时间",
     probing: "探测中...",
     resetAll: "重置全部通道",
+    resetOne: "重置该通道熔断",
     resetOneSuccess: "已重置 {key} 的熔断状态",
     resetSuccess: "所有熔断状态已重置",
     resetError: "重置失败",

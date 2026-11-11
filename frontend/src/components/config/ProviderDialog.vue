@@ -543,12 +543,14 @@ const onSubmit = handleSubmit(async (values) => {
               <div v-if="type === 'gemini'" class="grid gap-2">
                 <div class="flex items-center justify-between">
                   <div>
-                    <Label>{{ t("providers.geminiInteractions") }}</Label>
+                    <Label for="provider-gemini-interactions">{{
+                      t("providers.geminiInteractions")
+                    }}</Label>
                     <p class="text-[11px] text-muted-foreground">
                       {{ t("providers.geminiInteractionsHelp") }}
                     </p>
                   </div>
-                  <Switch v-model="geminiInteractions" />
+                  <Switch id="provider-gemini-interactions" v-model="geminiInteractions" />
                 </div>
               </div>
               <div
@@ -656,12 +658,15 @@ const onSubmit = handleSubmit(async (values) => {
               <div class="grid gap-2">
                 <div class="flex items-center justify-between">
                   <div>
-                    <Label>{{ t("providers.nativeWebSearch") }}</Label>
+                    <Label for="provider-native-web-search">{{
+                      t("providers.nativeWebSearch")
+                    }}</Label>
                     <p class="text-[11px] text-muted-foreground">
                       {{ t("providers.nativeWebSearchHelp") }}
                     </p>
                   </div>
                   <Switch
+                    id="provider-native-web-search"
                     :model-value="nativeWebSearchEnabled"
                     @update:model-value="(val: boolean) => setFieldValue('native_web_search', val)"
                   />
@@ -689,6 +694,8 @@ const onSubmit = handleSubmit(async (values) => {
                       variant="ghost"
                       size="icon"
                       class="h-10 w-10"
+                      :aria-label="`${t('common.delete')} ${header.key || index + 1}`"
+                      :title="t('common.delete')"
                       @click="customHeaders.splice(index, 1)"
                     >
                       <Trash2 class="w-4 h-4 icon-btn-muted hover:text-destructive" />
@@ -732,6 +739,8 @@ const onSubmit = handleSubmit(async (values) => {
                       variant="ghost"
                       size="icon"
                       class="h-10 w-10"
+                      :aria-label="`${t('common.delete')} ${endpoint.url || index + 1}`"
+                      :title="t('common.delete')"
                       @click="endpointBaseUrls.splice(index, 1)"
                     >
                       <Trash2 class="w-4 h-4 icon-btn-muted hover:text-destructive" />
