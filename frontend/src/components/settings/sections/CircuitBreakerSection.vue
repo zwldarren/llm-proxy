@@ -149,7 +149,7 @@ function formatCooldown(key: string): string {
       <!-- Circuit states list -->
       <div class="border-t border-border/45 bg-muted/5">
         <div
-          class="px-5.5 py-4 border-b border-border/40 bg-muted/10 flex items-center justify-between gap-4"
+          class="px-5 py-4 border-b border-border/40 bg-muted/10 flex items-center justify-between gap-4"
         >
           <div class="space-y-0.5">
             <h3 class="text-sm font-semibold text-foreground">
@@ -187,7 +187,7 @@ function formatCooldown(key: string): string {
         </div>
 
         <!-- Circuits List -->
-        <div class="p-5.5 space-y-3">
+        <div class="p-5 space-y-3">
           <div v-if="loading && !circuitStates" class="flex justify-center py-6">
             <Loader2 class="size-6 animate-spin text-muted-foreground" />
           </div>

@@ -33,12 +33,16 @@ withDefaults(defineProps<Props>(), {
     stacks under the title and the control keeps the right edge, which is the
     desktop row this component always had.
   -->
+  <!-- Inner padding is px-5 (20px) at every level, the same measure
+       PanelSection's p-5 uses, so a settings card and a panel card share a left
+       edge. sm:pl-11 here and sm:pl-10.5 on the section description are the one
+       deliberate exception: both align to the icon chip's width plus its gap. -->
   <div
     class="group transition-colors duration-200 grid items-start gap-x-3.5 gap-y-1 sm:items-center sm:gap-x-6"
     :class="[
       variant === 'nested'
-        ? 'grid-cols-[minmax(0,1fr)_auto] py-3.5 px-5.5 pl-6 sm:pl-11'
-        : 'grid-cols-[auto_minmax(0,1fr)_auto] py-4.5 px-5.5',
+        ? 'grid-cols-[minmax(0,1fr)_auto] py-3.5 px-5 pl-6 sm:pl-11'
+        : 'grid-cols-[auto_minmax(0,1fr)_auto] py-4 px-5',
       'hover:bg-muted/12 first:rounded-t-xl last:rounded-b-xl',
     ]"
   >

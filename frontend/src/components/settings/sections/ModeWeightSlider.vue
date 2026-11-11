@@ -23,7 +23,7 @@ function onChange(event: Event) {
 
 <template>
   <div
-    class="px-5.5 py-4.5 border-t border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors duration-150"
+    class="px-5 py-4 border-t border-border/40 bg-muted/5 hover:bg-muted/10 transition-colors duration-150"
   >
     <div class="flex items-center justify-between gap-3">
       <Label class="text-sm font-semibold text-foreground">{{ label }}</Label>

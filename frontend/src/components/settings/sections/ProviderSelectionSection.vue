@@ -68,12 +68,12 @@ const options: StrategyOption[] = [
     </template>
 
     <!-- Save error -->
-    <div v-if="error" class="px-5.5 py-3 text-xs text-destructive">
+    <div v-if="error" class="px-5 py-3 text-xs text-destructive">
       {{ error }}
     </div>
 
     <!-- Strategy radio cards -->
-    <div class="px-5.5 py-5">
+    <div class="px-5 py-5">
       <div
         role="radiogroup"
         :aria-label="t('providerSelection.title')"
@@ -143,7 +143,7 @@ const options: StrategyOption[] = [
     </div>
 
     <!-- Priority-group scoping footnote -->
-    <div class="flex items-start gap-2.5 px-5.5 py-4">
+    <div class="flex items-start gap-2.5 px-5 py-4">
       <Info class="size-3.5 mt-px shrink-0 text-muted-foreground/80" />
       <p class="text-xs text-muted-foreground leading-normal max-w-[70ch]">
         {{ t("providerSelection.help") }}

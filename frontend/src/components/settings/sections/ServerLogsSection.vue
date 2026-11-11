@@ -36,7 +36,7 @@ const { t } = useI18n();
     <section v-if="isAdmin" aria-labelledby="log-capture-heading" class="divide-y divide-border/45">
       <h3
         id="log-capture-heading"
-        class="px-5.5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+        class="px-5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         {{ t("settings.logCaptureGroup") }}
       </h3>
@@ -94,7 +94,7 @@ const { t } = useI18n();
     <section aria-labelledby="log-retention-heading" class="divide-y divide-border/45">
       <h3
         id="log-retention-heading"
-        class="px-5.5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+        class="px-5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         {{ t("settings.logRetentionGroup") }}
       </h3>
@@ -155,7 +155,7 @@ const { t } = useI18n();
     <section v-if="isAdmin" aria-labelledby="log-audit-heading" class="divide-y divide-border/45">
       <h3
         id="log-audit-heading"
-        class="px-5.5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+        class="px-5 pb-3 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         {{ t("settings.logAuditGroup") }}
       </h3>

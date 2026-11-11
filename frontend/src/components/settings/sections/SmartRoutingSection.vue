@@ -56,7 +56,7 @@ function setModeWeight(key: ModeKey, value: number) {
 
     <CollapsiblePanel :open="state.enabled">
       <!-- Mode weights section header -->
-      <div class="px-5.5 pt-5 pb-2 border-t border-border/40 bg-muted/5">
+      <div class="px-5 pt-5 pb-2 border-t border-border/40 bg-muted/5">
         <div class="text-sm font-semibold text-foreground">
           {{ t("smartRouting.modeWeights") }}
         </div>
@@ -102,7 +102,7 @@ function setModeWeight(key: ModeKey, value: number) {
       <RoutingJudgePanel :auto-save="autoSave" />
 
       <!-- Virtual Models -->
-      <div class="px-5.5 py-5 border-t border-border/40 bg-muted/5">
+      <div class="px-5 py-5 border-t border-border/40 bg-muted/5">
         <div class="text-sm font-semibold text-foreground">
           {{ t("smartRouting.virtualModels") }}
         </div>
