@@ -57,9 +57,10 @@ const viewMode = useViewMode(STORAGE_KEYS.PROVIDERS_VIEW_MODE);
 const providers = computed(() => providerStore.providers);
 const isLoading = computed(() => providerStore.loading && !providerStore.ready);
 
-// The list filter deliberately omits nanogpt, which only the create/edit
-// dialog offers (pre-existing behavior, preserved by the shared list).
-const providerTypes = computed(() => typeOptions.value.filter(({ value }) => value !== "nanogpt"));
+// Every type the create/edit dialog offers is filterable here too. The list used
+// to drop nanogpt, so a provider of that type appeared in the table with no chip
+// that could isolate it.
+const providerTypes = computed(() => typeOptions.value);
 
 const {
   searchQuery,

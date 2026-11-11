@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Search, RefreshCw } from "@lucide/vue";
+import { Inbox, Plus, RefreshCw } from "@lucide/vue";
 import type { Component } from "vue";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "vue-i18n";
@@ -19,6 +19,11 @@ interface Props {
   showCta?: boolean;
   /** Whether to show a retry button */
   showRetry?: boolean;
+  /**
+   * Accessible name for the region. Defaults to "No results found", which is
+   * wrong for the error and never-configured cases: pass the matching text.
+   */
+  ariaLabel?: string;
 }
 
 withDefaults(defineProps<Props>(), {
@@ -28,6 +33,7 @@ withDefaults(defineProps<Props>(), {
   ctaIcon: undefined,
   showCta: false,
   showRetry: false,
+  ariaLabel: undefined,
 });
 
 const emit = defineEmits<{
@@ -48,7 +54,7 @@ const sizeClasses = {
   <div
     class="flex flex-col items-center justify-center py-12 px-4 text-center animate-slide-in-up"
     role="region"
-    :aria-label="t('common.noResults')"
+    :aria-label="ariaLabel ?? t('common.noResults')"
   >
     <div
       :class="[
@@ -58,7 +64,10 @@ const sizeClasses = {
       aria-hidden="true"
     >
       <component v-if="icon" :is="icon" :class="[sizeClasses[iconSize], 'text-primary']" />
-      <Search v-else :class="[sizeClasses[iconSize], 'text-primary']" />
+      <!-- A magnifier used to stand in for every empty state, which read as
+           "your search found nothing" even for a collection that never had
+           anything in it. -->
+      <Inbox v-else :class="[sizeClasses[iconSize], 'text-primary']" />
     </div>
     <p v-if="text" class="text-muted-foreground mb-4 max-w-md wrap-break-word">{{ text }}</p>
     <slot name="title" />

@@ -2267,6 +2267,7 @@ export default {
     description: "暴力破解锁定、HSTS、请求体大小限制与限流行为。修改立即生效。",
     seconds: "秒",
     ms: "毫秒",
+    megabytes: "MB",
     loginLockoutEnabled: "登录锁定",
     loginLockoutEnabledDescription:
       "连续登录失败后锁定账户。默认关闭——硬锁定会让任何知道用户名的人故意锁死该账户；关闭时仍按 IP 限流。",

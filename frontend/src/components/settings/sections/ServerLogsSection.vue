@@ -193,9 +193,10 @@ const { t } = useI18n();
       >
         <template #action>
           <NumberStepper
-            :model-value="Math.floor(state.max_logged_body_bytes / BYTES_PER_MB)"
+            :model-value="Math.round((state.max_logged_body_bytes / BYTES_PER_MB) * 10) / 10"
             :min="0"
-            suffix="MB"
+            :step="1"
+            :suffix="t('security.megabytes')"
             :aria-label="t('settings.maxLoggedBodySize')"
             @update:model-value="
               state.max_logged_body_bytes =

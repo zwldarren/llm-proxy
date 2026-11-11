@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { AutoSaveState } from "@/composables/useSettingAutoSave";
 import { useAutoSaveRefs } from "@/composables/useAutoSaveRefs";
 import type { SecurityConfig } from "@/types/schemas";
-import { DEFAULT_SECURITY } from "@/constants/defaults";
+import { BYTES_PER_MB, DEFAULT_SECURITY } from "@/constants/defaults";
 
 const props = defineProps<{
   autoSave: AutoSaveState<SecurityConfig>;
@@ -223,13 +223,14 @@ const { t } = useI18n();
     >
       <template #action>
         <NumberStepper
-          :model-value="Math.floor(state.max_request_body_size_bytes / (1024 * 1024))"
+          :model-value="Math.round((state.max_request_body_size_bytes / BYTES_PER_MB) * 10) / 10"
           :min="0"
-          suffix="MB"
+          :step="1"
+          :suffix="t('security.megabytes')"
           :aria-label="t('security.maxRequestBodySize')"
           @update:model-value="
             state.max_request_body_size_bytes =
-              ($event ?? DEFAULT_SECURITY.max_request_body_size_bytes / (1024 * 1024)) * 1024 * 1024
+              ($event ?? DEFAULT_SECURITY.max_request_body_size_bytes / BYTES_PER_MB) * BYTES_PER_MB
           "
         />
       </template>

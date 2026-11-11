@@ -2377,6 +2377,7 @@ export default {
       "Brute-force lockout, HSTS, request size limit, and rate-limit behavior. Changes apply immediately.",
     seconds: "s",
     ms: "ms",
+    megabytes: "MB",
     loginLockoutEnabled: "Login Lockout",
     loginLockoutEnabledDescription:
       "Lock an account after repeated failed logins. Off by default — a hard lockout lets anyone who knows the username lock the account out on purpose. Per-IP throttling still applies when off.",

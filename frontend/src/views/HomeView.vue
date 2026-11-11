@@ -473,7 +473,12 @@ onMounted(() => {
 
       <!-- Error -->
       <div v-else-if="usageError" class="h-full flex items-center justify-center py-20">
-        <EmptyState :text="usageError" :show-retry="true" @retry="fetchUsageStats" />
+        <EmptyState
+          :text="usageError"
+          :aria-label="t('common.error')"
+          :show-retry="true"
+          @retry="fetchUsageStats"
+        />
       </div>
 
       <!-- Empty / first-run -->
