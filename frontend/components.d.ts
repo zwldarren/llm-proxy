@@ -37,6 +37,7 @@ declare module 'vue' {
     AuthShell: typeof import('./src/components/common/AuthShell.vue')['default']
     AuthStatusAlert: typeof import('./src/components/common/AuthStatusAlert.vue')['default']
     Badge: typeof import('./src/components/ui/badge/Badge.vue')['default']
+    BudgetMeter: typeof import('./src/components/common/BudgetMeter.vue')['default']
     Button: typeof import('./src/components/ui/button/Button.vue')['default']
     Calendar: typeof import('./src/components/ui/calendar/Calendar.vue')['default']
     CalendarCell: typeof import('./src/components/ui/calendar/CalendarCell.vue')['default']
