@@ -1017,13 +1017,13 @@ onMounted(() => {
                   :active-dir="sortDir"
                   @sort="onSort"
                 />
-                <TableHead class="hidden @min-[1024px]:table-cell">{{
+                <TableHead class="hidden @min-[768px]:table-cell">{{
                   t("team.allowedModels")
                 }}</TableHead>
-                <TableHead class="hidden @min-[1280px]:table-cell">{{
+                <TableHead class="hidden @min-[1024px]:table-cell">{{
                   t("team.budget")
                 }}</TableHead>
-                <TableHead class="hidden @min-[1536px]:table-cell">{{
+                <TableHead class="hidden @min-[1280px]:table-cell">{{
                   t("team.rateLimit")
                 }}</TableHead>
                 <SortableHead
@@ -1034,9 +1034,7 @@ onMounted(() => {
                   :active-dir="sortDir"
                   @sort="onSort"
                 />
-                <TableHead class="w-24 text-right">
-                  <span class="sr-only">{{ t("common.actions") }}</span>
-                </TableHead>
+                <TableHead class="w-24 text-right">{{ t("common.actions") }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody class="row-stagger">
@@ -1132,7 +1130,7 @@ onMounted(() => {
                     </Badge>
                   </div>
                 </TableCell>
-                <TableCell class="hidden @min-[1024px]:table-cell">
+                <TableCell class="hidden @min-[768px]:table-cell">
                   <!-- Clicking the scope summary opens the manage dialog directly -->
                   <component
                     :is="member.role !== 'admin' ? 'button' : 'div'"
@@ -1184,7 +1182,7 @@ onMounted(() => {
                   </component>
                 </TableCell>
                 <!-- Account budget: click-through to the manage-budget sheet -->
-                <TableCell class="hidden @min-[1280px]:table-cell">
+                <TableCell class="hidden @min-[1024px]:table-cell">
                   <button
                     type="button"
                     :aria-label="t('team.manageBudget')"
@@ -1194,7 +1192,7 @@ onMounted(() => {
                     <MemberBudgetCell :member="member" />
                   </button>
                 </TableCell>
-                <TableCell class="hidden @min-[1536px]:table-cell">
+                <TableCell class="hidden @min-[1280px]:table-cell">
                   <button
                     type="button"
                     :aria-label="t('team.manageRateLimit')"

@@ -585,7 +585,7 @@ onMounted(() => {
               />
               <TableHead>{{ t("apiKeys.status") }}</TableHead>
               <TableHead>{{ t("apiKeys.models") }}</TableHead>
-              <TableHead class="hidden @min-[1024px]:table-cell">{{
+              <TableHead class="hidden @min-[768px]:table-cell">{{
                 t("apiKeys.mcpServers")
               }}</TableHead>
               <TableHead>{{ t("apiKeys.expires") }}</TableHead>
@@ -595,7 +595,7 @@ onMounted(() => {
                 sort-key="created"
                 :active-field="sortField"
                 :active-dir="sortDir"
-                class="hidden @min-[1536px]:table-cell"
+                class="hidden @min-[1280px]:table-cell"
                 @sort="onSort"
               />
               <SortableHead
@@ -606,9 +606,7 @@ onMounted(() => {
                 class="hidden @min-[768px]:table-cell"
                 @sort="onSort"
               />
-              <TableHead class="w-24 text-right">
-                <span class="sr-only">{{ t("common.actions") }}</span>
-              </TableHead>
+              <TableHead class="w-24 text-right">{{ t("common.actions") }}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody class="row-stagger">
@@ -680,7 +678,7 @@ onMounted(() => {
                   </template>
                 </div>
               </TableCell>
-              <TableCell class="hidden @min-[1024px]:table-cell">
+              <TableCell class="hidden @min-[768px]:table-cell">
                 <div class="flex flex-wrap gap-1.5">
                   <Badge
                     v-if="key.allowed_mcp_servers === null"
@@ -724,7 +722,7 @@ onMounted(() => {
               <TableCell>
                 <ApiKeySpendCell :spend="spendFor(key)" />
               </TableCell>
-              <TableCell class="text-data text-muted-foreground hidden @min-[1536px]:table-cell">{{
+              <TableCell class="text-data text-muted-foreground hidden @min-[1280px]:table-cell">{{
                 formatDate(key.created_at)
               }}</TableCell>
               <TableCell class="text-data text-muted-foreground hidden @min-[768px]:table-cell">{{

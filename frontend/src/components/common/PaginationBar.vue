@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight } from "@lucide/vue";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { HTMLAttributes } from "vue";
 import { useI18n } from "vue-i18n";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,33 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const pageInput = ref(props.currentPage.toString());
+
+/**
+ * Whether the bar is wide enough for the full pager beside the result count.
+ *
+ * Measured here rather than asked of a viewport breakpoint: the bar lives in a
+ * content column the sidebar shrinks, so at a 768px window it has about 500px
+ * and `sm:flex-row` put the count and the whole pager on one line — wrapping
+ * "Showing" mid-word and clipping "Go to page". A container query cannot ask
+ * the question either: an element with `container-type` cannot query itself.
+ */
+const WIDE_LAYOUT_MIN_WIDTH = 700;
+const bar = ref<HTMLElement | null>(null);
+const isWide = ref(false);
+let widthObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  if (!bar.value) return;
+  widthObserver = new ResizeObserver((entries) => {
+    isWide.value = (entries[0]?.contentRect.width ?? 0) >= WIDE_LAYOUT_MIN_WIDTH;
+  });
+  widthObserver.observe(bar.value);
+});
+
+onBeforeUnmount(() => {
+  widthObserver?.disconnect();
+  widthObserver = null;
+});
 
 watch(
   () => props.currentPage,
@@ -116,15 +143,20 @@ const rangeText = computed(() => {
 <template>
   <div
     v-if="totalItems > 0"
+    ref="bar"
     :class="
       cn(
-        'border-t border-border/40 bg-card/50 px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between',
+        'border-t border-border/40 bg-card/50 px-6 py-4 flex flex-col gap-4',
+        isWide && 'flex-row items-center justify-between',
         props.class
       )
     "
   >
     <!-- Left: Pagination Info -->
-    <div class="text-sm text-muted-foreground font-medium text-center sm:text-left">
+    <div
+      class="text-sm text-muted-foreground font-medium text-center"
+      :class="isWide && 'text-left'"
+    >
       <span>
         {{ t("common.showingResults", { count: rangeText, total: totalItems }) }}
       </span>
@@ -133,7 +165,8 @@ const rangeText = computed(() => {
     <!-- Right: Pagination controls & page input -->
     <div
       v-if="totalPages > 1"
-      class="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6"
+      class="flex flex-col items-center justify-center gap-4"
+      :class="isWide && 'flex-row gap-6'"
     >
       <Pagination
         :page="currentPage"
@@ -144,7 +177,10 @@ const rangeText = computed(() => {
         @update:page="handlePageChange"
       >
         <!-- Mobile: Simplified pagination -->
-        <div class="flex items-center justify-between gap-4 sm:hidden w-full px-2">
+        <div
+          class="flex items-center justify-between gap-4 w-full px-2"
+          :class="isWide && 'hidden'"
+        >
           <button
             type="button"
             class="touch-target flex-1 max-w-[120px] h-11 text-xs border border-input bg-background hover:bg-accent hover:text-accent-foreground rounded-md disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1 transition-colors"
@@ -169,7 +205,11 @@ const rangeText = computed(() => {
         </div>
 
         <!-- Desktop: Full pagination with Shadcn-Vue -->
-        <PaginationContent v-slot="{ items }" class="hidden sm:flex items-center gap-1.5">
+        <PaginationContent
+          v-slot="{ items }"
+          class="items-center gap-1.5"
+          :class="isWide ? 'flex' : 'hidden'"
+        >
           <Tooltip>
             <TooltipTrigger as-child>
               <PaginationFirst
@@ -257,7 +297,10 @@ const rangeText = computed(() => {
       </Pagination>
 
       <!-- Page input (desktop only) -->
-      <div class="hidden sm:flex items-center gap-2 text-sm text-muted-foreground">
+      <div
+        class="items-center gap-2 text-sm text-muted-foreground"
+        :class="isWide ? 'flex' : 'hidden'"
+      >
         <span class="text-xs">{{ t("common.goToPage") }}</span>
         <Input
           v-model="pageInput"

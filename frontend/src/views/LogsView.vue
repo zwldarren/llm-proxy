@@ -1093,9 +1093,7 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableHead class="table-cell-mono text-right hidden @min-[768px]:table-cell">{{
                     t("logs.cost")
                   }}</TableHead>
-                  <TableHead class="w-36">
-                    <span class="sr-only">{{ t("common.actions") }}</span>
-                  </TableHead>
+                  <TableHead class="w-24 text-right">{{ t("common.actions") }}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1109,14 +1107,29 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableCellTimestamp>{{ formatDate(log.timestamp) }}</TableCellTimestamp>
                   <TableCell class="text-xs hidden @min-[768px]:table-cell">
                     <template v-if="log.auth_method === 'jwt'">
-                      <Badge variant="outline" class="font-mono">
-                        {{ log.user_identity || t("team.admin") }}
+                      <Badge
+                        variant="outline"
+                        class="font-mono max-w-32 overflow-hidden"
+                        :title="log.user_identity || t('team.admin')"
+                      >
+                        <!-- The badge is an inline-flex box: `truncate` on it
+                             clips from the left, because its text becomes an
+                             anonymous flex item. The inner span is what
+                             ellipsises. -->
+                        <span class="truncate">{{ log.user_identity || t("team.admin") }}</span>
                       </Badge>
                     </template>
                     <template v-else-if="log.api_key_name">
-                      <Badge variant="outline" class="font-mono">{{
-                        formatApiKeyName(log.api_key_name)
-                      }}</Badge>
+                      <!-- Capped: an identity badge is the widest thing in its
+                           column, and the width it took pushed the actions
+                           column past the table's container. -->
+                      <Badge
+                        variant="outline"
+                        class="font-mono max-w-32 overflow-hidden"
+                        :title="log.api_key_name"
+                      >
+                        <span class="truncate">{{ formatApiKeyName(log.api_key_name) }}</span>
+                      </Badge>
                     </template>
                     <template v-else>
                       <span class="text-muted-foreground">-</span>
@@ -1277,7 +1290,7 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableHead class="text-xs hidden @min-[640px]:table-cell">{{
                     t("logs.actor")
                   }}</TableHead>
-                  <TableHead class="text-xs hidden @min-[1280px]:table-cell">{{
+                  <TableHead class="text-xs hidden @min-[1024px]:table-cell">{{
                     t("logs.ipAddress")
                   }}</TableHead>
                   <TableHead
@@ -1285,12 +1298,10 @@ const auditListAction = (log: LogListItemType): string => {
                     >{{ t("logs.resource") }}</TableHead
                   >
                   <TableHead>{{ t("logs.result") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden @min-[1024px]:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[768px]:table-cell">{{
                     t("logs.latency")
                   }}</TableHead>
-                  <TableHead class="w-16">
-                    <span class="sr-only">{{ t("common.actions") }}</span>
-                  </TableHead>
+                  <TableHead class="w-16 text-right">{{ t("common.actions") }}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1324,7 +1335,7 @@ const auditListAction = (log: LogListItemType): string => {
                       v-html="sanitizeHighlightText(getActor(log), filters.search || '')"
                     ></span>
                   </TableCell>
-                  <TableCell class="text-xs hidden @min-[1280px]:table-cell">
+                  <TableCell class="text-xs hidden @min-[1024px]:table-cell">
                     <span class="font-mono text-muted-foreground">{{ log.client_ip || "—" }}</span>
                   </TableCell>
                   <TableCellCode
@@ -1337,7 +1348,7 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden @min-[1024px]:table-cell">
+                  <TableCellCode class="hidden @min-[768px]:table-cell">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
@@ -1376,12 +1387,10 @@ const auditListAction = (log: LogListItemType): string => {
                     t("logs.mcpResource")
                   }}</TableHead>
                   <TableHead>{{ t("logs.status") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden @min-[1024px]:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[768px]:table-cell">{{
                     t("logs.duration")
                   }}</TableHead>
-                  <TableHead class="w-16">
-                    <span class="sr-only">{{ t("common.actions") }}</span>
-                  </TableHead>
+                  <TableHead class="w-16 text-right">{{ t("common.actions") }}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1414,7 +1423,7 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden @min-[1024px]:table-cell">
+                  <TableCellCode class="hidden @min-[768px]:table-cell">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
@@ -1453,12 +1462,10 @@ const auditListAction = (log: LogListItemType): string => {
                     t("logs.webSearchCount")
                   }}</TableHead>
                   <TableHead>{{ t("logs.status") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden @min-[1024px]:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[768px]:table-cell">{{
                     t("logs.duration")
                   }}</TableHead>
-                  <TableHead class="w-16">
-                    <span class="sr-only">{{ t("common.actions") }}</span>
-                  </TableHead>
+                  <TableHead class="w-16 text-right">{{ t("common.actions") }}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody class="row-stagger">
@@ -1508,7 +1515,7 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ getWebSearchStatus(log) }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden @min-[1024px]:table-cell">
+                  <TableCellCode class="hidden @min-[768px]:table-cell">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
