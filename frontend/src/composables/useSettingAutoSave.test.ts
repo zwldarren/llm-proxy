@@ -62,4 +62,26 @@ describe("useSettingAutoSave", () => {
     expect(toast.success).not.toHaveBeenCalled();
     wrapper.unmount();
   });
+
+  it("keeps the operator's edit when the save fails", async () => {
+    let autoSave!: AutoSaveState<{ name: string }>;
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          autoSave = useSettingAutoSave<{ name: string }>({ name: "before" }, async () => {
+            throw new Error("offline");
+          });
+          return () => h("div");
+        },
+      })
+    );
+
+    autoSave.state.value.name = "typed-by-the-operator";
+    await autoSave.save();
+
+    // Reverting would discard typing the console never said it discarded.
+    expect(autoSave.state.value.name).toBe("typed-by-the-operator");
+    expect(autoSave.error.value).toBe("offline");
+    wrapper.unmount();
+  });
 });

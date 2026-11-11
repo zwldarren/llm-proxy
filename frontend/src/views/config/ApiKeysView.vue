@@ -1104,7 +1104,7 @@ onMounted(() => {
       :description="t('apiKeys.deleteDescription', { name: deletingKeyName })"
       :confirm-text="t('apiKeys.delete')"
       :cancel-text="t('common.cancel')"
-      :loading="isLoading"
+      :loading="isSaving"
       @confirm="deleteApiKey"
     />
 

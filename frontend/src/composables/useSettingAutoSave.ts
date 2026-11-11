@@ -48,12 +48,18 @@ export function useSettingAutoSave<T extends object>(
       return true;
     } catch (e) {
       error.value = getErrorMessage(e) || t("settings.saveFailed");
-      state.value = structuredClone(toRaw(lastSaved.value) as T) as Ref<T>["value"];
+      // Leave the draft alone. Reverting to the last saved snapshot pulled the
+      // value back out from under the cursor with no explanation, and since a
+      // section paints its shared error in every row, the repeated message read
+      // as "nothing happened" rather than "your edit was thrown away".
       return false;
     } finally {
       pending.value = false;
       isSaving = false;
-      scheduleSaveIfDirty();
+      // Reschedule only after a clean save: retrying here would hammer a
+      // failing endpoint for as long as the draft differs from the snapshot.
+      // The watch below picks the work up again when the operator edits.
+      if (error.value === null) scheduleSaveIfDirty();
     }
   }
 

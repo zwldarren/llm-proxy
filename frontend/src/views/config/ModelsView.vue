@@ -87,6 +87,7 @@ const showCreateDialog = ref(false);
 const showSyncDialog = ref(false);
 const showDeleteDialog = ref(false);
 const deletingModelName = ref("");
+const isDeleting = ref(false);
 const isEditing = ref(false);
 const editingModelName = ref("");
 const isSaving = ref(false);
@@ -137,6 +138,51 @@ onMounted(() => {
   providerStore.fetchProviders();
 });
 
+/**
+ * Unsaved-edit guard for the model sheet. That sheet carries pricing tiers,
+ * service tiers, per-provider cost overrides, parameter overrides and the
+ * capability switches, so Cancel — or Escape, or a click on the overlay —
+ * could throw away a dozen edits with nothing said. The snapshot is taken when
+ * the sheet opens and compared on every close attempt.
+ */
+const formSnapshot = ref<string | null>(null);
+const showDiscardConfirm = ref(false);
+
+const serializeDraft = () =>
+  JSON.stringify({ model: newModel.value, overrides: parameterOverrides.value });
+
+const isFormDirty = computed(
+  () => formSnapshot.value !== null && serializeDraft() !== formSnapshot.value
+);
+
+const seedDraftSnapshot = () => {
+  formSnapshot.value = serializeDraft();
+};
+
+const requestCloseSheet = () => {
+  if (isFormDirty.value) {
+    showDiscardConfirm.value = true;
+    return;
+  }
+  formSnapshot.value = null;
+  showCreateDialog.value = false;
+};
+
+const discardAndClose = () => {
+  showDiscardConfirm.value = false;
+  formSnapshot.value = null;
+  showCreateDialog.value = false;
+};
+
+/** Sheet visibility with the closing direction routed through the guard. */
+const sheetOpen = computed({
+  get: () => showCreateDialog.value,
+  set: (value: boolean) => {
+    if (value) showCreateDialog.value = true;
+    else requestCloseSheet();
+  },
+});
+
 const hasRoutingInfo = (model: ModelRead): boolean => Boolean(model.auto_eligible);
 
 // Fixed display order so capability icons don't shuffle between rows.
@@ -181,6 +227,7 @@ const openCreateDialog = () => {
   isEditing.value = false;
   editingModelName.value = "";
   openForCreate();
+  seedDraftSnapshot();
   showCreateDialog.value = true;
 };
 
@@ -188,6 +235,7 @@ const openEditDialog = (model: ModelRead) => {
   isEditing.value = true;
   editingModelName.value = model.name;
   openForEdit(model);
+  seedDraftSnapshot();
   showCreateDialog.value = true;
 };
 
@@ -208,6 +256,7 @@ const saveModel = async () => {
     }
 
     showCreateDialog.value = false;
+    formSnapshot.value = null;
     toast.success(t("common.success"), {
       description: isEditing.value ? t("models.updateSuccess") : t("models.createSuccess"),
     });
@@ -225,14 +274,19 @@ const openDeleteDialog = (name: string) => {
 
 const confirmDelete = async () => {
   const name = deletingModelName.value;
-  showDeleteDialog.value = false;
+  // The dialog stays up for the round trip: closing it first left a confirm
+  // button that still looked armed while the delete was in flight.
+  isDeleting.value = true;
   try {
     await modelStore.deleteModel(name);
+    showDeleteDialog.value = false;
     toast.success(t("common.success"), {
       description: t("models.deleteSuccess"),
     });
   } catch (e) {
     handleDeleteError(e);
+  } finally {
+    isDeleting.value = false;
   }
 };
 </script>
@@ -501,15 +555,25 @@ const confirmDelete = async () => {
       :description="t('dialogs.confirmDelete', { name: deletingModelName })"
       :confirm-text="t('common.delete')"
       :cancel-text="t('common.cancel')"
-      :loading="isLoading"
+      :loading="isDeleting"
       @confirm="confirmDelete"
+    />
+
+    <!-- Discard guard for the model sheet. -->
+    <ConfirmDialog
+      v-model:open="showDiscardConfirm"
+      :title="t('models.discardChangesTitle')"
+      :description="t('models.discardChangesConfirmation')"
+      :confirm-text="t('models.discardAndClose')"
+      :cancel-text="t('common.stay')"
+      @confirm="discardAndClose"
     />
 
     <!-- Sync dialog (models.dev: pricing + capabilities) -->
     <ModelsSyncDialog v-model:open="showSyncDialog" @applied="modelStore.fetchModels()" />
 
     <!-- Create/Edit Sheet (slides in from the right) -->
-    <Sheet v-model:open="showCreateDialog">
+    <Sheet v-model:open="sheetOpen">
       <SheetContent side="right" size="xl">
         <SheetHeader
           :icon="Box"
@@ -1342,9 +1406,7 @@ const confirmDelete = async () => {
         </Tabs>
 
         <SheetFooter>
-          <Button variant="outline" @click="showCreateDialog = false">{{
-            t("common.cancel")
-          }}</Button>
+          <Button variant="outline" @click="requestCloseSheet">{{ t("common.cancel") }}</Button>
           <Button @click="saveModel" :disabled="isSaving || isLoading">{{
             t("common.save")
           }}</Button>

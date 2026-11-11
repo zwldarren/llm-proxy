@@ -50,6 +50,7 @@ const failedIcons = ref(new Set<number>());
 const showCreateDialog = ref(false);
 const showDeleteDialog = ref(false);
 const deletingProviderName = ref("");
+const isDeleting = ref(false);
 const selectedProvider = ref<ProviderRead | null>(null);
 const viewMode = useViewMode(STORAGE_KEYS.PROVIDERS_VIEW_MODE);
 
@@ -115,14 +116,19 @@ const openDeleteDialog = (name: string) => {
 
 const confirmDelete = async () => {
   const name = deletingProviderName.value;
-  showDeleteDialog.value = false;
+  // The dialog stays up for the round trip: closing it first left a confirm
+  // button that still looked armed while the delete was in flight.
+  isDeleting.value = true;
   try {
     await providerStore.deleteProvider(name);
+    showDeleteDialog.value = false;
     toast.success(t("common.success"), {
       description: t("providers.deleteSuccess"),
     });
   } catch (e) {
     handleDeleteError(e);
+  } finally {
+    isDeleting.value = false;
   }
 };
 
@@ -317,7 +323,7 @@ onMounted(() => {
       :description="t('dialogs.confirmDelete', { name: deletingProviderName })"
       :confirm-text="t('common.delete')"
       :cancel-text="t('common.cancel')"
-      :loading="isLoading"
+      :loading="isDeleting"
       @confirm="confirmDelete"
     />
 

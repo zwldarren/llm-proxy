@@ -76,6 +76,7 @@ export default {
     success: "Success",
     select: "Select",
     clear: "Clear",
+    stay: "Stay",
     retry: "Retry",
     esc: "Esc",
     searchPlaceholder: "Search by name, type, or other fields...",
@@ -520,6 +521,7 @@ export default {
     name: "Name",
     type: "Type",
     apiKey: "API Key",
+    apiKeyUnknown: "Not set",
     baseUrl: "Base URL (Optional)",
     inactive: "Inactive",
     customHeaders: "Custom Headers",
@@ -684,6 +686,10 @@ export default {
     createSuccess: "Model created successfully.",
     updateSuccess: "Model updated successfully.",
     deleteSuccess: "Model deleted successfully.",
+    discardChangesTitle: "Discard unsaved changes?",
+    discardChangesConfirmation:
+      "Close without saving? The pricing, routing and capability edits in this sheet will be lost.",
+    discardAndClose: "Discard and close",
     atLeastOneProvider: "At least one provider is required.",
     providerNameRequired: "Provider name is required for all entries.",
     noProvidersConfigured: "No providers configured for this model.",
@@ -971,6 +977,8 @@ export default {
     // View mode
     visualView: "Visual",
     jsonView: "JSON",
+    operationsJsonOnly:
+      "This value uses an operations list, which only the JSON view can edit. The visual editor is read-only for it so it cannot overwrite it.",
   },
 
   // Settings
@@ -1421,6 +1429,11 @@ export default {
     emailInvalid: "Enter a valid email address.",
     validationSummary: "Check the highlighted fields before saving.",
     leaveConfirmation: "You have unsaved changes. Leave this page and discard them?",
+    leaveTitle: "Leave this page?",
+    leaveAndDiscard: "Leave and discard",
+    removeProviderTitle: "Remove this provider?",
+    removeProviderConfirmation:
+      "Remove {name}? Its issuer, client ID and client secret are dropped from the form. Save to apply.",
     discardChanges: "Discard changes",
     saving: "Saving…",
   },

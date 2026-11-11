@@ -75,6 +75,7 @@ export default {
     success: "成功",
     select: "选择",
     clear: "清除",
+    stay: "留在本页",
     retry: "重试",
     esc: "Esc",
     searchPlaceholder: "按名称、类型或其他字段搜索...",
@@ -505,6 +506,7 @@ export default {
     name: "名称",
     type: "类型",
     apiKey: "API 密钥",
+    apiKeyUnknown: "未设置",
     baseUrl: "基础 URL (可选)",
     inactive: "已停用",
     customHeaders: "自定义 Header",
@@ -662,6 +664,9 @@ export default {
     createSuccess: "模型创建成功。",
     updateSuccess: "模型更新成功。",
     deleteSuccess: "模型删除成功。",
+    discardChangesTitle: "放弃未保存的更改？",
+    discardChangesConfirmation: "不保存直接关闭？此面板中的定价、路由与能力设置将会丢失。",
+    discardAndClose: "放弃并关闭",
     atLeastOneProvider: "至少需要配置一个提供商。",
     providerNameRequired: "所有提供商项都必须选择提供商。",
     noProvidersConfigured: "此模型尚未配置提供商。",
@@ -934,6 +939,8 @@ export default {
     // View mode
     visualView: "可视化",
     jsonView: "JSON",
+    operationsJsonOnly:
+      "该值使用 operations 列表，只能在 JSON 视图中编辑。可视化视图对它只读，以免覆盖它。",
   },
 
   // Settings
@@ -1358,6 +1365,11 @@ export default {
     emailInvalid: "请输入有效的邮箱地址。",
     validationSummary: "保存前请检查标记的字段。",
     leaveConfirmation: "有尚未保存的更改。离开此页面并放弃这些更改吗？",
+    leaveTitle: "离开此页面？",
+    leaveAndDiscard: "离开并放弃",
+    removeProviderTitle: "移除该提供商？",
+    removeProviderConfirmation:
+      "移除 {name}？其 issuer、client ID 与 client secret 将从表单中丢弃。需保存后生效。",
     discardChanges: "放弃修改",
     saving: "正在保存…",
   },

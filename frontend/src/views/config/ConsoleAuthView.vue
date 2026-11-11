@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { onBeforeRouteLeave } from "vue-router";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { useClipboard } from "@vueuse/core";
 import { ChevronDown, Loader2, Plus, ShieldCheck, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import LoadingState from "@/components/common/LoadingState.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import ConfigField from "@/components/config/ConfigField.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -22,6 +23,7 @@ import {
 import { getErrorMessage } from "@/utils/error";
 
 const { t } = useI18n();
+const router = useRouter();
 const { copy } = useClipboard({ legacy: true, copiedDuring: 1500 });
 const settings = ref<ConsoleAuthSettings>({
   public_base_url: "",
@@ -57,6 +59,12 @@ const savedSnapshot = ref("");
 const savedProviderIds = ref<Set<string>>(new Set());
 const expandedProviders = ref<Set<number>>(new Set());
 const fieldErrors = ref<Record<string, string>>({});
+// Leaving with unsaved edits: the target path is captured, the navigation
+// cancelled, and the designed dialog decides whether to finish it.
+const showLeaveConfirm = ref(false);
+const pendingLeavePath = ref<string | null>(null);
+// Index of the OIDC provider awaiting a removal confirmation.
+const pendingProviderRemoval = ref<number | null>(null);
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
@@ -66,6 +74,14 @@ const hasFieldErrors = computed(() => Object.keys(fieldErrors.value).length > 0)
 const fieldErrorList = computed(() =>
   Object.entries(fieldErrors.value).map(([id, message]) => ({ id, message }))
 );
+
+/** Which provider the removal dialog is about, for the message it carries. */
+const providerRemovalName = computed(() => {
+  const index = pendingProviderRemoval.value;
+  if (index === null) return "";
+  const provider = settings.value.oidc_providers[index];
+  return provider?.name || provider?.id || "";
+});
 
 function isSecureHttpUrl(value: string): boolean {
   try {
@@ -309,10 +325,29 @@ async function sendTestEmail() {
   }
 }
 
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave((to) => {
   if (!isDirty.value) return true;
-  return window.confirm(t("consoleAuth.leaveConfirmation"));
+  // A designed dialog, not window.confirm: the native one cannot be styled,
+  // follows the OS language instead of the console's, and blocks the thread.
+  pendingLeavePath.value = to.fullPath;
+  showLeaveConfirm.value = true;
+  return false;
 });
+
+function confirmLeave() {
+  const path = pendingLeavePath.value;
+  pendingLeavePath.value = null;
+  showLeaveConfirm.value = false;
+  // The dialog promised the edits are discarded, so drop them before the guard
+  // re-runs and sees a clean form.
+  discardChanges();
+  if (path) void router.push(path);
+}
+
+function cancelLeave() {
+  pendingLeavePath.value = null;
+  showLeaveConfirm.value = false;
+}
 
 function warnBeforeUnload(event: BeforeUnloadEvent) {
   if (!isDirty.value) return;
@@ -324,6 +359,20 @@ function addProvider() {
   const index = settings.value.oidc_providers.length;
   settings.value.oidc_providers.push(newProvider());
   expandProvider(index);
+}
+
+/**
+ * Removing a provider also drops a client secret that may have been typed in
+ * this session and never saved, so it asks first and says what goes with it.
+ */
+function requestRemoveProvider(index: number) {
+  pendingProviderRemoval.value = index;
+}
+
+function confirmRemoveProvider() {
+  const index = pendingProviderRemoval.value;
+  pendingProviderRemoval.value = null;
+  if (index !== null) removeProvider(index);
 }
 
 function removeProvider(index: number) {
@@ -684,7 +733,7 @@ onUnmounted(() => {
                       class="shrink-0 text-muted-foreground hover:text-destructive"
                       :aria-label="t('consoleAuth.removeProvider')"
                       :title="t('consoleAuth.removeProvider')"
-                      @click="removeProvider(index)"
+                      @click="requestRemoveProvider(index)"
                     >
                       <Trash2 class="size-4" />
                     </Button>
@@ -888,5 +937,28 @@ onUnmounted(() => {
         </form>
       </div>
     </div>
+
+    <!-- Leaving with unsaved edits, and removing a provider, both used to be
+         native confirm() or nothing at all. -->
+    <ConfirmDialog
+      v-model:open="showLeaveConfirm"
+      :title="t('consoleAuth.leaveTitle')"
+      :description="t('consoleAuth.leaveConfirmation')"
+      :confirm-text="t('consoleAuth.leaveAndDiscard')"
+      :cancel-text="t('common.stay')"
+      @confirm="confirmLeave"
+      @cancel="cancelLeave"
+    />
+
+    <ConfirmDialog
+      :open="pendingProviderRemoval !== null"
+      :title="t('consoleAuth.removeProviderTitle')"
+      :description="t('consoleAuth.removeProviderConfirmation', { name: providerRemovalName })"
+      :confirm-text="t('consoleAuth.removeProvider')"
+      :cancel-text="t('common.cancel')"
+      @confirm="confirmRemoveProvider"
+      @update:open="(open: boolean) => !open && (pendingProviderRemoval = null)"
+      @cancel="pendingProviderRemoval = null"
+    />
   </AppLayout>
 </template>

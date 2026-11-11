@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { toast } from "vue-sonner";
+import { useDebounceFn } from "@vueuse/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +23,16 @@ const { t } = useI18n();
 const viewMode = ref<"json" | "visual">("visual");
 const simpleEntries = ref<{ key: string; value: unknown }[]>([]);
 const jsonValue = ref("");
+/** Inline parse error for the JSON view; null when the text is valid. */
+const jsonError = ref<string | null>(null);
+
+/**
+ * Operations mode. The key/value list can only express the simple shape of the
+ * config, so once the value carries an `operations` array, the visual tab is not
+ * an editor for it — it would render "nothing configured" and then overwrite the
+ * operations on the next keystroke. JSON is the only view for that value.
+ */
+const isOperationsMode = computed(() => "operations" in props.modelValue);
 
 // Serialized config of the last local emit. The watcher below skips echoes of
 // our own emits so it does not rebuild the entry list mid-edit (which would
@@ -31,6 +41,11 @@ let lastLocalEmit: string | null = null;
 
 const syncEntriesToModel = () => {
   const newConfig: ParameterOverridesConfig = {};
+  // Carry the keys the visual list does not model. Rebuilding from the rows
+  // alone silently deleted an `operations` array the operator never touched.
+  if (isOperationsMode.value) {
+    newConfig.operations = props.modelValue.operations;
+  }
   for (const entry of simpleEntries.value) {
     if (entry.key.trim()) {
       newConfig[entry.key] = entry.value;
@@ -38,6 +53,7 @@ const syncEntriesToModel = () => {
   }
   lastLocalEmit = JSON.stringify(newConfig);
   jsonValue.value = JSON.stringify(newConfig, null, 2);
+  jsonError.value = null;
   emit("update:modelValue", newConfig);
 };
 
@@ -51,6 +67,7 @@ watch(
     // Visual mode entries
     if ("operations" in newVal) {
       simpleEntries.value = [];
+      viewMode.value = "json";
     } else {
       simpleEntries.value = Object.entries(newVal)
         .filter(([key]) => key !== "operations")
@@ -58,18 +75,46 @@ watch(
     }
     // JSON view string
     jsonValue.value = JSON.stringify(newVal, null, 2);
+    jsonError.value = null;
   },
   { immediate: true, deep: true }
 );
 
-const syncJsonToModel = (jsonStr: string) => {
+/** Parse the JSON view's text into a config object, or null when unusable. */
+const parseConfig = (jsonStr: string): ParameterOverridesConfig | null => {
   try {
-    const parsed = JSON.parse(jsonStr || "{}");
-    lastLocalEmit = JSON.stringify(parsed);
-    emit("update:modelValue", parsed);
+    const parsed: unknown = JSON.parse(jsonStr.trim() || "{}");
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as ParameterOverridesConfig;
   } catch {
-    toast.error(t("common.invalidJson"));
+    return null;
   }
+};
+
+/**
+ * Commit the JSON view to the model. Errors are shown in place rather than as a
+ * toast that outlives the field: the old value stayed in the parent while the
+ * textarea held something else, and a disappearing toast left an operator
+ * saving a payload without the content he had just typed.
+ */
+const commitJson = (jsonStr: string) => {
+  const parsed = parseConfig(jsonStr);
+  if (parsed === null) {
+    jsonError.value = t("common.invalidJson");
+    return;
+  }
+  jsonError.value = null;
+  lastLocalEmit = JSON.stringify(parsed);
+  emit("update:modelValue", parsed);
+};
+
+// Parse while typing (debounced) so the error appears next to the field, and
+// flush immediately on blur instead of waiting out the debounce.
+const commitJsonDebounced = useDebounceFn(commitJson, 300);
+
+const onJsonBlur = (jsonStr: string) => {
+  commitJsonDebounced.cancel();
+  commitJson(jsonStr);
 };
 
 const addSimpleEntry = () => {
@@ -112,7 +157,11 @@ const getSimpleValueDisplay = (value: unknown): string => {
     <!-- View Mode Toggle -->
     <div class="flex items-center justify-between">
       <SegmentedControl :aria-label="t('parameterOverrides.viewMode')" size="sm">
-        <SegmentedControlItem :active="viewMode === 'visual'" @click="viewMode = 'visual'">
+        <SegmentedControlItem
+          :active="viewMode === 'visual'"
+          :disabled="isOperationsMode"
+          @click="viewMode = 'visual'"
+        >
           <ListTree class="w-3.5 h-3.5" />
           {{ t("parameterOverrides.visualView") }}
         </SegmentedControlItem>
@@ -132,6 +181,15 @@ const getSimpleValueDisplay = (value: unknown): string => {
         {{ t("parameterOverrides.addSimpleEntry") }}
       </Button>
     </div>
+
+    <!-- Operations mode: say why the visual editor is unavailable instead of
+         showing an empty list that implies nothing is configured. -->
+    <p
+      v-if="isOperationsMode"
+      class="rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground"
+    >
+      {{ t("parameterOverrides.operationsJsonOnly") }}
+    </p>
 
     <!-- Visual Mode -->
     <div v-if="viewMode === 'visual'" class="space-y-2">
@@ -190,9 +248,21 @@ const getSimpleValueDisplay = (value: unknown): string => {
       <Textarea
         v-model="jsonValue"
         class="code-textarea min-h-32 text-xs font-mono"
+        :class="{ 'border-destructive': jsonError }"
         rows="8"
-        @blur="syncJsonToModel(jsonValue)"
+        :aria-invalid="jsonError ? 'true' : undefined"
+        :aria-describedby="jsonError ? 'parameter-overrides-json-error' : undefined"
+        @input="commitJsonDebounced(jsonValue)"
+        @blur="onJsonBlur(jsonValue)"
       />
+      <p
+        v-if="jsonError"
+        id="parameter-overrides-json-error"
+        role="alert"
+        class="text-[11px] text-destructive"
+      >
+        {{ jsonError }}
+      </p>
       <p class="text-[11px] text-muted-foreground">
         {{ t("parameterOverrides.jsonModeHelp") }}
       </p>

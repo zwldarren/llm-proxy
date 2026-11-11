@@ -49,9 +49,17 @@ const rangeOptions = [7, 30, 90] as const;
 // no cancellation, so only the latest request may commit its result — an
 // older response arriving last must not overwrite newer data.
 let latestRequestId = 0;
+// The key whose numbers are on screen. A different key is a different dataset:
+// its predecessor's totals must never sit under the new key's name while the
+// response is in flight.
+let loadedKeyName: string | null = null;
 
 const loadUsage = async () => {
   if (!props.apiKey) return;
+  if (props.apiKey.name !== loadedKeyName) {
+    usage.value = null;
+    loadedKeyName = props.apiKey.name;
+  }
   const requestId = ++latestRequestId;
   loading.value = true;
   loadError.value = false;
@@ -74,7 +82,7 @@ const loadUsage = async () => {
 };
 
 watch(
-  [open, rangeDays],
+  [open, rangeDays, () => props.apiKey?.name],
   ([isOpen]) => {
     if (isOpen) loadUsage();
   },

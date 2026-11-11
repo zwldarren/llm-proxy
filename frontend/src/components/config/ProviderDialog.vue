@@ -453,10 +453,14 @@ const onSubmit = handleSubmit(async (values) => {
               <div class="grid gap-2">
                 <Label for="apikey">{{ t("providers.apiKey") }}</Label>
                 <div v-if="isEditing && !apiKeyEditing" class="flex items-center gap-2">
+                  <!-- The backend masks the key as `sk-...abcd` on purpose: the
+                       visible head and tail are how an operator tells one key
+                       from another. A password field hid exactly that. -->
                   <Input
-                    :value="provider?.masked_api_key || '********'"
-                    type="password"
-                    disabled
+                    id="apikey"
+                    :value="provider?.masked_api_key || t('providers.apiKeyUnknown')"
+                    type="text"
+                    readonly
                     class="flex-1 bg-muted/50 font-mono"
                   />
                   <Button variant="outline" @click="apiKeyEditing = true">

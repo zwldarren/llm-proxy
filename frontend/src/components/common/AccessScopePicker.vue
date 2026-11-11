@@ -63,13 +63,16 @@ const { t } = useI18n();
 
 const searchQuery = ref("");
 
-// Remember the last non-empty custom selection so toggling All -> Custom
-// restores it instead of dropping the user into a deny-all state.
+// Remember the last custom selection so toggling All -> Custom restores it
+// instead of dropping the user into a deny-all state.
 const lastSelection = ref<string[]>([]);
 watch(
   () => props.modelValue,
   (value) => {
-    if (Array.isArray(value) && value.length > 0) {
+    // An empty array is a deliberate deny-all, not "nothing chosen yet": keeping
+    // the previous list across it handed the cleared models back the moment the
+    // mode was toggled away and back — a silent reversal of a security setting.
+    if (Array.isArray(value)) {
       lastSelection.value = [...value];
     }
   },

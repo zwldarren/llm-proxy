@@ -38,12 +38,16 @@ const LabelStub = defineComponent({
 const TextareaStub = defineComponent({
   name: "Textarea",
   props: ["modelValue"],
-  emits: ["update:modelValue"],
+  emits: ["update:modelValue", "input", "blur"],
   setup(props, { emit }) {
     return () =>
       h("textarea", {
         value: props.modelValue,
-        onInput: (e: Event) => emit("update:modelValue", (e.target as HTMLInputElement).value),
+        onInput: (e: Event) => {
+          emit("update:modelValue", (e.target as HTMLTextAreaElement).value);
+          emit("input");
+        },
+        onBlur: () => emit("blur"),
       });
   },
 });
@@ -92,5 +96,40 @@ describe("ParameterOverridesBuilder", () => {
 
     await wrapper.setProps({ modelValue: { temperature: 0.7, max_tokens: 4096 } });
     expect(wrapper.findAll("input").length).toBe(4);
+  });
+
+  it("does not offer the visual editor for an operations value", async () => {
+    const operations = [{ mode: "set", path: "temperature", value: 0.2 }];
+    const wrapper = mount(ParameterOverridesBuilder, {
+      props: { modelValue: { operations } as ParameterOverridesConfig },
+      global: { stubs: globalStubs },
+    });
+
+    const segments = wrapper.findAll('[data-slot="segmented-control-item"]');
+
+    // The key/value list cannot express an operation, so offering it would have
+    // shown "no parameters configured" and then dropped the list on the next
+    // keystroke.
+    expect(segments[0]!.attributes("aria-disabled")).toBe("true");
+    expect(wrapper.text()).toContain("parameterOverrides.operationsJsonOnly");
+    expect(wrapper.find("textarea").exists()).toBe(true);
+  });
+
+  it("flags invalid JSON in place instead of keeping the old value silently", async () => {
+    const wrapper = mount(ParameterOverridesBuilder, {
+      props: { modelValue: {} },
+      global: { stubs: globalStubs },
+    });
+
+    await wrapper.findAll('[data-slot="segmented-control-item"]')[1]!.trigger("click");
+    const textarea = wrapper.find("textarea");
+    await textarea.setValue("{ not json");
+    await textarea.trigger("blur");
+
+    // The error belongs next to the field: the parent still holds the previous
+    // object, and a toast that fades left a payload missing what was typed.
+    expect(wrapper.text()).toContain("common.invalidJson");
+    expect(textarea.attributes("aria-invalid")).toBe("true");
+    expect(wrapper.emitted("update:modelValue")).toBeFalsy();
   });
 });

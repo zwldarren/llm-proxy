@@ -4,13 +4,16 @@ import type { ConsoleAuthSettings } from "@/services/api/consoleAuth";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), testEmail: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn() }));
-const router = vi.hoisted(() => ({ beforeRouteLeave: vi.fn() }));
+const router = vi.hoisted(() => ({ beforeRouteLeave: vi.fn(), push: vi.fn() }));
 
 vi.mock("vue-i18n", () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
 vi.mock("vue-sonner", () => ({ toast }));
-vi.mock("vue-router", () => ({ onBeforeRouteLeave: router.beforeRouteLeave }));
+vi.mock("vue-router", () => ({
+  onBeforeRouteLeave: router.beforeRouteLeave,
+  useRouter: () => ({ push: router.push }),
+}));
 vi.mock("@/services/api/consoleAuth", () => ({ consoleAuthApi: api }));
 vi.mock("@/utils/error", () => ({
   getErrorMessage: (value: unknown) => (value instanceof Error ? value.message : String(value)),
@@ -30,6 +33,7 @@ vi.mock("@lucide/vue", () => {
 });
 
 import ConsoleAuthView from "./ConsoleAuthView.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 
 enableAutoUnmount(afterEach);
 
@@ -190,20 +194,56 @@ describe("ConsoleAuthView", () => {
     expect(wrapper.find('button[type="submit"]').attributes("disabled")).toBeDefined();
   });
 
-  it("blocks route changes and page unload only while dirty", async () => {
+  it("blocks route changes, asks before leaving, and blocks page unload only while dirty", async () => {
     const wrapper = mount(ConsoleAuthView);
     await flushPromises();
-    const guard = router.beforeRouteLeave.mock.calls[0][0] as () => boolean;
-    expect(guard()).toBe(true);
+    const guard = router.beforeRouteLeave.mock.calls[0][0] as (to: { fullPath: string }) => boolean;
+    expect(guard({ fullPath: "/config/settings" })).toBe(true);
 
     await wrapper.find("#public-url").setValue("https://proxy-next.example.com");
-    const originalConfirm = window.confirm;
-    window.confirm = vi.fn().mockReturnValue(false);
-    expect(guard()).toBe(false);
+
+    // A dirty form cancels the navigation outright and raises the console's own
+    // dialog — the native confirm() ignored the app's language and styling.
+    expect(guard({ fullPath: "/config/settings" })).toBe(false);
+    expect(router.push).not.toHaveBeenCalled();
+
+    wrapper.findComponent(ConfirmDialog).vm.$emit("confirm");
+    await flushPromises();
+    expect(router.push).toHaveBeenCalledWith("/config/settings");
+
     const unload = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unload);
-    expect(unload.defaultPrevented).toBe(true);
-    window.confirm = originalConfirm;
+    expect(unload.defaultPrevented).toBe(false);
+  });
+
+  it("asks before dropping an OIDC provider, secret included", async () => {
+    const settings = makeSettings();
+    settings.oidc_providers.push({
+      id: "corp",
+      name: "Corporate SSO",
+      issuer: "https://id.example.com",
+      client_id: "llm-proxy",
+      client_secret: "typed-but-not-saved",
+      scopes: "openid email profile",
+      enabled: true,
+    });
+    api.get.mockResolvedValue(settings);
+
+    const wrapper = mount(ConsoleAuthView);
+    await flushPromises();
+    expect(wrapper.find("#provider-0-id").exists()).toBe(true);
+
+    await wrapper.find('[aria-label="consoleAuth.removeProvider"]').trigger("click");
+
+    // Nothing is spliced out on the first click: the removal carries an
+    // unsaved client secret with it.
+    expect(wrapper.find("#provider-0-id").exists()).toBe(true);
+
+    const removalDialog = wrapper.findAllComponents(ConfirmDialog).at(1)!;
+    removalDialog.vm.$emit("confirm");
+    await flushPromises();
+
+    expect(wrapper.find("#provider-0-id").exists()).toBe(false);
   });
 
   it("shows inline SMTP errors and focuses the first invalid field", async () => {
