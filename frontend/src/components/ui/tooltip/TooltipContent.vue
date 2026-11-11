@@ -4,8 +4,20 @@ import { TooltipContent, type TooltipContentProps, TooltipPortal } from "reka-ui
 import { cn } from "@/lib/utils";
 
 const props = withDefaults(
-  defineProps<TooltipContentProps & { class?: HTMLAttributes["class"] }>(),
+  defineProps<
+    TooltipContentProps & {
+      class?: HTMLAttributes["class"];
+      /**
+       * Render nothing at all. SidebarMenuButton uses this to suppress the
+       * collapsed-rail tooltips while the sidebar is expanded; declaring it
+       * here keeps it out of `$attrs`, which otherwise lands on the portal's
+       * teleport root and makes Vue warn on every sidebar item.
+       */
+      hidden?: boolean;
+    }
+  >(),
   {
+    hidden: false,
     sideOffset: 4,
     side: "top",
     // Keep collision handling on: an absent Boolean prop is cast to `false` by
@@ -17,13 +29,13 @@ const props = withDefaults(
 );
 
 const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props;
+  const { class: _, hidden: __, ...delegated } = props;
   return delegated;
 });
 </script>
 
 <template>
-  <TooltipPortal>
+  <TooltipPortal v-if="!props.hidden">
     <TooltipContent
       v-bind="delegatedProps"
       :class="
