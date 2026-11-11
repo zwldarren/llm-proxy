@@ -118,19 +118,28 @@ const capabilities = computed(() =>
               @filter="emit('filterProvider', $event)"
             />
           </div>
+          <!-- Separator and value travel together: as siblings they wrapped
+               independently, leaving a "·" dangling at the end of the previous
+               line on a phone. -->
           <template v-if="model.context_length">
-            <span class="text-border lg:hidden" aria-hidden="true">·</span>
-            <span class="shrink-0 tabular-nums lg:hidden">
-              {{ formatContextLength(model.context_length) }}
-              <span class="font-sans lowercase tracking-wide">{{ t("models.contextShort") }}</span>
+            <span class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap lg:hidden">
+              <span class="text-border" aria-hidden="true">·</span>
+              <span class="tabular-nums">
+                {{ formatContextLength(model.context_length) }}
+                <span class="font-sans lowercase tracking-wide">{{
+                  t("models.contextShort")
+                }}</span>
+              </span>
             </span>
           </template>
           <template v-if="model.description">
-            <span class="text-border" aria-hidden="true">·</span>
-            <!-- Prose, not an identifier: the row sets font-mono text-[11px] for
-                 the data around it, which made the description the smallest
-                 text in the line it dominates. -->
-            <span class="min-w-0 truncate font-sans text-xs">{{ model.description }}</span>
+            <span class="inline-flex min-w-0 items-center gap-2">
+              <span class="text-border" aria-hidden="true">·</span>
+              <!-- Prose, not an identifier: the row sets font-mono text-[11px]
+                   for the data around it, which made the description the
+                   smallest text in the line it dominates. -->
+              <span class="min-w-0 truncate font-sans text-xs">{{ model.description }}</span>
+            </span>
           </template>
         </div>
       </div>

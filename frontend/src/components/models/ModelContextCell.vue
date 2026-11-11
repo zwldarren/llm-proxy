@@ -21,7 +21,11 @@ const { t } = useI18n();
         {{ formatContextLength(contextLength) }}
       </span>
     </TooltipTrigger>
-    <TooltipContent>{{ t("models.contextLength") }}</TooltipContent>
+    <!-- The cell shows a rounded figure; the tooltip is where the exact
+         token count lives. It used to repeat the label, which said nothing. -->
+    <TooltipContent
+      >{{ t("models.contextLength") }} · {{ contextLength.toLocaleString() }}</TooltipContent
+    >
   </Tooltip>
   <span v-else class="text-xs text-muted-foreground">{{ ABSENT_METRIC }}</span>
 </template>

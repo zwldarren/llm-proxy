@@ -27,11 +27,15 @@ withDefaults(defineProps<Props>(), {
 
 <template>
   <!--
-    Grid instead of a flex row: on a phone the control sits on the same line as
-    the title and the long description wraps underneath, so a switch never
-    drifts far away from the setting it belongs to. From sm up the description
-    stacks under the title and the control keeps the right edge, which is the
-    desktop row this component always had.
+    Grid instead of a flex row. From sm up this is the desktop row: icon, then
+    title with its description underneath, then the control on the right edge.
+
+    On a phone the control moves to its own line instead of sharing one with
+    the title. It used to keep the third column, and a control with any
+    intrinsic width — a text input, a pair of steppers — then took what it
+    needed and left the title column 32px wide, so "Extra Sensitive Keys"
+    wrapped one character per line. The control keeps its natural width and the
+    text keeps the full row.
   -->
   <!-- Inner padding is px-5 (20px) at every level, the same measure
        PanelSection's p-5 uses, so a settings card and a panel card share a left
@@ -41,8 +45,8 @@ withDefaults(defineProps<Props>(), {
     class="group transition-colors duration-200 grid items-start gap-x-3.5 gap-y-1 sm:items-center sm:gap-x-6"
     :class="[
       variant === 'nested'
-        ? 'grid-cols-[minmax(0,1fr)_auto] py-3.5 px-5 pl-6 sm:pl-11'
-        : 'grid-cols-[auto_minmax(0,1fr)_auto] py-4 px-5',
+        ? 'grid-cols-[minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto] py-3.5 px-5 pl-6 sm:pl-11'
+        : 'grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] py-4 px-5',
       'hover:bg-muted/12 first:rounded-t-xl last:rounded-b-xl',
     ]"
   >
@@ -87,8 +91,8 @@ withDefaults(defineProps<Props>(), {
       class="flex min-w-0 max-w-full flex-wrap items-center gap-2 justify-end self-start sm:self-center"
       :class="[
         variant === 'nested'
-          ? 'col-start-2 row-start-1 row-span-2'
-          : 'col-start-3 row-start-1 row-span-2',
+          ? 'col-start-1 row-start-3 sm:col-start-2 sm:row-start-1 sm:row-span-2'
+          : 'col-start-1 col-span-2 row-start-3 sm:col-start-3 sm:col-span-1 sm:row-start-1 sm:row-span-2',
         loading ? 'opacity-70 pointer-events-none' : '',
       ]"
     >

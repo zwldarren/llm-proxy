@@ -208,8 +208,11 @@ export const formatNumberWithSuffix = (num: number, locale?: string): string => 
 export const formatContextLength = (length?: number | null): string => {
   if (length === null || length === undefined || length <= 0) return ABSENT_METRIC;
   if (length >= 1_000_000) {
-    const m = length / 1_000_000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+    // Two decimals where they carry information, none where they do not:
+    // 1,048,576 is 1.05M, 1,000,000 is 1M. A single decimal turned the former
+    // into "1.0M" next to the latter's "1M" — one column, two conventions.
+    const m = Math.round((length / 1_000_000) * 100) / 100;
+    return `${m}M`;
   }
   if (length >= 1_000) return `${Math.round(length / 1000)}K`;
   return String(length);

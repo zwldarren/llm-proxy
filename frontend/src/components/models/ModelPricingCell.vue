@@ -200,10 +200,16 @@ const hasAnyPricing = computed(
 <template>
   <Popover v-if="hasAnyPricing">
     <PopoverTrigger as-child>
+      <!-- The button's name is what a screen reader reads, so the extra
+           dimensions belong in it: "＋2" as bare text was announced as "plus
+           two", and an aria-label on the span inside cannot be a name. -->
       <button
         type="button"
         class="rounded-md px-1.5 py-1 -my-1 cursor-pointer transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
         :class="field ? 'text-right' : 'w-full text-right'"
+        :aria-label="
+          field && activeDims.length ? `${fieldText ?? '—'}, ${extraDimsTitle}` : undefined
+        "
       >
         <!-- Single-column mode: one clear mono value -->
         <template v-if="field">
@@ -215,7 +221,7 @@ const hasAnyPricing = computed(
                    assistive tech: give the trigger a name of its own. -->
               <span
                 class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground"
-                :aria-label="extraDimsTitle"
+                aria-hidden="true"
                 :title="extraDimsTitle"
                 >+{{ activeDims.length }}</span
               >
