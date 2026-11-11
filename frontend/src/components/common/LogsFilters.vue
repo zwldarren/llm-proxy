@@ -664,7 +664,7 @@ onUnmounted(() => {
           <Input
             id="filter-user"
             v-model="userText"
-            placeholder="admin"
+            :placeholder="t('logs.userFilterPlaceholder')"
             class="w-full h-10 border-border/60"
           />
         </div>

@@ -90,7 +90,7 @@ const isImageRequest = computed(
 // megabytes of text and freezes the page.
 function sanitizeLargeStrings(data: unknown, maxLen = 200): unknown {
   if (typeof data === "string") {
-    return data.length > maxLen ? `[truncated, ${data.length} chars]` : data;
+    return data.length > maxLen ? `[${t("logs.truncatedChars", { count: data.length })}]` : data;
   }
   if (Array.isArray(data)) return data.map((d) => sanitizeLargeStrings(d, maxLen));
   if (typeof data === "object" && data !== null) {

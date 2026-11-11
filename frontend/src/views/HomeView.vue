@@ -138,6 +138,15 @@ const useHourlyGranularity = computed(() => {
   return days <= 2;
 });
 
+// The dashboard shell renders whenever a summary exists, even for a range with
+// no provider or model rows. Reserving a 360px minimum for that row in that case
+// left a viewport-wide band holding one line of "No usage data in this range".
+const hasBreakdown = computed(
+  () =>
+    (usageStats.value?.by_provider?.length ?? 0) > 0 ||
+    (usageStats.value?.by_model?.length ?? 0) > 0
+);
+
 const tokenBreakdownBuckets = computed<HourlyUsageBucket[]>(() => {
   if (useHourlyGranularity.value) return hourlyBuckets.value;
   // Daily buckets feed the same chart; only the key and the granularity differ.
@@ -448,7 +457,8 @@ onMounted(() => {
             </div>
 
             <div
-              class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/60 lg:flex-1 lg:min-h-90"
+              class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/60"
+              :class="hasBreakdown ? 'lg:flex-1 lg:min-h-90' : ''"
             >
               <UsageByProvider :by-provider="usageStats.by_provider" />
               <UsageByModel

@@ -116,7 +116,7 @@ const visibleWithErrors = computed(() =>
             v-if="attempt.error_type"
             class="text-xs text-muted-foreground/90 font-medium mt-1.5"
           >
-            Type:
+            {{ t("logs.attemptErrorType") }}:
             <span class="font-mono text-[11px] text-foreground/80">{{ attempt.error_type }}</span>
           </div>
           <div

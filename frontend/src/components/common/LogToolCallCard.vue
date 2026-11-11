@@ -53,15 +53,15 @@ const expanded = ref(props.defaultExpanded);
 const kindMeta = computed(() => {
   switch (props.call.kind) {
     case "web_search":
-      return { icon: Search, label: "Web Search", tint: "action-blue" };
+      return { icon: Search, label: t("logs.webSearch"), tint: "action-blue" };
     case "tool_search":
-      return { icon: Search, label: "Tool Search", tint: "action-blue" };
+      return { icon: Search, label: t("logs.toolKindToolSearch"), tint: "action-blue" };
     case "custom":
-      return { icon: Wrench, label: "Custom", tint: "action-amber" };
+      return { icon: Wrench, label: t("logs.toolKindCustom"), tint: "action-amber" };
     case "server_tool_use":
-      return { icon: Wrench, label: "Server Tool", tint: "action-amber" };
+      return { icon: Wrench, label: t("logs.toolKindServerTool"), tint: "action-amber" };
     default:
-      return { icon: Wrench, label: "Function", tint: "action-amber" };
+      return { icon: Wrench, label: t("logs.toolKindFunction"), tint: "action-amber" };
   }
 });
 
@@ -178,7 +178,7 @@ const searchQuery = computed(() => {
     <div v-if="expanded" class="px-3 pb-3 pt-1 space-y-2.5 border-t border-border/25">
       <!-- Inline search query for web_search -->
       <div v-if="searchQuery" class="text-xs font-mono text-muted-foreground/90 pt-2">
-        <span class="text-muted-foreground">query: </span>
+        <span class="text-muted-foreground">{{ t("logs.query") }}: </span>
         <span class="text-foreground/90">"{{ searchQuery }}"</span>
       </div>
 
@@ -221,7 +221,7 @@ const searchQuery = computed(() => {
               variant="outline"
               class="text-[11px] h-4 py-0 px-1.5 border-status-error/30 text-status-error"
             >
-              error
+              {{ t("logs.toolResultError") }}
             </Badge>
             <span v-if="resultIsOversized" class="text-[11px] font-mono text-status-warning">
               {{ formatBytes(resultByteSize) }}

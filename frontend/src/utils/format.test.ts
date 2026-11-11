@@ -21,6 +21,28 @@ describe("absent metrics", () => {
   });
 });
 
+describe("cost formatting follows the magnitude of the amount", () => {
+  it("prints whole cents, not six decimals, for amounts that reach a cent", () => {
+    // The dashboard total used to read "$0.000000" for a rounding error and
+    // five zeros wide for every real total.
+    expect(formatCost(0)).toBe("$0.00");
+    expect(formatCost(12.5)).toBe("$12.50");
+    expect(formatCost(1_234.567)).toBe("$1234.57");
+  });
+
+  it("keeps the significant digits of a sub-cent amount", () => {
+    // Rounding these to two decimals — as every other amount is — would print
+    // "$0.00" for the number the operator opened the row to read.
+    expect(formatCost(0.000027)).toBe("$0.000027");
+    expect(formatCost(0.001)).toBe("$0.001");
+    expect(formatCost(-0.000004)).toBe("-$0.000004");
+  });
+
+  it("falls back to cents when nothing is left at six decimals", () => {
+    expect(formatCost(1e-9)).toBe("$0.00");
+  });
+});
+
 describe("date formatting follows the console locale", () => {
   it("formats a date in the active locale", () => {
     setActiveLocale("zh");

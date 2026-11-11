@@ -203,33 +203,33 @@ const formatMcpOperation = (op: string | undefined): string => {
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Server</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.server")
+            }}</span>
             <span class="text-sm font-semibold font-mono text-foreground/90 truncate">{{
               mcpMetadata.server || "-"
             }}</span>
           </div>
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Operation</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.operation")
+            }}</span>
             <span class="text-sm font-semibold text-foreground/90">{{
               formatMcpOperation(mcpMetadata.operation) || "-"
             }}</span>
           </div>
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Resource Type</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.resourceType")
+            }}</span>
             <span class="text-sm font-semibold font-mono text-foreground/90 truncate">{{
               mcpMetadata.resourceType || "-"
             }}</span>
           </div>
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Resource Name</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.resourceName")
+            }}</span>
             <span class="text-sm font-semibold font-mono text-foreground/90 truncate">{{
               mcpMetadata.resourceName || "-"
             }}</span>
@@ -280,14 +280,14 @@ const formatMcpOperation = (op: string | undefined): string => {
           <h3 class="font-semibold text-lg flex items-center gap-2">
             <span>{{ t("logs.searchQuery") }}</span>
           </h3>
-          <Badge variant="secondary" class="font-mono text-xs">Web Search</Badge>
+          <Badge variant="secondary" class="font-mono text-xs">{{ t("logs.webSearch") }}</Badge>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Status</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.status")
+            }}</span>
             <Badge
               :variant="webSearchMetadata.status === 'success' ? 'default' : 'destructive'"
               class="self-start font-mono text-xs shadow-xs"
@@ -296,17 +296,17 @@ const formatMcpOperation = (op: string | undefined): string => {
             </Badge>
           </div>
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Provider</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.provider")
+            }}</span>
             <span class="text-sm font-semibold font-mono text-foreground/90 capitalize">{{
               webSearchMetadata.provider || "-"
             }}</span>
           </div>
           <div class="bg-muted/10 border border-border/40 rounded-xl p-4 flex flex-col gap-1.5">
-            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-              >Result Count</span
-            >
+            <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+              t("logs.resultCount")
+            }}</span>
             <span class="text-sm font-semibold font-mono text-foreground/90">{{
               webSearchMetadata.resultCount ?? 0
             }}</span>
@@ -317,9 +317,9 @@ const formatMcpOperation = (op: string | undefined): string => {
           v-if="webSearchMetadata.query"
           class="bg-muted/5 border border-border/40 rounded-xl p-4"
         >
-          <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider"
-            >Query</span
-          >
+          <span class="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">{{
+            t("logs.query")
+          }}</span>
           <p class="font-mono text-sm font-semibold mt-1 text-foreground/90">
             {{ webSearchMetadata.query }}
           </p>

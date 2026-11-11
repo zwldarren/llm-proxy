@@ -67,6 +67,7 @@ import { HttpError } from "@/services/http";
 import type { LogFilter, LogListItem as LogListItemType, LogRead } from "@/types/schemas";
 import {
   formatCost,
+  formatCostWithPrecision,
   formatDate,
   formatDuration,
   formatTokens,
@@ -1187,7 +1188,13 @@ const auditListAction = (log: LogListItemType): string => {
                     </div>
                   </TableCellNumeric>
                   <TableCellNumeric class="hidden md:table-cell">
-                    {{ formatCost(costUsd(log)) }}
+                    <span
+                      :title="
+                        costUsd(log) != null ? formatCostWithPrecision(costUsd(log)!, 6) : undefined
+                      "
+                    >
+                      {{ formatCost(costUsd(log)) }}
+                    </span>
                   </TableCellNumeric>
                   <TableCellActions>
                     <div class="flex items-center justify-end gap-0.5">

@@ -260,37 +260,37 @@ defineExpose({
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-[11px] sm:text-xs">
         <!-- Provider Error Details -->
         <div v-if="log.log_metadata.error_details.provider_name" class="flex items-center gap-2">
-          <span class="error-detail-label">Provider:</span>
+          <span class="error-detail-label">{{ t("logs.provider") }}:</span>
           <span class="error-detail-value">{{ log.log_metadata.error_details.provider_name }}</span>
         </div>
         <div v-if="log.log_metadata.error_details.error_type" class="flex items-center gap-2">
-          <span class="error-detail-label">Error Type:</span>
+          <span class="error-detail-label">{{ t("logs.errorType") }}:</span>
           <span class="error-detail-value">{{ log.log_metadata.error_details.error_type }}</span>
         </div>
         <div v-if="log.log_metadata.error_details.code" class="flex items-center gap-2">
-          <span class="error-detail-label">Error Code:</span>
+          <span class="error-detail-label">{{ t("logs.errorCode") }}:</span>
           <span class="error-detail-value">{{ log.log_metadata.error_details.code }}</span>
         </div>
         <div v-if="log.log_metadata.error_details.param" class="flex items-center gap-2">
-          <span class="error-detail-label">Parameter:</span>
+          <span class="error-detail-label">{{ t("logs.parameter") }}:</span>
           <span class="error-detail-value">{{ log.log_metadata.error_details.param }}</span>
         </div>
         <!-- HTTP Error Details -->
         <div v-if="log.log_metadata.error_details.status_code" class="flex items-center gap-2">
-          <span class="error-detail-label">HTTP Status:</span>
+          <span class="error-detail-label">{{ t("logs.httpStatus") }}:</span>
           <span class="error-detail-value">{{ log.log_metadata.error_details.status_code }}</span>
         </div>
         <div v-if="log.log_metadata.error_details.method" class="flex items-center gap-2">
-          <span class="error-detail-label">Method:</span>
+          <span class="error-detail-label">{{ t("logs.method") }}:</span>
           <span class="error-detail-value">{{ log.log_metadata.error_details.method }}</span>
         </div>
         <div v-if="log.log_metadata.error_details.url" class="flex items-start gap-2 md:col-span-2">
-          <span class="error-detail-label">URL:</span>
+          <span class="error-detail-label">{{ t("logs.url") }}:</span>
           <span class="error-detail-value break-all">{{ log.log_metadata.error_details.url }}</span>
         </div>
         <!-- Original Error -->
         <div v-if="log.log_metadata.error_details.original_error" class="mt-2 md:col-span-2">
-          <span class="error-detail-label">Original Error:</span>
+          <span class="error-detail-label">{{ t("logs.originalError") }}:</span>
           <p v-if="originalErrorExplanation" class="mt-1 text-xs text-muted-foreground italic">
             {{ originalErrorExplanation }}
           </p>
@@ -304,7 +304,7 @@ defineExpose({
         </div>
         <!-- Response Body -->
         <div v-if="log.log_metadata.error_details.response_body" class="mt-2 md:col-span-2">
-          <span class="error-detail-label">Response Body:</span>
+          <span class="error-detail-label">{{ t("logs.responseBody") }}:</span>
           <p v-if="responseBodyExplanation" class="mt-1 text-xs text-muted-foreground italic">
             {{ responseBodyExplanation }}
           </p>
@@ -322,7 +322,7 @@ defineExpose({
           v-if="log.log_metadata.error_details.stream_error_type"
           class="flex items-center gap-2"
         >
-          <span class="error-detail-label">Stream Error Type:</span>
+          <span class="error-detail-label">{{ t("logs.streamErrorType") }}:</span>
           <span class="error-detail-value">{{
             log.log_metadata.error_details.stream_error_type
           }}</span>
@@ -331,7 +331,7 @@ defineExpose({
           v-if="log.log_metadata.error_details.stream_error_message"
           class="flex items-start gap-2 md:col-span-2"
         >
-          <span class="error-detail-label">Stream Error Message:</span>
+          <span class="error-detail-label">{{ t("logs.streamErrorMessage") }}:</span>
           <span class="error-detail-value break-all">{{
             log.log_metadata.error_details.stream_error_message
           }}</span>
@@ -502,16 +502,16 @@ defineExpose({
               <div class="flex items-center justify-between gap-2">
                 <span
                   class="text-[11px] text-muted-foreground font-mono truncate uppercase tracking-wider font-semibold"
-                  :title="item.key || 'Value'"
+                  :title="item.key || t('logs.value')"
                 >
-                  {{ item.key || "Value" }}
+                  {{ item.key || t("logs.value") }}
                 </span>
                 <Badge
                   v-if="item.active"
                   variant="outline"
                   class="text-[11px] h-4 py-0 px-1.5 bg-muted/10 border-border/20 text-foreground uppercase font-mono font-bold"
                 >
-                  Active
+                  {{ t("logs.active") }}
                 </Badge>
               </div>
               <div

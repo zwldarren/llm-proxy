@@ -87,8 +87,13 @@ const getShare = (requests: number): string => {
       </div>
 
       <!-- Fixed height on stacked layouts; fills the panel once the dashboard
-           row grows to the viewport (see HomeView). -->
-      <ScrollArea class="h-90 w-full lg:flex-1 lg:min-h-0">
+           row grows to the viewport (see HomeView). Neither applies when there
+           is nothing to list: a fixed 360px box around one line of "no usage"
+           text is 300px of empty panel. -->
+      <ScrollArea
+        class="w-full"
+        :class="sortedProviders.length > 0 ? 'h-90 lg:flex-1 lg:min-h-0' : ''"
+      >
         <div v-if="sortedProviders.length > 0" class="px-4 sm:px-6 py-1 space-y-0.5">
           <div
             v-for="(item, index) in sortedProviders"

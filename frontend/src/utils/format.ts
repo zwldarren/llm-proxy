@@ -76,16 +76,32 @@ export const getStatusType = (
 
 export const formatCost = (cost?: number | null, locale?: string) => {
   if (cost === undefined || cost === null) return ABSENT_METRIC;
-  if (!locale) return `$${cost.toFixed(6)}`;
+  const abs = Math.abs(cost);
+  // Money on this console spans four orders of magnitude: a single cached
+  // request costs $0.000027 and a month's spend runs into the hundreds. Six
+  // decimals everywhere made a dashboard total read "$0.000000" and every log
+  // row five zeros wide; two decimals everywhere turned the small rows into
+  // "$0.00", which is not the number either. Precision follows the magnitude.
+  const subCent = abs > 0 && abs < 0.01;
+  // Match Intl's convention elsewhere in the console: the sign precedes the
+  // symbol ("-$0.000004", not "$-0.000004").
+  const sign = cost < 0 ? "-" : "";
+  if (!locale) {
+    if (!subCent) return `${sign}$${abs.toFixed(2)}`;
+    // Trim the padding zeros but keep the amount readable: below the six-decimal
+    // resolution there is nothing left to print.
+    const trimmed = abs.toFixed(6).replace(/0+$/, "");
+    return trimmed.endsWith(".") ? "$0.00" : `${sign}$${trimmed}`;
+  }
   try {
     return getFormatter(locale, {
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 2,
-      maximumFractionDigits: 6,
+      maximumFractionDigits: subCent ? 6 : 2,
     }).format(cost);
   } catch {
-    return `$${cost.toFixed(6)}`;
+    return `${sign}$${abs.toFixed(subCent ? 6 : 2)}`;
   }
 };
 

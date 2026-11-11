@@ -11,6 +11,7 @@ import { apiKeysApi, type ApiKeyRead, type ApiKeyUsageResponse } from "@/service
 import { useApiKeyStore } from "@/stores/apiKeys";
 import {
   formatCost,
+  formatCostWithPrecision,
   formatDate,
   formatDuration,
   formatNumberWithSuffix,
@@ -100,6 +101,11 @@ const statCards = computed(() => [
     key: "spend",
     label: t("apiKeys.totalSpend"),
     value: formatCost(summary.value?.total_cost),
+    // The short form reads at a glance; the exact figure is one hover away.
+    title:
+      summary.value?.total_cost != null
+        ? formatCostWithPrecision(summary.value.total_cost, 6)
+        : undefined,
   },
   {
     key: "requests",
@@ -254,7 +260,7 @@ const modelRows = computed(() => {
                 <div class="text-[11px] uppercase tracking-wide text-muted-foreground">
                   {{ card.label }}
                 </div>
-                <div class="mt-1 text-lg font-semibold text-data">
+                <div class="mt-1 text-lg font-semibold text-data" :title="card.title">
                   {{ card.value }}
                 </div>
               </div>

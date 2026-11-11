@@ -1,10 +1,35 @@
 <script setup lang="ts">
 import { Check, Copy, AlertTriangle, Loader2 } from "@lucide/vue";
 import { useClipboard } from "@vueuse/core";
-import { computed, ref, defineAsyncComponent, watch } from "vue";
+import { computed, defineComponent, h, ref, defineAsyncComponent, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+// The async fallbacks are render functions rather than runtime template
+// strings: a template string needs Vue's runtime compiler to be in the bundle,
+// and it cannot reach the i18n instance to follow the console's language.
+const JsonViewerLoading = defineComponent({
+  setup() {
+    const { t } = useI18n();
+    return () =>
+      h("div", { class: "flex items-center gap-2 py-4 text-muted-foreground text-xs" }, [
+        h(Loader2, { class: "w-4 h-4 animate-spin" }),
+        h("span", t("logs.jsonViewerLoading")),
+      ]);
+  },
+});
+
+const JsonViewerLoadError = defineComponent({
+  setup() {
+    const { t } = useI18n();
+    return () =>
+      h("div", { class: "flex items-center gap-2 py-4 text-destructive text-xs" }, [
+        h(AlertTriangle, { class: "w-4 h-4 shrink-0" }),
+        h("span", t("logs.jsonViewerFailed")),
+      ]);
+  },
+});
 
 // Async load vue-json-pretty with error and loading fallbacks
 const VueJsonPretty = defineAsyncComponent({
@@ -12,17 +37,8 @@ const VueJsonPretty = defineAsyncComponent({
     await import("vue-json-pretty/lib/styles.css");
     return import("vue-json-pretty");
   },
-  loadingComponent: {
-    template:
-      '<div class="flex items-center gap-2 py-4 text-muted-foreground text-xs"><Loader2 class="w-4 h-4 animate-spin" /><span>Loading JSON viewer…</span></div>',
-    components: { Loader2 },
-  },
-  errorComponent: {
-    props: ["error"],
-    template:
-      '<div class="flex items-center gap-2 py-4 text-destructive text-xs"><AlertTriangle class="w-4 h-4 shrink-0" /><span>Failed to load JSON viewer</span></div>',
-    components: { AlertTriangle },
-  },
+  loadingComponent: JsonViewerLoading,
+  errorComponent: JsonViewerLoadError,
   timeout: 10000,
 });
 
