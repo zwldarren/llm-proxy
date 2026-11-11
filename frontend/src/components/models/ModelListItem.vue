@@ -127,7 +127,10 @@ const capabilities = computed(() =>
           </template>
           <template v-if="model.description">
             <span class="text-border" aria-hidden="true">·</span>
-            <span class="min-w-0 truncate font-sans">{{ model.description }}</span>
+            <!-- Prose, not an identifier: the row sets font-mono text-[11px] for
+                 the data around it, which made the description the smallest
+                 text in the line it dominates. -->
+            <span class="min-w-0 truncate font-sans text-xs">{{ model.description }}</span>
           </template>
         </div>
       </div>

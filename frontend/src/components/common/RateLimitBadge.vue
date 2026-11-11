@@ -15,7 +15,9 @@ const { t } = useI18n();
     :title="t('apiKeys.rateLimit')"
   >
     <Gauge class="w-3 h-3 mr-1" />
-    <!-- Mono + tabular for the numeric readout (DESIGN.md mono-data rule) -->
-    <span class="text-data-xs">{{ t("apiKeys.rateLimitPerMin", { n: rpm }) }}</span>
+    <!-- Mono + tabular for the number only: the unit is a word, and the
+         equivalent cell in MemberBudgetCell keeps its label in the body face. -->
+    <span class="text-data-xs font-semibold">{{ rpm }}</span>
+    <span class="ml-1 text-[11px]">{{ t("apiKeys.rateLimitUnit") }}</span>
   </Badge>
 </template>

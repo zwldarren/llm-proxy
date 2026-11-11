@@ -21,10 +21,14 @@ const breakdownDelay = (col: number, i: number) => delay(9 + (col - 1) * 4 + (i 
 <template>
   <!-- Mirrors the dashboard geometry: metric strip -> secondary meters ->
        trends chart -> two flush breakdown columns. -->
-  <div class="w-full" role="status" aria-busy="true" :aria-label="t('common.loading')">
-    <!-- Primary metric strip: 6 flush cells, hairline-separated -->
+  <div class="@container w-full" role="status" aria-busy="true" :aria-label="t('common.loading')">
+    <!-- Primary metric strip: 6 flush cells, hairline-separated. Same container
+         queries and same gutter arithmetic as UsageMetricStrip (px-1 sm:px-2 on
+         the strip, px-3 sm:px-4 on the cells) — viewport breakpoints and a
+         px-4/6 strip put the first cell 16px past everything below it, which is
+         the jump the skeleton exists to avoid. -->
     <div
-      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-y sm:divide-y-0 lg:divide-y-0 divide-border/60 border-b border-border/60 px-4 sm:px-6"
+      class="grid grid-cols-1 @[20rem]:grid-cols-2 @[28rem]:grid-cols-3 @[64rem]:grid-cols-6 divide-x divide-y @[64rem]:divide-y-0 divide-border/60 border-b border-border/60 px-1 sm:px-2"
     >
       <div v-for="i in 6" :key="i" class="px-3 sm:px-4 py-3">
         <Skeleton class="h-3 w-16" :style="{ animationDelay: stripDelay(i) }" />
@@ -43,7 +47,7 @@ const breakdownDelay = (col: number, i: number) => delay(9 + (col - 1) * 4 + (i 
 
     <!-- Secondary strip: 2 meter cells -->
     <div
-      class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60 border-b border-border/60 px-4 sm:px-6"
+      class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60 border-b border-border/60 px-1 sm:px-2"
     >
       <div v-for="i in 2" :key="i" class="px-3 sm:px-4 py-3">
         <div class="flex items-center justify-between">

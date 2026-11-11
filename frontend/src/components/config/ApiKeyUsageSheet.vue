@@ -316,7 +316,8 @@ const modelRows = computed(() => {
                 {{ t("apiKeys.rateLimit") }}
               </span>
               <span class="text-data">
-                {{ t("apiKeys.rateLimitPerMin", { n: apiKey.rate_limit_rpm }) }}
+                <span class="font-mono tabular-nums">{{ apiKey.rate_limit_rpm }}</span>
+                <span class="ml-1 font-sans">{{ t("apiKeys.rateLimitUnit") }}</span>
               </span>
             </div>
 

@@ -637,6 +637,8 @@ export default {
     editModel: "Edit Model",
     addModelDescription: "Map a model name to a provider model and set its pricing.",
     editModelDescription: "Change how this model is routed and billed.",
+    editProviderDescription:
+      "Pricing, context window and capabilities for {name}. The provider it points at is what changes here, not the model name.",
     name: "Name",
     provider: "Provider",
     providers: "Providers",
@@ -2277,7 +2279,7 @@ export default {
     rateLimitPlaceholder: "Unlimited",
     rateLimitHelp: "Maximum requests per minute for this key. Leave empty for no limit.",
     rateLimitInvalid: "Rate limit must be a positive whole number.",
-    rateLimitPerMin: "{n} req/min",
+    rateLimitUnit: "req/min",
     viewUsage: "View usage",
     viewUsageFor: "View usage for {name}",
     usageTitle: "Key Usage",

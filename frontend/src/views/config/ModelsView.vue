@@ -1430,9 +1430,11 @@ const confirmDelete = async () => {
       <SheetContent side="right" size="lg">
         <SheetHeader :icon="Settings" :title="t('models.editProvider')">
           <template #description>
-            <span class="font-mono">
-              {{ editingProviderData.provider_name || t("models.provider") }}
-            </span>
+            {{
+              t("models.editProviderDescription", {
+                name: editingProviderData.provider_name || t("models.provider"),
+              })
+            }}
           </template>
         </SheetHeader>
 

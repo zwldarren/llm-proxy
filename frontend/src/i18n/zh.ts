@@ -618,6 +618,8 @@ export default {
     editModel: "编辑模型",
     addModelDescription: "把模型名映射到提供商模型，并设置计费价格。",
     editModelDescription: "修改这个模型的路由方式和计费方式。",
+    editProviderDescription:
+      "{name} 的价格、上下文窗口与能力。此处改动的是它指向的提供商，不是模型名。",
     name: "名称",
     provider: "提供商",
     providers: "提供商列表",
@@ -1814,7 +1816,7 @@ export default {
     rateLimitPlaceholder: "无限制",
     rateLimitHelp: "此密钥每分钟允许的最大请求数。留空表示无限制。",
     rateLimitInvalid: "速率限制必须为正整数。",
-    rateLimitPerMin: "{n} 次/分钟",
+    rateLimitUnit: "次/分钟",
     viewUsage: "查看用量",
     viewUsageFor: "查看 {name} 的用量",
     usageTitle: "密钥用量",
