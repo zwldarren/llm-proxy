@@ -102,7 +102,6 @@ function formatCooldown(key: string): string {
       :title="t('circuitBreaker.enabled')"
       :description="t('circuitBreaker.enabledDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="state.circuit_breaker.enabled" :aria-label="t('circuitBreaker.enabled')" />
@@ -116,7 +115,6 @@ function formatCooldown(key: string): string {
         :title="t('circuitBreaker.failureThreshold')"
         :description="t('circuitBreaker.failureThresholdDescription')"
         :loading="pending"
-        :error="error"
         class="border-t border-border/45 bg-muted/5"
       >
         <template #action>
@@ -134,7 +132,6 @@ function formatCooldown(key: string): string {
         :title="t('circuitBreaker.cooldown')"
         :description="t('circuitBreaker.cooldownDescription')"
         :loading="pending"
-        :error="error"
         class="border-t border-border/45 bg-muted/5"
       >
         <template #action>

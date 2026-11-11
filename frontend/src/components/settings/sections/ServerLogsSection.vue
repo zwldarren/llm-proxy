@@ -46,7 +46,6 @@ const { t } = useI18n();
         :title="t('settings.logInputOutput')"
         :description="t('settings.logInputOutputDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <Switch v-model="state.log_input_output" :aria-label="t('settings.logInputOutput')" />
@@ -57,7 +56,6 @@ const { t } = useI18n();
         :title="t('settings.logRawStream')"
         :description="t('settings.logRawStreamDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <Switch v-model="state.log_raw_stream" :aria-label="t('settings.logRawStream')" />
@@ -68,7 +66,6 @@ const { t } = useI18n();
         :title="t('settings.maskSensitiveData')"
         :description="t('settings.maskSensitiveDataDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <Switch
@@ -82,7 +79,6 @@ const { t } = useI18n();
         :title="t('settings.sensitiveKeys')"
         :description="t('settings.sensitiveKeysDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <Input
@@ -108,7 +104,6 @@ const { t } = useI18n();
         :title="t('settings.logRetentionDays')"
         :description="t('settings.setZeroToKeepIndefinitely')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <NumberStepper
@@ -126,7 +121,6 @@ const { t } = useI18n();
         :title="t('settings.batchRetentionDays')"
         :description="t('settings.batchRetentionDaysDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <NumberStepper
@@ -170,7 +164,6 @@ const { t } = useI18n();
         :title="t('settings.samplingRate')"
         :description="t('settings.samplingRateDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <NumberInput
@@ -189,7 +182,6 @@ const { t } = useI18n();
         :title="t('settings.maxLoggedBodySize')"
         :description="t('settings.maxLoggedBodySizeDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <NumberStepper
@@ -210,7 +202,6 @@ const { t } = useI18n();
         :title="t('settings.auditSamplingRate')"
         :description="t('settings.auditSamplingRateDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <NumberInput
@@ -229,7 +220,6 @@ const { t } = useI18n();
         :title="t('settings.auditRetentionDays')"
         :description="t('settings.auditRetentionDaysDescription')"
         :loading="pending"
-        :error="error"
       >
         <template #action>
           <NumberInput

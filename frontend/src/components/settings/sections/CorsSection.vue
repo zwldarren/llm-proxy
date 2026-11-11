@@ -27,7 +27,6 @@ const { t } = useI18n();
       :title="t('cors.allowedOrigins')"
       :description="t('cors.allowedOriginsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple

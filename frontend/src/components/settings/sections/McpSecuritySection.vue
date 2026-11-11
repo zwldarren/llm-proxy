@@ -80,7 +80,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.requireKeyMcpPermissions')"
       :description="t('mcpSecurity.requireKeyMcpPermissionsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch
@@ -95,7 +94,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.allowedCommands')"
       :description="t('mcpSecurity.allowedCommandsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple
@@ -112,7 +110,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.blockedCommands')"
       :description="t('mcpSecurity.blockedCommandsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple
@@ -136,7 +133,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.allowedEnvKeys')"
       :description="t('mcpSecurity.allowedEnvKeysDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple
@@ -153,7 +149,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.blockedEnvKeys')"
       :description="t('mcpSecurity.blockedEnvKeysDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple
@@ -177,7 +172,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.blockedUrlHosts')"
       :description="t('mcpSecurity.blockedUrlHostsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple
@@ -194,7 +188,6 @@ const envKeyOverlap = computed(() => {
       :title="t('mcpSecurity.blockedUrlIps')"
       :description="t('mcpSecurity.blockedUrlIpsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <TagsInputSimple

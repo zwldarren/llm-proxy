@@ -997,6 +997,13 @@
     @apply bg-muted/50 border-b-2 border-border/70;
   }
 
+  /* The list view's header band. Same measure as the table cell treatment
+   * above, in one place, so a page that offers both views cannot drift into
+   * two different header surfaces. */
+  .config-listhead {
+    @apply sticky top-0 z-10 border-b-2 border-border/70 bg-muted/50;
+  }
+
   /* Sticky action column — the row's controls stay reachable when a wide
    * table scrolls horizontally under a narrow console. The cell paints the
    * page surface so the columns behind it do not show through, and a hairline

@@ -30,7 +30,6 @@ const { t } = useI18n();
       :title="t('security.loginLockoutEnabled')"
       :description="t('security.loginLockoutEnabledDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch
@@ -45,7 +44,6 @@ const { t } = useI18n();
       :title="t('security.maxFailedLoginAttempts')"
       :description="t('security.maxFailedLoginAttemptsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -64,7 +62,6 @@ const { t } = useI18n();
       :title="t('security.lockoutDurationSeconds')"
       :description="t('security.lockoutDurationSecondsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -83,7 +80,6 @@ const { t } = useI18n();
       :title="t('security.apiKeyLockoutEnabled')"
       :description="t('security.apiKeyLockoutEnabledDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch
@@ -98,7 +94,6 @@ const { t } = useI18n();
       :title="t('security.maxFailedApiKeyAttempts')"
       :description="t('security.maxFailedApiKeyAttemptsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -118,7 +113,6 @@ const { t } = useI18n();
       :title="t('security.apiKeyLockoutDurationSeconds')"
       :description="t('security.apiKeyLockoutDurationSecondsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -138,7 +132,6 @@ const { t } = useI18n();
       :title="t('security.authFailureDelayMs')"
       :description="t('security.authFailureDelayMsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -158,7 +151,6 @@ const { t } = useI18n();
       :title="t('security.rateLimitDisabled')"
       :description="t('security.rateLimitDisabledDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="state.rate_limit_disabled" :aria-label="t('security.rateLimitDisabled')" />
@@ -175,7 +167,6 @@ const { t } = useI18n();
       :title="t('security.redisRateLimitFailClosed')"
       :description="t('security.redisRateLimitFailClosedDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch
@@ -189,7 +180,6 @@ const { t } = useI18n();
       :title="t('security.hstsEnabled')"
       :description="t('security.hstsEnabledDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="state.hsts_enabled" :aria-label="t('security.hstsEnabled')" />
@@ -201,7 +191,6 @@ const { t } = useI18n();
       :title="t('security.hstsMaxAge')"
       :description="t('security.hstsMaxAgeDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -219,7 +208,6 @@ const { t } = useI18n();
       :title="t('security.maxRequestBodySize')"
       :description="t('security.maxRequestBodySizeDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper

@@ -77,7 +77,6 @@ watch(
       :title="t('settings.enableWebSearch')"
       :description="t('settings.enableWebSearchDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="state.enabled" :aria-label="t('settings.enableWebSearch')" />

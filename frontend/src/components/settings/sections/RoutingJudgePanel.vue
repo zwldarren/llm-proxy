@@ -32,7 +32,9 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
-const { state, pending, error } = useAutoSaveRefs(props.autoSave);
+// The shared save error belongs to the enclosing SettingsSection, which paints
+// and announces it once; this panel's rows no longer repeat it.
+const { state, pending } = useAutoSaveRefs(props.autoSave);
 
 const JUDGE_MODES: RoutingJudgeMode[] = ["auto", "best", "fast"];
 
@@ -171,7 +173,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
     :title="t('smartRouting.judge')"
     :description="t('smartRouting.judgeDescription')"
     :loading="pending"
-    :error="error"
     class="border-t border-border/40 bg-muted/5"
   >
     <template #action>
@@ -194,7 +195,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
           : t('smartRouting.judgeModelDescription')
       "
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Select v-model="judge.model" :disabled="hasNoJudgeModels">
@@ -216,7 +216,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeModes')"
       :description="t('smartRouting.judgeModesDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <div class="flex flex-wrap items-center gap-4">
@@ -242,7 +241,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeGate')"
       :description="t('smartRouting.judgeGateDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Select :model-value="trigger" @update:model-value="setTrigger">
@@ -267,7 +265,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeConfidenceBelow')"
       :description="t('smartRouting.judgeConfidenceBelowDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -287,7 +284,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeBand')"
       :description="t('smartRouting.judgeBandDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <div class="flex items-center gap-2">
@@ -318,7 +314,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeDeadline')"
       :description="t('smartRouting.judgeDeadlineDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -339,7 +334,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeShadow')"
       :description="t('smartRouting.judgeShadowDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="judge.shadow" :aria-label="t('smartRouting.judgeShadow')" />
@@ -352,7 +346,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeShadowSampleRate')"
       :description="t('smartRouting.judgeShadowSampleRateDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -372,7 +365,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeContext')"
       :description="t('smartRouting.judgeContextDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <div class="flex items-center gap-2">
@@ -412,7 +404,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeConsumption')"
       :description="t('smartRouting.judgeConsumptionDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch
@@ -428,7 +419,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeApplyConfidence')"
       :description="t('smartRouting.judgeApplyConfidenceDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -447,7 +437,6 @@ function toggleMode(mode: RoutingJudgeMode, checked: boolean) {
       :title="t('smartRouting.judgeApplyEscalation')"
       :description="t('smartRouting.judgeApplyEscalationDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper

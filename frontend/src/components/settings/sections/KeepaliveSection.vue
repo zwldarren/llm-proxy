@@ -29,7 +29,6 @@ const { t } = useI18n();
       :title="t('keepalive.enabled')"
       :description="t('keepalive.enabledDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="state.enabled" :aria-label="t('keepalive.enabled')" />
@@ -41,7 +40,6 @@ const { t } = useI18n();
       :title="t('keepalive.graceSeconds')"
       :description="t('keepalive.graceSecondsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -59,7 +57,6 @@ const { t } = useI18n();
       :title="t('keepalive.intervalSeconds')"
       :description="t('keepalive.intervalSecondsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper

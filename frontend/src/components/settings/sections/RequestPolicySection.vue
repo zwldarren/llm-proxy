@@ -33,7 +33,6 @@ const { t } = useI18n();
       :title="t('requestPolicy.unknownFieldsPolicy')"
       :description="t('requestPolicy.unknownFieldsPolicyDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Select v-model="state.unknown_fields_policy">
@@ -62,7 +61,6 @@ const { t } = useI18n();
       :title="t('requestPolicy.unsupportedBlockPolicy')"
       :description="t('requestPolicy.unsupportedBlockPolicyDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Select v-model="state.unsupported_block_policy">

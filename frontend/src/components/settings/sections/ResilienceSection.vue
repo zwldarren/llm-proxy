@@ -27,7 +27,6 @@ const { t } = useI18n();
       :title="t('resilience.maxRetries')"
       :description="t('resilience.maxRetriesDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper
@@ -44,7 +43,6 @@ const { t } = useI18n();
       :title="t('resilience.maxFallbackAttempts')"
       :description="t('resilience.maxFallbackAttemptsDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <NumberStepper

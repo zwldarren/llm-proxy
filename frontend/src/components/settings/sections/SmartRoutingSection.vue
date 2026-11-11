@@ -48,7 +48,6 @@ function setModeWeight(key: ModeKey, value: number) {
       :title="t('smartRouting.enable')"
       :description="t('smartRouting.enableDescription')"
       :loading="pending"
-      :error="error"
     >
       <template #action>
         <Switch v-model="state.enabled" :aria-label="t('smartRouting.enable')" />

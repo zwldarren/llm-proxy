@@ -55,9 +55,7 @@ function ariaLabel(col: ModelListColumn): string {
 </script>
 
 <template>
-  <div
-    class="sticky top-0 z-10 flex h-9 items-center gap-3 border-b-2 border-border/70 bg-muted/50 px-4 sm:px-6"
-  >
+  <div class="config-listhead flex h-9 items-center gap-3 px-4 sm:px-6">
     <div v-for="col in columns" :key="col.sortKey ?? col.label" :class="col.cellClass">
       <button
         v-if="col.sortKey"
