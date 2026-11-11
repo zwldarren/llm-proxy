@@ -2,7 +2,7 @@ import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConsoleAuthSettings } from "@/services/api/consoleAuth";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), testEmail: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn() }));
 const router = vi.hoisted(() => ({ beforeRouteLeave: vi.fn() }));
 
@@ -47,6 +47,11 @@ function makeSettings(): ConsoleAuthSettings {
       from_address: "",
       starttls: true,
       use_ssl: false,
+    },
+    resend: {
+      enabled: false,
+      api_key: "",
+      from_address: "",
     },
     oidc_providers: [],
   };
@@ -219,9 +224,71 @@ describe("ConsoleAuthView", () => {
 
     await wrapper.find("#smtp-host").setValue("smtp.example.com");
     await wrapper.find("#smtp-from").setValue("proxy@example.com");
+    await wrapper.find("#smtp-port").setValue("2525");
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(api.update).toHaveBeenCalledOnce();
+    // The port is a number in the wire contract, whatever the input's text is.
+    expect(api.update.mock.calls[0][0].smtp.port).toBe(2525);
+  });
+
+  it("validates the Resend block before saving", async () => {
+    const wrapper = mount(ConsoleAuthView, { attachTo: document.body });
+    await flushPromises();
+
+    expect(wrapper.find("#resend-api-key").exists()).toBe(false);
+    await wrapper.find('[aria-label="consoleAuth.resendEnabled"]').trigger("click");
+    expect(wrapper.find("#resend-api-key").exists()).toBe(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.update).not.toHaveBeenCalled();
+    expect(wrapper.find("#resend-api-key").attributes("aria-invalid")).toBe("true");
+    expect(wrapper.find("#resend-from").attributes("aria-invalid")).toBe("true");
+
+    await wrapper.find("#resend-api-key").setValue("re_test_key");
+    await wrapper.find("#resend-from").setValue("noreply@example.com");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.update).toHaveBeenCalledOnce();
+    expect(api.update.mock.calls[0][0].resend).toEqual({
+      enabled: true,
+      api_key: "re_test_key",
+      from_address: "noreply@example.com",
+    });
+  });
+
+  it("sends a test email through the saved transport", async () => {
+    const settings = makeSettings();
+    settings.resend = {
+      enabled: true,
+      api_key: "****",
+      from_address: "noreply@example.com",
+    };
+    api.get.mockResolvedValue(settings);
+    api.testEmail.mockResolvedValue({ sent: true, transport: "resend" });
+
+    const wrapper = mount(ConsoleAuthView);
+    await flushPromises();
+
+    const sendButton = () =>
+      wrapper
+        .findAll("button")
+        .find((button) => button.text().includes("consoleAuth.testEmailSend"))!;
+    expect(sendButton().attributes("disabled")).toBeUndefined();
+
+    // The endpoint reads the saved config, so unsaved edits must not look tested.
+    await wrapper.find("#public-url").setValue("https://proxy-next.example.com");
+    expect(sendButton().attributes("disabled")).toBeDefined();
+    await wrapper.find("#public-url").setValue("https://proxy.example.com");
+
+    await wrapper.find("#test-email-to").setValue("ops@example.com");
+    await sendButton().trigger("click");
+    await flushPromises();
+
+    expect(api.testEmail).toHaveBeenCalledWith("ops@example.com");
+    expect(toast.success).toHaveBeenCalledWith("consoleAuth.testEmailSent");
   });
 
   it("rejects an insecure public URL before saving", async () => {

@@ -1344,8 +1344,11 @@ export default {
     require2faAfterPasskey: "Ask for a code after a passkey sign-in",
     require2faAfterPasskeyHelp:
       "A passkey verifies you on the device, so it already counts as two factors. Turn this on only when a compliance regime requires a code after every sign-in.",
-    smtp: "Email delivery",
-    smtpHelp: "Optional SMTP for invitation, email-verification and password-reset links.",
+    emailDelivery: "Email delivery",
+    emailDeliveryHelp:
+      "Optional email delivery for invitation, email-verification and password-reset links. Both blocks are stored so you can switch without retyping, but only one is used: Resend when it is enabled, SMTP otherwise. There is no automatic fallback — an enabled block with a missing key or sender simply reports delivery failures.",
+    smtp: "SMTP",
+    smtpHelp: "Relay through an SMTP server you control.",
     smtpEnabled: "Enable SMTP delivery",
     host: "Host",
     port: "Port",
@@ -1354,6 +1357,19 @@ export default {
     fromAddress: "From address",
     starttls: "STARTTLS",
     smtps: "TLS (SMTPS)",
+    resend: "Resend",
+    resendHelp: "Send through Resend's HTTPS API instead of running an SMTP relay.",
+    resendEnabled: "Enable Resend delivery",
+    apiKey: "API key",
+    apiKeyHelp:
+      "Create a sending API key at resend.com. Stored encrypted and masked in API responses.",
+    testEmail: "Send a test email",
+    testEmailHelp:
+      "Uses the saved configuration, so save pending changes first. The result names the transport that delivered the message.",
+    testEmailTo: "Recipient",
+    testEmailSend: "Send test",
+    testEmailSending: "Sending…",
+    testEmailSent: "Test email accepted by {transport}.",
     oidc: "OpenID Connect providers",
     oidcHelp: "External identity providers. OAuth login is disabled until a provider is added.",
     addProvider: "Add provider",
@@ -1479,7 +1495,7 @@ export default {
     passkeyAdded: "Passkey added",
     email: "Login email",
     emailHelp:
-      "Add a verified email to sign in with it. SMTP must be configured by an administrator.",
+      "Add a verified email to sign in with it. An administrator must configure email delivery.",
     emailPlaceholder: "Email address",
     invalidEmail: "Enter a valid email address",
     sendVerification: "Send verification",
@@ -1603,7 +1619,7 @@ export default {
     setEmail: "Set login email",
     setEmailDescription: "Attest a login email for this member",
     setEmailHelp:
-      "Use this when SMTP verification is unavailable. The address is stored as admin-verified and can be used to sign in.",
+      "Use this when email verification is unavailable. The address is stored as admin-verified and can be used to sign in.",
     emailSaved: "Login email saved for {username}",
     cannotDeleteSelf: "You cannot delete your own account",
     deleteMember: "Delete Member",
@@ -1704,12 +1720,13 @@ export default {
     codes: {
       accountLocked:
         "Too many failed sign-ins. Try again later or ask an admin to unlock the account.",
-      emailDeliveryFailed: "The email could not be sent. Check the SMTP settings and try again.",
+      emailDeliveryFailed:
+        "The email could not be sent. Check the email delivery settings and try again.",
       emailVerificationInvalid: "This email verification link is invalid or has expired.",
       emailVerificationSuperseded:
         "A newer verification link replaced this one. Use the latest email.",
       emailVerificationUnavailable:
-        "Email verification needs HTTPS and SMTP. Ask an admin to set your email address.",
+        "Email verification needs HTTPS and a configured email transport. Ask an admin to set your email address.",
       invalidChallenge: "This sign-in attempt expired. Please start again.",
       invalidMfaCode: "That authentication code is not valid.",
       invitationInvalid: "This invitation is no longer valid. Ask an admin for a new one.",
@@ -2364,6 +2381,8 @@ export default {
     passwordResetConfirmDescription: "Maximum password reset confirmations per client IP.",
     accountSensitive: "Sensitive Account Changes",
     accountSensitiveDescription: "Maximum password, username, and email changes per client IP.",
+    testEmail: "Console Test Email",
+    testEmailDescription: "Maximum test-email sends per client IP.",
   },
   cors: {
     title: "CORS Origins",

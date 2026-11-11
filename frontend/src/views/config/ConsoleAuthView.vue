@@ -8,6 +8,7 @@ import { toast } from "vue-sonner";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import LoadingState from "@/components/common/LoadingState.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import ConfigField from "@/components/config/ConfigField.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,12 +37,20 @@ const settings = ref<ConsoleAuthSettings>({
     starttls: true,
     use_ssl: false,
   },
+  resend: {
+    enabled: false,
+    api_key: "",
+    from_address: "",
+  },
   oidc_providers: [],
 });
 const settingsLoaded = ref(false);
 const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
+const testEmailTo = ref("");
+const testEmailError = ref("");
+const sendingTest = ref(false);
 const savedSnapshot = ref("");
 // IDs that came from the server are immutable: the backend matches the stored
 // encrypted client secret by ID, so a rename would drop the secret on save.
@@ -50,6 +59,7 @@ const expandedProviders = ref<Set<number>>(new Set());
 const fieldErrors = ref<Record<string, string>>({});
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 const hasFieldErrors = computed(() => Object.keys(fieldErrors.value).length > 0);
@@ -74,7 +84,6 @@ function clearFieldError(fieldId: string) {
   const next = { ...fieldErrors.value };
   delete next[fieldId];
   fieldErrors.value = next;
-  error.value = "";
 }
 
 function describedBy(...ids: Array<string | false | undefined>): string | undefined {
@@ -100,11 +109,16 @@ function toggleProvider(index: number) {
   expandedProviders.value = next;
 }
 
-function clearSmtpErrors() {
+// Fields whose error belongs to one delivery block, cleared together when the
+// operator flips that block's switch.
+const BLOCK_ERROR_FIELDS = {
+  smtp: ["smtp-host", "smtp-port", "smtp-from"],
+  resend: ["resend-api-key", "resend-from"],
+} as const;
+
+function clearBlockErrors(block: keyof typeof BLOCK_ERROR_FIELDS) {
   const next = { ...fieldErrors.value };
-  delete next["smtp-host"];
-  delete next["smtp-port"];
-  delete next["smtp-from"];
+  for (const fieldId of BLOCK_ERROR_FIELDS[block]) delete next[fieldId];
   fieldErrors.value = next;
   error.value = "";
 }
@@ -138,8 +152,19 @@ function validate(): boolean {
     }
     if (!current.smtp.from_address.trim()) {
       errors["smtp-from"] = required("consoleAuth.fromAddress");
-    } else if (!/^[^\s@]+@[^\s@]+$/.test(current.smtp.from_address.trim())) {
+    } else if (!EMAIL_PATTERN.test(current.smtp.from_address.trim())) {
       errors["smtp-from"] = t("consoleAuth.emailInvalid");
+    }
+  }
+
+  if (current.resend.enabled) {
+    if (!current.resend.api_key.trim()) {
+      errors["resend-api-key"] = required("consoleAuth.apiKey");
+    }
+    if (!current.resend.from_address.trim()) {
+      errors["resend-from"] = required("consoleAuth.fromAddress");
+    } else if (!EMAIL_PATTERN.test(current.resend.from_address.trim())) {
+      errors["resend-from"] = t("consoleAuth.emailInvalid");
     }
   }
 
@@ -263,6 +288,25 @@ function discardChanges() {
   expandedProviders.value = new Set();
   fieldErrors.value = {};
   error.value = "";
+}
+
+async function sendTestEmail() {
+  if (sendingTest.value) return;
+  testEmailError.value = "";
+  const recipient = testEmailTo.value.trim();
+  if (!EMAIL_PATTERN.test(recipient)) {
+    testEmailError.value = t("consoleAuth.emailInvalid");
+    return;
+  }
+  sendingTest.value = true;
+  try {
+    const result = await consoleAuthApi.testEmail(recipient);
+    toast.success(t("consoleAuth.testEmailSent", { transport: result.transport.toUpperCase() }));
+  } catch (e) {
+    testEmailError.value = getErrorMessage(e);
+  } finally {
+    sendingTest.value = false;
+  }
 }
 
 onBeforeRouteLeave(() => {
@@ -419,106 +463,154 @@ onUnmounted(() => {
           </section>
 
           <section class="rounded-xl border border-border/60 bg-card p-5 sm:p-6">
-            <h2 class="font-medium">{{ t("consoleAuth.smtp") }}</h2>
-            <p class="mt-1 text-xs text-muted-foreground">{{ t("consoleAuth.smtpHelp") }}</p>
-            <div class="mt-5 flex items-center justify-between gap-4">
-              <p class="text-sm font-medium">{{ t("consoleAuth.smtpEnabled") }}</p>
-              <Switch
-                v-model="settings.smtp.enabled"
-                :aria-label="t('consoleAuth.smtpEnabled')"
-                @update:model-value="clearSmtpErrors"
-              />
-            </div>
-            <div v-if="settings.smtp.enabled" class="mt-5 grid gap-4 sm:grid-cols-2">
-              <div class="space-y-2">
-                <Label for="smtp-host">{{ t("consoleAuth.host") }}</Label>
-                <Input
+            <h2 class="font-medium">{{ t("consoleAuth.emailDelivery") }}</h2>
+            <p class="mt-1 max-w-[65ch] text-xs leading-relaxed text-muted-foreground">
+              {{ t("consoleAuth.emailDeliveryHelp") }}
+            </p>
+
+            <div class="mt-5 border-t border-border/50 pt-5">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-sm font-medium">{{ t("consoleAuth.smtp") }}</h3>
+                  <p class="mt-0.5 text-xs text-muted-foreground">
+                    {{ t("consoleAuth.smtpHelp") }}
+                  </p>
+                </div>
+                <Switch
+                  v-model="settings.smtp.enabled"
+                  :aria-label="t('consoleAuth.smtpEnabled')"
+                  @update:model-value="clearBlockErrors('smtp')"
+                />
+              </div>
+              <div v-if="settings.smtp.enabled" class="mt-5 grid gap-4 sm:grid-cols-2">
+                <ConfigField
                   id="smtp-host"
                   v-model="settings.smtp.host"
-                  autocomplete="off"
-                  maxlength="255"
-                  :aria-invalid="!!fieldErrors['smtp-host']"
-                  :aria-describedby="fieldErrors['smtp-host'] ? 'smtp-host-error' : undefined"
+                  :label="t('consoleAuth.host')"
+                  :error="fieldErrors['smtp-host']"
+                  :maxlength="255"
                   @input="clearFieldError('smtp-host')"
                 />
-                <p
-                  v-if="fieldErrors['smtp-host']"
-                  id="smtp-host-error"
-                  class="text-xs text-destructive"
-                >
-                  {{ fieldErrors["smtp-host"] }}
-                </p>
-              </div>
-              <div class="space-y-2">
-                <Label for="smtp-port">{{ t("consoleAuth.port") }}</Label>
-                <Input
+                <ConfigField
                   id="smtp-port"
-                  v-model.number="settings.smtp.port"
+                  v-model="settings.smtp.port"
+                  :label="t('consoleAuth.port')"
+                  :error="fieldErrors['smtp-port']"
                   type="number"
                   inputmode="numeric"
-                  min="1"
-                  max="65535"
-                  class="text-data"
-                  :aria-invalid="!!fieldErrors['smtp-port']"
-                  :aria-describedby="fieldErrors['smtp-port'] ? 'smtp-port-error' : undefined"
+                  :min="1"
+                  :max="65535"
+                  numeric
                   @input="clearFieldError('smtp-port')"
                 />
-                <p
-                  v-if="fieldErrors['smtp-port']"
-                  id="smtp-port-error"
-                  class="text-xs text-destructive"
-                >
-                  {{ fieldErrors["smtp-port"] }}
-                </p>
-              </div>
-              <div class="space-y-2">
-                <Label for="smtp-user">{{ t("consoleAuth.username") }}</Label>
-                <Input
+                <ConfigField
                   id="smtp-user"
                   v-model="settings.smtp.username"
-                  autocomplete="off"
-                  maxlength="255"
+                  :label="t('consoleAuth.username')"
+                  :maxlength="255"
                 />
-              </div>
-              <div class="space-y-2">
-                <Label for="smtp-password">{{ t("consoleAuth.password") }}</Label>
-                <Input
+                <ConfigField
                   id="smtp-password"
                   v-model="settings.smtp.password"
+                  :label="t('consoleAuth.password')"
                   type="password"
                   autocomplete="new-password"
                 />
-              </div>
-              <div class="space-y-2 sm:col-span-2">
-                <Label for="smtp-from">{{ t("consoleAuth.fromAddress") }}</Label>
-                <Input
+                <ConfigField
                   id="smtp-from"
                   v-model="settings.smtp.from_address"
+                  :label="t('consoleAuth.fromAddress')"
+                  :error="fieldErrors['smtp-from']"
                   type="email"
-                  autocomplete="off"
-                  maxlength="320"
-                  :aria-invalid="!!fieldErrors['smtp-from']"
-                  :aria-describedby="fieldErrors['smtp-from'] ? 'smtp-from-error' : undefined"
+                  :maxlength="320"
+                  cell-class="sm:col-span-2"
                   @input="clearFieldError('smtp-from')"
                 />
-                <p
-                  v-if="fieldErrors['smtp-from']"
-                  id="smtp-from-error"
-                  class="text-xs text-destructive"
-                >
-                  {{ fieldErrors["smtp-from"] }}
-                </p>
+              </div>
+              <div v-if="settings.smtp.enabled" class="mt-4 flex flex-wrap gap-x-6">
+                <label class="flex min-h-11 items-center gap-2 text-sm">
+                  <Switch v-model="settings.smtp.starttls" />
+                  {{ t("consoleAuth.starttls") }}
+                </label>
+                <label class="flex min-h-11 items-center gap-2 text-sm">
+                  <Switch v-model="settings.smtp.use_ssl" />
+                  {{ t("consoleAuth.smtps") }}
+                </label>
               </div>
             </div>
-            <div v-if="settings.smtp.enabled" class="mt-4 flex flex-wrap gap-x-6">
-              <label class="flex min-h-11 items-center gap-2 text-sm">
-                <Switch v-model="settings.smtp.starttls" />
-                {{ t("consoleAuth.starttls") }}
-              </label>
-              <label class="flex min-h-11 items-center gap-2 text-sm">
-                <Switch v-model="settings.smtp.use_ssl" />
-                {{ t("consoleAuth.smtps") }}
-              </label>
+
+            <div class="mt-5 border-t border-border/50 pt-5">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-sm font-medium">{{ t("consoleAuth.resend") }}</h3>
+                  <p class="mt-0.5 text-xs text-muted-foreground">
+                    {{ t("consoleAuth.resendHelp") }}
+                  </p>
+                </div>
+                <Switch
+                  v-model="settings.resend.enabled"
+                  :aria-label="t('consoleAuth.resendEnabled')"
+                  @update:model-value="clearBlockErrors('resend')"
+                />
+              </div>
+              <div v-if="settings.resend.enabled" class="mt-5 grid gap-4 sm:grid-cols-2">
+                <ConfigField
+                  id="resend-api-key"
+                  v-model="settings.resend.api_key"
+                  :label="t('consoleAuth.apiKey')"
+                  :error="fieldErrors['resend-api-key']"
+                  :help="t('consoleAuth.apiKeyHelp')"
+                  type="password"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  cell-class="sm:col-span-2"
+                  @input="clearFieldError('resend-api-key')"
+                />
+                <ConfigField
+                  id="resend-from"
+                  v-model="settings.resend.from_address"
+                  :label="t('consoleAuth.fromAddress')"
+                  :error="fieldErrors['resend-from']"
+                  type="email"
+                  :maxlength="320"
+                  cell-class="sm:col-span-2"
+                  @input="clearFieldError('resend-from')"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="settings.smtp.enabled || settings.resend.enabled"
+              class="mt-5 border-t border-border/50 pt-5"
+            >
+              <h3 class="text-sm font-medium">{{ t("consoleAuth.testEmail") }}</h3>
+              <p class="mt-0.5 max-w-[65ch] text-xs leading-relaxed text-muted-foreground">
+                {{ t("consoleAuth.testEmailHelp") }}
+              </p>
+              <div class="mt-3 flex flex-wrap items-start gap-2">
+                <ConfigField
+                  id="test-email-to"
+                  v-model="testEmailTo"
+                  :label="t('consoleAuth.testEmailTo')"
+                  :error="testEmailError"
+                  type="email"
+                  :maxlength="320"
+                  cell-class="min-w-0 flex-1"
+                  @input="testEmailError = ''"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  class="gap-2 max-md:h-11"
+                  :disabled="sendingTest || isDirty"
+                  @click="sendTestEmail"
+                >
+                  <Loader2 v-if="sendingTest" class="size-4 animate-spin" />
+                  {{
+                    sendingTest ? t("consoleAuth.testEmailSending") : t("consoleAuth.testEmailSend")
+                  }}
+                </Button>
+              </div>
             </div>
           </section>
 
@@ -696,7 +788,7 @@ onUnmounted(() => {
                       v-model="provider.client_id"
                       autocomplete="off"
                       spellcheck="false"
-                      maxlength="255"
+                      :maxlength="255"
                       :aria-invalid="!!fieldErrors[`provider-${index}-client-id`]"
                       :aria-describedby="
                         fieldErrors[`provider-${index}-client-id`]
@@ -729,7 +821,7 @@ onUnmounted(() => {
                     <Input
                       :id="`provider-${index}-scopes`"
                       v-model="provider.scopes"
-                      maxlength="255"
+                      :maxlength="255"
                       class="font-mono text-xs"
                       autocomplete="off"
                       spellcheck="false"

@@ -31,6 +31,7 @@ const BUCKETS = [
   "auth.password_reset",
   "auth.password_reset_confirm",
   "account.sensitive",
+  "config.test_email",
 ] as const;
 
 const bucketLabels: Record<(typeof BUCKETS)[number], { title: string; description: string }> = {
@@ -89,6 +90,10 @@ const bucketLabels: Record<(typeof BUCKETS)[number], { title: string; descriptio
   "account.sensitive": {
     title: "rateLimits.accountSensitive",
     description: "rateLimits.accountSensitiveDescription",
+  },
+  "config.test_email": {
+    title: "rateLimits.testEmail",
+    description: "rateLimits.testEmailDescription",
   },
 };
 
