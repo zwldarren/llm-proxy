@@ -1463,7 +1463,7 @@ const auditListAction = (log: LogListItemType): string => {
                   <TableCell class="text-xs overflow-hidden">
                     <!-- eslint-disable-next-line vue/no-v-html -->
                     <span
-                      class="font-mono text-muted-foreground break-all line-clamp-2"
+                      class="text-muted-foreground line-clamp-2 wrap-break-word"
                       v-html="sanitizeHighlightText(getWebSearchQuery(log), filters.search || '')"
                     ></span>
                   </TableCell>

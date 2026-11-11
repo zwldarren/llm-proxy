@@ -497,10 +497,7 @@ onUnmounted(() => {
         </button>
       </span>
     </div>
-    <div
-      class="filters-grid gap-3 sm:gap-4"
-      :class="usesProxyFilters ? 'filters-grid-7col' : 'filters-grid-4col'"
-    >
+    <div class="filters-grid gap-3 sm:gap-4" :class="{ 'filters-grid-7col': usesProxyFilters }">
       <!-- Search -->
       <div class="flex flex-col">
         <label for="log-search" class="text-xs font-medium text-muted-foreground mb-1.5">{{
@@ -732,13 +729,6 @@ onUnmounted(() => {
 /* Wide: 4 columns */
 @container (min-width: 900px) {
   .filters-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-/* Extra wide: 4 columns (audit/mcp/websearch tabs have 4 filter fields) */
-@container (min-width: 1100px) {
-  .filters-grid-4col {
     grid-template-columns: repeat(4, 1fr);
   }
 }

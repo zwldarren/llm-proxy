@@ -53,15 +53,15 @@ const expanded = ref(props.defaultExpanded);
 const kindMeta = computed(() => {
   switch (props.call.kind) {
     case "web_search":
-      return { icon: Search, label: t("logs.webSearch"), tint: "action-blue" };
+      return { icon: Search, label: t("logs.webSearch") };
     case "tool_search":
-      return { icon: Search, label: t("logs.toolKindToolSearch"), tint: "action-blue" };
+      return { icon: Search, label: t("logs.toolKindToolSearch") };
     case "custom":
-      return { icon: Wrench, label: t("logs.toolKindCustom"), tint: "action-amber" };
+      return { icon: Wrench, label: t("logs.toolKindCustom") };
     case "server_tool_use":
-      return { icon: Wrench, label: t("logs.toolKindServerTool"), tint: "action-amber" };
+      return { icon: Wrench, label: t("logs.toolKindServerTool") };
     default:
-      return { icon: Wrench, label: t("logs.toolKindFunction"), tint: "action-amber" };
+      return { icon: Wrench, label: t("logs.toolKindFunction") };
   }
 });
 

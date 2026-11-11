@@ -264,7 +264,7 @@ watch(
 
             <!-- Selection count -->
             <div class="border-t border-border/60 px-3 py-1.5">
-              <span class="text-[11px] tabular-nums text-muted-foreground">
+              <span class="text-xs tabular-nums text-muted-foreground">
                 {{
                   t("accessPicker.selectedCount", { count: selection.length, total: items.length })
                 }}
