@@ -1309,8 +1309,10 @@ const confirmDelete = async () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">{{ t("models.modelStatusNone") }}</SelectItem>
-                        <SelectItem value="beta">beta</SelectItem>
-                        <SelectItem value="deprecated">deprecated</SelectItem>
+                        <SelectItem value="beta">{{ t("models.lifecycleBeta") }}</SelectItem>
+                        <SelectItem value="deprecated">{{
+                          t("models.lifecycleDeprecated")
+                        }}</SelectItem>
                       </SelectContent>
                     </Select>
                     <p class="text-[11px] text-muted-foreground leading-normal">

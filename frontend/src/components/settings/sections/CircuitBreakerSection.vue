@@ -57,6 +57,23 @@ function getStateVariant(state: string) {
   }
 }
 
+/**
+ * Backend state names are Python identifiers. Printing them raw put
+ * "half_open" in the middle of an otherwise translated panel.
+ */
+function stateLabel(state: string): string {
+  switch (state) {
+    case "open":
+      return t("circuitBreaker.stateOpen");
+    case "half_open":
+      return t("circuitBreaker.stateHalfOpen");
+    case "closed":
+      return t("circuitBreaker.stateClosed");
+    default:
+      return state;
+  }
+}
+
 function formatCooldown(key: string): string {
   const circuit = props.circuitStates?.circuits.find((c) => c.key === key);
   if (!circuit || circuit.state !== "open") return "-";
@@ -191,7 +208,7 @@ function formatCooldown(key: string): string {
             >
               <div class="flex items-center gap-3">
                 <Badge :variant="getStateVariant(circuit.state)">
-                  {{ circuit.state }}
+                  {{ stateLabel(circuit.state) }}
                 </Badge>
                 <div>
                   <div class="font-medium font-mono text-xs text-foreground">

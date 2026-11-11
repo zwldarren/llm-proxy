@@ -24,9 +24,11 @@ const { t } = useI18n();
             : 'border-status-warning/30 bg-status-warning/10 text-status-warning'
         "
       >
-        {{ status }}
+        {{ t(`models.lifecycle${status === "deprecated" ? "Deprecated" : "Beta"}`) }}
       </span>
     </TooltipTrigger>
-    <TooltipContent>{{ t("models.modelStatus") }}</TooltipContent>
+    <TooltipContent>{{
+      t(`models.lifecycle${status === "deprecated" ? "Deprecated" : "Beta"}Help`)
+    }}</TooltipContent>
   </Tooltip>
 </template>

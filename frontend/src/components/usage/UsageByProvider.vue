@@ -140,7 +140,9 @@ const getShare = (requests: number): string => {
             >
               <div
                 class="h-full rounded-full transition-all duration-500 bg-foreground/70"
-                :style="{ width: `${Math.max((item.requests / totalRequests) * 100, 2)}%` }"
+                :style="{
+                  width: `${totalRequests > 0 ? Math.max((item.requests / totalRequests) * 100, 2) : 0}%`,
+                }"
               />
             </div>
           </div>

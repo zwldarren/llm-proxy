@@ -518,7 +518,8 @@ onMounted(() => {
                   v-for="(arg, index) in argsList"
                   :key="index"
                   v-model="argsList[index]"
-                  :placeholder="`arg ${index + 1}`"
+                  :aria-label="t('mcpServers.argN', { n: index + 1 })"
+                  :placeholder="t('mcpServers.argNPlaceholder', { n: index + 1 })"
                   class="font-mono"
                 />
                 <Button
@@ -534,7 +535,7 @@ onMounted(() => {
             </div>
 
             <div class="grid gap-2">
-              <Label for="env">{{ t("mcpServers.env") }} (JSON)</Label>
+              <Label for="env">{{ t("mcpServers.envJson") }}</Label>
               <Textarea
                 id="env"
                 v-model="envJson"
@@ -574,6 +575,16 @@ onMounted(() => {
         </div>
 
         <SheetFooter>
+          <!-- The reason Save is dead lives in the policy notice far above; the
+               operator who scrolled to the footer saw a button that just did
+               nothing. -->
+          <span
+            v-if="stdioCommandUnavailable"
+            class="text-[11px] text-muted-foreground sm:mr-auto"
+            role="status"
+          >
+            {{ t("mcpServers.policy.saveBlockedHint") }}
+          </span>
           <Button variant="outline" @click="showCreateDialog = false">{{
             t("common.cancel")
           }}</Button>

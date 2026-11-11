@@ -751,6 +751,12 @@ export default {
       "Descriptive metadata named after models.dev fields: status, family, knowledge cutoff, release date.",
     modelStatus: "Status",
     modelStatusNone: "None",
+    lifecycleBeta: "Beta",
+    lifecycleDeprecated: "Deprecated",
+    lifecycleBetaHelp:
+      "models.dev marks this model as beta: pricing and behaviour may still change.",
+    lifecycleDeprecatedHelp:
+      "models.dev marks this model as deprecated: the provider may stop serving it.",
     modelStatusHelp:
       "models.dev: status — lifecycle marker. 'deprecated' is highlighted in the catalog; display-only.",
     modelFamily: "Family",
@@ -2293,8 +2299,11 @@ export default {
     type: "Type",
     command: "Command",
     args: "Arguments",
+    argN: "Argument {n}",
+    argNPlaceholder: "arg {n}",
     baseUrl: "Base URL",
     env: "Environment Variables",
+    envJson: "Environment Variables (JSON)",
     enabled: "Enabled",
     noServers: "No MCP servers configured",
     stdio: "stdio (Local)",
@@ -2352,6 +2361,7 @@ export default {
       envKeysDroppedDescription:
         "these keys are not in the Allowed Environment Keys list, so they will not be passed to the server. Add them in MCP Security settings to use them.",
       openSettings: "Open MCP Security",
+      saveBlockedHint: "Saving is disabled: the security policy blocks this command.",
     },
   },
   // MCP Security
@@ -2601,6 +2611,9 @@ export default {
     circuits: "Active Circuits",
     circuitsDescription: "Live circuit state per provider, refreshed automatically",
     noCircuits: "No circuits tracked yet",
+    stateOpen: "Open",
+    stateHalfOpen: "Half open",
+    stateClosed: "Closed",
     failures: "Failures",
     cooldownRemaining: "Cooldown Remaining",
     probing: "Probing...",

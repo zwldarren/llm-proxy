@@ -353,6 +353,19 @@ const closeKeyRevealDialog = () => {
   createdKey.value = null;
 };
 
+/**
+ * The reveal dialog's open state. Escape and the overlay close it too, and they
+ * used to leave the plaintext key in memory (and re-openable) while the operator
+ * believed the dialog was gone.
+ */
+const keyRevealOpen = computed({
+  get: () => showKeyRevealDialog.value,
+  set: (value: boolean) => {
+    if (value) showKeyRevealDialog.value = true;
+    else closeKeyRevealDialog();
+  },
+});
+
 const openDeleteDialog = (keyName: string) => {
   deletingKeyName.value = keyName;
   showDeleteDialog.value = true;
@@ -1071,7 +1084,7 @@ onMounted(() => {
       </SheetContent>
     </Sheet>
 
-    <Dialog v-model:open="showKeyRevealDialog">
+    <Dialog v-model:open="keyRevealOpen">
       <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>
@@ -1084,6 +1097,11 @@ onMounted(() => {
           <div class="code-container p-4">
             <div class="break-all font-mono text-sm select-all">{{ createdKey?.key }}</div>
           </div>
+          <!-- The button label flips to "Copied"; this is what a screen reader
+               hears, since the label change alone is not announced. -->
+          <span role="status" aria-live="polite" class="sr-only">
+            {{ copiedKey ? t("apiKeys.copied") : "" }}
+          </span>
         </div>
         <DialogFooter>
           <Button @click="copyKey" variant="outline" class="w-full sm:w-auto">
