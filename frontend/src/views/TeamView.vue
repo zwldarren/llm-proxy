@@ -1203,7 +1203,7 @@ onMounted(() => {
                         variant="ghost"
                         size="icon"
                         class="h-9 w-9"
-                        :aria-label="t('team.memberActions')"
+                        :aria-label="t('team.memberActionsFor', { name: member.username })"
                       >
                         <EllipsisVertical class="h-4 w-4 icon-btn-muted" />
                       </Button>
@@ -1221,14 +1221,17 @@ onMounted(() => {
                       >
                         <Boxes class="h-4 w-4" />
                         {{ t("team.manageModels") }}
+                        <span class="sr-only"> · {{ member.username }}</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem class="cursor-pointer" @click="openBudgetDialog(member)">
                         <Wallet class="h-4 w-4" />
                         {{ t("team.manageBudget") }}
+                        <span class="sr-only"> · {{ member.username }}</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem class="cursor-pointer" @click="openRateLimitDialog(member)">
                         <Gauge class="h-4 w-4" />
                         {{ t("team.manageRateLimit") }}
+                        <span class="sr-only"> · {{ member.username }}</span>
                       </DropdownMenuItem>
 
                       <DropdownMenuSeparator />

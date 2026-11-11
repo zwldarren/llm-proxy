@@ -67,6 +67,10 @@ export default {
     add: "Add",
     edit: "Edit",
     delete: "Delete",
+    // Accessible names for row-level icon buttons: a table of identical
+    // "Edit" / "Delete" buttons is unusable with a screen reader.
+    editNamed: "Edit {name}",
+    deleteNamed: "Delete {name}",
     loading: "Loading...",
     error: "Error",
     success: "Success",
@@ -1563,6 +1567,7 @@ export default {
     title: "Team",
     description: "Manage team members and their permissions",
     memberActions: "Member actions",
+    memberActionsFor: "Actions for {name}",
     groupAccess: "Access",
     groupAccount: "Account",
     groupSecurity: "Sign-in security",
@@ -2227,6 +2232,7 @@ export default {
     rateLimitInvalid: "Rate limit must be a positive whole number.",
     rateLimitPerMin: "{n} req/min",
     viewUsage: "View usage",
+    viewUsageFor: "View usage for {name}",
     usageTitle: "Key Usage",
     lastNDays: "Last {n}d",
     requests: "Requests",

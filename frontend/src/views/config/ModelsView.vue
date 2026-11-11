@@ -440,7 +440,7 @@ const confirmDelete = async () => {
                     size="icon"
                     class="h-9 w-9"
                     :disabled="isLoading"
-                    :aria-label="t('common.edit')"
+                    :aria-label="t('common.editNamed', { name: model.name })"
                     @click="openEditDialog(model)"
                   >
                     <Edit class="w-4 h-4" />
@@ -450,7 +450,7 @@ const confirmDelete = async () => {
                     size="icon"
                     class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
                     :disabled="isLoading"
-                    :aria-label="t('common.delete')"
+                    :aria-label="t('common.deleteNamed', { name: model.name })"
                     @click="openDeleteDialog(model.name)"
                   >
                     <Trash2 class="w-4 h-4" />

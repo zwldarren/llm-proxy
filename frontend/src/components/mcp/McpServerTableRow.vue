@@ -113,7 +113,12 @@ const { isEnabled, showCapabilities } = useMcpServerRow(
       <div
         class="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
       >
-        <McpRowActions :is-loading="isLoading" @edit="emit('edit')" @delete="emit('delete')" />
+        <McpRowActions
+          :name="server.name"
+          :is-loading="isLoading"
+          @edit="emit('edit')"
+          @delete="emit('delete')"
+        />
       </div>
     </TableCell>
   </TableRow>

@@ -721,7 +721,7 @@ onMounted(() => {
                     variant="ghost"
                     size="icon"
                     class="h-9 w-9"
-                    :aria-label="t('apiKeys.viewUsage')"
+                    :aria-label="t('apiKeys.viewUsageFor', { name: key.name })"
                     @click="openUsageSheet(key)"
                   >
                     <BarChart3 class="w-4 h-4 icon-btn-muted" />
@@ -731,7 +731,7 @@ onMounted(() => {
                     size="icon"
                     class="h-9 w-9"
                     :disabled="isSaving"
-                    :aria-label="t('common.edit')"
+                    :aria-label="t('common.editNamed', { name: key.name })"
                     @click="openEditDialog(key)"
                   >
                     <Edit class="w-4 h-4 icon-btn-muted" />
@@ -741,7 +741,7 @@ onMounted(() => {
                     size="icon"
                     class="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10"
                     :disabled="isSaving"
-                    :aria-label="t('common.delete')"
+                    :aria-label="t('common.deleteNamed', { name: key.name })"
                     @click="openDeleteDialog(key.name)"
                   >
                     <Trash2 class="w-4 h-4" />
