@@ -29,26 +29,20 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
 <template>
   <div v-if="spend && spend.budget_usd !== null" class="min-w-28" :title="spendTitle">
     <div class="flex items-center gap-1.5 text-data text-muted-foreground">
+      <!-- Unknown window spend is not zero: the cell has no range total to fall
+           back to, so it says it does not know instead of claiming $0.00 spent
+           against a limit that is being enforced. -->
       <span :class="{ 'text-destructive font-medium': isBudgetExceeded }">
-        {{ formatCostWithPrecision(spend.period_spend_usd ?? 0, 2, locale) }}
+        {{
+          spend.period_spend_usd === null
+            ? ABSENT_METRIC
+            : formatCostWithPrecision(spend.period_spend_usd, 2, locale)
+        }}
       </span>
       <span>/ {{ formatCostWithPrecision(spend.budget_usd, 2, locale) }}</span>
     </div>
     <div class="mt-1 flex items-center gap-2">
-      <div
-        class="h-1.5 w-24 rounded-full bg-muted overflow-hidden"
-        role="progressbar"
-        :aria-label="spendTitle"
-        :aria-valuenow="Math.round((budgetRatio ?? 0) * 100)"
-        aria-valuemin="0"
-        aria-valuemax="100"
-      >
-        <div
-          class="h-full rounded-full transition-all"
-          :class="barClass"
-          :style="{ width: `${(budgetRatio ?? 0) * 100}%` }"
-        />
-      </div>
+      <BudgetMeter class="w-24" :ratio="budgetRatio" :label="spendTitle" :bar-class="barClass" />
       <span class="text-[10px] text-muted-foreground">
         {{ budgetPeriodLabel }}
       </span>

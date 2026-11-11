@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { Wallet } from "@lucide/vue";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { MeBudget } from "@/services/api/me";
+import BudgetMeter from "@/components/common/BudgetMeter.vue";
 import { formatCost } from "@/utils/format";
 
 interface Props {
@@ -48,20 +49,12 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
         </span>
         <span class="text-[10px] text-muted-foreground">{{ budgetPeriodLabel }}</span>
       </div>
-      <div
-        class="mt-1.5 h-1.5 w-full max-w-48 rounded-full bg-muted overflow-hidden"
-        role="progressbar"
-        :aria-label="spendTitle"
-        :aria-valuenow="Math.round((budgetRatio ?? 0) * 100)"
-        aria-valuemin="0"
-        aria-valuemax="100"
-      >
-        <div
-          class="h-full w-full origin-left rounded-full transition-transform"
-          :class="barClass"
-          :style="{ transform: `scaleX(${budgetRatio ?? 0})` }"
-        />
-      </div>
+      <BudgetMeter
+        class="mt-1.5 max-w-48"
+        :ratio="budgetRatio"
+        :label="spendTitle"
+        :bar-class="barClass"
+      />
     </div>
   </div>
 </template>

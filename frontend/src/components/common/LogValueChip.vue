@@ -5,9 +5,9 @@
  * (response column), so both columns read identically.
  *
  * A quiet annotation, not a mini card: borderless tonal pill (tags/chips are
- * the pill tier of the radius system). Mono label at muted strength,
- * semibold tabular value, value truncates and the full `label: value` pair
- * lives in the title tooltip (pass `title` to override, e.g. to show the
+ * the pill tier of the radius system). Label at muted strength in its own
+ * case, semibold tabular value, value truncates and the full `label: value`
+ * pair lives in the title tooltip (pass `title` to override, e.g. to show the
  * untruncated value).
  */
 withDefaults(
@@ -26,7 +26,9 @@ withDefaults(
     class="text-data-xs inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted/50 px-2.5 py-0.5"
     :title="title ?? `${label}: ${value}`"
   >
-    <span class="shrink-0 lowercase text-muted-foreground">{{ label }}</span>
+    <!-- The label's own case: it is a translated string, and lowercasing it
+         rewrote English sentence case while doing nothing at all in Chinese. -->
+    <span class="shrink-0 text-muted-foreground">{{ label }}</span>
     <span class="min-w-0 truncate font-semibold tabular-nums text-foreground/80">
       {{ value }}
     </span>
