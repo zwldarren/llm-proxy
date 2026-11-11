@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { Search } from "@lucide/vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useCommandPalette } from "@/composables/useCommandPalette";
 import { logsApi } from "@/services/api/logs";
 import { useAuthStore } from "@/stores/auth";
 import type { LogListItem } from "@/types/schemas";
@@ -13,7 +14,7 @@ const { t } = useI18n();
 const router = useRouter();
 const authStore = useAuthStore();
 
-const open = ref(false);
+const { paletteOpen: open, toggleCommandPalette } = useCommandPalette();
 const query = ref("");
 const activeIndex = ref(0);
 const inputEl = ref<HTMLInputElement | null>(null);
@@ -243,12 +244,8 @@ const onKeydown = (e: KeyboardEvent) => {
 // Global Cmd/Ctrl+K toggles the palette. useMagicKeys gives us a reactive
 // flag without racing manual addEventListener cleanup.
 const keys = useMagicKeys();
-whenever(keys["ctrl_k"], () => {
-  open.value = !open.value;
-});
-whenever(keys["meta_k"], () => {
-  open.value = !open.value;
-});
+whenever(keys["ctrl_k"], toggleCommandPalette);
+whenever(keys["meta_k"], toggleCommandPalette);
 </script>
 
 <template>

@@ -13,6 +13,7 @@ import {
   LogOut,
   MessageSquare,
   ScrollText,
+  Search,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -55,6 +56,7 @@ import McpIcon from "@/components/common/McpIcon.vue";
 import LogoIcon from "@/components/common/LogoIcon.vue";
 import { scrollToAnchor } from "@/utils/scroll";
 import { useStorage } from "@vueuse/core";
+import { COMMAND_PALETTE_KEY_HINT, useCommandPalette } from "@/composables/useCommandPalette";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
 import { useAuthStore } from "@/stores/auth";
 import { useSystemStore } from "@/stores/system";
@@ -66,6 +68,7 @@ const { t } = useI18n();
 const authStore = useAuthStore();
 const { state, isMobile, openMobile, toggleSidebar } = useSidebar();
 const systemStore = useSystemStore();
+const { openCommandPalette } = useCommandPalette();
 const navigationEl = ref<HTMLElement | null>(null);
 
 const userInitials = computed(() => {
@@ -337,6 +340,31 @@ const handleVersionBadgeClick = () => {
 
     <!-- Navigation -->
     <SidebarContent class="py-3">
+      <!-- The palette's only visible entry point. Cmd/Ctrl+K stays the fast
+           path for regulars; this is what the first-time operator can find and
+           click, with the accelerator spelled out for the next time. -->
+      <SidebarGroup class="pt-0 pb-1">
+        <SidebarMenu class="gap-0.5">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              :tooltip="`${t('nav.search')} · ${COMMAND_PALETTE_KEY_HINT}`"
+              class="max-md:min-h-11 text-sidebar-foreground/70"
+              @click="openCommandPalette"
+            >
+              <Search />
+              <span>{{ t("nav.search") }}</span>
+              <kbd
+                v-if="!isCollapsed"
+                class="ml-auto shrink-0 rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0.5 font-mono text-[10px] leading-none text-sidebar-foreground/60"
+                aria-hidden="true"
+              >
+                {{ COMMAND_PALETTE_KEY_HINT }}
+              </kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+
       <!-- Section seams are 4(prev group) + 4(nav gap) + 4(next group): enough
            to read as a break without the 24px band the primitives' p-2 defaults
            produced. -->

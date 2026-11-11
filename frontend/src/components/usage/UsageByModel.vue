@@ -108,7 +108,7 @@ const truncateModelName = (name: string, maxLength = 28): string => {
         <div class="flex items-center gap-2 flex-1 min-w-0">
           <span>#</span>
           <button
-            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer focus:outline-none truncate"
+            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 truncate"
             :class="{ 'text-foreground font-semibold': sortBy === 'name' }"
             @click="sortBy = 'name'"
           >
@@ -119,7 +119,7 @@ const truncateModelName = (name: string, maxLength = 28): string => {
 
         <div class="flex items-center gap-6 shrink-0 font-sans">
           <button
-            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer focus:outline-none"
+            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             :class="{ 'text-foreground font-semibold': sortBy === 'requests' }"
             @click="sortBy = 'requests'"
           >
@@ -127,7 +127,7 @@ const truncateModelName = (name: string, maxLength = 28): string => {
             <ArrowDown v-if="sortBy === 'requests'" class="w-3.5 h-3.5 text-action-amber" />
           </button>
           <button
-            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer focus:outline-none w-20 justify-end"
+            class="hover:text-foreground transition-colors flex items-center gap-0.5 cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 w-20 justify-end"
             :class="{ 'text-foreground font-semibold': sortBy === 'cost' }"
             @click="sortBy = 'cost'"
           >

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import {
   Activity,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   CornerDownRight,
   Eye,
   Filter,
   Globe,
+  RefreshCw,
   Scale,
   ScrollText,
   Shield,
@@ -141,7 +143,10 @@ const isInitialLoad = ref(true);
 // table body: bare row separators read as a broken table.
 const showSkeleton = computed(() => isFetching.value && logs.value.length === 0);
 const isFetching = ref(false);
-const isLoadingDetail = ref(false);
+// The last fetch failed. Kept apart from `logs` on purpose: an error is not an
+// empty result set, and the two need opposite conclusions from an operator.
+const fetchError = ref(false);
+const detailLoadingId = ref<string | null>(null);
 const isSwitchingTab = ref(false);
 const consecutiveFailures = ref(0);
 
@@ -314,6 +319,7 @@ const fetchLogs = async (showLoading = true) => {
     if (currentSequence !== fetchSequence) return;
 
     consecutiveFailures.value = 0;
+    fetchError.value = false;
 
     if (res.items.length > 0) {
       cachedLatestTimestamp.value = res.items[0]!.timestamp;
@@ -328,6 +334,7 @@ const fetchLogs = async (showLoading = true) => {
   } catch {
     if (currentSequence === fetchSequence) {
       consecutiveFailures.value++;
+      fetchError.value = true;
 
       if (showLoading) {
         toast.error(t("errors.fetchFailed"));
@@ -455,6 +462,12 @@ watch(activeTab, async (newTab) => {
     isInitialLoad.value = false;
     await fetchLogs(false);
   } else {
+    // Drop the previous tab's rows before the fetch: leaving them on screen
+    // means Audit (say) renders Proxy rows under its own heading until the
+    // response lands, which is exactly how a wrong conclusion gets drawn.
+    logs.value = [];
+    totalLogs.value = 0;
+    fetchError.value = false;
     isInitialLoad.value = true;
     await fetchLogs(true);
   }
@@ -583,17 +596,29 @@ const handleFilterTrace = (traceId: string) => {
   showFilters.value = true;
 };
 
+// Sequence guard for detail fetches: opening a second row while the first is
+// still loading supersedes it, instead of being swallowed by a global busy flag
+// (which made a click on any other row do nothing at all).
+let detailRequestSequence = 0;
+
 const handleViewDetails = async (log: LogListItemType) => {
-  if (isLoadingDetail.value) return;
-  isLoadingDetail.value = true;
+  const sequence = ++detailRequestSequence;
+  detailLoadingId.value = log.request_id;
   try {
     const fullLog = await logsApi.getLog(log.request_id);
+    if (sequence !== detailRequestSequence) return;
     selectedLog.value = fullLog;
     showDetailDialog.value = true;
   } catch {
-    // Error handled by UI
+    if (sequence !== detailRequestSequence) return;
+    // The detail payload holds the request/response bodies — the material a
+    // failed integration is diagnosed from. Swallowing this made a dead fetch
+    // and a mis-click look identical.
+    toast.error(t("errors.fetchFailed"));
   } finally {
-    isLoadingDetail.value = false;
+    if (sequence === detailRequestSequence) {
+      detailLoadingId.value = null;
+    }
   }
 };
 
@@ -975,12 +1000,44 @@ const auditListAction = (log: LogListItemType): string => {
           <div class="h-full bg-primary/60 animate-loading-bar" />
         </div>
 
+        <!-- A cached result set that could not be refreshed. The rows stay (an
+             operator mid-incident still needs them); the bar says they are old. -->
+        <div
+          v-if="fetchError && logs.length > 0 && !isFetching"
+          role="status"
+          class="flex flex-none items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-4 sm:px-6 py-2 text-xs text-status-warning"
+        >
+          <AlertTriangle class="size-3.5 shrink-0" aria-hidden="true" />
+          <span class="min-w-0 flex-1">{{ t("logs.staleResults") }}</span>
+          <Button size="sm" variant="ghost" class="h-7 text-xs" @click="manualRefresh">
+            <RefreshCw class="size-3.5" aria-hidden="true" />
+            {{ t("common.retry") }}
+          </Button>
+        </div>
+
         <!-- Loading skeleton mirrors the table geometry. It replaces the empty
              table body whenever a fetch runs with no rows on screen, so the
              console never shows bare row separators that read as a broken
              table. -->
         <div v-if="showSkeleton" class="flex-1 overflow-hidden animate-fade-in">
           <TableSkeleton :icon="false" :rows="10" />
+        </div>
+
+        <!-- A failed fetch, not an empty history: "no logs recorded yet" here
+             would assert a fact the console does not know. -->
+        <div
+          v-else-if="fetchError && logs.length === 0"
+          role="alert"
+          class="flex flex-1 flex-col items-center justify-center px-4 text-center animate-fade-in"
+        >
+          <div class="mb-4 rounded-lg border border-border bg-muted p-2.5" aria-hidden="true">
+            <AlertTriangle class="w-6 h-6 text-destructive" />
+          </div>
+          <p class="text-muted-foreground max-w-md">{{ t("logs.loadFailed") }}</p>
+          <Button variant="outline" class="mt-4" @click="manualRefresh">
+            <RefreshCw class="w-4 h-4 mr-2" aria-hidden="true" />
+            {{ t("common.retry") }}
+          </Button>
         </div>
 
         <!-- Empty state -->
@@ -1184,7 +1241,7 @@ const auditListAction = (log: LogListItemType): string => {
                         class="h-11 w-11 min-h-11 min-w-11"
                         data-row-action
                         :aria-label="rowActionLabel(log)"
-                        :disabled="isLoadingDetail"
+                        :disabled="detailLoadingId === log.request_id"
                         @click.stop="handleViewDetails(log)"
                       >
                         <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
@@ -1275,7 +1332,7 @@ const auditListAction = (log: LogListItemType): string => {
                       class="h-11 w-11 min-h-11 min-w-11"
                       data-row-action
                       :aria-label="rowActionLabel(log)"
-                      :disabled="isLoadingDetail"
+                      :disabled="detailLoadingId === log.request_id"
                       @click.stop="handleViewDetails(log)"
                     >
                       <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
@@ -1352,7 +1409,7 @@ const auditListAction = (log: LogListItemType): string => {
                       class="h-11 w-11 min-h-11 min-w-11"
                       data-row-action
                       :aria-label="rowActionLabel(log)"
-                      :disabled="isLoadingDetail"
+                      :disabled="detailLoadingId === log.request_id"
                       @click.stop="handleViewDetails(log)"
                     >
                       <Eye class="size-5 text-muted-foreground" aria-hidden="true" />
@@ -1446,7 +1503,7 @@ const auditListAction = (log: LogListItemType): string => {
                       class="h-11 w-11 min-h-11 min-w-11"
                       data-row-action
                       :aria-label="rowActionLabel(log)"
-                      :disabled="isLoadingDetail"
+                      :disabled="detailLoadingId === log.request_id"
                       @click.stop="handleViewDetails(log)"
                     >
                       <Eye class="size-5 text-muted-foreground" aria-hidden="true" />

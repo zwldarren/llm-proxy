@@ -93,6 +93,7 @@ vi.mock("@lucide/vue", () => {
   const Stub = () => null;
   return {
     Activity: Stub,
+    AlertTriangle: Stub,
     ArrowDown: Stub,
     ArrowUp: Stub,
     Calendar: Stub,
@@ -394,5 +395,87 @@ describe("LogsView", () => {
     // getLogs should be called for the new tab load (page 1)
     const page1Calls = vi.mocked(logsApi.getLogs).mock.calls.filter((args) => args[0]?.page === 1);
     expect(page1Calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("drops the previous tab's rows when switching to a tab with nothing cached", async () => {
+    const { logsApi } = await import("@/services/api/logs");
+    vi.clearAllMocks();
+    vi.mocked(logsApi.getLogs).mockImplementationOnce(() =>
+      Promise.resolve({
+        items: [
+          {
+            request_id: "req-proxy-1",
+            timestamp: 1_700_000_000,
+            model: "model-from-the-proxy-tab",
+            provider: "openai",
+            status_code: 200,
+            response_time_ms: 12,
+            log_type: "endpoint",
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      })
+    );
+
+    const wrapper = mount(LogsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          Card: CardStub,
+          Button: ButtonStub,
+          Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
+        },
+      },
+    });
+
+    await flushPromises();
+    expect(wrapper.text()).toContain("model-from-the-proxy-tab");
+
+    // The audit tab has no cached page, so its fetch is what the operator waits
+    // on. Hold it open and inspect the screen in the meantime.
+    vi.mocked(logsApi.getLogs).mockImplementationOnce(() => new Promise(() => {}));
+
+    const auditTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text() === "nav.auditLogs");
+    await auditTab!.trigger("mousedown");
+    await flushPromises();
+
+    // Audit must not wear the proxy rows as its own: the list is empty and the
+    // skeleton stands in until the response lands.
+    expect(wrapper.text()).not.toContain("model-from-the-proxy-tab");
+    expect(wrapper.find("[aria-busy='true']").exists()).toBe(true);
+  });
+
+  it("reports a failed fetch instead of claiming the history is empty", async () => {
+    const { logsApi } = await import("@/services/api/logs");
+    vi.clearAllMocks();
+    vi.mocked(logsApi.getLogs).mockImplementationOnce(() =>
+      Promise.reject(new Error("network down"))
+    );
+
+    const wrapper = mount(LogsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          Card: CardStub,
+          Button: ButtonStub,
+          Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    // "No logs recorded yet" would assert something the console does not know:
+    // an unreachable API and an unused proxy need opposite conclusions.
+    expect(wrapper.text()).toContain("logs.loadFailed");
+    expect(wrapper.text()).not.toContain("logs.noLogs");
   });
 });

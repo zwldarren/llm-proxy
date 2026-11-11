@@ -48,6 +48,7 @@ export default {
     collapseSidebar: "收起侧边栏",
     expandSidebar: "展开侧边栏",
     closeMenu: "关闭菜单",
+    search: "搜索",
     commandPalette: "命令面板",
     commandPaletteDescription: "搜索路由与最近日志并快速跳转。",
     commandPalettePlaceholder: "搜索路由或最近日志…",
@@ -200,6 +201,7 @@ export default {
     outAbbr: "出",
     // Top N filter
     topN: "前 {n}",
+    topNForMetric: "前 {n} 名 · {metric}",
     maxModels: "最多 {n} 个模型",
     // Empty state
     emptyStateTitle: "暂无使用数据",
@@ -1844,6 +1846,8 @@ export default {
     noLogs: "暂无日志记录。",
     noLogsYetDescription: "通过本代理的请求到达后会立即显示在这里。",
     noLogsFiltered: "没有请求符合当前筛选条件。清除筛选即可查看完整历史。",
+    loadFailed: "加载日志失败——这不是「暂无日志」，而是请求失败了。",
+    staleResults: "刷新失败，以下为上次成功加载的结果。",
     noSearchResults: '未找到与 "{query}" 匹配的结果。请尝试不同的搜索词或清除筛选条件。',
     noConversation: "暂无对话数据",
     nonStandardPayload: "非标准请求负载。请切换到「原始」模式查看请求体。",

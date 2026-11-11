@@ -47,6 +47,7 @@ export default {
     collapseSidebar: "Collapse sidebar",
     expandSidebar: "Expand sidebar",
     closeMenu: "Close menu",
+    search: "Search",
     commandPalette: "Command palette",
     commandPaletteDescription: "Search routes and recent logs, then jump to them.",
     commandPalettePlaceholder: "Search routes or recent logs…",
@@ -201,6 +202,7 @@ export default {
     outAbbr: "Out",
     // Top N filter
     topN: "Top {n}",
+    topNForMetric: "Top {n} · {metric}",
     maxModels: "Max {n} models",
     // Empty state
     emptyStateTitle: "No usage data yet",
@@ -1821,6 +1823,8 @@ export default {
     noLogs: "No logs recorded yet.",
     noLogsYetDescription: "Requests through this proxy will appear here as soon as they arrive.",
     noLogsFiltered: "No request matches the current filters. Clear them to see the full history.",
+    loadFailed: "Couldn't load logs — this is not an empty history, the request failed.",
+    staleResults: "Couldn't refresh. These are the results of the last successful load.",
     noSearchResults:
       'No results found for "{query}". Try a different search term or clear filters.',
     noConversation: "No conversation data available",

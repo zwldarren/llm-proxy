@@ -129,10 +129,38 @@ const allModels = computed(() => {
   return models.map(([name]) => name);
 });
 
+/** The value of the currently charted metric for one model row. */
+const metricValue = (row: DailyModelUsage): number => {
+  switch (chartType.value) {
+    case "cost":
+      return row.cost;
+    case "tokens":
+      return row.input_tokens + row.output_tokens;
+    default:
+      return row.requests;
+  }
+};
+
+/**
+ * Models ordered by the metric on screen. "Top 5" has to rank by what the chart
+ * plots: ranking by requests while displaying cost silently left the most
+ * expensive model out of the picture that exists to find it. Kept apart from
+ * `allModels`, whose request order also assigns the series colors.
+ */
+const rankedModels = computed(() => {
+  const totals = new Map<string, number>();
+  series.value.forEach((bucket) => {
+    bucket.by_model.forEach((row) => {
+      totals.set(row.model, (totals.get(row.model) ?? 0) + metricValue(row));
+    });
+  });
+  return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+});
+
 // Top N models
 const topNModels = computed(() => {
   if (!showTopN.value) return allModels.value;
-  return allModels.value.slice(0, showTopN.value);
+  return rankedModels.value.slice(0, showTopN.value);
 });
 
 // Hard cap: the chart never renders more than 10 series, which is exactly
@@ -347,7 +375,7 @@ const chartOptions = computed(() =>
             <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs bg-background">
               <Filter class="w-3.5 h-3.5 text-muted-foreground" />
               <span v-if="selectedModels.size === 0 && showTopN">{{
-                t("home.topN", { n: showTopN })
+                t("home.topNForMetric", { n: showTopN, metric: chartTypeLabel(chartType) })
               }}</span>
               <span v-else-if="selectedModels.size > 0"
                 >{{ selectedModels.size }} {{ t("models.title") }}</span
@@ -385,7 +413,7 @@ const chartOptions = computed(() =>
                       : ''
                   "
                   @click="selectTopN(5)"
-                  >{{ t("home.topN", { n: 5 }) }}</Badge
+                  >{{ t("home.topNForMetric", { n: 5, metric: chartTypeLabel(chartType) }) }}</Badge
                 >
                 <Badge
                   variant="outline"
@@ -396,7 +424,9 @@ const chartOptions = computed(() =>
                       : ''
                   "
                   @click="selectTopN(10)"
-                  >{{ t("home.topN", { n: 10 }) }}</Badge
+                  >{{
+                    t("home.topNForMetric", { n: 10, metric: chartTypeLabel(chartType) })
+                  }}</Badge
                 >
               </div>
             </div>
