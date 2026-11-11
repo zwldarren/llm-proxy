@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ABSENT_METRIC } from "@/utils/format";
 import { modelTierLabel } from "@/utils/modelTier";
 import type { ModelCatalogEntry } from "@/types/schemas";
 
@@ -65,7 +66,7 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
       <Tooltip>
         <TooltipTrigger as-child>
           <span class="block max-w-56 truncate font-mono text-xs text-muted-foreground">
-            {{ model.provider_names.join(" · ") || "–" }}
+            {{ model.provider_names.join(" · ") || ABSENT_METRIC }}
           </span>
         </TooltipTrigger>
         <TooltipContent>{{ model.provider_names.join(", ") }}</TooltipContent>

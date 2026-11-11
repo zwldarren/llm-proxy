@@ -1131,9 +1131,17 @@ onMounted(() => {
                   <component
                     :is="member.role !== 'admin' ? 'button' : 'div'"
                     :type="member.role !== 'admin' ? 'button' : undefined"
+                    :aria-label="
+                      member.role !== 'admin'
+                        ? t('team.manageModelsFor', { name: member.username })
+                        : undefined
+                    "
                     :title="member.role !== 'admin' ? t('team.manageModels') : undefined"
                     class="-m-1 flex flex-wrap items-center gap-1.5 rounded-md p-1 text-left transition-colors"
-                    :class="{ 'cursor-pointer hover:bg-accent/60': member.role !== 'admin' }"
+                    :class="{
+                      'cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring':
+                        member.role !== 'admin',
+                    }"
                     @click="member.role !== 'admin' && openModelsDialog(member)"
                   >
                     <Badge
@@ -1469,7 +1477,7 @@ onMounted(() => {
               mono
             />
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <Label for="invite-budget">{{ t("team.budget") }}</Label>
               <Input

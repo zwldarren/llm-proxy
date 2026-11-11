@@ -358,7 +358,7 @@ const modelRows = computed(() => {
                       <span class="text-muted-foreground tabular-nums w-12 text-right">
                         {{ formatPercentage(row.share) }}
                       </span>
-                      <span class="tabular-nums">{{ formatCost(row.cost) }}</span>
+                      <span class="tabular-nums w-16 text-right">{{ formatCost(row.cost) }}</span>
                     </div>
                   </div>
                 </div>

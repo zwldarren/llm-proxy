@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { ApiKeySpendSummary } from "@/services/api/apiKeys";
-import { formatCostWithPrecision } from "@/utils/format";
+import { ABSENT_METRIC, formatCostWithPrecision } from "@/utils/format";
 
 interface Props {
   spend?: ApiKeySpendSummary;
@@ -57,5 +57,5 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
   <span v-else-if="spend" class="text-data text-muted-foreground">
     {{ formatCostWithPrecision(spend.total_spend_usd, 2, locale) }}
   </span>
-  <span v-else class="text-data text-muted-foreground">-</span>
+  <span v-else class="text-data text-muted-foreground">{{ ABSENT_METRIC }}</span>
 </template>

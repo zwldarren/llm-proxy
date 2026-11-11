@@ -802,7 +802,7 @@ const confirmDelete = async () => {
                   {{ t("models.defaultPricingNote") }}
                 </p>
               </div>
-              <div class="grid grid-cols-2 gap-4">
+              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div class="grid gap-2">
                   <Label for="inputCost">
                     {{ t("models.costDimInput") }}
@@ -980,7 +980,7 @@ const confirmDelete = async () => {
                     {{ t("models.otherPricingDimensionsHelp") }}
                   </p>
                 </div>
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div class="grid gap-2">
                     <Label for="imageInputCost">
                       {{ t("models.costDimImageInput") }}
@@ -1140,11 +1140,11 @@ const confirmDelete = async () => {
 
               <!-- Quality Tier -->
               <div class="grid gap-2" :class="{ 'opacity-50': !newModel.auto_eligible }">
-                <Label
-                  for="qualityTier"
-                  class="after:content-['*'] after:ml-0.5 after:text-destructive"
-                >
+                <Label for="qualityTier">
                   {{ t("models.qualityTier") }}
+                  <!-- A literal asterisk, as every other required field in this
+                       sheet uses; a CSS ::after is not read out at all. -->
+                  <span class="text-destructive">*</span>
                 </Label>
                 <Select v-model="newModel.quality_tier" :disabled="!newModel.auto_eligible">
                   <SelectTrigger id="qualityTier" class="h-9">
@@ -1163,16 +1163,21 @@ const confirmDelete = async () => {
 
               <!-- Routing Assignments -->
               <div class="grid gap-2" :class="{ 'opacity-50': !newModel.auto_eligible }">
-                <Label>{{ t("models.routingAssignments") }}</Label>
+                <Label id="routing-assignments-label">{{ t("models.routingAssignments") }}</Label>
                 <p class="text-xs text-muted-foreground leading-relaxed">
                   {{ t("models.routingAssignmentsHelp") }}
                 </p>
-                <div class="flex flex-wrap gap-2 pt-0.5">
+                <div
+                  class="flex flex-wrap gap-2 pt-0.5"
+                  role="group"
+                  aria-labelledby="routing-assignments-label"
+                >
                   <button
                     type="button"
                     v-for="mode in ROUTING_MODES"
                     :key="mode"
                     :disabled="!newModel.auto_eligible"
+                    :aria-pressed="!!newModel.routing_assignments?.includes(mode)"
                     :class="[
                       'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer focus-visible-ring',
                       newModel.routing_assignments?.includes(mode)
@@ -1190,7 +1195,11 @@ const confirmDelete = async () => {
                         : [...(newModel.routing_assignments || []), mode]
                     "
                   >
-                    <Check v-if="newModel.routing_assignments?.includes(mode)" class="size-3" />
+                    <Check
+                      v-if="newModel.routing_assignments?.includes(mode)"
+                      class="size-3"
+                      aria-hidden="true"
+                    />
                     {{
                       {
                         fast: t("smartRouting.modeFast"),
@@ -1428,7 +1437,7 @@ const confirmDelete = async () => {
         </SheetHeader>
 
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="grid gap-2">
               <Label>{{ t("models.provider") }} <span class="text-destructive">*</span></Label>
               <Select v-model="editingProviderData.provider_name">

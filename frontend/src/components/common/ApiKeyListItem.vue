@@ -131,11 +131,14 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
             {{ t("apiKeys.noModels") }}
           </Badge>
           <template v-else>
+            <!-- Truncated at max-w-48: without a title the tail of a long model
+                 name is simply unreadable. -->
             <Badge
               v-for="model in allowedModels.slice(0, 2)"
               :key="model"
               variant="outline"
-              class="font-mono text-[11px] px-1.5 py-0"
+              class="font-mono text-[11px] px-1.5 py-0 max-w-48 truncate"
+              :title="model"
             >
               {{ model }}
             </Badge>
@@ -143,6 +146,7 @@ const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay
               v-if="allowedModels.length > 2"
               variant="outline"
               class="font-normal text-[11px] px-1.5 py-0 text-muted-foreground"
+              :title="allowedModels.join(', ')"
             >
               +{{ allowedModels.length - 2 }}
             </Badge>

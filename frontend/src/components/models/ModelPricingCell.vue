@@ -210,7 +210,13 @@ const hasAnyPricing = computed(
           <span class="text-data text-xs font-medium text-foreground">{{ fieldText ?? "—" }}</span>
           <Tooltip v-if="activeDims.length">
             <TooltipTrigger as-child>
-              <span class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground"
+              <!-- The bare "+2" is the only hint that more price dimensions
+                   exist, and a tooltip alone is unreachable on touch and by
+                   assistive tech: give the trigger a name of its own. -->
+              <span
+                class="ml-0.5 align-super text-[9px] font-medium text-muted-foreground"
+                :aria-label="extraDimsTitle"
+                :title="extraDimsTitle"
                 >+{{ activeDims.length }}</span
               >
             </TooltipTrigger>

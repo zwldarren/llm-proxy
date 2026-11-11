@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatContextLength } from "@/utils/format";
+import { ABSENT_METRIC, formatContextLength } from "@/utils/format";
 
 /**
  * Total context-length spec shared by the admin models table and the plaza
@@ -23,5 +23,5 @@ const { t } = useI18n();
     </TooltipTrigger>
     <TooltipContent>{{ t("models.contextLength") }}</TooltipContent>
   </Tooltip>
-  <span v-else class="text-xs text-muted-foreground">–</span>
+  <span v-else class="text-xs text-muted-foreground">{{ ABSENT_METRIC }}</span>
 </template>

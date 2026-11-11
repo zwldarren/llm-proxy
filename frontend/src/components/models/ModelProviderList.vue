@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ABSENT_METRIC } from "@/utils/format";
 import type { ModelProviderMapping } from "@/types/schemas";
 
 /**
@@ -49,6 +50,7 @@ const visibleProviders = computed(() => props.providers.slice(0, 3));
         +{{ providers.length - 3 }}
       </span>
     </template>
-    <span v-else>–</span>
+    <!-- One glyph for "no value" across every table: see ABSENT_METRIC. -->
+    <span v-else>{{ ABSENT_METRIC }}</span>
   </div>
 </template>

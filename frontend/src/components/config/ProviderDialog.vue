@@ -102,10 +102,10 @@ const providerTypes = computed(() => {
 
 const customHeaders = ref<{ key: string; value: string }[]>([]);
 type EndpointType = "embeddings" | "chat_completion";
-const endpointTypes: { label: string; value: EndpointType }[] = [
-  { label: "Embeddings", value: "embeddings" },
-  { label: "Chat Completion", value: "chat_completion" },
-];
+const endpointTypes = computed<{ label: string; value: EndpointType }[]>(() => [
+  { label: t("providers.endpointEmbeddings"), value: "embeddings" },
+  { label: t("providers.endpointChatCompletion"), value: "chat_completion" },
+]);
 const endpointBaseUrls = ref<{ type: EndpointType; url: string }[]>([]);
 
 /**
@@ -188,7 +188,9 @@ function setAppAttributionVisibility(value: unknown): void {
   appAttributionVisibility.value = value === "public" || value === "hidden" ? value : null;
 }
 
-const canAddEndpointUrl = computed(() => endpointBaseUrls.value.length < endpointTypes.length);
+const canAddEndpointUrl = computed(
+  () => endpointBaseUrls.value.length < endpointTypes.value.length
+);
 
 function populateForm(provider: ProviderRead | null) {
   if (provider) {
@@ -568,12 +570,15 @@ const onSubmit = handleSubmit(async (values) => {
                   </p>
                 </div>
                 <div class="grid gap-2">
-                  <Label class="text-xs">{{ t("providers.appAttributionUrl") }}</Label>
+                  <Label for="app-attribution-url" class="text-xs">{{
+                    t("providers.appAttributionUrl")
+                  }}</Label>
                   <Input
+                    id="app-attribution-url"
                     v-model="appAttributionUrl"
                     type="url"
                     maxlength="2048"
-                    placeholder="https://github.com/zwldarren/llm-proxy"
+                    :placeholder="t('providers.appAttributionUrlPlaceholder')"
                     class="h-8 text-xs font-mono"
                     :aria-invalid="!!appAttributionErrors.url"
                     :aria-describedby="
@@ -593,11 +598,14 @@ const onSubmit = handleSubmit(async (values) => {
                   </p>
                 </div>
                 <div class="grid gap-2">
-                  <Label class="text-xs">{{ t("providers.appAttributionTitle") }}</Label>
+                  <Label for="app-attribution-title" class="text-xs">{{
+                    t("providers.appAttributionTitle")
+                  }}</Label>
                   <Input
+                    id="app-attribution-title"
                     v-model="appAttributionTitle"
                     maxlength="128"
-                    placeholder="LLM Proxy"
+                    :placeholder="t('providers.appAttributionTitlePlaceholder')"
                     class="h-8 text-xs"
                     :aria-invalid="!!appAttributionErrors.title"
                     :aria-describedby="
@@ -614,11 +622,14 @@ const onSubmit = handleSubmit(async (values) => {
                   </p>
                 </div>
                 <div class="grid gap-2">
-                  <Label class="text-xs">{{ t("providers.appAttributionCategories") }}</Label>
+                  <Label for="app-attribution-categories" class="text-xs">{{
+                    t("providers.appAttributionCategories")
+                  }}</Label>
                   <Input
+                    id="app-attribution-categories"
                     v-model="appAttributionCategories"
                     maxlength="256"
-                    placeholder="cli-agent, cloud-agent"
+                    :placeholder="t('providers.appAttributionCategoriesPlaceholder')"
                     class="h-8 text-xs font-mono"
                     :aria-invalid="!!appAttributionErrors.categories"
                     :aria-describedby="
@@ -637,12 +648,14 @@ const onSubmit = handleSubmit(async (values) => {
                   </p>
                 </div>
                 <div class="grid gap-2">
-                  <Label class="text-xs">{{ t("providers.appAttributionVisibility") }}</Label>
+                  <Label for="app-attribution-visibility" class="text-xs">{{
+                    t("providers.appAttributionVisibility")
+                  }}</Label>
                   <Select
                     :model-value="appAttributionVisibility ?? 'default'"
                     @update:model-value="setAppAttributionVisibility"
                   >
-                    <SelectTrigger class="h-8 text-xs">
+                    <SelectTrigger id="app-attribution-visibility" class="h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
