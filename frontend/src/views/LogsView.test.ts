@@ -404,8 +404,11 @@ describe("LogsView", () => {
       Promise.resolve({
         items: [
           {
+            id: 1,
             request_id: "req-proxy-1",
             timestamp: 1_700_000_000,
+            endpoint: "/v1/chat/completions",
+            method: "POST",
             model: "model-from-the-proxy-tab",
             provider: "openai",
             status_code: 200,
