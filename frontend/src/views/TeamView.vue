@@ -992,7 +992,7 @@ onMounted(() => {
         <div class="flex h-full min-h-0 flex-col">
           <Table
             class="table-modern table-sticky-actions"
-            container-class="flex-1 min-h-0 border-0 bg-transparent rounded-none overflow-x-auto"
+            container-class="@container flex-1 min-h-0 border-0 bg-transparent rounded-none overflow-x-auto"
           >
             <TableHeader class="config-thead">
               <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
@@ -1017,11 +1017,17 @@ onMounted(() => {
                   :active-dir="sortDir"
                   @sort="onSort"
                 />
-                <TableHead class="hidden lg:table-cell">{{ t("team.allowedModels") }}</TableHead>
-                <TableHead class="hidden xl:table-cell">{{ t("team.budget") }}</TableHead>
-                <TableHead class="hidden 2xl:table-cell">{{ t("team.rateLimit") }}</TableHead>
+                <TableHead class="hidden @min-[1024px]:table-cell">{{
+                  t("team.allowedModels")
+                }}</TableHead>
+                <TableHead class="hidden @min-[1280px]:table-cell">{{
+                  t("team.budget")
+                }}</TableHead>
+                <TableHead class="hidden @min-[1536px]:table-cell">{{
+                  t("team.rateLimit")
+                }}</TableHead>
                 <SortableHead
-                  class="hidden md:table-cell"
+                  class="hidden @min-[768px]:table-cell"
                   :label="t('apiKeys.created')"
                   sort-key="created"
                   :active-field="sortField"
@@ -1126,7 +1132,7 @@ onMounted(() => {
                     </Badge>
                   </div>
                 </TableCell>
-                <TableCell class="hidden lg:table-cell">
+                <TableCell class="hidden @min-[1024px]:table-cell">
                   <!-- Clicking the scope summary opens the manage dialog directly -->
                   <component
                     :is="member.role !== 'admin' ? 'button' : 'div'"
@@ -1178,7 +1184,7 @@ onMounted(() => {
                   </component>
                 </TableCell>
                 <!-- Account budget: click-through to the manage-budget sheet -->
-                <TableCell class="hidden xl:table-cell">
+                <TableCell class="hidden @min-[1280px]:table-cell">
                   <button
                     type="button"
                     :aria-label="t('team.manageBudget')"
@@ -1188,7 +1194,7 @@ onMounted(() => {
                     <MemberBudgetCell :member="member" />
                   </button>
                 </TableCell>
-                <TableCell class="hidden 2xl:table-cell">
+                <TableCell class="hidden @min-[1536px]:table-cell">
                   <button
                     type="button"
                     :aria-label="t('team.manageRateLimit')"
@@ -1201,7 +1207,7 @@ onMounted(() => {
                     <span v-else class="font-mono">{{ member.rate_limit_rpm }} RPM</span>
                   </button>
                 </TableCell>
-                <TableCell class="hidden md:table-cell text-data text-muted-foreground">
+                <TableCell class="hidden @min-[768px]:table-cell text-data text-muted-foreground">
                   {{ formatDate(member.created_at) }}
                 </TableCell>
                 <TableCellActions>

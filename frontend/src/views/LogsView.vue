@@ -1070,25 +1070,27 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-if="activeTab === 'proxy' || activeTab === 'judge'"
               class="table-modern"
-              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+              container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
-                  <TableHead class="text-xs hidden md:table-cell">{{ t("logs.apiKey") }}</TableHead>
+                  <TableHead class="text-xs hidden @min-[768px]:table-cell">{{
+                    t("logs.apiKey")
+                  }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.model") }}</TableHead>
-                  <TableHead class="text-xs hidden sm:table-cell">{{
+                  <TableHead class="text-xs hidden @min-[640px]:table-cell">{{
                     t("logs.provider")
                   }}</TableHead>
                   <TableHead>{{ t("logs.status") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden md:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[768px]:table-cell">{{
                     t("logs.ttft")
                   }}</TableHead>
                   <TableHead class="table-cell-mono">{{ t("logs.duration") }}</TableHead>
-                  <TableHead class="table-cell-mono text-right hidden sm:table-cell">{{
+                  <TableHead class="table-cell-mono text-right hidden @min-[640px]:table-cell">{{
                     t("logs.tokens")
                   }}</TableHead>
-                  <TableHead class="table-cell-mono text-right hidden md:table-cell">{{
+                  <TableHead class="table-cell-mono text-right hidden @min-[768px]:table-cell">{{
                     t("logs.cost")
                   }}</TableHead>
                   <TableHead class="w-36">
@@ -1105,7 +1107,7 @@ const auditListAction = (log: LogListItemType): string => {
                   class="table-row-hover relative"
                 >
                   <TableCellTimestamp>{{ formatDate(log.timestamp) }}</TableCellTimestamp>
-                  <TableCell class="text-xs hidden md:table-cell">
+                  <TableCell class="text-xs hidden @min-[768px]:table-cell">
                     <template v-if="log.auth_method === 'jwt'">
                       <Badge variant="outline" class="font-mono">
                         {{ log.user_identity || t("team.admin") }}
@@ -1138,7 +1140,7 @@ const auditListAction = (log: LogListItemType): string => {
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell class="text-xs hidden sm:table-cell">
+                  <TableCell class="text-xs hidden @min-[640px]:table-cell">
                     <div class="flex items-center gap-1.5">
                       <div
                         v-if="getProviderIconUrl(log.provider || '')"
@@ -1167,13 +1169,16 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden md:table-cell" :title="getTimingTooltip(log)">
+                  <TableCellCode
+                    class="hidden @min-[768px]:table-cell"
+                    :title="getTimingTooltip(log)"
+                  >
                     {{ formatTTFT(log) }}
                   </TableCellCode>
                   <TableCellCode :title="getTimingTooltip(log)">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
-                  <TableCellNumeric class="hidden sm:table-cell">
+                  <TableCellNumeric class="hidden @min-[640px]:table-cell">
                     <div class="flex flex-col items-end gap-1">
                       <span :title="getTokenTooltip(log)">{{ tokenBreakdown(log) }}</span>
                       <!-- Cache hits are a first-class usage signal, so they are
@@ -1187,7 +1192,7 @@ const auditListAction = (log: LogListItemType): string => {
                       </span>
                     </div>
                   </TableCellNumeric>
-                  <TableCellNumeric class="hidden md:table-cell">
+                  <TableCellNumeric class="hidden @min-[768px]:table-cell">
                     <span
                       :title="
                         costUsd(log) != null ? formatCostWithPrecision(costUsd(log)!, 6) : undefined
@@ -1263,21 +1268,24 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-else-if="activeTab === 'audit'"
               class="table-modern"
-              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+              container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.action") }}</TableHead>
-                  <TableHead class="text-xs hidden sm:table-cell">{{ t("logs.actor") }}</TableHead>
-                  <TableHead class="text-xs hidden xl:table-cell">{{
+                  <TableHead class="text-xs hidden @min-[640px]:table-cell">{{
+                    t("logs.actor")
+                  }}</TableHead>
+                  <TableHead class="text-xs hidden @min-[1280px]:table-cell">{{
                     t("logs.ipAddress")
                   }}</TableHead>
-                  <TableHead class="table-cell-mono truncate max-w-60 hidden md:table-cell">{{
-                    t("logs.resource")
-                  }}</TableHead>
+                  <TableHead
+                    class="table-cell-mono truncate max-w-60 hidden @min-[768px]:table-cell"
+                    >{{ t("logs.resource") }}</TableHead
+                  >
                   <TableHead>{{ t("logs.result") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden lg:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[1024px]:table-cell">{{
                     t("logs.latency")
                   }}</TableHead>
                   <TableHead class="w-16">
@@ -1309,17 +1317,19 @@ const auditListAction = (log: LogListItemType): string => {
                       </Badge>
                     </div>
                   </TableCell>
-                  <TableCell class="text-xs hidden sm:table-cell">
+                  <TableCell class="text-xs hidden @min-[640px]:table-cell">
                     <!-- eslint-disable-next-line vue/no-v-html -->
                     <span
                       class="font-medium"
                       v-html="sanitizeHighlightText(getActor(log), filters.search || '')"
                     ></span>
                   </TableCell>
-                  <TableCell class="text-xs hidden xl:table-cell">
+                  <TableCell class="text-xs hidden @min-[1280px]:table-cell">
                     <span class="font-mono text-muted-foreground">{{ log.client_ip || "—" }}</span>
                   </TableCell>
-                  <TableCellCode class="truncate max-w-60 hidden md:table-cell overflow-hidden">
+                  <TableCellCode
+                    class="truncate max-w-60 hidden @min-[768px]:table-cell overflow-hidden"
+                  >
                     <span :title="log.endpoint" class="break-all">{{ log.endpoint }}</span>
                   </TableCellCode>
                   <TableCell>
@@ -1327,7 +1337,7 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden lg:table-cell">
+                  <TableCellCode class="hidden @min-[1024px]:table-cell">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
@@ -1353,20 +1363,20 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-else-if="activeTab === 'mcp'"
               class="table-modern"
-              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+              container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.mcpServer") }}</TableHead>
-                  <TableHead class="text-xs hidden sm:table-cell">{{
+                  <TableHead class="text-xs hidden @min-[640px]:table-cell">{{
                     t("logs.mcpOperation")
                   }}</TableHead>
-                  <TableHead class="table-cell-mono hidden md:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[768px]:table-cell">{{
                     t("logs.mcpResource")
                   }}</TableHead>
                   <TableHead>{{ t("logs.status") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden lg:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[1024px]:table-cell">{{
                     t("logs.duration")
                   }}</TableHead>
                   <TableHead class="w-16">
@@ -1391,10 +1401,10 @@ const auditListAction = (log: LogListItemType): string => {
                       ></span>
                     </Badge>
                   </TableCell>
-                  <TableCell class="text-xs hidden sm:table-cell">
+                  <TableCell class="text-xs hidden @min-[640px]:table-cell">
                     <span class="text-muted-foreground">{{ getMcpOperation(log) }}</span>
                   </TableCell>
-                  <TableCellCode class="hidden md:table-cell overflow-hidden">
+                  <TableCellCode class="hidden @min-[768px]:table-cell overflow-hidden">
                     <span :title="getMcpResourceName(log)" class="break-all">{{
                       getMcpResourceName(log)
                     }}</span>
@@ -1404,7 +1414,7 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ log.status_code }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden lg:table-cell">
+                  <TableCellCode class="hidden @min-[1024px]:table-cell">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>
@@ -1430,20 +1440,20 @@ const auditListAction = (log: LogListItemType): string => {
             <Table
               v-else-if="activeTab === 'websearch'"
               class="table-modern"
-              container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+              container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
                 <TableRow class="hover:bg-transparent hover:border-l-transparent">
                   <TableHead class="table-head-cell">{{ t("logs.timestamp") }}</TableHead>
                   <TableHead class="text-xs">{{ t("logs.webSearchQuery") }}</TableHead>
-                  <TableHead class="text-xs hidden sm:table-cell">{{
+                  <TableHead class="text-xs hidden @min-[640px]:table-cell">{{
                     t("logs.webSearchProvider")
                   }}</TableHead>
-                  <TableHead class="table-cell-mono hidden md:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[768px]:table-cell">{{
                     t("logs.webSearchCount")
                   }}</TableHead>
                   <TableHead>{{ t("logs.status") }}</TableHead>
-                  <TableHead class="table-cell-mono hidden lg:table-cell">{{
+                  <TableHead class="table-cell-mono hidden @min-[1024px]:table-cell">{{
                     t("logs.duration")
                   }}</TableHead>
                   <TableHead class="w-16">
@@ -1467,7 +1477,7 @@ const auditListAction = (log: LogListItemType): string => {
                       v-html="sanitizeHighlightText(getWebSearchQuery(log), filters.search || '')"
                     ></span>
                   </TableCell>
-                  <TableCell class="text-xs hidden sm:table-cell">
+                  <TableCell class="text-xs hidden @min-[640px]:table-cell">
                     <div class="flex items-center gap-1.5">
                       <div
                         class="w-4 h-4 rounded flex items-center justify-center overflow-hidden bg-background border border-border/50 shrink-0"
@@ -1490,7 +1500,7 @@ const auditListAction = (log: LogListItemType): string => {
                       }}</Badge>
                     </div>
                   </TableCell>
-                  <TableCellNumeric class="hidden md:table-cell">
+                  <TableCellNumeric class="hidden @min-[768px]:table-cell">
                     {{ getWebSearchResultCount(log) }}
                   </TableCellNumeric>
                   <TableCell>
@@ -1498,7 +1508,7 @@ const auditListAction = (log: LogListItemType): string => {
                       {{ getWebSearchStatus(log) }}
                     </StatusBadge>
                   </TableCell>
-                  <TableCellCode class="hidden lg:table-cell">
+                  <TableCellCode class="hidden @min-[1024px]:table-cell">
                     {{ formatDurationOrFailed(log, log.response_time_ms) }}
                   </TableCellCode>
                   <TableCellActions>

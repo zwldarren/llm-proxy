@@ -572,7 +572,7 @@ onMounted(() => {
         <Table
           v-if="viewMode === 'table'"
           class="table-modern table-sticky-actions"
-          container-class="h-full border-0 bg-transparent rounded-none overflow-x-auto"
+          container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
         >
           <TableHeader class="config-thead">
             <TableRow class="bg-transparent hover:bg-transparent hover:border-l-transparent">
@@ -585,7 +585,9 @@ onMounted(() => {
               />
               <TableHead>{{ t("apiKeys.status") }}</TableHead>
               <TableHead>{{ t("apiKeys.models") }}</TableHead>
-              <TableHead class="hidden lg:table-cell">{{ t("apiKeys.mcpServers") }}</TableHead>
+              <TableHead class="hidden @min-[1024px]:table-cell">{{
+                t("apiKeys.mcpServers")
+              }}</TableHead>
               <TableHead>{{ t("apiKeys.expires") }}</TableHead>
               <TableHead>{{ t("apiKeys.spend") }}</TableHead>
               <SortableHead
@@ -593,7 +595,7 @@ onMounted(() => {
                 sort-key="created"
                 :active-field="sortField"
                 :active-dir="sortDir"
-                class="hidden 2xl:table-cell"
+                class="hidden @min-[1536px]:table-cell"
                 @sort="onSort"
               />
               <SortableHead
@@ -601,7 +603,7 @@ onMounted(() => {
                 sort-key="lastUsed"
                 :active-field="sortField"
                 :active-dir="sortDir"
-                class="hidden md:table-cell"
+                class="hidden @min-[768px]:table-cell"
                 @sort="onSort"
               />
               <TableHead class="w-24 text-right">
@@ -678,7 +680,7 @@ onMounted(() => {
                   </template>
                 </div>
               </TableCell>
-              <TableCell class="hidden lg:table-cell">
+              <TableCell class="hidden @min-[1024px]:table-cell">
                 <div class="flex flex-wrap gap-1.5">
                   <Badge
                     v-if="key.allowed_mcp_servers === null"
@@ -722,10 +724,10 @@ onMounted(() => {
               <TableCell>
                 <ApiKeySpendCell :spend="spendFor(key)" />
               </TableCell>
-              <TableCell class="text-data text-muted-foreground hidden 2xl:table-cell">{{
+              <TableCell class="text-data text-muted-foreground hidden @min-[1536px]:table-cell">{{
                 formatDate(key.created_at)
               }}</TableCell>
-              <TableCell class="text-data text-muted-foreground hidden md:table-cell">{{
+              <TableCell class="text-data text-muted-foreground hidden @min-[768px]:table-cell">{{
                 key.last_used_at ? formatDate(key.last_used_at) : t("apiKeys.never")
               }}</TableCell>
               <TableCellActions>
