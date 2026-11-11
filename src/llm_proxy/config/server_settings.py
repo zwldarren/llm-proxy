@@ -207,6 +207,7 @@ def _validate_console_auth(payload: BaseModel) -> None:
             "public_base_url must be an HTTPS URL, or http://localhost for development"
         )
     _reject_edited_secret_mask(payload.smtp.password, label="SMTP password")
+    _reject_edited_secret_mask(payload.resend.api_key, label="Resend API key")
     seen: set[str] = set()
     for provider in payload.oidc_providers:
         if provider.id in seen:
@@ -259,6 +260,11 @@ def _mask_console_auth_secrets(doc: Any) -> Any:
         smtp = {**smtp}
         smtp["password"] = _MASKED_SECRET if smtp.get("password") else ""
         masked["smtp"] = smtp
+    resend = masked.get("resend")
+    if isinstance(resend, dict):
+        resend = {**resend}
+        resend["api_key"] = _MASKED_SECRET if resend.get("api_key") else ""
+        masked["resend"] = resend
     providers = masked.get("oidc_providers")
     if isinstance(providers, list):
         masked["oidc_providers"] = [
@@ -296,6 +302,16 @@ def _merge_console_auth_secrets(payload: BaseModel, stored: Any, existing: Any) 
     else:
         smtp["password"] = encrypt_api_key(password) or ""
     result["smtp"] = smtp
+
+    old_resend_value = old.get("resend")
+    old_resend = old_resend_value if isinstance(old_resend_value, dict) else {}
+    resend = dict(result.get("resend") or {})
+    api_key = str(resend.get("api_key") or "")
+    if api_key in ("", _MASKED_SECRET):
+        resend["api_key"] = str(old_resend.get("api_key") or "")
+    else:
+        resend["api_key"] = encrypt_api_key(api_key) or ""
+    result["resend"] = resend
 
     old_providers = {
         str(provider.get("id")): provider
@@ -419,7 +435,7 @@ SERVER_SETTINGS: tuple[ServerSetting, ...] = (
     ServerSetting(
         key="console_auth",
         path="/console-auth",
-        description="Console authentication, SMTP and OIDC configuration",
+        description="Console authentication, email delivery and OIDC configuration",
         model=ConsoleAuthSettings,
         validate=_validate_console_auth,
         write_transform=_merge_console_auth_secrets,
@@ -860,6 +876,12 @@ def load_server_settings(rows: Mapping[str, Any]) -> ServerSettingsRuntime:
             except EncryptionError as exc:
                 logger.warning(f"Failed to decrypt SMTP password: {exc}")
                 console_auth.smtp.password = ""
+        if console_auth.resend.api_key:
+            try:
+                console_auth.resend.api_key = decrypt_api_key(console_auth.resend.api_key) or ""
+            except EncryptionError as exc:
+                logger.warning(f"Failed to decrypt Resend API key: {exc}")
+                console_auth.resend.api_key = ""
         for provider in console_auth.oidc_providers:
             if not provider.client_secret:
                 continue

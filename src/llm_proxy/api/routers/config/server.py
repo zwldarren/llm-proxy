@@ -13,13 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import (
     get_async_session_dep,
+    get_config_from_state,
     require_admin_role,
     require_recent_auth_for_mutations,
 )
+from llm_proxy.api.middleware.rate_limiting import get_rate_limiter
 from llm_proxy.api.routers.config.helpers import (
     commit_and_reload,
     get_config_repository,
 )
+from llm_proxy.api.schemas.server_config import TestEmailRequest
 from llm_proxy.config.server_settings import (
     SERVER_SETTINGS,
     ServerSetting,
@@ -27,10 +30,12 @@ from llm_proxy.config.server_settings import (
     build_response,
     request_model_for,
 )
+from llm_proxy.notifications.email import send_email
 
 router = APIRouter(
     prefix="/server", tags=["configuration"], dependencies=[Depends(require_admin_role)]
 )
+limiter = get_rate_limiter()
 
 
 def _make_get_handler(setting: ServerSetting):
@@ -116,3 +121,46 @@ for _setting in SERVER_SETTINGS:
             methods=["DELETE"],
             name=f"Delete {_setting.description}",
         )
+
+
+@router.post(
+    "/console-auth/test-email",
+    dependencies=[Depends(require_recent_auth_for_mutations)],
+)
+@limiter.limit("config.test_email")
+async def send_console_auth_test_email(payload: TestEmailRequest, request: Request) -> dict:
+    """Send one message through the configured email transport.
+
+    Reads the live runtime config, so the test exercises exactly what
+    invitations, email verification and password resets use. The response
+    names the transport that delivered it, which is how an operator finds out
+    whether the Resend block or the SMTP block was selected.
+
+    Sending exercises the stored Resend key or SMTP password, so it takes the
+    same step-up window as the ``PUT`` that stores them.
+    """
+    console_auth = (await get_config_from_state(request)).server_params.console_auth
+    transport = console_auth.email_transport()
+    if transport is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No email transport is configured; enable SMTP or Resend with a "
+                "complete set of fields and save first."
+            ),
+        )
+    sent = await send_email(
+        transport,
+        payload.to,
+        "LLM Proxy test email",
+        "This is a test message from the LLM Proxy console. Email delivery works.\n",
+    )
+    if not sent:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"{transport.kind.upper()} did not accept the test message; "
+                "check the saved credentials and sender address."
+            ),
+        )
+    return {"sent": True, "transport": transport.kind}

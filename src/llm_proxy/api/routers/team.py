@@ -705,7 +705,7 @@ async def set_member_email(
     session: AsyncSession = get_async_session_dep,
     admin: UserRecord = Depends(require_recent_auth),
 ):
-    """Set an admin-attested email when SMTP verification is unavailable.
+    """Set an admin-attested email when email verification is unavailable.
 
     The invite flow and OAuth set a verified email automatically. This route
     exists for existing password accounts and for operators who deliberately

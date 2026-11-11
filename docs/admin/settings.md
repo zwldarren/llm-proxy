@@ -171,17 +171,26 @@ reset. Counters are per process and reset on restart.
 | Public base URL | empty | Canonical external URL (`https://proxy.example.com`). WebAuthn RP ID and OAuth redirect URIs derive from it. Must be HTTPS, or `http://localhost` for development. Changing it invalidates registered passkeys |
 | Require admins to use 2FA | off | Blocks admins that have not confirmed TOTP; the console funnels them to **Account → Sign-in & security** |
 | Ask for a code after a passkey sign-in | off | Also require TOTP after a passkey sign-in. A passkey assertion already proves possession plus user verification, so leave this off unless a compliance regime demands a code after every sign-in |
-| SMTP enabled | off | Send invitation, email-verification and password-reset messages. Without it, invitations are copyable links and a forgotten password goes to an administrator |
+| SMTP enabled | off | Send invitation, email-verification and password-reset messages. Without an email transport, invitations are copyable links and a forgotten password goes to an administrator |
 | SMTP host / port / username / password / from address | empty / `587` / empty / empty / empty | Standard SMTP delivery. The password is encrypted at rest and masked in the API response |
 | STARTTLS / TLS (SMTPS) | on / off | Transport security for the SMTP connection |
+| Resend enabled | off | Send the same messages through Resend's HTTPS API. Resend is the transport whenever it is enabled; SMTP is only used when it is not, so there is no automatic fallback |
+| Resend API key / from address | empty / empty | Resend sending API key and sender address. The key is encrypted at rest and masked in the API response |
 | OIDC providers | empty | Named OpenID Connect providers (`id`, display name, issuer, client ID/secret, scopes). OAuth buttons appear only for enabled providers. Secrets are encrypted at rest and masked on read |
 
-SMTP details appear after delivery is enabled, and saved OIDC providers start
-collapsed. The form validates URLs, required fields and the SMTP port before
+SMTP and Resend details appear after their delivery block is enabled, and saved
+OIDC providers start collapsed. Both email blocks are stored, so switching between
+Resend and SMTP never loses the other block's credentials, but only one of them is
+used at a time: an instance with Resend enabled sends through Resend and reports
+`email_sent: false` when that block is incomplete rather than quietly switching to
+SMTP. **Send test email** posts one message through the transport the proxy would
+pick and names it in the result; it reads the saved configuration, so save pending
+edits first. The form validates URLs, required fields and the SMTP port before
 saving; **Discard changes** restores the last saved snapshot, and leaving with
 unsaved edits requires confirmation.
 
-The SMTP password and OIDC client secrets are write-only: reads return `****`.
+The SMTP password, the Resend API key and OIDC client secrets are write-only:
+reads return `****`.
 Submitting that exact mask or a blank value keeps the stored secret. Editing the
 mask in place is rejected rather than overwriting the real credential; clear the
 field and enter the full new secret to rotate it.
@@ -245,6 +254,7 @@ Per-bucket overrides for the built-in IP limits, in `N/period` form
 | `auth.password_reset` | `5/minute` |
 | `auth.password_reset_confirm` | `10/minute` |
 | `account.sensitive` | `10/minute` |
+| `config.test_email` | `5/minute` |
 
 Unknown bucket names or unparseable values are rejected with 422, and the count
 must be positive (`0/minute` is rejected rather than silently disabling the

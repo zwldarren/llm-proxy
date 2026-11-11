@@ -198,12 +198,12 @@ async def capabilities(request: Request):
 
     Public by necessity: the login page has to know whether a self-service
     reset can work here before anyone is authenticated. It reports deployment
-    shape only (SMTP delivery plus a usable public base URL), never account
+    shape only (email delivery plus a usable public base URL), never account
     state, so it is not an oracle.
     """
     console_auth = (await get_config_from_state(request)).server_params.console_auth
     return AuthCapabilities(
-        password_reset=console_auth.smtp.enabled and public_origin(console_auth) is not None
+        password_reset=console_auth.email_enabled and public_origin(console_auth) is not None
     )
 
 
@@ -348,7 +348,7 @@ async def verify_email(
     request: Request,
     session: AsyncSession = get_async_session_dep,
 ):
-    """Finish an email-address change from the SMTP verification link."""
+    """Finish an email-address change from the emailed verification link."""
     auth_config = await get_auth_config(request)
     try:
         claims = JWTManager(auth_config).verify_scoped_token(data.token, "email_verify")
@@ -377,7 +377,7 @@ async def verify_email(
     if await repo.is_email_taken(email, exclude_user_id=user_id):
         raise ConflictError(message="That email address is already in use")
     try:
-        updated = await repo.set_email(user_id, email, verified_by="smtp")
+        updated = await repo.set_email(user_id, email, verified_by="email")
     except ValueError as exc:
         raise ConflictError(message=str(exc)) from exc
     if updated is None:
@@ -441,7 +441,7 @@ async def request_password_reset(
     """Email a single-use password reset link to a verified address.
 
     The response is identical for every input — unknown account, inactive
-    account, unverified address, no password, SMTP disabled — because a
+    account, unverified address, no password, no delivery transport — because a
     differing answer would turn this into an account oracle for anyone who can
     reach the login page. Delivery runs after the response so the timing does
     not leak the branch either.
@@ -451,8 +451,9 @@ async def request_password_reset(
     client_ip = get_client_ip(request)
     user = await UserRepository(session).get_by_login(data.identifier)
     recipient = _reset_recipient(user)
+    transport = console_auth.email_transport()
 
-    if recipient is None or not console_auth.smtp.enabled or origin is None:
+    if recipient is None or transport is None or origin is None:
         # The audit row records the attempt for operators (repeated misses can
         # mean a shared or stale address); the caller learns nothing from it.
         logger.info(
@@ -479,7 +480,7 @@ async def request_password_reset(
     reset_url = f"{origin}/reset-password?token={token}"
     background_tasks.add_task(
         send_email,
-        console_auth.smtp,
+        transport,
         address,
         "Reset your LLM Proxy password",
         (

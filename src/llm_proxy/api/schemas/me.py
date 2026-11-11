@@ -59,7 +59,7 @@ class MeUsernameChangeResponse(BaseModel):
 
 
 class MeEmailChange(BaseModel):
-    """Request verification of a new login email (SMTP required)."""
+    """Request verification of a new login email (email delivery required)."""
 
     email: str = Field(..., max_length=320)
 

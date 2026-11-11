@@ -121,7 +121,7 @@ No credential is required for:
 - `GET /api/health`, `/api/health/ready`, `/api/health/live`
 - `POST /api/auth/setup`, `GET /api/auth/setup-status`, `POST /api/auth/login`
 - `GET /api/auth/capabilities`: what the sign-in screen may offer here
-  (`password_reset` is true only when SMTP delivery and a public base URL are set)
+  (`password_reset` is true only when email delivery (SMTP or Resend) and a public base URL are set)
 - `POST /api/auth/password/forgot`, `POST /api/auth/password/reset`: the reset
   request always answers `202 {"requested": true}` and never discloses whether an
   account exists; the reset link is the credential on the confirm step

@@ -355,6 +355,11 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
             "starttls": True,
             "use_ssl": False,
         },
+        "resend": {
+            "enabled": True,
+            "api_key": "enc:stored-resend-key",
+            "from_address": "noreply@example.com",
+        },
         "oidc_providers": [
             {
                 "id": "idp",
@@ -372,11 +377,14 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
     unchanged = {
         **stored,
         "smtp": {**stored["smtp"], "password": "****"},
+        "resend": {**stored["resend"], "api_key": "****"},
         "oidc_providers": [{**stored["oidc_providers"][0], "client_secret": "****"}],
     }
     res = client.put(f"{BASE}/console-auth", json=unchanged)
     assert res.status_code == 200
     assert repo.rows["console_auth"] == stored
+    # The read shape masks the Resend key exactly like the SMTP password.
+    assert res.json()["resend"]["api_key"] == "****"
 
     edited_smtp = {
         **unchanged,
@@ -385,6 +393,15 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
     res = client.put(f"{BASE}/console-auth", json=edited_smtp)
     assert res.status_code == 422
     assert "SMTP password" in res.text
+    assert repo.rows["console_auth"] == stored
+
+    edited_resend = {
+        **unchanged,
+        "resend": {**unchanged["resend"], "api_key": "****edited"},
+    }
+    res = client.put(f"{BASE}/console-auth", json=edited_resend)
+    assert res.status_code == 422
+    assert "Resend API key" in res.text
     assert repo.rows["console_auth"] == stored
 
     edited_oidc = {
@@ -400,6 +417,7 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
         **unchanged,
         "require_2fa_after_passkey": True,
         "smtp": {**unchanged["smtp"], "password": "new-smtp-password"},
+        "resend": {**unchanged["resend"], "api_key": "new-resend-key"},
         "oidc_providers": [
             {**unchanged["oidc_providers"][0], "client_secret": "new-client-secret"}
         ],
@@ -408,6 +426,7 @@ def test_console_auth_preserves_exact_masks_and_rejects_edited_ones(client, repo
     assert res.status_code == 200
     saved = repo.rows["console_auth"]
     assert saved["smtp"]["password"] == "enc:new-smtp-password"
+    assert saved["resend"]["api_key"] == "enc:new-resend-key"
     assert saved["oidc_providers"][0]["client_secret"] == "enc:new-client-secret"
     assert saved["require_2fa_after_passkey"] is True
 
@@ -491,6 +510,65 @@ def test_load_server_settings_repairs_out_of_range_web_search_values(repo):
     assert snapshot.web_search.searxng.timeout == 300.0
 
 
+def test_load_server_settings_decrypts_both_email_secrets(repo, monkeypatch):
+    """Stored ciphertext becomes the runtime credential for SMTP and Resend alike,
+    and a malformed ciphertext disables only its own secret."""
+    from llm_proxy.config.server_settings import load_server_settings
+    from llm_proxy.security import encryption
+
+    def decrypt(value: str) -> str:
+        if value == "enc:broken":
+            raise encryption.EncryptionError("bad ciphertext")
+        return value.removeprefix("enc:")
+
+    monkeypatch.setattr(encryption, "decrypt_api_key", decrypt)
+
+    snapshot = load_server_settings(
+        {
+            "console_auth": {
+                "smtp": {
+                    "enabled": True,
+                    "host": "smtp.example.com",
+                    "from_address": "proxy@example.com",
+                    "password": "enc:smtp-password",
+                },
+                "resend": {
+                    "enabled": True,
+                    "api_key": "enc:resend-key",
+                    "from_address": "noreply@example.com",
+                },
+            }
+        }
+    )
+
+    assert snapshot.console_auth.smtp.password == "smtp-password"
+    assert snapshot.console_auth.resend.api_key == "resend-key"
+    assert snapshot.console_auth.email_transport() is snapshot.console_auth.resend
+
+    broken = load_server_settings(
+        {
+            "console_auth": {
+                "smtp": {
+                    "enabled": True,
+                    "host": "smtp.example.com",
+                    "from_address": "proxy@example.com",
+                },
+                "resend": {
+                    "enabled": True,
+                    "api_key": "enc:broken",
+                    "from_address": "noreply@example.com",
+                },
+            }
+        }
+    )
+
+    assert broken.console_auth.resend.api_key == ""
+    # A key that cannot be decrypted makes the enabled block deliverable-not:
+    # it must not quietly hand console mail to the SMTP block instead.
+    assert broken.console_auth.email_transport() is None
+    assert broken.console_auth.email_enabled is False
+
+
 def test_web_search_delete_removes_row(client, repo):
     repo.rows["web_search_config"] = {"enabled": True, "provider": "searxng"}
     res = client.delete(f"{BASE}/web-search")
@@ -569,3 +647,141 @@ def test_put_rejects_out_of_range_value(client, repo):
     res = client.put(f"{BASE}/logging", json={"sampling_rate": 2.0})
     assert res.status_code == 422
     assert repo.rows == {}
+
+
+# --- Delivery test endpoint (POST /console-auth/test-email) ---
+
+
+def _use_console_auth(monkeypatch, console_auth):
+    config = SimpleNamespace(server_params=SimpleNamespace(console_auth=console_auth))
+    monkeypatch.setattr(server_router, "get_config_from_state", AsyncMock(return_value=config))
+    return config
+
+
+@pytest.fixture
+def sender(monkeypatch) -> AsyncMock:
+    from llm_proxy.api.middleware.rate_limiting import RateLimitManager
+
+    # The endpoint is throttled per client IP; the contract under test is the
+    # delivery branch, not the shared in-memory limiter.
+    monkeypatch.setattr(RateLimitManager, "check_rate_limit", AsyncMock(return_value=(False, {})))
+    sender = AsyncMock(return_value=True)
+    monkeypatch.setattr(server_router, "send_email", sender)
+    return sender
+
+
+def test_test_email_uses_the_resend_block_when_configured(client, monkeypatch, sender):
+    from llm_proxy.config.types.console_auth import ConsoleAuthSettings, ResendSettings
+
+    console_auth = ConsoleAuthSettings(
+        resend=ResendSettings(enabled=True, api_key="re_key", from_address="noreply@example.com")
+    )
+    _use_console_auth(monkeypatch, console_auth)
+
+    res = client.post(f"{BASE}/console-auth/test-email", json={"to": "ops@example.com"})
+
+    assert res.status_code == 200
+    assert res.json() == {"sent": True, "transport": "resend"}
+    assert sender.await_args.args[0] is console_auth.resend
+    assert sender.await_args.args[1] == "ops@example.com"
+
+
+def test_test_email_uses_the_smtp_block_when_resend_is_off(client, monkeypatch, sender):
+    from llm_proxy.config.types.console_auth import ConsoleAuthSettings, SmtpSettings
+
+    console_auth = ConsoleAuthSettings(
+        smtp=SmtpSettings(
+            enabled=True,
+            host="smtp.example.com",
+            from_address="proxy@example.com",
+        )
+    )
+    _use_console_auth(monkeypatch, console_auth)
+
+    res = client.post(f"{BASE}/console-auth/test-email", json={"to": "ops@example.com"})
+
+    assert res.status_code == 200
+    assert res.json()["transport"] == "smtp"
+    assert sender.await_args.args[0] is console_auth.smtp
+
+
+def test_test_email_refuses_without_a_transport(client, monkeypatch, sender):
+    from llm_proxy.config.types.console_auth import ConsoleAuthSettings
+
+    _use_console_auth(monkeypatch, ConsoleAuthSettings())
+
+    res = client.post(f"{BASE}/console-auth/test-email", json={"to": "ops@example.com"})
+
+    assert res.status_code == 400
+    assert "No email transport is configured" in res.text
+    sender.assert_not_awaited()
+
+
+def test_test_email_does_not_fall_back_to_smtp(client, monkeypatch, sender):
+    """Resend enabled but incomplete means "cannot send", not "send through SMTP":
+    the operator has to see the broken block rather than mail that silently
+    left by a transport they turned off (ADR-0060)."""
+    from llm_proxy.config.types.console_auth import ConsoleAuthSettings, SmtpSettings
+
+    _use_console_auth(
+        monkeypatch,
+        ConsoleAuthSettings(
+            resend={"enabled": True, "api_key": "", "from_address": ""},
+            smtp=SmtpSettings(
+                enabled=True,
+                host="smtp.example.com",
+                from_address="proxy@example.com",
+            ),
+        ),
+    )
+
+    res = client.post(f"{BASE}/console-auth/test-email", json={"to": "ops@example.com"})
+
+    assert res.status_code == 400
+    sender.assert_not_awaited()
+
+
+def test_test_email_takes_the_step_up_window(sender):
+    """Sending spends the stored Resend key, so the route carries the same
+    mutation guard as the PUT that stores it (ADR-0060, ADR-0049)."""
+    from llm_proxy.api.dependencies import require_recent_auth_for_mutations
+
+    route = next(
+        r for r in router.routes if getattr(r, "path", "") == "/server/console-auth/test-email"
+    )
+
+    assert any(
+        dependency.dependency is require_recent_auth_for_mutations
+        for dependency in route.dependencies
+    )
+
+
+def test_test_email_reports_a_rejected_message(client, monkeypatch, sender):
+    from llm_proxy.config.types.console_auth import ConsoleAuthSettings, ResendSettings
+
+    sender.return_value = False
+    _use_console_auth(
+        monkeypatch,
+        ConsoleAuthSettings(
+            resend=ResendSettings(
+                enabled=True, api_key="re_key", from_address="noreply@example.com"
+            )
+        ),
+    )
+
+    res = client.post(f"{BASE}/console-auth/test-email", json={"to": "ops@example.com"})
+
+    assert res.status_code == 502
+    assert "RESEND did not accept" in res.text
+
+
+@pytest.mark.parametrize("to", ["", "not-an-email", "a@b"])
+def test_test_email_validates_the_recipient(client, monkeypatch, sender, to):
+    from llm_proxy.config.types.console_auth import ConsoleAuthSettings
+
+    _use_console_auth(monkeypatch, ConsoleAuthSettings())
+
+    res = client.post(f"{BASE}/console-auth/test-email", json={"to": to})
+
+    assert res.status_code == 422
+    sender.assert_not_awaited()

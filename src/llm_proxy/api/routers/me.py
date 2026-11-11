@@ -251,13 +251,15 @@ async def request_email_change(
     session: AsyncSession = get_async_session_dep,
     user: UserRecord = Depends(require_recent_auth),
 ):
-    """Send a verification link to a new login email (SMTP must be configured)."""
+    """Send a verification link to a new login email (email delivery must be configured)."""
     console_auth = (await get_config_from_state(request)).server_params.console_auth
     origin = public_origin(console_auth)
-    if not console_auth.smtp.enabled or origin is None:
+    transport = console_auth.email_transport()
+    if transport is None or origin is None:
         raise ValidationError(
             message=(
-                "Email verification requires HTTPS and SMTP; ask an administrator to set your email"
+                "Email verification requires HTTPS and configured email delivery; "
+                "ask an administrator to set your email"
             ),
             code="email_verification_unavailable",
         )
@@ -275,7 +277,7 @@ async def request_email_change(
     )
     url = f"{origin}/verify-email?token={token}"
     sent = await send_email(
-        console_auth.smtp,
+        transport,
         data.email,
         "Verify your LLM Proxy email address",
         f"Open this link within 24 hours to verify your email address:\n{url}\n",

@@ -127,7 +127,7 @@ class TestEmailVerificationIsSingleUse:
             )
 
         assert response.status_code == 200, response.text
-        repo.set_email.assert_awaited_once_with(1, "new@example.com", verified_by="smtp")
+        repo.set_email.assert_awaited_once_with(1, "new@example.com", verified_by="email")
 
     def test_replay_after_use_is_refused(self) -> None:
         """After the first use the address no longer matches the pinned one."""

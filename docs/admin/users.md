@@ -22,8 +22,9 @@ that member's active sessions — they must sign in again.
 ## Inviting a member
 
 **Team → Invite Member** creates a single-use, 7-day link for an email address.
-The link is shown once and can be copied; if SMTP is configured the proxy sends it
-automatically. Re-sending rotates the token and invalidates the previous link.
+The link is shown once and can be copied; if email delivery is configured (SMTP
+or Resend) the proxy sends it automatically. Re-sending rotates the token and
+invalidates the previous link.
 
 The invitee opens the link, chooses a username and password, and is signed in. The
 inviter's role, model allowlist and account budget are applied at acceptance. No
@@ -33,18 +34,19 @@ The invitation strip above the member table keeps every invitation, not just the
 open ones: pending rows offer **Resend** and **Revoke**, while accepted, revoked and
 expired rows move into **Past invitations** with the timestamp that settled them.
 
-If SMTP is not configured, the copyable link is the delivery mechanism: possession
-of the link is the credential, so share it only with the invitee. With SMTP, the
-email address is verified before the invite is accepted. OAuth invitations follow
-the same rule and only create an account when the provider reports a verified email
+If email delivery is not configured, the copyable link is the delivery mechanism:
+possession of the link is the credential, so share it only with the invitee. With
+email delivery, the email address is verified before the invite is accepted.
+OAuth invitations follow the same rule and only create an account when the
+provider reports a verified email
 matching the invitation.
 
 Existing users add or change their login email from **Account → Email**. The
 proxy sends a 24-hour verification link; only the link's recipient can complete the
 change. The link is single-use: it is pinned to the address the account had when it
 was sent, so it stops working once the address changes (and cannot be replayed to
-resurrect a superseded one). Without SMTP, an administrator can set the email in
-**Team** and the address is marked as admin-attested.
+resurrect a superseded one). Without email delivery, an administrator can set the
+email in **Team** and the address is marked as admin-attested.
 
 An OAuth invitation asks the invitee to choose a username before the first console
 session is created; the account is not silently named after the email local part.
@@ -81,8 +83,9 @@ JWTs, and deactivate all session API keys — the user must sign in again.
 there ends every existing session on the account, so the old password stops working
 everywhere at once.
 
-The entry is only a link when the instance can actually deliver mail — SMTP enabled
-and a public base URL set in **Instance sign-in**. Without them it reads "ask an
+The entry is only a link when the instance can actually deliver mail — SMTP or
+Resend enabled and a public base URL set in **Instance sign-in**. Without them it
+reads "ask an
 administrator"; the **Team** member password reset (see [Member lifecycle](#member-lifecycle))
 is the recovery path there. Accounts with no password (passkey-only or OIDC-only),
 no email address, or an unverified (admin-attested) address are never reset by mail:

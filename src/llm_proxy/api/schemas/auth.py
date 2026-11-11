@@ -107,7 +107,7 @@ class StepUpResponse(BaseModel):
 
 
 class EmailVerifyRequest(BaseModel):
-    """Finish an email-address change from the link sent by SMTP."""
+    """Finish an email-address change from the emailed verification link."""
 
     token: str = Field(..., min_length=1)
 
@@ -117,7 +117,10 @@ class AuthCapabilities(BaseModel):
 
     password_reset: bool = Field(
         default=False,
-        description="Self-service password reset works here (SMTP and public base URL set)",
+        description=(
+            "Self-service password reset works here (email delivery and a public base "
+            "URL are configured)"
+        ),
     )
 
 

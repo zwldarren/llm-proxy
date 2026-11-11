@@ -316,7 +316,9 @@ class UserRecord(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # How verification happened: ``smtp``, ``oidc``, or ``admin`` (attested).
+    # How verification happened: ``email`` (an emailed link, whatever transport
+    # delivered it), ``invite``, ``oidc``, or ``admin`` (attested). Rows written
+    # before Resend existed carry ``smtp``, which means the same as ``email``.
     email_verified_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Least-privilege default: every creation path passes a role explicitly;
     # the DB-level default must never silently grant admin.

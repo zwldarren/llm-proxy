@@ -144,6 +144,6 @@ class TeamMemberUsernameUpdateResponse(TeamMemberRead):
 
 
 class TeamMemberEmailUpdate(BaseModel):
-    """Admin-attested email for an existing member (SMTP may be disabled)."""
+    """Admin-attested email for an existing member (email delivery may be unavailable)."""
 
     email: str = Field(..., max_length=320)

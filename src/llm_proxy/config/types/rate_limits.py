@@ -38,6 +38,7 @@ DEFAULT_RATE_LIMITS: frozendict[str, str] = frozendict(
         "auth.password_reset": "5/minute",
         "auth.password_reset_confirm": "10/minute",
         "account.sensitive": "10/minute",
+        "config.test_email": "5/minute",
     }
 )
 

@@ -119,14 +119,16 @@ MCP 服务器的默认拒绝策略：允许/禁止的命令、环境变量过滤
 | 公开 base URL | 空 | 规范的对外 URL（`https://proxy.example.com`）。WebAuthn 的 RP ID 和 OAuth 重定向 URI 都由它推导。必须是 HTTPS，开发时可用 `http://localhost`。修改它会让已注册的通行密钥失效 |
 | 要求管理员使用 2FA | 关 | 阻止尚未确认 TOTP 的管理员，控制台会把他们引导到 **账户 → 登录与安全** |
 | passkey 登录后仍要求验证码 | 关 | 通行密钥登录之后再要求一次 TOTP。通行密钥断言本身已同时证明持有设备与用户验证，除非合规要求每次登录都输入验证码，否则保持关闭 |
-| 启用 SMTP | 关 | 发送邀请、邮箱验证和密码重置邮件。未启用时，邀请以可复制链接的形式给出，忘记密码只能找管理员 |
+| 启用 SMTP | 关 | 发送邀请、邮箱验证和密码重置邮件。没有任何邮件投递方式时，邀请以可复制链接的形式给出，忘记密码只能找管理员 |
 | SMTP 主机 / 端口 / 用户名 / 密码 / 发件地址 | 空 / `587` / 空 / 空 / 空 | 标准 SMTP 投递。密码在磁盘上加密，API 响应里做掩码 |
 | STARTTLS / TLS（SMTPS） | 开 / 关 | SMTP 连接的传输安全 |
+| 启用 Resend | 关 | 通过 Resend 的 HTTPS API 发送同样的邮件。只要启用了 Resend 就用它，未启用时才用 SMTP，不存在自动回退 |
+| Resend API 密钥 / 发件地址 | 空 / 空 | Resend 的发送密钥与发件地址。密钥在磁盘上加密，API 响应里做掩码 |
 | OIDC 提供商 | 空 | 具名 OpenID Connect 提供商（`id`、显示名称、issuer、client ID/secret、scopes）。只有已启用的提供商才会出现 OAuth 按钮。密钥在磁盘上加密，读取时做掩码 |
 
-SMTP 细节在启用投递后才会出现，已保存的 OIDC 提供商默认折叠。表单在保存前会校验 URL、必填字段和 SMTP 端口；**放弃更改** 会恢复为上次保存的快照，带着未保存的修改离开则需要确认。
+SMTP 与 Resend 的细节在各自的投递区块启用后才会出现，已保存的 OIDC 提供商默认折叠。两个邮件区块都会保存，因此在 Resend 与 SMTP 之间切换不会丢失另一个区块的凭据，但同一时间只会用其中一个：启用了 Resend 的实例走 Resend，该区块不完整时报 `email_sent: false`，而不会悄悄改用 SMTP。**发送测试邮件** 会用代理实际会选择的投递方式发出一封邮件，并在结果中说明用了哪一种；它读取的是已保存的配置，所以请先保存待保存的修改。表单在保存前会校验 URL、必填字段和 SMTP 端口；**放弃更改** 会恢复为上次保存的快照，带着未保存的修改离开则需要确认。
 
-SMTP 密码和 OIDC client secret 都是只写的：读取时返回 `****`。原样提交这个掩码或留空会保留已存的密钥。就地修改掩码会被拒绝，而不会覆盖真实凭据；轮换时请清空字段并输入完整的新密钥。
+SMTP 密码、Resend API 密钥和 OIDC client secret 都是只写的：读取时返回 `****`。原样提交这个掩码或留空会保留已存的密钥。就地修改掩码会被拒绝，而不会覆盖真实凭据；轮换时请清空字段并输入完整的新密钥。
 
 OIDC 提供商的 **id** 保存后永久不变：已存的 client secret 以它为键，所以对于已有提供商，控制台会锁定该字段。每个 **issuer** 必须是 HTTPS URL（开发时可用 `http://localhost`）；代理拒绝保存纯 HTTP 的 issuer，因为 client secret 和授权码都要发给它。
 
@@ -178,6 +180,7 @@ OIDC 提供商的 **id** 保存后永久不变：已存的 client secret 以它�
 | `auth.password_reset` | `5/minute` |
 | `auth.password_reset_confirm` | `10/minute` |
 | `account.sensitive` | `10/minute` |
+| `config.test_email` | `5/minute` |
 
 未知的桶名或无法解析的值会返回 422；计数必须为正数（`0/minute` 会被拒绝，而不是悄悄禁用该桶）。按 API 密钥的限制（`rate_limit_rpm`）在密钥本身上设置。
 

@@ -69,20 +69,23 @@ def _invitation_read(invitation: InvitationRecord) -> InvitationRead:
 
 
 async def _deliver_invite(
-    request: Request, invitation: InvitationRecord, token: str, *, resend: bool = False
+    request: Request, invitation: InvitationRecord, token: str, *, renewed: bool = False
 ) -> tuple[str, bool]:
     console_auth = (await get_config_from_state(request)).server_params.console_auth
     base_url = public_origin(console_auth) or str(request.base_url).rstrip("/")
     invite_url = f"{base_url}/invite/{token}"
     subject = "You have been invited to LLM Proxy"
-    if resend:
+    if renewed:
         subject = "Your LLM Proxy invitation was renewed"
     body = (
         f"You have been invited to the LLM Proxy console as {invitation.role}.\n\n"
         f"Open this single-use link within 7 days:\n{invite_url}\n\n"
         "If you were not expecting this invitation, ignore it."
     )
-    sent = await send_email(console_auth.smtp, invitation.email, subject, body)
+    transport = console_auth.email_transport()
+    if transport is None:
+        return invite_url, False
+    sent = await send_email(transport, invitation.email, subject, body)
     return invite_url, sent
 
 
@@ -195,7 +198,7 @@ async def resend_invitation(
     if invitation is None:
         raise NotFoundError(message="Invitation not found")
     await session.commit()
-    invite_url, sent = await _deliver_invite(request, invitation, token, resend=True)
+    invite_url, sent = await _deliver_invite(request, invitation, token, renewed=True)
     record_member_action(
         request,
         actor=admin.username,

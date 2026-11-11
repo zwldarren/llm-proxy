@@ -114,7 +114,7 @@ Cookie。
 - `GET /api/health`、`/api/health/ready`、`/api/health/live`
 - `POST /api/auth/setup`、`GET /api/auth/setup-status`、`POST /api/auth/login`
 - `GET /api/auth/capabilities` — 登录页在当前环境下可以提供的功能
-  （只有配置了 SMTP 投递和公开 base URL 时 `password_reset` 才为 true）
+  （只有配置了邮件投递（SMTP 或 Resend）和公开 base URL 时 `password_reset` 才为 true）
 - `POST /api/auth/password/forgot`、`POST /api/auth/password/reset` — 重置请求
   始终返回 `202 {"requested": true}`，绝不透露账号是否存在；确认步骤的凭据就是
   重置链接本身

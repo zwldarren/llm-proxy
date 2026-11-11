@@ -239,7 +239,7 @@ class ServerParams(BaseModel):
     console_auth: ConsoleAuthSettings = Field(
         default_factory=ConsoleAuthSettings,
         description=(
-            "Console login, invitation, SMTP and OIDC settings (server_config: console_auth)"
+            "Console authentication, email delivery and OIDC settings (server_config: console_auth)"
         ),
     )
     logging: LoggingConfig = Field(

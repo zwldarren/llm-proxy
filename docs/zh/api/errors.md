@@ -90,6 +90,7 @@ not_found`、`rate_limit_error → too_many_requests`、`api_error`/`provider_er
 | `auth.setup` | 客户端 IP | 5 次/分钟 |
 | `auth.setup_status` | 客户端 IP | 10 次/分钟 |
 | 其他控制台鉴权桶：`auth.capabilities`、`auth.mfa`、`auth.step_up`、`auth.invite_accept`、`auth.invite_status`、`auth.passkey`、`auth.oauth`、`auth.email_verify`、`auth.password_reset`（5 次/分钟）、`auth.password_reset_confirm`（10 次/分钟）、`account.sensitive` | 客户端 IP | 见[服务器设置 → 速率限制](/zh/admin/settings#rate-limits)中的默认值 |
+| `config.test_email` | 客户端 IP | 5 次/分钟 |
 | API 密钥失败尝试 | 客户端 IP | **默认关闭。** 开启 `api_key_lockout_enabled` 后：10 次失败 → 锁定 300 秒（`too_many_auth_failures`） |
 | 登录失败 | 用户名 | 默认关闭；开启后 5 次失败 → 锁定 900 秒（`account_locked`） |
 

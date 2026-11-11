@@ -54,7 +54,7 @@ create in **API Keys**. See [API Keys](api-keys.md).
 | **Team** (`/team`) | Create members, assign roles, per-user model allowlists, account budgets, and account rate limits |
 | **Chat** (`/chat`) | Playground: test any model with streaming, tools, vision, and reasoning |
 | **Images** (`/images`) | Playground: image generation and edits |
-| **Instance sign-in** (`/config/console-auth`) | Instance-wide sign-in policy: public URL, SMTP delivery, OIDC providers, forced admin 2FA |
+| **Instance sign-in** (`/config/console-auth`) | Instance-wide sign-in policy: public URL, email delivery (SMTP or Resend), OIDC providers, forced admin 2FA |
 | **Settings** (`/config/settings`) | Logging, web search, and all server-wide policy sections — admin only |
 | **Account** (`/account`) | Your identity: username, email, role, budget and current session |
 | **Preferences** (`/account/preferences`) | Theme and language (stored in this browser) and your own tracing backends |
