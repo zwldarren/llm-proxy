@@ -80,4 +80,22 @@ describe("useTableSort", () => {
     expect(table.sortField.value).toBe("name");
     expect(table.sortDir.value).toBe("asc");
   });
+
+  it("honors the initial column's default direction and restores it", () => {
+    const table = useTableSort<Row, "name" | "created">({
+      items: rows,
+      initialField: "created",
+      defaultDirectionFor: (field) => (field === "created" ? "desc" : "asc"),
+      compare: compareRows,
+    });
+
+    expect(table.sortDir.value).toBe("desc");
+    expect(table.sortedItems.value.map((row) => row.name)).toEqual(["beta", "gamma", "alpha"]);
+
+    table.onSort("name");
+    table.resetSort();
+
+    expect(table.sortField.value).toBe("created");
+    expect(table.sortDir.value).toBe("desc");
+  });
 });

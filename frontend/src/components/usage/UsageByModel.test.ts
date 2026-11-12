@@ -7,7 +7,7 @@ vi.mock("vue-i18n", () => ({ useI18n: () => ({ t: (k: string) => k }) }));
 vi.mock("@/composables/useTheme", () => ({ useTheme: () => ({ isDark: { value: false } }) }));
 vi.mock("@lucide/vue", () => {
   const Stub = () => null;
-  return { ArrowDown: Stub, ChevronLeft: Stub, ChevronRight: Stub, Cpu: Stub };
+  return { ArrowDown: Stub, ArrowUp: Stub, ChevronLeft: Stub, ChevronRight: Stub, Cpu: Stub };
 });
 
 const ScrollAreaStub = defineComponent({
@@ -96,5 +96,23 @@ describe("UsageByModel", () => {
     await next.trigger("click");
     expect(wrapper.text()).toContain("model-10");
     expect(wrapper.text()).not.toContain("model-0");
+  });
+
+  it("flips an active column and applies each new column's first direction", async () => {
+    const wrapper = mountModel();
+    async function clickSort(label: string) {
+      const button = wrapper.findAll("button").find((item) => item.text().includes(label));
+      await button!.trigger("click");
+    }
+
+    await clickSort("home.totalRequests");
+    expect(wrapper.text()).toContain("model-14");
+    expect(wrapper.text()).not.toContain("model-0");
+
+    await clickSort("home.costUsd");
+    expect(wrapper.text()).toContain("model-0");
+
+    await clickSort("logs.model");
+    expect(wrapper.text()).toContain("model-0");
   });
 });

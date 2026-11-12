@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTableSort } from "@/composables/useTableSort";
 import { formatCostWithPrecision, formatNumberWithSuffix } from "@/utils/format";
 import type { UsageByModel } from "@/types/schemas";
 
@@ -31,42 +32,23 @@ const itemsPerPage = ref(10);
 const currentPage = ref(1);
 
 type SortBy = "requests" | "cost" | "name";
-const sortBy = ref<SortBy>("requests");
-/**
- * Sort direction, per column. Clicking the active column used to do nothing,
- * so the table's only order was the one baked into each comparator, and the
- * arrow never changed.
- */
-const sortDir = ref<"asc" | "desc">("desc");
 
-/** First click on a column gives that column's useful order: numbers largest
- *  first, names A to Z. Clicking it again flips it. */
-function setSort(column: SortBy) {
-  if (sortBy.value === column) {
-    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
-    return;
-  }
-  sortBy.value = column;
-  sortDir.value = column === "name" ? "asc" : "desc";
-}
-
-// Sort models
-const sortedModels = computed(() => {
-  const result = [...(props.byModel ?? [])];
-  const direction = sortDir.value === "asc" ? 1 : -1;
-
-  if (sortBy.value === "cost") {
-    result.sort((a, b) => (a.cost - b.cost || a.requests - b.requests) * direction);
-    return result;
-  }
-
-  if (sortBy.value === "name") {
-    result.sort((a, b) => a.model.localeCompare(b.model) * direction);
-    return result;
-  }
-
-  result.sort((a, b) => (a.requests - b.requests || a.cost - b.cost) * direction);
-  return result;
+/** Initial order and per-column direction come from the shared table sorter. */
+const {
+  sortField: sortBy,
+  sortDir,
+  onSort: setSort,
+  sortedItems: sortedModels,
+} = useTableSort<UsageByModel, SortBy>({
+  items: () => props.byModel ?? [],
+  initialField: "requests",
+  initialDirection: "desc",
+  defaultDirectionFor: (field) => (field === "name" ? "asc" : "desc"),
+  compare: (field, a, b, dir) => {
+    if (field === "cost") return (a.cost - b.cost || a.requests - b.requests) * dir;
+    if (field === "name") return a.model.localeCompare(b.model) * dir;
+    return (a.requests - b.requests || a.cost - b.cost) * dir;
+  },
 });
 
 // Paginated results
