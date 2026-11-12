@@ -123,11 +123,11 @@ export default {
     increment: "增加",
     decrement: "减少",
     removeItem: "移除 {name}",
-    // 紧凑时长单位，例如 "42s"
+    // Compact duration unit, e.g. "42s"
     secondsShort: "{n}s",
   },
 
-  // 共享访问范围选择器（全部 / 自定义允许列表编辑器）
+  // Shared access-scope picker (All / custom allowlist editor)
   accessPicker: {
     scope: "访问范围",
     custom: "自定义",
@@ -182,7 +182,8 @@ export default {
     tokenBreakdownEmpty: "此时间范围内没有 Token 用量。",
     usageTrendsEmpty: "此时间范围内没有使用数据。",
     noUsageInRange: "此时间范围内暂无使用数据。",
-    // 无障碍名称保持简短：日期范围在页头，逐个时间桶的数字在屏幕阅读器数据表里。
+    // Keep accessible names short: the date range is in the header, and
+    // per-bucket values are in the screen-reader data table.
     tokenBreakdownAria: "Token 明细",
     trendsChartSummary: "{type}（按模型）",
     avgThroughput: "平均吞吐量",
@@ -219,8 +220,8 @@ export default {
     description: "通过实时对话测试模型",
     selectModel: "选择模型",
     startChatting: "选择一个模型并开始聊天！",
-    // 模型选择器的降级状态。两者都保持可点击：模型列表每个会话只加载一次，
-    // 加载失败必须在原地可重试。
+    // Model-selector fallback. Both states stay clickable: the model list loads
+    // once per session, so a failed load must be retryable in place.
     retryModels: "模型列表不可用，点击重试",
     noModelsAvailable: "暂无可用模型，点击重试",
     modelsLoadFailed: "无法加载模型列表",
@@ -391,7 +392,7 @@ export default {
     selectModelHelp: "请从上方下拉菜单选择一个语言模型以开始对话。",
   },
 
-  // Playground 仪表家族 — 共享运行托盘 + 检查器（Chat 与 Images）
+  // Playground instrument family — shared run tray + inspector (Chat and Images)
   playground: {
     inspector: "运行检查器",
     runNumber: "运行 #{n}",
@@ -417,8 +418,8 @@ export default {
     description: "根据文本提示生成图像",
     selectModel: "选择模型",
     startGenerating: "选择一个模型并开始创建！",
-    // 模型选择器的降级状态。两者都保持可点击：模型列表每个会话只加载一次，
-    // 加载失败必须在原地可重试。
+    // Model-selector fallback. Both states stay clickable: the model list loads
+    // once per session, so a failed load must be retryable in place.
     retryModels: "模型列表不可用，点击重试",
     noModelsAvailable: "暂无可用模型，点击重试",
     noImageModels: "未配置图像模型",
@@ -562,7 +563,7 @@ export default {
     deleteSuccess: "提供商删除成功。",
   },
 
-  // 模型广场 (公共目录，所有用户可见)
+  // Model plaza (public catalog, visible to all users)
   plaza: {
     title: "模型",
     description: "浏览本代理可用的模型",
@@ -691,7 +692,7 @@ export default {
     orEnterManually: "或手动输入模型名称：",
     iconUrl: "图标链接",
     iconUrlHelp: "可选的模型图标图片链接",
-    // 能力配置页：与代理行为绑定的开关（影响路由/端点）
+    // Capability settings: switches tied to proxy behavior (routing/endpoints)
     capBoundHeader: "功能绑定能力",
     capBoundHint:
       "这些开关会改变代理行为——影响路由决策和该模型可用的 API 端点。命名与 models.dev 保持一致。",
@@ -708,7 +709,7 @@ export default {
       systemone:
         "处理评估请求（证据 + 类型化问题，逐题返回答案）。一个开关同时控制两种报文：/v1/systemone（state + questions）与 /v1/decisions（input + questions），由 provider 桥接到上游实际支持的格式。该标记同时决定模型能否作为路由裁判。",
     },
-    // 能力配置页：仅展示的 models.dev 属性
+    // Capability settings: display-only models.dev attributes
     capInfoHeader: "展示属性（models.dev）",
     capInfoHint: "与 models.dev 字段一一对应的展示属性。仅用于描述模型，不会改变代理行为。",
     capInfoHelp: {
@@ -845,8 +846,8 @@ export default {
       colOutput: "输出 $/1M",
       colExtra: "其他维度",
       badgeNew: "新增",
-      // 按「写入这行会做什么」命名，而不是「这行有差异」：标着「覆盖」的
-      // 行不会默认勾选。
+      // Name a row by what writing it will do, not by what differs: rows
+      // labelled Overwrite are not selected by default.
       badgeOverwrite: "覆盖",
       badgeNoData: "无数据",
       upToDate: "所有价格已是最新",
@@ -860,7 +861,7 @@ export default {
       emptyNoData: "没有缺失价格数据的模型",
       emptyNoDataDescription: "所有模型映射都能在 models.dev 上找到匹配。",
       selectAll: "全选",
-      // 费率维度，保持简短以适配表格单元格。
+      // Pricing dimension labels; keep them short enough for table cells.
       dimCacheRead: "缓存读",
       dimCacheWrite: "缓存写",
       dimReasoning: "推理",
@@ -913,7 +914,7 @@ export default {
       colModel: "模型",
       colSource: "来源",
       colChanges: "变更",
-      // 「补全」只写入留空的字段，「覆盖」会替换已有值。
+      // "Fill" writes only blank fields; "Overwrite" replaces populated values.
       badgeFill: "补全",
       badgeOverwrite: "覆盖",
       badgeNoData: "无数据",
@@ -1953,7 +1954,7 @@ export default {
     rawStream: "原始流",
     filterAll: "全部",
 
-    // 结构化 I/O 标签：此前是写死的英文，中文控制台恰好在事故阅读处中英混排。
+    // Structured I/O labels: previously hardcoded English, leaving the Chinese console mixed-language exactly where incidents are read.
     errorType: "错误类型",
     errorCode: "错误码",
     parameter: "参数",
