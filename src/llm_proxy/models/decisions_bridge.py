@@ -30,9 +30,11 @@ envelopes allow, and every lossy step is marked ``# lossy`` with the reason:
   System One upstream depends on the channel that upstream documents: Ollama
   takes a raw-base64 ``images`` array shared by every question, OpenRouter takes
   ``image_url`` parts inside ``state`` (and inside a question's instructions),
-  and TypeSafe takes an ``assets`` map whose placeholder strings sit in the
-  ``state`` and instruction text. An upstream that documents no channel gets the
-  text alone.
+  TypeSafe takes an ``assets`` map whose placeholder strings sit in the
+  ``state`` and instruction text, and Gemini's Decisions API takes typed content
+  blocks in ``input`` (with text-only question instructions, so an image a
+  question carries joins the shared evidence). An upstream that documents no
+  channel gets the text alone.
 * Decisions ``input`` may also be a conversation — developer and system messages,
   assistant output and refusals, function and custom tool calls with their
   outputs — while System One evaluates one ``state``. Conversation items are
@@ -50,7 +52,7 @@ override markers so a bridged request is still field-policy-correct.
 
 import base64
 import json
-from typing import Any
+from typing import Any, Literal
 
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.decisions import (
@@ -123,24 +125,52 @@ _ASSET_FORMATS: frozendict[str, str] = frozendict({"image/png": "png", "image/jp
 #: ``("image", url)``, in request order.
 _Segment = tuple[str, str]
 
+#: Where a rendered image would be placed: the shared evidence (``state`` on the
+#: System One wire, ``input`` on Gemini's) or one question's instructions.
+_Place = Literal["input", "instructions"]
+
 
 class _ImageSink:
     """Collect the images of one bridged request for a System One image channel.
 
     The channel decides where an image goes, not whether it survives:
-    ``state_parts`` and ``assets`` place it inline (so its position relative to
-    the text is kept), ``images`` collects it in the shared array Ollama reads,
-    and ``None`` drops it because the upstream documents no channel at all.
+    ``state_parts``, ``assets`` and ``content_parts`` place it inline (so its
+    position relative to the text is kept), ``images`` collects it in the shared
+    array Ollama reads, and ``None`` drops it because the upstream documents no
+    channel at all.
+
+    A channel may also carry images in the shared evidence only and take a
+    question's instructions as text (``content_parts``, because Gemini's Decisions
+    API documents text-only question instructions): an image a question carries is
+    then collected in :attr:`collected` and joins that shared evidence.
     """
 
     def __init__(self, channel: SystemOneImageChannel | None) -> None:
         self.channel = channel
         self.images: list[str] = []
         self.assets: dict[str, Any] = {}
+        #: Content blocks a question carried, for a channel whose questions take
+        #: text only: they join the shared evidence every question is asked about.
+        self.collected: list[dict[str, Any]] = []
 
-    def takes_inline(self) -> bool:
-        """Whether this channel places an image where it appears in the text."""
+    def takes_inline(self, place: _Place) -> bool:
+        """Whether this channel places an image where it appears, at ``place``."""
+        if self.channel == "content_parts":
+            # Gemini's Decisions API takes question instructions as text only, so
+            # only the shared input keeps an image in position.
+            return place == "input"
         return self.channel in ("state_parts", "assets")
+
+    def inline_text(self, value: str) -> Any:
+        """The element one text segment becomes when the content is placed inline.
+
+        Every channel but ``content_parts`` keeps text as a plain string (the part
+        arrays OpenRouter and TypeSafe read accept strings between parts); Gemini's
+        ``input`` takes typed content blocks for text too.
+        """
+        if value and self.channel == "content_parts":
+            return {"type": "text", "text": value}
+        return value
 
     def inline(self, data_url: str) -> Any:
         """Take one image, returning the element to place inline for it.
@@ -155,11 +185,46 @@ class _ImageSink:
             placeholder, asset = _asset_for(data_url, len(self.assets) + 1)
             self.assets[placeholder] = asset
             return placeholder
+        if self.channel == "content_parts":
+            return _content_block_for(data_url)
         if self.channel == "images":
             payload = _base64_from_data_url(data_url)
             if payload is not None:
                 self.images.append(payload)
         return None
+
+    def collect(self, data_url: str) -> None:
+        """Take one image a question carries, on a channel that takes none there."""
+        if self.channel == "images":
+            payload = _base64_from_data_url(data_url)
+            if payload is not None:
+                self.images.append(payload)
+        elif self.channel == "content_parts":
+            self.collected.append(_content_block_for(data_url))
+
+
+def _content_block_for(data_url: str) -> dict[str, Any]:
+    """Build one Gemini content block from an inline image data URL.
+
+    Gemini takes media as ``data`` plus a ``mime_type`` (or a ``uri``), so a data
+    URL splits into both. A value that is not a data URL has no real media type to
+    declare here — the capability layer inlines hosted images before the bridge
+    runs, so this is a direct bridge call — and guessing one would hand the
+    upstream content that does not match its declared type.
+    """
+    split = _split_data_url(data_url)
+    if split is None:
+        raise ValidationError(
+            message=(
+                "Gemini content blocks take inline base64 data URLs; "
+                f"got '{data_url[:32]}'. Inline the image or use a provider with "
+                "a wider image channel."
+            ),
+            code="invalid_request_error",
+            status_code=400,
+        )
+    media_type, payload = split
+    return {"type": "image", "data": payload, "mime_type": media_type}
 
 
 def _asset_for(data_url: str, index: int) -> tuple[str, dict[str, Any]]:
@@ -266,29 +331,30 @@ def _decision_input_segments(payload: Any) -> list[_Segment]:
     return segments
 
 
-def _render_segments(segments: list[_Segment], sink: _ImageSink) -> Any:
-    """Render segments for the upstream's channel.
+def _render_segments(segments: list[_Segment], sink: _ImageSink, place: _Place) -> Any:
+    """Render segments for the upstream's channel and the place they land in.
 
     Text-only content stays a string, which every upstream accepts. When the
-    content carries images and the channel places them inline, the result is an
-    array with the text as plain strings and the images between them, in request
-    order.
+    content carries images and the channel places them inline at ``place``, the
+    result is an array with the text between them in request order — plain
+    strings for every channel but ``content_parts``, which spells text as typed
+    blocks too. A channel that places images elsewhere (or nowhere) keeps the
+    text alone, and still offers each image to the sink, so one is collected or
+    dropped knowingly rather than silently.
     """
     texts = [value for kind, value in segments if kind == "text"]
     if not any(kind == "image" for kind, _ in segments):
         return "\n\n".join(texts)
-    if not sink.takes_inline():
-        # The shared-array and channel-less upstreams keep the text alone; the
-        # former still needs each image offered to the sink for collection.
+    if not sink.takes_inline(place):
         for kind, value in segments:
             if kind == "image":
-                sink.inline(value)
+                sink.collect(value)
         return "\n\n".join(texts)
     rendered: list[Any] = []
     for kind, value in segments:
         if kind == "text":
             if value:
-                rendered.append(value)
+                rendered.append(sink.inline_text(value))
         else:
             rendered.append(sink.inline(value))
     return rendered
@@ -299,8 +365,8 @@ def _render_instructions(instructions: Any, sink: _ImageSink) -> Any:
 
     A string passes through. A part array — the form that lets one question carry
     its own image — is rendered like message content: text joins into one string
-    on a text-only channel, and stays an array with the images in place on a
-    channel that carries them inline.
+    on a channel that takes instructions as text, and stays an array with the
+    images in place on a channel that carries them inline there.
     """
     if isinstance(instructions, str):
         return instructions
@@ -308,7 +374,17 @@ def _render_instructions(instructions: Any, sink: _ImageSink) -> Any:
         # The schema admits a string or a part array; anything else is passed
         # through rather than dropped.
         return instructions
-    return _render_segments(_content_segments(instructions), sink)
+    return _render_segments(_content_segments(instructions), sink, place="instructions")
+
+
+def _with_collected_media(state: Any, blocks: list[dict[str, Any]]) -> Any:
+    """Append the content blocks a question carried to the shared evidence."""
+    if isinstance(state, str):
+        head = [{"type": "text", "text": state}] if state else []
+        return [*head, *blocks]
+    if isinstance(state, list):
+        return [*state, *blocks]
+    return [{"type": "text", "text": _json_text(state)}, *blocks]
 
 
 def _score_instructions(instructions: Any, levels: list[dict[str, Any]]) -> Any:
@@ -378,13 +454,18 @@ def decisions_to_systemone_request(
     upstream receives the text alone.
     """
     sink = _ImageSink(image_channel)
-    state = _render_segments(_decision_input_segments(request.input), sink)
+    state = _render_segments(_decision_input_segments(request.input), sink, place="input")
     questions: dict[str, Any] = {}
     for index, question in enumerate(request.questions):
         if not isinstance(question, dict):
             continue
         name = _question_name(question)
         questions[name or _unnamed_key(index)] = _decision_question_to_systemone(question, sink)
+    if sink.collected:
+        # An image a question carried on a channel whose questions take text: it
+        # joins the shared evidence, which every question is asked about. # lossy:
+        # its position and its question scoping.
+        state = _with_collected_media(state, sink.collected)
     extra: dict[str, Any] = {}
     if sink.images:
         extra["images"] = sink.images

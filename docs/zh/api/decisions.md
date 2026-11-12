@@ -174,7 +174,9 @@ System One 和 Decisions 回答的是同样三种基本问题。代理让两个�
   和 `label` 的 `probabilities`，以及 `confidence`
 
 `model` 是执行评估的模型，`usage` 报告输入和输出 Token 数。没有流式形态：一次决策就是
-一次同步评估。上游报告了 `usage` 时，会原样回显。
+一次同步评估。上游报告的若正是本信封的 `usage` 对象，会原样回显；上游用的是另一套
+词汇（Gemini 的 `total_input_tokens`、System One 的扁平一对）时会先映射成上面的字段，
+客户端看到的始终是这些字段。
 
 未命名问题的答案里没有 `name`，请按位置对应。桥接而来的答案在上游没有报告 `confidence`
 时不含 `confidence`。
@@ -192,6 +194,7 @@ System One 和 Decisions 回答的是同样三种基本问题。代理让两个�
 | `openrouter` | `POST /v1/systemone` | 桥接。图像以 `state` 里的 `image_url` 片段传输。OpenRouter 在第二条仍处于 alpha 的路由（`/api/alpha/decisions`）上提供同一信封；这里仍走稳定路由。 |
 | `ollama` | `POST /v1/systemone` | 桥接。内联图像变成本地 `images` 字段（裸 base64，与 Ollama 的文档一致）。 |
 | `opencode-zen`、`opencode-go` | `POST /v1/systemone` | 桥接。该网关没有为这个信封文档化图像通道，因此桥接请求里的图像会被丢弃。 |
+| `gemini` | `POST /decisions` | 桥接到 Gemini 的 Decisions 路由：该路由用自己 `input`／内容块的写法，承载与 System One 相同的问题词汇。内联图像变成带类型的内容块（`{"type": "image", "data": …、"mime_type": …}`）；问题自带的图像会并入共用证据，因为 Gemini 的问题指令只接受文本。`predicate` 以 `noul` 送达，评分档位的描述会并入其标签，也就是 Gemini 回显的图例。 |
 
 **托管**的图像 URL 会在桥接请求离开代理之前被下载并内联：没有任何 System One 上游会去
 抓取它。代理会跟随重定向（最多 5 跳，每一跳都按第一跳的方式校验），所以返回 `302` 的
@@ -226,8 +229,9 @@ endpoint_base_urls:
   变成它自己的 JSON——因为 System One 只评估一个 state，没有字段放角色、调用或输出。
 - 图像走目标上游自己的通道：`typesafe` 用 `assets`（只支持 PNG 和 JPEG，且请求会带上
   TypeSafe 的危险区请求头），`openrouter` 用 `state` 片段，`ollama` 用共用的 `images`
-  数组。没有文档化图像通道的上游——`opencode-*` 线路——只收到文本。`safety_identifier` 和
-  缓存相关字段在 System One 中没有对应物，会被丢弃。
+  数组，`gemini` 用带类型的内容块——它的问题指令只接受文本，因此问题自带的图像会并入
+  每个问题都要评估的共用证据。没有文档化图像通道的上游——`opencode-*` 线路——只收到
+  文本。`safety_identifier` 和缓存相关字段在 System One 中没有对应物，会被丢弃。
 
 **System One → Decisions**
 

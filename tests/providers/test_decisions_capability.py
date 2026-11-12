@@ -14,6 +14,7 @@ import pytest
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.models.decisions import InternalDecisionRequest
 from llm_proxy.models.systemone import InternalSystemOneRequest
+from llm_proxy.providers.gemini.adapter import GeminiAdapter
 from llm_proxy.providers.ollama.adapter import OllamaAdapter
 from llm_proxy.providers.openai.adapter import OpenAIAdapter
 from llm_proxy.providers.openrouter.adapter import OpenRouterAdapter
@@ -534,11 +535,14 @@ class TestCapabilityWiring:
         assert OpenAIAdapter.decisions is DecisionsCapabilityMixin.decisions
         assert OpenAIAdapter.systemone is SystemOneOverDecisionsMixin.systemone
         # Every System One adapter does the reverse — including the OpenCode
-        # gateway lanes, which used to fall through to the unimplemented stub.
+        # gateway lanes, which used to fall through to the unimplemented stub,
+        # and the Gemini adapter, whose Decisions route carries the System One
+        # question vocabulary (so /v1/decisions is the bridged direction there).
         for adapter in (
             TypeSafeAdapter,
             OpenRouterAdapter,
             OllamaAdapter,
             OpenCodeGatewayAdapter,
+            GeminiAdapter,
         ):
             assert adapter.decisions is DecisionsOverSystemOneMixin.decisions

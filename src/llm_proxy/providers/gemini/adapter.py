@@ -38,7 +38,9 @@ from llm_proxy.providers.base import BaseHttpProvider
 from llm_proxy.providers.capabilities import (
     AudioCapabilityMixin,
     ChatCapabilityMixin,
+    DecisionsOverSystemOneMixin,
     EmbeddingCapabilityMixin,
+    SystemOneCapabilityMixin,
 )
 from llm_proxy.providers.capabilities.image import normalize_image_stream_chunk
 from llm_proxy.providers.gemini.batch import GeminiBatchMixin
@@ -135,12 +137,19 @@ def _nearest_supported_aspect_ratio(width: int, height: int) -> str:
     )
 
 
+def _is_evaluation_request(request: Any) -> bool:
+    """Whether this request is an evaluation call, outside the chat dialect switch."""
+    return getattr(request, "request_type", None) in ("systemone", "decisions")
+
+
 @register_adapter("gemini")
 class GeminiAdapter(
     GeminiBatchMixin,
     ChatCapabilityMixin,
     EmbeddingCapabilityMixin,
     AudioCapabilityMixin,
+    DecisionsOverSystemOneMixin,
+    SystemOneCapabilityMixin,
     BaseHttpProvider,
 ):
     """Gemini provider using direct HTTP calls."""
@@ -154,6 +163,19 @@ class GeminiAdapter(
     LOBE_ICON_VARIANT = "color"
 
     DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+    #: Gemini Decision 1 serves its evaluation models on ``POST /decisions``, so
+    #: that is the route the System One capability posts to — and the one the
+    #: bridged ``/v1/decisions`` direction reaches too, because ``DEFAULT_BASE_URL``
+    #: ends at ``/v1beta``. Gemini publishes one evaluation surface under the
+    #: Decisions name, with the System One question vocabulary; see
+    #: :mod:`llm_proxy.serialization.gemini.evaluation`.
+    SYSTEMONE_ENDPOINT = "/decisions"
+
+    #: Gemini takes media as typed content blocks in ``input``: inline base64 with
+    #: a ``mime_type``, or a ``uri`` for a hosted one. Its question instructions are
+    #: text only, so an image a bridged question carries joins the shared evidence.
+    SYSTEMONE_IMAGE_CHANNEL = "content_parts"
 
     _MAX_THOUGHT_SIGNATURE_CACHE = 1000
 
@@ -244,8 +266,14 @@ class GeminiAdapter(
         exempt from the unknown-fields policy (they are supported fields),
         so the default "ignore" policy cannot strip them from the body and
         the "error" policy cannot reject them.
+
+        Evaluation requests are the exception: the ``/decisions`` route is one
+        resource regardless of the chat dialect, and its body carries none of the
+        Interactions chat extras, so the whitelist must not rewrite it — the
+        generic merge plus the unknown-fields policy is what an evaluation body
+        needs (Gemini documents no extra field there).
         """
-        if not self._is_interactions_variant():
+        if not self._is_interactions_variant() or _is_evaluation_request(request):
             return super()._finalize_body(
                 body, request, exempt_keys=exempt_keys, merge_extra=merge_extra
             )

@@ -34,7 +34,7 @@ Every route the proxy serves. `X` in the auth column means "API key
 | GET | `/v1/batches` | X | OpenAI | List batches in their last observed state (no upstream polling) |
 | GET | `/v1/batches/{batch_id}` | X | OpenAI | Poll a batch; the first terminal read materializes `output_file_id`/`error_file_id` |
 | POST | `/v1/batches/{batch_id}/cancel` | X | OpenAI | Cancel; `400 batch_cancel_unsupported` where the upstream has no cancel |
-| POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter and local Ollama models). The named model must carry the `supports_systemone` flag, otherwise `400 invalid_request_error` |
+| POST | `/v1/systemone` | X | System One | TypeSafe Jev evaluation (also via OpenRouter, local Ollama models and Gemini's Decisions route, which speaks this question vocabulary). The named model must carry the `supports_systemone` flag, otherwise `400 invalid_request_error` |
 | POST | `/v1/decisions` | X | Decisions | OpenAI's Decisions endpoint (`gpt-6-luna`), also served by System One models through the proxy's bridge. Gated by the same `supports_systemone` flag |
 | POST | `/v1/images/generations` | X | OpenAI | JSON body |
 | POST | `/v1/images/edits` | X | OpenAI | JSON or multipart (`image`, `image[]`, `mask`) |
@@ -63,8 +63,8 @@ Provider support varies by capability — the table summarizes who can serve wha
 | Images (generation + edits) | `openai`, the `openai-compatible` family, `gemini`, `qwen` |
 | Audio (speech, STT) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`** (DashScope serves speech only on its native endpoints — see below), `gemini` (native TTS/STT), `ollama` (speech only, v0.40.8+ — WAV/PCM), `openrouter` (STT), `cohere` (STT only — v2 has no speech synthesis) |
 | Audio (translation) | `openai`, the `openai-compatible` family **except `qwen`/`qwen-intl`**, `gemini`. `openrouter`, `cohere` and `qwen`/`qwen-intl` have no upstream endpoint and reject the request with a `400` |
-| System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold, plus its other decision models), `ollama` (local and cloud models, v0.35+), the `opencode-zen`/`opencode-go` gateway lanes (per-model dialect). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
-| Decisions (evaluation) | `openai` (native `/v1/decisions`), plus every System One provider above, which the proxy bridges onto a System One route. Images reach an upstream through the channel it documents (`assets`, `state` parts, or `images`); a hosted image URL is downloaded and inlined first |
+| System One (evaluation) | `typesafe` (Jev, direct), `openrouter` (TypeSafe Jev resold, plus its other decision models), `ollama` (local and cloud models, v0.35+), `gemini` (Gemini Decision 1 on its `/decisions` route, which takes this question vocabulary), the `opencode-zen`/`opencode-go` gateway lanes (per-model dialect). Chat and embeddings against `ollama` keep using the native `/api/*` surface |
+| Decisions (evaluation) | `openai` (native `/v1/decisions`), plus every System One provider above, which the proxy bridges onto a System One route. Images reach an upstream through the channel it documents (`assets`, `state` parts, `images`, or Gemini's content blocks); a hosted image URL is downloaded and inlined first |
 
 The dedicated `anthropic` provider type is chat-only. The `typesafe` provider
 type is System One-only — assign it to models that serve `/v1/systemone`, and

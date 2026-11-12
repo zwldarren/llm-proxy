@@ -80,10 +80,10 @@ per-transport hand-rolled gate sequence, `scope["llm_proxy_auth"]`
 **Decision model**:
 A model that answers typed questions with calibrated probabilities instead of
 prose. The proxy reaches two families of them: System One (TypeSafe's Jev, also
-resold by OpenRouter and served locally by Ollama) and OpenAI's Decisions
-(`gpt-6-luna`). One capability flag, `supports_systemone`, marks a model as a
-decision model, which gates both evaluation endpoints and being selected as the
-routing judge. See ADR-0019.
+resold by OpenRouter, served locally by Ollama and by Gemini Decision 1) and
+OpenAI's Decisions (`gpt-6-luna`). One capability flag, `supports_systemone`,
+marks a model as a decision model, which gates both evaluation endpoints and
+being selected as the routing judge. See ADR-0019 and ADR-0062.
 _Avoid_: classifier (that is routing signal B), judge (that is the router's
 consumer of one), decision endpoint (that is the route, not the model)
 
@@ -92,7 +92,10 @@ One of the two wire formats over the same three evaluation primitives. System On
 (`state` + `questions` map, kinds `noul`/`choice`/`score`, plus `box` for the
 image-locating question only System One has) and Decisions (`input` + ordered
 `questions`, kinds `predicate`/`choice`/`score`). A request names one
-by its endpoint — `/v1/systemone` or `/v1/decisions`. See ADR-0019.
+by its endpoint — `/v1/systemone` or `/v1/decisions`. Gemini's Decisions API
+serves the System One question vocabulary on a route named after the other
+envelope; the route name does not decide which side of the seam an upstream sits
+on. See ADR-0019 and ADR-0062.
 _Avoid_: protocol, dialect, format (it is a payload shape, not a client-facing
 API)
 
@@ -110,8 +113,10 @@ _Avoid_: adapter translation, protocol conversion (that is the chat path)
 **Image channel**:
 How one System One upstream carries an image, since the envelope has no image
 field of its own: `images` (Ollama's shared base64 array), `state_parts`
-(OpenRouter's `image_url` parts in `state`), or `assets` (TypeSafe's placeholder
-map). Each adapter declares its own (`SYSTEMONE_IMAGE_CHANNEL`); the bridge
+(OpenRouter's `image_url` parts in `state`), `assets` (TypeSafe's placeholder
+map), or `content_parts` (Gemini's typed content blocks, whose question
+instructions are text-only so a question's image joins the shared evidence).
+Each adapter declares its own (`SYSTEMONE_IMAGE_CHANNEL`); the bridge
 renders a Decisions request's images into that channel, and an adapter that
 declares none receives the text alone — the hosted-image download is skipped for
 it, since there is nothing to inline into. Where the upstream has a channel, a

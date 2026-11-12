@@ -35,10 +35,15 @@ from llm_proxy.models.types import Usage
 #: ``assets``
 #:     TypeSafe's ``assets`` map: an image per placeholder string, which the
 #:     upstream substitutes wherever it appears in ``state`` or instructions.
+#: ``content_parts``
+#:     Gemini's Decisions API: typed content blocks inside ``input`` —
+#:     ``{"type": "image", "data": <base64>, "mime_type": …}`` for an inlined
+#:     image, ``uri`` for a hosted one. Its questions take text-only instructions,
+#:     so an image a question carries joins the shared evidence instead.
 #:
 #: An adapter that documents none of them leaves the channel unset, and a bridged
 #: Decisions request reaches it as text alone.
-SystemOneImageChannel = Literal["images", "state_parts", "assets"]
+SystemOneImageChannel = Literal["images", "state_parts", "assets", "content_parts"]
 
 
 @dataclass

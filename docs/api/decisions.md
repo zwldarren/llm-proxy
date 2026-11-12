@@ -194,8 +194,10 @@ one question without disclosing a score).
 
 `model` identifies the model that performed the evaluation and `usage` reports
 input and output tokens. There is no streaming variant: a decision is a single
-synchronous evaluation. `usage` is echoed verbatim from the upstream when it
-reported one.
+synchronous evaluation. `usage` is echoed verbatim from an upstream that reports
+this envelope's usage object; an upstream reporting a different vocabulary
+(Gemini's `total_input_tokens`, System One's flat pair) is mapped onto it
+instead, so the client always sees the fields above.
 
 An unnamed question has no `name` in its answer; correlate it by position. A
 bridged answer omits `confidence` when the System One upstream reported none.
@@ -215,6 +217,7 @@ same flag gates [`/v1/systemone`](systemone.md) and the
 | `openrouter` | `POST /v1/systemone` | Bridged. Images travel as `image_url` parts inside `state`. OpenRouter serves the same envelope on a second, still-alpha route (`/api/alpha/decisions`); this stays on the stable one. |
 | `ollama` | `POST /v1/systemone` | Bridged. Inline images become the local `images` field (raw base64, as Ollama documents). |
 | `opencode-zen`, `opencode-go` | `POST /v1/systemone` | Bridged. The gateway documents no image channel for this envelope, so a bridged request's images are dropped. |
+| `gemini` | `POST /decisions` | Bridged onto Gemini's Decisions route, which takes the System One question vocabulary in its own `input`/content-block spelling. Inline images become typed content blocks (`{"type": "image", "data": …, "mime_type": …}`); a question's own image joins the shared evidence, because Gemini documents text-only question instructions. `predicate` arrives as `noul` and a score level's description is folded into its label, which is the legend Gemini echoes back. |
 
 A **hosted** image URL is downloaded by the proxy and inlined before a bridged
 request leaves it: no System One upstream fetches one. Redirects are followed (at
@@ -257,10 +260,12 @@ Both directions are lossless except where one envelope has no field for a fact:
   output.
 - Images go through the target upstream's own channel: `assets` for `typesafe`
   (PNG and JPEG only, and the request opts into TypeSafe's danger-zone header),
-  `state` parts for `openrouter`, and the shared `images` array for `ollama`. An
-  upstream that documents no channel — the `opencode-*` lanes — receives the
-  text alone. `safety_identifier` and the prompt-cache fields have no System One
-  counterpart and are dropped.
+  `state` parts for `openrouter`, the shared `images` array for `ollama`, and
+  typed content blocks for `gemini` — which takes question instructions as text
+  only, so an image a question carried joins the shared evidence every question
+  is asked about. An upstream that documents no channel — the `opencode-*` lanes
+  — receives the text alone. `safety_identifier` and the prompt-cache fields have
+  no System One counterpart and are dropped.
 
 **System One → Decisions**
 

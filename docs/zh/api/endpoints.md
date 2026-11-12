@@ -34,7 +34,7 @@ aside: false
 | GET | `/v1/batches` | X | OpenAI | 列出批量作业的最后观察状态（不回源刷新） |
 | GET | `/v1/batches/{batch_id}` | X | OpenAI | 轮询作业；第一次读到终态时生成 `output_file_id`/`error_file_id` |
 | POST | `/v1/batches/{batch_id}/cancel` | X | OpenAI | 取消；上游不支持取消时返回 `400 batch_cancel_unsupported` |
-| POST | `/v1/systemone` | X | System One | TypeSafe Jev 评估（也可经 OpenRouter 和本地 Ollama 模型）。指定的模型必须带 `supports_systemone` 标志，否则返回 `400 invalid_request_error` |
+| POST | `/v1/systemone` | X | System One | TypeSafe Jev 评估（也可经 OpenRouter、本地 Ollama 模型，以及使用这套问题词汇的 Gemini Decisions 路由）。指定的模型必须带 `supports_systemone` 标志，否则返回 `400 invalid_request_error` |
 | POST | `/v1/decisions` | X | Decisions | OpenAI 的 Decisions 端点（`gpt-6-luna`），System One 模型也可通过代理的桥接提供。受同一个 `supports_systemone` 标志约束 |
 | POST | `/v1/images/generations` | X | OpenAI | JSON 请求体 |
 | POST | `/v1/images/edits` | X | OpenAI | JSON 或 multipart（`image`、`image[]`、`mask`） |
@@ -63,8 +63,8 @@ aside: false
 | 图像（生成 + 编辑） | `openai`、`openai-compatible` 系列、`gemini`、`qwen` |
 | 音频（语音、STT） | `openai`、`openai-compatible` 系列**但 `qwen`/`qwen-intl` 除外**（DashScope 只在原生端点上提供语音——见下文）、`gemini`（原生 TTS/STT）、`ollama`（仅语音，v0.40.8+——WAV/PCM）、`openrouter`（STT）、`cohere`（仅 STT——v2 没有语音合成） |
 | 音频（翻译） | `openai`、`openai-compatible` 系列**但 `qwen`/`qwen-intl` 除外**、`gemini`。`openrouter`、`cohere` 以及 `qwen`/`qwen-intl` 没有对应的上游端点，会以 `400` 拒绝请求 |
-| System One（评估） | `typesafe`（直接对接 Jev）、`openrouter`（转售的 TypeSafe Jev，以及它的其他决策模型）、`ollama`（本地和云端模型，v0.35+）、`opencode-zen`/`opencode-go` 网关线路（按模型区分方言）。对 `ollama` 的 Chat 和 embeddings 仍走原生 `/api/*` 接口 |
-| Decisions（评估） | `openai`（原生 `/v1/decisions`），以及上面所有 System One 提供商——代理会把它们桥接到 System One 路由。图像按上游文档说明的渠道传递（`assets`、`state` 部分或 `images`）；托管的图片 URL 会先下载并内联 |
+| System One（评估） | `typesafe`（直接对接 Jev）、`openrouter`（转售的 TypeSafe Jev，以及它的其他决策模型）、`ollama`（本地和云端模型，v0.35+）、`gemini`（Gemini Decision 1，走它自己的 `/decisions` 路由，问题词汇与 System One 相同）、`opencode-zen`/`opencode-go` 网关线路（按模型区分方言）。对 `ollama` 的 Chat 和 embeddings 仍走原生 `/api/*` 接口 |
+| Decisions（评估） | `openai`（原生 `/v1/decisions`），以及上面所有 System One 提供商——代理会把它们桥接到 System One 路由。图像按上游文档说明的渠道传递（`assets`、`state` 部分、`images` 或 Gemini 的内容块）；托管的图片 URL 会先下载并内联 |
 
 专用的 `anthropic` 提供商类型只提供 chat。`typesafe` 提供商类型只提供 System One
 ——把它分配给承接 `/v1/systemone` 的模型，并注意对这类模型的 chat 请求会以 `400`

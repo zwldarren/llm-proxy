@@ -106,7 +106,7 @@ is not sent to the model; answers come back under the same id.
 | `noul` | Yes/no question; returns the probability the answer is yes | Optional object with `true` / `false` descriptions; either key may be given on its own (OpenRouter requires both when `criteria` is present) |
 | `choice` | Picks one option; returns the option and the full distribution | Required map of option → rubric description (`null` for no extra detail; at most 255) |
 | `score` | Rates along a rubric; returns a probability-weighted value | Required ordered array of level descriptions (2–26; TypeSafe and OpenRouter cap at 10) |
-| `box` | Locates what the instructions describe in an image and returns its edges as fractions of the image's width and height | None — a box question takes no rubric. System One only (Jev 1.14, or TypeSafe behind its danger-zone header); `/v1/decisions` refuses it because the Decisions envelope has no such question |
+| `box` | Locates what the instructions describe in an image and returns its edges as fractions of the image's width and height | None — a box question takes no rubric. System One only (Jev 1.14, or TypeSafe behind its danger-zone header); `/v1/decisions` refuses it because the Decisions envelope has no such question, and a `gemini` model refuses it because Gemini answers three question kinds |
 
 `instructions` can be a string, or a structured object/array that holds the
 question in one field and the data it references in others. The optional
@@ -123,6 +123,7 @@ are documented — every other upstream strips them:
 | `images` | `ollama` | Array of base64 strings | Images shared by every question, in request order. Needs a vision-capable System One model (Clef). URLs and data URLs are not accepted. |
 | `keep_alive` | `ollama` | Duration string (`"5m"`) or seconds (number) | How long to keep the model loaded after the request. Zero unloads it; a negative value keeps it loaded. Defaults to the server's setting. |
 | `assets` | `typesafe` | Map of placeholder → `{type: "image", format: "png"\|"jpeg", data_base64}` | Images the upstream substitutes wherever the placeholder appears in `state` or a question's instructions. Requires a vision-capable model; any request carrying assets (or a `box` question) sends TypeSafe's `TypeSafe-Danger-Zone-Images: true` header automatically. |
+| `state` content blocks | `gemini` | Array of `{type: "text", text}` / `{type: "image", data, mime_type}` / `audio` / `video` / `document` | The typed blocks Gemini's Decisions API reads in its `input`. A data URL splits into `data` plus `mime_type`; a hosted URL is downloaded and inlined first. Question instructions take text only upstream, so an image a question carries joins the shared evidence. |
 
 Images can also ride inside `state` itself for a model that reads parts there —
 OpenRouter documents `{"type": "image_url", "image_url": {"url": "data:…"}}`
@@ -152,8 +153,10 @@ never truncated.
 
 `model` identifies the model that performed the evaluation, and `answers`
 carries one answer per question, keyed by the ids you supplied. `usage` reports
-`input_tokens` / `output_tokens`. When OpenRouter serves the request, the
-response also carries `id` and `provider`, and `usage.cost` is preserved.
+`input_tokens` / `output_tokens` — from an upstream reporting another vocabulary
+(Gemini's `total_input_tokens`) the proxy maps the counts onto that pair rather
+than forwarding the block. When OpenRouter serves the request, the response also
+carries `id` and `provider`, and `usage.cost` is preserved.
 There is no streaming variant: System One is a single synchronous evaluation.
 
 ## Provider support
@@ -170,6 +173,7 @@ a System One model on the request path without going through this endpoint.
 | `openrouter` | `https://openrouter.ai/api/v1` | TypeSafe's Jev resold through OpenRouter. OpenRouter itself maps bare `jev-*` model ids onto its `typesafe/` namespace. This is their `/api/v1/systemone` route, the compatibility alias for clients already pointed at TypeSafe; they also serve the same envelope on a still-alpha `/api/alpha/decisions` route, which [`/v1/decisions`](decisions.md) can be pointed at. Its other decision models (Clef, Mercury Decide, D1, …) speak the same envelope. |
 | `ollama` | `http://localhost:11434` | System One models (`nimble`, `clef`, `tev`) on Ollama v0.35 or later, local or in Ollama's cloud (v0.40.5 or later for cloud models). Chat and embeddings use the native `/api/*` surface; `/v1/systemone` is served under Ollama's OpenAI-compatibility prefix. |
 | `opencode-zen`, `opencode-go` | the lane's base URL | The gateway lanes dispatch per model dialect, and their System One dialect serves this envelope. No image channel is documented for it, so a bridged Decisions request's images are dropped. |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta` | Gemini Decision 1 (`gemini-decision-1`). Google publishes it on a route named `POST /decisions`, but the envelope it takes is this one's question vocabulary: a `questions` map keyed by id, `noul` / `choice` / `score`, and the same `criteria` shapes. The proxy sends `state` as its `input` — a string passes through, a structured `state` becomes JSON text, and images ride typed content blocks (inline base64 with a `mime_type`). Question instructions are text only upstream, so a structured `instructions` value becomes JSON text and a question's own image joins the shared evidence. `box` has no counterpart and is refused with a `400`. The proxy's own 26-level score ceiling still applies, though Gemini accepts up to 255. |
 | `openai` | `https://api.openai.com/v1` | Bridged: the `state` and typed `questions` are translated into a `POST /v1/decisions` request and the answers translated back. Rubrics have nowhere to live in a `predicate`, so a `noul` `criteria` map is folded into the question text; a `box` question is refused with a `400` because the Decisions envelope has no counterpart; the upstream-only fields are dropped. |
 
 Every provider above also serves [`/v1/decisions`](decisions.md) for the same

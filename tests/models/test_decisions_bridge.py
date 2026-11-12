@@ -256,6 +256,82 @@ class TestDecisionsToSystemOneRequest:
         assert shared.questions["match"]["instructions"] == "Is it a variant?"
         assert shared.extra == {"images": [PNG_B64]}
 
+    def test_content_parts_channel_renders_typed_blocks(self):
+        # Gemini's Decisions API takes Interactions-style content blocks in its
+        # ``input``, with text spelled as a block too (adjacent text blocks are
+        # concatenated with no separator).
+        request = decisions_to_systemone_request(
+            _decision_request(
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "before"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                            {"type": "input_text", "text": "after"},
+                        ],
+                    }
+                ]
+            ),
+            image_channel="content_parts",
+        )
+        assert request.state == [
+            {"type": "text", "text": "before"},
+            {"type": "image", "data": PNG_B64, "mime_type": "image/png"},
+            {"type": "text", "text": "after"},
+        ]
+        # Media rides ``input`` itself; there is no extra channel field to carry.
+        assert request.extra == {}
+
+    def test_content_parts_keeps_a_questions_image_in_the_shared_input(self):
+        # Gemini documents question instructions as text only, so a question's own
+        # image joins the shared evidence every question is asked about.
+        request = decisions_to_systemone_request(
+            _decision_request(
+                questions=[
+                    {
+                        "type": "predicate",
+                        "name": "match",
+                        "instructions": [
+                            {"type": "input_text", "text": "Is it a variant?"},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
+                            },
+                        ],
+                    }
+                ]
+            ),
+            image_channel="content_parts",
+        )
+        assert request.questions["match"]["instructions"] == "Is it a variant?"
+        assert request.state == [
+            {"type": "text", "text": "I was charged twice for my order."},
+            {"type": "image", "data": PNG_B64, "mime_type": "image/png"},
+        ]
+
+    def test_content_parts_channel_requires_inline_data(self):
+        # Gemini needs a real ``mime_type`` beside the bytes, and the capability
+        # layer inlines hosted URLs before the bridge runs — so a URL reaching the
+        # bridge directly fails loudly instead of being mislabelled.
+        with pytest.raises(ValidationError, match="inline base64 data URLs"):
+            decisions_to_systemone_request(
+                _decision_request(
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_image", "image_url": "https://example.com/a"}
+                            ],
+                        }
+                    ]
+                ),
+                image_channel="content_parts",
+            )
+
     def test_json_and_conversation_items_become_text(self):
         # System One evaluates one state: roles, JSON evidence and tool items are
         # rendered as text in request order.

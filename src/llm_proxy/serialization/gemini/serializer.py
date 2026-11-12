@@ -9,6 +9,7 @@ from typing import Any
 from llm_proxy.serialization.gemini import (
     GeminiConversationMixin,
     GeminiEmbeddingsMixin,
+    GeminiEvaluationMixin,
     GeminiRequestBuilderMixin,
     GeminiResponseParserMixin,
     sanitize_gemini_schema,
@@ -21,6 +22,7 @@ from llm_proxy.serialization.providers.registry import register_provider_seriali
 class GeminiProviderSerializer(
     GeminiConversationMixin,
     GeminiEmbeddingsMixin,
+    GeminiEvaluationMixin,
     GeminiResponseParserMixin,
     GeminiRequestBuilderMixin,
     ProviderSerializer,

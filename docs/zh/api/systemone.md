@@ -104,7 +104,7 @@ System One 的提供商（`typesafe`、`openrouter`、`ollama` 或 `opencode-*` 
 | `noul` | 是／否问题，返回答案为「是」的概率 | 可选对象，含 `true` / `false` 的描述；两个键可以只给一个（OpenRouter 在给出 `criteria` 时要求两个都有） |
 | `choice` | 选出一个选项，返回该选项和完整分布 | 必填的「选项 → 评分说明」映射（`null` 表示不加说明；最多 255 项） |
 | `score` | 按评分标准打分，返回概率加权后的数值 | 必填的有序档位描述数组（2–26；TypeSafe 和 OpenRouter 上限为 10） |
-| `box` | 在图像中定位指令描述的内容，按图像宽高的比例返回其边界 | 无——`box` 问题不带评分标准。仅 System One 支持（Jev 1.14，或需打开危险区请求头的 TypeSafe）；`/v1/decisions` 会拒绝它，因为 Decisions 信封里没有这种问题 |
+| `box` | 在图像中定位指令描述的内容，按图像宽高的比例返回其边界 | 无——`box` 问题不带评分标准。仅 System One 支持（Jev 1.14，或需打开危险区请求头的 TypeSafe）；`/v1/decisions` 会拒绝它，因为 Decisions 信封里没有这种问题；`gemini` 模型也会拒绝它，因为 Gemini 只回答三种问题类型 |
 
 `instructions` 可以是字符串，也可以是结构化对象／数组：其中一个字段放问题本身，其他字段
 放它引用的数据。OpenRouter 专属的可选字段 `provider`（路由偏好）、`session_id`、`trace`
@@ -119,6 +119,7 @@ System One 的提供商（`typesafe`、`openrouter`、`ollama` 或 `opencode-*` 
 | `images` | `ollama` | base64 字符串数组 | 所有问题共用的图像，按请求顺序。需要支持视觉的 System One 模型（Clef）。不接受 URL 和 data URL。 |
 | `keep_alive` | `ollama` | 时长字符串（`"5m"`）或秒数（数字） | 请求结束后模型保持加载多久。0 表示卸载；负数表示一直保持加载。默认使用服务端设置。 |
 | `assets` | `typesafe` | 「占位符 → `{type: "image", format: "png"\|"jpeg", data_base64}`」映射 | 上游在 `state` 或某问题指令中出现占位符的地方替换成的图像。需要支持视觉的模型；任何带 assets（或 `box` 问题）的请求都会自动带上 TypeSafe 的 `TypeSafe-Danger-Zone-Images: true` 请求头。 |
+| `state` 内容块 | `gemini` | `{type: "text", text}`、`{type: "image", data, mime_type}`、`audio`、`video`、`document` 组成的数组 | Gemini Decisions API 在 `input` 里读取的带类型内容块。data URL 会拆成 `data` 与 `mime_type`；托管 URL 会先下载并内联。上游只接受文本形式的问题指令，因此问题自带的图像会并入共用证据。 |
 
 如果模型从 `state` 中读取多模态内容，图像也可以直接放在 `state` 里——OpenRouter 文档化
 了顶层 `state` 数组（以及某问题的 `instructions`）中的
@@ -143,8 +144,10 @@ Ollama 还有两条代理不做校验的限制，因为只有它知道当前加�
 ## 响应
 
 `model` 是执行评估的模型，`answers` 按你提供的 id 给出每个问题的答案。`usage` 报告
-`input_tokens` / `output_tokens`。由 OpenRouter 承接请求时，响应还会带 `id` 和
-`provider`，并保留 `usage.cost`。没有流式形态：System One 是一次同步评估。
+`input_tokens` / `output_tokens`——如果上游用的是另一套词汇（Gemini 的
+`total_input_tokens`），代理会把计数映射到这一对上，而不是原样转出那个块。由 OpenRouter
+承接请求时，响应还会带 `id` 和 `provider`，并保留 `usage.cost`。没有流式形态：System One
+是一次同步评估。
 
 ## 提供商支持
 
@@ -159,6 +162,7 @@ Ollama 还有两条代理不做校验的限制，因为只有它知道当前加�
 | `openrouter` | `https://openrouter.ai/api/v1` | 经 OpenRouter 转售的 TypeSafe Jev。OpenRouter 自己会把裸 `jev-*` 模型 id 映射到它的 `typesafe/` 命名空间。这是它的 `/api/v1/systemone` 路由，是给已经指向 TypeSafe 的客户端准备的兼容别名；同一个信封它还在仍处于 alpha 的 `/api/alpha/decisions` 路由上提供，可以把 [`/v1/decisions`](/zh/api/decisions) 指过去。它的其他决策模型（Clef、Mercury Decide、D1 等）使用同一信封。 |
 | `ollama` | `http://localhost:11434` | Ollama v0.35 或更新版本上的 System One 模型（`nimble`、`clef`、`tev`），本地或 Ollama 云端（云端模型需要 v0.40.5 或更新版本）。chat 和嵌入走原生 `/api/*` 接口；`/v1/systemone` 挂在 Ollama 的 OpenAI 兼容前缀下。 |
 | `opencode-zen`、`opencode-go` | 该线路的 base URL | 网关线路按模型方言分发，它们的 System One 方言提供这个信封。该方言没有文档化的图像通道，因此桥接过来的 Decisions 请求里的图像会被丢弃。 |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta` | Gemini Decision 1（`gemini-decision-1`）。Google 把它挂在名为 `POST /decisions` 的路由上，但它接受的其实是本信封的问题词汇：按 id 索引的 `questions` 映射、`noul`／`choice`／`score`，以及相同的 `criteria` 形状。代理把 `state` 作为它的 `input` 发送：字符串原样透传，结构化 `state` 转成 JSON 文本，图像以带类型的内容块传递（内联 base64 加 `mime_type`）。上游只接受文本形式的问题指令，所以结构化 `instructions` 会转成 JSON 文本，问题自带的图像会并入共用证据。`box` 没有对应物，会以 `400` 拒绝。代理自身的 26 档评分上限仍然生效，尽管 Gemini 支持到 255 档。 |
 | `openai` | `https://api.openai.com/v1` | 桥接：把 `state` 和带类型的 `questions` 翻译成 `POST /v1/decisions` 请求，再把答案翻译回来。`predicate` 里没有放评分标准的地方，所以 `noul` 的 `criteria` 映射会并入问题文本；`box` 问题会被 `400` 拒绝，因为 Decisions 信封没有对应物；只属于上游的字段会被丢弃。 |
 
 上表中的每个提供商对同样的模型也都提供 [`/v1/decisions`](/zh/api/decisions)，走同一个上游路由。
