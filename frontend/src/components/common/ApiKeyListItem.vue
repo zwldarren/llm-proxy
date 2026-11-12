@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { ApiKeyRead, ApiKeySpendSummary } from "@/services/api/apiKeys";
 import { getApiKeyStatus, isApiKeyExpired } from "@/utils/apiKeys";
-import { formatCostWithPrecision, formatDate } from "@/utils/format";
+import { formatBudgetAmount } from "@/composables/useBudgetDisplay";
+import { formatDate } from "@/utils/format";
 
 interface Props {
   apiKey: ApiKeyRead;
@@ -49,9 +50,9 @@ const spendLabel = computed(() => {
   const spend = props.spend;
   if (!spend) return null;
   if (spend.budget_usd !== null && spend.period_spend_usd !== null) {
-    return `${formatCostWithPrecision(spend.period_spend_usd, 2, locale.value)} / ${formatCostWithPrecision(spend.budget_usd, 2, locale.value)}`;
+    return `${formatBudgetAmount(spend.period_spend_usd, locale.value)} / ${formatBudgetAmount(spend.budget_usd, locale.value)}`;
   }
-  return formatCostWithPrecision(spend.total_spend_usd, 2, locale.value);
+  return formatBudgetAmount(spend.total_spend_usd, locale.value);
 });
 
 const { isBudgetExceeded, budgetRatio, spendTitle, barClass } = useBudgetDisplay(

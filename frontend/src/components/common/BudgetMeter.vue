@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 /**
  * The budget bar itself: one track, one fill, one progressbar role.
  *
@@ -24,11 +26,13 @@ const props = withDefaults(
   { barClass: "", class: "" }
 );
 
+const hasRatio = computed(() => Number.isFinite(props.ratio));
 const clamped = () => Math.min(1, Math.max(0, props.ratio ?? 0));
 </script>
 
 <template>
   <div
+    v-if="hasRatio"
     class="h-1.5 w-full rounded-full bg-muted overflow-hidden"
     :class="props.class"
     role="progressbar"
@@ -43,4 +47,12 @@ const clamped = () => Math.min(1, Math.max(0, props.ratio ?? 0));
       :style="{ transform: `scaleX(${clamped()})` }"
     />
   </div>
+  <!-- No ratio means the spend is unknown, not zero. Keep the track as a
+       visual placeholder but do not expose a progressbar value. -->
+  <div
+    v-else
+    class="h-1.5 w-full rounded-full border border-border/60 bg-muted/40"
+    :class="props.class"
+    aria-hidden="true"
+  />
 </template>

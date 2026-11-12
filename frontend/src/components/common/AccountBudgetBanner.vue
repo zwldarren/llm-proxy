@@ -2,10 +2,9 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Wallet } from "@lucide/vue";
-import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
+import { formatBudgetAmount, useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { MeBudget } from "@/services/api/me";
 import BudgetMeter from "@/components/common/BudgetMeter.vue";
-import { formatCost } from "@/utils/format";
 
 interface Props {
   budget: MeBudget;
@@ -13,7 +12,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass } = useBudgetDisplay(
   {
@@ -43,9 +42,9 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
         <span class="text-xs font-medium">{{ t("apiKeys.accountBudget") }}</span>
         <span class="text-data text-muted-foreground" :title="spendTitle">
           <span :class="{ 'text-destructive font-medium': isBudgetExceeded }">
-            {{ formatCost(budget.period_spend_usd) }}
+            {{ formatBudgetAmount(budget.period_spend_usd, locale) }}
           </span>
-          / {{ formatCost(budget.budget_usd) }}
+          / {{ formatBudgetAmount(budget.budget_usd, locale) }}
         </span>
         <span class="text-[10px] text-muted-foreground">{{ budgetPeriodLabel }}</span>
       </div>

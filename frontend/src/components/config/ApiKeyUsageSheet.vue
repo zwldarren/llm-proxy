@@ -2,7 +2,7 @@
 import { AlertTriangle, BarChart3, Gauge, Inbox } from "@lucide/vue";
 import { computed, defineAsyncComponent, defineComponent, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
+import { formatBudgetAmount, useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import { useRequestSequence } from "@/composables/useRequestSequence";
 import BudgetMeter from "@/components/common/BudgetMeter.vue";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,7 @@ interface Props {
 const props = defineProps<Props>();
 const open = defineModel<boolean>("open", { default: false });
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const apiKeyStore = useApiKeyStore();
 
 // The trend chart pulls chart.js into the bundle; loading it only when the
@@ -287,7 +287,8 @@ const modelRows = computed(() => {
                   </Badge>
                 </span>
                 <span class="text-data">
-                  {{ formatCost(budgetSpend) }} / {{ formatCost(apiKey.budget_usd) }}
+                  {{ formatBudgetAmount(budgetSpend, locale) }} /
+                  {{ formatBudgetAmount(apiKey.budget_usd, locale) }}
                 </span>
               </div>
               <BudgetMeter

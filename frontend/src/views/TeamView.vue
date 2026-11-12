@@ -78,7 +78,8 @@ import {
   type TeamMemberBudgetUpdate,
   type TeamRole,
 } from "@/services/api/team";
-import { formatCost, formatCostWithPrecision, formatDate, formatFullDate } from "@/utils/format";
+import { formatBudgetAmount } from "@/composables/useBudgetDisplay";
+import { formatDate, formatFullDate } from "@/utils/format";
 
 defineOptions({ name: "TeamView" });
 
@@ -1069,9 +1070,9 @@ onMounted(() => {
                       }}
                     </dd>
                     <dd v-if="member.budget_usd !== null" class="text-data">
-                      {{ formatCostWithPrecision(member.budget_spend_usd ?? 0, 2, locale) }}
+                      {{ formatBudgetAmount(member.budget_spend_usd, locale) }}
                       /
-                      {{ formatCostWithPrecision(member.budget_usd, 2, locale) }}
+                      {{ formatBudgetAmount(member.budget_usd, locale) }}
                     </dd>
                     <dd class="text-data">{{ formatFullDate(member.created_at) }}</dd>
                   </dl>
@@ -1799,7 +1800,7 @@ onMounted(() => {
             <span class="text-xs text-muted-foreground">
               {{ t("team.currentWindowSpend") }}:
               <span class="font-medium text-foreground">
-                {{ formatCost(budgetMember.budget_spend_usd) }}
+                {{ formatBudgetAmount(budgetMember.budget_spend_usd, locale) }}
               </span>
               — {{ t("team.resetSpendHint") }}
             </span>

@@ -1,7 +1,13 @@
 import { computed, toValue, type MaybeRefOrGetter } from "vue";
 import type { BudgetPeriod } from "@/services/api/apiKeys";
+import { ABSENT_METRIC, formatCostWithPrecision } from "@/utils/format";
 
 type TFn = (key: string, ...args: unknown[]) => string;
+
+/** Every budget surface uses the same currency precision as the key table. */
+export function formatBudgetAmount(amount: number | null | undefined, locale?: string): string {
+  return amount == null ? ABSENT_METRIC : formatCostWithPrecision(amount, 2, locale);
+}
 
 interface BudgetDisplayInput {
   budgetUsd: MaybeRefOrGetter<number | null | undefined>;
@@ -27,8 +33,8 @@ export function useBudgetDisplay(input: BudgetDisplayInput, t: TFn) {
 
   const hasBudget = computed(() => budgetUsd.value !== null);
 
-  /** Spend counted against the budget; falls back when the window spend is unknown. */
-  const budgetSpend = computed(() => periodSpendUsd.value ?? fallbackSpendUsd.value ?? 0);
+  /** Spend counted against the budget; null when neither source knows it. */
+  const budgetSpend = computed(() => periodSpendUsd.value ?? fallbackSpendUsd.value ?? null);
 
   const isBudgetExceeded = computed(
     () =>

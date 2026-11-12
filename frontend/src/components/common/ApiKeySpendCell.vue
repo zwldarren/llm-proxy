@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
+import { formatBudgetAmount, useBudgetDisplay } from "@/composables/useBudgetDisplay";
 import type { ApiKeySpendSummary } from "@/services/api/apiKeys";
-import { ABSENT_METRIC, formatCostWithPrecision } from "@/utils/format";
+import { ABSENT_METRIC } from "@/utils/format";
 
 interface Props {
   spend?: ApiKeySpendSummary;
@@ -36,10 +36,10 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
         {{
           spend.period_spend_usd === null
             ? ABSENT_METRIC
-            : formatCostWithPrecision(spend.period_spend_usd, 2, locale)
+            : formatBudgetAmount(spend.period_spend_usd, locale)
         }}
       </span>
-      <span>/ {{ formatCostWithPrecision(spend.budget_usd, 2, locale) }}</span>
+      <span>/ {{ formatBudgetAmount(spend.budget_usd, locale) }}</span>
     </div>
     <div class="mt-1 flex items-center gap-2">
       <BudgetMeter class="w-24" :ratio="budgetRatio" :label="spendTitle" :bar-class="barClass" />
@@ -49,7 +49,7 @@ const { isBudgetExceeded, budgetRatio, budgetPeriodLabel, spendTitle, barClass }
     </div>
   </div>
   <span v-else-if="spend" class="text-data text-muted-foreground">
-    {{ formatCostWithPrecision(spend.total_spend_usd, 2, locale) }}
+    {{ formatBudgetAmount(spend.total_spend_usd, locale) }}
   </span>
   <span v-else class="text-data text-muted-foreground">{{ ABSENT_METRIC }}</span>
 </template>
