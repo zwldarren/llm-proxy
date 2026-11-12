@@ -58,6 +58,7 @@ const showCreateDialog = ref(false);
 const servers = computed(() => mcpStore.mcpServers);
 const isLoading = computed(() => mcpStore.loading && !mcpStore.ready);
 const isSaving = ref(false);
+const isDeleting = ref(false);
 
 // The policy warning already says the server cannot be created; leaving Save
 // enabled only produces a backend rejection after the operator fills the form.
@@ -306,14 +307,17 @@ const openDeleteDialog = (name: string) => {
 
 const confirmDelete = async () => {
   const name = deletingServerName.value;
-  showDeleteDialog.value = false;
+  isDeleting.value = true;
   try {
     await mcpStore.deleteMcpServer(name);
+    showDeleteDialog.value = false;
     toast.success(t("common.success"), {
       description: t("mcpServers.deleteSuccess"),
     });
   } catch (e) {
     handleDeleteError(e);
+  } finally {
+    isDeleting.value = false;
   }
 };
 
@@ -436,7 +440,7 @@ onMounted(() => {
       :description="t('dialogs.confirmDelete', { name: deletingServerName })"
       :confirm-text="t('common.delete')"
       :cancel-text="t('common.cancel')"
-      :loading="isSaving"
+      :loading="isDeleting"
       @confirm="confirmDelete"
     />
 
