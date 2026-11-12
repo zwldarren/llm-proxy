@@ -481,4 +481,60 @@ describe("LogsView", () => {
     expect(wrapper.text()).toContain("logs.loadFailed");
     expect(wrapper.text()).not.toContain("logs.noLogs");
   });
+
+  it("does not lend one tab's fetch error to another tab's cached rows", async () => {
+    const { logsApi } = await import("@/services/api/logs");
+    vi.clearAllMocks();
+
+    const row = (requestId: string) => ({
+      id: 1,
+      request_id: requestId,
+      timestamp: 1_700_000_000,
+      endpoint: "/v1/chat/completions",
+      method: "POST",
+      model: "model",
+      provider: "openai",
+      status_code: 200,
+      response_time_ms: 12,
+      log_type: "endpoint",
+    });
+    vi.mocked(logsApi.getLogs)
+      .mockResolvedValueOnce({ items: [row("proxy")], total: 1, page: 1, page_size: 20 })
+      .mockResolvedValueOnce({ items: [row("audit")], total: 1, page: 1, page_size: 20 })
+      .mockResolvedValueOnce({ items: [row("proxy")], total: 1, page: 1, page_size: 20 });
+
+    const wrapper = mount(LogsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          Card: CardStub,
+          Button: ButtonStub,
+          Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
+        },
+      },
+    });
+    await flushPromises();
+
+    const tab = (label: string) =>
+      wrapper.findAll('[role="tab"]').find((item) => item.text() === label)!;
+    await tab("nav.auditLogs").trigger("mousedown");
+    await flushPromises();
+    await tab("nav.proxyLogs").trigger("mousedown");
+    await flushPromises();
+
+    vi.mocked(logsApi.getLogs).mockRejectedValueOnce(new Error("proxy refresh failed"));
+    await wrapper.find('[aria-label="common.refresh"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("logs.staleResults");
+
+    vi.mocked(logsApi.getLogs).mockImplementationOnce(() => new Promise(() => {}));
+    await tab("nav.auditLogs").trigger("mousedown");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("audit");
+    expect(wrapper.text()).not.toContain("logs.staleResults");
+  });
 });

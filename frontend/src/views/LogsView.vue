@@ -461,6 +461,7 @@ watch(activeTab, async (newTab) => {
   if (cached) {
     logs.value = cached.items;
     totalLogs.value = cached.total;
+    fetchError.value = false;
     isInitialLoad.value = false;
     await fetchLogs(false);
   } else {
