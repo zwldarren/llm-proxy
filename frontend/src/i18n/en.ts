@@ -1416,6 +1416,10 @@ export default {
     testEmailSend: "Send test",
     testEmailSending: "Sending…",
     testEmailSent: "Test email accepted by {transport}.",
+    testEmailNoTransport:
+      "No email transport is configured. Enable SMTP or Resend with all required fields, then save.",
+    testEmailFailed:
+      "The selected transport rejected the test message. Check its credentials and sender address.",
     oidc: "OpenID Connect providers",
     oidcHelp: "External identity providers. OAuth login is disabled until a provider is added.",
     addProvider: "Add provider",
@@ -1775,7 +1779,7 @@ export default {
       accountLocked:
         "Too many failed sign-ins. Try again later or ask an admin to unlock the account.",
       emailDeliveryFailed:
-        "The email could not be sent. Check the email delivery settings and try again.",
+        "The email could not be sent. Check the mail delivery settings and try again.",
       emailVerificationInvalid: "This email verification link is invalid or has expired.",
       emailVerificationSuperseded:
         "A newer verification link replaced this one. Use the latest email.",

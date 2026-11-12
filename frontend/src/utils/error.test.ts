@@ -22,6 +22,15 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error)).toBe(i18n.global.t("errors.codes.lastFactor"));
   });
 
+  it("localizes test-email failures instead of echoing the English detail", () => {
+    expect(
+      getErrorMessage(httpError("email_transport_unconfigured", "No email transport is configured"))
+    ).toBe(i18n.global.t("consoleAuth.testEmailNoTransport"));
+    expect(getErrorMessage(httpError("email_test_failed", "Resend rejected", 502))).toBe(
+      i18n.global.t("consoleAuth.testEmailFailed")
+    );
+  });
+
   it("reads the code from a bare detail envelope too", () => {
     const error = new HttpError(400, "Bad Request", {
       code: "email_verification_unavailable",

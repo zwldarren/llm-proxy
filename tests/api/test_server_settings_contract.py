@@ -714,6 +714,7 @@ def test_test_email_refuses_without_a_transport(client, monkeypatch, sender):
 
     assert res.status_code == 400
     assert "No email transport is configured" in res.text
+    assert res.json()["error"]["code"] == "email_transport_unconfigured"
     sender.assert_not_awaited()
 
 
@@ -773,6 +774,7 @@ def test_test_email_reports_a_rejected_message(client, monkeypatch, sender):
 
     assert res.status_code == 502
     assert "RESEND did not accept" in res.text
+    assert res.json()["error"]["code"] == "email_test_failed"
 
 
 @pytest.mark.parametrize("to", ["", "not-an-email", "a@b"])

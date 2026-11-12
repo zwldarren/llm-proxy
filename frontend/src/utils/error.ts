@@ -12,6 +12,8 @@ import { errorCodeFromPayload } from "@/utils/apiError";
 const CODE_MESSAGES: Record<string, string> = {
   account_locked: "errors.codes.accountLocked",
   email_delivery_failed: "errors.codes.emailDeliveryFailed",
+  email_test_failed: "consoleAuth.testEmailFailed",
+  email_transport_unconfigured: "consoleAuth.testEmailNoTransport",
   email_verification_invalid: "errors.codes.emailVerificationInvalid",
   email_verification_superseded: "errors.codes.emailVerificationSuperseded",
   email_verification_unavailable: "errors.codes.emailVerificationUnavailable",

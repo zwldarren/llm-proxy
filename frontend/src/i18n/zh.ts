@@ -1351,6 +1351,9 @@ export default {
     testEmailSend: "发送测试",
     testEmailSending: "正在发送…",
     testEmailSent: "{transport} 已接收测试邮件。",
+    testEmailNoTransport:
+      "尚未配置邮件投递方式。请启用 SMTP 或 Resend 并填写所有必填项，然后保存。",
+    testEmailFailed: "当前投递方式拒绝了测试邮件。请检查凭据和发件地址。",
     oidc: "OpenID Connect 提供商",
     oidcHelp: "外部身份提供商。添加提供商之前 OAuth 登录不可用。",
     addProvider: "添加提供商",

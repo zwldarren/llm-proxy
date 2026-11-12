@@ -9,6 +9,7 @@ hand-written endpoints this replaces (ADR-0026).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.api.dependencies import (
@@ -22,7 +23,7 @@ from llm_proxy.api.routers.config.helpers import (
     commit_and_reload,
     get_config_repository,
 )
-from llm_proxy.api.schemas.server_config import TestEmailRequest
+from llm_proxy.api.schemas.common import validate_email
 from llm_proxy.config.server_settings import (
     SERVER_SETTINGS,
     ServerSetting,
@@ -30,12 +31,21 @@ from llm_proxy.config.server_settings import (
     build_response,
     request_model_for,
 )
+from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.notifications.email import send_email
 
 router = APIRouter(
     prefix="/server", tags=["configuration"], dependencies=[Depends(require_admin_role)]
 )
 limiter = get_rate_limiter()
+
+
+class TestEmailRequest(BaseModel):
+    """Recipient of an admin-triggered delivery test."""
+
+    to: str = Field(..., max_length=320, description="Address that receives the test message")
+
+    _validate_email = field_validator("to")(validate_email)
 
 
 def _make_get_handler(setting: ServerSetting):
@@ -142,12 +152,13 @@ async def send_console_auth_test_email(payload: TestEmailRequest, request: Reque
     console_auth = (await get_config_from_state(request)).server_params.console_auth
     transport = console_auth.email_transport()
     if transport is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
+        raise ValidationError(
+            message=(
                 "No email transport is configured; enable SMTP or Resend with a "
                 "complete set of fields and save first."
             ),
+            code="email_transport_unconfigured",
+            status_code=400,
         )
     sent = await send_email(
         transport,
@@ -158,9 +169,12 @@ async def send_console_auth_test_email(payload: TestEmailRequest, request: Reque
     if not sent:
         raise HTTPException(
             status_code=502,
-            detail=(
-                f"{transport.kind.upper()} did not accept the test message; "
-                "check the saved credentials and sender address."
-            ),
+            detail={
+                "message": (
+                    f"{transport.kind.upper()} did not accept the test message; "
+                    "check the saved credentials and sender address."
+                ),
+                "code": "email_test_failed",
+            },
         )
     return {"sent": True, "transport": transport.kind}
