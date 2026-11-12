@@ -174,7 +174,10 @@ function validate(): boolean {
   }
 
   if (current.resend.enabled) {
-    if (!current.resend.api_key.trim()) {
+    const stored = JSON.parse(savedSnapshot.value || "{}") as Partial<ConsoleAuthSettings>;
+    // A blank secret means "keep the saved credential" once one exists; only a
+    // brand-new Resend block must supply its first API key.
+    if (!current.resend.api_key.trim() && !stored.resend?.api_key) {
       errors["resend-api-key"] = required("consoleAuth.apiKey");
     }
     if (!current.resend.from_address.trim()) {

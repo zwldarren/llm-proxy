@@ -299,6 +299,27 @@ describe("ConsoleAuthView", () => {
     });
   });
 
+  it("keeps the stored Resend key when the masked field is cleared", async () => {
+    const settings = makeSettings();
+    settings.resend = {
+      enabled: true,
+      api_key: "****",
+      from_address: "noreply@example.com",
+    };
+    api.get.mockResolvedValue(settings);
+
+    const wrapper = mount(ConsoleAuthView);
+    await flushPromises();
+
+    expect((wrapper.find("#resend-api-key").element as HTMLInputElement).value).toBe("****");
+    await wrapper.find("#resend-api-key").setValue("");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(api.update).toHaveBeenCalledOnce();
+    expect(api.update.mock.calls[0][0].resend.api_key).toBe("");
+  });
+
   it("sends a test email through the saved transport", async () => {
     const settings = makeSettings();
     settings.resend = {
