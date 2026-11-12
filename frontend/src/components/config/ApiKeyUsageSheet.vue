@@ -3,6 +3,7 @@ import { AlertTriangle, BarChart3, Gauge, Inbox } from "@lucide/vue";
 import { computed, defineAsyncComponent, defineComponent, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useBudgetDisplay } from "@/composables/useBudgetDisplay";
+import { useRequestSequence } from "@/composables/useRequestSequence";
 import BudgetMeter from "@/components/common/BudgetMeter.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +48,8 @@ const loadError = ref(false);
 const rangeDays = ref(30);
 const rangeOptions = [7, 30, 90] as const;
 
-// Sequence guard: rapid range-preset switches fire overlapping requests with
-// no cancellation, so only the latest request may commit its result — an
-// older response arriving last must not overwrite newer data.
-let latestRequestId = 0;
+// Rapid range-preset switches overlap; only the latest response may commit.
+const usageRequests = useRequestSequence();
 // The key whose numbers are on screen. A different key is a different dataset:
 // its predecessor's totals must never sit under the new key's name while the
 // response is in flight.
@@ -62,7 +61,7 @@ const loadUsage = async () => {
     usage.value = null;
     loadedKeyName = props.apiKey.name;
   }
-  const requestId = ++latestRequestId;
+  const requestId = usageRequests.begin();
   loading.value = true;
   loadError.value = false;
   try {
@@ -72,14 +71,14 @@ const loadUsage = async () => {
       start_date: start.toISOString(),
       end_date: end.toISOString(),
     });
-    if (requestId !== latestRequestId) return;
+    if (!usageRequests.isLatest(requestId)) return;
     usage.value = result;
   } catch (e) {
-    if (requestId !== latestRequestId) return;
+    if (!usageRequests.isLatest(requestId)) return;
     loadError.value = true;
     console.error("Failed to load API key usage:", e);
   } finally {
-    if (requestId === latestRequestId) loading.value = false;
+    if (usageRequests.isLatest(requestId)) loading.value = false;
   }
 };
 

@@ -9,6 +9,7 @@ import {
   type ApiKeyUpdate,
 } from "@/services/api/apiKeys";
 import { createResourceStore } from "@/composables/useResourceStore";
+import { useRequestSequence } from "@/composables/useRequestSequence";
 
 export const useApiKeyStore = defineStore("apiKeys", () => {
   const store = createResourceStore<ApiKeyRead, ApiKeyCreate, ApiKeyUpdate>({
@@ -25,9 +26,8 @@ export const useApiKeyStore = defineStore("apiKeys", () => {
   // Tracks whether the summary was fetched at least once: an empty result is
   // a valid cache state (no keys / no spend yet), not a reason to refetch.
   const spendLoaded = ref(false);
-  // Sequence guard: a forced refresh may overlap an in-flight fetch, and only
-  // the latest request is allowed to commit its result.
-  let spendFetchSeq = 0;
+  // A forced refresh may overlap an in-flight fetch; only the latest commits.
+  const spendRequests = useRequestSequence();
 
   // createApiKey returns ApiKeyResponse (includes the generated key), not ApiKeyRead.
   // Omitted models/mcpServers mean "no restriction" (allow all); an explicit
@@ -50,19 +50,19 @@ export const useApiKeyStore = defineStore("apiKeys", () => {
     // flight; only redundant non-forced calls are skipped.
     if (spendLoading.value && !force) return;
     if (!force && spendLoaded.value) return;
-    const seq = ++spendFetchSeq;
+    const seq = spendRequests.begin();
     spendLoading.value = true;
     try {
       const rows = await apiKeysApi.getSpendSummary();
       // Discard a stale response when a newer fetch has already been issued.
-      if (seq !== spendFetchSeq) return;
+      if (!spendRequests.isLatest(seq)) return;
       spendByKey.value = Object.fromEntries(rows.map((row) => [row.name, row]));
       spendLoaded.value = true;
     } catch (err) {
       // Spend is auxiliary display data: a failure must not break key listing.
       console.error("Failed to fetch API key spend summary:", err);
     } finally {
-      if (seq === spendFetchSeq) spendLoading.value = false;
+      if (spendRequests.isLatest(seq)) spendLoading.value = false;
     }
   }
 
@@ -72,11 +72,11 @@ export const useApiKeyStore = defineStore("apiKeys", () => {
   }
 
   /** Full teardown: factory list state plus the per-key spend cache. Spend is
-   *  per-user billing data — it must not survive logout. Bumping
-   *  spendFetchSeq also discards any in-flight spend fetch. */
+   *  per-user billing data — it must not survive logout. Invalidating the
+   *  sequence also discards any in-flight spend fetch. */
   function reset(): void {
     store.reset();
-    spendFetchSeq++;
+    spendRequests.invalidate();
     spendByKey.value = {};
     spendLoading.value = false;
     spendLoaded.value = false;

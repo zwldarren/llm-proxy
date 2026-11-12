@@ -27,6 +27,7 @@ import { invitationsApi } from "@/services/api/invitations";
 import type { Invitation } from "@/types/schemas";
 import { useModelStore } from "@/stores/models";
 import { getErrorMessage } from "@/utils/error";
+import { useRequestSequence } from "@/composables/useRequestSequence";
 import { passwordRequirementsText, validatePasswordStrength } from "@/utils/password";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import AccessScopePicker from "@/components/common/AccessScopePicker.vue";
@@ -296,10 +297,10 @@ function patchMember(updated: TeamMember) {
 }
 
 // --- Methods ---
-let loadSequence = 0;
+const memberLoads = useRequestSequence();
 
 async function loadMembers() {
-  const sequence = ++loadSequence;
+  const sequence = memberLoads.begin();
   isLoading.value = true;
   loadError.value = null;
   try {
@@ -310,7 +311,7 @@ async function loadMembers() {
       sort_by: sortField.value,
       sort_dir: sortDir.value,
     });
-    if (sequence !== loadSequence) return;
+    if (!memberLoads.isLatest(sequence)) return;
     // Deleting the last row of the last page can leave the cursor past the
     // end; clamp to the new final page and load it.
     if (response.total > 0 && (currentPage.value - 1) * pageSize >= response.total) {
@@ -321,9 +322,9 @@ async function loadMembers() {
     members.value = response.items;
     totalMembers.value = response.total;
   } catch {
-    if (sequence === loadSequence) loadError.value = t("errors.fetchFailed");
+    if (memberLoads.isLatest(sequence)) loadError.value = t("errors.fetchFailed");
   } finally {
-    if (sequence === loadSequence) isLoading.value = false;
+    if (memberLoads.isLatest(sequence)) isLoading.value = false;
   }
 }
 

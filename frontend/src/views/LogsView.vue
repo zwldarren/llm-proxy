@@ -32,6 +32,7 @@ import {
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { toast } from "vue-sonner";
+import { useRequestSequence } from "@/composables/useRequestSequence";
 import { useAuthStore } from "@/stores/auth";
 import EmptyState from "@/components/common/EmptyState.vue";
 import AppLayout from "@/components/layout/AppLayout.vue";
@@ -153,7 +154,7 @@ const consecutiveFailures = ref(0);
 
 const cachedLatestTimestamp = ref<number | null>(null);
 
-let fetchSequence = 0;
+const listRequests = useRequestSequence();
 
 interface PageCacheEntry {
   items: LogListItemType[];
@@ -300,7 +301,7 @@ const applyPageCache = (tab: LogTab, page: number, entry: PageCacheEntry) => {
 };
 
 const fetchLogs = async (showLoading = true) => {
-  const currentSequence = ++fetchSequence;
+  const currentSequence = listRequests.begin();
   const tab = activeTab.value;
   const page = currentPage.value;
 
@@ -317,7 +318,7 @@ const fetchLogs = async (showLoading = true) => {
   try {
     const res = await performFetch(filters, page);
 
-    if (currentSequence !== fetchSequence) return;
+    if (!listRequests.isLatest(currentSequence)) return;
 
     consecutiveFailures.value = 0;
     fetchError.value = false;
@@ -333,7 +334,7 @@ const fetchLogs = async (showLoading = true) => {
     };
     applyPageCache(tab, page, entry);
   } catch {
-    if (currentSequence === fetchSequence) {
+    if (listRequests.isLatest(currentSequence)) {
       consecutiveFailures.value++;
       fetchError.value = true;
 
@@ -345,13 +346,13 @@ const fetchLogs = async (showLoading = true) => {
       }
     }
   } finally {
-    if (currentSequence === fetchSequence) {
+    if (listRequests.isLatest(currentSequence)) {
       isFetching.value = false;
       isInitialLoad.value = false;
     }
   }
 
-  if (currentSequence === fetchSequence) {
+  if (listRequests.isLatest(currentSequence)) {
     schedulePrefetch(tab, page);
   }
 };
@@ -597,27 +598,26 @@ const handleFilterTrace = (traceId: string) => {
   showFilters.value = true;
 };
 
-// Sequence guard for detail fetches: opening a second row while the first is
-// still loading supersedes it, instead of being swallowed by a global busy flag
-// (which made a click on any other row do nothing at all).
-let detailRequestSequence = 0;
+// Opening a second row while the first is still loading supersedes it instead
+// of leaving a global busy flag to swallow every later click.
+const detailRequests = useRequestSequence();
 
 const handleViewDetails = async (log: LogListItemType) => {
-  const sequence = ++detailRequestSequence;
+  const sequence = detailRequests.begin();
   detailLoadingId.value = log.request_id;
   try {
     const fullLog = await logsApi.getLog(log.request_id);
-    if (sequence !== detailRequestSequence) return;
+    if (!detailRequests.isLatest(sequence)) return;
     selectedLog.value = fullLog;
     showDetailDialog.value = true;
   } catch {
-    if (sequence !== detailRequestSequence) return;
+    if (!detailRequests.isLatest(sequence)) return;
     // The detail payload holds the request/response bodies — the material a
     // failed integration is diagnosed from. Swallowing this made a dead fetch
     // and a mis-click look identical.
     toast.error(t("errors.fetchFailed"));
   } finally {
-    if (sequence === detailRequestSequence) {
+    if (detailRequests.isLatest(sequence)) {
       detailLoadingId.value = null;
     }
   }

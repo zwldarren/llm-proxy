@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 
 vi.mock("@/utils/icons", () => ({
+  getModelIconUrl: vi.fn(() => null),
+  isMonoIcon: vi.fn(() => false),
   getProviderIconUrl: vi.fn(() => null),
   getIconUrl: vi.fn(() => null),
 }));
@@ -19,6 +21,7 @@ vi.mock("vue-router", () => ({
 
 vi.mock("@/services/api/logs", () => ({
   logsApi: {
+    getHourlyUsage: vi.fn(() => Promise.resolve({ buckets: [] })),
     getUsageStats: vi.fn(() =>
       Promise.resolve({
         summary: {
@@ -88,6 +91,8 @@ vi.mock("@lucide/vue", () => {
   };
 });
 
+import { logsApi } from "@/services/api/logs";
+import type { UsageStatsResponse } from "@/types/schemas";
 import HomeView from "./HomeView.vue";
 
 const AppLayoutStub = defineComponent({
@@ -123,4 +128,76 @@ describe("HomeView", () => {
     expect(wrapper.find("[data-test='by-provider']").exists()).toBe(true);
     expect(wrapper.find("[data-test='by-model']").exists()).toBe(true);
   });
+
+  it("does not let an older range response repaint the newer range", async () => {
+    vi.clearAllMocks();
+
+    const older = deferred<UsageStatsResponse>();
+    const newer = deferred<UsageStatsResponse>();
+    vi.mocked(logsApi.getUsageStats)
+      .mockResolvedValueOnce(makeStats("initial-model"))
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+
+    const wrapper = mount(HomeView, { global: { stubs: { AppLayout: AppLayoutStub } } });
+    await flushPromises();
+
+    type ViewMethods = {
+      selectPreset: (preset: "7d" | "30d") => void;
+    };
+    const view = wrapper.vm as unknown as ViewMethods;
+    view.selectPreset("7d");
+    view.selectPreset("30d");
+
+    newer.resolve(makeStats("newer-range"));
+    await flushPromises();
+    older.resolve(makeStats("older-range"));
+    await flushPromises();
+
+    const usage = wrapper.findComponent({ name: "UsageByModel" });
+    expect(usage.props("byModel")).toEqual([expect.objectContaining({ model: "newer-range" })]);
+  });
 });
+
+/** The project's TypeScript lib predates Promise.withResolvers. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function makeStats(model: string): UsageStatsResponse {
+  return {
+    summary: {
+      total_cost: 0,
+      total_requests: 1,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      avg_response_time_ms: 0,
+      success_rate: 100,
+      avg_ttft_ms: 0,
+      avg_tokens_per_second: 0,
+      total_cache_creation_tokens: 0,
+      total_cache_read_tokens: 0,
+      total_cached_prompt_tokens: 0,
+      cache_savings_usd: 0,
+    },
+    by_provider: [],
+    by_model: [
+      {
+        model,
+        provider: "openai",
+        requests: 1,
+        cost: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_tokens: 0,
+        cache_read_tokens: 0,
+        cached_prompt_tokens: 0,
+      },
+    ],
+    daily_usage: [],
+  };
+}

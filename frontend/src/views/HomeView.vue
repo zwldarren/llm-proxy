@@ -23,6 +23,7 @@ import {
   UsageMetricStrip,
   TokenBreakdownChart,
 } from "@/components/usage";
+import { useRequestSequence } from "@/composables/useRequestSequence";
 import { logsApi } from "@/services/api/logs";
 import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
 import type { HourlyUsageBucket, UsageStatsResponse } from "@/types/schemas";
@@ -166,9 +167,8 @@ const tokenBreakdownBuckets = computed<HourlyUsageBucket[]>(() => {
  * Guards against a slow response from an earlier range landing on top of a
  * newer one: two preset clicks in quick succession used to be a race, and the
  * loser could repaint the dashboard with the range the operator had left.
- * Same pattern as LogsView's fetchSequence.
  */
-let fetchSequence = 0;
+const usageRequests = useRequestSequence();
 
 async function fetchHourlyUsage(sequence: number) {
   if (!useHourlyGranularity.value) {
@@ -181,10 +181,10 @@ async function fetchHourlyUsage(sequence: number) {
       end_date: formatDateValue(dateRange.value.end),
       model: selectedModel.value ?? undefined,
     });
-    if (sequence !== fetchSequence) return;
+    if (!usageRequests.isLatest(sequence)) return;
     hourlyBuckets.value = response.buckets;
   } catch (error) {
-    if (sequence !== fetchSequence) return;
+    if (!usageRequests.isLatest(sequence)) return;
     // Non-fatal: the breakdown chart degrades to the empty state.
     console.error("Failed to fetch hourly usage:", error);
     hourlyBuckets.value = [];
@@ -208,7 +208,7 @@ function onModelFilterChange(value: string) {
 }
 
 async function fetchUsageStats() {
-  const sequence = ++fetchSequence;
+  const sequence = usageRequests.begin();
   try {
     isLoadingUsage.value = true;
     usageError.value = null;
@@ -224,7 +224,7 @@ async function fetchUsageStats() {
       }),
       fetchHourlyUsage(sequence),
     ]);
-    if (sequence !== fetchSequence) return;
+    if (!usageRequests.isLatest(sequence)) return;
     usageStats.value = stats;
 
     const merged = new Map(availableModels.value.map((m) => [m.model, m.provider]));
@@ -235,7 +235,7 @@ async function fetchUsageStats() {
       .map(([model, provider]) => ({ model, provider }))
       .sort((a, b) => a.model.localeCompare(b.model));
   } catch (error) {
-    if (sequence !== fetchSequence) return;
+    if (!usageRequests.isLatest(sequence)) return;
     console.error("Failed to fetch usage stats:", error);
     const message = error instanceof Error ? error.message : t("errors.fetchFailed");
     // Background refresh: when stale data is already on screen, keep the panel
@@ -246,7 +246,7 @@ async function fetchUsageStats() {
       usageError.value = message;
     }
   } finally {
-    if (sequence === fetchSequence) isLoadingUsage.value = false;
+    if (usageRequests.isLatest(sequence)) isLoadingUsage.value = false;
   }
 }
 
