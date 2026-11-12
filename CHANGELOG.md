@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.6.0](https://github.com/zwldarren/llm-proxy/compare/v0.5.5...v0.6.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **frontend:** the command palette is no longer rendered by `AppLayout`. It is mounted once in `App.vue`, for a signed-in session, because a per-layout copy meant one dialog and one Cmd/Ctrl+K handler per live view. A surface that renders `AppLayout` outside the console shell — and so used to inherit the palette — now has to mount `CommandPalette` itself.
+
+### Features
+
+* **console-auth:** add Resend as a second email transport ([1aea044](https://github.com/zwldarren/llm-proxy/commit/1aea0446d0ef44cba760ecdb2f04f9c34e7f4bdb))
+* **frontend:** configure Resend and send a test email from instance sign-in ([29ca470](https://github.com/zwldarren/llm-proxy/commit/29ca470ad4facc4f883e0197cb7a022dba1ae157))
+* **gemini:** added decision 1 as a system one upstream ([8fb4cf5](https://github.com/zwldarren/llm-proxy/commit/8fb4cf54e457bf56ce7290f1ae9939073df26516))
+* **routing:** split a priority group's traffic with a mapping weight ([f6a3b26](https://github.com/zwldarren/llm-proxy/commit/f6a3b2627ce2cc29d2f2c2622a952cb973a9ce58))
+
+
+### Bug Fixes
+
+* **anthropic:** count the prompt usage a terminal delta reports ([7c4834d](https://github.com/zwldarren/llm-proxy/commit/7c4834df920f1fb5f5f2a106a1a3339a78fcfe03))
+* **console-auth:** keep a saved Resend key when the masked field is cleared ([cb77392](https://github.com/zwldarren/llm-proxy/commit/cb7739215cf591eef940c91c2736e821f3fc4ab6))
+* **frontend:** attach the labels, names and widths that were only implied ([5e6f260](https://github.com/zwldarren/llm-proxy/commit/5e6f260a60d8e7f9e3b1a81e2d4ab7f61a20e4f6))
+* **frontend:** draw the budget bar once, and stop calling an unknown spend zero ([1f9bd88](https://github.com/zwldarren/llm-proxy/commit/1f9bd8845b2276893b02075ac535713a9729c5ff))
+* **frontend:** drop dead style hooks and the mono treatment on prose ([89ff88c](https://github.com/zwldarren/llm-proxy/commit/89ff88ca36c325a761e3f1ed81b4e553788706ff))
+* **frontend:** give a table's first order and its reset the same direction ([17faa10](https://github.com/zwldarren/llm-proxy/commit/17faa10be65ad9abebf4f3268081a6ed31e3f689))
+* **frontend:** give the config forms and pricing cells accessible names ([2e8dd62](https://github.com/zwldarren/llm-proxy/commit/2e8dd6271bfcea3554413ff8225f22d3380f5282))
+* **frontend:** give the log rows real icons and the skeleton the real geometry ([d20f38e](https://github.com/zwldarren/llm-proxy/commit/d20f38e071f25a768b9bf58f889353d5d481ce74))
+* **frontend:** keep a failed refresh on the log tab that failed ([fd0880f](https://github.com/zwldarren/llm-proxy/commit/fd0880f67f91c384cf7879692f8103eeb4099205))
+* **frontend:** keep config edits, and their attribution, from being lost ([b48228a](https://github.com/zwldarren/llm-proxy/commit/b48228a344c7eda67b89cde0c3a5b787d7f3e40d))
+* **frontend:** keep the delete dialog open while a deletion is running ([08697d3](https://github.com/zwldarren/llm-proxy/commit/08697d3a3dcb4d15538dde3dacae019be6f61f23))
+* **frontend:** let the number be data and the words be words ([2171dd7](https://github.com/zwldarren/llm-proxy/commit/2171dd7f37ed94a165736eac5b8c611989ad5d0b))
+* **frontend:** make the tables and the pager fit the column they sit in ([63e8d24](https://github.com/zwldarren/llm-proxy/commit/63e8d2489b7958fab8a32d941b323fa014cb5c30))
+* **frontend:** measure the tables, not the window, when hiding columns ([dd2f91b](https://github.com/zwldarren/llm-proxy/commit/dd2f91bcd928f88247206a858b289a54141c6cde))
+* **frontend:** mount the command palette once, clear its header corner ([01c27c3](https://github.com/zwldarren/llm-proxy/commit/01c27c341438e23967bf169c3f2207aa27c6afd5))
+* **frontend:** name the row action buttons after the row they act on ([f4cab34](https://github.com/zwldarren/llm-proxy/commit/f4cab341bcb93863a72d20e1c19f00f00aec363e))
+* **frontend:** put back the labels and voices the console was mixing up ([fa8bfcd](https://github.com/zwldarren/llm-proxy/commit/fa8bfcd3dcbe858d1fee5663ad0be92f0f3af60b))
+* **frontend:** put the settings cards on the same padding grid ([ec6a0b8](https://github.com/zwldarren/llm-proxy/commit/ec6a0b845d361d8d173aaae92dc2ba3e2eedb2d8))
+* **frontend:** read money at its own scale, and keep the log detail in one language ([f243324](https://github.com/zwldarren/llm-proxy/commit/f243324f67075d8d6b3ce91b9eeba2d22aea1589))
+* **frontend:** read the key's usage sheet as a panel, not a card grid ([2aa2ff3](https://github.com/zwldarren/llm-proxy/commit/2aa2ff3ef5499c97758869a1e312fe1f6c1357e3))
+* **frontend:** round the megabyte fields honestly and stop borrowing the search icon ([5b0bb7a](https://github.com/zwldarren/llm-proxy/commit/5b0bb7a2a4224b98a7c3bb7a1b288dd8baed74c5))
+* **frontend:** say a settings save error once, not once per row ([747803b](https://github.com/zwldarren/llm-proxy/commit/747803bb1a5bb49ee3e08cf0d23375d39e4e62bf))
+* **frontend:** show an unknown spend as unknown, not as zero ([c779465](https://github.com/zwldarren/llm-proxy/commit/c77946503cf57729769105302eed2fa0cc9d51c5))
+* **frontend:** stack a settings row on a phone and stop the ragged figures ([b76c237](https://github.com/zwldarren/llm-proxy/commit/b76c2377b4830b1977f156f587b1e653bdf5a585))
+* **frontend:** stop printing backend identifiers and dead ends at the operator ([49ccccd](https://github.com/zwldarren/llm-proxy/commit/49ccccd4e1c7092b731bc9356e56f451f742b064))
+* **frontend:** stop the collapsed nav rail swallowing its own clicks ([25d04cd](https://github.com/zwldarren/llm-proxy/commit/25d04cdaa18a292a00cd0606d72fa85636bf0ddc))
+* **frontend:** stop the dashboard and the filter strip from lying about state ([0ee806d](https://github.com/zwldarren/llm-proxy/commit/0ee806d6d6600563bd5b62814751f903f6000abc))
+* **frontend:** stop the logs view lying about what it does not know ([d58bc7b](https://github.com/zwldarren/llm-proxy/commit/d58bc7b7652642583e56194d48ee3a9b3eaf9c4f))
+
 ## [0.5.5](https://github.com/zwldarren/llm-proxy/compare/v0.5.4...v0.5.5) (2026-11-07)
 
 
