@@ -33,45 +33,34 @@ const hasOpenCircuits = computed(
   () => props.circuitStates?.circuits.some((c) => c.state === "open") ?? false
 );
 
+const CIRCUIT_STATES = {
+  open: { order: 0, variant: "destructive", label: "circuitBreaker.stateOpen" },
+  half_open: { order: 1, variant: "warning", label: "circuitBreaker.stateHalfOpen" },
+  closed: { order: 2, variant: "secondary", label: "circuitBreaker.stateClosed" },
+} as const;
+
+function circuitState(state: string) {
+  return CIRCUIT_STATES[state as keyof typeof CIRCUIT_STATES];
+}
+
 const sortedCircuits = computed(() => {
   const circuits = props.circuitStates?.circuits ?? [];
   return [...circuits].sort((a, b) => {
-    const stateOrder = { open: 0, half_open: 1, closed: 2 };
-    const aOrder = stateOrder[a.state] ?? 3;
-    const bOrder = stateOrder[b.state] ?? 3;
+    const aOrder = circuitState(a.state)?.order ?? 3;
+    const bOrder = circuitState(b.state)?.order ?? 3;
     if (aOrder !== bOrder) return aOrder - bOrder;
     return a.provider.localeCompare(b.provider);
   });
 });
 
 function getStateVariant(state: string) {
-  switch (state) {
-    case "open":
-      return "destructive";
-    case "half_open":
-      return "warning";
-    case "closed":
-      return "secondary";
-    default:
-      return "secondary";
-  }
+  return circuitState(state)?.variant ?? "secondary";
 }
 
-/**
- * Backend state names are Python identifiers. Printing them raw put
- * "half_open" in the middle of an otherwise translated panel.
- */
+/** Backend identifiers stay readable when a future state has no translation. */
 function stateLabel(state: string): string {
-  switch (state) {
-    case "open":
-      return t("circuitBreaker.stateOpen");
-    case "half_open":
-      return t("circuitBreaker.stateHalfOpen");
-    case "closed":
-      return t("circuitBreaker.stateClosed");
-    default:
-      return state;
-  }
+  const label = circuitState(state)?.label;
+  return label ? t(label) : state;
 }
 
 function formatCooldown(key: string): string {
