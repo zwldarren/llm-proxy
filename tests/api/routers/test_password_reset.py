@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from llm_proxy.api.middleware.exceptions import register_exception_handlers
 from llm_proxy.api.routers.auth import router as auth_router
 from llm_proxy.config.types.auth import ProxyAuthConfig
-from llm_proxy.config.types.console_auth import ConsoleAuthSettings, SmtpSettings
+from llm_proxy.config.types.console_auth import ConsoleAuthSettings, ResendSettings, SmtpSettings
 from llm_proxy.database import get_async_session
 from llm_proxy.security.jwt import JWTManager
 from llm_proxy.security.passwords import hash_password, verify_password
@@ -62,7 +62,12 @@ def _user(
     return user
 
 
-def _console_auth(*, smtp: bool = True, public_url: str = "https://proxy.example.com"):
+def _console_auth(
+    *,
+    smtp: bool = True,
+    resend: bool = False,
+    public_url: str = "https://proxy.example.com",
+):
     return ConsoleAuthSettings(
         public_base_url=public_url,
         smtp=SmtpSettings(
@@ -70,13 +75,22 @@ def _console_auth(*, smtp: bool = True, public_url: str = "https://proxy.example
             host="smtp.example.com" if smtp else "",
             from_address="proxy@example.com" if smtp else "",
         ),
+        resend=ResendSettings(
+            enabled=resend,
+            api_key="re_test_key" if resend else "",
+            from_address="proxy@example.com" if resend else "",
+        ),
     )
 
 
-def _config(*, smtp: bool = True, public_url: str = "https://proxy.example.com") -> MagicMock:
+def _config(
+    *, smtp: bool = True, resend: bool = False, public_url: str = "https://proxy.example.com"
+) -> MagicMock:
     config = MagicMock()
     config.server_params.auth = ProxyAuthConfig(jwt_secret=TEST_SECRET)
-    config.server_params.console_auth = _console_auth(smtp=smtp, public_url=public_url)
+    config.server_params.console_auth = _console_auth(
+        smtp=smtp, resend=resend, public_url=public_url
+    )
     manager = MagicMock()
     manager.get_config = AsyncMock(return_value=config)
     manager.get_cached_config = MagicMock(return_value=config)
@@ -84,11 +98,13 @@ def _config(*, smtp: bool = True, public_url: str = "https://proxy.example.com")
     return manager
 
 
-def _client(*, smtp: bool = True, public_url: str = "https://proxy.example.com") -> TestClient:
+def _client(
+    *, smtp: bool = True, resend: bool = False, public_url: str = "https://proxy.example.com"
+) -> TestClient:
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(auth_router)
-    app.state.config_manager = _config(smtp=smtp, public_url=public_url)
+    app.state.config_manager = _config(smtp=smtp, resend=resend, public_url=public_url)
     app.dependency_overrides[get_async_session] = lambda: AsyncMock()
     return TestClient(app, raise_server_exceptions=False)
 
@@ -165,6 +181,23 @@ class TestRequestReset:
         assert response.status_code == 202, response.text
         assert response.json() == {"requested": True}
         send.assert_not_awaited()
+
+    def test_emails_through_resend_when_it_is_the_selected_transport(self) -> None:
+        user = _user()
+        repo = AsyncMock()
+        repo.get_by_login = AsyncMock(return_value=user)
+
+        with (
+            patch("llm_proxy.api.routers.auth.UserRepository", return_value=repo),
+            patch("llm_proxy.api.routers.auth.send_email", new=AsyncMock()) as send,
+        ):
+            response = _client(resend=True).post(
+                "/api/auth/password/forgot", json={"identifier": "alice@example.com"}
+            )
+
+        assert response.status_code == 202, response.text
+        send.assert_awaited_once()
+        assert send.await_args.args[0].kind == "resend"
 
     def test_emails_a_link_for_an_eligible_account(self) -> None:
         user = _user()
