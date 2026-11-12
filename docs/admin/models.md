@@ -10,7 +10,7 @@ or more providers with capability flags, context size, and prices.
 | Part | Purpose |
 | --- | --- |
 | **Name** | The client-facing alias (e.g. `gpt-5.6-luna`). Unique. Exact match only — no wildcards |
-| **Provider mappings** | One entry per provider that can serve it: `provider_name`, upstream `provider_model_name`, and `priority` |
+| **Provider mappings** | One entry per provider that can serve it: `provider_name`, upstream `provider_model_name`, `priority`, and `weight` |
 | **Capability flags** | `supports_images` (vision), `supports_image_generation`, `supports_tts`, `supports_stt`, `supports_embedding`, `supports_rerank`, `supports_realtime`, `supports_systemone` (decision models) |
 | **Catalog metadata** | `context_length`, `max_output_tokens`, family, release date, knowledge cut-off, and models.dev attributes (`attachment`, `reasoning`, `tool_call`, `structured_output`, `temperature`, `open_weights`, `status`) |
 | **Pricing** | Model-level rates, optionally overridden per mapping (see below) |
@@ -25,12 +25,23 @@ with a `400`), and `supports_systemone` marks a decision model — it gates both
 evaluation endpoints, `/v1/systemone` and `/v1/decisions`; the remaining flags
 are catalog/display metadata.
 
-## Provider priority and fallback
+## Provider priority, weight and fallback {#provider-priority-and-fallback}
 
 - Selection uses the **mapping's** `priority` (higher wins): the provider's own
   `priority` field is not consulted.
 - Candidates are grouped by mapping priority; the highest non-empty group is tried
   first, then the rest in order.
+- A mapping's **`weight`** (default `1`) splits traffic inside its own priority
+  group: with weights `2` and `1`, the `2` is picked twice as often as the `1`.
+  `0` means "never preferred" — the mapping stays the group's last-resort
+  fallback but is not picked while a weighted mapping is still usable. The value
+  is a float, so `1.5` is a valid split.
+- How a weight is applied follows the strategy: `random` samples with probability
+  proportional to weight, `session_sticky` weights its rendezvous hash (still
+  deterministic per conversation, so the split shows up across conversations),
+  and `cost_optimized`/`balanced` divide their score by it — a weight of `2`
+  tolerates twice the price (or combined cost+latency score) of a weight of `1`.
+  With every weight at `1` the selection is exactly what it was before.
 - Within a group, the global [provider selection strategy](settings.md#provider-selection)
   orders candidates (`session_sticky` by default, or random/cost-optimized/balanced).
 - Each mapping is attempted once per request. Failures retry within the provider

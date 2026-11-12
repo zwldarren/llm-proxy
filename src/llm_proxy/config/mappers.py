@@ -71,6 +71,7 @@ def map_model_provider_record(mapping: ModelProviderRecord) -> ModelProviderConf
     return ModelProviderConfig(
         provider=provider.name,
         priority=mapping.priority,
+        weight=mapping.weight,
         provider_model_name=mapping.provider_model_name,
         input_cost_per_1m=mapping.input_cost_per_1m,
         output_cost_per_1m=mapping.output_cost_per_1m,

@@ -140,6 +140,19 @@ describe("useModelForm seeding", () => {
     expect(form.form.value.providers[1]!.parameter_overrides).toEqual({});
   });
 
+  it("openForEdit keeps a stored weight and defaults a missing one to 1", () => {
+    const form = useModelForm();
+    form.openForEdit(
+      savedModel({
+        providers: [savedProvider({ provider_name: "heavy", weight: 3 }), savedProvider()],
+      })
+    );
+
+    expect(form.form.value.providers[0]!.weight).toBe(3);
+    expect(form.form.value.providers[1]!.weight).toBe(1);
+    expect(form.buildPayload().providers.map((p) => p.weight)).toEqual([3, 1]);
+  });
+
   it("openForEdit keeps the model parameter overrides for the builder", () => {
     const form = useModelForm();
     form.openForEdit(savedModel({ parameter_overrides: { temperature: 0.7 } }));
@@ -279,6 +292,11 @@ describe("useModelForm buildPayload", () => {
         parameter_overrides: {},
       })
     );
+  });
+
+  it("sends a neutral weight for a provider row the form never touched", () => {
+    const payload = validDraft().buildPayload();
+    expect(payload.providers[0]!.weight).toBe(1);
   });
 
   it("sends null pricing tiers when none are configured", () => {

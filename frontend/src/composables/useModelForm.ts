@@ -72,6 +72,7 @@ function emptyProviderMapping(): ModelProviderMapping {
   return {
     provider_name: "",
     priority: 0,
+    weight: 1,
     provider_model_name: "",
     input_cost_per_1m: null,
     output_cost_per_1m: null,
@@ -134,6 +135,7 @@ export function useModelForm() {
   const editingProviderData = ref<ModelProviderMapping>({
     provider_name: "",
     priority: 0,
+    weight: 1,
     provider_model_name: "",
   });
 
@@ -238,6 +240,7 @@ export function useModelForm() {
             .map((p) => ({
               provider_name: p.provider_name,
               priority: p.priority || 0,
+              weight: p.weight ?? 1,
               provider_model_name: p.provider_model_name,
               input_cost_per_1m: p.input_cost_per_1m ?? null,
               output_cost_per_1m: p.output_cost_per_1m ?? null,
@@ -335,6 +338,7 @@ export function useModelForm() {
       providers: data.providers.map((p) => ({
         provider_name: p.provider_name,
         priority: p.priority,
+        weight: p.weight ?? 1,
         provider_model_name: p.provider_model_name,
         input_cost_per_1m: p.input_cost_per_1m ?? null,
         output_cost_per_1m: p.output_cost_per_1m ?? null,

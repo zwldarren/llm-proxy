@@ -41,6 +41,7 @@ def _mapping(**overrides) -> SimpleNamespace:
     defaults = dict(
         provider=SimpleNamespace(name="openai"),
         priority=1,
+        weight=1.0,
         provider_model_name="gpt-4o",
         input_cost_per_1m=5.0,
         output_cost_per_1m=15.0,
@@ -215,6 +216,19 @@ def test_map_model_provider_record_maps_all_pricing():
     assert len(config.pricing_tiers) == 1
     assert config.pricing_tiers[0].threshold == 272000
     assert config.pricing_tiers[0].input_cost_per_1m == 5.0
+
+
+def test_map_model_provider_record_carries_the_weight():
+    """The traffic split travels with the mapping, not with the provider."""
+    config = map_model_provider_record(_mapping(weight=2.5))
+
+    assert config.weight == 2.5
+
+
+def test_map_model_provider_record_defaults_to_a_neutral_weight():
+    config = map_model_provider_record(_mapping())
+
+    assert config.weight == 1.0
 
 
 def test_map_model_provider_record_null_pricing_tiers_means_inherit():

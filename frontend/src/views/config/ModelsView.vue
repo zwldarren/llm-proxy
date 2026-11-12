@@ -631,11 +631,12 @@ const confirmDelete = async () => {
                 <div class="border-t border-border/60">
                   <div
                     v-if="newModel.providers.length > 0"
-                    class="hidden sm:grid grid-cols-[1.5fr_2fr_80px_90px] gap-3 py-2 border-b border-border/60 text-[11px] uppercase tracking-wider text-muted-foreground font-medium"
+                    class="hidden sm:grid grid-cols-[1.5fr_2fr_72px_72px_88px] gap-3 py-2 border-b border-border/60 text-[11px] uppercase tracking-wider text-muted-foreground font-medium"
                   >
                     <div>{{ t("models.provider") }}</div>
                     <div>{{ t("models.providerModelName") }}</div>
                     <div class="text-center">{{ t("models.priority") }}</div>
+                    <div class="text-center">{{ t("models.weight") }}</div>
                     <div class="text-right">{{ t("common.actions") }}</div>
                   </div>
 
@@ -643,7 +644,7 @@ const confirmDelete = async () => {
                     <div
                       v-for="(p, index) in newModel.providers"
                       :key="index"
-                      class="grid grid-cols-1 sm:grid-cols-[1.5fr_2fr_80px_90px] gap-3 py-3 items-center hover:bg-muted/10 transition-colors"
+                      class="grid grid-cols-1 sm:grid-cols-[1.5fr_2fr_72px_72px_88px] gap-3 py-3 items-center hover:bg-muted/10 transition-colors"
                     >
                       <div class="space-y-1 sm:space-y-0">
                         <span
@@ -701,6 +702,22 @@ const confirmDelete = async () => {
                         />
                       </div>
 
+                      <div class="space-y-1 sm:space-y-0">
+                        <span
+                          class="text-[11px] text-muted-foreground uppercase font-medium sm:hidden block"
+                        >
+                          {{ t("models.weight") }}
+                        </span>
+                        <NumberInput
+                          v-model.number="p.weight"
+                          class="h-8 text-xs text-center"
+                          :placeholder="t('placeholders.weight')"
+                          :aria-label="t('models.weight')"
+                          min="0"
+                          step="0.5"
+                        />
+                      </div>
+
                       <div
                         class="flex items-center justify-end gap-1.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50"
                       >
@@ -739,9 +756,14 @@ const confirmDelete = async () => {
                     {{ t("models.noProvidersConfigured") }}
                   </div>
                 </div>
-                <p class="text-[11px] text-muted-foreground">
-                  {{ t("models.priorityHelp") }}
-                </p>
+                <div class="space-y-1">
+                  <p class="text-[11px] text-muted-foreground">
+                    {{ t("models.priorityHelp") }}
+                  </p>
+                  <p class="text-[11px] text-muted-foreground">
+                    {{ t("models.weightHelp") }}
+                  </p>
+                </div>
               </div>
             </TabsContent>
 
@@ -1471,14 +1493,28 @@ const confirmDelete = async () => {
             </div>
           </div>
 
-          <div class="grid gap-2 w-32">
-            <Label>{{ t("models.priority") }}</Label>
-            <NumberInput
-              v-model.number="editingProviderData.priority"
-              class="h-9"
-              :placeholder="t('placeholders.priority')"
-            />
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label>{{ t("models.priority") }}</Label>
+              <NumberInput
+                v-model.number="editingProviderData.priority"
+                class="h-9"
+                :placeholder="t('placeholders.priority')"
+                min="0"
+              />
+            </div>
+            <div class="grid gap-2">
+              <Label>{{ t("models.weight") }}</Label>
+              <NumberInput
+                v-model.number="editingProviderData.weight"
+                class="h-9"
+                :placeholder="t('placeholders.weight')"
+                min="0"
+                step="0.5"
+              />
+            </div>
           </div>
+          <p class="text-[11px] text-muted-foreground -mt-2">{{ t("models.weightHelp") }}</p>
 
           <div class="border-t pt-4">
             <Label class="text-sm font-medium mb-3 block">{{ t("models.providerCosts") }}</Label>

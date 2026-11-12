@@ -51,6 +51,12 @@ export interface ModelProviderMapping {
    */
   priority?: number;
   /**
+   * Relative share of traffic this mapping receives inside its priority group
+   * (1 = normal, 2 = twice as likely as a 1, 0 = last-resort only).
+   * @default 1
+   */
+  weight?: number;
+  /**
    * The model name to use with this provider (e.g., 'gpt-4o', 'claude-3-opus').
    */
   provider_model_name: string;

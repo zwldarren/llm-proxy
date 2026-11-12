@@ -137,6 +137,13 @@ How providers of the same priority are ordered when several can serve a model:
 
 Higher-priority groups are always tried before lower ones, regardless of strategy.
 
+Each provider mapping also carries a **weight** (default `1`, set next to its
+priority in the model form) that splits traffic inside its own priority group: a
+weight of `2` receives twice the requests of a weight of `1`, and `0` keeps the
+provider as a last-resort fallback. `random` and `session_sticky` sample by that
+weight, while `cost_optimized` and `balanced` divide their score by it. At the
+default weight `1` nothing changes. See [Models & Pricing → Provider priority](models.md#provider-priority-and-fallback).
+
 The sticky key prefers the client's own session header (`x-opencode-session`,
 `x-claude-code-session-id`, Codex's `x-codex-turn-metadata`, Pi's
 `x-session-affinity`, …), then an explicit session id in the request body, then the

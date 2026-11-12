@@ -58,11 +58,12 @@ class ProviderRecord(Base):
 
 
 class ModelProviderRecord(Base):
-    """Database model for model-provider relationship with priority.
+    """Database model for model-provider relationship with priority and weight.
 
     This join table allows a model to have multiple providers with different
-    priorities for fallback support. Each provider mapping can have its own
-    pricing (input_cost_per_1m, output_cost_per_1m).
+    priorities for fallback support, and a weight that splits traffic inside a
+    priority group. Each provider mapping can have its own pricing
+    (input_cost_per_1m, output_cost_per_1m).
     """
 
     __tablename__ = "model_providers"
@@ -79,6 +80,11 @@ class ModelProviderRecord(Base):
         ForeignKey("providers.id", ondelete="CASCADE"), nullable=False
     )
     priority: Mapped[int] = mapped_column(default=0)
+    # Share of traffic this mapping gets inside its priority group. 1 is the
+    # neutral value (a 2 is picked twice as often as a 1); 0 keeps the mapping
+    # as a last-resort fallback only. Non-null so a mapping inserted outside the
+    # ORM still parses as "normal".
+    weight: Mapped[float] = mapped_column(Float, default=1.0, server_default=text("1.0"))
     provider_model_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     # Per-provider pricing (overrides model-level pricing when set)
@@ -114,7 +120,8 @@ class ModelProviderRecord(Base):
     def __repr__(self) -> str:
         return (
             f"<ModelProviderRecord(id={self.id}, model_id={self.model_id}, "
-            f"provider_id={self.provider_id}, priority={self.priority})>"
+            f"provider_id={self.provider_id}, priority={self.priority}, "
+            f"weight={self.weight})>"
         )
 
 

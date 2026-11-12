@@ -624,6 +624,7 @@ export default {
     provider: "提供商",
     providers: "提供商列表",
     priority: "优先级",
+    weight: "权重",
     modelName: "模型名称",
     modelNameHelperText: "客户端请求时使用的名称 (例如 gpt-4, my-claude)",
     providerModelName: "模型名称",
@@ -679,6 +680,8 @@ export default {
     noProvidersConfigured: "此模型尚未配置提供商。",
     priorityHelp:
       "数字越大优先级越高。优先级相同的提供商将按全局“提供商选择策略”进行调用（设置 → 高级）。",
+    weightHelp:
+      "权重用于在同优先级的提供商之间分配流量：权重 2 被选中的次数是权重 1 的两倍，权重 0 表示只作为最后兜底（默认值 1 不改变分配结果）。",
     addProvider: "添加提供商",
     selectProviderModel: "选择模型...",
     searchModels: "搜索模型...",
@@ -1206,6 +1209,7 @@ export default {
     selectProvider: "选择提供商",
     apiKeyOptional: "留空以保留现有密钥",
     priority: "100",
+    weight: "1",
     serverName: "my-mcp-server",
     command: "bunx",
     endpointUrl: "https://model.host.ai/v1/embeddings",

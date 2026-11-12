@@ -76,6 +76,7 @@ def model_record_to_read(model) -> ModelRead:
         ModelProviderMapping(
             provider_name=mapping.provider.name,
             priority=mapping.priority,
+            weight=mapping.weight,
             provider_model_name=mapping.provider_model_name or model.name,
             input_cost_per_1m=mapping.input_cost_per_1m,
             output_cost_per_1m=mapping.output_cost_per_1m,
@@ -161,6 +162,7 @@ def _build_providers_list(
         {
             "provider_name": p["provider_name"],
             "priority": p.get("priority", 0),
+            "weight": p.get("weight", 1.0),
             "provider_model_name": p.get("provider_model_name"),
             "input_cost_per_1m": p.get("input_cost_per_1m"),
             "output_cost_per_1m": p.get("output_cost_per_1m"),

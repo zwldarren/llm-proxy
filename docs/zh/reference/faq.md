@@ -13,7 +13,8 @@ API 密钥（`sk-…`）。反过来也一样：API 密钥在 `/api/*` 上会被
 ## 同一个模型名能映射到多个提供商吗？
 
 可以。模型映射本来就支持多个提供商。给每个映射设置 `priority`，优先级高的先用，失败后沿
-链条向下回退。见[模型与定价](/zh/admin/models#provider-priority-and-fallback)。
+链条向下回退。同优先级的映射还可以设置 `weight`（默认 `1`）来分配流量：`2` 与 `1` 并存
+时，`2` 接收的请求是 `1` 的两倍。见[模型与定价](/zh/admin/models#provider-priority-and-fallback)。
 
 ## 为什么 `cost_usd` 显示为 null？
 

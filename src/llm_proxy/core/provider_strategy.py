@@ -6,6 +6,20 @@ fallback naturally walks the ordering (used/unavailable keys are filtered out
 before each pick). Priority groups still dominate: strategies never reorder
 across priority levels.
 
+Every mapping also carries a ``weight`` (default 1) that splits traffic inside
+the group it belongs to: with a 2 and a 1, the 2 is picked twice as often. How
+weight enters the ordering depends on what the strategy means, and the neutral
+weight 1 makes it a no-op everywhere:
+
+- probabilistic strategies sample with probability proportional to weight
+  (``random``: weighted sampling without replacement; ``session_sticky``:
+  weighted rendezvous hashing, still deterministic per conversation);
+- ranking strategies treat it as a preference multiplier (``cost_optimized``
+  and ``balanced`` divide their score by the weight).
+
+A weight of 0 is "never preferred": the mapping stays a last-resort fallback
+but is not picked while any positive-weight candidate in its group remains.
+
 Strategies:
 
 - ``random``: uniform random pick — spreads load evenly, at the cost of
@@ -30,6 +44,7 @@ Strategies:
 """
 
 import hashlib
+import math
 import random
 import statistics
 from dataclasses import dataclass
@@ -102,8 +117,91 @@ def _sticky_redis_key(conversation_key: str, model_name: str) -> str:
 
 
 def _rendezvous_score(conversation_key: str, candidate_key: str) -> str:
-    """Deterministic rendezvous-hashing score (higher wins)."""
+    """Deterministic rendezvous-hashing digest for a conversation/mapping pair.
+
+    Returned as hex so the full 256 bits stay in the ordering; the weighted
+    ordering in :func:`_sticky_ranked` maps it into ``(0, 1]`` to apply the
+    mapping's weight.
+    """
     return hashlib.sha256(f"{conversation_key}:{candidate_key}".encode()).hexdigest()
+
+
+# Size of the space a rendezvous digest is read into. Keeps the derived value
+# in (0, 1] so ``-ln(u)`` is finite at the top of the range.
+_RENDEZVOUS_HASH_SPACE = 1 << 256
+
+
+def _effective_weight(provider: ModelProviderConfig) -> float:
+    """Weight of a mapping, clamped to the valid range.
+
+    ``ModelProviderConfig`` validates the field, but strategies are also
+    reachable with hand-built candidates from callers and tests, and an
+    unusable value must never fail a request: it falls back to the neutral 1.
+    """
+    weight = getattr(provider, "weight", 1.0)
+    if weight is None:
+        return 1.0
+    try:
+        return max(0.0, float(weight))
+    except TypeError, ValueError:
+        return 1.0
+
+
+def _preference_score(score: float, provider: ModelProviderConfig) -> float:
+    """Scale a lower-is-better score by the mapping's weight.
+
+    ``cost_optimized`` and ``balanced`` rank candidates deterministically, so
+    weight enters as a preference multiplier rather than a probability: the
+    score is divided by the weight, which is what lets a weight of 2 tolerate
+    twice the cost (or combined score) of a weight of 1. The default weight 1
+    leaves every score untouched; a zero weight never wins a comparison.
+    """
+    weight = _effective_weight(provider)
+    if weight <= 0:
+        return float("inf")
+    return score / weight
+
+
+def _weighted_sample_ordered(available: list[Candidate], rng: random.Random) -> list[Candidate]:
+    """Weighted random permutation (Efraimidis-Spirakis sampling keys).
+
+    Each candidate is keyed by ``u ** (1 / weight)`` and the keys are sorted
+    descending, so the head is picked with probability proportional to its
+    weight (2 vs 1 gives 2/3 vs 1/3) while the tail stays a valid fallback
+    order. With every weight at 1 the keys are uniform and this is the same
+    uniform shuffle the strategies used before. Zero-weight candidates key to 0,
+    so they follow every positive-weight candidate in random order.
+
+    Sampling *without replacement* is what keeps the two properties the
+    selector relies on: the head is weighted, and the ordering it walks on
+    retry never repeats a mapping.
+    """
+    keyed: list[tuple[float, float, Candidate]] = []
+    for candidate in available:
+        weight = _effective_weight(candidate[0])
+        sample = rng.random() ** (1.0 / weight) if weight > 0 else 0.0
+        keyed.append((sample, rng.random(), candidate))
+    keyed.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [candidate for _, _, candidate in keyed]
+
+
+def _weighted_pick(available: list[Candidate], rng: random.Random) -> Candidate:
+    """Pick one candidate with probability proportional to its weight."""
+    weights = [_effective_weight(candidate[0]) for candidate in available]
+    total = sum(weights)
+    if total <= 0:
+        # Nothing in the set carries a preference; fall back to a uniform draw
+        # rather than failing the request.
+        return rng.choice(available)
+    target = rng.random() * total
+    cumulative = 0.0
+    for candidate, weight in zip(available, weights, strict=True):
+        if weight <= 0:
+            continue
+        cumulative += weight
+        if cumulative > target:
+            return candidate
+    return available[-1]
 
 
 def _estimated_cost(model_config: ModelConfig, provider: ModelProviderConfig) -> float:
@@ -137,13 +235,20 @@ def _max_normalize(values: list[float]) -> list[float]:
 
 
 def _cost_ordered(available: list[Candidate], ctx: StrategyContext) -> list[Candidate]:
-    """Order candidates by ascending estimated cost; shuffle ties."""
+    """Order candidates by ascending weighted cost; shuffle ties.
+
+    Weight divides the estimated cost (:func:`_preference_score`), so a heavier
+    mapping wins more often without losing the cost ranking among equals.
+    """
     rng = ctx.rng or _default_rng
     # (cost, random tiebreak) keeps ordering deterministic on price while
     # spreading load across equally-priced providers.
     return sorted(
         available,
-        key=lambda pk: (_estimated_cost(ctx.model_config, pk[0]), rng.random()),
+        key=lambda pk: (
+            _preference_score(_estimated_cost(ctx.model_config, pk[0]), pk[0]),
+            rng.random(),
+        ),
     )
 
 
@@ -175,26 +280,48 @@ def _balanced_ordered(available: list[Candidate], ctx: StrategyContext) -> list[
     norm_cost = _max_normalize(filled_cost)
     norm_latency = _max_normalize(filled_latency)
     scored = [
-        (_BALANCED_COST_WEIGHT * nc + _BALANCED_LATENCY_WEIGHT * nl, rng.random(), pk)
+        (
+            _preference_score(_BALANCED_COST_WEIGHT * nc + _BALANCED_LATENCY_WEIGHT * nl, pk[0]),
+            rng.random(),
+            pk,
+        )
         for pk, nc, nl in zip(available, norm_cost, norm_latency, strict=True)
     ]
     scored.sort(key=lambda item: (item[0], item[1]))
     ordered = [pk for _, _, pk in scored]
-    if len(ordered) > 1 and rng.random() < _BALANCED_EXPLORE_RATE:
-        # Exploration turn: start on a runner-up, keep the remaining ordering so
-        # a fallback inside this request still drifts consistently.
-        head = rng.choice(ordered[1:])
+    # Zero-weight mappings are excluded from exploration: their weight says the
+    # group's traffic should not land there while anything else is available.
+    runner_ups = [pk for pk in ordered[1:] if _effective_weight(pk[0]) > 0]
+    if runner_ups and rng.random() < _BALANCED_EXPLORE_RATE:
+        # Exploration turn: start on a runner-up (weighted, so heavier mappings
+        # are explored more), keep the remaining ordering so a fallback inside
+        # this request still drifts consistently.
+        head = _weighted_pick(runner_ups, rng)
         return [head, *[pk for pk in ordered if pk[1] != head[1]]]
     return ordered
 
 
 def _sticky_ranked(available: list[Candidate], conv_key: str) -> list[Candidate]:
-    """Rendezvous-hash ordering: deterministic per conversation key."""
-    return sorted(
-        available,
-        key=lambda pk: _rendezvous_score(conv_key, pk[1]),
-        reverse=True,
-    )
+    """Weighted rendezvous-hash ordering: deterministic per conversation key.
+
+    Plain rendezvous hashing gives every mapping the same chance of being a
+    conversation's head. Weighting it with ``-ln(u) / weight`` keeps the head
+    deterministic per conversation while making a weight-2 mapping head twice
+    as often as a weight-1 one across conversations. Weight 1 is monotone with
+    the bare hash, so existing conversations keep the provider they had.
+
+    A zero-weight mapping scores ``inf`` and is therefore ranked last instead
+    of being removed: it stays the group's fallback.
+    """
+
+    def score(candidate: Candidate) -> float:
+        weight = _effective_weight(candidate[0])
+        if weight <= 0:
+            return float("inf")
+        unit = (int(_rendezvous_score(conv_key, candidate[1]), 16) + 1) / _RENDEZVOUS_HASH_SPACE
+        return -math.log(unit) / weight
+
+    return sorted(available, key=score)
 
 
 def _sticky_ordered(
@@ -212,9 +339,8 @@ def _sticky_ordered(
     conv_key = ctx.conversation_key
     rng = ctx.rng or _default_rng
     if not conv_key:
-        shuffled = list(available)
-        rng.shuffle(shuffled)
-        return shuffled
+        # No conversation signal to hash on: pick proportionally to weight.
+        return _weighted_sample_ordered(available, rng)
 
     ordered = _sticky_ranked(available, conv_key)
     available_keys = {k for _, k in available}
@@ -323,9 +449,7 @@ def order_providers(
         # Defensive fallback for unknown future strategies: preserve current
         # behavior (random) rather than failing the request.
         logger.warning(f"Unknown provider strategy '{strategy}', falling back to random")
-    shuffled = list(available)
-    rng.shuffle(shuffled)
-    return shuffled
+    return _weighted_sample_ordered(available, rng)
 
 
 def pick_provider(

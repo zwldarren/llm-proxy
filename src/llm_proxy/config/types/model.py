@@ -397,6 +397,15 @@ class ModelProviderConfig(BaseModel):
         ge=0,
         description="Priority for provider selection (higher = preferred)",
     )
+    weight: float = Field(
+        default=1.0,
+        ge=0,
+        description=(
+            "Relative share of traffic this mapping receives inside its priority group "
+            "(1 = normal; 2 = twice as likely as a 1; 0 = only picked when nothing "
+            "else in the group is left)"
+        ),
+    )
     provider_model_name: str | None = Field(
         default=None,
         description="Upstream model name for this specific provider",

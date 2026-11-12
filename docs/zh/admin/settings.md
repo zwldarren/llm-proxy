@@ -93,6 +93,12 @@ MCP 服务器的默认拒绝策略：允许/禁止的命令、环境变量过滤
 
 无论采用哪种策略，高优先级组总是先于低优先级组尝试。
 
+每个提供商映射还带一个**权重**（默认 `1`，在模型表单里紧挨着优先级设置），
+用于在它所在的优先级组内分配流量：权重 `2` 接收的请求是权重 `1` 的两倍，
+权重 `0` 表示只作为最后兜底。`random` 与 `session_sticky` 按权重抽样，
+`cost_optimized` 与 `balanced` 则用权重去除自己的打分。保持默认权重 `1` 时行为不变。
+详见[模型与定价 → 提供商优先级](/zh/admin/models#provider-priority-and-fallback)。
+
 会话粘性优先看客户端自己的会话请求头（`x-opencode-session`、`x-claude-code-session-id`、Codex 的 `x-codex-turn-metadata`、Pi 的 `x-session-affinity` 等），其次是请求体里显式的会话 id，然后是可信代理传来的 `x-session-id`，最后是首条用户消息的哈希。这与 [OpenCode 线路](/zh/admin/providers) 转给上游的对话句柄是同一个键，所以两层对「对话属于谁」的判断一致。Redis 会记住这个对应关系 30 分钟；如果对话实际由漂移后的提供商（回退）在服务，而不是按哈希选中的那个，就在服务期间持续续期。
 
 ### 重试与回退 {#retry-fallback}

@@ -10,7 +10,7 @@
 | 部分 | 作用 |
 | --- | --- |
 | **名称** | 面向客户端的别名（例如 `gpt-5.6-luna`）。唯一，只做精确匹配——不支持通配符 |
-| **提供商映射** | 每个能服务该模型的提供商一条：`provider_name`、上游的 `provider_model_name`、以及 `priority` |
+| **提供商映射** | 每个能服务该模型的提供商一条：`provider_name`、上游的 `provider_model_name`、`priority` 和 `weight` |
 | **能力标记** | `supports_images`（视觉）、`supports_image_generation`、`supports_tts`、`supports_stt`、`supports_embedding`、`supports_rerank`、`supports_realtime`、`supports_systemone`（决策模型） |
 | **目录元数据** | `context_length`、`max_output_tokens`、系列、发布日期、知识截止时间，以及 models.dev 属性（`attachment`、`reasoning`、`tool_call`、`structured_output`、`temperature`、`open_weights`、`status`） |
 | **定价** | 模型级费率，可按映射覆盖（见下文） |
@@ -24,11 +24,20 @@
 `supports_systemone` 标记决策模型——它同时是 `/v1/systemone` 和 `/v1/decisions`
 两个评估端点的门槛；其余标记只是目录和展示用的元数据。
 
-## 提供商优先级与回退 {#provider-priority-and-fallback}
+## 提供商优先级、权重与回退 {#provider-priority-and-fallback}
 
 - 选择时用的是**映射**上的 `priority`（越高越优先）：提供商自身的 `priority` 字段
   不参与。
 - 候选按映射优先级分组；先试最高的非空组，然后依次试其余各组。
+- 映射上的 **`weight`**（默认 `1`）在它所在的优先级组内分配流量：权重 `2` 与 `1`
+  并存时，`2` 被选中的次数是 `1` 的两倍。`0` 表示“不主动选中”——该映射仍留在组内
+  作为最后兜底，但只要还有正权重的映射可用就不会选它。取值是浮点数，`1.5` 这类
+  比例同样有效。
+- 权重的用法随策略而定：`random` 按权重比例抽样；`session_sticky` 把权重加进
+  rendezvous 哈希（同一会话仍然确定，分配比例体现在不同会话之间）；
+  `cost_optimized` 与 `balanced` 则用权重去除自己的打分——权重 `2` 的映射能容忍
+  两倍于权重 `1` 的价格（或成本+延迟综合分）。所有权重都是 `1` 时，选择行为与
+  之前完全一致。
 - 同一组内，由全局的[提供商选择策略](/zh/admin/settings#provider-selection)决定顺序（默认
   `session_sticky`，也可选 random/cost-optimized/balanced）。
 - 每个映射在每个请求中只尝试一次。失败后先在提供商内部重试（`max_retries`），再跨

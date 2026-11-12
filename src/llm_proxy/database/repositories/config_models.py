@@ -19,6 +19,16 @@ from llm_proxy.database.tables import ModelProviderRecord, ModelRecord
 _UNSET = sentinel("_UNSET")
 
 
+def _mapping_weight(prov_config: dict[str, Any]) -> float:
+    """Weight of a submitted provider mapping; absent/None means neutral ``1.0``.
+
+    An explicit ``0`` is meaningful (last-resort only) and must survive, so this
+    cannot be an ``or`` fallback.
+    """
+    weight = prov_config.get("weight")
+    return 1.0 if weight is None else float(weight)
+
+
 class ModelRepository(BaseRepository):
     """Repository for model configuration operations."""
 
@@ -67,6 +77,7 @@ class ModelRepository(BaseRepository):
                     model_id=model_id,
                     provider_id=prov.id,
                     priority=prov_config.get("priority", 0),
+                    weight=_mapping_weight(prov_config),
                     provider_model_name=prov_config.get("provider_model_name"),
                     input_cost_per_1m=prov_config.get("input_cost_per_1m"),
                     output_cost_per_1m=prov_config.get("output_cost_per_1m"),
@@ -102,7 +113,7 @@ class ModelRepository(BaseRepository):
             name: The model name (proxy-facing name)
             providers: List of provider configurations with priorities.
                 Each dict should have: provider_name (str), priority (int, default 0),
-                provider_model_name (str | None),
+                weight (float, default 1.0), provider_model_name (str | None),
                 input_cost_per_1m (float | None), output_cost_per_1m (float | None),
                 cached_read_cost_per_1m (float | None), cached_write_cost_per_1m (float | None),
                 audio_input_cost_per_1m (float | None), audio_output_cost_per_1m (float | None),
@@ -185,7 +196,7 @@ class ModelRepository(BaseRepository):
             name: The model name to update
             providers: Optional list of provider configurations to replace existing mappings.
                 Each dict should have: provider_name (str), priority (int, default 0),
-                provider_model_name (str | None),
+                weight (float, default 1.0), provider_model_name (str | None),
                 input_cost_per_1m (float | None), output_cost_per_1m (float | None),
                 cached_read_cost_per_1m (float | None), cached_write_cost_per_1m (float | None),
                 audio_input_cost_per_1m (float | None), audio_output_cost_per_1m (float | None),

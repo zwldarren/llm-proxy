@@ -1,5 +1,6 @@
 """Tests for pluggable provider-selection strategies (provider_strategy.py)."""
 
+import hashlib
 import random
 
 import pytest
@@ -53,10 +54,12 @@ def _provider(
     priority: int = 1,
     input_cost: float | None = None,
     output_cost: float | None = None,
+    weight: float = 1.0,
 ) -> ModelProviderConfig:
     return ModelProviderConfig(
         provider=name,
         priority=priority,
+        weight=weight,
         input_cost_per_1m=input_cost,
         output_cost_per_1m=output_cost,
     )
@@ -474,6 +477,179 @@ class TestBalancedStrategy:
 
         assert streamed[0].provider == "snappy"
         assert complete[0].provider == "steady"
+
+
+class TestProviderWeight:
+    """Traffic weight inside a priority group: 2 vs 1 means 2/3 vs 1/3."""
+
+    def _weighted_pair(self, heavy: float, light: float, cost: float = 2.0) -> tuple:
+        providers = [
+            _provider("heavy", input_cost=cost, output_cost=cost, weight=heavy),
+            _provider("light", input_cost=cost, output_cost=cost, weight=light),
+        ]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        return available, _model(providers)
+
+    def test_random_split_is_proportional_to_weight(self):
+        available, model = self._weighted_pair(heavy=2.0, light=1.0)
+        rng = random.Random(11)
+
+        picks = [
+            pick_provider(available, ProviderSelectionStrategy.RANDOM, _ctx(model, rng=rng))[
+                0
+            ].provider
+            for _ in range(2000)
+        ]
+
+        assert 0.62 < picks.count("heavy") / len(picks) < 0.72
+
+    def test_neutral_weights_split_evenly(self):
+        """Every weight at 1 must stay the uniform shuffle it was before."""
+        available, model = self._weighted_pair(heavy=1.0, light=1.0)
+        rng = random.Random(11)
+
+        picks = [
+            pick_provider(available, ProviderSelectionStrategy.RANDOM, _ctx(model, rng=rng))[
+                0
+            ].provider
+            for _ in range(2000)
+        ]
+
+        assert 0.44 < picks.count("heavy") / len(picks) < 0.56
+
+    def test_random_ordering_never_repeats_a_candidate(self):
+        """The tail is a fallback order, so it must be a permutation."""
+        available, model = self._weighted_pair(heavy=3.0, light=1.0)
+
+        ordered = order_providers(
+            available, ProviderSelectionStrategy.RANDOM, _ctx(model, rng=random.Random(4))
+        )
+
+        assert sorted(k for _, k in ordered) == sorted(k for _, k in available)
+
+    def test_sticky_head_split_is_proportional_to_weight(self):
+        """Across conversations a weight-2 mapping is the rendezvous head twice as often."""
+        providers = [_provider("heavy", weight=2.0), _provider("light", weight=1.0)]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        model = _model(providers)
+
+        heads = [
+            pick_provider(
+                available,
+                ProviderSelectionStrategy.SESSION_STICKY,
+                _ctx(model, conversation_key=f"conv-{i}"),
+            )[0].provider
+            for i in range(2000)
+        ]
+
+        assert 0.62 < heads.count("heavy") / len(heads) < 0.72
+
+    def test_sticky_stays_deterministic_per_conversation(self):
+        providers = [_provider("heavy", weight=2.0), _provider("light", weight=1.0)]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        model = _model(providers)
+        ctx = _ctx(model, conversation_key="conv-1")
+
+        first = pick_provider(available, ProviderSelectionStrategy.SESSION_STICKY, ctx)
+
+        for _ in range(10):
+            assert pick_provider(available, ProviderSelectionStrategy.SESSION_STICKY, ctx) == first
+
+    def test_neutral_weight_keeps_the_plain_rendezvous_order(self):
+        """Weight 1 must reproduce the bare hash ordering, so pins do not move."""
+        providers = [_provider("a"), _provider("b"), _provider("c")]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        expected = sorted(
+            available,
+            key=lambda pk: hashlib.sha256(f"conv-1:{pk[1]}".encode()).hexdigest(),
+            reverse=True,
+        )
+
+        assert _sticky_ranked(available, "conv-1") == expected
+
+    def test_zero_weight_is_ranked_last_but_kept_as_fallback(self):
+        providers = [_provider("off", weight=0.0), _provider("on", weight=1.0)]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        model = _model(providers)
+
+        for seed in range(50):
+            ordered = order_providers(
+                available, ProviderSelectionStrategy.RANDOM, _ctx(model, rng=random.Random(seed))
+            )
+            assert ordered[0][0].provider == "on"
+            assert ordered[-1][0].provider == "off"
+
+    def test_zero_weight_is_still_served_when_nothing_else_remains(self):
+        providers = [_provider("off", weight=0.0)]
+        available = [(p, "off::0") for p in providers]
+        model = _model(providers)
+
+        picked = pick_provider(
+            available, ProviderSelectionStrategy.RANDOM, _ctx(model, rng=random.Random(1))
+        )
+
+        assert picked[0].provider == "off"
+
+    def test_cost_optimized_treats_weight_as_a_preference_multiplier(self):
+        """Equal price: a weight-2 mapping has half the effective cost."""
+        available, model = self._weighted_pair(heavy=2.0, light=1.0)
+
+        picked = pick_provider(available, ProviderSelectionStrategy.COST_OPTIMIZED, _ctx(model))
+
+        assert picked[0].provider == "heavy"
+
+    def test_cost_gap_still_beats_the_weight(self):
+        """A 10x dearer mapping does not win by carrying weight 2."""
+        providers = [
+            _provider("dear", input_cost=5.0, output_cost=15.0, weight=2.0),  # 20 / 2 = 10
+            _provider("cheap", input_cost=1.0, output_cost=1.0, weight=1.0),  # 2 / 1 = 2
+        ]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        model = _model(providers)
+
+        picked = pick_provider(available, ProviderSelectionStrategy.COST_OPTIMIZED, _ctx(model))
+
+        assert picked[0].provider == "cheap"
+
+    def test_zero_weight_never_wins_a_cost_comparison(self):
+        providers = [
+            _provider("free", input_cost=0.0, output_cost=0.0, weight=0.0),
+            _provider("priced", input_cost=1.0, output_cost=1.0, weight=1.0),
+        ]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        model = _model(providers)
+
+        picked = pick_provider(available, ProviderSelectionStrategy.COST_OPTIMIZED, _ctx(model))
+
+        assert picked[0].provider == "priced"
+
+    def test_balanced_treats_weight_as_a_preference_multiplier(self):
+        available, model = self._weighted_pair(heavy=2.0, light=1.0)
+        store = ProviderStatsStore()
+        store.observe("heavy::0", 100.0)
+        store.observe("light::0", 100.0)
+
+        picked = pick_provider(
+            available, ProviderSelectionStrategy.BALANCED, _ctx(model, stats_store=store)
+        )
+
+        assert picked[0].provider == "heavy"
+
+    def test_balanced_never_explores_a_zero_weight_mapping(self):
+        providers = [_provider("off", weight=0.0), _provider("on", weight=1.0)]
+        available = [(p, f"{p.provider}::0") for p in providers]
+        model = _model(providers)
+        store = ProviderStatsStore()
+        store.observe("off::0", 10.0)  # the fast one is switched off
+        store.observe("on::0", 900.0)
+
+        for seed in range(50):
+            ordered = order_providers(
+                available,
+                ProviderSelectionStrategy.BALANCED,
+                _ctx(model, stats_store=store, rng=random.Random(seed)),
+            )
+            assert ordered[0][0].provider == "on"
 
 
 class TestProviderStatsStore:

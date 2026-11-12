@@ -643,6 +643,7 @@ export default {
     provider: "Provider",
     providers: "Providers",
     priority: "Priority",
+    weight: "Weight",
     modelName: "Model Name",
     modelNameHelperText: "The name clients use to request this model (e.g., gpt-4, my-claude)",
     providerModelName: "Model Name",
@@ -702,6 +703,8 @@ export default {
     noProvidersConfigured: "No providers configured for this model.",
     priorityHelp:
       "Higher priority number means higher selection priority. Providers with the same priority are picked according to the provider strategy (see Settings → Advanced).",
+    weightHelp:
+      "Weight splits traffic between providers of the same priority: a weight of 2 receives twice the requests of a weight of 1, and 0 keeps a provider as a last-resort fallback. 1 (the default) leaves the split unchanged.",
     addProvider: "Add Provider",
     selectProviderModel: "Select model...",
     searchModels: "Search models...",
@@ -1258,6 +1261,7 @@ export default {
     selectProvider: "Select Provider",
     apiKeyOptional: "Leave blank to keep existing",
     priority: "100",
+    weight: "1",
     serverName: "my-mcp-server",
     command: "bunx",
     endpointUrl: "https://model.host.ai/v1/embeddings",

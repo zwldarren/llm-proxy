@@ -86,6 +86,14 @@ class ModelProviderMapping(BaseModel, ValidatorMixin):
         ge=0,
         description="Priority for provider selection (higher = preferred)",
     )
+    weight: float = Field(
+        default=1.0,
+        ge=0,
+        description=(
+            "Relative share of traffic this mapping receives inside its priority group "
+            "(1 = normal, 2 = twice as likely as a 1, 0 = last-resort only)"
+        ),
+    )
     provider_model_name: str = Field(
         ...,
         description="The model name to use with this provider (e.g., 'gpt-4o', 'claude-3-opus')",

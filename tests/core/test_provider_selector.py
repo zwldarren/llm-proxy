@@ -23,6 +23,7 @@ class MockModelProviderConfig:
     provider: str
     provider_model_name: str | None = None
     priority: int = 1
+    weight: float = 1.0
     parameter_overrides: dict[str, Any] | None = None
     input_cost_per_1m: float | None = None
     output_cost_per_1m: float | None = None
@@ -937,6 +938,47 @@ class TestProviderStrategies:
         result = selector.select_next_provider()
         assert result is not None
         assert result.provider_name == "expensive"
+
+    def test_weight_splits_traffic_inside_a_priority_group(self):
+        """A weight-0 mapping is skipped until its group has nothing left."""
+        from llm_proxy.config.types.model import ProviderSelectionStrategy
+
+        for _ in range(20):
+            selector = create_test_selector(
+                providers=[
+                    {"provider": "off", "priority": 1, "weight": 0.0},
+                    {"provider": "on", "priority": 1, "weight": 1.0},
+                ]
+            )
+            selector.strategy = ProviderSelectionStrategy.RANDOM
+
+            first = selector.select_next_provider()
+            assert first is not None
+            assert first.provider_name == "on"
+
+            # Kept as the group's last resort, not dropped from the rotation.
+            second = selector.select_next_provider()
+            assert second is not None
+            assert second.provider_name == "off"
+            assert selector.select_next_provider() is None
+
+    def test_priority_still_dominates_weight(self):
+        """Weight only orders inside a group; a lower priority never jumps ahead."""
+        from llm_proxy.config.types.model import ProviderSelectionStrategy
+
+        for _ in range(20):
+            selector = create_test_selector(
+                providers=[
+                    {"provider": "primary", "priority": 10, "weight": 0.1},
+                    {"provider": "backup", "priority": 5, "weight": 100.0},
+                ]
+            )
+            selector.strategy = ProviderSelectionStrategy.RANDOM
+
+            first = selector.select_next_provider()
+
+            assert first is not None
+            assert first.provider_name == "primary"
 
     def test_session_sticky_same_conversation_same_provider(self):
         """session_sticky pins a conversation to one provider across requests."""

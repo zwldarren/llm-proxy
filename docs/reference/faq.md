@@ -15,7 +15,9 @@ is simply: create new → switch → delete old.
 ## Can one model name map to several providers?
 
 Yes. A model mapping can point to several providers. Give each mapping a `priority`; higher
-priority is preferred, and failures fall back down the chain. See
+priority is preferred, and failures fall back down the chain. Mappings on the same priority
+can also carry a `weight` (default `1`) to split traffic: a `2` beside a `1` receives twice
+the requests. See
 [Models & Pricing](../admin/models.md#provider-priority-and-fallback).
 
 ## Why does `cost_usd` show as null?

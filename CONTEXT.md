@@ -14,6 +14,18 @@ _Avoid_: format, frontend API
 An upstream LLM API the proxy forwards requests to (OpenAI, Anthropic, Gemini, Ollama, …).
 _Avoid_: backend, upstream service
 
+**Provider mapping weight**:
+The `weight` on a model's provider mapping (float, default `1`) that splits traffic
+inside that mapping's priority group — with `2` and `1`, the `2` is picked twice as
+often. It is not a probability in every strategy: `random` and `session_sticky`
+sample by it (the latter weighs the rendezvous hash, so a conversation stays
+deterministic and the split appears across conversations), while
+`cost_optimized` and `balanced` divide their score by it, so a weight of `2`
+tolerates twice the price or latency score. `0` means "never preferred": the
+mapping stays the group's last-resort fallback. See ADR-0061.
+_Avoid_: provider priority (that orders groups and outranks weight), load balancer
+share, quota
+
 **Service** (process-lifetime):
 A subsystem constructed once per worker by the lifespan and shared by every request —
 the config manager, the pooled HTTP client, Redis, the circuit-breaker and provider-stats
