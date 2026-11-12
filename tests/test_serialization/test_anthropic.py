@@ -1482,6 +1482,44 @@ class TestAnthropicChunkConverter:
         assert usage["cache_read_input_tokens"] == 70
         assert usage["output_tokens_details"] == {"thinking_tokens": 7}
 
+    def test_message_delta_usage_updates_openai_prompt_tokens(self, converter):
+        """Input and cache counters reported only by message_delta reach the client."""
+        converter.convert_chunk(
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "m1",
+                    "usage": {"input_tokens": 0, "output_tokens": 1},
+                },
+            }
+        )
+        converter.convert_chunk(
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {
+                    "input_tokens": 123,
+                    "cache_read_input_tokens": 20,
+                    "cache_creation_input_tokens": 3,
+                    "output_tokens": 45,
+                },
+            }
+        )
+
+        final = converter.convert_chunk({"type": "message_stop"})
+
+        assert final is not None
+        usage = final["usage"]
+        assert usage["prompt_tokens"] == 146
+        assert usage["completion_tokens"] == 45
+        assert usage["total_tokens"] == 191
+        assert usage["cache_read_input_tokens"] == 20
+        assert usage["cache_creation_input_tokens"] == 3
+        assert usage["prompt_tokens_details"] == {
+            "cached_tokens": 20,
+            "cache_write_tokens": 3,
+        }
+
     def test_thinking_and_signature_full_flow(self, converter):
         """Multiple thinking deltas plus signature are all preserved."""
         converter.convert_chunk(

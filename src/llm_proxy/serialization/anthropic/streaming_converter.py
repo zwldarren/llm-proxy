@@ -452,6 +452,17 @@ class AnthropicChunkConverter(PendingTerminalState, StreamingTransformer):
 
         usage = event.get("usage", {})
         if usage:
+            # Some Anthropic-compatible servers report the prompt accounting in
+            # the terminal delta instead of (or in addition to) message_start.
+            # Counters are cumulative within the turn, so a later lower or absent
+            # value must not erase the prompt count already observed.
+            self._input_tokens = max(self._input_tokens, usage.get("input_tokens") or 0)
+            self._cache_read_input_tokens = max(
+                self._cache_read_input_tokens, usage.get("cache_read_input_tokens") or 0
+            )
+            self._cache_creation_input_tokens = max(
+                self._cache_creation_input_tokens, usage.get("cache_creation_input_tokens") or 0
+            )
             self._output_tokens = usage.get("output_tokens", 0) or 0
             total_input = (
                 self._input_tokens
