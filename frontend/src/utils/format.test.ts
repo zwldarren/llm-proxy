@@ -21,6 +21,14 @@ describe("absent metrics", () => {
   });
 });
 
+describe("context length formatting", () => {
+  it("keeps meaningful decimals without showing a ragged trailing zero", () => {
+    expect(formatContextLength(1_048_576)).toBe("1.05M");
+    expect(formatContextLength(1_000_000)).toBe("1M");
+    expect(formatContextLength(1_000_001)).toBe("1M");
+  });
+});
+
 describe("cost formatting follows the magnitude of the amount", () => {
   it("prints whole cents, not six decimals, for amounts that reach a cent", () => {
     // The dashboard total used to read "$0.000000" for a rounding error and
