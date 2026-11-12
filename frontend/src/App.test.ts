@@ -1,4 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, type Component } from "vue";
 
@@ -54,6 +55,8 @@ vi.mock("@/i18n", async () => {
 });
 
 import App from "./App.vue";
+import CommandPalette from "@/components/layout/CommandPalette.vue";
+import { useAuthStore } from "@/stores/auth";
 
 /**
  * RouterView stand-in: renders a component that throws on its first mount and
@@ -84,7 +87,14 @@ const RouterViewStub = defineComponent({
 });
 
 function mountApp() {
-  return mount(App, { global: { components: { RouterView: RouterViewStub } } });
+  // App.vue reads the auth store to decide whether the console's command
+  // palette belongs on screen (it is not part of the public auth screens).
+  return mount(App, {
+    global: {
+      components: { RouterView: RouterViewStub },
+      plugins: [createPinia()],
+    },
+  });
 }
 
 describe("App error boundary", () => {
@@ -145,5 +155,30 @@ describe("App error boundary", () => {
 
     expect(ctl.replace).toHaveBeenCalledWith("/");
     expect(wrapper.find("main[role='alert']").exists()).toBe(false);
+  });
+});
+
+/**
+ * The palette is app chrome, mounted once here rather than in AppLayout.
+ *
+ * Every console view renders its own AppLayout and the router keeps several of
+ * them alive, so a per-layout copy gave one palette — one teleported dialog, one
+ * Cmd/Ctrl+K handler — per live view, all bound to the same module-level open
+ * flag. The stacked panels swallowed clicks and wheel scrolling.
+ */
+describe("command palette mounting", () => {
+  it("mounts in the app shell, and only for a signed-in session", async () => {
+    const wrapper = mount(App, {
+      global: { components: { RouterView: RouterViewStub }, plugins: [createPinia()] },
+    });
+    await nextTick();
+
+    // Signed out: the public screens get no palette.
+    expect(wrapper.findComponent(CommandPalette).exists()).toBe(false);
+
+    useAuthStore().isAuthenticated = true;
+    await nextTick();
+
+    expect(wrapper.findAllComponents(CommandPalette)).toHaveLength(1);
   });
 });

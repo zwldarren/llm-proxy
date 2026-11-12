@@ -53,6 +53,7 @@ export default {
     commandPaletteDescription: "搜索路由与最近日志并快速跳转。",
     commandPalettePlaceholder: "搜索路由或最近日志…",
     commandPaletteNav: "移动",
+    commandPaletteClose: "关闭",
     commandPaletteResultCount: "{count} 个结果",
   },
 

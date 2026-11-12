@@ -3,12 +3,15 @@ import { onErrorCaptured, ref, watch, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import i18n from "@/i18n";
 import AppErrorState from "@/components/common/AppErrorState.vue";
+import CommandPalette from "@/components/layout/CommandPalette.vue";
 import StepUpDialog from "@/components/common/StepUpDialog.vue";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuthStore } from "@/stores/auth";
 
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
 
 watchEffect(() => {
   document.documentElement.lang = i18n.global.locale.value;
@@ -92,6 +95,12 @@ function reload(): void {
         </KeepAlive>
       </RouterView>
     </div>
+    <!-- Global Cmd/Ctrl+K command palette (routes + recent logs). Mounted here,
+         once, rather than in AppLayout: every console view renders its own
+         AppLayout and the router keeps several of them alive (KeepAlive), so a
+         per-layout copy meant one palette per live view — stacked, teleported
+         panels fighting over the same open flag. -->
+    <CommandPalette v-if="authStore.isAuthenticated" />
     <StepUpDialog />
     <Toaster position="top-right" :expand="false" />
   </TooltipProvider>

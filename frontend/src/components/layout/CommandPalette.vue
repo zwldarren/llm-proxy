@@ -258,8 +258,15 @@ whenever(keys["meta_k"], toggleCommandPalette);
         t("nav.commandPaletteDescription")
       }}</DialogDescription>
 
-      <!-- Search field -->
-      <div class="flex items-center gap-2.5 px-3.5 h-13 border-b border-border/60">
+      <!-- Search field. The right gutter is reserved for the shell's close
+           control (DialogSurface pins it at top-4 right-4), so the field never
+           runs underneath it — 64px on a coarse pointer, where that control
+           grows to its 44px target. The palette's keyboard hints live in the
+           footer instead: a kbd sharing that corner would collide with the
+           button. -->
+      <div
+        class="flex items-center gap-2.5 pl-3.5 pr-12 max-sm:pr-16 h-13 border-b border-border/60"
+      >
         <Search class="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
         <input
           ref="inputEl"
@@ -279,11 +286,6 @@ whenever(keys["meta_k"], toggleCommandPalette);
           autocomplete="off"
           spellcheck="false"
         />
-        <kbd
-          class="hidden sm:inline-flex h-5 select-none items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 font-mono text-[11px] text-muted-foreground"
-        >
-          {{ t("common.esc") }}
-        </kbd>
       </div>
 
       <!-- Results. A listbox driven by a roving aria-activedescendant, not a
@@ -294,7 +296,7 @@ whenever(keys["meta_k"], toggleCommandPalette);
         role="listbox"
         aria-labelledby="command-palette-title"
         :aria-busy="loadingLogs"
-        class="max-h-80 overflow-y-auto py-1.5"
+        class="max-h-80 overflow-y-auto overscroll-contain py-1.5"
       >
         <div
           v-if="filtered.length === 0"
@@ -342,13 +344,20 @@ whenever(keys["meta_k"], toggleCommandPalette);
         {{ t("nav.commandPaletteResultCount", { count: filtered.length }) }}
       </div>
 
-      <!-- Footer hint -->
+      <!-- Footer hints. Every key the palette listens for is taught here, which
+           is also what keeps the close button's corner in the header free. -->
       <div
         class="flex items-center justify-between px-3.5 h-9 border-t border-border/60 bg-muted/20 text-[11px] text-muted-foreground"
       >
-        <span class="flex items-center gap-2">
-          <kbd class="font-mono">↑↓</kbd>
-          <span>{{ t("nav.commandPaletteNav") }}</span>
+        <span class="flex items-center gap-3">
+          <span class="flex items-center gap-2">
+            <kbd class="font-mono">↑↓</kbd>
+            <span>{{ t("nav.commandPaletteNav") }}</span>
+          </span>
+          <span class="hidden sm:flex items-center gap-2">
+            <kbd class="font-mono">{{ t("common.esc") }}</kbd>
+            <span>{{ t("nav.commandPaletteClose") }}</span>
+          </span>
         </span>
         <span class="flex items-center gap-2">
           <kbd class="font-mono">↵</kbd>

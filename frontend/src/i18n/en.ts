@@ -52,6 +52,7 @@ export default {
     commandPaletteDescription: "Search routes and recent logs, then jump to them.",
     commandPalettePlaceholder: "Search routes or recent logs…",
     commandPaletteNav: "navigate",
+    commandPaletteClose: "close",
     commandPaletteResultCount: "{count} result|{count} results",
   },
 

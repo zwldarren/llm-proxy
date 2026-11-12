@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import MobileSidebarTrigger from "./MobileSidebarTrigger.vue";
 import NavSidebar from "./NavSidebar.vue";
-import CommandPalette from "./CommandPalette.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useSystemStore } from "@/stores/system";
 
@@ -86,9 +85,6 @@ onActivated(triggerReveal);
     </a>
 
     <NavSidebar />
-
-    <!-- Global Cmd/Ctrl+K command palette (routes + recent logs) -->
-    <CommandPalette />
 
     <SidebarInset
       id="main-content"
