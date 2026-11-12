@@ -870,20 +870,22 @@ onMounted(() => {
         <PageHeader :title="t('team.title')" :description="t('team.description')" :icon="Users">
           <template #actions>
             <Button
+              size="sm"
               @click="openInviteDialog"
               class="btn-action"
               :title="t('team.inviteDescription')"
             >
-              <Mail class="h-4 w-4 mr-2" />
+              <Mail class="h-4 w-4" />
               {{ t("team.inviteMember") }}
             </Button>
             <Button
               variant="outline"
+              size="sm"
               @click="openCreateDialog"
               class="btn-action"
               :title="t('team.addMemberDescription')"
             >
-              <Plus class="h-4 w-4 mr-2" />
+              <Plus class="h-4 w-4" />
               {{ t("team.addMember") }}
             </Button>
           </template>
@@ -1101,7 +1103,7 @@ onMounted(() => {
                         @click="openRoleDialog(member, option)"
                       >
                         <Check
-                          class="mr-2 h-4 w-4"
+                          class="h-4 w-4"
                           :class="member.role === option ? 'opacity-100' : 'opacity-0'"
                         />
                         <span>{{ roleLabel(option) }}</span>

@@ -119,7 +119,7 @@ const handleSetup = async () => {
         <AlertDescription>{{ t("auth.setupStatusFailed") }}</AlertDescription>
       </Alert>
       <Button variant="outline" :disabled="retryingStatus" @click="retryStatus">
-        <Loader2 v-if="retryingStatus" class="mr-2 size-4 animate-spin" />
+        <Loader2 v-if="retryingStatus" class="size-4 animate-spin" />
         {{ t("common.retry") }}
       </Button>
     </div>

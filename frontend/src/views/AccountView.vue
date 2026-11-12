@@ -436,7 +436,7 @@ function authMethodLabel(method: string): string {
               {{ t("common.cancel") }}
             </Button>
             <Button type="submit" :disabled="savingUsername">
-              <Loader2 v-if="savingUsername" class="mr-2 size-4 animate-spin" />
+              <Loader2 v-if="savingUsername" class="size-4 animate-spin" />
               {{ t("profile.changeUsername") }}
             </Button>
           </DialogFooter>
@@ -473,7 +473,7 @@ function authMethodLabel(method: string): string {
               {{ t("common.cancel") }}
             </Button>
             <Button type="submit" :disabled="sendingEmail || !emailDraft">
-              <Loader2 v-if="sendingEmail" class="mr-2 size-4 animate-spin" />
+              <Loader2 v-if="sendingEmail" class="size-4 animate-spin" />
               {{ t("accountSecurity.sendVerification") }}
             </Button>
           </DialogFooter>

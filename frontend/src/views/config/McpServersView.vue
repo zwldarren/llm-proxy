@@ -358,8 +358,8 @@ onMounted(() => {
           :icon="Zap"
         >
           <template #actions>
-            <Button @click="openCreateDialog" class="btn-action">
-              <Plus class="w-4 h-4 mr-2" />
+            <Button size="sm" @click="openCreateDialog" class="btn-action">
+              <Plus class="w-4 h-4" />
               {{ t("mcpServers.addServer") }}
             </Button>
           </template>
@@ -531,7 +531,7 @@ onMounted(() => {
                   class="w-full border-dashed text-xs"
                   @click="argsList.push('')"
                 >
-                  <Plus class="w-3 h-3 mr-2" />
+                  <Plus class="w-3 h-3" />
                   {{ t("common.add") }}
                 </Button>
               </div>

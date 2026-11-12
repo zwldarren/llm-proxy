@@ -145,7 +145,7 @@ const { t } = useI18n();
             class="h-auto min-h-9 max-w-full whitespace-normal py-2 text-center max-sm:min-h-11"
             @click="emit('cleanup')"
           >
-            <Trash2 class="size-4 mr-2" />
+            <Trash2 class="size-4" />
             {{ t("settings.cleanupLogs") }}
           </Button>
         </template>

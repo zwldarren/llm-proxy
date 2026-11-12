@@ -558,7 +558,7 @@ onUnmounted(() => {
                 aria-labelledby="filter-date-range"
               >
                 <CalendarIcon
-                  class="mr-2 h-4 w-4 shrink-0 text-muted-foreground/80"
+                  class="h-4 w-4 shrink-0 text-muted-foreground/80"
                   aria-hidden="true"
                 />
                 <span class="truncate flex-1 text-xs font-mono">{{ dateRangeText }}</span>

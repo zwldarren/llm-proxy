@@ -297,12 +297,12 @@ const confirmDelete = async () => {
       <header class="config-header-bar px-4 sm:px-6 py-4">
         <PageHeader :title="t('models.title')" :description="t('models.description')" :icon="Box">
           <template #actions>
-            <Button variant="outline" @click="showSyncDialog = true">
-              <RefreshCw class="w-4 h-4 mr-2" />
+            <Button variant="outline" size="sm" @click="showSyncDialog = true">
+              <RefreshCw class="w-4 h-4" />
               {{ t("models.sync.trigger") }}
             </Button>
-            <Button @click="openCreateDialog" class="btn-action">
-              <Plus class="w-4 h-4 mr-2" />
+            <Button size="sm" @click="openCreateDialog" class="btn-action">
+              <Plus class="w-4 h-4" />
               {{ t("models.addModel") }}
             </Button>
           </template>

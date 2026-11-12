@@ -104,14 +104,16 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
         <Input
           v-model="searchQueryValue"
           :placeholder="searchPlaceholder || t('common.searchPlaceholder')"
-          class="min-h-11 w-full border-border/40 bg-muted/15 hover:bg-muted/25 focus:bg-background pl-9 transition-colors duration-200"
+          class="w-full border-border/40 bg-muted/15 hover:bg-muted/25 focus:bg-background pl-9 transition-colors duration-200"
         />
       </div>
 
-      <!-- Type filter -->
+      <!-- Type filter. `lg` is this band's control metric: 40px on a fine
+           pointer, 44px on a coarse one, matching the field beside it. -->
       <Select v-if="typeFilterOptions && typeFilterOptions.length > 0" v-model="typeFilter">
         <SelectTrigger
-          class="min-h-11 w-full shrink-0 border-border/40 bg-muted/15 hover:bg-muted/25 transition-colors duration-200 sm:w-40 focus:bg-background"
+          size="lg"
+          class="w-full shrink-0 border-border/40 bg-muted/15 hover:bg-muted/25 transition-colors duration-200 sm:w-40 focus:bg-background"
           :aria-label="typeFilterLabel || t('common.filter')"
         >
           <SelectValue :placeholder="typeFilterLabel || t('common.filter')" />
@@ -132,7 +134,7 @@ watch(typeFilter, () => handleTypeFilterChange(typeFilter.value));
         @click="clearFilters"
         class="h-10 shrink-0"
       >
-        <X class="w-4 h-4 mr-2" />
+        <X class="w-4 h-4" />
         {{ t("common.clearFilters") }}
       </Button>
     </div>

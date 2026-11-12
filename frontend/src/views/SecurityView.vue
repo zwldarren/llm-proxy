@@ -614,7 +614,7 @@ function formatDate(value: string): string {
           </p>
           <div class="flex justify-end">
             <Button type="submit" :disabled="savingPassword || !newPassword || !confirmPassword">
-              <Loader2 v-if="savingPassword" class="mr-2 size-4 animate-spin" />
+              <Loader2 v-if="savingPassword" class="size-4 animate-spin" />
               {{ hasPassword ? t("profile.changePassword") : t("accountSecurity.setPassword") }}
             </Button>
           </div>

@@ -37,6 +37,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  HEADER_ACTIVE_CLASS,
+  HEADER_CHIP_CLASS,
+  HEADER_ICON_BUTTON_CLASS,
+} from "@/lib/controlMetric";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChatMessage as ChatMessageType, ContentPart } from "@/types/schemas";
 import { useChat, type ChatOptions } from "@/composables/useChat";
@@ -971,7 +976,10 @@ watch(
           <Select v-if="models.length > 0" v-model="selectedModel">
             <SelectTrigger
               :aria-label="t('chat.selectModel')"
-              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-3 transition-colors text-foreground flex items-center min-w-0 max-w-[36vw] sm:max-w-none font-mono text-[11px]"
+              :class="[
+                HEADER_CHIP_CLASS,
+                'flex min-w-0 items-center font-mono text-[11px] max-w-[36vw] sm:max-w-none',
+              ]"
             >
               <div class="flex items-center gap-2 min-w-0">
                 <div
@@ -1050,7 +1058,10 @@ watch(
           <!-- Endpoint Selector: protocol name first, wire path second -->
           <Select v-model="selectedEndpoint">
             <SelectTrigger
-              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground flex items-center text-[11px] max-w-[30vw] sm:max-w-none"
+              :class="[
+                HEADER_CHIP_CLASS,
+                'flex items-center text-[11px] max-w-[30vw] sm:max-w-none',
+              ]"
               :aria-label="t('chat.protocolEndpoint')"
             >
               <div class="flex items-center gap-2 min-w-0">
@@ -1088,11 +1099,11 @@ watch(
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 @click="toggleSettings"
                 :aria-label="t('chat.advancedSettings')"
-                class="relative h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                :class="{ 'bg-muted text-foreground': showSettings }"
+                class="relative"
+                :class="[HEADER_ICON_BUTTON_CLASS, showSettings ? HEADER_ACTIVE_CLASS : '']"
               >
                 <Settings2 class="w-4 h-4" />
                 <span
@@ -1115,10 +1126,10 @@ watch(
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 @click="handleClearChat"
                 :aria-label="t('chat.clearChatTitle')"
-                class="h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                class="rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
               >
                 <Eraser class="w-4 h-4" />
               </Button>

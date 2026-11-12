@@ -61,6 +61,7 @@ import { useAutoRefresh } from "@/composables/useAutoRefresh";
 import { useAuditLabels } from "@/composables/useAuditLabels";
 import { useHorizontalOverflow } from "@/composables/useHorizontalOverflow";
 import { CONSOLE_DESKTOP_QUERY } from "@/composables/useViewMode";
+import { HEADER_ACTIVE_CLASS } from "@/lib/controlMetric";
 import { useDebounceFn, useEventListener, useMediaQuery } from "@vueuse/core";
 import { logsApi } from "@/services/api/logs";
 import { meApi, type FeedbackSignal } from "@/services/api/me";
@@ -898,10 +899,10 @@ const auditListAction = (log: LogListItemType): string => {
               v-if="activeTab === 'audit' && authStore.isAdmin"
               variant="secondary"
               size="sm"
-              class="h-9 transition-colors"
+              class="touch-target-square transition-colors"
               @click="showIntegrityDialog = true"
             >
-              <Shield class="w-4 h-4 sm:mr-2" />
+              <Shield class="w-4 h-4" />
               <span class="hidden sm:inline">{{ t("logs.audit.verifyIntegrity") }}</span>
             </Button>
             <RefreshButton
@@ -911,28 +912,30 @@ const auditListAction = (log: LogListItemType): string => {
               @refresh="manualRefresh"
               @toggle-auto-refresh="toggleAutoRefresh"
             />
+            <!-- Filter toggle: the same ghost icon-button metric as the refresh
+                 pair, so the row reads as one cluster. The count badge carries
+                 the state the old inverted-ink fill used to shout. -->
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
-              class="touch-target-square h-9 min-w-11 transition-colors"
+              :class="[
+                'h-9 touch-target-square rounded-lg px-2.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                showFilters ? HEADER_ACTIVE_CLASS : '',
+              ]"
               @click="showFilters = !showFilters"
               :aria-label="
                 activeFilterCount
                   ? `${t('logs.filters')} (${activeFilterCount})`
                   : t('logs.filters')
               "
-              :class="{
-                'bg-foreground text-background hover:bg-foreground/90 hover:text-background':
-                  showFilters,
-              }"
               :aria-expanded="showFilters"
             >
-              <Filter class="w-4 h-4 sm:mr-2" />
+              <Filter class="w-4 h-4" />
               <span class="hidden sm:inline">{{ t("logs.filters") }}</span>
               <Badge
                 v-if="activeFilterCount"
-                variant="default"
-                class="ml-1.5 h-5 min-w-5 px-1.5 text-xs"
+                variant="outline"
+                class="ml-1 h-5 min-w-5 px-1.5 text-xs"
               >
                 {{ activeFilterCount }}
               </Badge>
@@ -1037,7 +1040,7 @@ const auditListAction = (log: LogListItemType): string => {
           </div>
           <p class="text-muted-foreground max-w-md">{{ t("logs.loadFailed") }}</p>
           <Button variant="outline" class="mt-4" @click="manualRefresh">
-            <RefreshCw class="w-4 h-4 mr-2" aria-hidden="true" />
+            <RefreshCw class="w-4 h-4" aria-hidden="true" />
             {{ t("common.retry") }}
           </Button>
         </div>

@@ -34,6 +34,11 @@ import {
 import { buildImageEditBody, buildImageGenerationBody } from "@/utils/imageRequest";
 import type { ImageRequestSettings } from "@/utils/imageRequest";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
+import {
+  HEADER_ACTIVE_CLASS,
+  HEADER_CHIP_CLASS,
+  HEADER_ICON_BUTTON_CLASS,
+} from "@/lib/controlMetric";
 import { formatLatency, makeRunId } from "@/utils/runs";
 import { useAuthStore } from "@/stores/auth";
 import type { ImageData, UploadedImage } from "@/types/schemas";
@@ -406,7 +411,7 @@ onActivated(async () => {
           <Select v-if="models.length > 0" v-model="selectedModel">
             <SelectTrigger
               :aria-label="t('images.selectModel')"
-              class="border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-3 transition-colors text-foreground flex items-center min-w-0 font-mono text-[11px]"
+              :class="[HEADER_CHIP_CLASS, 'flex min-w-0 items-center font-mono text-[11px]']"
             >
               <div class="flex items-center gap-2 min-w-0">
                 <div
@@ -479,23 +484,22 @@ onActivated(async () => {
           <!-- Hairline divider between the primary model picker and the secondary endpoint -->
           <div class="hidden sm:block h-4 w-px bg-border/60 shrink-0" aria-hidden="true" />
 
-          <!-- Endpoint Selector (secondary, mono) -->
-          <Select
-            :model-value="isEditMode ? '/v1/images/edits' : '/v1/images/generations'"
-            disabled
+          <!-- Endpoint: read-only. The playground derives it from the mode, so a
+               disabled select would show a chevron for a menu that cannot open.
+               The chip keeps the weight of the picker beside it without
+               pretending to be one. -->
+          <div
+            :title="t('chat.protocolEndpoint')"
+            :class="[
+              HEADER_CHIP_CLASS,
+              'hidden cursor-default items-center gap-2 font-mono text-[11px] hover:border-border/60 hover:bg-transparent sm:flex',
+            ]"
           >
-            <SelectTrigger
-              :aria-label="t('chat.protocolEndpoint')"
-              class="border border-border/60 bg-transparent opacity-80 cursor-default shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-2 transition-colors text-foreground hidden sm:flex items-center font-mono text-[11px]"
-            >
-              <div class="flex items-center gap-2">
-                <span class="text-muted-foreground font-mono text-[11px] select-none">API</span>
-                <span class="font-medium text-muted-foreground">
-                  {{ isEditMode ? "/v1/images/edits" : "/v1/images/generations" }}
-                </span>
-              </div>
-            </SelectTrigger>
-          </Select>
+            <span class="text-muted-foreground font-mono text-[11px] select-none">API</span>
+            <span class="font-medium text-muted-foreground">
+              {{ isEditMode ? "/v1/images/edits" : "/v1/images/generations" }}
+            </span>
+          </div>
         </div>
 
         <div class="flex items-center gap-1">
@@ -504,11 +508,11 @@ onActivated(async () => {
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 @click="showSettings = !showSettings"
                 :aria-label="t('images.settings')"
-                class="relative h-9 w-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                :class="{ 'bg-muted text-foreground': showSettings }"
+                class="relative"
+                :class="[HEADER_ICON_BUTTON_CLASS, showSettings ? HEADER_ACTIVE_CLASS : '']"
               >
                 <Settings2 class="w-4 h-4" />
               </Button>
@@ -523,10 +527,10 @@ onActivated(async () => {
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 @click="clearRuns"
                 :aria-label="t('images.clearResults')"
-                class="h-9 w-9 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                class="rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
               >
                 <Trash2 class="w-4 h-4" />
               </Button>

@@ -24,6 +24,7 @@ import {
   TokenBreakdownChart,
 } from "@/components/usage";
 import { useRequestSequence } from "@/composables/useRequestSequence";
+import { HEADER_CHIP_CLASS } from "@/lib/controlMetric";
 import { logsApi } from "@/services/api/logs";
 import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
 import type { HourlyUsageBucket, UsageStatsResponse } from "@/types/schemas";
@@ -283,15 +284,16 @@ onMounted(() => {
           :icon="BarChart3"
         >
           <template #actions>
-            <!-- Model filter — same Select pattern + styling as the Chat page
-                 model selector (icon chip + mono name, h-8 ghost trigger). -->
+            <!-- Model filter — the shared header chip, the same surface as the
+                 Chat and Images model pickers. Side by side with the date-range
+                 trigger below it must not read as a different kind of control. -->
             <Select
               :model-value="selectedModel ?? ALL_MODELS"
               @update:model-value="onModelFilterChange($event as string)"
             >
               <SelectTrigger
                 :aria-label="t('home.filterByModel')"
-                class="w-auto border border-border/60 bg-transparent hover:bg-muted/10 shadow-none focus-visible:ring-1 focus-visible:ring-foreground focus-visible:ring-offset-0 rounded-md h-8 px-2.5 gap-3 transition-colors text-foreground flex items-center min-w-0"
+                :class="[HEADER_CHIP_CLASS, 'flex min-w-0 items-center']"
               >
                 <div class="flex items-center gap-2 min-w-0">
                   <div
@@ -365,14 +367,20 @@ onMounted(() => {
             </Select>
             <Popover v-model:open="isDatePickerOpen">
               <PopoverTrigger as-child>
-                <Button
-                  variant="outline"
-                  class="w-fit justify-start text-left font-normal btn-action bg-background border-border/60 shadow-none backdrop-blur-none hover:bg-accent/60 hover:border-border"
+                <!-- A chip, not a `<Button>`: a button size brings its own
+                     `has-[>svg]:px-3` and `hover:text-accent-foreground`, both
+                     of which out-specify the chip and left this 2px wider than
+                     the model picker beside it. -->
+                <button
+                  type="button"
+                  :class="[HEADER_CHIP_CLASS, 'touch-target flex w-fit items-center text-left']"
                 >
-                  <Loader2 v-if="isLoadingUsage && usageStats" class="mr-2 h-4 w-4 animate-spin" />
-                  <CalendarIcon v-else class="mr-2 h-4 w-4" />
-                  <span>{{ dateRangeLabel }}</span>
-                </Button>
+                  <span class="flex min-w-0 items-center gap-2">
+                    <Loader2 v-if="isLoadingUsage && usageStats" class="h-4 w-4 animate-spin" />
+                    <CalendarIcon v-else class="h-4 w-4" />
+                    <span class="truncate">{{ dateRangeLabel }}</span>
+                  </span>
+                </button>
               </PopoverTrigger>
               <PopoverContent class="w-[min(92vw,620px)] sm:w-[620px] p-0" align="end">
                 <div class="flex flex-col gap-4 p-4">

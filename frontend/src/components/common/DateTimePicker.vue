@@ -132,7 +132,7 @@ const clear = () => {
           :class="{ 'text-muted-foreground': !displayText }"
           :disabled="disabled"
         >
-          <CalendarIcon class="mr-2 h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden="true" />
+          <CalendarIcon class="h-4 w-4 shrink-0 text-muted-foreground/80" aria-hidden="true" />
           <span class="flex-1 truncate font-mono text-xs">{{ displayText ?? placeholder }}</span>
         </Button>
       </PopoverTrigger>

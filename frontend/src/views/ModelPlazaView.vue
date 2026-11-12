@@ -17,6 +17,7 @@ import PlazaModelTableRow from "@/components/plaza/PlazaModelTableRow.vue";
 import { ModelListHead } from "@/components/models";
 import type { ModelListColumn } from "@/components/models/ModelListHead.vue";
 import { Button } from "@/components/ui/button";
+import { HEADER_ICON_BUTTON_CLASS } from "@/lib/controlMetric";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTableFilter } from "@/composables/useTableFilter";
@@ -151,9 +152,10 @@ const listColumns = computed<ModelListColumn[]>(() => [
               <TooltipTrigger as-child>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="icon-sm"
                   :disabled="isLoading"
                   :aria-label="t('common.refresh')"
+                  :class="HEADER_ICON_BUTTON_CLASS"
                   @click="refreshCatalog"
                 >
                   <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />

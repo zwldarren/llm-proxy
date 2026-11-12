@@ -508,8 +508,8 @@ onMounted(() => {
           :icon="KeyRound"
         >
           <template #actions>
-            <Button @click="openCreateDialog" class="btn-action">
-              <Plus class="w-4 h-4 mr-2" />
+            <Button size="sm" @click="openCreateDialog" class="btn-action">
+              <Plus class="w-4 h-4" />
               {{ t("apiKeys.create") }}
             </Button>
           </template>
@@ -899,7 +899,7 @@ onMounted(() => {
             t("common.cancel")
           }}</Button>
           <Button @click="createApiKey" :disabled="isSaving">
-            <Key class="w-4 h-4 mr-2" />
+            <Key class="w-4 h-4" />
             {{ t("apiKeys.generate") }}
           </Button>
         </SheetFooter>
@@ -1062,7 +1062,7 @@ onMounted(() => {
             t("common.cancel")
           }}</Button>
           <Button @click="updateApiKey" :disabled="isSaving">
-            <Pencil class="w-4 h-4 mr-2" />
+            <Pencil class="w-4 h-4" />
             {{ t("apiKeys.save") }}
           </Button>
         </SheetFooter>
@@ -1090,8 +1090,8 @@ onMounted(() => {
         </div>
         <DialogFooter>
           <Button @click="copyKey" variant="outline" class="w-full sm:w-auto">
-            <Check v-if="copiedKey" class="w-4 h-4 mr-2 text-status-success" />
-            <Copy v-else class="w-4 h-4 mr-2" />
+            <Check v-if="copiedKey" class="w-4 h-4 text-status-success" />
+            <Copy v-else class="w-4 h-4" />
             {{ copiedKey ? t("apiKeys.copied") : t("apiKeys.copyKey") }}
           </Button>
           <Button @click="closeKeyRevealDialog" class="w-full sm:w-auto">

@@ -502,7 +502,7 @@ const handleVersionBadgeClick = () => {
                   @focus="prefetchRoute('/account')"
                   class="cursor-pointer"
                 >
-                  <UserRound class="mr-2 size-4 text-muted-foreground" />
+                  <UserRound class="size-4 text-muted-foreground" />
                   <span>{{ t("nav.account") }}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -511,7 +511,7 @@ const handleVersionBadgeClick = () => {
                   @focus="prefetchRoute('/account/preferences')"
                   class="cursor-pointer"
                 >
-                  <SlidersHorizontal class="mr-2 size-4 text-muted-foreground" />
+                  <SlidersHorizontal class="size-4 text-muted-foreground" />
                   <span>{{ t("nav.preferences") }}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -520,7 +520,7 @@ const handleVersionBadgeClick = () => {
                   @focus="prefetchRoute('/account/security')"
                   class="cursor-pointer"
                 >
-                  <ShieldCheck class="mr-2 size-4 text-muted-foreground" />
+                  <ShieldCheck class="size-4 text-muted-foreground" />
                   <span>{{ t("nav.security") }}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -529,7 +529,7 @@ const handleVersionBadgeClick = () => {
                 @click="handleLogout"
                 class="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive transition-colors duration-150"
               >
-                <LogOut class="mr-2 size-4" />
+                <LogOut class="size-4" />
                 <span>{{ t("auth.logout") }}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>

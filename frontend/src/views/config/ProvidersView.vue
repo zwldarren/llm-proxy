@@ -149,8 +149,8 @@ onMounted(() => {
           :icon="Server"
         >
           <template #actions>
-            <Button @click="openCreateDialog" class="btn-action">
-              <Plus class="w-4 h-4 mr-2" />
+            <Button size="sm" @click="openCreateDialog" class="btn-action">
+              <Plus class="w-4 h-4" />
               {{ t("providers.addProvider") }}
             </Button>
           </template>

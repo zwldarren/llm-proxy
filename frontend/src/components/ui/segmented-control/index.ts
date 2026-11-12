@@ -31,7 +31,11 @@ export const segmentedControlItemVariants = cva(
       size: {
         sm: "touch-target px-2.5 py-1 text-[11px] max-md:min-h-11 max-md:px-3",
         md: "touch-target px-3 py-1.5 text-xs max-md:min-h-11 max-md:px-4",
-        icon: "touch-target touch-target-square size-[1.875rem] p-0 max-md:size-11",
+        // 32px items + 6px frame padding + 2px border = the 40px control metric
+        // a toolbar band uses, so an icon switch sits on the same baseline as
+        // the search field beside it. `md` stays 30px: its tab strips live in
+        // page headers, where the metric is 36px.
+        icon: "touch-target touch-target-square size-8 p-0 max-md:size-11",
       },
       variant: {
         raised: "",

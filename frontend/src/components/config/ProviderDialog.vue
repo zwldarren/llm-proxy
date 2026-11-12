@@ -724,7 +724,7 @@ const onSubmit = handleSubmit(async (values) => {
                     class="w-full border-dashed text-xs h-8"
                     @click="customHeaders.push({ key: '', value: '' })"
                   >
-                    <Plus class="w-3 h-3 mr-2" />
+                    <Plus class="w-3 h-3" />
                     {{ t("common.add") }}
                   </Button>
                 </div>
@@ -770,7 +770,7 @@ const onSubmit = handleSubmit(async (values) => {
                     :disabled="!canAddEndpointUrl"
                     @click="endpointBaseUrls.push({ type: 'embeddings', url: '' })"
                   >
-                    <Plus class="w-3 h-3 mr-2" />
+                    <Plus class="w-3 h-3" />
                     {{ t("common.add") }}
                   </Button>
                 </div>

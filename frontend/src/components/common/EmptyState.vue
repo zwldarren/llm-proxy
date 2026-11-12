@@ -74,11 +74,11 @@ const sizeClasses = {
     <slot name="description" />
     <div v-if="showRetry || showCta" class="flex items-center gap-3 mt-4 flex-wrap justify-center">
       <Button v-if="showRetry" variant="outline" @click="emit('retry')">
-        <RefreshCw class="w-4 h-4 mr-2" />
+        <RefreshCw class="w-4 h-4" />
         {{ t("common.refresh") }}
       </Button>
       <Button v-if="showCta && ctaText" variant="secondary" @click="emit('click')">
-        <component :is="ctaIcon ?? Plus" class="w-4 h-4 mr-2" />
+        <component :is="ctaIcon ?? Plus" class="w-4 h-4" />
         {{ ctaText }}
       </Button>
     </div>
