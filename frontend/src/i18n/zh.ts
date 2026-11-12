@@ -1627,6 +1627,7 @@ export default {
     budgetPeriod: "预算周期",
     budgetUnlimited: "无限制",
     manageBudget: "管理预算",
+    manageBudgetFor: "管理 {member} 的预算",
     manageBudgetDescription: "限制该成员所有 API 密钥的总花费",
     budgetHelp:
       "当该成员所有密钥在当前周期内的总花费达到此上限后，其所有密钥将停止工作。在此额度内，密钥级预算仍由成员自行管理。",
@@ -1640,6 +1641,7 @@ export default {
     rateLimit: "速率限制",
     rateLimitUnlimited: "无限制",
     manageRateLimit: "管理速率限制",
+    manageRateLimitFor: "管理 {member} 的速率限制",
     manageRateLimitDescription: "限制该成员所有 API 密钥的总请求速率",
     rateLimitPlaceholder: "每分钟请求数",
     rateLimitHelp: "该成员所有密钥（含界面会话密钥）合计的每分钟请求数。",

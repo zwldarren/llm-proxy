@@ -143,7 +143,7 @@ const invalidBuckets = computed(() =>
       :title="t(bucketLabels[bucket].title)"
       :description="t(bucketLabels[bucket].description)"
       :loading="pending"
-      :error="invalidBuckets.includes(bucket) ? t('rateLimits.invalidFormat') : error"
+      :error="invalidBuckets.includes(bucket) ? t('rateLimits.invalidFormat') : undefined"
     >
       <template #action>
         <Input

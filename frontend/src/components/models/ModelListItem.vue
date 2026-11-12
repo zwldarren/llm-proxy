@@ -34,6 +34,9 @@ const { t } = useI18n();
 
 const providers = computed(() => props.model.providers ?? []);
 const hasRoutingInfo = computed(() => Boolean(props.model.auto_eligible));
+// Word labels stay in the sans voice even when the surrounding meta line is mono.
+const routingBadgeClass =
+  "shrink-0 items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px font-sans text-[10px] font-medium text-status-success";
 // Fixed display order so icons don't shuffle between rows.
 const capabilities = computed(() =>
   CAPABILITY_ORDER.filter((cap) => props.model.capabilities?.includes(cap))
@@ -70,9 +73,7 @@ const capabilities = computed(() =>
           <template v-if="hasRoutingInfo">
             <Tooltip>
               <TooltipTrigger as-child>
-                <span
-                  class="hidden shrink-0 items-center gap-1 rounded-full border border-status-success/30 bg-status-success/10 px-1.5 py-px text-[10px] font-medium text-status-success sm:inline-flex"
-                >
+                <span :class="['hidden sm:inline-flex', routingBadgeClass]">
                   <Check class="size-2.5" aria-hidden="true" />
                   <span v-if="model.quality_tier">
                     {{ modelTierLabel(t, model.quality_tier) }}
@@ -97,16 +98,13 @@ const capabilities = computed(() =>
         <div
           class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted-foreground"
         >
-          <span v-if="model.status" class="inline-flex sm:hidden">
+          <span v-if="model.status" class="inline-flex font-sans sm:hidden">
             <ModelStatusChip :status="model.status" />
           </span>
-          <span v-if="capabilities.length" class="inline-flex sm:hidden">
+          <span v-if="capabilities.length" class="inline-flex font-sans sm:hidden">
             <CapabilityIcons :capabilities="capabilities" />
           </span>
-          <span
-            v-if="hasRoutingInfo"
-            class="inline-flex shrink-0 items-center gap-1 text-status-success sm:hidden"
-          >
+          <span v-if="hasRoutingInfo" :class="['inline-flex sm:hidden', routingBadgeClass]">
             <Check class="size-2.5" aria-hidden="true" />
             {{ model.quality_tier ? modelTierLabel(t, model.quality_tier) : t("common.routing") }}
           </span>

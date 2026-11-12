@@ -1187,7 +1187,7 @@ onMounted(() => {
                 <TableCell class="hidden @min-[1024px]:table-cell">
                   <button
                     type="button"
-                    :aria-label="t('team.manageBudget')"
+                    :aria-label="t('team.manageBudgetFor', { member: member.username })"
                     class="-m-1 rounded-md p-1 text-left transition-colors cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     @click="openBudgetDialog(member)"
                   >
@@ -1197,7 +1197,7 @@ onMounted(() => {
                 <TableCell class="hidden @min-[1280px]:table-cell">
                   <button
                     type="button"
-                    :aria-label="t('team.manageRateLimit')"
+                    :aria-label="t('team.manageRateLimitFor', { member: member.username })"
                     class="-m-1 rounded-md p-1 text-left text-data transition-colors cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     @click="openRateLimitDialog(member)"
                   >

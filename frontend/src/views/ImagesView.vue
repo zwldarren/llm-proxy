@@ -663,7 +663,10 @@ onActivated(async () => {
 
                 <!-- Why the button is disabled: a greyed-out control with no
                      reason reads as broken. -->
-                <p v-if="submitHint" class="mr-2 hidden text-[11px] text-muted-foreground sm:block">
+                <p
+                  v-if="submitHint"
+                  class="w-full text-left text-[11px] text-muted-foreground sm:mr-2 sm:w-auto"
+                >
                   {{ submitHint }}
                 </p>
 

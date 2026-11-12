@@ -11,7 +11,7 @@ defineProps<{
   contextLength?: number | null;
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 </script>
 
 <template>
@@ -23,9 +23,10 @@ const { t } = useI18n();
     </TooltipTrigger>
     <!-- The cell shows a rounded figure; the tooltip is where the exact
          token count lives. It used to repeat the label, which said nothing. -->
-    <TooltipContent
-      >{{ t("models.contextLength") }} · {{ contextLength.toLocaleString() }}</TooltipContent
-    >
+    <TooltipContent>
+      {{ t("models.contextLength") }} ·
+      <span class="text-data">{{ contextLength.toLocaleString(locale) }}</span>
+    </TooltipContent>
   </Tooltip>
   <span v-else class="text-xs text-muted-foreground">{{ ABSENT_METRIC }}</span>
 </template>

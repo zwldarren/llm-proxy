@@ -2,17 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import {
-  ArrowLeft,
-  CircleAlert,
-  Eye,
-  EyeOff,
-  Fingerprint,
-  Info,
-  KeyRound,
-  Loader2,
-} from "@lucide/vue";
+import { ArrowLeft, CircleAlert, Fingerprint, Info, KeyRound, Loader2 } from "@lucide/vue";
 import AuthShell from "@/components/common/AuthShell.vue";
+import PasswordInput from "@/components/common/PasswordInput.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +32,6 @@ const challengeToken = ref<string | null>(null);
 const mfaCode = ref("");
 const recoveryMode = ref(false);
 const recoveryCode = ref("");
-const revealPassword = ref(false);
 const capsLock = ref(false);
 // Which field the operator still has to fill in. Field-level feedback points at
 // the control that needs attention; the alert is reserved for the server's
@@ -442,35 +433,20 @@ function toggleRecoveryMode() {
             {{ t("auth.forgotPassword") }}
           </RouterLink>
         </div>
-        <div class="relative">
-          <Input
-            id="password"
-            v-model="password"
-            :type="revealPassword ? 'text' : 'password'"
-            autocomplete="current-password"
-            required
-            :disabled="loading || passkeyLoading"
-            :aria-invalid="fieldError === 'password'"
-            :aria-describedby="fieldError === 'password' ? 'password-error' : undefined"
-            class="auth-input h-11 pr-12"
-            @input="clearFeedback"
-            @keydown="trackCapsLock"
-            @keyup="trackCapsLock"
-            @blur="capsLock = false"
-          />
-          <!-- Revealing the value is local to this screen and never widens what
-               autocomplete or the browser remembers. The focus ring is inset so
-               it cannot bleed past the field's own rounded edge. -->
-          <button
-            type="button"
-            class="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-ring/40 focus-visible:ring-inset"
-            :aria-label="revealPassword ? t('auth.hidePassword') : t('auth.showPassword')"
-            :aria-pressed="revealPassword"
-            @click="revealPassword = !revealPassword"
-          >
-            <component :is="revealPassword ? EyeOff : Eye" class="size-4" aria-hidden="true" />
-          </button>
-        </div>
+        <PasswordInput
+          id="password"
+          v-model="password"
+          autocomplete="current-password"
+          required
+          :disabled="loading || passkeyLoading"
+          :aria-invalid="fieldError === 'password'"
+          :aria-describedby="fieldError === 'password' ? 'password-error' : undefined"
+          class="auth-input h-11"
+          @input="clearFeedback"
+          @keydown="trackCapsLock"
+          @keyup="trackCapsLock"
+          @blur="capsLock = false"
+        />
         <p v-if="fieldError === 'password'" id="password-error" class="text-xs text-destructive">
           {{ t("auth.enterPassword") }}
         </p>

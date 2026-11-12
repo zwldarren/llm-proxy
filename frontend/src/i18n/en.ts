@@ -1705,6 +1705,7 @@ export default {
     budgetPeriod: "Budget period",
     budgetUnlimited: "Unlimited",
     manageBudget: "Manage Budget",
+    manageBudgetFor: "Manage budget for {member}",
     manageBudgetDescription: "Cap this member's total spend across all of their API keys",
     budgetHelp:
       "All of the member's keys stop working once their combined spend in the current window reaches this cap. Their key-level budgets stay self-service within this envelope.",
@@ -1723,6 +1724,7 @@ export default {
     rateLimit: "Rate limit",
     rateLimitUnlimited: "Unlimited",
     manageRateLimit: "Manage rate limit",
+    manageRateLimitFor: "Manage rate limit for {member}",
     manageRateLimitDescription: "Cap this member's request rate across all of their API keys",
     rateLimitPlaceholder: "Requests per minute",
     rateLimitHelp:

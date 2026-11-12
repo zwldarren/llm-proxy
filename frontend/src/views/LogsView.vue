@@ -1070,7 +1070,7 @@ const auditListAction = (log: LogListItemType): string => {
                  cost), just a different log_type. -->
             <Table
               v-if="activeTab === 'proxy' || activeTab === 'judge'"
-              class="table-modern"
+              class="table-modern table-sticky-actions"
               container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
@@ -1281,7 +1281,7 @@ const auditListAction = (log: LogListItemType): string => {
             <!-- Audit Logs Table -->
             <Table
               v-else-if="activeTab === 'audit'"
-              class="table-modern"
+              class="table-modern table-sticky-actions"
               container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
@@ -1374,7 +1374,7 @@ const auditListAction = (log: LogListItemType): string => {
             <!-- MCP Logs Table -->
             <Table
               v-else-if="activeTab === 'mcp'"
-              class="table-modern"
+              class="table-modern table-sticky-actions"
               container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">
@@ -1449,7 +1449,7 @@ const auditListAction = (log: LogListItemType): string => {
             <!-- Web Search Logs Table -->
             <Table
               v-else-if="activeTab === 'websearch'"
-              class="table-modern"
+              class="table-modern table-sticky-actions"
               container-class="@container h-full border-0 bg-transparent rounded-none overflow-x-auto"
             >
               <TableHeader class="config-thead">

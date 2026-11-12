@@ -1864,7 +1864,7 @@
  * so they are not utilities and do not need to sit in a layer. */
 .hljs-comment,
 .hljs-quote {
-  color: hsl(var(--json-null));
+  color: hsl(var(--muted-foreground));
   font-style: italic;
 }
 
