@@ -66,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useApiKeyReveal } from "@/composables/useApiKeyReveal";
 import { useErrorHandler } from "@/composables/useErrorHandler";
 import { useTableFilter } from "@/composables/useTableFilter";
 import { useTableSort } from "@/composables/useTableSort";
@@ -74,7 +75,6 @@ import { getApiKeyStatus, isApiKeyExpired } from "@/utils/apiKeys";
 import {
   type ApiKeyCreate,
   type ApiKeyRead,
-  type ApiKeyResponse,
   type ApiKeySpendSummary,
   type ApiKeyUpdate,
   type BudgetPeriod,
@@ -114,10 +114,14 @@ async function fetchMcpServerNames() {
 }
 
 const showCreateDialog = ref(false);
-const showKeyRevealDialog = ref(false);
 const showEditDialog = ref(false);
 const showDeleteDialog = ref(false);
-const createdKey = ref<ApiKeyResponse | null>(null);
+const {
+  createdKey,
+  open: keyRevealOpen,
+  reveal: revealCreatedKey,
+  close: closeKeyRevealDialog,
+} = useApiKeyReveal();
 const editingKey = ref<ApiKeyRead | null>(null);
 const editKeyName = ref("");
 const editIsActive = ref(true);
@@ -333,9 +337,8 @@ const createApiKey = async () => {
       payload.rate_limit_rpm = rateLimit;
     }
     const res = await apiKeyStore.createApiKey(payload);
-    createdKey.value = res;
     showCreateDialog.value = false;
-    showKeyRevealDialog.value = true;
+    revealCreatedKey(res);
   } catch (e) {
     handleSaveError(e);
   } finally {
@@ -347,24 +350,6 @@ const copyKey = async () => {
   if (!createdKey.value) return;
   await copy(createdKey.value.key);
 };
-
-const closeKeyRevealDialog = () => {
-  showKeyRevealDialog.value = false;
-  createdKey.value = null;
-};
-
-/**
- * The reveal dialog's open state. Escape and the overlay close it too, and they
- * used to leave the plaintext key in memory (and re-openable) while the operator
- * believed the dialog was gone.
- */
-const keyRevealOpen = computed({
-  get: () => showKeyRevealDialog.value,
-  set: (value: boolean) => {
-    if (value) showKeyRevealDialog.value = true;
-    else closeKeyRevealDialog();
-  },
-});
 
 const openDeleteDialog = (keyName: string) => {
   deletingKeyName.value = keyName;
