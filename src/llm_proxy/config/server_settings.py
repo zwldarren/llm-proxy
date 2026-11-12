@@ -229,6 +229,10 @@ def _validate_console_auth(payload: BaseModel) -> None:
 
 
 _MASKED_SECRET = "****"
+_CONSOLE_AUTH_SECRET_BLOCKS: tuple[tuple[str, str], ...] = (
+    ("smtp", "password"),
+    ("resend", "api_key"),
+)
 
 
 def _reject_edited_secret_mask(value: str | None, *, label: str) -> None:
@@ -255,16 +259,12 @@ def _mask_console_auth_secrets(doc: Any) -> Any:
     if not isinstance(doc, dict):
         return doc
     masked = {**doc}
-    smtp = masked.get("smtp")
-    if isinstance(smtp, dict):
-        smtp = {**smtp}
-        smtp["password"] = _MASKED_SECRET if smtp.get("password") else ""
-        masked["smtp"] = smtp
-    resend = masked.get("resend")
-    if isinstance(resend, dict):
-        resend = {**resend}
-        resend["api_key"] = _MASKED_SECRET if resend.get("api_key") else ""
-        masked["resend"] = resend
+    for block_name, field in _CONSOLE_AUTH_SECRET_BLOCKS:
+        block = masked.get(block_name)
+        if isinstance(block, dict):
+            block = {**block}
+            block[field] = _MASKED_SECRET if block.get(field) else ""
+            masked[block_name] = block
     providers = masked.get("oidc_providers")
     if isinstance(providers, list):
         masked["oidc_providers"] = [
@@ -293,25 +293,17 @@ def _merge_console_auth_secrets(payload: BaseModel, stored: Any, existing: Any) 
 
     result = dict(stored) if isinstance(stored, dict) else payload.model_dump()
     old = existing if isinstance(existing, dict) else {}
-    old_smtp_value = old.get("smtp")
-    old_smtp = old_smtp_value if isinstance(old_smtp_value, dict) else {}
-    smtp = dict(result.get("smtp") or {})
-    password = str(smtp.get("password") or "")
-    if password in ("", _MASKED_SECRET):
-        smtp["password"] = str(old_smtp.get("password") or "")
-    else:
-        smtp["password"] = encrypt_api_key(password) or ""
-    result["smtp"] = smtp
-
-    old_resend_value = old.get("resend")
-    old_resend = old_resend_value if isinstance(old_resend_value, dict) else {}
-    resend = dict(result.get("resend") or {})
-    api_key = str(resend.get("api_key") or "")
-    if api_key in ("", _MASKED_SECRET):
-        resend["api_key"] = str(old_resend.get("api_key") or "")
-    else:
-        resend["api_key"] = encrypt_api_key(api_key) or ""
-    result["resend"] = resend
+    for block_name, field in _CONSOLE_AUTH_SECRET_BLOCKS:
+        block_value = result.get(block_name)
+        block = dict(block_value) if isinstance(block_value, dict) else {}
+        old_value = old.get(block_name)
+        old_block = old_value if isinstance(old_value, dict) else {}
+        secret = str(block.get(field) or "")
+        if secret in ("", _MASKED_SECRET):
+            block[field] = str(old_block.get(field) or "")
+        else:
+            block[field] = encrypt_api_key(secret) or ""
+        result[block_name] = block
 
     old_providers = {
         str(provider.get("id")): provider
