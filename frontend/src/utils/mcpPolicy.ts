@@ -69,3 +69,34 @@ export function isEnvKeyAllowed(key: string, policy: McpSecurityPolicyConfig): b
 export function disallowedEnvKeys(keys: string[], policy: McpSecurityPolicyConfig): string[] {
   return keys.filter((k) => k.trim() && !isEnvKeyAllowed(k, policy));
 }
+
+/** Whether the policy names any usable command at all. */
+export function hasAllowedCommands(policy: McpSecurityPolicyConfig): boolean {
+  return policy.allowed_commands.some((command) => command.trim());
+}
+
+export type McpCommandState = "empty" | "allowed" | "blocked" | "denied";
+
+/** The single policy verdict shared by the inline notice and the Save gate. */
+export function mcpCommandState(
+  command: string,
+  args: string[],
+  policy: McpSecurityPolicyConfig
+): McpCommandState {
+  const trimmed = command.trim();
+  if (!trimmed) return "empty";
+  if (isBlockedCommand(trimmed, policy)) return "blocked";
+  return isCommandAllowed(trimmed, args, policy) ? "allowed" : "denied";
+}
+
+/** A stdio server cannot be saved until its command passes the policy. */
+export function isStdioCommandUnavailable(
+  command: string,
+  args: string[],
+  policy: McpSecurityPolicyConfig | null | undefined
+): boolean {
+  if (!policy) return false;
+  if (!hasAllowedCommands(policy)) return true;
+  const state = mcpCommandState(command, args, policy);
+  return state === "blocked" || state === "denied";
+}

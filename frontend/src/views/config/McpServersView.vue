@@ -34,7 +34,7 @@ import { useViewMode } from "@/composables/useViewMode";
 import { useMcpServerStore } from "@/stores/mcpServers";
 import { useSettingsStore } from "@/stores/settings";
 import { STORAGE_KEYS } from "@/constants/storageKeys";
-import { isBlockedCommand, isCommandAllowed } from "@/utils/mcpPolicy";
+import { isStdioCommandUnavailable } from "@/utils/mcpPolicy";
 import type {
   McpServerCreate,
   McpServerRead,
@@ -63,12 +63,11 @@ const isSaving = ref(false);
 // enabled only produces a backend rejection after the operator fills the form.
 const stdioCommandUnavailable = computed(() => {
   if (newServer.value.type !== "stdio") return false;
-  const policy = mcpSecurityPolicy.value;
-  if (!policy) return false;
-  if (!policy.allowed_commands.some((command) => command.trim())) return true;
-  const command = newServer.value.command?.trim() ?? "";
-  if (!command) return false;
-  return isBlockedCommand(command, policy) || !isCommandAllowed(command, argsList.value, policy);
+  return isStdioCommandUnavailable(
+    newServer.value.command ?? "",
+    argsList.value,
+    mcpSecurityPolicy.value
+  );
 });
 
 const loadingServers = ref<Set<string>>(new Set());

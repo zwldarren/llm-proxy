@@ -5,7 +5,7 @@ import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import { Button } from "@/components/ui/button";
 import type { McpSecurityPolicyConfig } from "@/types/schemas";
-import { disallowedEnvKeys, isBlockedCommand, isCommandAllowed } from "@/utils/mcpPolicy";
+import { disallowedEnvKeys, mcpCommandState } from "@/utils/mcpPolicy";
 
 /**
  * Inline, proactive feedback about the MCP security policy for the stdio
@@ -45,13 +45,7 @@ const mcpSecurityLink = {
 
 const allowedCommands = computed(() => props.policy.allowed_commands.filter((c) => c.trim()));
 const hasAllowlist = computed(() => allowedCommands.value.length > 0);
-
-const commandState = computed<"empty" | "allowed" | "blocked" | "denied">(() => {
-  const command = props.command.trim();
-  if (!command) return "empty";
-  if (isBlockedCommand(command, props.policy)) return "blocked";
-  return isCommandAllowed(command, props.args, props.policy) ? "allowed" : "denied";
-});
+const commandState = computed(() => mcpCommandState(props.command, props.args, props.policy));
 
 const droppedEnvKeys = computed(() => disallowedEnvKeys(props.envKeys, props.policy));
 </script>
