@@ -123,23 +123,139 @@ export function weekdayLabels(locale: string): string[] {
   });
 }
 
-/** "Mon, Fri" or "every day" for a window's start days. */
-export function windowDaysLabel(t: ComposerTranslation, window: PricingTimeWindow, locale: string) {
+/**
+ * Separator between items of one list label. Non-breaking, so a popover row
+ * that has to wrap breaks between groups (ranges · days · zone) and not in the
+ * middle of "Mon, Tue" or "01:00–04:00, 06:00–10:00".
+ */
+const LABEL_ITEM_SEPARATOR = ",\u00A0";
+
+/** "Mon, Fri" or "every day" for a band's start days. */
+export function windowDaysLabel(
+  t: ComposerTranslation,
+  window: { days?: number[] },
+  locale: string
+) {
   if (!window.days?.length) return t("models.pricingWindowEveryDay");
   const labels = weekdayLabels(locale);
-  return window.days.map((day) => labels[day] ?? String(day)).join(", ");
+  return window.days.map((day) => labels[day] ?? String(day)).join(LABEL_ITEM_SEPARATOR);
 }
 
-/** Time windows as popover rows, keyed by their clock and start days. */
+/** One clock range inside a peak band. */
+export interface WindowRange {
+  start: string;
+  end: string;
+}
+
+/**
+ * A peak band as the editor and the popover present it: one timezone, one set
+ * of start days and one set of rates, plus every clock range that shares them.
+ *
+ * Storage stays a flat `PricingTimeWindow[]`, one entry per range — the band is
+ * a presentation grouping, so that stating "01:00–04:00 and 06:00–10:00 UTC are
+ * peak" does not mean retyping the timezone, the days and the rates twice.
+ */
+export interface PricingWindowBand {
+  timezone: string;
+  days: number[];
+  ranges: WindowRange[];
+  rates: TokenRateOverrides;
+}
+
+/** The rate dimensions a window actually sets, in display order. */
+function ratesOf(window: TokenRateOverrides): TokenRateOverrides {
+  const rates: TokenRateOverrides = {};
+  for (const key of TIER_RATE_KEYS) {
+    const value = window[key];
+    if (value != null) rates[key] = value;
+  }
+  return rates;
+}
+
+/**
+ * What every window in one band shares. An unset rate and an explicit null are
+ * the same statement ("inherit"), so both read as absent here. The timezone and
+ * the day set are normalized first: a differently ordered list is the same band.
+ */
+function bandKey(window: PricingTimeWindow): string {
+  const timezone = window.timezone ?? "UTC";
+  const days = [...new Set(window.days ?? [])].sort((a, b) => a - b);
+  return JSON.stringify([timezone, days, TIER_RATE_KEYS.map((key) => window[key] ?? null)]);
+}
+
+function byClock(a: WindowRange, b: WindowRange): number {
+  return (minutesOfDay(a.start) ?? 0) - (minutesOfDay(b.start) ?? 0);
+}
+
+/**
+ * Windows regrouped into bands: same timezone, same start days, same rates.
+ *
+ * Bands come out ordered the way windows are stored (timezone, then clock), so
+ * an untouched list round-trips through {@link flattenWindowBands} unchanged.
+ */
+export function groupWindowBands(windows: PricingTimeWindow[]): PricingWindowBand[] {
+  const bands = new Map<string, PricingWindowBand>();
+  for (const window of windows) {
+    const key = bandKey(window);
+    let band = bands.get(key);
+    if (!band) {
+      band = {
+        timezone: window.timezone ?? "UTC",
+        days: [...new Set(window.days ?? [])].sort((a, b) => a - b),
+        ranges: [],
+        rates: ratesOf(window),
+      };
+      bands.set(key, band);
+    }
+    band.ranges.push({ start: window.start, end: window.end });
+  }
+
+  const list = [...bands.values()];
+  for (const band of list) band.ranges.sort(byClock);
+  list.sort(
+    (a, b) =>
+      a.timezone.localeCompare(b.timezone) ||
+      (minutesOfDay(a.ranges[0]?.start ?? "") ?? 0) - (minutesOfDay(b.ranges[0]?.start ?? "") ?? 0)
+  );
+  return list;
+}
+
+/** Bands back to the stored shape: one window per range, sorted as the backend orders them. */
+export function flattenWindowBands(bands: PricingWindowBand[]): PricingTimeWindow[] {
+  const windows = bands.flatMap((band) =>
+    band.ranges.map((range) => ({
+      ...band.rates,
+      start: range.start,
+      end: range.end,
+      days: [...band.days],
+      timezone: band.timezone,
+    }))
+  );
+  windows.sort(
+    (a, b) =>
+      (a.timezone ?? "UTC").localeCompare(b.timezone ?? "UTC") ||
+      (minutesOfDay(a.start) ?? 0) - (minutesOfDay(b.start) ?? 0)
+  );
+  return windows;
+}
+
+/**
+ * Time windows as popover rows: a band is one row that lists all its ranges, so
+ * "01:00–04:00, 06:00–10:00 · every day · UTC" does not repeat the rates.
+ */
 export function windowRateRows(
   t: ComposerTranslation,
   windows: PricingTimeWindow[],
   locale = "en-US"
 ): RateRow[] {
-  return windows.map((window, index) => ({
+  return groupWindowBands(windows).map((band, index) => ({
     key: `window-${index}`,
-    label: `${window.start}–${window.end} · ${windowDaysLabel(t, window, locale)}`,
-    text: overlayRateText(t, window),
+    label: [
+      band.ranges.map((range) => `${range.start}–${range.end}`).join(LABEL_ITEM_SEPARATOR),
+      windowDaysLabel(t, band, locale),
+      band.timezone,
+    ].join(" · "),
+    text: overlayRateText(t, band.rates),
   }));
 }
 
@@ -211,13 +327,17 @@ const OFFSET_SAMPLE_INSTANTS = ["01-15", "04-15", "07-15", "10-15"].map(
 );
 
 /** A zone's UTC offset in minutes east of UTC, read through the platform tz db. */
-function offsetMinutes(timeZone: string, at: Date): number {
-  const name = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    timeZoneName: "longOffset",
-  })
-    .formatToParts(at)
-    .find((part) => part.type === "timeZoneName")?.value;
+function offsetMinutes(timeZone: string, at: Date): number | null {
+  let name: string | undefined;
+  try {
+    name = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" })
+      .formatToParts(at)
+      .find((part) => part.type === "timeZoneName")?.value;
+  } catch {
+    // An unresolvable zone has no offset to compare; the editor flags the name
+    // itself, and throwing here would take the whole form down with it.
+    return null;
+  }
   // "GMT+08:00" / "GMT-03:30"; plain "GMT" is UTC.
   const match = /GMT([+-])(\d{2}):(\d{2})/.exec(name ?? "");
   if (!match) return 0;
@@ -229,7 +349,11 @@ function offsetMinutes(timeZone: string, at: Date): number {
 function coexistingOffsets(leftZone: string, rightZone: string): Array<[number, number]> {
   const pairs = new Map<string, [number, number]>();
   for (const at of OFFSET_SAMPLE_INSTANTS) {
-    const pair: [number, number] = [offsetMinutes(leftZone, at), offsetMinutes(rightZone, at)];
+    const left = offsetMinutes(leftZone, at);
+    const right = offsetMinutes(rightZone, at);
+    // No comparison is possible while a zone name does not resolve.
+    if (left === null || right === null) continue;
+    const pair: [number, number] = [left, right];
     pairs.set(pair.join(","), pair);
   }
   return [...pairs.values()];

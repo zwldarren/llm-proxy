@@ -828,18 +828,24 @@ export default {
     reasoningCost: "Reasoning cost",
     pricingWindows: "Peak / off-peak pricing",
     pricingWindowsHelp:
-      "Time-of-day rate windows: a request that STARTED inside a window is billed at that window's rates for the whole request, otherwise at the base price above. Read on the window's own timezone, and an end at or before the start wraps past midnight. Blank dimensions inherit the base price. models.dev does not publish these — enter them from the provider's price sheet.",
+      "Time-of-day rate bands. A band is one timezone, the weekdays its ranges start on, and the rates they all share — add every range the band prices, so 01:00–04:00 and 06:00–10:00 sit in one band. A request that STARTED inside a range is billed at the band's rates for the whole request, otherwise at the base price above. Clocks are 24-hour, read in the band's timezone, and an end at or before the start wraps past midnight. Blank dimensions inherit the base price. models.dev does not publish these — enter them from the provider's price sheet.",
     pricingWindowsEmpty:
-      "No windows — every request bills at the base rates, whatever the clock says.",
-    addPricingWindow: "Add window",
-    removePricingWindow: "Remove window",
-    pricingWindowStart: "Window start",
-    pricingWindowEnd: "Window end",
+      "No bands — every request bills at the base rates, whatever the clock says.",
+    pricingWindowBand: "Peak band {index}",
+    addPricingWindow: "Add band",
+    removePricingWindow: "Remove band",
+    pricingWindowStart: "Range start",
+    pricingWindowEnd: "Range end",
     pricingWindowTimezone: "Timezone (IANA)",
     pricingWindowDays: "Starts on",
-    pricingWindowEveryDay: "every day",
+    pricingWindowEveryDay: "every\u00A0day",
+    pricingWindowRanges: "Ranges",
+    addPricingWindowRange: "Add range",
+    removePricingWindowRange: "Remove range",
+    pricingWindowUnknownTimezone:
+      "Unknown timezone — the backend resolves this IANA name with ZoneInfo, so a band it cannot read is ignored in billing. Use a name like Asia/Shanghai or UTC.",
     pricingWindowsOverlap:
-      "Windows overlap on the same real instant (timezones included). Billing would depend on list order, so the backend rejects this — split or shorten them.",
+      "Ranges overlap on the same real instant (timezones included). Billing would depend on list order, so the backend rejects this — split or shorten them.",
     pricingWindowsSection: "Peak / off-peak",
     serviceTiers: "Service tier pricing",
     serviceTiersHelp:

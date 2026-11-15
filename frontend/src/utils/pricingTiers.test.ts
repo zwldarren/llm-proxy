@@ -1,6 +1,13 @@
 // frontend/src/utils/pricingTiers.test.ts
 import { describe, expect, it } from "vitest";
-import { formatRate, overlappingWindowIndexes } from "./pricingTiers";
+import type { ComposerTranslation } from "vue-i18n";
+import {
+  flattenWindowBands,
+  formatRate,
+  groupWindowBands,
+  overlappingWindowIndexes,
+  windowRateRows,
+} from "./pricingTiers";
 import type { PricingTimeWindow } from "@/types/schemas";
 
 function window(overrides: Partial<PricingTimeWindow> = {}): PricingTimeWindow {
@@ -82,5 +89,127 @@ describe("overlappingWindowIndexes", () => {
     ];
 
     expect(overlappingWindowIndexes(windows).size).toBe(2);
+  });
+});
+
+describe("groupWindowBands", () => {
+  it("folds windows that share timezone, days and rates into one band", () => {
+    const bands = groupWindowBands([
+      window({ start: "06:00", end: "10:00", input_cost_per_1m: 2 }),
+      window({ start: "01:00", end: "04:00", input_cost_per_1m: 2 }),
+    ]);
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0]?.ranges).toEqual([
+      { start: "01:00", end: "04:00" },
+      { start: "06:00", end: "10:00" },
+    ]);
+    expect(bands[0]?.rates).toEqual({ input_cost_per_1m: 2 });
+  });
+
+  it("treats a differently ordered day list as the same band", () => {
+    const bands = groupWindowBands([
+      window({ start: "01:00", end: "04:00", days: [0, 2] }),
+      window({ start: "06:00", end: "10:00", days: [2, 0] }),
+    ]);
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0]?.days).toEqual([0, 2]);
+  });
+
+  it("keeps a window that prices or schedules differently in its own band", () => {
+    const bands = groupWindowBands([
+      window({ start: "01:00", end: "04:00", input_cost_per_1m: 2 }),
+      window({ start: "06:00", end: "10:00", input_cost_per_1m: 5 }),
+      window({ start: "06:00", end: "10:00", days: [1] }),
+      window({ start: "06:00", end: "10:00", timezone: "Asia/Shanghai" }),
+    ]);
+
+    expect(bands).toHaveLength(4);
+  });
+
+  it("treats an explicit null rate as an unset one", () => {
+    const bands = groupWindowBands([
+      window({ start: "01:00", end: "04:00", input_cost_per_1m: null }),
+      window({ start: "06:00", end: "10:00" }),
+    ]);
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0]?.rates).toEqual({});
+  });
+});
+
+describe("flattenWindowBands", () => {
+  it("writes one window per range with the band's timezone, days and rates", () => {
+    const windows = flattenWindowBands([
+      {
+        timezone: "UTC",
+        days: [1],
+        ranges: [
+          { start: "01:00", end: "04:00" },
+          { start: "06:00", end: "10:00" },
+        ],
+        rates: { input_cost_per_1m: 2 },
+      },
+    ]);
+
+    expect(windows).toEqual([
+      { start: "01:00", end: "04:00", days: [1], timezone: "UTC", input_cost_per_1m: 2 },
+      { start: "06:00", end: "10:00", days: [1], timezone: "UTC", input_cost_per_1m: 2 },
+    ]);
+  });
+
+  it("round-trips a saved list through the band grouping", () => {
+    // Stored order is by timezone then clock, which is what the editor emits.
+    const saved = [
+      window({ start: "22:00", end: "08:00", timezone: "Asia/Shanghai" }),
+      window({ start: "01:00", end: "04:00", days: [0], input_cost_per_1m: 2 }),
+      window({ start: "06:00", end: "10:00", days: [0], input_cost_per_1m: 2 }),
+    ];
+
+    expect(flattenWindowBands(groupWindowBands(saved))).toEqual(saved);
+  });
+});
+
+describe("windowRateRows", () => {
+  const translate = ((key: string) =>
+    ({
+      "models.inputShort": "IN",
+      "models.outputShort": "OUT",
+      "models.pricingWindowEveryDay": "every\u00A0day",
+    })[key] ?? key) as unknown as ComposerTranslation;
+
+  it("lists every range of a band in a single row", () => {
+    const rows = windowRateRows(translate, [
+      window({ start: "01:00", end: "04:00", input_cost_per_1m: 2 }),
+      window({ start: "06:00", end: "10:00", input_cost_per_1m: 2 }),
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.label).toBe("01:00–04:00,\u00A006:00–10:00 · every\u00A0day · UTC");
+    expect(rows[0]?.text).toBe("IN $2 · OUT —");
+  });
+
+  it("keeps a band that prices differently on its own row", () => {
+    const rows = windowRateRows(translate, [
+      window({ start: "01:00", end: "04:00", input_cost_per_1m: 2 }),
+      window({ start: "06:00", end: "10:00", input_cost_per_1m: 5 }),
+    ]);
+
+    expect(rows.map((row) => row.text)).toEqual(["IN $2 · OUT —", "IN $5 · OUT —"]);
+  });
+});
+
+describe("overlappingWindowIndexes with an unresolvable zone", () => {
+  it("skips the comparison instead of throwing out of the form", () => {
+    const windows = [
+      window({ start: "01:00", end: "04:00", timezone: "Asia/Atlantis" }),
+      window({ start: "06:00", end: "10:00", timezone: "UTC" }),
+    ];
+
+    // The editor already flags the name itself; a RangeError here would take
+    // the whole pricing form down with it.
+    expect(() => overlappingWindowIndexes(windows)).not.toThrow();
+    expect(overlappingWindowIndexes(windows).size).toBe(0);
   });
 });

@@ -84,8 +84,11 @@ Details that affect the bill:
   `start` wraps past midnight, and `days` names the day the window starts on.
   Requests outside every window bill at the base rates. Windows must not overlap
   in real (UTC) time, across timezones too — the whole request is repriced by the
-  first match, so an overlap would make the bill depend on list order. models.dev
-  does not publish these — enter them by hand.
+  first match, so an overlap would make the bill depend on list order. In the
+  console, windows that share a timezone, a day set and the same rates are edited
+  as one band with several clock ranges, so peak hours of 01:00–04:00 and
+  06:00–10:00 UTC are entered once and stored as two windows. models.dev does not
+  publish these — enter them by hand.
 - Service tiers (`service_tier_pricing`) bill by the tier the request was
   served at: a map from mode name (`flex`, `priority`, …) to rates, selected by the
   request's `service_tier` (the provider's reported tier wins over the requested

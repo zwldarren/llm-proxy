@@ -37,8 +37,10 @@ const headingClass = computed(() => (props.dense ? "mb-1 text-[10px]" : "mb-1.5 
         :key="row.key"
         class="flex items-baseline justify-between gap-3 py-1"
       >
-        <span class="text-xs text-muted-foreground">{{ row.label }}</span>
-        <span class="text-data text-xs text-foreground">{{ row.text }}</span>
+        <span class="min-w-0 text-xs text-muted-foreground">{{ row.label }}</span>
+        <span class="shrink-0 whitespace-nowrap text-data text-xs text-foreground">{{
+          row.text
+        }}</span>
       </div>
     </div>
   </div>
