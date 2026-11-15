@@ -272,6 +272,7 @@ declare module 'vue' {
     TagsInputSimple: typeof import('./src/components/ui/tags-input/TagsInputSimple.vue')['default']
     Textarea: typeof import('./src/components/ui/textarea/Textarea.vue')['default']
     ThemeSelector: typeof import('./src/components/settings/ThemeSelector.vue')['default']
+    TimeInput: typeof import('./src/components/ui/time-input/TimeInput.vue')['default']
     TokenBreakdownChart: typeof import('./src/components/usage/TokenBreakdownChart.vue')['default']
     Tooltip: typeof import('./src/components/ui/tooltip/Tooltip.vue')['default']
     TooltipContent: typeof import('./src/components/ui/tooltip/TooltipContent.vue')['default']
