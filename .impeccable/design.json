@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-03T23:22:56Z",
+  "generatedAt": "2026-11-16T01:26:57Z",
   "title": "Design System: LLM Proxy",
   "extensions": {
     "colorMeta": {
@@ -651,11 +651,15 @@
       },
       "mono": {
         "displayName": "Mono",
-        "purpose": "Every code/JSON/technical value; tabular-nums."
+        "purpose": "Code and JSON payloads (.text-code / .text-code-xs): mono at 400, no tabular-nums."
       },
       "metric": {
         "displayName": "Metric",
         "purpose": "Large stats; tabular-nums + slashed-zero."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "The technical value a label rail names (.text-data / .text-data-xs): mono at 500 with tabular-nums so columns align."
       }
     },
     "shadows": [
@@ -855,11 +859,33 @@
       "description": "One overlay shell for centered dialogs and edge sheets: card surface, hairline border, band header, bar footer, no resting shadow.",
       "html": "<div class='ds-overlay'><div class='ds-dialog' role='dialog' aria-modal='true' aria-labelledby='ds-dialog-title'><div class='ds-dialog-band'><div class='ds-dialog-icon'><svg viewBox='0 0 24 24' width='20' height='20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='3' y='4' width='18' height='6' rx='2'/><rect x='3' y='14' width='18' height='6' rx='2'/></svg></div><div class='ds-dialog-heading'><h2 id='ds-dialog-title'>Provider settings</h2><p>Update the upstream connection.</p></div><button class='ds-dialog-close' type='button' aria-label='Close'><svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' aria-hidden='true'><path d='M18 6 6 18M6 6l12 12'/></svg></button></div><div class='ds-dialog-body'><label class='ds-dialog-label' for='ds-dialog-url'>Base URL</label><input id='ds-dialog-url' class='ds-dialog-input' type='url' value='https://api.example.com' /></div><div class='ds-dialog-footer'><button class='ds-dialog-outline' type='button'>Cancel</button><button class='ds-dialog-primary' type='button'>Save</button></div></div></div>",
       "css": ".ds-overlay { position: relative; display: flex; align-items: center; justify-content: center; width: 520px; min-height: 340px; padding: 24px; border-radius: 12px; background: hsl(var(--background)); font-family: var(--font-sans); } .ds-overlay::before { content: ''; position: absolute; inset: 0; border-radius: 12px; background: hsl(var(--overlay) / 0.8); } .ds-dialog { position: relative; width: 360px; overflow: hidden; border: 1px solid hsl(var(--border) / 0.6); border-radius: 16px; background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: none; } .ds-dialog-band { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 20px 64px 20px 24px; border-bottom: 1px solid hsl(var(--border) / 0.6); background: hsl(var(--muted) / 0.1); } .ds-dialog-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none; border: 1px solid hsl(var(--border) / 0.4); border-radius: 10px; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); } .ds-dialog-heading { min-width: 0; padding-top: 1px; } .ds-dialog-heading h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1; } .ds-dialog-heading p { margin: 4px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.5; } .ds-dialog-close { position: absolute; top: 16px; right: 16px; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 4px; background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; opacity: 0.7; transition: background-color 150ms, color 150ms, opacity 150ms; } .ds-dialog-close:hover { background: hsl(var(--accent)); color: hsl(var(--muted-foreground)); opacity: 1; } .ds-dialog-close:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--ring) / 0.5); } .ds-dialog-body { padding: 24px; } .ds-dialog-label { display: block; margin-bottom: 6px; color: hsl(var(--foreground) / 0.9); font-size: 14px; font-weight: 500; } .ds-dialog-input { width: 100%; height: 40px; padding: 8px 14px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: inherit; font-size: 14px; box-shadow: inset 0 1px 0 hsl(var(--background) / 0.9); } .ds-dialog-input:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px; border-top: 1px solid hsl(var(--border) / 0.6); background: hsl(var(--muted) / 0.1); } .ds-dialog-outline, .ds-dialog-primary { height: 40px; padding: 0 16px; border-radius: 10px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; } .ds-dialog-outline { border: 1px solid hsl(var(--border) / 0.8); background: hsl(var(--background) / 0.8); color: hsl(var(--foreground)); } .ds-dialog-outline:hover { border-color: hsl(var(--primary) / 0.35); background: hsl(var(--accent) / 0.7); } .ds-dialog-outline:focus-visible, .ds-dialog-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); } .ds-dialog-primary { border: 0; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-dialog-primary:hover { background: hsl(var(--primary) / 0.9); }"
+    },
+    {
+      "name": "Header Chip",
+      "kind": "custom",
+      "description": "The one surface every page-header picker and popover trigger draws from, so a model picker and a date range read as the same object.",
+      "html": "<button class=\"ds-header-chip\"><span>gpt-4o-mini</span><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg></button>",
+      "css": ".ds-header-chip { display: inline-flex; align-items: center; gap: 10px; height: 36px; cursor: pointer; white-space: nowrap; padding: 0 10px; border: 1px solid hsl(var(--border) / 0.6); border-radius: 10px; background: transparent; color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 14px; font-weight: 400; transition: border-color 200ms, background-color 200ms; } .ds-header-chip:hover { border-color: hsl(var(--border) / 0.8); background: hsl(var(--muted) / 0.1); } .ds-header-chip:focus-visible { outline: none; box-shadow: 0 0 0 1px hsl(var(--foreground)); } .ds-header-chip[data-on='true'] { background: hsl(var(--muted)); color: hsl(var(--foreground)); }"
+    },
+    {
+      "name": "Time Field",
+      "kind": "input",
+      "refersTo": "time-input",
+      "description": "A typed 24-hour clock: commits a normalized HH:MM whatever the browser locale, and reverts to the stored value on unreadable input.",
+      "html": "<label class=\"ds-time-field\"><span class=\"ds-time-label\">Start</span><input class=\"ds-time-input\" value=\"09:30\" inputmode=\"numeric\" maxlength=\"5\" autocomplete=\"off\" spellcheck=\"false\" /></label>",
+      "css": ".ds-time-field { display: flex; flex-direction: column; gap: 4px; } .ds-time-label { color: hsl(var(--muted-foreground)); font-family: var(--font-sans); font-size: 11px; font-weight: 500; } .ds-time-input { height: 32px; width: 80px; padding: 8px 14px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 500; box-shadow: inset 0 1px 0 hsl(var(--background) / 0.9); backdrop-filter: blur(4px); transition: border-color 200ms, box-shadow 200ms; } .ds-time-input:focus-visible { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5); }"
+    },
+    {
+      "name": "Pricing Time Band",
+      "kind": "custom",
+      "description": "One peak/off-peak band: a timezone, the weekdays its ranges start on, and the rates they share — a nested surface one tonal step above the panel.",
+      "html": "<fieldset class=\"ds-band\"><div class=\"ds-band-id\"><input class=\"ds-band-tz\" value=\"UTC\" /><div class=\"ds-band-days\"><button class=\"ds-day\" data-on=\"true\" aria-pressed=\"true\">Mo</button><button class=\"ds-day\" data-on=\"true\" aria-pressed=\"true\">Tu</button><button class=\"ds-day\" aria-pressed=\"false\">We</button></div></div><div class=\"ds-band-range\"><input class=\"ds-band-clock\" value=\"01:00\" inputmode=\"numeric\" maxlength=\"5\" /><span class=\"ds-band-arrow\">→</span><input class=\"ds-band-clock\" value=\"04:00\" inputmode=\"numeric\" maxlength=\"5\" /></div><div class=\"ds-band-rates\"><input class=\"ds-band-rate\" value=\"0.60\" /><input class=\"ds-band-rate\" value=\"2.40\" /></div></fieldset>",
+      "css": ".ds-band { max-width: 420px; padding: 0 12px 12px; border: 1px solid hsl(var(--border) / 0.7); border-radius: 12px; background: hsl(var(--muted) / 0.1); font-family: var(--font-sans); } .ds-band-id, .ds-band-range, .ds-band-rates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; } .ds-band-tz { height: 32px; width: 160px; padding: 0 10px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 12px; font-weight: 500; box-shadow: inset 0 1px 0 hsl(var(--background) / 0.9); } .ds-band-days { display: flex; gap: 4px; } .ds-day { border: 0; border-radius: 8px; padding: 2px 6px; background: transparent; color: hsl(var(--muted-foreground)); font-family: inherit; font-size: 11px; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-day:hover { background: hsl(var(--muted)); } .ds-day[data-on='true'] { background: hsl(var(--foreground)); color: hsl(var(--background)); } .ds-day:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--ring) / 0.6); } .ds-band-clock { height: 32px; width: 80px; padding: 0 10px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; } .ds-band-clock[aria-invalid='true'] { border-color: hsl(var(--status-warning)); } .ds-band-arrow { color: hsl(var(--muted-foreground)); font-size: 11px; } .ds-band-rate { height: 32px; flex: 1; padding: 0 10px; border: 1px solid hsl(var(--input) / 0.8); border-radius: 10px; background: hsl(var(--background) / 0.75); color: hsl(var(--foreground)); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; }"
     }
   ],
   "narrative": {
     "northStar": "The Operator's Console",
-    "overview": "LLM Proxy's admin UI is an infrastructure instrument panel — a dark, monochrome console an operator reads mid-incident and trusts on the first glance. It pairs the discipline of editorial typography (Space Grotesk display, Manrope body, IBM Plex Mono for every number and code value) with the restraint of a telemetry surface: tonal layering, hairline borders, and ambient glow in place of ornament. The operator is technical, time-pressed, and often a stranger deploying the proxy for the first time, so the system earns trust through precision, not decoration.\n\nThe palette is monochrome editorial — deep cool-neutral voids in dark mode, crisp near-white in light mode — with a barely-perceptible hue tinting system reserved for semantic differentiation only: HTTP methods, status, and action types. Saturation is deliberately low; color never decorates, it disambiguates. The atmosphere is built from two fixed layers behind every screen: a trio of soft radial foreground-glints and a faint 42px grid masked toward the viewport center — present enough to read as a designed surface, quiet enough never to compete with data.\n\nThis system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand warm-neutral bodies, gradient-text headlines, identical icon-card grids, big-number hero-metric templates), loud SaaS gradients, playful/consumer affordances, and circa-2008 enterprise chrome. It is **dark-first**: dark mode is the primary experience and the canonical reference for every token below; light mode is a complete, first-class translation, not an afterthought.",
+    "overview": "LLM Proxy's admin UI is an infrastructure instrument panel — a dark, monochrome console an operator reads mid-incident and trusts on the first glance. It pairs the discipline of editorial typography (Space Grotesk display, Manrope body, IBM Plex Mono for every number and code value) with the restraint of a telemetry surface: tonal layering, hairline borders, and ambient glow in place of ornament. The operator is technical, time-pressed, and often a stranger deploying the proxy for the first time, so the system earns trust through precision, not decoration.\n\nThe palette is monochrome editorial — deep cool-neutral voids in dark mode, crisp near-white in light mode — with a deliberately low-chroma hue tinting system reserved for semantic differentiation only: HTTP methods, status, and action types. Saturation is deliberately low; color never decorates, it disambiguates. The atmosphere is built from two fixed layers behind every screen: a trio of soft radial foreground-glints and a faint 42px grid masked toward the viewport center — present enough to read as a designed surface, quiet enough never to compete with data.\n\nThis system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand warm-neutral bodies, gradient-text headlines, identical icon-card grids, big-number hero-metric templates), loud SaaS gradients, playful/consumer affordances, and circa-2008 enterprise chrome. It is **dark-first**: dark mode is the primary experience and the canonical reference for every token below; light mode is a complete, first-class translation, not an afterthought.",
     "keyCharacteristics": [
       "Dark-first monochrome with cool-neutral (220°) undertones; light mode is a crisp mirror.",
       "Editorial type pairing: geometric Space Grotesk display + humanist Manrope body + IBM Plex Mono for data.",
@@ -874,77 +900,77 @@
       {
         "name": "The Monochrome-First Rule",
         "body": "Black, white, and the cool-neutral slate ramp carry 90%+ of any screen. The action/status tints are permitted only on badges, icon containers, metric values, and hover glows — never as section backgrounds, never as button colors (except `destructive`), never as large fills. If a screen reads as \"colorful,\" it has failed this rule.",
-        "section": "Colors"
+        "section": "colors"
       },
       {
         "name": "The Tint, Not the Hue Rule",
         "body": "Status and HTTP colors render at low alpha (`/15` background, `/25–30` border) with the full token as text. The badge is a labeled chip, not a swatch. Color is redundant information; the text label is the primary signal, and the chip is static — never a live region.",
-        "section": "Colors"
+        "section": "colors"
       },
       {
         "name": "The Cool-Neutral Undertone Rule",
         "body": "Every surface, border, and mid-tone neutral carries hue 220° at very low chroma (3–14%). The extreme ink tokens (`--foreground`, `--primary`, `--ring`, `--sidebar-foreground`) may resolve to `0 0%` because hue is imperceptible at those lightnesses; those are the only true-gray values. Never introduce a true-gray mid-surface or a warm-neutral (`hue 30–100`) — both break the cool-console atmosphere and edge toward the cream/SaaS default this system rejects.",
-        "section": "Colors"
+        "section": "colors"
       },
       {
         "name": "The Quiet Syntax Rule",
         "body": "The JSON and code palettes differentiate structure at low chroma for scanning — and only on code surfaces (JSON viewers, highlighted snippets, code blocks). Never reuse syntax tokens for badges, chart series, or fills; a rainbow syntax theme is a defect, not a feature.",
-        "section": "Colors"
+        "section": "colors"
       },
       {
         "name": "The Three Voices Rule",
         "body": "Space Grotesk + Manrope + IBM Plex Mono is the whole system. Never introduce a fourth family. A number or code value set in Manrope is a defect, not a stylistic choice.",
-        "section": "Typography"
+        "section": "typography"
       },
       {
         "name": "The Mono-Data Rule",
         "body": "Every numeric value — tokens, cost, latency, counts, timestamps, status codes, HTTP methods — is set in IBM Plex Mono with `tabular-nums`. Use `.text-data` inline and `.text-metric` for large stats.",
-        "section": "Typography"
+        "section": "typography"
       },
       {
         "name": "The Display Restraint Rule",
         "body": "Display weight is 600 in-app, sizes cap at `text-2xl` (1.5rem) for page titles, and emphasis comes from weight + size in a single solid color — never from `background-clip: text` or a gradient.",
-        "section": "Typography"
+        "section": "typography"
       },
       {
         "name": "The Label-Rail Rule",
-        "body": "The 11px tracked uppercase label is a *rail*, not a *kicker*: it may sit **inside** a panel to name the value beneath it (spec-sheet cells, log-detail headings, segmented toggles, nav groups), and it never sits **above** a page or a page section to introduce content. If deleting it would leave the heading unable to say what follows, it was a kicker and does not belong.",
-        "section": "Typography"
+        "body": "The 11px tracked uppercase label is a *rail*, not a *kicker*: it may sit **inside** a panel to name the value beneath it (spec-sheet cells, log-detail headings, segmented toggles, nav groups), and it never sits **above** a page or a page section to introduce content. If deleting it would leave the heading unable to say what follows, it was a kicker and does not belong. The `.brand-kicker` utility in `main.css` is unused legacy from before this rule — do not revive it.",
+        "section": "typography"
       },
       {
         "name": "The One-Console Rule",
         "body": "Management pages are one seamless surface — sticky header, flush toolbar, scrollable body — separated only by `border-b/60` hairlines. Never wrap a console table in an outer Card; never compete with the table's own thead.",
-        "section": "Layout"
+        "section": "layout"
       },
       {
         "name": "The Page-Header Anchor Rule",
         "body": "Every route opens with exactly one `.page-header` (tinted icon container + `.brand-heading` title + muted description + actions). It is the consistent entry point a stranger trusts cold.",
-        "section": "Layout"
+        "section": "layout"
       },
       {
         "name": "The Task-Shape Rule",
         "body": "Structure follows the task, not the page: management tables are one flush console; instance configuration is a centered form column under the console header; personal settings are stacked hairline panels; auth is containerless. Four grammars, one per task shape — never two on one screen.",
-        "section": "Layout"
+        "section": "layout"
       },
       {
         "name": "The Flat-By-Default Rule",
         "body": "Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus) or as the constrained auth-mark and toast exceptions. Never pair a 1px border with a 16px+ blur drop shadow on the same element (the ghost-card pattern) — pick a tonal step or `shadow-xs`, never a wide decorative shadow.",
-        "section": "Elevation & Depth"
+        "section": "elevation"
       },
       {
         "name": "The Tonal-Step Rule",
         "body": "When you need to separate two surfaces, step the background token (`--background` → `--card` → `--muted`) before reaching for a shadow. A 1px `--border` hairline plus a tonal step is the default depth recipe.",
-        "section": "Elevation & Depth"
+        "section": "elevation"
       },
       {
         "name": "The Radius Cap Rule",
         "body": "Cards and panels cap at `rounded-xl` (16px). Save full-pill for tags and status chips; nav items use the control radius `rounded-md` (10px). No 24/28/32/40px card radii, no pill buttons.",
-        "section": "Shapes"
+        "section": "shapes"
       },
       {
         "name": "The No-Stripe Rule",
         "body": "A colored >1px stripe never marks state anywhere in the system — active nav items are a filled `--sidebar-accent` step plus `font-medium`, and the only >1px rules are the neutral 2px console header bottom rules. Never use a colored `border-left/right` accent stripe on cards, list items, or alerts.",
-        "section": "Shapes"
+        "section": "shapes"
       }
     ],
     "dos": [
@@ -954,11 +980,12 @@
       "Do use the `config-page-reveal` entrance on every page and the `stagger-fast` / `row-stagger` / `list-stagger` cascades on first render — and let the global `prefers-reduced-motion` rule neutralize them.",
       "Do keep display tracking at −0.02em (floor −0.04em), display weight 600 in-app, and page titles at `text-xl sm:text-2xl`.",
       "Do hit WCAG AA on both themes: tune `--muted-foreground` for readability, never lighten muted text \"for elegance,\" and bump dark-mode body line-height to 1.55–1.6.",
-      "Do keep touch targets ≥44px (`min-h-11 min-w-11`) on nav, mobile controls, and every coarse-pointer viewport through the shared control-slot floor — tablets and touch laptops must clear 44px without enlarging mouse-driven desktop density.",
+      "Do keep touch targets ≥44px (`min-h-11 min-w-11`) on nav, mobile controls, and every touch-first viewport through the shared control-slot floor — tablets must clear 44px, and a mouse-driven desktop must keep its density even when the machine also has a touchscreen.",
       "Do render JSON and code with the syntax palette on code surfaces only — subtle chroma that reads as structure, never a rainbow theme.",
       "Do build every pre-console screen through `AuthShell` and leave it containerless: one centered `max-w-sm` column, a 48px `auth-mark` locked up with the product name, 44px glass fields, and exactly one white CTA — the passkey button when the account has one, the password submit otherwise.",
       "Do pick the structural grammar by task — flush console for management tables, full-width configuration headers with centered form columns for Settings and instance policy, stacked hairline panels in a centered column for personal settings, containerless for auth — and never mix two on one screen.",
-      "Do use the label rail *inside* a panel to name the value beneath it, and let a page heading stand without one."
+      "Do use the label rail *inside* a panel to name the value beneath it, and let a page heading stand without one.",
+      "Do type every clock through `TimeInput`, never a native `type=\"time\"`: the native field follows the browser locale and renders 12-hour AM/PM on an en-US machine, while the format the operator reads beside timestamps is 24-hour `HH:MM`. The field commits a normalized clock and reverts on blur rather than passing an unreadable time to the form."
     ],
     "donts": [
       "Don't make it playful/consumer — no cute illustrations, mascots, gamification, or celebratory confetti. This is infrastructure. *(PRODUCT.md anti-reference.)*",

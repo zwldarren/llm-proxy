@@ -94,6 +94,12 @@ typography:
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "0"
+  data:
+    fontFamily: "IBM Plex Mono, IBM Plex Mono Fallback, JetBrains Mono, ui-monospace, monospace"
+    fontSize: "0.875rem"
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: "0"
     fontVariantNumeric: "tabular-nums"
   metric:
     fontFamily: "IBM Plex Mono, JetBrains Mono, ui-monospace, monospace"
@@ -161,6 +167,13 @@ components:
     rounded: "{rounded.md}"
     padding: "8px 14px"
     height: "44px"
+  time-input:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.data}"
+    rounded: "{rounded.md}"
+    padding: "8px 14px"
+    height: "32px"
   card:
     backgroundColor: "{colors.card}"
     textColor: "{colors.ink}"
@@ -225,7 +238,7 @@ components:
 
 LLM Proxy's admin UI is an infrastructure instrument panel — a dark, monochrome console an operator reads mid-incident and trusts on the first glance. It pairs the discipline of editorial typography (Space Grotesk display, Manrope body, IBM Plex Mono for every number and code value) with the restraint of a telemetry surface: tonal layering, hairline borders, and ambient glow in place of ornament. The operator is technical, time-pressed, and often a stranger deploying the proxy for the first time, so the system earns trust through precision, not decoration.
 
-The palette is monochrome editorial — deep cool-neutral voids in dark mode, crisp near-white in light mode — with a barely-perceptible hue tinting system reserved for semantic differentiation only: HTTP methods, status, and action types. Saturation is deliberately low; color never decorates, it disambiguates. The atmosphere is built from two fixed layers behind every screen: a trio of soft radial foreground-glints and a faint 42px grid masked toward the viewport center — present enough to read as a designed surface, quiet enough never to compete with data.
+The palette is monochrome editorial — deep cool-neutral voids in dark mode, crisp near-white in light mode — with a deliberately low-chroma hue tinting system reserved for semantic differentiation only: HTTP methods, status, and action types. Saturation is deliberately low; color never decorates, it disambiguates. The atmosphere is built from two fixed layers behind every screen: a trio of soft radial foreground-glints and a faint 42px grid masked toward the viewport center — present enough to read as a designed surface, quiet enough never to compete with data.
 
 This system explicitly rejects the generic 2026 AI-tool aesthetic (cream/sand warm-neutral bodies, gradient-text headlines, identical icon-card grids, big-number hero-metric templates), loud SaaS gradients, playful/consumer affordances, and circa-2008 enterprise chrome. It is **dark-first**: dark mode is the primary experience and the canonical reference for every token below; light mode is a complete, first-class translation, not an afterthought.
 
@@ -264,9 +277,9 @@ A two-theme monochrome system with a cool-neutral (hue 220°) undertone. Dark mo
 Muted but perceptible hues used to disambiguate HTTP methods, action types, and categorical data (usage bars, chart series). Chroma is tuned so each hue reads as its color while staying clearly muted — never decoration, never large-surface fills.
 - **Muted Azure** (`--action-blue` / `--http-get`, GET): Dark `hsl(210 26% 64%)` `#8BA3BB` / Light `hsl(210 22% 35%)` `#46596D`.
 - **Pale Iris** (`--action-violet` / `--http-post`, POST): Dark `hsl(260 24% 80%)` `#C8C0D8` / Light `hsl(260 22% 9%)` `#15121C`.
-- **Muted Amber** (`--action-amber` / `--http-put`, PUT/PATCH): Dark `hsl(35 28% 60%)` `#B69E7C` / Light `hsl(35 24% 36%)` `#725F46`, shared by both tokens. The lighter pair they used to carry (`action-amber` at 38%, `http-put` at 48%) read 4.31:1 and 3.12:1 as badge text on their own tint — PUT/PATCH labels were the one method pair that failed AA. `--http-put` sits half a step lighter at `hsl(35 24% 37%)` `#756248` to keep the method distinguishable in a dense row.
+- **Muted Amber** (`--action-amber` / `--http-put`, PUT/PATCH): Dark `hsl(35 28% 60%)` `#B69E7C` / Light `hsl(35 24% 36%)` `#725F46`, shared by both tokens. The lighter pair they used to carry (`action-amber` at 38%, `http-put` at 48%) read 4.31:1 and 3.12:1 as badge text on their own tint — PUT/PATCH labels were the one method pair that failed AA. The half-step that kept `--http-put` lighter than `--action-amber` bought that unreadability, so both tokens now resolve to `hsl(35 24% 36%)` in light mode and the method is distinguished by its label alone.
 - **Muted Coral** (`--action-rose` / `--http-delete`, DELETE): Dark `hsl(350 28% 64%)` `#BD8992` / Light `hsl(350 26% 44%)` `#8D535D` — at 45% the DELETE label measured exactly 4.50:1 on its own `/15` tint, so it sat on the AA line rather than over it.
-- **Muted Teal** (`--action-teal`, embedding): the fifth capability tint in the model plaza — vision→azure, image generation→iris, TTS→amber, STT→coral, embedding→teal. Dark `hsl(180 26% 62%)` `#85B7B7` / Light `hsl(180 24% 30%)` `#3A5F5F`.
+- **Muted Teal** (`--action-teal`, embedding): the fifth capability tint in the model plaza — vision→azure, image generation→iris, TTS→amber, STT→coral, embedding→teal. Dark `hsl(180 26% 62%)` `#85B7B7` / Light `hsl(180 24% 30%)` `#3A5F5F`. The informational models.dev attributes (`reasoning`, `tool_call`, `realtime`, `rerank`, `systemone`) reuse those same five tints rather than minting a hue per capability — a sixth color would turn a semantic key into a palette.
 
 ### Status Tints (Tertiary — semantic only)
 Desaturated but recognizable; always rendered as a tinted badge (`bg/15 text border/30`) with a text label. The badge is a static label, so it carries no live region: a table of hundreds of rows must not mint hundreds of `role="status"` announcers. Live feedback belongs to the one `role="status"` region that reports the result count. Success and error pair across themes via light/dark aliases — `--status-success` resolves to `--success-light` in light mode and `--success-dark` in dark mode; `--status-error` resolves to `--error-light` / `--error-dark`. Surface code consumes the resolved `--status-*` token only: the light/dark halves exist to define it, never as a second encoding alongside it.
@@ -316,7 +329,8 @@ The scale is a 1.25 (Major Third) modular scale on a 16px base, expressed in fix
 - **Secondary** (Manrope, 400, 0.875rem, line-height 1.5): descriptions, secondary text (`text-sm`, usually `text-muted-foreground`).
 - **Label** (Manrope, 500, 0.75rem, tracking 0.02em): captions, metadata, badges, form labels (`text-xs font-medium`).
 - **Label Rail** (Manrope, 600, 11px, tracking 0.05em, uppercase): the in-panel micro-heading — the label row above a spec-sheet value, a log-detail panel heading, a segmented view toggle. The nav groups raise it to `tracking-[0.14em]`.
-- **Mono** (IBM Plex Mono, 400, 0.875rem, `tabular-nums`): code, JSON, technical values (`.text-code`, `.text-data`).
+- **Mono** (IBM Plex Mono, 400, 0.875rem): code and JSON payloads (`.text-code`; `.text-code-xs` at 0.75rem for dense rows and table cells). No `tabular-nums` — these values are read, not compared down a column.
+- **Data** (IBM Plex Mono, 500, 0.875rem, `tabular-nums`): the technical value a label rail names — an id, a cost, a latency (`.text-data`; `.text-data-xs` is the 0.75rem compact form in telemetry chips and log rows). The 500 weight is what separates a *value* from a *payload*: `.text-code` is something you copy, `.text-data` is something you compare.
 - **Metric** (IBM Plex Mono, 700, 1.5rem, `tabular-nums slashed-zero`, line-height 1): large stats (`.text-metric`).
 
 ### Dark-Mode Readability Adjustments
@@ -329,7 +343,7 @@ Dark mode adds 0.05 to body line-height for light-on-dark readability: `.dark bo
 
 **The Display Restraint Rule.** Display weight is 600 in-app, sizes cap at `text-2xl` (1.5rem) for page titles, and emphasis comes from weight + size in a single solid color — never from `background-clip: text` or a gradient.
 
-**The Label-Rail Rule.** The 11px tracked uppercase label is a *rail*, not a *kicker*: it may sit **inside** a panel to name the value beneath it (spec-sheet cells, log-detail headings, segmented toggles, nav groups), and it never sits **above** a page or a page section to introduce content. If deleting it would leave the heading unable to say what follows, it was a kicker and does not belong.
+**The Label-Rail Rule.** The 11px tracked uppercase label is a *rail*, not a *kicker*: it may sit **inside** a panel to name the value beneath it (spec-sheet cells, log-detail headings, segmented toggles, nav groups), and it never sits **above** a page or a page section to introduce content. If deleting it would leave the heading unable to say what follows, it was a kicker and does not belong. The `.brand-kicker` utility in `main.css` is unused legacy from before this rule — do not revive it.
 
 ## Layout
 
@@ -445,6 +459,15 @@ A lit-edge control with the strongest focus signal in the system.
 - **Placeholder:** `text-muted-foreground` (tuned for AA contrast, not lightened).
 - **Auth input (login/setup):** the standard `Input` at `h-11` — same fill, same inset sheen — or `h-12 text-center font-mono text-lg tracking-[0.35em]` for the MFA code field. `.auth-input` in `main.css` changes only the **state** signals, and it is declared **outside `@layer components` on purpose**: `Input.vue` sets the same properties as utilities, and a utility layer outranks every earlier layer no matter how specific the selector is, so an in-layer version never reached the screen. What it owns: focus (`border-color` → `primary/0.65`, plus a 1px `primary/0.55` line and a 2px `primary/0.12` glow, with the `inset 0 1px 0 background/0.9` sheen restated so it survives), hover (`primary/0.28`, guarded with `:not(:disabled):not(:focus-visible):not([aria-invalid="true"])`), and invalid-while-focused (`destructive` border with the same glow shape). Every property the block overrides is restated inside it — hand one back to the utilities and the red error border silently disappears on all six auth screens. Never patch it with `!important`.
 
+### Time Field (`TimeInput`, signature field)
+A typed 24-hour clock, so a schedule reads the same on every machine.
+- **Why not `type="time"`:** the native control follows the browser locale. On an en-US browser it renders a 12-hour clock with an AM/PM picker and cannot be asked to do otherwise, while the wire format the proxy stores and displays is 24-hour `HH:MM`. One field type, one clock.
+- **Shell:** the standard `Input` at its compact metric — `h-8 text-xs` inside a pricing band — with `text-data` so clock columns align, `inputmode="numeric"`, `maxlength="5"`, and no `autocomplete` or `spellcheck`.
+- **Editing:** focus selects the whole value, and while the field is focused it holds the operator's own text rather than a normalized rewrite — typing `1` must not become `01:00` under the caret. Typing `9`, `930` or `09:30` and leaving the field commits `09:30`.
+- **Commit and revert:** blur normalizes and emits only when the clock actually changed; `Enter` commits and releases focus; `Esc` restores the stored value. Input the parser cannot read reverts to the stored clock instead of reaching the form, so an unreadable time never turns into a validation error the operator has to decode.
+- **Rule:** a clock is a `TimeInput`. A native time input, a free-text field validated on submit, or a 12-hour format is a defect — the operator reads these next to timestamps that are already 24-hour.
+- **Source:** `frontend/src/components/ui/time-input/TimeInput.vue`, parsing in `frontend/src/utils/clock.ts`.
+
 ### Auth Screen — "The Vestibule" (signature surface)
 One centered column, no card, one white action. Every screen before the console opens renders through `AuthShell`: login, first-run setup, force-change-password, invite acceptance, OAuth completion, email verification, forgot-password, and reset-password.
 - **Shell:** `min-h-dvh` column, `px-4 py-8 sm:py-10`; block `max-w-sm` centered; the `.auth-enter` entrance (500ms `cubic-bezier(0.16, 1, 0.3, 1)`, a 14px rise plus fade, from an already-visible default).
@@ -483,7 +506,7 @@ The log-details metric grid is the densest thing in the product, and its cell is
 ### Segmented Control
 Mutually-exclusive views chosen in place: page tabs, list/table switches, chart metrics, theme and scope pickers. One `SegmentedControl` / `SegmentedControlItem` pair owns the grammar.
 - **Track:** `raised` is the default — `flex items-center gap-0 bg-muted/60 p-[3px] rounded-lg border border-border/55`, 36px tall with `md` segments. `quiet` drops the track for the icon-only theme switcher; `fill` stretches every segment to the available width.
-- **Size:** `md` is the default 30px segment with `text-xs`; `sm` is the compact 11px form used by chart and log toggles; `icon` is a 30px square for glyph-only controls. Every size clears 44px on a coarse primary pointer through the shared `.touch-target` floor.
+- **Size:** `md` is the default 30px segment with `text-xs`; `sm` is the compact 11px form used by chart and log toggles; `icon` is a 32px square (`size-8`) for glyph-only controls. The 32px is chosen for the row it lives in, not for the glyph: 32 + 6px of track padding + 2px of border lands the switch on the 40px toolbar-band metric, so an icon view toggle sits on the baseline of the search field beside it. `md` stays 30px because its tab strips live in page headers, where the metric is 36px. Every size clears 44px on a coarse primary pointer through the shared `.touch-target` floor.
 - **Segment:** `rounded-md border transition-all duration-200`, `px-3 py-1.5 text-xs` at `md` (`max-md:min-h-11 max-md:px-4` for phones); `caps` opts into uppercase tracking for compact mode toggles. Both states carry a border — active `bg-accent text-foreground border-border/70 shadow-xs font-semibold`, inactive `border-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground` — so the label never shifts by a pixel when the selection moves. The `quiet` variant is trackless: active `bg-muted text-foreground`, inactive `text-muted-foreground hover:bg-muted/60 hover:text-foreground`.
 - **State:** `aria-pressed` for toggles, `aria-current="page"` for route tabs. The active segment is a raised slate: deeper track, tonal step, hairline edge, drop shadow. It must read as lifted, not as a hole; `bg-background` on the pill is a defect because on this page `--background` *is* the page, which renders the selected segment identical to the surface behind the track.
 - **No 3:1 fill, on purpose:** on the `#090A0B` page no fill in this palette reaches 3:1 against a track (`--accent` tops out around 1.3:1, and 3:1 would need a `rgb(~98)` gray). The state therefore leans on three small cues together — the tonal step, the 1px edge, the drop shadow — plus the label moving from `text-muted-foreground` (6.7:1) to `text-foreground` (~17:1), which is what actually carries it. Do not "fix" the missing 3:1 by lightening the pill to a mid-gray: that promotes a header tab to primary-CTA weight.
@@ -494,6 +517,17 @@ One route may render different views by role when both roles work on the same da
 - The role switch must be **synchronous** (derived from the auth store's JWT, never async) so there is no flash of the wrong view.
 - Nav placement and command-palette grouping follow **each role's mental model** (Catalog for viewers, Configuration for admins) while pointing at the same route; legacy URLs redirect by route name.
 - Keep this pattern rare — admin tools otherwise live under `/config/*` with an `adminOnly` route guard.
+
+### Pricing Time Bands (signature form pattern)
+One card is a *band* — a timezone, the weekdays its ranges start on, and the rates they all share — so "peak is 01:00–04:00 and 06:00–10:00 UTC" is stated once instead of re-entering the timezone, the days and the rates per range. Storage stays the flat one-window-per-range list the API accepts; the band exists in the editor only.
+- **Shell:** a `rounded-lg border bg-muted/10` fieldset inside the model or provider form's own panel, `space-y-2.5` between bands, `px-3` internal gutter. This is a form inside a form: the band is a nested surface one tonal step above the panel, never a card with its own shadow, and never a second panel recipe.
+- **Identity row** (`flex flex-wrap items-center gap-2 px-3 py-2`): the timezone `Input` at `h-8 w-40 text-data text-xs`, a `text-[11px]` muted preposition, then the weekday toggles — seven `rounded px-1.5 py-0.5 text-[11px]` buttons carrying `aria-pressed`, selected filled `bg-foreground text-background` and unselected `text-muted-foreground hover:bg-muted`. The inverted fill is the one place a selected control may use full ink: these are 11px glyph cells inside a form body, not a header toggle competing with a primary CTA. Days are chosen once per band and the range rows below inherit them; the band's summary follows as `text-[11px]` muted.
+- **Range rows:** `TimeInput` start, a `text-[11px]` muted `→`, `TimeInput` end, then a ghost `X` at `p-1`. Adding a range proposes the band's next free hour (an overnight `22:00–08:00` for a new band), so the control never hands back a collision it already knows about. Deleting a band's last range deletes the band — a band *is* its ranges.
+- **Rates:** a `grid-cols-2 sm:grid-cols-4 gap-2` grid of `text-[11px]` muted labels over `h-8 text-data text-xs` `NumberInput`s for the primary dimensions, with the remaining dimensions behind a chevron disclosure that opens itself whenever one of those rates is already set. An empty rate means "inherit" and shows the inherited placeholder.
+- **Validation in place:** overlapping ranges mark the offending start and end fields `aria-invalid` and turn that band's border to `border-status-warning/60`; a timezone the platform cannot resolve is marked the same way. Each failure adds one `text-[11px] text-status-warning` sentence under the list, never a toast — the field is where the operator has to act.
+- **Empty state:** a `rounded-md border border-dashed border-border` strip with one muted `text-[11px]` line. No illustration, no centered icon tile.
+- **Repeated controls carry repeated names:** every rate input's `aria-label` appends the band's clocks and timezone (`Input rate · 01:00–04:00, 06:00–10:00 · UTC`), because one field label appears once per band.
+- **Source:** `frontend/src/components/models/PricingTimeWindowEditor.vue`, grouping in `frontend/src/utils/pricingTiers.ts`.
 
 ### Color-Tinted Icon Container (signature)
 `.icon-container` (and its `.icon-container-sm` page-header size, `h-8 w-8 rounded-md`): `p-2.5 rounded-xl min-h-11 min-w-11`, `bg-linear-to-br from-primary/20 via-primary/10 to-action-blue/12`, `ring-1 ring-primary/30`, `inset 0 1px 0 primary/0.26`. The signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen.
@@ -549,6 +583,7 @@ Concrete visual guardrails grounded in the implemented system.
 - **Do** build every pre-console screen through `AuthShell` and leave it containerless: one centered `max-w-sm` column, a 48px `auth-mark` locked up with the product name, 44px glass fields, and exactly one white CTA — the passkey button when the account has one, the password submit otherwise.
 - **Do** pick the structural grammar by task — flush console for management tables, full-width configuration headers with centered form columns for Settings and instance policy, stacked hairline panels in a centered column for personal settings, containerless for auth — and never mix two on one screen.
 - **Do** use the label rail *inside* a panel to name the value beneath it, and let a page heading stand without one.
+- **Do** type every clock through `TimeInput`, never a native `type="time"`: the native field follows the browser locale and renders 12-hour AM/PM on an en-US machine, while the format the operator reads beside timestamps is 24-hour `HH:MM`. The field commits a normalized clock and reverts on blur rather than passing an unreadable time to the form.
 
 ### Don't:
 - **Don't** make it playful/consumer — no cute illustrations, mascots, gamification, or celebratory confetti. This is infrastructure. *(PRODUCT.md anti-reference.)*
