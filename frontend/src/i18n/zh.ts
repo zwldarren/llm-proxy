@@ -1396,6 +1396,8 @@ export default {
     removeProviderTitle: "移除该提供商？",
     removeProviderConfirmation:
       "移除 {name}？其 issuer、client ID 与 client secret 将从表单中丢弃。需保存后生效。",
+    removeProviderLinkedWarning:
+      "通过它登录的账户仍保留已绑定的身份，但在重新添加该提供商之前将无法再登录。",
     discardChanges: "放弃修改",
     saving: "正在保存…",
   },
@@ -1477,6 +1479,7 @@ export default {
     regenerate: "重新生成恢复码",
     linkedAccounts: "已绑定的登录提供商",
     noLinkedAccounts: "尚未绑定外部提供商。",
+    identityProviderUnavailable: "（提供商不可用）",
     noProvidersAvailable: "此实例尚未配置登录提供商。",
     link: "绑定",
     unlink: "解绑",

@@ -63,8 +63,12 @@ const fieldErrors = ref<Record<string, string>>({});
 // cancelled, and the designed dialog decides whether to finish it.
 const showLeaveConfirm = ref(false);
 const pendingLeavePath = ref<string | null>(null);
-// Index of the OIDC provider awaiting a removal confirmation.
-const pendingProviderRemoval = ref<number | null>(null);
+// Which provider the removal dialog is about, kept apart from whether the
+// dialog is open. AlertDialogAction closes the dialog before the click handler
+// runs, so a payload cleared by that close would be gone by the time the
+// confirm handler reads it — the removal would silently do nothing.
+const providerRemovalIndex = ref<number | null>(null);
+const showProviderRemoval = ref(false);
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
@@ -77,10 +81,32 @@ const fieldErrorList = computed(() =>
 
 /** Which provider the removal dialog is about, for the message it carries. */
 const providerRemovalName = computed(() => {
-  const index = pendingProviderRemoval.value;
+  const index = providerRemovalIndex.value;
   if (index === null) return "";
   const provider = settings.value.oidc_providers[index];
   return provider?.name || provider?.id || "";
+});
+
+/** Whether the provider being removed is saved, so accounts may sign in with it. */
+const providerRemovalIsSaved = computed(() => {
+  const index = providerRemovalIndex.value;
+  const provider = index === null ? undefined : settings.value.oidc_providers[index];
+  return !!provider && savedProviderIds.value.has(provider.id);
+});
+
+/**
+ * What the removal dialog says. A saved provider may already carry linked
+ * identities that stop signing in once it is gone, so that consequence is
+ * named; a provider typed in this session has nothing linked to it yet and
+ * such a warning would only be noise.
+ */
+const providerRemovalDescription = computed(() => {
+  const message = t("consoleAuth.removeProviderConfirmation", {
+    name: providerRemovalName.value,
+  });
+  return providerRemovalIsSaved.value
+    ? `${message} ${t("consoleAuth.removeProviderLinkedWarning")}`
+    : message;
 });
 
 function isSecureHttpUrl(value: string): boolean {
@@ -369,13 +395,19 @@ function addProvider() {
  * this session and never saved, so it asks first and says what goes with it.
  */
 function requestRemoveProvider(index: number) {
-  pendingProviderRemoval.value = index;
+  providerRemovalIndex.value = index;
+  showProviderRemoval.value = true;
 }
 
 function confirmRemoveProvider() {
-  const index = pendingProviderRemoval.value;
-  pendingProviderRemoval.value = null;
+  const index = providerRemovalIndex.value;
+  dismissRemoveProvider();
   if (index !== null) removeProvider(index);
+}
+
+function dismissRemoveProvider() {
+  providerRemovalIndex.value = null;
+  showProviderRemoval.value = false;
 }
 
 function removeProvider(index: number) {
@@ -954,14 +986,13 @@ onUnmounted(() => {
     />
 
     <ConfirmDialog
-      :open="pendingProviderRemoval !== null"
+      v-model:open="showProviderRemoval"
       :title="t('consoleAuth.removeProviderTitle')"
-      :description="t('consoleAuth.removeProviderConfirmation', { name: providerRemovalName })"
+      :description="providerRemovalDescription"
       :confirm-text="t('consoleAuth.removeProvider')"
       :cancel-text="t('common.cancel')"
       @confirm="confirmRemoveProvider"
-      @update:open="(open: boolean) => !open && (pendingProviderRemoval = null)"
-      @cancel="pendingProviderRemoval = null"
+      @cancel="dismissRemoveProvider"
     />
   </AppLayout>
 </template>

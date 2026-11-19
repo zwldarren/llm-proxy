@@ -209,6 +209,10 @@ keyed by it, so the console locks the field for an existing provider. Each
 proxy refuses to save a plain-HTTP issuer, because the client secret and the
 authorization code travel to it.
 
+Removing a provider and saving deletes its configuration and secret. Identities
+already linked through it stay on those accounts, but they cannot sign in with it
+again until a provider with the same **id** is added back.
+
 Passkey and OAuth endpoints are unavailable when no HTTPS public base URL is
 configured. This is deliberate: WebAuthn cannot be made secure over plain HTTP or a
 LAN IP.

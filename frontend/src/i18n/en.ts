@@ -1462,6 +1462,8 @@ export default {
     removeProviderTitle: "Remove this provider?",
     removeProviderConfirmation:
       "Remove {name}? Its issuer, client ID and client secret are dropped from the form. Save to apply.",
+    removeProviderLinkedWarning:
+      "Accounts that sign in through it keep their linked identity, which stops working until the provider is added back.",
     discardChanges: "Discard changes",
     saving: "Saving…",
   },
@@ -1548,6 +1550,7 @@ export default {
     regenerate: "Regenerate recovery codes",
     linkedAccounts: "Linked sign-in providers",
     noLinkedAccounts: "No external provider is linked.",
+    identityProviderUnavailable: "(provider unavailable)",
     noProvidersAvailable: "No sign-in provider is configured on this instance.",
     link: "Link",
     unlink: "Unlink",

@@ -35,6 +35,12 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
+// ``AlertDialogAction`` is reka-ui's ``DialogClose``: it closes the dialog on
+// click *before* the click handler below runs, so ``update:open(false)`` is
+// emitted before ``confirm``. A caller that keeps what it is confirming in the
+// same state the close clears (``:open="pending !== null"``) therefore reads it
+// as empty by the time ``confirm`` arrives. Keep the payload in its own state
+// and let the dialog own its open flag, or the action silently does nothing.
 const handleConfirm = () => {
   emit("confirm");
 };

@@ -61,6 +61,30 @@ function makeSettings(): ConsoleAuthSettings {
   };
 }
 
+/**
+ * Click the removal dialog's confirm button the way an operator does.
+ *
+ * The dialog is teleported to ``body``, so it is queried from the document
+ * rather than from the wrapper, and the click goes through reka-ui's own close
+ * handler — the path a ``$emit("confirm")`` shortcut would skip, and the one
+ * where the payload used to be cleared before the confirm handler read it.
+ */
+async function clickProviderRemovalConfirm(): Promise<void> {
+  const confirm = [...document.querySelectorAll('[data-slot="alert-dialog-content"] button')].find(
+    (button) => button.textContent?.trim() === "consoleAuth.removeProvider"
+  );
+  expect(confirm).toBeTruthy();
+  (confirm as HTMLButtonElement).click();
+  await flushPromises();
+}
+
+/** The removal dialog, picked by its title rather than by index. */
+function removalDialog(wrapper: ReturnType<typeof mount>) {
+  return wrapper
+    .findAllComponents(ConfirmDialog)
+    .find((dialog) => dialog.props("title") === "consoleAuth.removeProviderTitle")!;
+}
+
 describe("ConsoleAuthView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -229,7 +253,7 @@ describe("ConsoleAuthView", () => {
     });
     api.get.mockResolvedValue(settings);
 
-    const wrapper = mount(ConsoleAuthView);
+    const wrapper = mount(ConsoleAuthView, { attachTo: document.body });
     await flushPromises();
     expect(wrapper.find("#provider-0-id").exists()).toBe(true);
 
@@ -239,11 +263,38 @@ describe("ConsoleAuthView", () => {
     // unsaved client secret with it.
     expect(wrapper.find("#provider-0-id").exists()).toBe(true);
 
-    const removalDialog = wrapper.findAllComponents(ConfirmDialog).at(1)!;
-    removalDialog.vm.$emit("confirm");
-    await flushPromises();
+    // A saved provider may carry linked identities, and its removal takes their
+    // sign-in away until it is added back.
+    expect(removalDialog(wrapper).props("description")).toContain(
+      "consoleAuth.removeProviderLinkedWarning"
+    );
+
+    await clickProviderRemovalConfirm();
 
     expect(wrapper.find("#provider-0-id").exists()).toBe(false);
+  });
+
+  it("removes a provider that was only added in this session", async () => {
+    const wrapper = mount(ConsoleAuthView, { attachTo: document.body });
+    await flushPromises();
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("consoleAuth.addProvider"))!
+      .trigger("click");
+    expect(wrapper.find("#provider-0-id").exists()).toBe(true);
+
+    await wrapper.find('[aria-label="consoleAuth.removeProvider"]').trigger("click");
+
+    // Nothing is linked to a provider that was never saved, so the dialog says
+    // only what goes out of the form.
+    expect(removalDialog(wrapper).props("description")).not.toContain(
+      "consoleAuth.removeProviderLinkedWarning"
+    );
+    await clickProviderRemovalConfirm();
+
+    expect(wrapper.find("#provider-0-id").exists()).toBe(false);
+    expect(wrapper.text()).toContain("consoleAuth.noProviders");
   });
 
   it("shows inline SMTP errors and focuses the first invalid field", async () => {

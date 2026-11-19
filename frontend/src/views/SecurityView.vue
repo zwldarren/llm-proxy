@@ -88,6 +88,38 @@ const onboardingHint = computed(() =>
     : t("accountSecurity.onboardingHint")
 );
 
+/**
+ * Display name for a linked identity's provider.
+ *
+ * Falls back to the stored id: an identity outlives the provider block it was
+ * created under, and the id is then the only thing left to name it by.
+ */
+function providerLabel(providerId: string | undefined): string {
+  if (!providerId) return "";
+  return providers.value.find((provider) => provider.id === providerId)?.name ?? providerId;
+}
+
+/**
+ * Whether an identity's provider is still configured and enabled.
+ *
+ * The provider list only carries usable providers, so a miss means the admin
+ * removed or disabled it: the identity stays linked but cannot sign in.
+ */
+function isProviderConfigured(providerId: string): boolean {
+  return providers.value.some((provider) => provider.id === providerId);
+}
+
+/**
+ * Providers worth offering a "Link" button for. One that is already linked is
+ * left out: the flow would round-trip through the IdP only to report the same
+ * link it started with.
+ */
+const linkableProviders = computed(() =>
+  providers.value.filter(
+    (provider) => !identities.value.some((identity) => identity.provider === provider.id)
+  )
+);
+
 // Passwordless accounts (passkey/OIDC only) can still gain a password: the
 // backend takes a null current password and requires a recent step-up instead.
 const hasPassword = computed(() => profile.value?.has_password ?? true);
@@ -857,7 +889,15 @@ function formatDate(value: string): string {
             :key="identity.id"
             class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 px-3 py-2.5 text-sm"
           >
-            <span class="min-w-0 truncate"> {{ identity.provider }} · {{ identity.email }} </span>
+            <span class="min-w-0 truncate">
+              {{ providerLabel(identity.provider) }} · {{ identity.email }}
+              <span
+                v-if="!isProviderConfigured(identity.provider)"
+                class="text-xs text-muted-foreground"
+              >
+                {{ t("accountSecurity.identityProviderUnavailable") }}
+              </span>
+            </span>
             <Button
               variant="ghost"
               size="sm"
@@ -880,9 +920,9 @@ function formatDate(value: string): string {
           </p>
         </div>
 
-        <div v-if="providers.length" class="mt-4 flex flex-wrap gap-2">
+        <div v-if="linkableProviders.length" class="mt-4 flex flex-wrap gap-2">
           <Button
-            v-for="provider in providers"
+            v-for="provider in linkableProviders"
             :key="provider.id"
             variant="outline"
             size="sm"
@@ -892,7 +932,7 @@ function formatDate(value: string): string {
             {{ t("accountSecurity.link") }} {{ provider.name }}
           </Button>
         </div>
-        <p v-else class="mt-2 text-xs text-muted-foreground">
+        <p v-else-if="!providers.length" class="mt-2 text-xs text-muted-foreground">
           {{ t("accountSecurity.noProvidersAvailable") }}
         </p>
       </PanelSection>
@@ -947,7 +987,9 @@ function formatDate(value: string): string {
       :open="showUnlinkIdentity"
       :title="t('accountSecurity.unlinkTitle')"
       :description="
-        t('accountSecurity.unlinkDescription', { provider: unlinkIdentityTarget?.provider ?? '' })
+        t('accountSecurity.unlinkDescription', {
+          provider: providerLabel(unlinkIdentityTarget?.provider),
+        })
       "
       :confirm-text="t('accountSecurity.unlink')"
       :loading="pendingAction"

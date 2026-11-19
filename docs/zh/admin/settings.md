@@ -138,6 +138,8 @@ SMTP 密码、Resend API 密钥和 OIDC client secret 都是只写的：读取�
 
 OIDC 提供商的 **id** 保存后永久不变：已存的 client secret 以它为键，所以对于已有提供商，控制台会锁定该字段。每个 **issuer** 必须是 HTTPS URL（开发时可用 `http://localhost`）；代理拒绝保存纯 HTTP 的 issuer，因为 client secret 和授权码都要发给它。
 
+移除提供商并保存后，其配置与密钥会被删除。已经通过它绑定过身份的账户仍保留该绑定，但在以相同 **id** 重新添加该提供商之前，这些账户无法再通过它登录。
+
 没有配置 HTTPS 公开 base URL 时，通行密钥和 OAuth 接口不可用。这是有意为之：WebAuthn 在纯 HTTP 或局域网 IP 上无法做到安全。
 
 ### 安全与速率限制 {#security-rate-limiting}
