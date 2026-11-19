@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.1](https://github.com/zwldarren/llm-proxy/compare/v0.6.0...v0.6.1) (2026-11-19)
+
+
+### Features
+
+* **frontend:** give a typed 24-hour clock a field of its own ([cf92a56](https://github.com/zwldarren/llm-proxy/commit/cf92a56d089959e60ec32cc205326383cfdab92f))
+* **frontend:** handled linked identities during OIDC provider removal ([d114e39](https://github.com/zwldarren/llm-proxy/commit/d114e395023c5c166c0ae38a81b262a2e8273ca5))
+* **frontend:** resolve brand icons from the full Lobe catalog ([451fc77](https://github.com/zwldarren/llm-proxy/commit/451fc7764222b78d9fd97478c0801aeaaec7f6b7))
+* **frontend:** state a peak band once, not once per clock range ([993c0e8](https://github.com/zwldarren/llm-proxy/commit/993c0e82b2b8098f2142af3d5c04871be30b6edc))
+* **thinking:** passed thinking parameters through verbatim ([b464d8b](https://github.com/zwldarren/llm-proxy/commit/b464d8b07b31845b757c35950b33850f58a5c660))
+
+
+### Documentation
+
+* **design:** re-derive DESIGN.md from the shipped console ([bd23226](https://github.com/zwldarren/llm-proxy/commit/bd23226034ae648f179657bcaa550660840a3d18))
+
 ## [0.6.0](https://github.com/zwldarren/llm-proxy/compare/v0.5.5...v0.6.0) (2026-11-12)
 
 
