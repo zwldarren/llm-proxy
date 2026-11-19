@@ -55,6 +55,7 @@ import orjson
 
 from llm_proxy.core.adapter import register_adapter
 from llm_proxy.core.exceptions import ProviderError, ValidationError
+from llm_proxy.core.request_type import RequestType
 from llm_proxy.models import (
     InternalEmbeddingRequest,
     InternalEmbeddingResponse,
@@ -96,6 +97,12 @@ class QwenAdapter(NativePassthroughChatBase):
     #: Anthropic Messages path appended to the site root (see
     #: ``_native_root_base_url``): ``{host}/apps/anthropic/v1/messages``.
     ANTHROPIC_MESSAGES_PATH = "/apps/anthropic/v1/messages"
+
+    #: Documented DashScope Chat Completions thinking switches; exempt from
+    #: ``unknown_fields_policy`` stripping/rejection when narrowed by config.
+    EXEMPT_EXTRA_KEYS = {
+        RequestType.CHAT: frozenset({"enable_thinking", "thinking_budget"}),
+    }
 
     #: Wanx image task endpoints, hung off the site root (the compatible-mode
     #: alias carries no image service). ``{root}/api/v1/services/...``.

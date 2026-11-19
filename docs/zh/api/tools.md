@@ -31,12 +31,17 @@ aside: false
 | Anthropic | `thinking: {"type":"enabled","budget_tokens":N}` 或 effort 形式 |
 | Responses | `reasoning: {effort, mode, context, summary}` |
 
-几个提供商特有的行为：
+提供商侧的行为细节：
 
-- 目标是 Claude 时，`budget_tokens` 必须 ≥ 1024 且小于 `max_tokens`（否则返回 400
-  `invalid_parameter`），并且开启思考期间会省略 `temperature`/`top_p`——若强制
-  `tool_choice`（`any`/`tool`），思考会被关闭、这两个参数重新生效。
-- 出站时，能推导出 `reasoning_effort` 就发它，否则发 `thinking` 对象。
+- 跨协议请求发往 Anthropic 目标时，`reasoning_effort` 会转换为
+  `thinking: {"type": "adaptive"}` 加 `output_config.effort`（`none` 转为
+  `thinking: {"type": "disabled"}`）。代理侧不做 `budget_tokens` 范围校验，也不会在
+  开启思考或使用强制 `tool_choice` 时自动隐藏采样参数或改写思考配置，非法组合由上游
+  按模型规则报错返回。
+- OpenAI Chat 出站时，存在明确 effort、`disabled` 或 `budget_tokens` 时发送
+  `reasoning_effort`（同时保留如 `clear_thinking` 这类提供商专属的 `thinking` 字段）；
+  OpenRouter 和 NanoGPT 会将其汇总进 `reasoning` 对象；仅含 `type` 的裸 `thinking`
+  配置保留为 `thinking` 对象。
 
 推理内容如何返回：
 

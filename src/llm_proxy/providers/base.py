@@ -143,23 +143,22 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
     #: Request fields this upstream documents as supported even though they
     #: arrive through ``InternalRequest.extra``, keyed by ``RequestType``.
-    #: ``unknown_fields_policy`` (default ``ignore``) drops *every* key present
-    #: in ``extra`` from the built body, which is right for genuinely unknown
-    #: fields but wrong for an upstream that officially accepts them — a
-    #: multi-provider router like OpenRouter takes ``provider``/``models``/
-    #: ``plugins``/``usage`` on chat and ``output_format``/``provider`` on the
-    #: media endpoints, and would otherwise lose them silently. Declared per
-    #: adapter, empty by default; adapters that document nothing for a request
-    #: type simply omit the key.
+    #: When an operator sets ``unknown_fields_policy`` to ``ignore`` or
+    #: ``error``, declared keys remain exempt so documented fields still reach
+    #: the upstream. Declared per adapter, empty by default; adapters that
+    #: document nothing for a request type simply omit the key.
     EXEMPT_EXTRA_KEYS: dict[RequestType, frozenset[str]] = {}
 
     #: Value used when the operator configured no global policy. The global
     #: value (``server_params.unknown_fields_policy``) is an explicit choice and
     #: always wins; ``None``/absent means "not configured", so this default
-    #: applies. Adapters for upstreams that accept-and-ignore unknown fields
-    #: (vLLM, SGLang) override it to ``passthrough`` so their engine-specific
-    #: sampling extensions survive the trip.
-    DEFAULT_UNKNOWN_FIELDS_POLICY: ClassVar[str] = "ignore"
+    #: applies. Defaults to ``passthrough`` (ADR-0063) so chat thinking keys
+    #: and provider extensions pass through unless narrowed by policy.
+    DEFAULT_UNKNOWN_FIELDS_POLICY: ClassVar[str] = "passthrough"
+    #: Default policy for non-chat endpoints (System One, Decisions, Rerank,
+    #: Embeddings, Images, Audio), which merge ``extra`` over multi-provider
+    #: union schemas and isolate per-provider fields via ``EXEMPT_EXTRA_KEYS``.
+    DEFAULT_NONCHAT_UNKNOWN_FIELDS_POLICY: ClassVar[str] = "ignore"
     #: Block-policy counterpart of :attr:`DEFAULT_UNKNOWN_FIELDS_POLICY`.
     DEFAULT_UNSUPPORTED_BLOCK_POLICY: ClassVar[str] = "drop"
 
@@ -540,17 +539,6 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
         return get_provider_serializer(self._adapter_type)
 
-    def _thinking_disabled_wire(self, model: str | None) -> str:
-        """How "thinking off" reaches this provider's Chat Completions wire.
-
-        ``effort`` (the default) sends the OpenAI spelling
-        ``reasoning_effort: "none"``. Adapters whose upstream rejects that
-        spelling override this: ``thinking`` sends
-        ``thinking: {"type": "disabled"}``, ``omit`` sends neither (for models
-        that always think).
-        """
-        return "effort"
-
     def _build_chat_context(self, request: Any) -> Any:
         """Build a BuildContext with policies for provider request construction."""
         from llm_proxy.serialization.context import BuildContext
@@ -563,7 +551,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
             provider_name=self.provider_name,
             provider_type=self._adapter_type,
             target_endpoint=self._target_endpoint(),
-            unknown_fields_policy=self._resolve_field_policy(),
+            unknown_fields_policy=self._resolve_field_policy(RequestType.CHAT),
             unsupported_block_policy=self._resolve_block_policy(),
             supported_content_blocks=supported,
             compatible_protocols=serializer.compatible_protocols,
@@ -571,7 +559,6 @@ class BaseHttpProvider(BaseAdapter, ABC):
             # tier (same pattern as the native_passthrough kill switch).
             response_passthrough=bool(self._extra_config.get("response_passthrough", True)),
             reasoning_object=self.REASONING_OBJECT,
-            thinking_disabled_wire=self._thinking_disabled_wire(request.model),
         )
 
     # ------------------------------------------------------------------
@@ -679,7 +666,13 @@ class BaseHttpProvider(BaseAdapter, ABC):
         exempt = self._exempt_keys_for(rt, exempt_keys)
 
         def _finalize(body: dict[str, Any], merge_extra: bool = True) -> dict[str, Any]:
-            return self._finalize_body(body, request, exempt_keys=exempt, merge_extra=merge_extra)
+            return self._finalize_body(
+                body,
+                request,
+                exempt_keys=exempt,
+                merge_extra=merge_extra,
+                request_type=rt,
+            )
 
         if rt == RequestType.CHAT:
             ctx = self._build_chat_context(request)
@@ -692,7 +685,11 @@ class BaseHttpProvider(BaseAdapter, ABC):
 
             def _finalize_chat(body: dict[str, Any], merge_extra: bool = False) -> dict[str, Any]:
                 return self._finalize_body(
-                    body, request, exempt_keys=chat_exempt, merge_extra=merge_extra
+                    body,
+                    request,
+                    exempt_keys=chat_exempt,
+                    merge_extra=merge_extra,
+                    request_type=RequestType.CHAT,
                 )
 
             # The conversion seam decides the tier. Native passthrough
@@ -794,16 +791,19 @@ class BaseHttpProvider(BaseAdapter, ABC):
     # Policy resolution helpers
     # ------------------------------------------------------------------
 
-    def _resolve_field_policy(self) -> str:
+    def _resolve_field_policy(self, request_type: RequestType | None = None) -> str:
         """Resolve the effective unknown-fields policy for this adapter.
 
-        An explicitly configured global policy always wins; otherwise the
-        adapter's own default applies. Values outside the valid set (e.g. a
-        typo, or a sentinel that slipped through) fall back to the default.
+        An explicitly configured global policy always wins; otherwise chat
+        requests use :attr:`DEFAULT_UNKNOWN_FIELDS_POLICY` and non-chat
+        union-schema endpoints use :attr:`DEFAULT_NONCHAT_UNKNOWN_FIELDS_POLICY`.
+        Values outside the valid set fall back to the resolved default.
         """
         value = self._extra_config.get("unknown_fields_policy")
         if value in ("ignore", "passthrough", "error"):
             return value
+        if request_type is not None and request_type != RequestType.CHAT:
+            return self.DEFAULT_NONCHAT_UNKNOWN_FIELDS_POLICY
         return self.DEFAULT_UNKNOWN_FIELDS_POLICY
 
     def _resolve_block_policy(self) -> str:
@@ -851,10 +851,12 @@ class BaseHttpProvider(BaseAdapter, ABC):
         body: dict[str, Any],
         extra: dict[str, Any] | None,
         exempt_keys: set[str] | None = None,
+        *,
+        request_type: RequestType | None = None,
     ) -> dict[str, Any]:
         if not extra:
             return body
-        policy = self._resolve_field_policy()
+        policy = self._resolve_field_policy(request_type)
         relevant = {k: v for k, v in extra.items() if k not in (exempt_keys or set())}
         if not relevant:
             return body
@@ -901,6 +903,7 @@ class BaseHttpProvider(BaseAdapter, ABC):
         *,
         exempt_keys: set[str] | None = None,
         merge_extra: bool = True,
+        request_type: RequestType | None = None,
     ) -> dict[str, Any]:
         extra = getattr(request, "extra", None) or {}
         internal_keys = INTERNAL_EXTRA_KEYS.intersection(extra)
@@ -922,7 +925,9 @@ class BaseHttpProvider(BaseAdapter, ABC):
         override_keys = getattr(request, "_override_injected_keys", None)
         if override_keys:
             exempt_keys = (exempt_keys or set()) | override_keys
-        return self._apply_field_policy(body, extra, exempt_keys=exempt_keys)
+        return self._apply_field_policy(
+            body, extra, exempt_keys=exempt_keys, request_type=request_type
+        )
 
     def _parse_error_response(self, status_code: int, error_body: dict[str, Any]) -> ProviderError:
         """Parse provider error response body. Override for provider-specific formats."""

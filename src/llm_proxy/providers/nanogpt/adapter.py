@@ -11,6 +11,7 @@ and pricing metadata extraction in the streaming path.
 from typing import Any
 
 from llm_proxy.core.adapter import register_adapter
+from llm_proxy.core.request_type import RequestType
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.nanogpt.pricing import extract_nanogpt_pricing
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
@@ -42,6 +43,14 @@ class NanoGPTAdapter(OpenAICompatibleBase):
     DEFAULT_BASE_URL = "https://nano-gpt.com/api/v1"
     # NanoGPT always expects assistant reasoning as the `reasoning` field.
     _REASONING_FIELD = "reasoning"
+
+    #: NanoGPT documents OpenRouter-compatible ``reasoning`` object support.
+    REASONING_OBJECT = True
+
+    #: Documented NanoGPT extension kept even when policy is ``ignore``/``error``.
+    EXEMPT_EXTRA_KEYS = {
+        RequestType.CHAT: frozenset({"include_reasoning"}),
+    }
 
     def _stream_transform_chunk(
         self, chunk: dict[str, Any], context: dict[str, Any]

@@ -89,3 +89,35 @@ class TestStreamTransformChunk:
         result = self.adapter._stream_transform_chunk(chunk, context={})
 
         assert result is chunk
+
+
+class TestNanoGPTReasoningParameters:
+    """NanoGPT supports OpenRouter-style ``reasoning`` objects and ``include_reasoning``."""
+
+    def test_reasoning_object_and_include_reasoning_survive_strict_policies(self):
+        from llm_proxy.models import (
+            ConversationContext,
+            GenerationParams,
+            InternalRequest,
+            Message,
+            TextBlock,
+            ThinkingConfig,
+        )
+
+        assert NanoGPTAdapter.REASONING_OBJECT is True
+        for policy in (None, "ignore", "error"):
+            kwargs = {"unknown_fields_policy": policy} if policy else {}
+            adapter = NanoGPTAdapter(api_key="test-key", **kwargs)
+            request = InternalRequest(
+                model="deepseek-r1",
+                conversation=ConversationContext(
+                    messages=[Message(role="user", content=[TextBlock(text="hi")])]
+                ),
+                params=GenerationParams(
+                    thinking=ThinkingConfig(type="enabled", budget_tokens=4096)
+                ),
+                extra={"include_reasoning": False},
+            )
+            body = adapter._build_request_body(request)
+            assert body["reasoning"] == {"max_tokens": 4096}
+            assert body["include_reasoning"] is False

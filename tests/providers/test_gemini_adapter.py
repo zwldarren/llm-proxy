@@ -1178,9 +1178,8 @@ class TestModelFamilyOverrides:
         request = self._chat_request("gemini-flash-latest")
         body = adapter._build_chat_raw(request, adapter._build_chat_context(request))
         config = body["generationConfig"]
-        # Gemini 4 shapes: thinkingLevel floor (minimal is an error there) and
-        # no sampling parameters.
-        assert config["thinkingConfig"] == {"thinkingLevel": "LOW", "includeThoughts": True}
+        # Gemini 4 shapes: thinkingLevel and no sampling parameters.
+        assert config["thinkingConfig"] == {"thinkingLevel": "MINIMAL"}
         assert "temperature" not in config
 
     @staticmethod

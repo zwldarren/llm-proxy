@@ -18,7 +18,7 @@ and let fallback and priority decide who answers.
 | **Base URL** | Pre-filled per type. **Required** for `openai-compatible`. Trailing slashes are trimmed |
 | **Icon URL** | Optional logo shown next to the provider in the console; must be a public URL (`https:`/`http:`) — private/loopback addresses are rejected by the SSRF guard |
 | **Gemini Interactions** | `gemini` type only: use Google's newer Interactions API instead of `generateContent` (`metadata.api_variant`). The provider list shows an **Interactions** badge |
-| **Gemini model family overrides** | `gemini` type only, API/DB (`metadata.model_family_overrides`): maps an exact model id to a Gemini family version (e.g. `{"gemini-flash-latest": "4.0"}`) for the generateContent dialect. Use it when a model's id carries no `gemini-X.Y` segment (Google aliases, aggregator nicknames) — without it the proxy falls back to the legacy-safe request shape for that id and logs a warning once; with it the pinned family's shapes apply (thinking level vs budget, JSON-Schema fields, thought signatures, sampling-parameter dropping). Values must be versions like `"4.0"`/`"3.8"`; invalid entries are dropped with a warning. The Interactions dialect has no family gates, so a pin is a no-op there |
+| **Gemini model family overrides** | `gemini` type only, API/DB (`metadata.model_family_overrides`): maps an exact model id to a Gemini family version (e.g. `{"gemini-flash-latest": "4.0"}`) for the generateContent dialect. Use it when a model's id carries no `gemini-X.Y` segment (Google aliases, aggregator nicknames) — without it the proxy still emits `thinkingLevel` for thinking while falling back to the legacy-safe shapes for schemas, signatures, and sampling parameters (logged once); with it the pinned family's shapes apply (thinking level vs budget, JSON-Schema fields, thought signatures, sampling-parameter dropping). Values must be versions like `"4.0"`/`"3.8"`; invalid entries are dropped with a warning. The Interactions dialect has no family gates, so a pin is a no-op there |
 | **API version** | Not in the console dialog; set via API/DB only. Stored for forward compatibility — no adapter applies it yet |
 | **Timeout** | Not in the console dialog; set via API/DB only. Stored but not applied — upstream calls use a fixed 600 s read timeout (10 s connect) |
 | **Custom headers** | Extra headers sent upstream (e.g. tenant or organization headers). These win over any other source for the same header name |
@@ -290,17 +290,11 @@ an Anthropic-compatible Messages endpoint
 endpoint (`https://api.minimax.io/v1/responses`). The two native endpoints are
 forwarded verbatim, so the client's own fields survive.
 
-- The thinking vocabulary is translated. MiniMax does not speak
-  Anthropic's: `thinking.type` is `disabled` or `adaptive` (there is no
-  `budget_tokens`), the depth rides `reasoning_effort` (Chat) or
-  `output_config.effort` (Messages), and `none` / `minimal` are not spellings
-  it accepts — it answers HTTP 400. The proxy therefore rewrites the
-  vocabulary on every tier: an Anthropic client's
-  `thinking: {"type": "enabled", "budget_tokens": 16000}` becomes
-  `{"type": "adaptive"}`, an effort of `minimal` becomes `low`, and "no
-  reasoning" becomes `thinking: {"type": "disabled"}` rather than
-  `reasoning_effort: "none"`. `MiniMax-M3.1-Flash` always thinks and rejects
-  `disabled` as well, so on that model the field is dropped instead.
+- Thinking parameters pass through untouched. On native Messages and Responses
+  passthrough, `thinking`, `output_config`, `reasoning_effort`, and `reasoning`
+  reach MiniMax verbatim without proxy-side rewriting or `budget_tokens` stripping
+  (`MiniMax-M3.1-Flash` rejects disabled thinking directly upstream). On Chat
+  Completions, translated thinking fields and `reasoning_split` are forwarded as-is.
 - `reasoning_split` is MiniMax's own output switch: with it off, the
   thinking content stays inside `content` wrapped in `<think>` tags instead of
   moving to `reasoning_content`. It is forwarded on the chat wire.
@@ -357,8 +351,10 @@ otherwise forward.
   with `documents` or `tools` — ask for one or the other.
 - Thinking. The unified `thinking` config becomes v2's
   `{"type": "enabled"|"disabled", "token_budget": N}`. Reasoning is on by default
-  for models that support it; `disabled` (or an effort of `none`/`minimal`) sends
-  the off spelling rather than omitting the field.
+  for models that support it; `disabled` (or an effort of `none`) sends
+  the off spelling rather than omitting the field, and explicit `budget_tokens`
+  / `token_budget` sets `token_budget` without fabricating a synthetic budget
+  for effort-only requests.
 - Tools. Tools are JSON-Schema function entries (`parameters` is required, so a
   schema-less tool gets `{}`) and a freeform tool bridges to a single-`content`
   function. `tool_choice` collapses onto v2's `REQUIRED`/`NONE` pair: v2 has no

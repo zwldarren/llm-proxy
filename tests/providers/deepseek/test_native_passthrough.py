@@ -244,39 +244,32 @@ class TestNativeBodies:
         assert raw["stream"] is False
 
 
-class TestAnthropicThinkingDisabledEffortConflict:
-    """DeepSeek's Anthropic endpoint 400s on ``thinking: disabled`` + effort
-    ("thinking options type cannot be disabled when reasoning_effort is set").
-    Claude Code 2.1.166+ Workflow / Dynamic Workflow subagents send exactly
-    that combination; the conflicting effort parameter must be stripped before
-    the native passthrough forwards the body (mirrors cc-switch's
-    ``normalize_deepseek_thinking_disabled_strip_effort``).
-    """
+class TestAnthropicThinkingDisabledVerbatim:
+    """Native passthrough forwards Anthropic thinking & effort verbatim (ADR-0063)."""
 
-    def test_effort_stripped_from_populated_output_config(self, adapter):
+    def test_thinking_disabled_and_populated_output_config_kept_verbatim(self, adapter):
         raw = raw_anthropic(
             thinking={"type": "disabled"},
             output_config={"effort": "low", "format": {"type": "text"}},
         )
         req = _request(raw)
         _url, body = adapter._native_request_parts(req, stream=False)
-        assert body["output_config"] == {"format": {"type": "text"}}
-        # The raw stash is untouched: only a shallow copy is prepared, so the
-        # fix must never edit the shared output_config dict in place.
-        assert raw["output_config"] == {"effort": "low", "format": {"type": "text"}}
+        assert body["thinking"] == {"type": "disabled"}
+        assert body["output_config"] == {"effort": "low", "format": {"type": "text"}}
 
-    def test_effort_only_output_config_removed_entirely(self, adapter):
+    def test_thinking_disabled_and_effort_only_output_config_kept_verbatim(self, adapter):
         raw = raw_anthropic(thinking={"type": "disabled"}, output_config={"effort": "high"})
         req = _request(raw)
         _url, body = adapter._native_request_parts(req, stream=False)
-        assert "output_config" not in body
-        assert raw["output_config"] == {"effort": "high"}
+        assert body["thinking"] == {"type": "disabled"}
+        assert body["output_config"] == {"effort": "high"}
 
-    def test_mixed_in_reasoning_effort_dropped(self, adapter):
+    def test_mixed_in_reasoning_effort_kept_verbatim(self, adapter):
         raw = raw_anthropic(thinking={"type": "disabled"}, reasoning_effort="medium")
         req = _request(raw)
         _url, body = adapter._native_request_parts(req, stream=False)
-        assert "reasoning_effort" not in body
+        assert body["reasoning_effort"] == "medium"
+        assert body["thinking"] == {"type": "disabled"}
 
     def test_thinking_enabled_keeps_effort(self, adapter):
         raw = raw_anthropic(

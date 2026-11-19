@@ -370,8 +370,9 @@ class TestClientHeaderForwarding:
 
 
 class TestChatExemptExtraKeys:
-    def test_documented_fields_survive_the_ignore_policy(self, adapter):
+    def test_documented_fields_survive_the_ignore_policy(self):
         """``unknown_fields_policy="ignore"`` must not eat OpenRouter's own fields."""
+        adapter = OpenRouterAdapter(api_key="sk-or-test", unknown_fields_policy="ignore")
         raw = {
             "model": "openai/gpt-5.6",
             "messages": [{"role": "user", "content": "hi"}],
@@ -396,8 +397,79 @@ class TestChatExemptExtraKeys:
         assert body["plugins"] == [{"id": "web"}]
         assert body["usage"] == {"include": True}
         assert body["min_p"] == 0.05
-        # Genuinely unknown fields are still dropped by the default policy.
+        # With explicit "ignore", genuinely unknown fields are stripped.
         assert "definitely_not_a_field" not in body
+
+    def test_reasoning_enabled_false_disables_reasoning_echo_and_budget_maps_to_max_tokens(
+        self, adapter
+    ):
+        from llm_proxy.models import (
+            ConversationContext,
+            GenerationParams,
+            InternalRequest,
+            Message,
+            TextBlock,
+            ThinkingConfig,
+            ToolResultBlock,
+            ToolUseBlock,
+        )
+        from llm_proxy.providers.reasoning import is_thinking_explicitly_disabled
+
+        disabled_req = get_protocol_serializer("openai").parse_request(
+            {
+                "model": "deepseek/deepseek-chat",
+                "messages": [{"role": "user", "content": "hi"}],
+                "reasoning": {"enabled": False},
+            }
+        )
+        assert disabled_req.params.thinking == ThinkingConfig(type="disabled")
+        assert is_thinking_explicitly_disabled(disabled_req) is True
+
+        # Disabled thinking skips reasoning echo injection on tool-call history.
+        echo_req = disabled_req
+        echo_req.conversation = ConversationContext(
+            messages=[
+                Message(role="user", content=[TextBlock(text="hi")]),
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="call_1", name="f", input={})],
+                ),
+                Message(
+                    role="tool",
+                    content=[ToolResultBlock(tool_use_id="call_1", content="ok")],
+                ),
+            ]
+        )
+        body_disabled = adapter._build_request_body(echo_req)
+        # Explicit caller `reasoning.enabled: False` is preserved verbatim while skipping echo.
+        assert body_disabled["reasoning"] == {"enabled": False}
+        assert "reasoning_content" not in body_disabled["messages"][1]
+        assert "reasoning" not in body_disabled["messages"][1]
+
+        # Cross-protocol disabled thinking without extra.reasoning maps to reasoning.effort="none".
+        cross_disabled_req = InternalRequest(
+            model="anthropic/claude-sonnet-4-5",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            params=GenerationParams(thinking=ThinkingConfig(type="disabled")),
+        )
+        cross_disabled_req.metadata.protocol_name = "anthropic"
+        assert adapter._build_request_body(cross_disabled_req)["reasoning"] == {"effort": "none"}
+
+        # Anthropic budget_tokens maps onto reasoning.max_tokens and omitted display -> exclude.
+        budget_req = InternalRequest(
+            model="anthropic/claude-sonnet-4-5",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            params=GenerationParams(
+                thinking=ThinkingConfig(type="enabled", budget_tokens=5000, display="omitted")
+            ),
+        )
+        budget_req.metadata.protocol_name = "anthropic"
+        body_budget = adapter._build_request_body(budget_req)
+        assert body_budget["reasoning"] == {"max_tokens": 5000, "exclude": True}
 
 
 # ---------------------------------------------------------------------------

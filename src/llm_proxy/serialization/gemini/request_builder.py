@@ -33,7 +33,6 @@ from llm_proxy.serialization.context import BuildContext
 from llm_proxy.serialization.gemini.model_family import (
     ignores_sampling_params,
     supports_json_schema_fields,
-    supports_thinking_config,
     uses_thinking_budget,
     uses_thinking_level,
 )
@@ -301,11 +300,6 @@ class GeminiRequestBuilderMixin:
         name = model.lower()
         return "-image" in name or "nano-banana" in name
 
-    @staticmethod
-    def _is_gemini_25_pro_model(model: str | None) -> bool:
-        """Check if the model name indicates a Gemini 2.5 Pro model."""
-        return model is not None and "gemini-2.5" in model and "pro" in model
-
     _SIMPLE_PARAM_MAP: dict[str, str] = {
         "max_tokens": "maxOutputTokens",
         "temperature": "temperature",
@@ -362,34 +356,14 @@ class GeminiRequestBuilderMixin:
         thinking = resolve_thinking(request)
         if thinking is not None:
             if uses_thinking_level(effective_model, model_family_overrides):
-                gemini_thinking = convert_to_gemini(
-                    thinking, model=effective_model, model_family_overrides=model_family_overrides
-                )
+                gemini_thinking = convert_to_gemini(thinking)
                 if gemini_thinking:
                     config.update(gemini_thinking)
             elif uses_thinking_budget(effective_model, model_family_overrides):
-                # Gemini 2.5 rejects thinkingLevel; use thinkingBudget.
-                if thinking.type == "disabled":
-                    # 2.5 Flash family supports disabling via thinkingBudget=0;
-                    # 2.5 Pro cannot disable thinking (budget floor 128).
-                    if self._is_gemini_25_pro_model(effective_model):
-                        logger.warning(
-                            "Gemini 2.5 Pro cannot disable thinking; ignoring the request"
-                        )
-                    else:
-                        config["thinkingConfig"] = {"thinkingBudget": 0}
-                else:
-                    gemini_thinking = convert_to_gemini_legacy(thinking)
-                    if gemini_thinking:
-                        config.update(gemini_thinking)
-            elif supports_thinking_config(effective_model, model_family_overrides):
-                # A family in between (none today): accept the budget shape.
                 gemini_thinking = convert_to_gemini_legacy(thinking)
                 if gemini_thinking:
                     config.update(gemini_thinking)
             else:
-                # thinkingConfig is only supported on the 2.5 series and newer;
-                # older models reject it.
                 if thinking.type != "disabled":
                     logger.warning(
                         "thinking config is not supported by model %r (requires "

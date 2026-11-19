@@ -20,8 +20,6 @@ base); this module only declares the native endpoints as data and the site-root
 derivation they hang off.
 """
 
-from typing import Any
-
 from llm_proxy.core.adapter import register_adapter
 from llm_proxy.models import InternalRequest
 from llm_proxy.providers.openai_compatible._native import NativePassthroughChatBase
@@ -81,45 +79,6 @@ class DeepSeekAdapter(NativePassthroughChatBase):
         in unconditionally (thinking-mode and tool gates still apply).
         """
         return True
-
-    # ------------------------------------------------------------------
-    # Native passthrough repairs
-    # ------------------------------------------------------------------
-
-    def native_body_hook(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Anthropic structural repairs + DeepSeek-specific thinking fixes.
-
-        DeepSeek's Anthropic endpoint treats ``thinking: {"type": "disabled"}``
-        and effort parameters (``output_config.effort``) as mutually exclusive,
-        returning HTTP 400: "thinking options type cannot be disabled when
-        reasoning_effort is set"
-        (https://github.com/deepseek-ai/DeepSeek-V3/issues/1397). Claude Code
-        2.1.166+ Workflow / Dynamic Workflow subagents send exactly that
-        combination.
-
-        The caller's explicit ``thinking: disabled`` is the intent (sub-agents
-        don't display reasoning), so the conflicting effort parameter is
-        dropped while every other output_config key is preserved. The rebuilt
-        dict is brand-new: ``prepare_native_body`` only shallow-copies the raw
-        stash, so in-place edits of the shared ``output_config`` reference
-        would leak into the stash the fallback chain re-parses from. Top-level
-        ``reasoning_effort`` (an OpenAI-format field some clients mix in) is
-        dropped too, mirroring cc-switch's
-        ``normalize_deepseek_thinking_disabled_strip_effort``.
-        """
-        body = super().native_body_hook(body)
-        thinking = body.get("thinking")
-        if not (isinstance(thinking, dict) and thinking.get("type") == "disabled"):
-            return body
-        body.pop("reasoning_effort", None)
-        output_config = body.get("output_config")
-        if isinstance(output_config, dict) and "effort" in output_config:
-            rest = {k: v for k, v in output_config.items() if k != "effort"}
-            if rest:
-                body["output_config"] = rest
-            else:
-                body.pop("output_config", None)
-        return body
 
 
 __all__ = ["DeepSeekAdapter"]

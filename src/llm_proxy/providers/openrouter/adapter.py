@@ -128,11 +128,9 @@ class OpenRouterAdapter(
     _ANTHROPIC_PROTOCOL_HEADERS = frozenset({"anthropic-version", "anthropic-beta"})
 
     #: OpenRouter request fields documented as supported on each endpoint but
-    #: absent from the OpenAI schema, so the default
-    #: ``unknown_fields_policy="ignore"`` would strip them as if the upstream
-    #: did not understand them. Declaring them here keeps a client's routing,
-    #: fallback, plugin, caching and accounting options intact without forcing
-    #: operators to switch the whole provider to ``passthrough``.
+    #: absent from the OpenAI schema. Declaring them here keeps a client's
+    #: routing, fallback, plugin, caching and accounting options intact even
+    #: when ``unknown_fields_policy`` is narrowed to ``ignore`` or ``error``.
     EXEMPT_EXTRA_KEYS = {
         RequestType.CHAT: frozenset(
             {
@@ -407,6 +405,7 @@ class OpenRouterAdapter(
             request,
             exempt_keys=self._exempt_keys_for(RequestType.TRANSCRIPTION),
             merge_extra=True,
+            request_type=RequestType.TRANSCRIPTION,
         )
 
         async def _make_request():
@@ -447,6 +446,7 @@ class OpenRouterAdapter(
             request,
             exempt_keys=self._exempt_keys_for(RequestType.TRANSCRIPTION),
             merge_extra=True,
+            request_type=RequestType.TRANSCRIPTION,
         )
 
         stream_timeout = self._get_stream_timeout()

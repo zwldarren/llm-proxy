@@ -16,9 +16,9 @@ stated by Google's own documentation for the family it applies to:
 The family is read from the model id the client asked for, because that is the
 only model identity the proxy has: ``gemini-3.8-flash`` → ``(3, 8)``. A model
 alias the proxy cannot parse (an aggregator's nickname, a fine-tune) yields
-``None`` and every gate falls back to the legacy-safe answer — the shape that
-works on the oldest family still in service — instead of guessing a new one;
-the fallback is logged once per id so it is never silent.
+``None``: thinking configuration defaults to ``thinkingLevel`` (the modern
+shape; ADR-0063), while schema/signature/sampling gates fall back to the
+legacy-safe answer and log once per id.
 
 Every gate takes an optional ``model_family_overrides`` mapping (the provider's
 ``metadata.model_family_overrides``, exact model id → family version like
@@ -46,22 +46,21 @@ _UNPARSABLE_WARNED_LIMIT = 128
 
 
 def _warn_unparsable_model_once(model: str) -> None:
-    """Log the legacy-safe fallback for *model* once per process.
+    """Log the fallback choices for *model* once per process.
 
-    An id without a ``gemini-X.Y`` version gets every family gate's legacy-safe
-    answer silently; without this line the only symptom an operator sees is an
-    upstream 400 (or a silently dropped thinking config). The log names the
-    escape hatch that pins the id to a family.
+    An id without a ``gemini-X.Y`` version gets ``thinkingLevel`` for thinking
+    and the legacy-safe answer for schemas, signatures, and sampling
+    parameters. The log names the escape hatch that pins the id to a family.
     """
     if model in _UNPARSABLE_WARNED or len(_UNPARSABLE_WARNED) >= _UNPARSABLE_WARNED_LIMIT:
         return
     _UNPARSABLE_WARNED.add(model)
     logger.warning(
-        "Model id %r carries no gemini-X.Y version; every Gemini family gate "
-        "falls back to the legacy-safe shape (thinkingConfig omitted, "
-        "sanitized schemas, sampling parameters sent, thought signatures "
-        "stripped from foreign history). If this model is a newer family, pin "
-        "it via the provider metadata key model_family_overrides.",
+        "Model id %r carries no gemini-X.Y version; Gemini family gates default "
+        "to thinkingLevel for thinking and legacy-safe shapes elsewhere "
+        "(sanitized schemas, sampling parameters sent, thought signatures "
+        "stripped from foreign history). If this model requires another family "
+        "shape, pin it via the provider metadata key model_family_overrides.",
         model,
     )
 
@@ -143,19 +142,19 @@ def supports_thinking_config(
 ) -> bool:
     """Whether the model accepts ``generationConfig.thinkingConfig`` at all.
 
-    ``thinkingConfig`` arrived with the 2.5 series; older models reject the
-    field.
+    ``thinkingConfig`` arrived with the 2.5 series; only explicit pre-2.5
+    models return False, while unparseable aliases default to True (ADR-0063).
     """
     version = gemini_model_version(model, model_family_overrides)
-    return version is not None and version >= GeminiFamilyVersion(2, 5)
+    return version is None or version >= GeminiFamilyVersion(2, 5)
 
 
 def uses_thinking_level(
     model: str | None, model_family_overrides: Mapping[str, str] | None = None
 ) -> bool:
-    """Whether the model takes ``thinkingLevel`` (3.x and later) not a budget."""
+    """Whether the model takes ``thinkingLevel`` (3.x+ or unparseable alias)."""
     version = gemini_model_version(model, model_family_overrides)
-    return version is not None and version >= GeminiFamilyVersion(3, 0)
+    return version is None or version >= GeminiFamilyVersion(3, 0)
 
 
 def uses_thinking_budget(
@@ -164,26 +163,6 @@ def uses_thinking_budget(
     """Whether the model takes ``thinkingBudget`` (the 2.5 series only)."""
     version = gemini_model_version(model, model_family_overrides)
     return version is not None and GeminiFamilyVersion(2, 5) <= version < GeminiFamilyVersion(3, 0)
-
-
-def supports_minimal_thinking_level(
-    model: str | None, model_family_overrides: Mapping[str, str] | None = None
-) -> bool:
-    """Whether ``thinkingLevel: MINIMAL`` is accepted by this model.
-
-    Google's thinking table marks ``minimal`` as an error on Gemini 4 Argon and
-    Gemini 3.8 Flash only. Every other 3.x Flash / Flash-Lite / robotics model
-    the table lists takes it — including Gemini 3.1 Flash-Lite **Image**, where
-    ``minimal`` is the documented *default* and ``low``/``medium`` are the
-    levels marked "Not Supported". Pro models are left out (no documented
-    support), so they keep the default level with a warning instead of failing
-    the request.
-    """
-    version = gemini_model_version(model, model_family_overrides)
-    if version is None or not GeminiFamilyVersion(3, 0) <= version < GeminiFamilyVersion(3, 8):
-        return False
-    name = (model or "").lower()
-    return "flash" in name or "robotics" in name
 
 
 def supports_thought_signatures(
@@ -240,7 +219,6 @@ __all__ = [
     "normalize_family_overrides",
     "parse_family_version",
     "supports_json_schema_fields",
-    "supports_minimal_thinking_level",
     "supports_thought_signatures",
     "supports_thinking_config",
     "uses_thinking_budget",

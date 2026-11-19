@@ -690,19 +690,15 @@ class ReasoningParam(BaseModel):
     Summary values: auto, concise, detailed.
     """
 
-    effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = Field(
-        None, description="Reasoning effort level"
-    )
-    mode: Literal["standard", "pro"] | None = Field(
+    model_config = ConfigDict(extra="allow")
+
+    effort: str | None = Field(None, description="Reasoning effort level")
+    mode: str | None = Field(
         None, description="Reasoning mode: standard (default) or pro (GPT-5.6)"
     )
-    context: Literal["auto", "current_turn", "all_turns"] | None = Field(
-        None, description="Reasoning context persistence across turns"
-    )
-    summary: Literal["auto", "concise", "detailed"] | None = Field(
-        None, description="Reasoning summary style"
-    )
-    generate_summary: Literal["auto", "concise", "detailed"] | None = Field(
+    context: str | None = Field(None, description="Reasoning context persistence across turns")
+    summary: str | None = Field(None, description="Reasoning summary style")
+    generate_summary: str | None = Field(
         None,
         description=(
             "Deprecated: use `summary` instead. Legacy reasoning summary generation control"

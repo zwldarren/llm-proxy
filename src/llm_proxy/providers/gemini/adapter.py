@@ -13,6 +13,7 @@ import orjson
 from llm_proxy.core.adapter import AdapterConfig, register_adapter
 from llm_proxy.core.errors import get_error_type_for_status
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.core.request_type import RequestType
 from llm_proxy.http.client import AsyncSession
 from llm_proxy.http.media import RequestDownloads
 from llm_proxy.models import (
@@ -253,6 +254,7 @@ class GeminiAdapter(
         *,
         exempt_keys: set[str] | None = None,
         merge_extra: bool = True,
+        request_type: RequestType | None = None,
     ) -> dict[str, Any]:
         """Enforce the Interactions extra whitelist on every body path.
 
@@ -275,7 +277,11 @@ class GeminiAdapter(
         """
         if not self._is_interactions_variant() or _is_evaluation_request(request):
             return super()._finalize_body(
-                body, request, exempt_keys=exempt_keys, merge_extra=merge_extra
+                body,
+                request,
+                exempt_keys=exempt_keys,
+                merge_extra=merge_extra,
+                request_type=request_type,
             )
 
         extra = getattr(request, "extra", None) or {}
@@ -286,7 +292,7 @@ class GeminiAdapter(
         override_keys = getattr(request, "_override_injected_keys", None)
         if override_keys:
             exempt = exempt | override_keys
-        return self._apply_field_policy(body, extra, exempt_keys=exempt)
+        return self._apply_field_policy(body, extra, exempt_keys=exempt, request_type=request_type)
 
     def _build_headers(
         self,

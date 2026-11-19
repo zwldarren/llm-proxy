@@ -63,9 +63,9 @@ print(message.content[0].text)
 | `messages` | `user` / `assistant`；`tool` 和 `function` 角色会降级为 `tool_result` 的 user 轮次；`developer` 消息会合并进 `system` |
 | `system` | 字符串，或块列表。使用块列表时，非文本块会被丢弃，除非某个文本块带 `cache_control`/`citations`——此时列表原样转发 |
 | `stop_sequences` | 原样转发 |
-| `temperature`、`top_p`、`top_k` | 目标是 Claude 且开启思考时省略；当强制的 `tool_choice`（`any`/`tool`）关闭思考时恢复发送 |
+| `temperature`、`top_p`、`top_k` | 原样转发 |
 | `tools`、`tool_choice` | `tool_choice.type`：`auto` / `any` / `tool` / `none`；`disable_parallel_tool_use` 可以放在顶层、`tool_choice` 内部，或通过 OpenAI 的 `parallel_tool_calls: false` 表达——最终一律输出在 API 定义的位置，即 `tool_choice` 内部 |
-| `thinking` | `{"type":"enabled","budget_tokens":N}` 或 effort 形式。目标是 Claude 时，`budget_tokens` 必须 ≥ 1024 且小于 `max_tokens`，否则返回 400 `invalid_parameter` |
+| `thinking` | `{"type":"enabled","budget_tokens":N}`、`{"type":"adaptive"}` 或 effort 形式。代理侧不做预算范围校验直接转发，由上游按模型规则返回错误 |
 | `cache_control` | 支持顶层和每个内容块（`{"type":"ephemeral","ttl":…}`）；可用于 text、image、audio、file/document、tool_use、server_tool_use、tool_result 等块类型 |
 | `metadata` | 转发；`user_id` 也会从 OpenAI 风格的 metadata 或 `user` 填充 |
 | `container`、`inference_geo`、`service_tier`、`output_config` | 转发；旧的 `output_format` 会作为别名写入 `output_config.format`。`service_tier` 接受 Anthropic 的 `auto`/`standard_only`，也接受 Anthropic 兼容上游（MiniMax）文档中的 `standard`/`priority` 名称；当上游就是 Anthropic 本身时，后者会转换为最接近的 Anthropic 档位 |

@@ -725,3 +725,22 @@ class TestEmbeddingValidation:
             await adapter.embeddings(
                 InternalEmbeddingRequest(model="text-embedding-v4", input="x", dimensions=3000)
             )
+
+
+class TestQwenThinkingExtras:
+    def test_enable_thinking_and_budget_pass_through_by_default_and_under_strict_policies(self):
+        from llm_proxy.models import ConversationContext, Message, TextBlock
+
+        for policy in (None, "ignore", "error"):
+            kwargs = {"unknown_fields_policy": policy} if policy else {}
+            qwen = QwenAdapter(api_key="k", **kwargs)
+            request = InternalRequest(
+                model="qwen3.7-plus",
+                conversation=ConversationContext(
+                    messages=[Message(role="user", content=[TextBlock(text="hi")])]
+                ),
+                extra={"enable_thinking": True, "thinking_budget": 4096},
+            )
+            body = qwen._build_request_body(request)
+            assert body["enable_thinking"] is True
+            assert body["thinking_budget"] == 4096

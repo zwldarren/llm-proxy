@@ -815,7 +815,36 @@ class TestRequestBuilder:
 
         request.params.thinking = ThinkingConfig(type="enabled", effort="minimal")
         body = serializer.build_provider_request(request)
-        assert body["generation_config"]["thinking_level"] == "low"
+        assert body["generation_config"]["thinking_level"] == "minimal"
+
+        # Explicit efforts (xhigh, minimal, etc.) pass through unconditionally;
+        # upstream validates model support.
+        neon_request = InternalRequest(
+            model="gemini-4-neon",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="Hi")])]
+            ),
+            params=GenerationParams(
+                thinking=ThinkingConfig(type="enabled", budget_tokens=32000, effort="xhigh")
+            ),
+        )
+        body = serializer.build_provider_request(neon_request)
+        assert body["generation_config"]["thinking_level"] == "xhigh"
+
+        neon_request.params.thinking = ThinkingConfig(
+            type="enabled", budget_tokens=4000, effort="minimal"
+        )
+        body = serializer.build_provider_request(neon_request)
+        assert body["generation_config"]["thinking_level"] == "minimal"
+
+        # Escape-hatch thinkingLevel is lowercased for the Interactions enum.
+        from llm_proxy.serialization.gemini_interactions.request_builder import (
+            normalize_generation_config,
+        )
+
+        assert normalize_generation_config({"thinkingLevel": "XHIGH"}) == {
+            "thinking_level": "xhigh"
+        }
 
         # display=summary/full request visible thinking -> auto summaries;
         # explicit suppression (none) maps to "none".
@@ -827,10 +856,14 @@ class TestRequestBuilder:
         body = serializer.build_provider_request(request)
         assert body["generation_config"]["thinking_summaries"] == "none"
 
+        request.params.thinking = ThinkingConfig(type="enabled", effort="max")
+        body = serializer.build_provider_request(request)
+        assert body["generation_config"]["thinking_level"] == "max"
+
         request.params.thinking = ThinkingConfig(type="disabled")
         body = serializer.build_provider_request(request)
-        assert "thinking_level" not in body.get("generation_config", {})
-        assert "thinking_summaries" not in body.get("generation_config", {})
+        assert body["generation_config"]["thinking_level"] == "minimal"
+        assert "thinking_summaries" not in body["generation_config"]
 
     def test_tts_response_format_and_speech_config(self, serializer):
         request = InternalRequest(

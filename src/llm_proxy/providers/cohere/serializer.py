@@ -23,6 +23,7 @@ Nothing here is wire-compatible with a client protocol, so
 from typing import Any
 
 from llm_proxy.core.exceptions import ProviderError
+from llm_proxy.core.thinking import resolve_thinking
 from llm_proxy.models import (
     CustomTool,
     FunctionTool,
@@ -179,11 +180,11 @@ class CohereProviderSerializer(
         reasoning on by default for models that support it — so only an explicit
         "off" or an explicit budget needs to travel.
         """
-        thinking = request.params.thinking
+        thinking = resolve_thinking(request)
         if thinking is None:
             return
         effort = (thinking.effort or "").lower()
-        if thinking.type == "disabled" or effort in {"none", "minimal"}:
+        if thinking.type == "disabled" or effort == "none":
             body["thinking"] = {"type": "disabled"}
             return
         config: dict[str, Any] = {"type": "enabled"}

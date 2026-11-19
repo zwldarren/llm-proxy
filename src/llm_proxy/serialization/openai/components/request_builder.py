@@ -55,21 +55,6 @@ _RESPONSES_ONLY_EXTRA_KEYS = frozenset(
     }
 )
 
-# The unified ``reasoning`` object (OpenRouter's cross-provider interface) is
-# accepted by some Chat Completions upstreams even though it is Responses-API-
-# shaped. Adapters that declare ``REASONING_OBJECT`` set
-# ``BuildContext.reasoning_object``, and these keys are then forwarded instead
-# of dropped with the rest of ``_RESPONSES_ONLY_EXTRA_KEYS``.
-_REASONING_OBJECT_KEYS = (
-    "effort",
-    "mode",
-    "context",
-    "summary",
-    "max_tokens",
-    "exclude",
-    "enabled",
-)
-
 
 class OpenAIRequestBuilder:
     """Builds OpenAI Chat Completions request bodies from InternalRequest.
@@ -270,9 +255,7 @@ class OpenAIRequestBuilder:
 
         thinking = resolve_thinking(request)
         if thinking is not None:
-            thinking_params = convert_to_openai(
-                thinking, disabled_wire=context.thinking_disabled_wire
-            )
+            thinking_params = convert_to_openai(thinking)
             if thinking_params:
                 body.update(thinking_params)
         return body
@@ -417,27 +400,38 @@ class OpenAIRequestBuilder:
         """Build the unified ``reasoning`` object for Chat Completions upstreams.
 
         Merges whatever the client sent (``mode``/``context``/``summary`` and
-        any explicit ``effort``) with the effort derived from the unified
-        thinking config, so a request that only carries
-        ``reasoning_effort``/``thinking`` still reaches the upstream as a
-        complete reasoning object.
+        any explicit ``effort``/``max_tokens``/``enabled``) with the unified
+        thinking config, preserving exact token budgets, explicit enable/disable
+        switches, and display suppression where supported.
         """
-        from llm_proxy.core.thinking import resolve_thinking, thinking_config_to_reasoning_effort
+        from llm_proxy.core.thinking import resolve_thinking
 
         reasoning: dict[str, Any] = {}
         extra_reasoning = request.extra.get("reasoning")
         if isinstance(extra_reasoning, dict):
-            for key in _REASONING_OBJECT_KEYS:
-                val = extra_reasoning.get(key)
+            for key, val in extra_reasoning.items():
                 if val is not None:
                     reasoning[key] = val
 
-        if "effort" not in reasoning:
-            thinking = resolve_thinking(request)
-            if thinking is not None:
-                effort = thinking_config_to_reasoning_effort(thinking)
-                if effort is not None:
-                    reasoning["effort"] = effort
+        thinking = resolve_thinking(request)
+        if thinking is not None:
+            if not any(k in reasoning for k in ("effort", "max_tokens", "enabled")):
+                if thinking.effort is not None:
+                    reasoning["effort"] = thinking.effort
+                elif thinking.type == "disabled":
+                    reasoning["effort"] = "none"
+                elif thinking.budget_tokens is not None:
+                    reasoning["max_tokens"] = thinking.budget_tokens
+                elif thinking.type == "enabled":
+                    reasoning["enabled"] = True
+
+            if "exclude" not in reasoning and (thinking.display or "").lower() in (
+                "omitted",
+                "none",
+                "off",
+                "hidden",
+            ):
+                reasoning["exclude"] = True
 
         return reasoning or None
 

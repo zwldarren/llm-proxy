@@ -639,12 +639,13 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             if effort is not None:
                 reasoning["effort"] = effort
 
-        # From extra: mode, context, summary (already validated by ReasonParam schema)
+        # From extra: forward all non-None fields (mode, context, summary, and
+        # any provider-specific or future reasoning options), letting the
+        # unified thinking config supply ``effort`` when not already set.
         extra_reasoning = request.extra.get("reasoning")
         if isinstance(extra_reasoning, dict):
-            for key in ("mode", "context", "summary"):
-                val = extra_reasoning.get(key)
-                if val is not None:
+            for key, val in extra_reasoning.items():
+                if val is not None and (key != "effort" or "effort" not in reasoning):
                     reasoning[key] = val
 
         return reasoning if reasoning else None

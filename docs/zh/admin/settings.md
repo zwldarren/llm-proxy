@@ -55,11 +55,11 @@ MCP 服务器的默认拒绝策略：允许/禁止的命令、环境变量过滤
 
 ### 请求策略 {#request-policy}
 
-代理如何处理它不认识的字段和内容块。这是全局设置，但**提供商默认**会把决定权交给各提供商的适配器（多数会丢弃未知字段；vLLM/SGLang 会透传，从而保留 `top_k`/`guided_json`/`chat_template_kwargs` 这类引擎专有参数）。选定具体值后会覆盖所有提供商自己的默认行为。
+代理如何处理它不认识的字段和内容块。这是全局设置，但**提供商默认**会把决定权交给各提供商的适配器（目前聊天请求默认为 `passthrough`，让 Qwen 的 `enable_thinking`、Ollama 的 `think` 或 vLLM/SGLang 引擎专有参数能够保留下来；非聊天的多提供商联合接口仍默认为 `ignore`）。选定具体值后会覆盖所有提供商自己的默认行为。
 
 | 字段 | 选项 | 默认值 |
 | --- | --- | --- |
-| **未知字段处理策略** | `provider default` · `ignore` · `passthrough` · `error` | **提供商默认**——由各适配器决定（通常是 `ignore`） |
+| **未知字段处理策略** | `provider default` · `ignore` · `passthrough` · `error` | **提供商默认**——由各适配器决定（聊天默认 `passthrough`，非聊天默认 `ignore`） |
 | **不支持块策略** | `provider default` · `drop` · `degrade` · `error` | **提供商默认**——由各适配器决定（目前是 `drop`） |
 
 未知字段策略作用于内部模型不认识的**顶层**请求字段；消息内部嵌套的未知字段由各序列化器处理。走原生透传档位的请求（在支持该档位的提供商上使用 Anthropic 和 Responses 客户端）会绕过该策略，正文原样转发。

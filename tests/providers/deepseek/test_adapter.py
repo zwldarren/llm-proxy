@@ -226,14 +226,10 @@ class TestDeepSeekRequestBody:
         assert body["messages"][0]["role"] == "user"
         assert body["messages"][0]["content"] == "Hello"
 
-    def test_thinking_enabled_emits_reasoning_effort(self, deepseek_adapter):
-        """ThinkingConfig(type=enabled) → reasoning_effort: medium.
-
-        The unified thinking layer converts ``ThinkingConfig(type="enabled")``
-        into a ``reasoning_effort`` value. DeepSeek accepts both
-        ``reasoning_effort`` and ``thinking: {type}``; the proxy uses the
-        simpler ``reasoning_effort`` form when the effort can be derived.
-        """
+    def test_thinking_enabled_emits_thinking_object_without_fabricated_effort(
+        self, deepseek_adapter
+    ):
+        """Bare ``ThinkingConfig(type="enabled")`` preserves ``thinking`` natively."""
         request = InternalRequest(
             model="deepseek-v4-pro",
             conversation=ConversationContext(
@@ -242,8 +238,8 @@ class TestDeepSeekRequestBody:
             params=GenerationParams(thinking=ThinkingConfig(type="enabled")),
         )
         body = deepseek_adapter._build_request_body(request)
-        assert body["reasoning_effort"] == "medium"
-        assert "thinking" not in body
+        assert body["thinking"] == {"type": "enabled"}
+        assert "reasoning_effort" not in body
 
     def test_thinking_disabled_emits_reasoning_effort_none(self, deepseek_adapter):
         """ThinkingConfig(type=disabled) → reasoning_effort: none."""

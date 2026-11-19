@@ -19,8 +19,8 @@ class TestNormalizeThinking:
     def test_reasoning_effort(self):
         result = normalize_thinking({"reasoning_effort": "high"})
         assert result is not None
-        assert result.type == "enabled"
-        assert result.budget_tokens == 32000
+        assert result.type == "adaptive"
+        assert result.budget_tokens is None
         assert result.effort == "high"
 
     def test_thinking_dict(self):
@@ -41,26 +41,57 @@ class TestNormalizeThinking:
         assert result is not None
         assert result.type == "disabled"
 
+    def test_unknown_thinking_type_preserved_verbatim(self):
+        result = normalize_thinking({"thinking": {"type": "future_mode", "budget_tokens": 2048}})
+        assert result == ThinkingConfig(type="future_mode", budget_tokens=2048)
+
+    def test_cohere_token_budget_and_zero_preserved(self):
+        result = normalize_thinking({"thinking": {"type": "enabled", "token_budget": 4096}})
+        assert result == ThinkingConfig(type="enabled", budget_tokens=4096)
+
+        zero_result = normalize_thinking({"thinking": {"type": "enabled", "token_budget": 0}})
+        assert zero_result == ThinkingConfig(type="enabled", budget_tokens=0)
+
+    def test_glm_nested_effort_and_clear_thinking_preserved(self):
+        result = normalize_thinking(
+            {
+                "thinking": {
+                    "type": "enabled",
+                    "reasoning_effort": "high",
+                    "clear_thinking": False,
+                }
+            }
+        )
+        assert result == ThinkingConfig(
+            type="enabled",
+            effort="high",
+            extra={"clear_thinking": False},
+        )
+
     def test_reasoning_object(self):
         result = normalize_thinking({"reasoning": {"effort": "medium"}})
         assert result is not None
-        assert result.type == "enabled"
-        assert result.budget_tokens == 16000
+        assert result.type == "adaptive"
+        assert result.budget_tokens is None
         assert result.effort == "medium"
+
+    def test_reasoning_object_openrouter_fields(self):
+        assert normalize_thinking({"reasoning": {"enabled": False}}) == ThinkingConfig(
+            type="disabled"
+        )
+        assert normalize_thinking(
+            {"reasoning": {"max_tokens": 5000, "exclude": True}}
+        ) == ThinkingConfig(type="enabled", budget_tokens=5000, display="omitted")
+        expected_enabled = ThinkingConfig(type="enabled")
+        assert normalize_thinking({"reasoning": {"enabled": True}}) == expected_enabled
 
     def test_output_config_effort(self):
         result = normalize_thinking({"output_config": {"effort": "medium"}})
-        assert result is not None
-        assert result.type == "enabled"
-        assert result.budget_tokens == 16000
-        assert result.effort == "medium"
+        assert result == ThinkingConfig(type=None, effort="medium")
 
     def test_output_config_effort_max(self):
         result = normalize_thinking({"output_config": {"effort": "max"}})
-        assert result is not None
-        assert result.type == "enabled"
-        assert result.budget_tokens is None
-        assert result.effort == "max"
+        assert result == ThinkingConfig(type=None, effort="max")
 
     def test_output_config_dict_over_reasoning_dict(self):
         result = normalize_thinking(
@@ -72,7 +103,7 @@ class TestNormalizeThinking:
         assert result is not None
         assert result.effort == "high"
 
-    def test_thinking_dict_over_output_config(self):
+    def test_thinking_dict_preserves_budget_and_merges_output_config_effort(self):
         result = normalize_thinking(
             {
                 "thinking": {"type": "enabled", "budget_tokens": 10000},
@@ -82,13 +113,9 @@ class TestNormalizeThinking:
         assert result is not None
         assert result.type == "enabled"
         assert result.budget_tokens == 10000
-        assert result.effort is None
+        assert result.effort == "high"
 
     def test_adaptive_merges_output_config_effort(self):
-        # `thinking: {type: adaptive}` + `output_config: {effort: high}` is the
-        # canonical Anthropic pattern for adaptive thinking controlled by
-        # effort. The effort must be preserved so downstream providers can map
-        # it (e.g. to OpenAI reasoning_effort) instead of dropping it.
         result = normalize_thinking(
             {
                 "thinking": {"type": "adaptive"},
@@ -100,22 +127,46 @@ class TestNormalizeThinking:
         assert result.effort == "high"
         assert result.budget_tokens is None
 
+    def test_between_tools_merges_output_config_effort(self):
+        result = normalize_thinking(
+            {
+                "thinking": {"type": "between_tools"},
+                "output_config": {"effort": "high"},
+            }
+        )
+        assert result == ThinkingConfig(type="between_tools", effort="high")
+
     def test_adaptive_without_output_config_has_no_effort(self):
         result = normalize_thinking({"thinking": {"type": "adaptive"}})
         assert result is not None
         assert result.type == "adaptive"
         assert result.effort is None
 
+    def test_enabled_without_budget_merges_output_config_effort(self):
+        result = normalize_thinking(
+            {
+                "thinking": {"type": "enabled"},
+                "output_config": {"effort": "xhigh"},
+            }
+        )
+        assert result is not None
+        assert result.type == "enabled"
+        assert result.effort == "xhigh"
+        assert result.budget_tokens is None
+
     def test_no_thinking_params(self):
         result = normalize_thinking({"temperature": 0.7})
         assert result is None
 
-    def test_reasoning_effort_precedence(self):
+    def test_thinking_takes_precedence_over_reasoning_effort_when_disabled(self):
+        result = normalize_thinking({"reasoning_effort": "high", "thinking": {"type": "disabled"}})
+        assert result == ThinkingConfig(type="disabled", effort=None)
+
+    def test_thinking_dict_merges_top_level_reasoning_effort_when_enabled(self):
         result = normalize_thinking(
             {"reasoning_effort": "low", "thinking": {"type": "enabled", "budget_tokens": 10000}}
         )
-        assert result is not None
-        assert result.effort == "low"
+        assert result == ThinkingConfig(type="enabled", budget_tokens=10000, effort="low")
 
     def test_thinking_dict_over_reasoning_dict(self):
         result = normalize_thinking(
@@ -137,50 +188,35 @@ class TestThinkingConfigFromReasoningEffort:
 
     def test_minimal(self):
         config = thinking_config_from_reasoning_effort("minimal")
-        assert config.type == "enabled"
-        assert config.budget_tokens == 4000
-        assert config.effort == "minimal"
+        assert config == ThinkingConfig(type="adaptive", effort="minimal")
 
     def test_low(self):
         config = thinking_config_from_reasoning_effort("low")
-        assert config.type == "enabled"
-        assert config.budget_tokens == 4000
-        assert config.effort == "low"
+        assert config == ThinkingConfig(type="adaptive", effort="low")
 
     def test_medium(self):
         config = thinking_config_from_reasoning_effort("medium")
-        assert config.type == "enabled"
-        assert config.budget_tokens == 16000
-        assert config.effort == "medium"
+        assert config == ThinkingConfig(type="adaptive", effort="medium")
 
     def test_high(self):
         config = thinking_config_from_reasoning_effort("high")
-        assert config.type == "enabled"
-        assert config.budget_tokens == 32000
-        assert config.effort == "high"
+        assert config == ThinkingConfig(type="adaptive", effort="high")
 
     def test_xhigh(self):
         config = thinking_config_from_reasoning_effort("xhigh")
-        assert config.type == "enabled"
-        assert config.budget_tokens == 32000
-        assert config.effort == "xhigh"
+        assert config == ThinkingConfig(type="adaptive", effort="xhigh")
 
     def test_case_insensitive(self):
         config = thinking_config_from_reasoning_effort("HIGH")
-        assert config.type == "enabled"
-        assert config.effort == "high"
+        assert config == ThinkingConfig(type="adaptive", effort="high")
 
-    def test_unknown_defaults_to_enabled_medium(self):
+    def test_unknown_passes_through_without_fabricated_budget(self):
         config = thinking_config_from_reasoning_effort("unknown")
-        assert config.type == "enabled"
-        assert config.budget_tokens == 16000
-        assert config.effort == "unknown"
+        assert config == ThinkingConfig(type="adaptive", effort="unknown")
 
     def test_max(self):
         config = thinking_config_from_reasoning_effort("max")
-        assert config.type == "enabled"
-        assert config.budget_tokens is None
-        assert config.effort == "max"
+        assert config == ThinkingConfig(type="adaptive", effort="max")
 
 
 class TestThinkingConfigToReasoningEffort:
@@ -204,9 +240,9 @@ class TestThinkingConfigToReasoningEffort:
         config = ThinkingConfig(type="enabled", budget_tokens=32000)
         assert thinking_config_to_reasoning_effort(config) == "high"
 
-    def test_no_effort_no_budget(self):
+    def test_no_effort_no_budget_returns_none(self):
         config = ThinkingConfig(type="enabled")
-        assert thinking_config_to_reasoning_effort(config) == "medium"
+        assert thinking_config_to_reasoning_effort(config) is None
 
 
 class TestConvertToOpenAI:
@@ -238,6 +274,21 @@ class TestConvertToOpenAI:
     def test_none(self):
         assert convert_to_openai(None) is None
 
+    def test_bare_enabled_preserves_thinking_object(self):
+        config = ThinkingConfig(type="enabled")
+        assert convert_to_openai(config) == {"thinking": {"type": "enabled"}}
+
+    def test_extra_keys_preserved_alongside_reasoning_effort(self):
+        config = ThinkingConfig(
+            type="enabled",
+            effort="high",
+            extra={"clear_thinking": False},
+        )
+        assert convert_to_openai(config) == {
+            "reasoning_effort": "high",
+            "thinking": {"type": "enabled", "clear_thinking": False},
+        }
+
     def test_no_type(self):
         config = ThinkingConfig(budget_tokens=5000)
         result = convert_to_openai(config)
@@ -249,16 +300,11 @@ class TestConvertToOpenAI:
         assert result == {"reasoning_effort": "max"}
 
     def test_adaptive_with_effort_maps_to_reasoning_effort(self):
-        # adaptive + effort (merged from output_config) must surface as
-        # reasoning_effort, not as an invalid `thinking: {type: adaptive}`.
         config = ThinkingConfig(type="adaptive", effort="high")
         result = convert_to_openai(config)
         assert result == {"reasoning_effort": "high"}
 
     def test_adaptive_without_effort_is_dropped(self):
-        # `adaptive` has no OpenAI equivalent; without a derivable effort it
-        # must be dropped rather than emit an unsupported thinking type that
-        # OpenAI-compatible providers reject with a 4xx.
         config = ThinkingConfig(type="adaptive")
         assert convert_to_openai(config) is None
 
@@ -277,23 +323,33 @@ class TestConvertToAnthropic:
     def test_none(self):
         assert convert_to_anthropic(None) is None
 
-    def test_no_type(self):
+    def test_no_type_no_effort(self):
         config = ThinkingConfig(budget_tokens=5000)
         assert convert_to_anthropic(config) is None
+
+    def test_bare_effort_omits_thinking_block(self):
+        config = ThinkingConfig(type=None, effort="high")
+        assert convert_to_anthropic(config) == {"output_config": {"effort": "high"}}
 
     def test_effort_outputs_output_config(self):
         config = ThinkingConfig(type="enabled", effort="medium")
         result = convert_to_anthropic(config)
-        assert result is not None
-        assert result["output_config"] == {"effort": "medium"}
-        assert result["thinking"] == {"type": "enabled"}
+        assert result == {"thinking": {"type": "enabled"}, "output_config": {"effort": "medium"}}
 
-    def test_effort_and_budget_tokens(self):
+    def test_effort_and_budget_tokens_both_preserved(self):
         config = ThinkingConfig(type="enabled", effort="high", budget_tokens=32000)
         result = convert_to_anthropic(config)
-        assert result is not None
-        assert result["output_config"] == {"effort": "high"}
-        assert result["thinking"] == {"type": "enabled"}
+        assert result == {
+            "thinking": {"type": "enabled", "budget_tokens": 32000},
+            "output_config": {"effort": "high"},
+        }
+
+    def test_minimal_effort_preserved_verbatim(self):
+        config = ThinkingConfig(type="adaptive", effort="minimal")
+        assert convert_to_anthropic(config) == {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "minimal"},
+        }
 
     def test_budget_tokens_without_effort(self):
         config = ThinkingConfig(type="enabled", budget_tokens=5000)
@@ -305,17 +361,14 @@ class TestConvertToAnthropic:
     def test_max_effort(self):
         config = ThinkingConfig(type="enabled", effort="max")
         result = convert_to_anthropic(config)
-        assert result is not None
-        assert result["output_config"] == {"effort": "max"}
-        assert result["thinking"] == {"type": "enabled"}
+        assert result == {
+            "thinking": {"type": "enabled"},
+            "output_config": {"effort": "max"},
+        }
 
 
 class TestConvertToGemini:
-    """Gemini 3+ thinking shape: a level plus includeThoughts.
-
-    ``includeThoughts`` is always set — without it the API returns no thought
-    parts at all, so a client that asked for reasoning would see none.
-    """
+    """Gemini thinking conversions across generateContent and Interactions."""
 
     def test_low_budget(self):
         config = ThinkingConfig(type="enabled", budget_tokens=4000)
@@ -335,69 +388,91 @@ class TestConvertToGemini:
     def test_from_effort_low(self):
         config = ThinkingConfig(type="enabled", effort="low")
         result = convert_to_gemini(config)
+        assert result is not None
         assert result["thinkingConfig"]["thinkingLevel"] == "LOW"
 
     def test_from_effort_high(self):
         config = ThinkingConfig(type="enabled", effort="high")
         result = convert_to_gemini(config)
+        assert result is not None
         assert result["thinkingConfig"]["thinkingLevel"] == "HIGH"
 
     def test_from_effort_xhigh(self):
         config = ThinkingConfig(type="enabled", effort="xhigh")
         result = convert_to_gemini(config)
-        assert result["thinkingConfig"]["thinkingLevel"] == "HIGH"
+        assert result == {"thinkingConfig": {"thinkingLevel": "XHIGH", "includeThoughts": True}}
 
-    def test_from_effort_max(self):
+    def test_from_effort_max_passes_verbatim(self):
         config = ThinkingConfig(type="enabled", effort="max")
-        result = convert_to_gemini(config)
-        assert result["thinkingConfig"]["thinkingLevel"] == "HIGH"
+        assert convert_to_gemini(config) == {
+            "thinkingConfig": {"thinkingLevel": "MAX", "includeThoughts": True}
+        }
+        assert convert_to_gemini_interactions(config) == {"thinking_level": "max"}
 
-    def test_from_effort_minimal_without_model(self):
-        """No model id: the safe level is LOW (MINIMAL support is model-specific)."""
-        config = ThinkingConfig(type="enabled", effort="minimal")
-        result = convert_to_gemini(config)
-        assert result["thinkingConfig"]["thinkingLevel"] == "LOW"
+    def test_from_effort_future_tier_passes_through(self):
+        config = ThinkingConfig(type="enabled", effort="ultra")
+        assert convert_to_gemini(config) == {
+            "thinkingConfig": {"thinkingLevel": "ULTRA", "includeThoughts": True}
+        }
+        assert convert_to_gemini_interactions(config) == {"thinking_level": "ultra"}
+        assert convert_to_openai(config) == {"reasoning_effort": "ultra"}
+        assert convert_to_anthropic(config) == {
+            "thinking": {"type": "enabled"},
+            "output_config": {"effort": "ultra"},
+        }
+        assert convert_to_ollama(config) == "ultra"
 
-    def test_from_effort_minimal_uses_minimal_when_supported(self):
-        """3.x Flash models take ``minimal`` as the closest thing to "off"."""
-        config = ThinkingConfig(type="enabled", effort="minimal")
-        result = convert_to_gemini(config, model="gemini-3.6-flash")
-        assert result["thinkingConfig"]["thinkingLevel"] == "MINIMAL"
+    def test_from_effort_minimal_and_xhigh(self):
+        minimal_cfg = normalize_thinking({"reasoning_effort": "minimal"})
+        assert convert_to_gemini(minimal_cfg) == {
+            "thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}
+        }
+        xhigh_cfg = normalize_thinking({"reasoning_effort": "xhigh"})
+        assert convert_to_gemini(xhigh_cfg) == {
+            "thinkingConfig": {"thinkingLevel": "XHIGH", "includeThoughts": True}
+        }
+        assert convert_to_gemini_interactions(xhigh_cfg) == {"thinking_level": "xhigh"}
 
-    def test_disabled_without_model_returns_none(self):
-        config = ThinkingConfig(type="disabled")
-        assert convert_to_gemini(config) is None
+    def test_display_omitted_disables_include_thoughts_and_summaries(self):
+        cfg = ThinkingConfig(type="enabled", effort="high", display="omitted")
+        assert convert_to_gemini(cfg) == {
+            "thinkingConfig": {"thinkingLevel": "HIGH", "includeThoughts": False}
+        }
+        assert convert_to_gemini_interactions(cfg) == {
+            "thinking_level": "high",
+            "thinking_summaries": "none",
+        }
+        assert convert_to_gemini_legacy(ThinkingConfig(type="enabled", display="omitted")) == {
+            "thinkingConfig": {"thinkingBudget": -1, "includeThoughts": False}
+        }
 
-    def test_disabled_uses_minimal_when_supported(self):
-        config = ThinkingConfig(type="disabled")
-        result = convert_to_gemini(config, model="gemini-3.6-flash")
-        assert result == {"thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}}
+    def test_disabled_emits_minimal_without_forcing_thoughts(self):
+        assert convert_to_gemini(ThinkingConfig(type="disabled")) == {
+            "thinkingConfig": {"thinkingLevel": "MINIMAL"}
+        }
+        assert convert_to_gemini_interactions(ThinkingConfig(type="disabled")) == {
+            "thinking_level": "minimal"
+        }
+        assert convert_to_gemini_legacy(ThinkingConfig(type="disabled")) == {
+            "thinkingConfig": {"thinkingBudget": 0}
+        }
 
-    def test_disabled_falls_back_to_low_where_minimal_errors(self):
-        """Gemini 3.8 Flash and Gemini 4 reject ``minimal``; LOW is the floor.
-
-        The Flash-Lite Image model is NOT in that set: the thinking table takes
-        ``minimal`` as its default there (it is ``low``/``medium`` it rejects).
-        """
-        config = ThinkingConfig(type="disabled")
-        for model in ("gemini-3.8-flash", "gemini-4-argon"):
-            result = convert_to_gemini(config, model=model)
-            assert result == {
-                "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": True}
-            }, model
-
-    def test_disabled_takes_minimal_on_flash_lite_image(self):
-        config = ThinkingConfig(type="disabled")
-        result = convert_to_gemini(config, model="gemini-3.1-flash-lite-image")
-        assert result == {"thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}}
+    def test_legacy_effort_budgets_stay_within_flash_cap(self):
+        cfg = thinking_config_from_reasoning_effort("high")
+        assert convert_to_gemini_legacy(cfg) == {
+            "thinkingConfig": {"thinkingBudget": 8192, "includeThoughts": True}
+        }
+        assert convert_to_gemini_legacy(ThinkingConfig(type="enabled")) == {
+            "thinkingConfig": {"thinkingBudget": -1, "includeThoughts": True}
+        }
 
     def test_none(self):
         assert convert_to_gemini(None) is None
 
-    def test_default_medium(self):
+    def test_bare_enabled_omits_thinking_level(self):
         config = ThinkingConfig(type="enabled")
         result = convert_to_gemini(config)
-        assert result == {"thinkingConfig": {"thinkingLevel": "MEDIUM", "includeThoughts": True}}
+        assert result == {"thinkingConfig": {"includeThoughts": True}}
 
 
 class TestConvertToOllama:
@@ -408,6 +483,10 @@ class TestConvertToOllama:
     def test_none_effort(self):
         config = ThinkingConfig(type="enabled", effort="none")
         assert convert_to_ollama(config) is False
+
+    def test_minimal_effort_verbatim(self):
+        config = ThinkingConfig(type="enabled", effort="minimal")
+        assert convert_to_ollama(config) == "minimal"
 
     def test_low_effort(self):
         config = ThinkingConfig(type="enabled", effort="low")
@@ -421,9 +500,9 @@ class TestConvertToOllama:
         config = ThinkingConfig(type="enabled", effort="high")
         assert convert_to_ollama(config) == "high"
 
-    def test_xhigh_effort(self):
+    def test_xhigh_effort_verbatim(self):
         config = ThinkingConfig(type="enabled", effort="xhigh")
-        assert convert_to_ollama(config) == "max"
+        assert convert_to_ollama(config) == "xhigh"
 
     def test_max_effort(self):
         config = ThinkingConfig(type="enabled", effort="max")
@@ -464,7 +543,7 @@ class TestCrossProtocolConversion:
         data = {"reasoning": {"effort": "minimal"}}
         config = normalize_thinking(data)
         ollama = convert_to_ollama(config)
-        assert ollama == "low"
+        assert ollama == "minimal"
 
     def test_openai_none_to_anthropic(self):
         data = {"reasoning_effort": "none"}
@@ -482,10 +561,7 @@ class TestCrossProtocolConversion:
         data = {"output_config": {"effort": "high"}}
         config = normalize_thinking(data)
         anthropic = convert_to_anthropic(config)
-        assert anthropic == {
-            "output_config": {"effort": "high"},
-            "thinking": {"type": "enabled"},
-        }
+        assert anthropic == {"output_config": {"effort": "high"}}
 
     def test_thinking_bool_false(self):
         result = normalize_thinking({"thinking": False})
@@ -493,27 +569,17 @@ class TestCrossProtocolConversion:
         assert result.type == "disabled"
 
     def test_anthropic_adaptive_plus_output_config_to_openai(self):
-        # Regression: an Anthropic client sending `thinking: {type: adaptive}`
-        # together with `output_config: {effort: high}` (Claude Code's pattern)
-        # must reach an OpenAI-compatible provider as `reasoning_effort: high`,
-        # not as an unsupported `thinking: {type: adaptive}` that triggers a
-        # 4xx "Invalid request".
         data = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
         config = normalize_thinking(data)
         openai = convert_to_openai(config)
         assert openai == {"reasoning_effort": "high"}
 
     def test_anthropic_adaptive_only_to_openai_dropped(self):
-        # `adaptive` alone has no OpenAI equivalent; it must be dropped so the
-        # OpenAI-compatible provider uses its default rather than rejecting an
-        # unknown `thinking` type.
         data = {"thinking": {"type": "adaptive"}}
         config = normalize_thinking(data)
         assert convert_to_openai(config) is None
 
     def test_anthropic_adaptive_plus_output_config_roundtrip(self):
-        # Anthropic adaptive + effort must survive an Anthropic -> OpenAI ->
-        # Anthropic roundtrip.
         data = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
         config = normalize_thinking(data)
         anthropic = convert_to_anthropic(config)
@@ -523,57 +589,48 @@ class TestCrossProtocolConversion:
         }
 
     def test_openai_xhigh_to_anthropic_preserves_xhigh(self):
-        """OpenAI xhigh should stay as xhigh for Anthropic (now natively supported)."""
         data = {"reasoning_effort": "xhigh"}
         config = normalize_thinking(data)
         anthropic = convert_to_anthropic(config)
         assert anthropic == {
             "output_config": {"effort": "xhigh"},
-            "thinking": {"type": "enabled"},
+            "thinking": {"type": "adaptive"},
         }
 
-    def test_openai_minimal_to_anthropic_maps_to_low(self):
-        """OpenAI minimal should map to Anthropic low."""
+    def test_openai_minimal_to_anthropic_preserves_minimal(self):
         data = {"reasoning_effort": "minimal"}
         config = normalize_thinking(data)
         anthropic = convert_to_anthropic(config)
         assert anthropic == {
-            "output_config": {"effort": "low"},
-            "thinking": {"type": "enabled"},
+            "output_config": {"effort": "minimal"},
+            "thinking": {"type": "adaptive"},
         }
 
     def test_anthropic_max_to_openai_preserves_max(self):
-        """Anthropic max should stay as max for OpenAI (now natively supported)."""
         data = {"output_config": {"effort": "max"}}
         config = normalize_thinking(data)
         openai = convert_to_openai(config)
         assert openai == {"reasoning_effort": "max"}
 
     def test_openai_xhigh_roundtrip_via_anthropic(self):
-        """OpenAI xhigh → Anthropic xhigh → OpenAI xhigh.
-
-        Uses only output_config (not thinking dict) for the reverse path,
-        since Anthropic clients send one or the other, not both.
-        """
         data = {"reasoning_effort": "xhigh"}
         config = normalize_thinking(data)
         anthropic = convert_to_anthropic(config)
-        # Reverse path: only use output_config (the effort-bearing field)
+        assert anthropic is not None
         config2 = normalize_thinking({"output_config": anthropic["output_config"]})
         openai = convert_to_openai(config2)
         assert openai == {"reasoning_effort": "xhigh"}
 
     def test_anthropic_max_roundtrip_via_openai(self):
-        """Anthropic max → OpenAI max → Anthropic max."""
         data = {"output_config": {"effort": "max"}}
         config = normalize_thinking(data)
         openai = convert_to_openai(config)
-        # Reverse path
+        assert openai is not None
         config2 = normalize_thinking(openai)
         anthropic = convert_to_anthropic(config2)
         assert anthropic == {
             "output_config": {"effort": "max"},
-            "thinking": {"type": "enabled"},
+            "thinking": {"type": "adaptive"},
         }
 
 
@@ -615,17 +672,13 @@ class TestResolveThinking:
         from llm_proxy.models.params import AnthropicSpecificParams
 
         req = self._req(anthropic=AnthropicSpecificParams(output_config={"effort": "high"}))
-        assert resolve_thinking(req) == ThinkingConfig(
-            type="enabled", budget_tokens=32000, effort="high"
-        )
+        assert resolve_thinking(req) == ThinkingConfig(type=None, effort="high")
 
     def test_falls_back_to_openai_reasoning_effort(self):
         from llm_proxy.models.params import OpenAISpecificParams
 
         req = self._req(openai=OpenAISpecificParams(reasoning_effort="medium"))
-        assert resolve_thinking(req) == ThinkingConfig(
-            type="enabled", budget_tokens=16000, effort="medium"
-        )
+        assert resolve_thinking(req) == ThinkingConfig(type="adaptive", effort="medium")
 
     def test_anthropic_output_config_beats_openai_reasoning_effort(self):
         from llm_proxy.models.params import (
@@ -637,16 +690,12 @@ class TestResolveThinking:
             anthropic=AnthropicSpecificParams(output_config={"effort": "low"}),
             openai=OpenAISpecificParams(reasoning_effort="high"),
         )
-        assert resolve_thinking(req) == ThinkingConfig(
-            type="enabled", budget_tokens=4000, effort="low"
-        )
+        assert resolve_thinking(req) == ThinkingConfig(type=None, effort="low")
 
     def test_returns_none_when_no_effort_source(self):
         assert resolve_thinking(self._req()) is None
 
     def test_disabled_thinking_is_preserved_not_overridden(self):
-        # An explicit disabled thinking must win over a set effort source;
-        # provider builders rely on this to emit the disabled form.
         from llm_proxy.models.params import OpenAISpecificParams
 
         req = self._req(
@@ -657,13 +706,7 @@ class TestResolveThinking:
 
 
 class TestBetweenToolsConversion:
-    """``between_tools`` (Anthropic's lowest thinking setting, Claude Sonnet 5.5).
-
-    Anthropic upstreams receive the value verbatim; every other provider gets
-    the lowest thinking setting it can express, mirroring how
-    ``convert_to_openai`` leaves the provider default in place rather than
-    sending a type the upstream would reject.
-    """
+    """``between_tools`` (Anthropic's Claude Sonnet 5.5 setting)."""
 
     def test_anthropic_receives_between_tools_verbatim(self):
         result = convert_to_anthropic(ThinkingConfig(type="between_tools"))
@@ -672,22 +715,18 @@ class TestBetweenToolsConversion:
     def test_openai_translation_leaves_provider_default(self):
         assert convert_to_openai(ThinkingConfig(type="between_tools")) is None
 
-    def test_gemini_uses_lowest_acceptable_level(self):
+    def test_gemini_returns_none_without_effort(self):
         config = ThinkingConfig(type="between_tools")
-        # Without a model id: untouched, like a disabled request.
         assert convert_to_gemini(config) is None
-        # Models that accept MINIMAL get it; the rest get their LOW floor.
-        assert convert_to_gemini(config, model="gemini-3.1-flash-lite-image") == {
-            "thinkingConfig": {"thinkingLevel": "MINIMAL", "includeThoughts": True}
+        assert convert_to_gemini(ThinkingConfig(type="between_tools", effort="low")) == {
+            "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": True}
         }
-        for model in ("gemini-3.8-flash", "gemini-4-argon"):
-            assert convert_to_gemini(config, model=model) == {
-                "thinkingConfig": {"thinkingLevel": "LOW", "includeThoughts": True}
-            }, model
 
-    def test_gemini_interactions_uses_minimal(self):
-        result = convert_to_gemini_interactions(ThinkingConfig(type="between_tools"))
-        assert result == {"thinking_level": "minimal"}
+    def test_gemini_interactions_returns_none_without_effort(self):
+        assert convert_to_gemini_interactions(ThinkingConfig(type="between_tools")) is None
+        assert convert_to_gemini_interactions(
+            ThinkingConfig(type="between_tools", effort="low")
+        ) == {"thinking_level": "low"}
 
     def test_gemini_legacy_uses_floor_budget(self):
         result = convert_to_gemini_legacy(ThinkingConfig(type="between_tools"))

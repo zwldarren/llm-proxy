@@ -109,14 +109,14 @@ class TestBuildRequestBody:
         assert body["think"] == "high"
 
     def test_reasoning_effort_levels(self, provider):
-        """Test OpenAI reasoning_effort maps to think levels."""
+        """Test OpenAI reasoning_effort maps verbatim to think levels."""
         cases = [
             ("none", False),
-            ("minimal", "low"),
+            ("minimal", "minimal"),
             ("low", "low"),
             ("medium", "medium"),
             ("high", "high"),
-            ("xhigh", "max"),
+            ("xhigh", "xhigh"),
         ]
         for effort, expected in cases:
             request = InternalRequest(
@@ -156,8 +156,9 @@ class TestBuildRequestBody:
         assert body["logprobs"] is True
         assert body["top_logprobs"] == 5
 
-    def test_ollama_options_from_extra_body(self, provider):
-        """Test Ollama options extracted from extra_body."""
+    def test_ollama_options_from_extra_body(self):
+        """Test Ollama options extracted from extra_body under ignore policy."""
+        adapter = OllamaAdapter(unknown_fields_policy="ignore")
         request = InternalRequest(
             model="test",
             conversation=ConversationContext(
@@ -170,12 +171,29 @@ class TestBuildRequestBody:
                 "unknown_param": "value",
             },
         )
-        body = provider._build_request_body(request)
+        body = adapter._build_request_body(request)
         assert body["options"]["num_ctx"] == 4096
         assert body["options"]["num_batch"] == 512
         assert body["options"]["seed"] == 42
-        # With default 'ignore' policy, unknown params are stripped
+        # With explicit 'ignore' policy, unknown params are stripped
         assert "unknown_param" not in body
+
+    def test_native_think_survives_ignore_and_error_policies(self):
+        """Raw ``think`` in extra survives strict policies and overrides derived think."""
+        for policy in ("ignore", "error"):
+            adapter = OllamaAdapter(unknown_fields_policy=policy)
+            request = InternalRequest(
+                model="test",
+                conversation=ConversationContext(
+                    messages=[Message(role="user", content=[TextBlock(text="hi")])]
+                ),
+                params=GenerationParams(
+                    thinking=ThinkingConfig(type="enabled", budget_tokens=2000)
+                ),
+                extra={"think": "high"},
+            )
+            body = adapter._build_request_body(request)
+            assert body["think"] == "high"
 
     def test_ollama_options_from_extra_body_passthrough(self, provider):
         """Test Ollama options with passthrough policy."""

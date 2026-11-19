@@ -349,23 +349,11 @@ class TestThinkingConfig:
         tc = body["generationConfig"]["thinkingConfig"]
         assert tc["thinkingLevel"] == "HIGH"
 
-    def test_gemini_3_disabled_thinking_uses_lowest_level(self, builder):
-        """A disabled request asks for the lowest level the model accepts.
-
-        Gemini 3 has no "off": the API documents ``minimal`` as "little to no
-        thinking" where it is supported (3.x Flash / Flash-Lite) and as an error
-        on 3.8 Flash, 3.1 Flash-Lite Image and Gemini 4, whose floor is ``LOW``.
-        Every other family gets ``LOW``, which is the closest it can get.
-        """
+    def test_gemini_3_disabled_thinking_emits_minimal_verbatim(self, builder):
+        """Disabled requests emit ``thinkingLevel: MINIMAL`` without model allowlists."""
         from llm_proxy.serialization.context import BuildContext
 
-        cases = {
-            "gemini-3.6-flash": "MINIMAL",
-            "gemini-3.8-flash": "LOW",
-            "gemini-4-argon": "LOW",
-            "gemini-3.0-pro": "LOW",
-        }
-        for model, expected in cases.items():
+        for model in ("gemini-3.6-flash", "gemini-3.8-flash", "gemini-4-argon", "gemini-3.0-pro"):
             request = InternalRequest(
                 model=model,
                 conversation=ConversationContext(
@@ -377,7 +365,36 @@ class TestThinkingConfig:
                 request, BuildContext.from_request(request, base_url="https://test.example.com")
             )
             generation_config = body.get("generationConfig") or {}
-            assert generation_config["thinkingConfig"]["thinkingLevel"] == expected, model
+            assert generation_config["thinkingConfig"] == {"thinkingLevel": "MINIMAL"}, model
+
+    def test_gemini_25_pro_disabled_and_flash_high_effort_budget(self, builder):
+        """2.5 Pro emits thinkingBudget=0 verbatim; 2.5 Flash high effort stays <= 24576."""
+        from llm_proxy.models.params import OpenAISpecificParams
+        from llm_proxy.serialization.context import BuildContext
+
+        pro_req = InternalRequest(
+            model="gemini-2.5-pro",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="Quick fact")])]
+            ),
+            params=GenerationParams(thinking=ThinkingConfig(type="disabled")),
+        )
+        pro_body = builder._build_provider_request(
+            pro_req, BuildContext.from_request(pro_req, base_url="https://test.example.com")
+        )
+        assert pro_body["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
+
+        flash_req = InternalRequest(
+            model="gemini-2.5-flash",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="Solve")])]
+            ),
+            params=GenerationParams(openai=OpenAISpecificParams(reasoning_effort="high")),
+        )
+        flash_body = builder._build_provider_request(
+            flash_req, BuildContext.from_request(flash_req, base_url="https://test.example.com")
+        )
+        assert flash_body["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 8192
 
     def test_gemini_3_effort_from_openai_reasoning_effort_when_thinking_unset(self, builder):
         """Regression: effort sources other than ``thinking`` must still reach Gemini.

@@ -48,11 +48,13 @@ OLLAMA_NATIVE_OPTIONS: frozenset[str] = frozenset(
 
 #: Ollama native top-level request parameters (not options.*) that clients
 #: may pass via extra. They are exempt from the unknown-fields policy so they
-#: survive to the body. ``truncate``/``shift`` control context-overflow
-#: behavior (Ollama >= 0.8); ``keep_alive`` controls model unload timing.
+#: survive to the body. ``think`` controls Ollama reasoning output directly;
+#: ``truncate``/``shift`` control context-overflow behavior (Ollama >= 0.8);
+#: ``keep_alive`` controls model unload timing.
 OLLAMA_NATIVE_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
     {
         "keep_alive",
+        "think",
         "truncate",
         "shift",
     }

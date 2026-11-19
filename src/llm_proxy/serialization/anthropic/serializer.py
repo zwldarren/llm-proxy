@@ -8,8 +8,7 @@ from typing import Any
 
 import orjson
 
-from llm_proxy.core.exceptions import ValidationError
-from llm_proxy.core.thinking import convert_to_anthropic
+from llm_proxy.core.thinking import convert_to_anthropic, resolve_thinking
 from llm_proxy.core.utils import generate_response_id
 from llm_proxy.models import (
     AudioBlock,
@@ -169,13 +168,7 @@ def _normalize_input_schema(parameters: dict[str, Any] | None) -> dict[str, Any]
 
 
 def _set_temperature_and_top_p(body: dict[str, Any], params: Any) -> None:
-    """Emit ``temperature``/``top_p`` into the body when set.
-
-    Claude models reject both while thinking is enabled, so for Claude models
-    they are only emitted for non-thinking requests (and restored when a
-    forced tool_choice disables thinking). Non-Claude models behind a custom
-    base_url accept them alongside thinking and always get them.
-    """
+    """Emit ``temperature``/``top_p`` into the body when set."""
     if params.temperature is not None:
         body["temperature"] = params.temperature
     if params.top_p is not None:
@@ -525,44 +518,9 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
         if context.stream:
             body["stream"] = True
 
-        # Resolve thinking first: Claude models reject temperature/top_p and
-        # forced tool_choice while thinking is enabled, so the decision must
-        # be made before those fields are emitted. The Anthropic provider may
-        # also target non-Claude models through a custom base_url (Kimi,
-        # DeepSeek, OpenRouter's Anthropic-compatible endpoint, ...), which
-        # accept these parameters alongside thinking — the Claude-specific
-        # constraints only apply to Claude models.
-        thinking_result = convert_to_anthropic(request.params.thinking)
-        thinking_enabled = bool(
-            thinking_result
-            and thinking_result.get("thinking", {}).get("type") in ("enabled", "adaptive")
-        )
-        is_claude_model = "claude" in (context.model or request.model or "").lower()
+        thinking_result = convert_to_anthropic(resolve_thinking(request))
 
-        # Anthropic's API enforces ``thinking.budget_tokens >= 1024`` and
-        # ``budget_tokens < max_tokens``. Enforced here (provider-side, not in
-        # the client-facing parser) and only for Claude models: third-party
-        # Anthropic-compatible upstreams (DeepSeek, GLM, Kimi Code, ...) may
-        # not impose the floor, and rejecting proxy-side would break requests
-        # they previously accepted.
-        if is_claude_model and thinking_enabled:
-            thinking_body = thinking_result.get("thinking") if thinking_result else None
-            budget_tokens = (
-                thinking_body.get("budget_tokens") if isinstance(thinking_body, dict) else None
-            )
-            max_tokens = 16384 if request.params.max_tokens is None else request.params.max_tokens
-            if budget_tokens is not None and (budget_tokens < 1024 or budget_tokens >= max_tokens):
-                raise ValidationError(
-                    message=(
-                        f"thinking.budget_tokens ({budget_tokens}) must be >= 1024 and "
-                        f"less than max_tokens ({max_tokens})"
-                    ),
-                    code="invalid_parameter",
-                    status_code=400,
-                )
-
-        if not thinking_enabled or not is_claude_model:
-            _set_temperature_and_top_p(body, request.params)
+        _set_temperature_and_top_p(body, request.params)
         if request.params.stop is not None:
             stop = request.params.stop
             body["stop_sequences"] = [stop] if isinstance(stop, str) else stop
@@ -647,7 +605,11 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                 body["inference_geo"] = anthropic_params.inference_geo
 
             if anthropic_params.output_config is not None:
-                body["output_config"] = anthropic_params.output_config
+                existing_oc = body.get("output_config")
+                if isinstance(existing_oc, dict):
+                    body["output_config"] = {**existing_oc, **anthropic_params.output_config}
+                else:
+                    body["output_config"] = dict(anthropic_params.output_config)
 
             if anthropic_params.service_tier is not None:
                 body["service_tier"] = _ANTHROPIC_REQUEST_SERVICE_TIER.get(
@@ -656,25 +618,6 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
 
             if anthropic_params.context_management is not None:
                 body["context_management"] = anthropic_params.context_management
-
-        # Claude models reject a forced tool_choice (``any``/``tool``) while
-        # thinking is enabled. Preserve the caller's explicit tool constraint
-        # and disable thinking for this request instead of failing — mirrors
-        # cc-switch's forced-tool_choice handling. output_config (effort) is
-        # invalid once thinking is disabled, so it is dropped too, and
-        # temperature/top_p (rejected while thinking was on) are restored.
-        # Non-Claude models accept forced tool_choice alongside thinking, so
-        # the fallback is skipped for them.
-        tool_choice = body.get("tool_choice")
-        if (
-            thinking_enabled
-            and is_claude_model
-            and isinstance(tool_choice, dict)
-            and tool_choice.get("type") in ("any", "tool")
-        ):
-            body["thinking"] = {"type": "disabled"}
-            body.pop("output_config", None)
-            _set_temperature_and_top_p(body, request.params)
 
         # Merge metadata into Anthropic ``metadata``.
         metadata: dict[str, Any] = {}

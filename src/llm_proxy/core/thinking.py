@@ -35,13 +35,24 @@ OpenAI-compatible providers (openai, deepseek, openrouter, etc.):
   and OpenAICompatibleBase in providers/openai_compatible/_base.py.
 """
 
-import logging
-from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any
 
 from llm_proxy.models.types import ThinkingConfig
 
-logger = logging.getLogger(__name__)
+#: Keys inside ``thinking`` dicts that map onto named ``ThinkingConfig`` fields;
+#: any remaining non-None keys (e.g. GLM's ``clear_thinking``) ride ``extra``.
+_KNOWN_THINKING_KEYS: frozenset[str] = frozenset(
+    {
+        "type",
+        "budget_tokens",
+        "token_budget",
+        "display",
+        "effort",
+        "reasoning_effort",
+    }
+)
+
+_SUPPRESSED_DISPLAY_VALUES: frozenset[str] = frozenset({"none", "off", "hidden", "omitted"})
 
 PROVIDER_REASONING_FORMAT: frozendict[str, frozendict[str, Any]] = frozendict(
     {
@@ -75,13 +86,17 @@ PROVIDER_REASONING_FORMAT: frozendict[str, frozendict[str, Any]] = frozendict(
 
 
 def normalize_thinking(data: dict[str, Any]) -> ThinkingConfig | None:
-    """Normalize various thinking parameter formats into ThinkingConfig.
+    """Normalize protocol-specific thinking parameters into ThinkingConfig.
 
     Handles:
-    - OpenAI ``reasoning_effort`` (string)
-    - OpenAI ``thinking`` dict (with type and budget_tokens)
-    - Anthropic ``thinking`` dict (with type and budget_tokens)
-    - OpenResponses ``reasoning`` dict (with effort field)
+    - Anthropic / Cohere / GLM ``thinking`` dict or boolean
+    - OpenAI ``reasoning_effort`` string
+    - OpenResponses / OpenRouter ``reasoning`` dict
+    - Anthropic ``output_config.effort``
+
+    When multiple fields are present, explicit ``thinking`` wins so a provider-
+    native disable switch (``thinking: {"type": "disabled"}``) or extension key
+    (e.g. GLM ``clear_thinking``) is never overwritten by a sibling effort key.
 
     Args:
         data: Raw request data dict that may contain thinking parameters.
@@ -89,80 +104,118 @@ def normalize_thinking(data: dict[str, Any]) -> ThinkingConfig | None:
     Returns:
         ThinkingConfig if any thinking parameter is found, else None.
     """
-    # Check for OpenAI reasoning_effort
-    reasoning_effort = data.get("reasoning_effort")
-    if reasoning_effort is not None:
-        return thinking_config_from_reasoning_effort(str(reasoning_effort))
-
-    # Check for thinking dict (OpenAI or Anthropic style)
     thinking = data.get("thinking")
     if thinking is True:
         return ThinkingConfig(type="enabled")
     if thinking is False:
         return ThinkingConfig(type="disabled")
     if isinstance(thinking, dict):
-        thinking_type = thinking.get("type", "enabled")
-        if thinking_type not in ("enabled", "disabled", "adaptive", "between_tools"):
-            thinking_type = "enabled"
-        effort = thinking.get("effort")
-        if effort is None and thinking_type == "adaptive":
-            oc = data.get("output_config")
-            if isinstance(oc, dict):
-                oc_effort = oc.get("effort")
-                if oc_effort is not None:
-                    effort = str(oc_effort)
+        raw_type = thinking.get("type")
+        thinking_type = str(raw_type) if raw_type is not None else "enabled"
+
+        budget_tokens = thinking.get("budget_tokens")
+        if budget_tokens is None:
+            budget_tokens = thinking.get("token_budget")
+
+        raw_effort = thinking.get("effort")
+        if raw_effort is None:
+            raw_effort = thinking.get("reasoning_effort")
+        effort = str(raw_effort).lower() if raw_effort is not None else None
+
+        if effort is None and thinking_type != "disabled":
+            top_effort = data.get("reasoning_effort")
+            if top_effort is not None:
+                effort = str(top_effort).lower()
+            else:
+                oc = data.get("output_config")
+                if isinstance(oc, dict):
+                    oc_effort = oc.get("effort")
+                    if oc_effort is not None:
+                        effort = str(oc_effort).lower()
+
+        extra_fields = {
+            k: v for k, v in thinking.items() if k not in _KNOWN_THINKING_KEYS and v is not None
+        }
         return ThinkingConfig(
             type=thinking_type,
-            budget_tokens=thinking.get("budget_tokens"),
+            budget_tokens=budget_tokens,
             display=thinking.get("display"),
             effort=effort,
+            extra=extra_fields or None,
         )
 
-    # Check for OpenResponses reasoning object
+    reasoning_effort = data.get("reasoning_effort")
+    if reasoning_effort is not None:
+        return thinking_config_from_reasoning_effort(str(reasoning_effort))
+
     reasoning = data.get("reasoning")
     if isinstance(reasoning, dict):
-        effort = reasoning.get("effort")
-        if effort is not None:
-            return thinking_config_from_reasoning_effort(str(effort))
+        thinking_type: str | None = None
+        effort: str | None = None
+        budget_tokens: int | None = None
+        display: str | None = None
 
-    # Check for Anthropic output_config.effort
+        raw_enabled = reasoning.get("enabled")
+        raw_effort = reasoning.get("effort")
+        raw_max_tokens = reasoning.get("max_tokens")
+        raw_exclude = reasoning.get("exclude")
+        raw_summary = reasoning.get("summary")
+
+        if raw_enabled is False:
+            thinking_type = "disabled"
+        else:
+            if raw_effort is not None:
+                effort_lower = str(raw_effort).lower()
+                if effort_lower == "none":
+                    thinking_type = "disabled"
+                else:
+                    thinking_type = "adaptive"
+                    effort = effort_lower
+            if isinstance(raw_max_tokens, int) and not isinstance(raw_max_tokens, bool):
+                budget_tokens = raw_max_tokens
+                if thinking_type is None:
+                    thinking_type = "enabled"
+            if raw_enabled is True and thinking_type is None:
+                thinking_type = "enabled"
+
+        if raw_exclude is True:
+            display = "omitted"
+        elif isinstance(raw_summary, str) and raw_summary:
+            display = raw_summary
+
+        if any(v is not None for v in (thinking_type, budget_tokens, effort, display)):
+            return ThinkingConfig(
+                type=thinking_type,
+                budget_tokens=budget_tokens,
+                effort=effort,
+                display=display,
+            )
+
     output_config = data.get("output_config")
     if isinstance(output_config, dict):
         effort = output_config.get("effort")
         if effort is not None:
-            return thinking_config_from_reasoning_effort(str(effort))
+            # Bare effort without a ``thinking`` block leaves ``type=None`` so
+            # Anthropic rebuilds do not invent a ``thinking`` key the client omitted.
+            return ThinkingConfig(type=None, effort=str(effort).lower())
 
     return None
 
 
 def thinking_config_from_reasoning_effort(effort: str) -> ThinkingConfig:
-    """Convert OpenAI reasoning_effort string to ThinkingConfig.
-
-    Mapping:
-    - ``none`` → disabled
-    - ``minimal`` / ``low`` → enabled, low budget
-    - ``medium`` → enabled, medium budget
-    - ``high`` / ``xhigh`` → enabled, high budget
-    """
+    """Convert an effort string into ThinkingConfig without fabricating budgets."""
     effort_lower = effort.lower()
     if effort_lower == "none":
         return ThinkingConfig(type="disabled")
-    if effort_lower in ("minimal", "low"):
-        return ThinkingConfig(type="enabled", budget_tokens=4000, effort=effort_lower)
-    if effort_lower == "medium":
-        return ThinkingConfig(type="enabled", budget_tokens=16000, effort=effort_lower)
-    if effort_lower in ("high", "xhigh"):
-        return ThinkingConfig(type="enabled", budget_tokens=32000, effort=effort_lower)
-    if effort_lower == "max":
-        return ThinkingConfig(type="enabled", effort=effort_lower)
-    # Unknown effort - default to enabled with medium budget
-    return ThinkingConfig(type="enabled", budget_tokens=16000, effort=effort_lower)
+    return ThinkingConfig(type="adaptive", effort=effort_lower)
 
 
 def thinking_config_to_reasoning_effort(config: ThinkingConfig) -> str | None:
     """Convert ThinkingConfig to OpenAI reasoning_effort string.
 
-    Returns the effort field if set, otherwise derives from type/budget_tokens.
+    Returns explicit ``effort``, ``"none"`` for ``disabled``, or bucketed effort
+    only when ``budget_tokens`` is set. Bare ``type="enabled"`` returns ``None``
+    rather than synthesizing a default effort.
     """
     if config.effort is not None:
         return config.effort
@@ -174,34 +227,22 @@ def thinking_config_to_reasoning_effort(config: ThinkingConfig) -> str | None:
         if config.budget_tokens > 24000:
             return "high"
         return "medium"
-    # Default to medium when enabled but no budget specified
-    if config.type == "enabled":
-        return "medium"
     return None
 
 
 def resolve_thinking(request: Any) -> ThinkingConfig | None:
     """Resolve the canonical ThinkingConfig that provider builders should use.
 
-    This is the **single source of truth** for the thinking/reasoning effort
-    surfaced to non-Anthropic providers (OpenAI Chat, OpenAI Responses, Ollama,
-    Gemini). Anthropic is handled separately by its provider serializer because
-    it has a native ``output_config`` field — see the note below.
+    This is the **single source of truth** for thinking parameters across
+    all provider serializers.
 
     Precedence (highest first):
-    1. ``request.params.thinking`` — set by every protocol parser via
-       :func:`normalize_thinking`, which already funnels ``reasoning_effort``,
-       the ``thinking`` dict, ``reasoning.effort`` and ``output_config.effort``
-       into it. In normal proxy flow this is always set when any effort source is
-       present, so the fallbacks below only matter for directly-constructed
-       ``InternalRequest`` objects that bypass the parsers.
-    2. ``request.params.anthropic.output_config.effort`` — Anthropic effort.
-    3. ``request.params.openai.reasoning_effort`` — OpenAI effort.
-
-    Centralizing this here means provider builders never re-derive effort from
-    protocol-specific fields; they call ``convert_to_*(resolve_thinking(request))``
-    and nothing else. Adding a new provider requires zero thinking-specific
-    fallback logic.
+    1. ``request.params.thinking`` — populated by every protocol parser via
+       :func:`normalize_thinking`.
+    2. ``request.params.anthropic.output_config.effort`` — direct fallback for
+       synthetically-constructed ``InternalRequest`` objects.
+    3. ``request.params.openai.reasoning_effort`` — direct fallback for
+       synthetically-constructed ``InternalRequest`` objects.
     """
     params = request.params
     if params.thinking is not None:
@@ -209,281 +250,199 @@ def resolve_thinking(request: Any) -> ThinkingConfig | None:
     if params.anthropic is not None and params.anthropic.output_config:
         effort = params.anthropic.output_config.get("effort")
         if effort is not None:
-            return thinking_config_from_reasoning_effort(str(effort))
+            return ThinkingConfig(type=None, effort=str(effort).lower())
     if params.openai is not None and params.openai.reasoning_effort is not None:
         return thinking_config_from_reasoning_effort(str(params.openai.reasoning_effort))
     return None
 
 
-_VALID_REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+def convert_to_openai(config: ThinkingConfig | None) -> dict[str, Any] | None:
+    """Convert ThinkingConfig to OpenAI Chat Completions provider format.
 
-#: How a provider's Chat Completions wire expresses "thinking off".
-#:
-#: ``effort`` — the OpenAI spelling: ``reasoning_effort: "none"``. Accepted by
-#: OpenAI and the OpenAI-compatible upstreams that document it.
-#: ``thinking`` — the Anthropic spelling: ``thinking: {"type": "disabled"}``,
-#: for upstreams that answer HTTP 400 to ``reasoning_effort: "none"``
-#: (MiniMax).
-#: ``omit`` — send nothing at all, for upstreams whose thinking cannot be
-#: turned off (MiniMax-M3.1-Flash answers HTTP 400 to ``disabled`` too).
-ThinkingDisabledWire = Literal["effort", "thinking", "omit"]
-
-
-def convert_to_openai(
-    config: ThinkingConfig | None,
-    *,
-    disabled_wire: ThinkingDisabledWire = "effort",
-) -> dict[str, Any] | None:
-    """Convert ThinkingConfig to OpenAI provider format.
-
-    Returns either ``{"reasoning_effort": ...}`` or ``{"thinking": {...}}``.
-    Prefers reasoning_effort when a valid effort value can be derived; falls
-    back to thinking dict for provider-specific budget_tokens precision.
-
-    ``disabled_wire`` selects how "thinking off" reaches an upstream that does
-    not accept the OpenAI spelling: ``"thinking"`` emits
-    ``thinking: {"type": "disabled"}``, ``"omit"`` emits nothing (the model
-    thinks regardless), and ``"effort"`` (the default) keeps
-    ``reasoning_effort: "none"``.
+    Emits ``{"reasoning_effort": ...}`` when an effort value is explicit or
+    derivable from ``disabled`` / ``budget_tokens`` (preserving ``config.extra``
+    inside ``thinking`` if both are present), or ``{"thinking": {...}}`` when
+    only non-adaptive thinking fields are present.
     """
     if config is None:
         return None
 
     effort = thinking_config_to_reasoning_effort(config)
-    if effort is not None and effort.lower() in _VALID_REASONING_EFFORTS:
-        if effort.lower() == "none":
-            if disabled_wire == "omit":
-                return None
-            if disabled_wire == "thinking":
-                return {"thinking": {"type": "disabled"}}
-        return {"reasoning_effort": effort}
+    if effort:
+        result: dict[str, Any] = {"reasoning_effort": effort}
+        if config.extra and config.type is not None:
+            result["thinking"] = {"type": config.type, **config.extra}
+        return result
 
-    if config.type == "adaptive":
+    if config.type in ("adaptive", "between_tools"):
         return None
 
-    if config.type == "between_tools":
-        # Anthropic-specific: "no up-front thinking" has no OpenAI equivalent.
-        # Sending the raw type would 400 on OpenAI-compatible upstreams; leaving
-        # the provider default in place is the least-wrong translation.
-        return None
-
-    if config.type is not None or config.budget_tokens is not None:
+    if config.type is not None or config.budget_tokens is not None or config.extra:
         thinking_dict: dict[str, Any] = {}
         if config.type is not None:
             thinking_dict["type"] = config.type
         if config.budget_tokens is not None:
             thinking_dict["budget_tokens"] = config.budget_tokens
+        if config.extra:
+            thinking_dict.update(config.extra)
         return {"thinking": thinking_dict}
 
     return None
 
 
 def convert_to_anthropic(config: ThinkingConfig | None) -> dict[str, Any] | None:
-    """Convert ThinkingConfig to Anthropic provider format.
+    """Convert ThinkingConfig to Anthropic Messages provider format.
 
-    When ``effort`` is set, outputs ``output_config`` (the preferred modern
-    Anthropic API) and ``thinking`` without ``budget_tokens`` since effort
-    already controls the budget.  When ``effort`` is absent, outputs the
-    ``thinking`` dict with ``budget_tokens``.
-
-    Effort value mapping (Anthropic supports ``low``, ``medium``,
-    ``high``, ``xhigh``, ``max``):
-    - ``minimal`` → ``low``
-    """
-    if config is None or config.type is None:
-        return None
-
-    thinking_dict: dict[str, Any] = {"type": config.type}
-    if config.budget_tokens is not None and config.effort is None:
-        thinking_dict["budget_tokens"] = config.budget_tokens
-    if config.display is not None:
-        thinking_dict["display"] = config.display
-
-    result: dict[str, Any] = {"thinking": thinking_dict}
-    if config.effort is not None:
-        effort_lower = config.effort.lower()
-        # Map OpenAI-specific effort values to Anthropic-supported values
-        mapped_effort = "low" if effort_lower == "minimal" else effort_lower
-        result["output_config"] = {"effort": mapped_effort}
-    return result
-
-
-def convert_to_gemini(
-    config: ThinkingConfig | None,
-    model: str | None = None,
-    model_family_overrides: Mapping[str, str] | None = None,
-) -> dict[str, Any] | None:
-    """Convert ThinkingConfig to Gemini provider format (Gemini 3+).
-
-    Returns ``{"thinkingConfig": {"thinkingLevel": ..., "includeThoughts": True}}``
-    suitable for merging into ``generationConfig`` for Gemini 3+ models.
-    For older Gemini models, use :func:`convert_to_gemini_legacy` instead.
-
-    ``includeThoughts`` is always set: without it the API returns no thought
-    parts at all, so a client that asked for reasoning would get none (the 2.5
-    path has always set it).
-
-    *model* decides how close to "off" a disabled request can get. Google's
-    thinking table documents ``MINIMAL`` ("little to no thinking") on the 3.x
-    Flash / Flash-Lite / robotics models — including Gemini 3.1 Flash-Lite
-    Image, where ``minimal`` is the default and ``low``/``medium`` are the
-    levels it rejects — but as an **error** on Gemini 3.8 Flash and Gemini 4
-    Argon; those families take ``LOW`` as their floor. Without a model id the
-    request is left untouched (no thinking config), which is the old behaviour.
+    Emits ``thinking`` when ``config.type`` is present (keeping ``budget_tokens``,
+    ``display``, and ``extra`` intact) and ``output_config.effort`` whenever
+    ``config.effort`` is set, without rewriting or stripping user values.
     """
     if config is None:
         return None
 
-    # Function-level import: ``core.thinking`` must not import the serializer
-    # package at module scope (``serialization.gemini`` imports this module).
-    from llm_proxy.serialization.gemini.model_family import (
-        supports_minimal_thinking_level,
-    )
+    result: dict[str, Any] = {}
+    if config.type is not None:
+        thinking_dict: dict[str, Any] = {"type": config.type}
+        if config.budget_tokens is not None:
+            thinking_dict["budget_tokens"] = config.budget_tokens
+        if config.display is not None:
+            thinking_dict["display"] = config.display
+        if config.extra:
+            thinking_dict.update(config.extra)
+        result["thinking"] = thinking_dict
 
-    minimal = supports_minimal_thinking_level(model, model_family_overrides)
+    if config.effort is not None:
+        result["output_config"] = {"effort": config.effort.lower()}
 
-    # ``between_tools`` is Anthropic's lowest thinking setting (no up-front
-    # thinking); Gemini has no between-tools mode, so express the same intent
-    # with the lowest level the target accepts — the same treatment a plain
-    # "disabled" request gets.
-    if config.type in ("disabled", "between_tools"):
-        if model is None:
-            return None
-        level = "MINIMAL" if minimal else "LOW"
-        if not minimal:
-            # Debug, not info: the answer is deterministic per model, so an
-            # info line here is one per request on the hot path.
-            logger.debug(
-                "Gemini model %r cannot disable thinking; using thinkingLevel=%s "
-                "as the lowest level it accepts",
-                model,
-                level,
-            )
-        return {"thinkingConfig": {"thinkingLevel": level, "includeThoughts": True}}
+    return result or None
 
-    level = "MEDIUM"
-    if config.budget_tokens is not None:
+
+def _include_thoughts_from_display(display: str | None) -> bool:
+    """Whether to request thought summaries based on ``ThinkingConfig.display``."""
+    return (display or "").lower() not in _SUPPRESSED_DISPLAY_VALUES
+
+
+def convert_to_gemini(config: ThinkingConfig | None) -> dict[str, Any] | None:
+    """Convert ThinkingConfig to Gemini 3+ ``thinkingConfig`` format.
+
+    Passes explicit effort levels verbatim in uppercase without model-name
+    filtering or level rewriting. Bare ``enabled``/``adaptive`` omits
+    ``thinkingLevel`` so the upstream model's default applies.
+    """
+    if config is None:
+        return None
+
+    if config.type == "disabled" or (config.effort or "").lower() == "none":
+        return {"thinkingConfig": {"thinkingLevel": "MINIMAL"}}
+
+    level: str | None = None
+    if config.effort is not None and config.effort.strip():
+        level = config.effort.strip().upper()
+    elif config.budget_tokens is not None:
         if config.budget_tokens < 8000:
             level = "LOW"
         elif config.budget_tokens > 24000:
             level = "HIGH"
-    elif config.effort is not None:
-        effort_lower = config.effort.lower()
-        if effort_lower in ("none", "minimal", "low"):
-            # ``minimal`` matches the "no thinking" setting where the model
-            # supports it; ``none`` is the closest expressible level.
-            level = "MINIMAL" if minimal and effort_lower != "low" else "LOW"
-        elif effort_lower == "medium":
+        else:
             level = "MEDIUM"
-        elif effort_lower in ("high", "xhigh", "max"):
-            level = "HIGH"
+    elif config.type == "between_tools":
+        return None
 
-    return {"thinkingConfig": {"thinkingLevel": level, "includeThoughts": True}}
+    thinking_cfg: dict[str, Any] = {
+        "includeThoughts": _include_thoughts_from_display(config.display)
+    }
+    if level is not None:
+        thinking_cfg["thinkingLevel"] = level
+    return {"thinkingConfig": thinking_cfg}
 
 
 def convert_to_gemini_interactions(config: ThinkingConfig | None) -> dict[str, Any] | None:
-    """Convert ThinkingConfig to Gemini Interactions generation_config format.
+    """Convert ThinkingConfig to Gemini Interactions ``generation_config`` format.
 
-    Returns ``{"thinking_level": "minimal" | "low" | "medium" | "high"}``
-    (lowercase enum, unlike the uppercase ``thinkingConfig.thinkingLevel`` of
-    the generateContent dialect) suitable for merging into
-    ``generation_config`` of an Interactions API request.
-
-    When ``config.display`` is set, ``thinking_summaries`` is emitted too
-    (``"auto"`` to enable summaries, ``"none"`` for explicit suppression).
-    Omitted when unset — the API default shows the final output only.
+    Emits lowercase ``thinking_level`` verbatim when effort or budget is set,
+    and ``thinking_summaries`` when ``config.display`` is present.
     """
-    if config is None or config.type == "disabled":
-        return None  # Interactions has no explicit disable; omit the field.
+    if config is None:
+        return None
 
-    level = "medium"
-    if config.type == "between_tools":
-        # Anthropic's lowest thinking setting; the Interactions dialect's floor.
-        level = "minimal"
+    if config.type == "disabled" or (config.effort or "").lower() == "none":
+        return {"thinking_level": "minimal"}
+
+    level: str | None = None
+    if config.effort is not None and config.effort.strip():
+        level = config.effort.strip().lower()
     elif config.budget_tokens is not None:
         if config.budget_tokens < 8000:
             level = "low"
         elif config.budget_tokens > 24000:
             level = "high"
-    elif config.effort is not None:
-        effort_lower = config.effort.lower()
-        if effort_lower == "none":
-            level = "minimal"
-        elif effort_lower in ("minimal", "low"):
-            level = "low"
-        elif effort_lower in ("high", "xhigh", "max"):
-            level = "high"
+        else:
+            level = "medium"
+    elif config.type == "between_tools":
+        level = None
 
-    result: dict[str, Any] = {"thinking_level": level}
+    result: dict[str, Any] = {}
+    if level is not None:
+        result["thinking_level"] = level
     if config.display is not None:
-        # thinking_summaries is a string enum ("auto" | "none"); any display
-        # request other than explicit suppression maps to "auto".
-        display = config.display.lower()
-        result["thinking_summaries"] = "none" if display in ("none", "off", "hidden") else "auto"
-    return result
+        display_lower = config.display.lower()
+        result["thinking_summaries"] = (
+            "none" if display_lower in _SUPPRESSED_DISPLAY_VALUES else "auto"
+        )
+    return result or None
 
 
 def convert_to_gemini_legacy(config: ThinkingConfig | None) -> dict[str, Any] | None:
-    """Convert ThinkingConfig to Gemini legacy provider format (pre-Gemini 3).
-
-    Returns ``{"thinkingConfig": {"thinkingBudget": n, "includeThoughts": true}}``
-    suitable for merging into ``generationConfig``.
-    """
+    """Convert ThinkingConfig to Gemini 2.5 ``thinkingBudget`` format."""
     if config is None:
         return None
 
-    if config.type == "disabled":
-        return None
+    if config.type == "disabled" or (config.effort or "").lower() == "none":
+        return {"thinkingConfig": {"thinkingBudget": 0}}
 
-    budget = 4096  # default medium
-    if config.type == "between_tools":
-        # Anthropic's lowest thinking setting; the legacy dialect's floor.
-        budget = 1024
-    elif config.budget_tokens is not None:
+    if config.budget_tokens is not None:
         budget = config.budget_tokens
     elif config.effort is not None:
         effort_lower = config.effort.lower()
-        if effort_lower in ("none", "minimal", "low"):
+        if effort_lower in ("minimal", "low"):
             budget = 1024
         elif effort_lower == "medium":
             budget = 4096
         elif effort_lower in ("high", "xhigh", "max"):
             budget = 8192
+        else:
+            budget = 4096
+    elif config.type == "between_tools":
+        budget = 1024
+    else:
+        budget = -1
 
-    return {"thinkingConfig": {"thinkingBudget": budget, "includeThoughts": True}}
+    return {
+        "thinkingConfig": {
+            "thinkingBudget": budget,
+            "includeThoughts": _include_thoughts_from_display(config.display),
+        }
+    }
 
 
 def convert_to_ollama(config: ThinkingConfig | None) -> bool | str | None:
-    """Convert ThinkingConfig to Ollama provider think parameter.
-
-    Returns ``bool`` (enable/disable) or ``"low" | "medium" | "high" | "max"``.
-    """
+    """Convert ThinkingConfig to Ollama provider ``think`` parameter."""
     if config is None:
         return None
 
     if config.type == "disabled":
         return False
-    if config.type == "between_tools":
-        # Anthropic's lowest thinking setting; Ollama's floor.
-        return "low"
 
-    # If effort is set, map directly
     if config.effort is not None:
         effort_lower = config.effort.lower()
         if effort_lower == "none":
             return False
-        if effort_lower in ("minimal", "low"):
-            return "low"
-        if effort_lower == "medium":
-            return "medium"
-        if effort_lower == "high":
-            return "high"
-        if effort_lower == "xhigh":
-            return "max"
-        if effort_lower == "max":
-            return "max"
+        if effort_lower:
+            return effort_lower
 
-    # Derive from budget_tokens
+    if config.type == "between_tools":
+        return "low"
+
     if config.budget_tokens is not None:
         if config.budget_tokens < 8000:
             return "low"
@@ -491,7 +450,6 @@ def convert_to_ollama(config: ThinkingConfig | None) -> bool | str | None:
             return "high"
         return "medium"
 
-    # Default: enabled
     return True
 
 

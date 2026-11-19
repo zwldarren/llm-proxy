@@ -372,11 +372,8 @@ def test_thinking_enabled_keeps_temperature_for_non_claude(serializer):
     assert body["top_p"] == 0.9
 
 
-def test_thinking_enabled_drops_temperature_for_claude(serializer):
-    """Claude models reject temperature/top_p while thinking is enabled.
-
-    They are silently dropped instead of surfacing a 400. Mirrors cc-switch.
-    """
+def test_thinking_enabled_keeps_temperature_for_claude(serializer):
+    """Sampling parameters pass through alongside thinking on Claude too (ADR-0063)."""
     request = InternalRequest(
         model="claude-sonnet-4-6",
         conversation=ConversationContext(
@@ -392,8 +389,8 @@ def test_thinking_enabled_drops_temperature_for_claude(serializer):
     body = serializer.build_provider_request(request)
 
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 4000}
-    assert "temperature" not in body
-    assert "top_p" not in body
+    assert body["temperature"] == 0.7
+    assert body["top_p"] == 0.9
 
 
 def test_forced_tool_choice_keeps_thinking_for_non_claude(serializer):
@@ -420,12 +417,8 @@ def test_forced_tool_choice_keeps_thinking_for_non_claude(serializer):
     assert body["temperature"] == 0.7
 
 
-def test_forced_tool_choice_disables_thinking_for_claude(serializer):
-    """Claude models reject a forced tool_choice while thinking is enabled.
-
-    The caller's explicit tool constraint wins: thinking is disabled (and
-    output_config dropped) instead of failing the request. Mirrors cc-switch.
-    """
+def test_forced_tool_choice_preserves_thinking_and_output_config_for_claude(serializer):
+    """Forced tool_choice preserves thinking, output_config, and temperature verbatim."""
     request = InternalRequest(
         model="claude-sonnet-4-6",
         conversation=ConversationContext(
@@ -434,6 +427,9 @@ def test_forced_tool_choice_disables_thinking_for_claude(serializer):
         params=GenerationParams(
             temperature=0.7,
             thinking=ThinkingConfig(type="enabled", effort="high"),
+            anthropic=AnthropicSpecificParams(
+                output_config={"format": {"type": "json_schema", "schema": {"type": "object"}}}
+            ),
         ),
         tools=[FunctionTool(name="exec", parameters={"type": "object"})],
         tool_choice=ToolChoice(mode="required"),
@@ -442,8 +438,11 @@ def test_forced_tool_choice_disables_thinking_for_claude(serializer):
     body = serializer.build_provider_request(request)
 
     assert body["tool_choice"] == {"type": "any"}
-    assert body["thinking"] == {"type": "disabled"}
-    assert "output_config" not in body
+    assert body["thinking"] == {"type": "enabled"}
+    assert body["output_config"] == {
+        "effort": "high",
+        "format": {"type": "json_schema", "schema": {"type": "object"}},
+    }
     assert body["temperature"] == 0.7
 
 
@@ -643,7 +642,7 @@ def test_build_provider_request_with_disable_parallel_tool_use(serializer):
 
 
 def test_parse_request_with_output_config(serializer):
-    """Test parsing Anthropic request with output_config.effort."""
+    """Test parsing Anthropic request with bare output_config.effort."""
     data = {
         "model": "claude-opus-4-7",
         "max_tokens": 1024,
@@ -655,10 +654,31 @@ def test_parse_request_with_output_config(serializer):
 
     assert request.model == "claude-opus-4-7"
     assert request.params.thinking is not None
-    assert request.params.thinking.type == "enabled"
+    assert request.params.thinking.type is None
     assert request.params.thinking.effort == "medium"
     assert request.params.anthropic is not None
     assert request.params.anthropic.output_config == {"effort": "medium"}
+
+
+def test_openai_reasoning_effort_maps_to_adaptive_for_anthropic(serializer):
+    """Cross-protocol OpenAI reasoning_effort emits adaptive + output_config.effort."""
+    from llm_proxy.models.params import OpenAISpecificParams
+
+    request = InternalRequest(
+        model="claude-opus-4-7",
+        conversation=ConversationContext(
+            messages=[Message(role="user", content=[TextBlock(text="Hello")])]
+        ),
+        params=GenerationParams(
+            max_tokens=1024,
+            openai=OpenAISpecificParams(reasoning_effort="high"),
+        ),
+    )
+
+    body = serializer.build_provider_request(request)
+
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"] == {"effort": "high"}
 
 
 def test_build_provider_request_with_output_config_effort(serializer):
@@ -704,7 +724,7 @@ def test_build_provider_request_with_output_config_max(serializer):
 
 
 def test_round_trip_output_config(serializer):
-    """Test round-trip of output_config.effort through parse and build."""
+    """Test round-trip of bare output_config.effort without fabricating thinking."""
     data = {
         "model": "claude-opus-4-7",
         "max_tokens": 1024,
@@ -716,7 +736,7 @@ def test_round_trip_output_config(serializer):
     body = serializer.build_provider_request(request)
 
     assert body["output_config"] == {"effort": "xhigh"}
-    assert body["thinking"] == {"type": "enabled"}
+    assert "thinking" not in body
 
 
 def test_output_config_preserved_with_extra_fields(serializer):

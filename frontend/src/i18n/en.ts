@@ -1114,7 +1114,7 @@ export default {
     description: "Configure how the proxy handles unknown fields and unsupported content blocks.",
     unknownFieldsPolicy: "Unknown Fields Policy",
     unknownFieldsPolicyDescription:
-      "Controls what happens when a request contains extra parameters (e.g. custom fields in the JSON body) that the target provider does not recognize. 'Provider default' leaves the choice to each provider (most ignore unknown fields; vLLM/SGLang pass them through so engine-specific options survive), 'Ignore' silently strips them, 'Passthrough' forwards them as-is, and 'Error' rejects the request. This applies to top-level request fields like metadata, custom parameters, or vendor-specific options — not to content blocks inside messages.",
+      "Controls what happens when a request contains extra parameters (e.g. custom fields in the JSON body) that the target provider does not recognize. 'Provider default' leaves the choice to each provider (currently passthrough for chat, ignore for non-chat endpoints), 'Ignore' silently strips them, 'Passthrough' forwards them as-is, and 'Error' rejects the request. This applies to top-level request fields like metadata, custom parameters, or vendor-specific options — not to content blocks inside messages.",
     unknownFieldsPolicyDefault: "Provider default",
     unknownFieldsPolicyPassthrough: "Passthrough (keep fields)",
     unknownFieldsPolicyIgnore: "Ignore (strip fields)",

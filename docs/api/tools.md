@@ -34,12 +34,15 @@ Thinking controls are accepted in every dialect and normalized:
 
 Provider-specific details:
 
-- For Claude targets, `budget_tokens` must be ≥ 1024 and < `max_tokens` (400
-  `invalid_parameter` otherwise), and `temperature`/`top_p` are omitted while thinking
-  is enabled — a forced `tool_choice` (`any`/`tool`) disables thinking and restores
-  them.
-- Outbound, the proxy emits `reasoning_effort` when derivable, otherwise a `thinking`
-  object.
+- Cross-protocol `reasoning_effort` translates to `thinking: {"type": "adaptive"}` plus
+  `output_config.effort` on Anthropic targets (and `thinking: {"type": "disabled"}` for
+  `none`), without proxy-side `budget_tokens` validation, `temperature`/`top_p`
+  suppression, or forced `tool_choice` rewriting; upstream rejects invalid combinations
+  for a given model.
+- Outbound on OpenAI Chat, explicit effort or `disabled`/`budget_tokens` emits
+  `reasoning_effort` (alongside any provider-specific `thinking` keys such as
+  `clear_thinking`); OpenRouter and NanoGPT fold it into a `reasoning` object, and bare
+  `thinking` configurations pass as `thinking`.
 
 How reasoning comes back:
 

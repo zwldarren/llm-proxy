@@ -137,6 +137,26 @@ class TestChatRequest:
 
         assert body["thinking"] == {"type": "disabled"}
 
+    def test_thinking_resolves_openai_reasoning_effort_fallback_without_synthetic_budget(self):
+        from llm_proxy.models.params import OpenAISpecificParams
+
+        body = _build(
+            _chat_request(
+                params=GenerationParams(openai=OpenAISpecificParams(reasoning_effort="xhigh"))
+            )
+        )
+
+        assert body["thinking"] == {"type": "enabled"}
+
+    def test_minimal_effort_maps_to_enabled_not_disabled(self):
+        body = _build(
+            _chat_request(
+                params=GenerationParams(thinking=ThinkingConfig(type="adaptive", effort="minimal"))
+            )
+        )
+
+        assert body["thinking"] == {"type": "enabled"}
+
     def test_tools_are_rendered_as_function_entries(self):
         tool = FunctionTool(
             name="get_weather",

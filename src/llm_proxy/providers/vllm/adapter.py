@@ -96,8 +96,8 @@ class VLLMAdapter(NativePassthroughChatBase):
 
     #: vLLM accepts-and-ignores unknown fields, so engine-specific sampling
     #: extensions (``top_k``/``min_p``/``guided_json``/``chat_template_kwargs``/…)
-    #: must reach it unchanged. Applies only while the operator has not set a
-    #: global ``unknown_fields_policy`` — an explicit global value always wins.
+    #: must reach it unchanged. Keeps ``passthrough`` explicit alongside the
+    #: base default; an explicit global ``unknown_fields_policy`` still wins.
     DEFAULT_UNKNOWN_FIELDS_POLICY = "passthrough"
 
 

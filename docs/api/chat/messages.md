@@ -63,9 +63,9 @@ print(message.content[0].text)
 | `messages` | `user` / `assistant`; `tool` and `function` roles are degraded to `tool_result` user turns; `developer` messages merge into `system` |
 | `system` | String, or a block list. With a block list, non-text blocks are dropped unless a text block carries `cache_control`/`citations` — then the list is forwarded verbatim |
 | `stop_sequences` | Forwarded as-is |
-| `temperature`, `top_p`, `top_k` | Omitted for Claude targets while thinking is enabled; restored when a forced `tool_choice` (`any`/`tool`) disables thinking |
+| `temperature`, `top_p`, `top_k` | Forwarded as-is |
 | `tools`, `tool_choice` | `tool_choice.type`: `auto` / `any` / `tool` / `none`; `disable_parallel_tool_use` accepted at top level, inside `tool_choice`, or via OpenAI's `parallel_tool_calls: false` — always emitted where the API defines it, inside `tool_choice` |
-| `thinking` | `{"type":"enabled","budget_tokens":N}` or an effort form. For Claude targets, `budget_tokens` must be ≥ 1024 and < `max_tokens`, otherwise 400 `invalid_parameter` |
+| `thinking` | `{"type":"enabled","budget_tokens":N}`, `{"type":"adaptive"}`, or an effort form. Forwarded without proxy-side budget validation; upstream rejects invalid combinations for a given model |
 | `cache_control` | Top level and per content block (`{"type":"ephemeral","ttl":…}`); accepted on text, image, audio, file/document, tool_use, server_tool_use, tool_result, and other block types |
 | `metadata` | Forwarded; `user_id` is also filled from OpenAI-style metadata or `user` |
 | `container`, `inference_geo`, `service_tier`, `output_config` | Forwarded; legacy `output_format` is aliased into `output_config.format`. `service_tier` accepts Anthropic's `auto`/`standard_only` and the `standard`/`priority` names an Anthropic-compatible upstream (MiniMax) documents; the latter are translated to the closest Anthropic tier when the upstream is Anthropic itself |

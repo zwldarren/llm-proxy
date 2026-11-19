@@ -9,6 +9,7 @@ protocols are declared.
 """
 
 from llm_proxy.core.adapter import register_adapter
+from llm_proxy.core.request_type import RequestType
 from llm_proxy.providers.openai_compatible._base import OpenAICompatibleBase
 
 
@@ -25,6 +26,12 @@ class MistralAdapter(OpenAICompatibleBase):
     LOBE_ICON_VARIANT = "color"
 
     DEFAULT_BASE_URL = "https://api.mistral.ai/v1"
+
+    #: Documented Mistral chat switch (``"reasoning"`` etc.), exempt from
+    #: ``unknown_fields_policy`` stripping/rejection when narrowed by config.
+    EXEMPT_EXTRA_KEYS = {
+        RequestType.CHAT: frozenset({"prompt_mode"}),
+    }
 
 
 __all__ = ["MistralAdapter"]

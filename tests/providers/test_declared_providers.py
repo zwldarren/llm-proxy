@@ -625,3 +625,20 @@ class TestNativeVetoFallsBackToTranslation:
         assert "future_field" not in call.kwargs["json"]
         assert "_raw_response_body" not in result.provider_info
         assert len(result.output) == 1
+
+
+def test_mistral_prompt_mode_exempt_under_strict_policies():
+    from llm_proxy.models import ConversationContext, Message, TextBlock
+
+    for policy in (None, "ignore", "error"):
+        kwargs = {"unknown_fields_policy": policy} if policy else {}
+        adapter = MistralAdapter(api_key="k", **kwargs)
+        req = InternalRequest(
+            model="mistral-large-latest",
+            conversation=ConversationContext(
+                messages=[Message(role="user", content=[TextBlock(text="hi")])]
+            ),
+            extra={"prompt_mode": "reasoning"},
+        )
+        body = adapter._build_request_body(req)
+        assert body["prompt_mode"] == "reasoning"

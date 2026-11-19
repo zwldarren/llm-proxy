@@ -15,7 +15,7 @@ def _req() -> InternalRequest:
 
 def test_context_defaults():
     ctx = BuildContext.from_request(_req())
-    assert ctx.unknown_fields_policy == "ignore"
+    assert ctx.unknown_fields_policy == "passthrough"
     assert ctx.unsupported_block_policy == "drop"
 
 

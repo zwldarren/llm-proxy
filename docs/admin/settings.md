@@ -81,14 +81,15 @@ outbound check with `UPDATE_CHECK__ENABLED=false`.
 ### Request Policy
 
 How the proxy treats fields and content blocks it does not understand. The setting is
-global, but **Provider default** leaves the decision to each provider's adapter (most
-drop unknown fields; vLLM/SGLang pass them through so engine-specific options such as
-`top_k`/`guided_json`/`chat_template_kwargs` survive). A concrete value overrides every
-provider's own default.
+global, but **Provider default** leaves the decision to each provider's adapter
+(currently `passthrough` for chat requests so provider-specific extensions such as Qwen
+`enable_thinking`, Ollama `think`, or vLLM/SGLang options like
+`top_k`/`guided_json`/`chat_template_kwargs` survive, and `ignore` for non-chat
+multi-provider union endpoints). A concrete value overrides every provider's own default.
 
 | Field | Options | Default |
 | --- | --- | --- |
-| **Unknown fields policy** | `provider default` · `ignore` · `passthrough` · `error` | **Provider default** — per adapter (usually `ignore`) |
+| **Unknown fields policy** | `provider default` · `ignore` · `passthrough` · `error` | **Provider default** — per adapter (`passthrough` for chat; `ignore` for non-chat) |
 | **Unsupported block policy** | `provider default` · `drop` · `degrade` · `error` | **Provider default** — per adapter (currently `drop`) |
 
 Unknown-fields policy applies to **top-level** request fields the internal model does

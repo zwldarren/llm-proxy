@@ -260,8 +260,8 @@ class ServerParams(BaseModel):
             "'ignore' (strip fields silently), "
             "'passthrough' (keep unknown fields in body), "
             "'error' (reject request with validation error). "
-            "When unset, each provider's own default applies (e.g. vLLM/SGLang "
-            "default to 'passthrough'). "
+            "When unset, each provider's own default applies ('passthrough' "
+            "for chat requests, 'ignore' for non-chat union endpoints). "
             "Note: native passthrough requests (client protocol identical to the "
             "upstream's wire format) are forwarded verbatim and bypass this policy."
         ),

@@ -17,7 +17,7 @@
 | **Base URL** | 按类型预填。`openai-compatible` **必填**。末尾的斜杠会被去掉 |
 | **图标 URL** | 可选，显示在控制台提供商旁边的 logo；必须是公网 URL（`https:`/`http:`），私有地址和回环地址会被 SSRF 防护拒绝 |
 | **Gemini Interactions** | 仅 `gemini` 类型：改用 Google 较新的 Interactions API，而不是 `generateContent`（`metadata.api_variant`）。提供商列表中会显示 **Interactions** 徽标 |
-| **Gemini 模型系列覆盖** | 仅 `gemini` 类型，只能通过 API/数据库设置（`metadata.model_family_overrides`）：把精确的模型 id 映射到某个 Gemini 系列版本（例如 `{"gemini-flash-latest": "4.0"}`），作用于 generateContent 方言。当模型 id 里不含 `gemini-X.Y` 片段时（Google 的别名、聚合站的昵称）用它——否则代理会为该 id 回退到旧版安全的请求形态，并记录一次警告；设置之后，就按所钉系列的形态处理（思考等级与预算、JSON-Schema 字段、思考签名、采样参数丢弃）。取值必须是 `"4.0"`/`"3.8"` 这样的版本号；无效条目会被丢弃并给出警告。Interactions 方言没有系列门控，在那里钉版本不起作用 |
+| **Gemini 模型系列覆盖** | 仅 `gemini` 类型，只能通过 API/数据库设置（`metadata.model_family_overrides`）：把精确的模型 id 映射到某个 Gemini 系列版本（例如 `{"gemini-flash-latest": "4.0"}`），作用于 generateContent 方言。当模型 id 里不含 `gemini-X.Y` 片段时（Google 的别名、聚合站的昵称）用它——否则代理会默认按 `thinkingLevel` 发送思考参数，同时在 schema、签名与采样参数上回退到旧版安全形态（记录一次警告）；设置之后，就按所钉系列的形态处理（思考等级与预算、JSON-Schema 字段、思考签名、采样参数丢弃）。取值必须是 `"4.0"`/`"3.8"` 这样的版本号；无效条目会被丢弃并给出警告。Interactions 方言没有系列门控，在那里钉版本不起作用 |
 | **API 版本** | 不在控制台对话框中，只能通过 API/数据库设置。仅为向前兼容而存储——目前没有适配器应用它 |
 | **超时** | 不在控制台对话框中，只能通过 API/数据库设置。会存储但不生效——上游调用固定使用 600 秒读超时（10 秒连接超时） |
 | **自定义请求头** | 额外发送给上游的请求头（例如租户或组织标识头）。同名请求头以这里的值为准，优先于其他任何来源 |
@@ -247,15 +247,10 @@ Anthropic 兼容的 Messages 端点（`https://api.minimax.io/anthropic/v1/messa
 OpenAI Responses 端点（`https://api.minimax.io/v1/responses`）。两个原生端点原样转发，
 因此客户端自己的字段能保留下来。
 
-- 思考词汇会被翻译。 MiniMax 不说 Anthropic 那套：`thinking.type` 是 `disabled`
-  或 `adaptive`（没有 `budget_tokens`），深度走 `reasoning_effort`（Chat）或
-  `output_config.effort`（Messages），并且 `none` / `minimal` 不是它接受的写法——它会
-  返回 HTTP 400。因此代理在每一层都重写这套词汇：Anthropic 客户端的
-  `thinking: {"type": "enabled", "budget_tokens": 16000}` 会变成
-  `{"type": "adaptive"}`，`minimal` 的力度变成 `low`，「不推理」会变成
-  `thinking: {"type": "disabled"}` 而不是 `reasoning_effort: "none"`。
-  `MiniMax-M3.1-Flash` 总是思考，连 `disabled` 也拒绝，所以在该模型上这个字段会被
-  直接丢弃。
+- 思考参数原样传递。走原生 Messages 和 Responses 透传时，`thinking`、`output_config`、
+  `reasoning_effort` 和 `reasoning` 会按客户端原貌发往 MiniMax，代理不再做改写或
+  剥离 `budget_tokens`（`MiniMax-M3.1-Flash` 拒绝关闭思考时由上游直接返回错误）。
+  在 Chat Completions 路径上，翻译后的思考字段与 `reasoning_split` 都会转发。
 - `reasoning_split` 是 MiniMax 自己的输出开关：关掉它时，思考内容仍留在 `content`
   里、用 ` thinking` 标签包裹，而不移到 `reasoning_content`。它会随聊天请求转发。
 - 视频输入。 M 系列模型能读图像和视频。OpenAI 聊天请求用 `video_url`；
@@ -302,7 +297,9 @@ OpenAI 字段。
   `tools` 同时使用——二者只能取其一。
 - 思考。 统一的 `thinking` 配置变成 v2 的
   `{"type": "enabled"|"disabled", "token_budget": N}`。对支持推理的模型，推理默认
-  开启；`disabled`（或力度为 `none`/`minimal`）会发送关闭的写法，而不是省略字段。
+  开启；`disabled`（或力度为 `none`）会发送关闭的写法，而不是省略字段；仅传 effort
+  时不会凭空生成 `token_budget`，只有显式给出 `budget_tokens` / `token_budget` 时才
+  写入它。
 - 工具。 工具是 JSON-Schema 函数条目（`parameters` 必填，所以没有 schema 的工具
   会得到 `{}`），自由形式工具会桥接成单 `content` 函数。`tool_choice` 收缩到 v2 的
   `REQUIRED`/`NONE` 二选一：v2 没有「调用*这个*工具」的模式，所以具名选择会变成

@@ -15,7 +15,7 @@ from typing import Any
 import orjson
 
 from llm_proxy.core.reasoning_cache import try_cache_reasoning_from_responses_output
-from llm_proxy.core.thinking import thinking_config_from_reasoning_effort
+from llm_proxy.core.thinking import normalize_thinking
 from llm_proxy.core.utils import create_image_source_from_url, generate_response_id
 from llm_proxy.models import (
     ContentBlock,
@@ -1353,8 +1353,10 @@ def _convert_request_to_unified(
             response_format = ResponseFormat(type=fmt_type, json_schema=json_schema)
 
     thinking = None
-    if request.reasoning is not None and request.reasoning.effort is not None:
-        thinking = thinking_config_from_reasoning_effort(request.reasoning.effort)
+    if request.reasoning is not None:
+        thinking = normalize_thinking(
+            {"reasoning": request.reasoning.model_dump(exclude_none=True)}
+        )
 
     params = GenerationParams(
         temperature=request.temperature,

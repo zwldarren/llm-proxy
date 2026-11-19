@@ -24,6 +24,7 @@ fields) and is warn-and-dropped.
 
 import logging
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any
 
 from llm_proxy.core.thinking import convert_to_gemini_interactions, resolve_thinking
@@ -127,6 +128,8 @@ def normalize_generation_config(raw: dict[str, Any]) -> dict[str, Any]:
         if mapped is None:
             dropped.append(key)
             continue
+        if mapped == "thinking_level" and isinstance(value, str):
+            value = value.lower()
         normalized[mapped] = value
     if dropped:
         logger.warning(
@@ -178,7 +181,11 @@ class GeminiInteractionsRequestBuilderMixin:
         if system_instruction:
             body["system_instruction"] = system_instruction
 
-        gen_config = self._build_generation_config(request, model=model)
+        gen_config = self._build_generation_config(
+            request,
+            model=model,
+            model_family_overrides=context.model_family_overrides,
+        )
         if gen_config:
             body["generation_config"] = gen_config
 
@@ -268,10 +275,14 @@ class GeminiInteractionsRequestBuilderMixin:
             )
 
     def _build_generation_config(
-        self, request: InternalRequest, model: str | None = None
+        self,
+        request: InternalRequest,
+        model: str | None = None,
+        model_family_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any] | None:
         """Build the snake_case ``generation_config`` dict."""
         params = request.params
+        effective_model = model or request.model
         config: dict[str, Any] = {}
 
         _SIMPLE_PARAM_MAP: dict[str, str] = {
@@ -302,7 +313,6 @@ class GeminiInteractionsRequestBuilderMixin:
         # ``speech_config`` as an ARRAY of {language, speaker, voice}
         # objects (single- or multi-speaker), unlike generateContent's
         # nested voiceConfig form.
-        effective_model = model or request.model
         tts_model = is_gemini_tts_model(effective_model)
 
         if (tts_model or self._wants_openai_audio(params)) and "speech_config" not in config:

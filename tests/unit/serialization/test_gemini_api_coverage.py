@@ -36,7 +36,6 @@ from llm_proxy.serialization.gemini.model_family import (
     ignores_sampling_params,
     normalize_family_overrides,
     supports_json_schema_fields,
-    supports_minimal_thinking_level,
     supports_thinking_config,
     supports_thought_signatures,
     uses_thinking_budget,
@@ -119,18 +118,6 @@ class TestModelFamily:
         assert supports_json_schema_fields("gemini-4-argon")
         assert not supports_json_schema_fields("gemini-2.5-flash")
 
-    def test_minimal_level_gate(self):
-        assert supports_minimal_thinking_level("gemini-3.6-flash")
-        assert supports_minimal_thinking_level("gemini-3-flash")
-        # The thinking table takes minimal as the *default* on the Flash-Lite
-        # Image model — it is low/medium that model rejects.
-        assert supports_minimal_thinking_level("gemini-3.1-flash-lite-image")
-        assert supports_minimal_thinking_level("gemini-3.1-flash-image")
-        assert not supports_minimal_thinking_level("gemini-3.8-flash")
-        assert not supports_minimal_thinking_level("gemini-3-pro-image")
-        assert not supports_minimal_thinking_level("gemini-nano-banana-2")
-        assert not supports_minimal_thinking_level("gemini-4-argon")
-
     def test_sampling_gate(self):
         assert ignores_sampling_params("gemini-4-argon")
         assert ignores_sampling_params("gemini-3.6-flash")
@@ -166,16 +153,20 @@ class TestModelFamily:
         assert normalize_family_overrides(None) == {}
         assert normalize_family_overrides(["not-a-mapping"]) == {}
 
-    def test_unparsable_id_falls_back_legacy_and_warns_once(self, caplog):
+    def test_unparsable_id_defaults_to_thinking_level_and_warns_once(self, caplog):
         _UNPARSABLE_WARNED.clear()
         try:
             with caplog.at_level(
                 logging.WARNING, logger="llm_proxy.serialization.gemini.model_family"
             ):
                 assert gemini_model_version("gemini-flash-latest") is None
-                # The legacy-safe answers: no thinkingLevel, no schema fields.
-                assert not uses_thinking_level("gemini-flash-latest")
+                # Thinking defaults to the modern thinkingLevel path (ADR-0063),
+                # while schemas/signatures/sampling remain legacy-safe.
+                assert supports_thinking_config("gemini-flash-latest")
+                assert uses_thinking_level("gemini-flash-latest")
                 assert not supports_json_schema_fields("gemini-flash-latest")
+                assert not supports_thought_signatures("gemini-flash-latest")
+                assert not ignores_sampling_params("gemini-flash-latest")
                 gemini_model_version("gemini-flash-latest")
         finally:
             _UNPARSABLE_WARNED.clear()
@@ -448,12 +439,12 @@ class TestFamilyOverrides:
     pinned family's documentation describes.
     """
 
-    def test_unparseable_id_gets_the_legacy_safe_body(self, serializer):
+    def test_unparseable_id_emits_thinking_level_and_keeps_sampling(self, serializer):
         request = _request(
             "gemini-flash-latest", temperature=0.2, thinking=ThinkingConfig(type="disabled")
         )
         config = serializer.build_provider_request(request)["generationConfig"]
-        assert "thinkingConfig" not in config
+        assert config["thinkingConfig"] == {"thinkingLevel": "MINIMAL"}
         assert config["temperature"] == 0.2
 
     def test_override_pins_the_unparseable_id_to_a_modern_family(self, serializer):
@@ -464,10 +455,19 @@ class TestFamilyOverrides:
             request, model_family_overrides={"gemini-flash-latest": "4.0"}
         )
         config = serializer.build_provider_request(request, context)["generationConfig"]
-        # Gemini 4 shapes: thinkingLevel floor (minimal is an error there), no
-        # sampling parameters.
-        assert config["thinkingConfig"] == {"thinkingLevel": "LOW", "includeThoughts": True}
+        assert config["thinkingConfig"] == {"thinkingLevel": "MINIMAL"}
         assert "temperature" not in config
+
+    def test_override_pins_the_unparseable_id_to_25_budget(self, serializer):
+        request = _request(
+            "gemini-flash-latest", temperature=0.2, thinking=ThinkingConfig(type="disabled")
+        )
+        context = BuildContext.from_request(
+            request, model_family_overrides={"gemini-flash-latest": "2.5"}
+        )
+        config = serializer.build_provider_request(request, context)["generationConfig"]
+        assert config["thinkingConfig"] == {"thinkingBudget": 0}
+        assert config["temperature"] == 0.2
 
 
 # ---------------------------------------------------------------------------
