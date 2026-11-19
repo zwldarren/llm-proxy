@@ -16,7 +16,8 @@
     "format": "prettier --write \"src/**/*.{ts,vue,css,json}\"",
     "lint": "eslint --fix \"src/**/*.{ts,vue}\"",
     "lint:check": "eslint \"src/**/*.{ts,vue}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,vue,css,json}\""
+    "format:check": "prettier --check \"src/**/*.{ts,vue,css,json}\"",
+    "icons:sync": "node scripts/sync-lobe-icons.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

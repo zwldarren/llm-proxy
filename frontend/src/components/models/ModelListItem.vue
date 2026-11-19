@@ -46,7 +46,12 @@ const capabilities = computed(() =>
 <template>
   <article class="group border-b border-border transition-colors duration-150 hover:bg-muted/50">
     <div class="flex items-center gap-3 px-4 py-2.5 sm:px-6">
-      <ModelIcon :name="model.name" :icon-url="model.icon_url" :decorative="false" />
+      <ModelIcon
+        :name="model.name"
+        :provider="model.providers?.[0]?.provider_name"
+        :icon-url="model.icon_url"
+        :decorative="false"
+      />
 
       <!-- Name block: identifier line (name + chips) over the meta line -->
       <div class="min-w-0 flex-1">

@@ -45,7 +45,11 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
       :aria-label="isOpen ? t('plaza.collapseDetails') : t('plaza.expandDetails')"
       @click="isOpen = !isOpen"
     >
-      <ModelIcon :name="model.name" :icon-url="model.icon_url" />
+      <ModelIcon
+        :name="model.name"
+        :provider="model.provider_names?.[0]"
+        :icon-url="model.icon_url"
+      />
 
       <span class="min-w-0 flex-1">
         <span class="flex items-center gap-1.5">

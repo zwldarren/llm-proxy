@@ -33,7 +33,12 @@ const { capabilities, safeHomepageUrl, copied, copyName, tierBadgeVariant } = us
     <!-- Model: icon + name + capability icons -->
     <TableCell>
       <div class="flex items-center gap-2.5 min-w-0">
-        <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
+        <ModelIcon
+          :name="model.name"
+          :provider="model.provider_names?.[0]"
+          :icon-url="model.icon_url"
+          size="sm"
+        />
         <Tooltip>
           <TooltipTrigger as-child>
             <span class="font-mono text-[13px] font-medium text-foreground truncate">

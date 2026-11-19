@@ -532,6 +532,14 @@ One card is a *band* — a timezone, the weekdays its ranges start on, and the r
 ### Color-Tinted Icon Container (signature)
 `.icon-container` (and its `.icon-container-sm` page-header size, `h-8 w-8 rounded-md`): `p-2.5 rounded-xl min-h-11 min-w-11`, `bg-linear-to-br from-primary/20 via-primary/10 to-action-blue/12`, `ring-1 ring-primary/30`, `inset 0 1px 0 primary/0.26`. The signature treatment for the icon beside a page title or section heading — a flat, tinted, lightly-ringed tile with a top sheen.
 
+### Brand Tile (`BrandMark`)
+The tile that carries a model or provider logo in lists, pickers, log rows and the config sheets.
+- **Two surfaces, one shape:** a logo sits on `bg-card` with a 1px `--border`; when nothing resolves, the tile switches to the muted identity surface (`bg-muted`, `border-border/50`) and shows the name's first letter in `font-semibold uppercase text-muted-foreground`. A missing logo is an initial, never a generic glyph and never an empty hole.
+- **Sizes:** `xs` 16px `rounded` (log rows, pickers), `sm` 28px `rounded-md` (table rows), `md` 32px `rounded-lg` (list rows), `lg` 36px `rounded-lg` (provider tiles, sheet preview), `xl` 48px `rounded-xl` (model form preview). The mark fills 12/18/20/20/32px inside them.
+- **Pill variant** exists for the round 16px log chips only; everything else takes the size's radius.
+- **Mono marks** are `currentColor` SVGs and take `.icon-mono`, which dark mode inverts. Fixed-palette marks are left as shipped — a configured `icon_url` is always used verbatim and never tinted.
+- **Source:** `frontend/src/components/common/BrandMark.vue`, resolution in `frontend/src/utils/icons.ts`.
+
 ### Range Slider (signature control)
 Used by Smart Routing mode-weight sliders. `appearance-none` + `.range-thumb`; track `0.5rem rounded-full bg-muted`, thumb `1rem rounded-full border-2 bg-background bg-primary` with a `primary/40` shadow; hover `scale(1.12)`, active `scale(0.96)`, focus `0 0 0 2px background, 0 0 0 4px ring`. Reduced-motion removes the thumb transform.
 

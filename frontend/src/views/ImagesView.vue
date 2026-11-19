@@ -7,7 +7,6 @@ import {
   Trash2,
   Upload,
   X,
-  Cpu,
   AlertTriangle,
   FileJson2,
 } from "@lucide/vue";
@@ -17,6 +16,7 @@ import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import EmptyState from "@/components/common/EmptyState.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import ImagesSettings from "@/components/images/ImagesSettings.vue";
 import RunInspector from "@/components/playground/RunInspector.vue";
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { ImageData, UploadedImage } from "@/types/schemas";
 import type { ImageRun } from "@/types/runs";
 import ModelPickerPlaceholder from "@/components/common/ModelPickerPlaceholder.vue";
-import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
+import { modelIcon } from "@/utils/icons";
 import { useModelStore } from "@/stores/models";
 import { useModelCatalog } from "@/composables/useModelCatalog";
 
@@ -75,7 +75,7 @@ const modelStore = useModelStore();
 const getModelIcon = (modelId: string | null | undefined) => {
   if (!modelId) return null;
   const model = models.value.find((m) => m.id === modelId);
-  return getModelIconUrl(modelId, model?.provider);
+  return modelIcon({ name: modelId, provider: model?.provider });
 };
 
 // Prompt
@@ -414,23 +414,12 @@ onActivated(async () => {
               :class="[HEADER_CHIP_CLASS, 'flex min-w-0 items-center font-mono text-[11px]']"
             >
               <div class="flex items-center gap-2 min-w-0">
-                <div
+                <BrandMark
                   v-if="selectedModel"
-                  class="w-4 h-4 rounded flex items-center justify-center shrink-0 overflow-hidden bg-background/50 border border-border/40"
-                >
-                  <img
-                    v-if="getModelIcon(selectedModel)"
-                    :src="getModelIcon(selectedModel)!"
-                    alt=""
-                    aria-hidden="true"
-                    :class="[
-                      isMonoIcon(selectedModel) ? 'icon-mono' : null,
-                      'w-3.5 h-3.5 object-contain',
-                    ]"
-                    loading="lazy"
-                  />
-                  <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                </div>
+                  size="xs"
+                  :icon="getModelIcon(selectedModel)"
+                  :label="selectedModel"
+                />
                 <span class="font-medium truncate min-w-0 max-w-[200px]" v-if="selectedModel">
                   {{ selectedModel }}
                 </span>
@@ -445,22 +434,11 @@ onActivated(async () => {
                 class="rounded-sm"
               >
                 <div class="flex items-center gap-2.5 min-w-0 w-full py-0.5">
-                  <div
-                    class="w-4 h-4 rounded flex items-center justify-center shrink-0 overflow-hidden bg-background/50 border border-border/40"
-                  >
-                    <img
-                      v-if="getModelIcon(modelOption.id)"
-                      :src="getModelIcon(modelOption.id)!"
-                      alt=""
-                      aria-hidden="true"
-                      :class="[
-                        isMonoIcon(modelOption.id) ? 'icon-mono' : null,
-                        'w-3.5 h-3.5 object-contain',
-                      ]"
-                      loading="lazy"
-                    />
-                    <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                  </div>
+                  <BrandMark
+                    size="xs"
+                    :icon="getModelIcon(modelOption.id)"
+                    :label="modelOption.id"
+                  />
                   <span
                     class="min-w-0 truncate max-w-[40vw] sm:max-w-[250px] text-[11px] font-mono text-foreground leading-none"
                     :title="modelOption.id"

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Database, Edit, Globe, Trash2 } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { Edit, Globe, Trash2 } from "@lucide/vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import BrandMark from "@/components/common/BrandMark.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useProviderTypes } from "@/composables/useProviderTypes";
@@ -23,15 +24,11 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const { providerIconUrl: resolveIconUrl, providerIsMono: resolveIsMono } = useProviderTypes();
-
-const iconFailed = ref(false);
+const { providerMark } = useProviderTypes();
 
 const isEnabled = computed(() => props.provider.enabled !== false);
-// Resolution order: custom icon_url -> backend type metadata -> static map.
-const iconUrl = computed(() => resolveIconUrl(props.provider));
-// Mono styling: backend-declared variant wins; fall back to the static map.
-const isMono = computed(() => resolveIsMono(props.provider));
+// Adapter-declared branding, else a catalog match on the type/name.
+const icon = computed(() => providerMark(props.provider));
 </script>
 
 <template>
@@ -45,27 +42,13 @@ const isMono = computed(() => resolveIsMono(props.provider));
   >
     <div class="flex items-center gap-3">
       <!-- Icon -->
-      <div
-        :class="
-          cn(
-            'w-9 h-9 rounded-lg flex items-center justify-center overflow-hidden shrink-0',
-            iconUrl ? 'bg-card border border-border' : 'bg-muted',
-            !isEnabled && 'grayscale-[0.5]'
-          )
-        "
-        role="img"
-        :aria-label="provider.name"
-      >
-        <img
-          v-if="iconUrl && !iconFailed"
-          :src="iconUrl"
-          :alt="provider.name"
-          :class="[isMono && !provider.icon_url ? 'icon-mono' : null, 'w-5 h-5 object-contain']"
-          loading="lazy"
-          @error="iconFailed = true"
-        />
-        <Database v-else class="w-4 h-4 text-muted-foreground" />
-      </div>
+      <BrandMark
+        :icon="icon"
+        :label="provider.name"
+        size="lg"
+        :decorative="false"
+        :class="cn(!isEnabled && 'grayscale-[0.5]')"
+      />
 
       <!-- Name + type + base url (stacked, matching the other list items) -->
       <div class="flex-1 min-w-0">

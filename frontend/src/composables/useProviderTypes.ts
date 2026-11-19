@@ -2,7 +2,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useProviderTypesStore } from "@/stores/providerTypes";
 import type { ProviderTypeInfo } from "@/types/schemas";
-import { getProviderIconUrl, iconUrlFromMetadata, isMonoProvider } from "@/utils/icons";
+import { providerIcon, type BrandIcon } from "@/utils/icons";
 
 interface ProviderTypeOption {
   label: string;
@@ -12,6 +12,7 @@ interface ProviderTypeOption {
 /** Structural subset of a provider record that the icon helpers read. */
 interface ProviderLike {
   type: string;
+  name: string;
   icon_url?: string | null;
 }
 
@@ -47,27 +48,23 @@ export function useProviderTypes() {
   );
 
   /**
-   * Icon URL for a provider row, in resolution order:
-   * custom icon_url -> backend type metadata -> static map.
+   * Mark for a provider row, in resolution order: custom icon_url -> the
+   * branding the provider type's adapter declares -> a catalog match on the
+   * type/name. Null means "no logo": the caller's `BrandMark` then renders the
+   * provider name's initial.
    */
-  function providerIconUrl(provider: ProviderLike): string | null {
-    return (
-      provider.icon_url ||
-      iconUrlFromMetadata(store.getType(provider.type)) ||
-      getProviderIconUrl(provider.type)
-    );
-  }
-
-  /** Mono styling: the backend-declared variant wins; fall back to the static map. */
-  function providerIsMono(provider: ProviderLike): boolean {
-    const info = store.getType(provider.type);
-    return info?.icon_id ? info.icon_variant === "mono" : isMonoProvider(provider.type);
+  function providerMark(provider: ProviderLike): BrandIcon | null {
+    return providerIcon({
+      type: provider.type,
+      name: provider.name,
+      iconUrl: provider.icon_url,
+      brand: store.getType(provider.type),
+    });
   }
 
   return {
     typeOptions,
-    providerIconUrl,
-    providerIsMono,
+    providerMark,
     ensureLoaded: store.ensureLoaded,
   };
 }

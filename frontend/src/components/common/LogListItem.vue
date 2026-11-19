@@ -18,6 +18,7 @@ import {
 import { computed, type ComputedRef } from "vue";
 import { useI18n } from "vue-i18n";
 import StatusBadge from "@/components/common/StatusBadge.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import { useAuditLabels } from "@/composables/useAuditLabels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ import {
   type LogItem,
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
-import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { providerIcon } from "@/utils/icons";
 import { asString } from "@/utils/logFormat";
 import {
   cachedTokens,
@@ -393,21 +394,12 @@ const totalRetryCount = computed(() => {
     <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-2 overflow-hidden">
       <template v-for="metric in secondaryMetrics" :key="metric.label">
         <div class="flex items-center gap-1.5 min-w-0">
-          <div
-            v-if="metric.provider && getProviderIconUrl(metric.provider)"
-            class="size-4 rounded flex items-center justify-center overflow-hidden bg-background border border-border/50 shrink-0"
-          >
-            <img
-              :src="getProviderIconUrl(metric.provider)!"
-              :class="[
-                isMonoProvider(metric.provider) ? 'icon-mono' : null,
-                'size-3 object-contain',
-              ]"
-              alt=""
-              aria-hidden="true"
-              loading="lazy"
-            />
-          </div>
+          <BrandMark
+            v-if="metric.provider"
+            size="xs"
+            :icon="providerIcon({ type: metric.provider })"
+            :label="metric.provider"
+          />
           <component :is="metric.icon" v-else class="size-3.5 text-muted-foreground shrink-0" />
           <span class="text-xs text-muted-foreground shrink-0">{{ metric.label }}:</span>
           <span

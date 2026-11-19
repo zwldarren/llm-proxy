@@ -17,6 +17,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetFooter, SheetHeader } from "@/components/ui/sheet";
+import BrandMark from "@/components/common/BrandMark.vue";
 import { useProviderTypes } from "@/composables/useProviderTypes";
 import { configApi } from "@/services/api/config";
 import { providerFormSchema, type ProviderFormValues } from "@/schemas/providerForm";
@@ -33,7 +34,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const { typeOptions, ensureLoaded } = useProviderTypes();
+const { typeOptions, providerMark, ensureLoaded } = useProviderTypes();
 
 const isLoading = ref(false);
 const isEditing = computed(() => !!props.provider);
@@ -76,6 +77,14 @@ const [apiKey, apiKeyAttrs] = defineField("api_key");
 const [baseUrl, baseUrlAttrs] = defineField("base_url");
 const [iconUrl, iconUrlAttrs] = defineField("icon_url");
 const [nativeWebSearchEnabled] = defineField("native_web_search");
+
+/**
+ * Preview of the mark the provider row will show: the URL being typed, else
+ * whatever the type/name resolve to in the icon catalog.
+ */
+const iconPreview = computed(() =>
+  providerMark({ type: type.value ?? "", name: name.value ?? "", icon_url: iconUrl.value })
+);
 
 /**
  * Gemini upstream API dialect switch (provider_metadata.api_variant).
@@ -519,7 +528,10 @@ const onSubmit = handleSubmit(async (values) => {
                 </p>
               </div>
               <div class="grid gap-2">
-                <Label for="iconurl">{{ t("models.iconUrl") }}</Label>
+                <div class="flex items-center justify-between gap-3">
+                  <Label for="iconurl">{{ t("models.iconUrl") }}</Label>
+                  <BrandMark :icon="iconPreview" :label="name || type || 'Provider'" size="lg" />
+                </div>
                 <Input
                   id="iconurl"
                   v-model="iconUrl"

@@ -13,7 +13,6 @@ import {
   Code,
   File,
   Globe,
-  Cpu,
 } from "@lucide/vue";
 import { useThrottleFn, useWindowSize } from "@vueuse/core";
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
@@ -25,6 +24,7 @@ import ChatEmptyState from "@/components/chat/ChatEmptyState.vue";
 import ChatMessage from "@/components/chat/ChatMessage.vue";
 import ChatSettings from "@/components/chat/ChatSettings.vue";
 import ModelPickerPlaceholder from "@/components/common/ModelPickerPlaceholder.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import type { ToolDefinition } from "@/adapters/types";
 import type { CustomVariable } from "@/adapters/types";
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,7 @@ const WEB_SEARCH_TOOL_NAME = "web_search";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { Input } from "@/components/ui/input";
 import { useModelStore } from "@/stores/models";
-import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
+import { modelIcon } from "@/utils/icons";
 import { useModelCatalog } from "@/composables/useModelCatalog";
 
 const loadSelectedEndpoint = (): string => {
@@ -95,15 +95,15 @@ const {
 
 const input = ref("");
 
-const getModelIcon = (modelId: string | null | undefined) => {
+const modelIconFor = (modelId: string | null | undefined) => {
   if (!modelId) return null;
   const apiModel = models.value.find((m) => m.id === modelId);
   const configModel = modelStore.models.find((cm) => cm.name === modelId);
-  return getModelIconUrl(
-    modelId,
-    apiModel?.provider || configModel?.providers?.[0]?.provider_name,
-    configModel?.icon_url
-  );
+  return modelIcon({
+    name: modelId,
+    provider: apiModel?.provider || configModel?.providers?.[0]?.provider_name,
+    iconUrl: configModel?.icon_url,
+  });
 };
 
 interface AttachedFile {
@@ -982,23 +982,12 @@ watch(
               ]"
             >
               <div class="flex items-center gap-2 min-w-0">
-                <div
+                <BrandMark
                   v-if="selectedModel"
-                  class="w-4 h-4 rounded flex items-center justify-center shrink-0 overflow-hidden bg-background/50 border border-border/40"
-                >
-                  <img
-                    v-if="getModelIcon(selectedModel)"
-                    :src="getModelIcon(selectedModel)!"
-                    alt=""
-                    aria-hidden="true"
-                    :class="[
-                      isMonoIcon(selectedModel) ? 'icon-mono' : null,
-                      'w-3.5 h-3.5 object-contain',
-                    ]"
-                    loading="lazy"
-                  />
-                  <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                </div>
+                  size="xs"
+                  :icon="modelIconFor(selectedModel)"
+                  :label="selectedModel"
+                />
                 <span
                   class="min-w-0 max-w-[30vw] truncate font-medium sm:max-w-[200px]"
                   v-if="selectedModel"
@@ -1016,22 +1005,11 @@ watch(
                 class="rounded-sm"
               >
                 <div class="flex items-center gap-2.5 min-w-0 w-full py-0.5">
-                  <div
-                    class="w-4 h-4 rounded flex items-center justify-center shrink-0 overflow-hidden bg-background/50 border border-border/40"
-                  >
-                    <img
-                      v-if="getModelIcon(modelOption.id)"
-                      :src="getModelIcon(modelOption.id)!"
-                      alt=""
-                      aria-hidden="true"
-                      :class="[
-                        isMonoIcon(modelOption.id) ? 'icon-mono' : null,
-                        'w-3.5 h-3.5 object-contain',
-                      ]"
-                      loading="lazy"
-                    />
-                    <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                  </div>
+                  <BrandMark
+                    size="xs"
+                    :icon="modelIconFor(modelOption.id)"
+                    :label="modelOption.id"
+                  />
                   <span
                     class="min-w-0 truncate max-w-[40vw] sm:max-w-[250px] text-[11px] font-mono text-foreground leading-none"
                     :title="modelOption.id"

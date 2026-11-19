@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { getLocalTimeZone, today } from "@internationalized/date";
-import { BarChart3, CalendarIcon, Cpu, Layers, Loader2, Settings } from "@lucide/vue";
+import { BarChart3, CalendarIcon, Layers, Loader2, Settings } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { computed, onMounted, ref, watch, type Ref } from "vue";
 import { useWindowSize } from "@vueuse/core";
@@ -9,6 +9,7 @@ const { width: windowWidth } = useWindowSize();
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import PageHeader from "@/components/common/PageHeader.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RangeCalendar } from "@/components/ui/range-calendar";
@@ -26,7 +27,7 @@ import {
 import { useRequestSequence } from "@/composables/useRequestSequence";
 import { HEADER_CHIP_CLASS } from "@/lib/controlMetric";
 import { logsApi } from "@/services/api/logs";
-import { getModelIconUrl, isMonoIcon } from "@/utils/icons";
+import { modelIcon } from "@/utils/icons";
 import type { HourlyUsageBucket, UsageStatsResponse } from "@/types/schemas";
 import type { DateRange } from "reka-ui";
 
@@ -114,11 +115,16 @@ const selectedModel = ref<string | null>(null);
 const availableModels = ref<Array<{ model: string; provider: string }>>([]);
 
 // Icon resolution as in the Chat page model selector: model-name match first,
-// provider icon as fallback (usage rows always carry a provider). Built once
-// per model list — `getModelIconUrl` walks the well-known icon table, so
-// resolving it per option per render is wasted work.
+// provider mark as fallback (usage rows always carry a provider). Built once
+// per model list — resolving it per option per render is wasted work.
 const modelIcons = computed(
-  () => new Map(availableModels.value.map((m) => [m.model, getModelIconUrl(m.model, m.provider)]))
+  () =>
+    new Map(
+      availableModels.value.map((m) => [
+        m.model,
+        modelIcon({ name: m.model, provider: m.provider }),
+      ])
+    )
 );
 
 /** Select options: the "all models" sentinel, then every known model. */
@@ -296,23 +302,20 @@ onMounted(() => {
                 :class="[HEADER_CHIP_CLASS, 'flex min-w-0 items-center']"
               >
                 <div class="flex items-center gap-2 min-w-0">
-                  <div
-                    class="w-4 h-4 rounded flex items-center justify-center shrink-0 overflow-hidden bg-background/50 border border-border/40"
+                  <BrandMark
+                    v-if="!selectedModel"
+                    size="xs"
+                    :icon="null"
+                    :label="t('home.allModels')"
                   >
-                    <img
-                      v-if="selectedModel && modelIcons.get(selectedModel)"
-                      :src="modelIcons.get(selectedModel)!"
-                      alt=""
-                      aria-hidden="true"
-                      :class="[
-                        isMonoIcon(selectedModel) ? 'icon-mono' : null,
-                        'w-3.5 h-3.5 object-contain',
-                      ]"
-                      loading="lazy"
-                    />
-                    <Layers v-else-if="!selectedModel" class="w-2.5 h-2.5 text-muted-foreground" />
-                    <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                  </div>
+                    <Layers class="w-2.5 h-2.5 text-muted-foreground" />
+                  </BrandMark>
+                  <BrandMark
+                    v-else
+                    size="xs"
+                    :icon="modelIcons.get(selectedModel) ?? null"
+                    :label="selectedModel ?? t('home.allModels')"
+                  />
                   <!-- Model IDs stay mono (data); the "All Models" UI label uses
                        the body font so it matches the date-range button. -->
                   <span
@@ -331,23 +334,20 @@ onMounted(() => {
                   class="rounded-sm"
                 >
                   <div class="flex items-center gap-2.5 min-w-0 w-full py-0.5">
-                    <div
-                      class="w-4 h-4 rounded flex items-center justify-center shrink-0 overflow-hidden bg-background/50 border border-border/40"
+                    <BrandMark
+                      v-if="!option.model"
+                      size="xs"
+                      :icon="null"
+                      :label="t('home.allModels')"
                     >
-                      <img
-                        v-if="option.model && modelIcons.get(option.model)"
-                        :src="modelIcons.get(option.model)!"
-                        alt=""
-                        aria-hidden="true"
-                        :class="[
-                          isMonoIcon(option.model) ? 'icon-mono' : null,
-                          'w-3.5 h-3.5 object-contain',
-                        ]"
-                        loading="lazy"
-                      />
-                      <Layers v-else-if="!option.model" class="w-2.5 h-2.5 text-muted-foreground" />
-                      <Cpu v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                    </div>
+                      <Layers class="w-2.5 h-2.5 text-muted-foreground" />
+                    </BrandMark>
+                    <BrandMark
+                      v-else
+                      size="xs"
+                      :icon="modelIcons.get(option.model) ?? null"
+                      :label="option.model ?? t('home.allModels')"
+                    />
                     <!-- Model IDs stay mono (data); the "All Models" label uses
                          the body font so it matches the date-range button. -->
                     <span

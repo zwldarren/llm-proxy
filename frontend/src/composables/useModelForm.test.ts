@@ -202,16 +202,6 @@ describe("useModelForm cross-field rules", () => {
     expect(form.form.value.quality_tier).toBeNull();
     expect(form.form.value.routing_assignments).toBeNull();
   });
-
-  it("resets the icon preview failure when the name or icon changes", async () => {
-    const form = useModelForm();
-    form.openForCreate();
-    form.iconPreviewFailed.value = true;
-
-    form.form.value.icon_url = "https://example.com/icon.svg";
-    await nextTick();
-    expect(form.iconPreviewFailed.value).toBe(false);
-  });
 });
 
 describe("useModelForm validate", () => {

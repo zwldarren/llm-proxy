@@ -38,6 +38,7 @@ import EmptyState from "@/components/common/EmptyState.vue";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import LogListItem from "@/components/common/LogListItem.vue";
 import PaginationBar from "@/components/common/PaginationBar.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import RefreshButton from "@/components/common/RefreshButton.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import TableCellActions from "@/components/common/TableCellActions.vue";
@@ -79,7 +80,7 @@ import {
   formatApiKeyName,
 } from "@/utils/format";
 import { sanitizeHighlightText } from "@/utils/sanitize";
-import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { providerIcon } from "@/utils/icons";
 import { asString } from "@/utils/logFormat";
 import {
   cachedTokens,
@@ -1159,21 +1160,12 @@ const auditListAction = (log: LogListItemType): string => {
                   </TableCell>
                   <TableCell class="text-xs hidden @min-[640px]:table-cell">
                     <div class="flex items-center gap-1.5">
-                      <div
-                        v-if="getProviderIconUrl(log.provider || '')"
-                        class="w-4 h-4 rounded flex items-center justify-center overflow-hidden bg-background border border-border/50 shrink-0"
-                      >
-                        <img
-                          :src="getProviderIconUrl(log.provider || '')!"
-                          :class="[
-                            isMonoProvider(log.provider || '') ? 'icon-mono' : null,
-                            'w-3 h-3 object-contain',
-                          ]"
-                          alt=""
-                          aria-hidden="true"
-                          loading="lazy"
-                        />
-                      </div>
+                      <BrandMark
+                        v-if="log.provider"
+                        size="xs"
+                        :icon="providerIcon({ type: log.provider })"
+                        :label="log.provider"
+                      />
                       <!-- eslint-disable-next-line vue/no-v-html -->
                       <span
                         class="text-muted-foreground font-medium"
@@ -1490,22 +1482,11 @@ const auditListAction = (log: LogListItemType): string => {
                   </TableCell>
                   <TableCell class="text-xs hidden @min-[640px]:table-cell">
                     <div class="flex items-center gap-1.5">
-                      <div
-                        class="w-4 h-4 rounded flex items-center justify-center overflow-hidden bg-background border border-border/50 shrink-0"
-                      >
-                        <img
-                          v-if="getProviderIconUrl(log.provider || '')"
-                          :src="getProviderIconUrl(log.provider || '')!"
-                          :class="[
-                            isMonoProvider(log.provider || '') ? 'icon-mono' : null,
-                            'w-3 h-3 object-contain',
-                          ]"
-                          alt=""
-                          aria-hidden="true"
-                          loading="lazy"
-                        />
-                        <Globe v-else class="w-2.5 h-2.5 text-muted-foreground" />
-                      </div>
+                      <BrandMark
+                        size="xs"
+                        :icon="providerIcon({ type: log.provider || 'searxng' })"
+                        :label="log.provider || 'searxng'"
+                      />
                       <Badge variant="outline" class="font-mono">{{
                         log.provider || "searxng"
                       }}</Badge>

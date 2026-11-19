@@ -5,10 +5,11 @@ import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, h } from "vue";
 import type { ModelCatalogEntry } from "@/types/schemas";
 
-vi.mock("@/utils/icons", () => ({
-  getProviderIconUrl: vi.fn(() => null),
-  getIconUrl: vi.fn(() => null),
-  isMonoIcon: vi.fn(() => false),
+// Keep the real fallback helpers, stub only the catalog-backed resolvers.
+vi.mock("@/utils/icons", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/icons")>()),
+  modelIcon: vi.fn(() => null),
+  providerIcon: vi.fn(() => null),
 }));
 
 vi.mock("vue-i18n", () => ({

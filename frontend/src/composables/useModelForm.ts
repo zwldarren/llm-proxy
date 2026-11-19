@@ -118,7 +118,6 @@ const CAPABILITY_FIELD: Record<ModelCapability, string> = {
 export function useModelForm() {
   const form = ref<ModelCreate>(emptyModelForm());
   const parameterOverrides = ref<ParameterOverridesConfig>({});
-  const iconPreviewFailed = ref(false);
 
   function getCapability(cap: ModelCapability): boolean {
     return Boolean(form.value[CAPABILITY_FIELD[cap] as keyof ModelCreate]);
@@ -174,10 +173,6 @@ export function useModelForm() {
     }
   );
 
-  watch([() => form.value.icon_url, () => form.value.name], () => {
-    iconPreviewFailed.value = false;
-  });
-
   // ---- Null proxies for inputs that bind non-null strings ----
 
   // Textarea binds a non-null string; proxy null <-> empty for the description field.
@@ -220,7 +215,6 @@ export function useModelForm() {
 
   /** Reset to a blank create draft with one empty provider row. */
   const openForCreate = () => {
-    iconPreviewFailed.value = false;
     form.value = {
       ...emptyModelForm(),
       providers: [emptyProviderMapping()],
@@ -230,7 +224,6 @@ export function useModelForm() {
 
   /** Load an existing model into the draft for editing. */
   const openForEdit = (model: ModelRead) => {
-    iconPreviewFailed.value = false;
     form.value = {
       ...emptyModelForm(),
       name: model.name,
@@ -365,7 +358,6 @@ export function useModelForm() {
   return {
     form,
     parameterOverrides,
-    iconPreviewFailed,
     getCapability,
     setCapability,
     showProviderEditDialog,

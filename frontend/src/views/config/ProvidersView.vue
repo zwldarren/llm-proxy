@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Database, Edit, Plus, Server, Trash2 } from "@lucide/vue";
+import { Edit, Plus, Server, Trash2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import EmptyFilterResults from "@/components/common/EmptyFilterResults.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
@@ -38,14 +39,7 @@ defineOptions({ name: "ProvidersView" });
 const { t } = useI18n();
 const { handleDeleteError } = useErrorHandler();
 const providerStore = useProviderStore();
-const {
-  typeOptions,
-  providerIconUrl,
-  providerIsMono,
-  ensureLoaded: ensureProviderTypesLoaded,
-} = useProviderTypes();
-
-const failedIcons = ref(new Set<number>());
+const { typeOptions, providerMark, ensureLoaded: ensureProviderTypesLoaded } = useProviderTypes();
 
 const showCreateDialog = ref(false);
 const showDeleteDialog = ref(false);
@@ -221,25 +215,7 @@ onMounted(() => {
           <TableBody class="row-stagger">
             <TableRow v-for="provider in sortedProviders" :key="provider.id" class="group">
               <TableCell>
-                <div
-                  :class="[
-                    'w-9 h-9 rounded-lg flex items-center justify-center overflow-hidden',
-                    providerIconUrl(provider) ? 'bg-card border border-border' : 'bg-muted',
-                  ]"
-                >
-                  <img
-                    v-if="providerIconUrl(provider) && !failedIcons.has(provider.id)"
-                    :src="providerIconUrl(provider)!"
-                    :alt="provider.name"
-                    :class="[
-                      providerIsMono(provider) && !provider.icon_url ? 'icon-mono' : null,
-                      'w-5 h-5 object-contain',
-                    ]"
-                    loading="lazy"
-                    @error="failedIcons.add(provider.id)"
-                  />
-                  <Database v-else class="w-4 h-4 text-muted-foreground" />
-                </div>
+                <BrandMark :icon="providerMark(provider)" :label="provider.name" size="lg" />
               </TableCell>
               <TableCell class="font-medium">
                 {{ provider.name }}

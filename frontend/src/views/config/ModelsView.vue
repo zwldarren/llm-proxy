@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
+import BrandMark from "@/components/common/BrandMark.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import EmptyFilterResults from "@/components/common/EmptyFilterResults.vue";
 import FilterBar from "@/components/common/FilterBar.vue";
@@ -69,7 +70,7 @@ import { ROUTING_MODES } from "@/constants/model";
 
 import ParameterOverridesBuilder from "@/components/config/ParameterOverridesBuilder.vue";
 import ProviderModelSelector from "@/components/common/ProviderModelSelector.vue";
-import { getIconUrl, isMonoIcon } from "@/utils/icons";
+import { modelIcon } from "@/utils/icons";
 
 import { modelTierLabel } from "@/utils/modelTier";
 import type { ModelRead } from "@/types/schemas";
@@ -112,7 +113,6 @@ const {
 const {
   form: newModel,
   parameterOverrides,
-  iconPreviewFailed,
   getCapability,
   setCapability,
   showProviderEditDialog,
@@ -428,7 +428,12 @@ const confirmDelete = async () => {
               <!-- Name: icon + name + status + capabilities + routing -->
               <TableCell class="font-medium">
                 <div class="flex items-center gap-2.5 min-w-0">
-                  <ModelIcon :name="model.name" :icon-url="model.icon_url" size="sm" />
+                  <ModelIcon
+                    :name="model.name"
+                    :provider="model.providers?.[0]?.provider_name"
+                    :icon-url="model.icon_url"
+                    size="sm"
+                  />
                   <Tooltip>
                     <TooltipTrigger as-child>
                       <span class="truncate font-mono text-[13px]">{{ model.name }}</span>
@@ -1400,21 +1405,18 @@ const confirmDelete = async () => {
                   <!-- Icon Preview -->
                   <div class="flex flex-col items-center gap-1.5 shrink-0">
                     <span class="text-xs text-muted-foreground">Preview</span>
-                    <div
-                      class="w-12 h-12 rounded-xl flex items-center justify-center border border-border bg-background overflow-hidden"
-                    >
-                      <img
-                        v-if="getIconUrl(newModel.icon_url, newModel.name) && !iconPreviewFailed"
-                        :src="getIconUrl(newModel.icon_url, newModel.name)!"
-                        :alt="newModel.name"
-                        :class="[
-                          isMonoIcon(newModel.name) ? 'icon-mono' : null,
-                          'w-8 h-8 object-contain',
-                        ]"
-                        @error="iconPreviewFailed = true"
-                      />
-                      <Box v-else class="w-5 h-5 text-muted-foreground" />
-                    </div>
+                    <BrandMark
+                      :icon="
+                        modelIcon({
+                          name: newModel.name,
+                          provider: newModel.providers?.[0]?.provider_name,
+                          iconUrl: newModel.icon_url,
+                        })
+                      "
+                      :label="newModel.name"
+                      size="xl"
+                      :decorative="!newModel.name"
+                    />
                   </div>
 
                   <!-- Icon URL Input -->

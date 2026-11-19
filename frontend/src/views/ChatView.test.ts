@@ -4,9 +4,11 @@ import { createPinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, ref } from "vue";
 
-vi.mock("@/utils/icons", () => ({
-  getModelIconUrl: vi.fn(() => null),
-  isMonoIcon: vi.fn(() => false),
+// Keep the real fallback helpers, stub only the catalog-backed resolvers.
+vi.mock("@/utils/icons", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/icons")>()),
+  modelIcon: vi.fn(() => null),
+  providerIcon: vi.fn(() => null),
 }));
 
 vi.mock("vue-i18n", () => ({
@@ -110,6 +112,18 @@ describe("ChatView model list", () => {
     // The selector (not the retry placeholder) is what renders once loaded.
     expect(wrapper.find("[data-slot='select-trigger']").exists()).toBe(true);
     expect(retryButton(wrapper).exists()).toBe(false);
+  });
+
+  it("renders the model initial when no brand resolves", async () => {
+    vi.mocked(chatApi.getModels).mockResolvedValue(models("gpt-4o"));
+
+    const wrapper = render();
+    await flushPromises();
+
+    const tile = wrapper.find("[data-slot='select-trigger'] span.size-4");
+    expect(tile.exists()).toBe(true);
+    expect(tile.text()).toBe("G");
+    expect(tile.find("svg").exists()).toBe(false);
   });
 
   it("keeps the model selector retryable after a failed load", async () => {

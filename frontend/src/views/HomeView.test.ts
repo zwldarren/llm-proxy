@@ -3,11 +3,11 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 
-vi.mock("@/utils/icons", () => ({
-  getModelIconUrl: vi.fn(() => null),
-  isMonoIcon: vi.fn(() => false),
-  getProviderIconUrl: vi.fn(() => null),
-  getIconUrl: vi.fn(() => null),
+// Keep the real fallback helpers, stub only the catalog-backed resolvers.
+vi.mock("@/utils/icons", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/icons")>()),
+  modelIcon: vi.fn(() => null),
+  providerIcon: vi.fn(() => null),
 }));
 
 vi.mock("vue-i18n", () => ({

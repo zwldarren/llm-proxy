@@ -50,6 +50,32 @@
   Mock the lazy children (`vi.mock` with `__esModule: true`, otherwise Vue keeps the
   mocked namespace as the component) so a view test only loads what the view imports.
 
+## Icons
+
+Model and provider logos are not hand-mapped. `utils/icons.ts` matches the identifier
+against the whole `@lobehub/icons` catalog, so a new model from a known brand and a niche
+provider type both resolve without editing a table:
+
+```ts
+import { modelIcon, providerIcon } from "@/utils/icons";
+
+modelIcon({ name: model.name, provider: names?.[0], iconUrl: model.icon_url });
+providerIcon({ type: p.type, name: p.name, iconUrl: p.icon_url, brand: typeInfo });
+```
+
+- Both return `{ url, mono }` or `null`. Resolve **once** and pass the result to
+  `BrandMark`; never derive the URL and the mono flag separately — that is how a colour
+  mark used to end up inverted.
+- Rendering goes through `components/common/BrandMark.vue`, which owns the frame, the
+  `.icon-mono` theming, the load-failure latch and the fallback. Without a slot it falls
+  back to the name's initial; pass a lucide glyph in the default slot to keep a caller's
+  own chip (dense log rows).
+- Resolution order: configured `icon_url` → model brand → provider brand → initial.
+  For providers the adapter's declared `LOBE_ICON_ID`/`LOBE_ICON_VARIANT` wins over the
+  catalog match.
+- `utils/lobeBrands.generated.ts` is generated: run `bun run icons:sync` to pick up new
+  brands (it bumps the pinned CDN version too). Never edit it by hand.
+
 ## Development Guidelines
 
 - Use shadcn-vue for component library (Radix Vue + Reka UI)

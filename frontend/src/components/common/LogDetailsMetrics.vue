@@ -18,6 +18,7 @@ import StatusBadge from "@/components/common/StatusBadge.vue";
 import MetricCell from "@/components/common/MetricCell.vue";
 import { useAuditLabels } from "@/composables/useAuditLabels";
 import { Badge } from "@/components/ui/badge";
+import BrandMark from "@/components/common/BrandMark.vue";
 import type { LogRead } from "@/types/schemas";
 import {
   formatCost,
@@ -26,7 +27,7 @@ import {
   getActionFromEndpoint,
   getActor,
 } from "@/utils/format";
-import { getProviderIconUrl, isMonoProvider } from "@/utils/icons";
+import { providerIcon } from "@/utils/icons";
 import { asString } from "@/utils/logFormat";
 import {
   cachedTokens,
@@ -177,20 +178,12 @@ const statusColorClass = computed(() => {
               <span class="truncate">{{ providerModelName }}</span>
             </div>
             <div v-if="log.provider" class="flex items-center gap-1.5 mt-0.5">
-              <div
-                v-if="getProviderIconUrl(log.provider)"
-                class="size-4 rounded-full overflow-hidden bg-background border border-border/50 flex items-center justify-center shrink-0"
-              >
-                <img
-                  :src="getProviderIconUrl(log.provider)!"
-                  :class="[
-                    isMonoProvider(log.provider) ? 'icon-mono' : null,
-                    'size-2.5 object-contain',
-                  ]"
-                  alt=""
-                  aria-hidden="true"
-                />
-              </div>
+              <BrandMark
+                size="xs"
+                shape="pill"
+                :icon="providerIcon({ type: log.provider })"
+                :label="log.provider"
+              />
               <span class="text-[11px] text-muted-foreground font-medium capitalize">{{
                 log.provider
               }}</span>
@@ -451,20 +444,12 @@ const statusColorClass = computed(() => {
           <template #icon><Globe class="size-3 text-muted-foreground/50" /></template>
           <div class="flex flex-col gap-1.5 mt-1 min-w-0">
             <div class="flex items-center gap-1.5">
-              <div
-                v-if="getProviderIconUrl(log.provider || 'searxng')"
-                class="size-4 rounded-full overflow-hidden bg-background border border-border/50 flex items-center justify-center shrink-0"
-              >
-                <img
-                  :src="getProviderIconUrl(log.provider || 'searxng')!"
-                  :class="[
-                    isMonoProvider(log.provider || 'searxng') ? 'icon-mono' : null,
-                    'size-2.5 object-contain',
-                  ]"
-                  alt=""
-                  aria-hidden="true"
-                />
-              </div>
+              <BrandMark
+                size="xs"
+                shape="pill"
+                :icon="providerIcon({ type: log.provider || 'searxng' })"
+                :label="log.provider || 'searxng'"
+              />
               <span class="text-xs sm:text-sm font-bold text-foreground capitalize truncate">{{
                 log.provider || "searxng"
               }}</span>

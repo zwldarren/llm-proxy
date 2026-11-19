@@ -2,12 +2,12 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 
-vi.mock("@/utils/icons", () => {
-  return {
-    getProviderIconUrl: vi.fn(() => null),
-    getIconUrl: vi.fn(() => null),
-  };
-});
+// Keep the real fallback helpers, stub only the catalog-backed resolvers.
+vi.mock("@/utils/icons", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/icons")>()),
+  modelIcon: vi.fn(() => null),
+  providerIcon: vi.fn(() => null),
+}));
 
 vi.mock("vue-i18n", () => {
   return {
@@ -167,6 +167,8 @@ vi.mock("@/components/common/AuditIntegrityDialog.vue", () => ({
   }),
 }));
 
+import { logsApi } from "@/services/api/logs";
+import { providerIcon } from "@/utils/icons";
 import LogsView from "./LogsView.vue";
 
 const AppLayoutStub = defineComponent({
@@ -256,6 +258,93 @@ describe("LogsView", () => {
 
     expect(logsApi.getLogs).toHaveBeenCalled();
     expect(wrapper.text()).toContain("logs.noLogs");
+  });
+
+  it("does not render an icon tile for a log without a provider", async () => {
+    vi.mocked(logsApi.getLogs).mockResolvedValueOnce({
+      items: [
+        {
+          id: 1,
+          request_id: "no-provider",
+          timestamp: 1_700_000_000,
+          endpoint: "/v1/chat/completions",
+          method: "POST",
+          model: "model",
+          provider: null,
+          status_code: 200,
+          response_time_ms: 12,
+          log_type: "endpoint",
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    const wrapper = mount(LogsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          Card: CardStub,
+          Button: ButtonStub,
+          Input: InputStub,
+          Tooltip: TooltipStub,
+          TooltipTrigger: TooltipTriggerStub,
+          TooltipContent: TooltipContentStub,
+        },
+      },
+    });
+    await flushPromises();
+
+    const row = wrapper.find("tbody tr");
+    expect(row.exists()).toBe(true);
+    expect(row.find(".size-4").exists()).toBe(false);
+  });
+
+  it("uses the SearXNG mark for web-search rows without a provider", async () => {
+    vi.mocked(providerIcon).mockClear();
+    vi.mocked(logsApi.getLogs).mockResolvedValueOnce({
+      items: [
+        {
+          id: 2,
+          request_id: "web-search-default-provider",
+          timestamp: 1_700_000_000,
+          endpoint: "/v1/web-search",
+          method: "POST",
+          model: null,
+          provider: null,
+          status_code: 200,
+          response_time_ms: 12,
+          log_type: "web_search",
+          log_metadata: { web_search_query: "query" },
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    routeQuery.tab = "websearch";
+
+    try {
+      mount(LogsView, {
+        global: {
+          stubs: {
+            AppLayout: AppLayoutStub,
+            Card: CardStub,
+            Button: ButtonStub,
+            Input: InputStub,
+            Tooltip: TooltipStub,
+            TooltipTrigger: TooltipTriggerStub,
+            TooltipContent: TooltipContentStub,
+          },
+        },
+      });
+      await flushPromises();
+
+      expect(providerIcon).toHaveBeenCalledWith({ type: "searxng" });
+    } finally {
+      delete routeQuery.tab;
+    }
   });
 
   it("shows a skeleton instead of bare row separators while the first fetch runs", async () => {
