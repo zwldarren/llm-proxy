@@ -6,6 +6,7 @@ import { computed } from "vue";
 import { useForwardPropsEmits } from "reka-ui";
 import { cn } from "@/lib/utils";
 import DialogSurface from "../dialog/DialogSurface.vue";
+import type { SurfaceLayer } from "../dialog/layers";
 
 interface SheetContentProps extends DialogContentProps {
   class?: HTMLAttributes["class"];
@@ -13,7 +14,7 @@ interface SheetContentProps extends DialogContentProps {
   size?: "sm" | "md" | "lg" | "xl" | "2xl" | "none";
   variant?: "default" | "sidebar";
   showCloseButton?: boolean;
-  layer?: "base" | "top";
+  layer?: SurfaceLayer;
 }
 
 defineOptions({

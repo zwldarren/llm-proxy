@@ -6,6 +6,7 @@ import { computed } from "vue";
 import { useForwardPropsEmits } from "reka-ui";
 import { cn } from "@/lib/utils";
 import DialogSurface from "./DialogSurface.vue";
+import type { SurfaceLayer } from "./layers";
 
 defineOptions({
   inheritAttrs: false,
@@ -19,7 +20,7 @@ const props = withDefaults(
       size?: "sm" | "md" | "lg" | "xl" | "screen" | "none";
       layout?: "padded" | "flush" | "none";
       variant?: "modal" | "palette" | "media";
-      layer?: "base" | "top";
+      layer?: SurfaceLayer;
       scroll?: boolean;
     }
   >(),
