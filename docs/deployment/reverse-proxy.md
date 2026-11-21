@@ -119,6 +119,12 @@ CORS is only needed when the admin UI is served from a **different origin** than
 API. Configured origins live in **Settings → Advanced → CORS Origins** and are
 hot-reloaded; an empty list disables CORS entirely.
 
+A preflight is answered for the headers the client asks to send, not a fixed list:
+each name is validated as an HTTP field name, the first 64 are echoed back, and only
+for an origin already on the allow list. That is what lets an SDK send its own
+`x-api-key`, `anthropic-beta`, `x-stainless-*` or provider identity headers without
+being refused at the preflight.
+
 ::: warning CORS is the innermost layer
 Requests rejected by auth, body-size, or rate-limit middleware return **before**
 CORS headers are added, so a browser sees a generic CORS failure instead of the

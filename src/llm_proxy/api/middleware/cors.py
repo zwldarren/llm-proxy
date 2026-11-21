@@ -10,6 +10,8 @@ the previous behaviour of not registering the middleware (CORS is only needed
 when the admin frontend is served from a different origin).
 """
 
+import re
+
 from fastapi import Request
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -24,6 +26,10 @@ from llm_proxy.services import runtime_services
 logger = get_logger(__name__)
 
 _ALLOWED_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+#: Headers answered on a preflight that names none. A browser preflight always
+#: carries ``Access-Control-Request-Headers`` when the request sets any header
+#: beyond the safelisted set, so this list is the fallback, not the boundary:
+#: :func:`_allowed_headers` echoes whatever else the client actually asks for.
 _ALLOWED_HEADERS = [
     "Authorization",
     "Content-Type",
@@ -34,13 +40,28 @@ _ALLOWED_HEADERS = [
     "Accept",
     "Accept-Language",
     "Accept-Encoding",
+    # The proxy's second credential form (``_extract_key`` reads either this
+    # or ``Authorization``), so a browser client can authenticate without
+    # synthesizing a Bearer header.
+    "X-API-Key",
 ]
 
 # Response headers browser JS is allowed to read on cross-origin requests.
 # Trace ids are how a client correlates its own request with the console's log
-# detail view, so they must be readable from the response.
-_EXPOSED_HEADERS = ["X-Trace-ID", "X-Langfuse-Trace-ID"]
+# detail view, so they must be readable from the response. ``Retry-After`` is
+# what a cross-origin client paces its retries with; without the exposure it
+# is sent but unreadable.
+_EXPOSED_HEADERS = ["X-Trace-ID", "X-Langfuse-Trace-ID", "X-Request-Id", "Retry-After"]
 _PREFLIGHT_MAX_AGE_SECONDS = 600
+
+#: RFC 9110 ``field-name``: what may appear in a reflected allow-headers list.
+#: A requested value that is not one is dropped, never echoed into a response
+#: header — the preflight still succeeds for the names that are valid.
+_FIELD_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+#: Bounds on the reflected list: a preflight is unauthenticated and cheap, so a
+#: hostile one must not be able to inflate the response without limit.
+_MAX_REFLECTED_HEADERS = 64
+_MAX_FIELD_NAME_LENGTH = 64
 
 
 def _resolve_allowed_origins(request: Request) -> list[str]:
@@ -57,6 +78,51 @@ def _resolve_allowed_origins(request: Request) -> list[str]:
 def _has_origin_header(scope: Scope) -> bool:
     """Whether the raw ASGI headers carry an ``Origin`` (lowercased name)."""
     return any(key == b"origin" for key, _ in scope.get("headers", ()))
+
+
+def _requested_headers(request: Request) -> list[str] | None:
+    """The header names a preflight asks to send, in request order.
+
+    Returns ``None`` when the preflight names no headers (the caller then
+    answers with the built-in list) and an empty list when it names only
+    invalid names — an empty answer no browser will accept, which is the right
+    refusal. Names are matched case-insensitively on the built-in list so a
+    client that spells ``x-api-key`` gets the canonical ``X-API-Key`` back.
+    """
+    raw = request.headers.get("access-control-request-headers")
+    if raw is None or not raw.strip():
+        # No header named: the built-in list is the answer. An empty value is
+        # the same statement as an absent one.
+        return None
+    canonical = {name.lower(): name for name in _ALLOWED_HEADERS}
+    names: list[str] = []
+    for candidate in raw.split(","):
+        name = candidate.strip()
+        if not name or len(name) > _MAX_FIELD_NAME_LENGTH:
+            continue
+        if _FIELD_NAME.fullmatch(name) is None:
+            continue
+        names.append(canonical.get(name.lower(), name))
+        if len(names) >= _MAX_REFLECTED_HEADERS:
+            break
+    return names
+
+
+def _allowed_headers(request: Request) -> list[str]:
+    """The ``Access-Control-Allow-Headers`` value for one preflight.
+
+    The API's header surface is defined by the client's protocol, not by this
+    middleware: SDKs send ``x-api-key``, ``anthropic-beta``, ``x-stainless-*``
+    and provider-specific identity headers, and a fixed list rejects every one
+    of them at the preflight — before auth runs, so the failure is a generic
+    CORS error with no log row. Echoing the requested names (validated as
+    field names, bounded, and only for an origin already allowed) keeps the
+    allowlist from silently drifting behind the protocol surface.
+    """
+    requested = _requested_headers(request)
+    if requested is None:
+        return list(_ALLOWED_HEADERS)
+    return requested
 
 
 class CORSMiddleware:
@@ -99,9 +165,11 @@ class CORSMiddleware:
                         "Access-Control-Allow-Origin": origin,
                         "Access-Control-Allow-Credentials": "true",
                         "Access-Control-Allow-Methods": ", ".join(_ALLOWED_METHODS),
-                        "Access-Control-Allow-Headers": ", ".join(_ALLOWED_HEADERS),
+                        "Access-Control-Allow-Headers": ", ".join(_allowed_headers(request)),
                         "Access-Control-Max-Age": str(_PREFLIGHT_MAX_AGE_SECONDS),
-                        "Vary": "Origin",
+                        # The allow-headers answer now depends on the request,
+                        # so caches must key on it too.
+                        "Vary": "Origin, Access-Control-Request-Headers",
                     },
                 )
             await response(scope, receive, send)
