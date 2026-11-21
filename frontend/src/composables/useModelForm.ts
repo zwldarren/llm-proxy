@@ -162,14 +162,24 @@ export function useModelForm() {
 
   // ---- Cross-field rules ----
 
-  // Routing profile is meaningless without auto-eligibility.
+  /**
+   * The routing profile is meaningless without auto-eligibility, and the server
+   * never sees one on a model that is not eligible. Clearing it is also a seed
+   * step: the watcher below fires a tick after `openForEdit` replaced the draft,
+   * so a saved model carrying a stale tier (kept from when it was eligible)
+   * would be normalized after the view snapshotted its draft — the sheet then
+   * opened already "dirty" and its first Cancel asked to discard edits nobody
+   * had made. `openForEdit` clears it synchronously for the same reason.
+   */
+  const clearRoutingProfile = () => {
+    form.value.quality_tier = null;
+    form.value.routing_assignments = null;
+  };
+
   watch(
     () => form.value.auto_eligible,
     (val) => {
-      if (!val) {
-        form.value.quality_tier = null;
-        form.value.routing_assignments = null;
-      }
+      if (!val) clearRoutingProfile();
     }
   );
 
@@ -271,7 +281,8 @@ export function useModelForm() {
       icon_url: model.icon_url,
       parameter_overrides: model.parameter_overrides ?? null,
       auto_eligible: model.auto_eligible ?? false,
-      quality_tier: model.quality_tier ?? null,
+      // Seeded normalized: see clearRoutingProfile.
+      quality_tier: model.auto_eligible ? (model.quality_tier ?? null) : null,
       supports_images: model.supports_images ?? false,
       supports_image_generation: model.supports_image_generation ?? false,
       supports_tts: model.supports_tts ?? false,
@@ -292,7 +303,7 @@ export function useModelForm() {
       knowledge: model.knowledge ?? null,
       release_date: model.release_date ?? null,
       max_output_tokens: model.max_output_tokens ?? null,
-      routing_assignments: model.routing_assignments ?? null,
+      routing_assignments: model.auto_eligible ? (model.routing_assignments ?? null) : null,
       description: model.description ?? null,
       homepage_url: model.homepage_url ?? null,
       context_length: model.context_length ?? null,

@@ -159,6 +159,28 @@ describe("useModelForm seeding", () => {
     expect(form.parameterOverrides.value).toEqual({ temperature: 0.7 });
   });
 
+  it("seeds a non-eligible model already normalized, so it opens clean", async () => {
+    // A saved row can still carry a routing profile from when it was eligible:
+    // the clear watcher does not run on save. Normalizing a tick after the draft
+    // was seeded made the sheet dirty before the operator typed anything, so its
+    // first Cancel asked to discard edits nobody had made.
+    const form = useModelForm();
+    form.openForEdit(
+      savedModel({ auto_eligible: true, quality_tier: "PREMIUM", routing_assignments: ["auto"] })
+    );
+    await nextTick();
+    form.openForEdit(
+      savedModel({ auto_eligible: false, quality_tier: "PREMIUM", routing_assignments: ["auto"] })
+    );
+    const seeded = JSON.stringify(form.form.value);
+
+    await nextTick();
+
+    expect(form.form.value.quality_tier).toBeNull();
+    expect(form.form.value.routing_assignments).toBeNull();
+    expect(JSON.stringify(form.form.value)).toBe(seeded);
+  });
+
   it("openForEdit keeps a stored capability flag in the payload", () => {
     // Regression: a capability missing from the load path is sent as false by
     // the PUT, silently clearing the flag on every edit.
