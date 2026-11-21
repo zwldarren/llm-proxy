@@ -141,7 +141,7 @@ API 密钥。
 | 同一 IP 反复提交无效密钥 | 启用 API 密钥 IP 锁定后返回 **429** `too_many_auth_failures`（默认关闭；10 次失败 → 300 秒，计数器按进程计并在重启时清零）。`/v1/*` 的 429 带 `Retry-After`，`/servers/*` 的 429 不带 |
 | 模型不在密钥白名单内 | 403 `model_not_allowed`。这不属于鉴权失败：密钥已通过认证，因此不会触发 IP 锁定，也不会增加延迟 |
 | MCP 服务器不在密钥白名单内 | 403 `Access denied to MCP server '<name>'` |
-| 预算耗尽 | 429 `budget_exceeded`（账户预算为 `user_budget_exceeded`） |
+| 预算耗尽 | 429 `budget_exceeded`（账户预算为 `user_budget_exceeded`）。只检查会产生花费的请求：`/v1/*` 下的 `GET`/`HEAD`（模型列表、已存储对象）仍需鉴权、仍受速率限制，但不会因预算被拒 |
 | 鉴权失败 | 响应会被延迟 `auth_failure_delay_ms`（默认 100 毫秒，±10% 抖动）以减缓暴力破解 |
 
 鉴权失败、锁定和登录都会记入审计日志。

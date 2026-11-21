@@ -66,7 +66,7 @@ server logs.
 | 404 | `model_not_found`, `not_found`, `mcp_server_not_found`, `provider_not_configured` | Unknown model/response/server; stored responses expire after 24 h |
 | 409 | `conflict` | Duplicate feedback, cancel of a non-cancellable response |
 | 413 | `body_size_exceeded` | Over `max_request_body_size_bytes` (default 64 MiB) |
-| 429 | `rate_limit_exceeded`, `too_many_auth_failures`, `budget_exceeded`, `user_budget_exceeded` | Rate limit, lockout, or budget cap. Rate-limit, per-key RPM, and `/v1/*` lockout 429s carry `Retry-After`; the `/servers/*` MCP lockout 429, the routed `max_cost` cap, and budget rejections do not |
+| 429 | `rate_limit_exceeded`, `too_many_auth_failures`, `budget_exceeded`, `user_budget_exceeded` | Rate limit, lockout, or budget cap. Rate-limit, per-key RPM, and `/v1/*` lockout 429s carry `Retry-After`; the `/servers/*` MCP lockout 429, the routed `max_cost` cap, and budget rejections do not. A budget rejection applies only to requests that can spend — `GET`/`HEAD` under `/v1/*` still authenticate and are still rate limited, but are never rejected for budget |
 | 499 | `client_disconnected` | Client or intermediary gave up mid-response; upstream cancelled (logged as failure). Every read timeout — SDK, browser, reverse proxy, Cloudflare — looks the same from here; a close after the last frame logs as a success instead |
 | 500 | `configuration_error`, `internal_error` | Bad configuration (e.g. smart routing disabled, missing model), or upstream responses that fail to parse (500 `api_error`) |
 | 502 | `provider_error`, `network_error` | Upstream failed |

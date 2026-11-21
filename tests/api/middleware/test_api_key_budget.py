@@ -594,6 +594,10 @@ class TestV1MiddlewareBudgetResponse:
         async def models():
             return {"data": []}
 
+        @app.post("/v1/chat/completions")
+        async def chat():
+            return {"choices": []}
+
         return app
 
     @pytest.mark.asyncio
@@ -613,14 +617,58 @@ class TestV1MiddlewareBudgetResponse:
         ):
             transport = ASGITransport(app=app, raise_app_exceptions=False)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get(
-                    "/v1/models", headers={"Authorization": "Bearer sk-test"}
+                response = await client.post(
+                    "/v1/chat/completions", headers={"Authorization": "Bearer sk-test"}
                 )
 
         assert response.status_code == 429
         body = response.json()
         assert body["error"]["code"] == "budget_exceeded"
         assert body["error"]["type"] == "rate_limit_error"
+
+    @pytest.mark.asyncio
+    async def test_over_budget_read_still_lists_models(self, app):
+        """A GET cannot spend, so the budget step is off for it.
+
+        Rejecting the model list left every client of an over-budget key with
+        no way to discover what it may call; the key must still be able to
+        read the catalog and its own records.
+        """
+        from httpx import ASGITransport, AsyncClient
+
+        auth_info = build_auth_info(principal_id="test-key", budget_usd=10.0, budget_period="daily")
+        budget_check = AsyncMock(return_value=True)
+        with (
+            patch(
+                "llm_proxy.api.gate.verify_api_key",
+                new=AsyncMock(return_value=auth_info),
+            ),
+            patch("llm_proxy.api.gate.is_key_budget_exceeded", new=budget_check),
+        ):
+            transport = ASGITransport(app=app, raise_app_exceptions=False)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.get(
+                    "/v1/models", headers={"Authorization": "Bearer sk-test"}
+                )
+
+        assert response.status_code == 200
+        # The spend lookup is not merely ignored — it never runs on a read.
+        budget_check.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_read_still_requires_a_valid_key(self, app):
+        """Skipping the budget step does not skip authentication."""
+        from httpx import ASGITransport, AsyncClient
+
+        with patch("llm_proxy.api.gate.verify_api_key", new=AsyncMock(return_value=None)):
+            transport = ASGITransport(app=app, raise_app_exceptions=False)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.get(
+                    "/v1/models", headers={"Authorization": "Bearer sk-bogus"}
+                )
+
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "invalid_api_key"
 
     @pytest.mark.asyncio
     async def test_under_budget_passes_through(self, app):
@@ -639,8 +687,8 @@ class TestV1MiddlewareBudgetResponse:
         ):
             transport = ASGITransport(app=app, raise_app_exceptions=False)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get(
-                    "/v1/models", headers={"Authorization": "Bearer sk-test"}
+                response = await client.post(
+                    "/v1/chat/completions", headers={"Authorization": "Bearer sk-test"}
                 )
 
         assert response.status_code == 200
@@ -663,8 +711,8 @@ class TestV1MiddlewareBudgetResponse:
         ):
             transport = ASGITransport(app=app, raise_app_exceptions=False)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get(
-                    "/v1/models", headers={"Authorization": "Bearer sk-test"}
+                response = await client.post(
+                    "/v1/chat/completions", headers={"Authorization": "Bearer sk-test"}
                 )
 
         assert response.status_code == 503
@@ -699,8 +747,8 @@ class TestV1MiddlewareBudgetResponse:
         ):
             transport = ASGITransport(app=app, raise_app_exceptions=False)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get(
-                    "/v1/models", headers={"Authorization": "Bearer sk-test"}
+                response = await client.post(
+                    "/v1/chat/completions", headers={"Authorization": "Bearer sk-test"}
                 )
 
         assert response.status_code == 429
@@ -735,8 +783,8 @@ class TestV1MiddlewareBudgetResponse:
         ):
             transport = ASGITransport(app=app, raise_app_exceptions=False)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get(
-                    "/v1/models", headers={"Authorization": "Bearer sk-test"}
+                response = await client.post(
+                    "/v1/chat/completions", headers={"Authorization": "Bearer sk-test"}
                 )
 
         assert response.status_code == 503

@@ -162,6 +162,8 @@ Beyond per-key budgets (see [API Keys](api-keys.md#budgets)), an admin can set a
 keys in the same UTC calendar windows.
 
 - Requests over the account budget fail with **429** and code `user_budget_exceeded`.
+  As with key budgets, only requests that can spend are checked: reads under
+  `/v1/*` still work.
 - Only an admin can reset it: **Team → member → Reset budget**.
 - The member can see their own status at `GET /api/me/budget`.
 

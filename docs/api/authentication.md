@@ -149,7 +149,7 @@ needs an API key.
 | Repeated invalid keys from one IP | **429** `too_many_auth_failures` when API-key IP lockout is enabled (off by default; 10 failures → 300 s, counters per process and reset on restart). The `/v1/*` 429 carries `Retry-After`; the `/servers/*` 429 does not |
 | Model not in the key's allowlist | 403 `model_not_allowed`. Not an auth failure: the key is already authenticated, so this never feeds the IP lockout and adds no delay |
 | MCP server not in the key's allowlist | 403 `Access denied to MCP server '<name>'` |
-| Budget exhausted | 429 `budget_exceeded` (or `user_budget_exceeded` for account budgets) |
+| Budget exhausted | 429 `budget_exceeded` (or `user_budget_exceeded` for account budgets). Only spending requests are checked: `GET`/`HEAD` under `/v1/*` (model lists, stored objects) still authenticate and are still rate limited, but never fail for budget |
 | Failed auth | Responses are delayed by `auth_failure_delay_ms` (default 100 ms, ±10% jitter) to slow brute force |
 
 Failed authentication attempts, lockouts, and logins are recorded in the audit log.

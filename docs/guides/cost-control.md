@@ -38,7 +38,10 @@ discount they applied upstream.
 
 ## 2. Budgets
 
-Budgets are checked on every request that carries an API key.
+Budgets are checked on every request that carries an API key and can spend. Reads
+(`GET`/`HEAD` under `/v1/*` — the model list, stored responses, files, batch
+listings) still authenticate and are still rate limited, but are never rejected for
+budget: a client that cannot list models cannot recover from a spent-out key.
 
 | Budget | Scope | Set in | Reset |
 | --- | --- | --- | --- |

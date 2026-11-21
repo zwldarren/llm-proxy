@@ -8,6 +8,8 @@ identity stamping, rejection logging — lives in :mod:`llm_proxy.api.gate`
 and is shared with the other protected transports.
 """
 
+from dataclasses import replace
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
@@ -30,6 +32,18 @@ V1_GATE_POLICY = GatePolicy(
     extraction=KeyExtraction.STRICT,
     allow_session_cookie=True,
 )
+
+#: Methods whose /v1/* requests cannot create a billable usage record.
+#: ``GET /v1/models``, a stored response, a file, or a batch listing are the
+#: client's own records, not spend.
+_READ_ONLY_METHODS = frozenset({"GET", "HEAD"})
+
+#: The policy for those reads: identical except that the budget step is off.
+#: A budget caps spending, so a request that cannot spend must not be rejected
+#: by it. Rejecting the model list stranded every client of an over-budget key
+#: with no way to discover what it may call (and broke the console's own model
+#: picker), which is a different failure from "this call would cost money".
+V1_READ_GATE_POLICY = replace(V1_GATE_POLICY, budget=False)
 
 
 async def _dispatch(request: Request, body: BodyReader) -> Response | None:
@@ -71,7 +85,12 @@ async def _dispatch(request: Request, body: BodyReader) -> Response | None:
     ):
         return csrf_rejection()
 
-    rejection = await gate.gate_request(request, V1_GATE_POLICY)
+    # A read cannot create spend, so the budget step is off for it: an
+    # over-budget key must still be able to list models and read its own
+    # records. Everything else (verification, rate limit, lockout) still runs.
+    policy = V1_READ_GATE_POLICY if request.method in _READ_ONLY_METHODS else V1_GATE_POLICY
+
+    rejection = await gate.gate_request(request, policy)
     if rejection is not None:
         return JSONResponse(
             status_code=rejection.status_code,

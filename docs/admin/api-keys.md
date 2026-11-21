@@ -35,6 +35,11 @@ Budgets are enforced at request time. When the current window's spend reaches th
 further requests fail with **HTTP 429** and error code `budget_exceeded`; an
 admin-configured account budget produces `user_budget_exceeded`.
 
+Only requests that can spend are checked. Reads (`GET`/`HEAD` under `/v1/*`, such as
+the model list, stored responses, files and batch listings) still authenticate and
+count against rate limits, but a spent-out key can keep calling them — a client that
+cannot list models cannot tell "over budget" from "provider is broken".
+
 Window semantics are UTC calendar-based:
 
 | Period | Window start |

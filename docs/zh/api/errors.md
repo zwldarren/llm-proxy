@@ -63,7 +63,7 @@ not_found`、`rate_limit_error → too_many_requests`、`api_error`/`provider_er
 | 404 | `model_not_found`、`not_found`、`mcp_server_not_found`、`provider_not_configured` | 模型/响应/服务器不存在；已存储的响应 24 小时后过期 |
 | 409 | `conflict` | 重复提交反馈，或取消一个不可取消的响应 |
 | 413 | `body_size_exceeded` | 超出 `max_request_body_size_bytes`（默认 64 MiB） |
-| 429 | `rate_limit_exceeded`、`too_many_auth_failures`、`budget_exceeded`、`user_budget_exceeded` | 速率限制、锁定或预算上限。速率限制、单密钥 RPM 以及 `/v1/*` 的锁定 429 带 `Retry-After`；`/servers/*` 的 MCP 锁定 429、路由时的 `max_cost` 上限以及预算拒绝都不带 |
+| 429 | `rate_limit_exceeded`、`too_many_auth_failures`、`budget_exceeded`、`user_budget_exceeded` | 速率限制、锁定或预算上限。速率限制、单密钥 RPM 以及 `/v1/*` 的锁定 429 带 `Retry-After`；`/servers/*` 的 MCP 锁定 429、路由时的 `max_cost` 上限以及预算拒绝都不带。预算拒绝只作用于会产生花费的请求——`/v1/*` 下的 `GET`/`HEAD` 仍需鉴权、仍受速率限制，但不会因预算被拒 |
 | 499 | `client_disconnected` | 客户端或中间环节在响应中途放弃；上游调用被取消（按失败记录）。SDK、浏览器、反向代理、Cloudflare 的各种读超时，从这里看都一样；最后一个分片之后的关闭则记为成功 |
 | 500 | `configuration_error`、`internal_error` | 配置有问题（如智能路由未开启、模型缺失），或上游响应解析失败（500 `api_error`） |
 | 502 | `provider_error`、`network_error` | 上游失败 |

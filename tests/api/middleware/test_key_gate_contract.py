@@ -23,7 +23,7 @@ from llm_proxy.api.gate import (
     VerifiedKeyAuth,
     gate_request,
 )
-from llm_proxy.api.middleware.api_key_auth import V1_GATE_POLICY
+from llm_proxy.api.middleware.api_key_auth import V1_GATE_POLICY, V1_READ_GATE_POLICY
 from llm_proxy.api.middleware.mcp_proxy import MCP_GATE_POLICY
 from llm_proxy.api.routers.openresponses import OPENRESPONSES_WS_POLICY
 from llm_proxy.api.routers.realtime import REALTIME_GATE_POLICY
@@ -40,6 +40,10 @@ STEPS = ("lockout", "auth_failure_penalty", "rate_limit", "budget", "claim_last_
 EXPECTED_STEPS: frozendict[str, dict[str, bool]] = frozendict(
     {
         "v1": dict.fromkeys(STEPS, True),
+        # The /v1/* read-only policy: a GET cannot create a usage record, so the
+        # budget step is off — an over-budget key must still list models and read
+        # its own stored objects. Every other step is unchanged.
+        "v1-read": {**dict.fromkeys(STEPS, True), "budget": False},
         "mcp": dict.fromkeys(STEPS, True),
         "realtime": {
             "lockout": False,
@@ -65,6 +69,7 @@ EXPECTED_STEPS: frozendict[str, dict[str, bool]] = frozendict(
 TRANSPORT_POLICIES: frozendict[str, Any] = frozendict(
     {
         "v1": V1_GATE_POLICY,
+        "v1-read": V1_READ_GATE_POLICY,
         "mcp": MCP_GATE_POLICY,
         "realtime": REALTIME_GATE_POLICY,
         "openresponses": OPENRESPONSES_WS_POLICY,

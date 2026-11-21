@@ -68,10 +68,13 @@ throttled last-used claim. One module (`llm_proxy.api.gate`) owns the sequence;
 each transport — the `/v1/*` middleware, the `/servers/*` MCP middleware, the
 Realtime and OpenResponses WebSocket handshakes — declares a policy row (which
 checks apply, how strictly a key is extracted) and renders rejections in its own
-wire form. A rejection — auth failure or quota — is logged by the gate itself,
-never by the transport. The verified principal is a fact of the request, not a
-scope dict: identity goes through the request facts' `RequestIdentity`.
-See ADR-0032.
+wire form. The `/v1/*` transport declares a second row for `GET`/`HEAD`, where the
+budget step is off: a read cannot create a usage record, so a spent-out key keeps
+its catalog and its stored objects instead of being told they do not exist. A
+rejection — auth failure or quota — is logged by the gate itself, never by the
+transport. The verified principal is a fact of the request, not a scope dict:
+identity goes through the request facts' `RequestIdentity`.
+See ADR-0032 and ADR-0064.
 _Avoid_: verify_api_key_for_mcp (the old misnomer for the shared verifier), a
 per-transport hand-rolled gate sequence, `scope["llm_proxy_auth"]`
 
