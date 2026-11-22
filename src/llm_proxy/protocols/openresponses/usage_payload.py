@@ -31,6 +31,7 @@ def build_usage_payload(
     total_tokens: int | None = None,
     cached_tokens: int = 0,
     cache_write_tokens: int = 0,
+    cache_write_long_tokens: int = 0,
     reasoning_tokens: int = 0,
     input_details: Mapping[str, Any] | None = None,
     output_details: Mapping[str, Any] | None = None,
@@ -43,6 +44,8 @@ def build_usage_payload(
         total_tokens: Provider-reported total; computed when omitted.
         cached_tokens: Input tokens served from cache.
         cache_write_tokens: Input tokens written to the prompt cache.
+        cache_write_long_tokens: The part of those writes (`12h` writes) upstream
+            prices above a default-lifetime write; omitted when unreported.
         reasoning_tokens: Output tokens attributed to reasoning.
         input_details: Provider detail keys merged over the defaults
             (``None`` values skipped).
@@ -52,6 +55,8 @@ def build_usage_payload(
         "cached_tokens": cached_tokens,
         "cache_write_tokens": cache_write_tokens,
     }
+    if cache_write_long_tokens:
+        details_in["cache_write_tokens_details"] = {"ttl_12h_tokens": cache_write_long_tokens}
     for key, value in (input_details or {}).items():
         if value is not None:
             details_in[key] = value

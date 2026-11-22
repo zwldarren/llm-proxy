@@ -2129,6 +2129,20 @@ def _build_usage(response: InternalResponse) -> dict[str, Any]:
         )
     if response.usage.cache_creation_input_tokens:
         prompt_details["cache_write_tokens"] = response.usage.cache_creation_input_tokens
+    # The long-lifetime slice of those writes: OpenAI prices a 12-hour write
+    # above a 30-minute one, and a client reading its own bill needs the split
+    # back. Nested under the write it belongs to, never added to it.
+    long_writes = (
+        response.usage.prompt_tokens_details.cache_write_long_tokens
+        if response.usage.prompt_tokens_details
+        else None
+    )
+    if long_writes:
+        prompt_details["cache_write_tokens_details"] = {"ttl_12h_tokens": long_writes}
+    # The snake_case keys are the canonical record's spelling of the facts the
+    # client reads under ``input_tokens_details``; ``asdict`` above put them
+    # under their own names, and leaving both would report one fact twice.
+    prompt_details.pop("cache_write_long_tokens", None)
     if prompt_details:
         usage_payload["prompt_tokens_details"] = prompt_details
     completion_details = (

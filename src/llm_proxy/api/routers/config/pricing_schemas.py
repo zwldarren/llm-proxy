@@ -93,6 +93,12 @@ class SyncPricingResult(BaseModel):
     new_cached_write_cost: float | None = Field(
         None, description="New cached write cost per 1M tokens"
     )
+    old_cached_write_long_cost: float | None = Field(
+        None, description="Previous long-lifetime cached write cost per 1M tokens"
+    )
+    new_cached_write_long_cost: float | None = Field(
+        None, description="New long-lifetime cached write cost per 1M tokens"
+    )
     old_reasoning_cost: float | None = Field(
         None, description="Previous reasoning cost per 1M tokens"
     )

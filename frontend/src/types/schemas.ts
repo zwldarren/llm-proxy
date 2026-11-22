@@ -7,6 +7,8 @@ export interface TokenRateOverrides {
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  /** Cost per 1M cached write tokens for long-lifetime (12h) writes. */
+  cached_write_long_cost_per_1m?: number | null;
   reasoning_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
@@ -76,6 +78,8 @@ export interface ModelProviderMapping {
    * Cost per 1M cached write tokens in USD.
    */
   cached_write_cost_per_1m?: number | null;
+  /** Cost per 1M cached write tokens for long-lifetime (12h) writes. */
+  cached_write_long_cost_per_1m?: number | null;
   /**
    * Cost per 1M audio input tokens in USD.
    */
@@ -140,6 +144,8 @@ interface ModelBase {
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  /** Cost per 1M cached write tokens for long-lifetime (12h) writes. */
+  cached_write_long_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   /**
@@ -248,6 +254,8 @@ export interface ModelUpdate {
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  /** Cost per 1M cached write tokens for long-lifetime (12h) writes. */
+  cached_write_long_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   image_input_cost_per_1m?: number | null;
@@ -344,6 +352,8 @@ interface PricingOption {
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  /** Cost per 1M cached write tokens for long-lifetime (12h) writes. */
+  cached_write_long_cost_per_1m?: number | null;
   reasoning_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
@@ -399,6 +409,8 @@ export interface PricingUpdateItem {
   output_cost_per_1m?: number | null;
   cached_read_cost_per_1m?: number | null;
   cached_write_cost_per_1m?: number | null;
+  /** Cost per 1M cached write tokens for long-lifetime (12h) writes. */
+  cached_write_long_cost_per_1m?: number | null;
   audio_input_cost_per_1m?: number | null;
   audio_output_cost_per_1m?: number | null;
   image_input_cost_per_1m?: number | null;

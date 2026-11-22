@@ -60,6 +60,7 @@ All prices are **USD**. Rates are per 1M tokens unless stated otherwise:
 | --- | --- |
 | `input_cost_per_1m`, `output_cost_per_1m` | tokens |
 | `cached_read_cost_per_1m`, `cached_write_cost_per_1m` | tokens (cache hits/writes) |
+| `cached_write_long_cost_per_1m` | tokens (cache writes with a long minimum lifetime, e.g. OpenAI's 12-hour writes) |
 | `reasoning_cost_per_1m` | reasoning/thinking tokens |
 | `audio_input_cost_per_1m`, `audio_output_cost_per_1m` | tokens |
 | `image_input_cost_per_1m` | tokens |
@@ -105,8 +106,19 @@ Details that affect the bill:
   `reasoning_cost_per_1m` is set they are carved out and charged at that rate,
   otherwise they bill at the output rate.
 - Cache tokens are re-priced from the base input rate to the cached read/write
-  rate, and the difference is recorded as `cache_savings_usd`. Without a base input
-  rate, cache tokens are charged at the cache rates directly.
+  rate, and the difference is recorded as `cache_savings_usd`. That figure is the
+  cache's **net** effect on the bill — what the reads saved minus what the writes
+  cost above the uncached input rate — so a turn whose writes outweighed its reads
+  reports a negative value. Without a base input rate, cache tokens are charged at
+  the cache rates directly.
+- Cache writes split by cache lifetime. Upstreams that let a request ask for a
+  longer-lived cache charge more for the write: OpenAI bills a write at 1.25× the
+  input rate for the default 30-minute lifetime and 2.5× for a 12-hour one.
+  `cached_write_cost_per_1m` prices the default-lifetime write and
+  `cached_write_long_cost_per_1m` the 12-hour part; with the long rate unset,
+  every written token bills at the default rate. The split comes from the
+  upstream's own `cache_write_tokens_details.ttl_12h_tokens` count, and is
+  reported back to clients under the same key.
 - Audio/image tokens are carved out of prompt/completion tokens when a dedicated
   rate exists, so they are not double-charged.
 - Provider-reported cost wins for `openrouter` and `nanogpt`: their own figures

@@ -6006,6 +6006,15 @@
                   "cache_write_tokens": {
                     "type": "integer"
                   },
+                  "cache_write_tokens_details": {
+                    "type": "object",
+                    "properties": {
+                      "ttl_12h_tokens": {
+                        "type": "integer"
+                      }
+                    },
+                    "additionalProperties": true
+                  },
                   "cached_tokens": {
                     "type": "integer"
                   }
@@ -7878,6 +7887,21 @@
             ],
             "title": "Cache Write Tokens",
             "description": "Number of tokens written to the prompt cache"
+          },
+          "cache_write_tokens_details": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens Details",
+            "description": "Split of the cache writes by cache lifetime; ``ttl_12h_tokens`` is the long-lifetime part, which upstreams price above a default write"
           }
         },
         "type": "object",

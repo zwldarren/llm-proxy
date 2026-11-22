@@ -52,6 +52,10 @@ _RESPONSES_ONLY_EXTRA_KEYS = frozenset(
         # (context_management, prompt_cache_options, ...); merged back into
         # the body only by the native Responses provider serializer.
         "responses_raw_fields",
+        # Forwarded by ``_build_openai_cache_options`` instead, which gates it on
+        # the same upstream allow-list as ``prompt_cache_key``: the generic extra
+        # merge below would send it to strict gateways that reject the key.
+        "prompt_cache_options",
     }
 )
 
@@ -284,6 +288,37 @@ class OpenAIRequestBuilder:
         return False
 
     @staticmethod
+    def _build_openai_cache_options(
+        body: dict[str, Any], request: InternalRequest, context: BuildContext
+    ) -> dict[str, Any]:
+        """Carry the client's ``prompt_cache_options`` to upstreams that accept it.
+
+        The field (``mode``/``ttl``/``prewarm``) is parsed into ``extra`` because
+        the internal model does not hold it, so without this gate it would be
+        forwarded to every Chat Completions upstream — including the strict
+        third-party gateways that reject an unknown key with a 400. The same
+        allow-list that governs ``prompt_cache_key`` applies: a native OpenAI
+        upstream understands the field, and every other gateway does not.
+
+        The cached options are dropped rather than downgraded: a client that asked
+        for a 12-hour cache keeps its prompt-cache behaviour only where the
+        upstream can honour it, and a silent rewrite to a shorter lifetime would
+        bill it for a cache it did not get.
+        """
+        options = request.extra.get("prompt_cache_options")
+        if not isinstance(options, dict) or not options:
+            return body
+        if not OpenAIRequestBuilder._should_send_prompt_cache_key(context.base_url):
+            logger.debug(
+                "Dropping prompt_cache_options %r: this Chat Completions upstream is not "
+                "known to accept the field",
+                sorted(options),
+            )
+            return body
+        body["prompt_cache_options"] = options
+        return body
+
+    @staticmethod
     def _build_openai_params(
         body: dict[str, Any],
         request: InternalRequest,
@@ -337,7 +372,7 @@ class OpenAIRequestBuilder:
             context.base_url
         ):
             body["prompt_cache_key"] = cache_key
-        return body
+        return OpenAIRequestBuilder._build_openai_cache_options(body, request, context)
 
     def _build_extra(
         self, body: dict[str, Any], request: InternalRequest, context: BuildContext

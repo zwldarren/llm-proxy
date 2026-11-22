@@ -30,6 +30,11 @@ class PricingRates:
     output_cost_per_1m: float | None = None
     cached_read_cost_per_1m: float | None = None
     cached_write_cost_per_1m: float | None = None
+    # A cache write with a long minimum lifetime costs more upstream: OpenAI
+    # bills a 12-hour write at 2.5x the input rate against 1.25x for the default
+    # 30-minute one. Unset means "no long-write rate": those tokens then bill at
+    # ``cached_write_cost_per_1m``, the rate every deployment had for every write.
+    cached_write_long_cost_per_1m: float | None = None
     reasoning_cost_per_1m: float | None = None
     audio_input_cost_per_1m: float | None = None
     audio_output_cost_per_1m: float | None = None
@@ -54,6 +59,7 @@ class CostTier:
     output_cost_per_1m: float | None = None
     cached_read_cost_per_1m: float | None = None
     cached_write_cost_per_1m: float | None = None
+    cached_write_long_cost_per_1m: float | None = None
     reasoning_cost_per_1m: float | None = None
     audio_input_cost_per_1m: float | None = None
     audio_output_cost_per_1m: float | None = None
@@ -78,6 +84,7 @@ class PricingWindow:
     output_cost_per_1m: float | None = None
     cached_read_cost_per_1m: float | None = None
     cached_write_cost_per_1m: float | None = None
+    cached_write_long_cost_per_1m: float | None = None
     reasoning_cost_per_1m: float | None = None
     audio_input_cost_per_1m: float | None = None
     audio_output_cost_per_1m: float | None = None
@@ -120,6 +127,7 @@ _OVERLAY_RATE_FIELDS = (
     "output_cost_per_1m",
     "cached_read_cost_per_1m",
     "cached_write_cost_per_1m",
+    "cached_write_long_cost_per_1m",
     "reasoning_cost_per_1m",
     "audio_input_cost_per_1m",
     "audio_output_cost_per_1m",
@@ -366,6 +374,14 @@ def _calculate_cache_cost(
     When no base input rate is configured but cache rates are set, cache tokens are
     charged at the cache rate directly (no adjustment needed since there's no base
     charge to adjust from).
+
+    Returns ``(cost_adjustment, cache_savings_usd)``. The second value is the
+    cache's NET effect on the bill, not just what the reads saved: a write costs
+    more than the uncached tokens it replaces (OpenAI bills 1.25x the input rate
+    for a default-lifetime write, 2.5x for a 12-hour one), so the premium those
+    tokens paid is subtracted here. A negative result is a turn where caching cost
+    more than it saved, which is the honest half of the picture when a prefix was
+    written once and read once.
     """
     if rates.input_cost_per_1m is None:
         # No base input rate — charge cache tokens at cache rates directly.
@@ -377,10 +393,7 @@ def _calculate_cache_cost(
             cache_cost += (
                 token_usage.cached_prompt_tokens / 1_000_000
             ) * rates.cached_read_cost_per_1m
-        if rates.cached_write_cost_per_1m is not None:
-            cache_cost += (
-                token_usage.cache_creation_input_tokens / 1_000_000
-            ) * rates.cached_write_cost_per_1m
+        cache_cost += _cache_write_cost(token_usage, rates) or 0.0
         return cache_cost, 0.0
 
     input_cost_per_1m = rates.input_cost_per_1m
@@ -402,14 +415,15 @@ def _calculate_cache_cost(
                 "tokens will be charged at full input price with no discount"
             )
 
-    # Anthropic cache creation tokens — already in prompt_tokens, adjust to cache write rate
+    # Cache write tokens — already in prompt_tokens, adjust to cache write rate.
     if token_usage.cache_creation_input_tokens > 0:
-        if rates.cached_write_cost_per_1m is not None:
-            creation_cost = (
-                token_usage.cache_creation_input_tokens / 1_000_000
-            ) * rates.cached_write_cost_per_1m
+        write_cost = _cache_write_cost(token_usage, rates)
+        if write_cost is not None:
             full_cost = (token_usage.cache_creation_input_tokens / 1_000_000) * input_cost_per_1m
-            cost_adjustment += creation_cost - full_cost
+            cost_adjustment += write_cost - full_cost
+            # A write above the input rate costs MORE than not caching, so the
+            # signed premium is what the cache actually did to the bill.
+            cache_savings_usd += full_cost - write_cost
         else:
             logger.warning(
                 "cache_creation_input_tokens present but no cached_write_cost_per_1m configured; "
@@ -432,6 +446,44 @@ def _calculate_cache_cost(
             )
 
     return cost_adjustment, cache_savings_usd
+
+
+def _cache_write_cost(token_usage: TokenUsage, rates: PricingRates) -> float | None:
+    """What the turn's cache writes cost, or ``None`` when no write rate is set.
+
+    A write is one count with two possible rates: the long-lifetime part (OpenAI's
+    12-hour writes) bills at ``cached_write_long_cost_per_1m``, the rest at
+    ``cached_write_cost_per_1m``. Both are total rates for their tokens, not
+    surcharges, so the two are added — never one applied on top of the other.
+    Without a long-write rate every written token bills at the plain write rate,
+    which is the behaviour every provider reported before lifetimes existed.
+
+    The long count is clamped to the write total it splits: wire data that claims
+    more long-lived tokens than were written cannot bill more than the write.
+    """
+    write_rate = rates.cached_write_cost_per_1m
+    long_rate = rates.cached_write_long_cost_per_1m
+    if write_rate is None and long_rate is None:
+        return None
+
+    total = token_usage.cache_creation_input_tokens or 0
+    # The fallbacks above guarantee at least one rate, but not which: a
+    # deployment that only configured the long-write rate bills every write
+    # there, and vice versa. Resolving both to a number keeps the arithmetic
+    # total-rate-times-tokens with no branch below.
+    has_long_rate = long_rate is not None
+    short_rate = write_rate if write_rate is not None else long_rate
+    long_rate = long_rate if long_rate is not None else write_rate
+    assert short_rate is not None and long_rate is not None
+
+    # Without a long-write rate every written token bills at the plain rate; the
+    # split is simply not priced apart.
+    long_tokens = 0
+    if has_long_rate:
+        long_tokens = min(token_usage.cache_write_long_tokens or 0, total)
+    short_tokens = total - long_tokens
+
+    return (short_tokens / 1_000_000) * short_rate + (long_tokens / 1_000_000) * long_rate
 
 
 def _calculate_audio_cost(

@@ -79,7 +79,11 @@ seconds.
 | `GET /api/me/budget` | Your account budget status |
 
 Cache savings require `cached_read_cost_per_1m` on the model; without it the metric is
-skipped (with a warning in the app log).
+skipped (with a warning in the app log). The figure is net: cache-write premiums are
+subtracted from what the reads saved, so a turn that wrote a prefix once and read it
+once reports a cost, not a saving. Give a model a `cached_write_long_cost_per_1m` rate
+when its upstream charges more for long-lived cache writes (OpenAI's 12-hour writes),
+or those tokens bill at the plain cache-write rate.
 
 ## 4. Reduce spend structurally
 

@@ -81,6 +81,15 @@ class TokenRateOverrides(BaseModel):
     cached_write_cost_per_1m: float | None = Field(
         default=None, ge=0, description="Cost per 1M cached write tokens in USD"
     )
+    cached_write_long_cost_per_1m: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Cost per 1M cached write tokens in USD when the write asks for a long "
+            "minimum cache lifetime (OpenAI's 12-hour writes); unset bills them at "
+            "the plain cached write rate"
+        ),
+    )
     reasoning_cost_per_1m: float | None = Field(
         default=None, ge=0, description="Cost per 1M reasoning (thinking) tokens in USD"
     )
@@ -430,6 +439,14 @@ class ModelProviderConfig(BaseModel):
         ge=0,
         description="Cost per 1M cached write tokens in USD for this specific provider",
     )
+    cached_write_long_cost_per_1m: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Cost per 1M cached write tokens in USD for this specific provider when the "
+            "write asks for a long minimum cache lifetime"
+        ),
+    )
     audio_input_cost_per_1m: float | None = Field(
         default=None,
         ge=0,
@@ -560,6 +577,14 @@ class ModelConfig(BaseModel):
         default=None,
         ge=0,
         description="Cost per 1M cached write tokens in USD",
+    )
+    cached_write_long_cost_per_1m: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Cost per 1M cached write tokens in USD when the write asks for a long "
+            "minimum cache lifetime"
+        ),
     )
     audio_input_cost_per_1m: float | None = Field(
         default=None,

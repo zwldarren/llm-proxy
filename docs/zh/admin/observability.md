@@ -18,7 +18,7 @@
 | `ttft_ms` | 首字时间（流式） |
 | `response_time_ms` | 总耗时 |
 | Token 数 | 提示、补全、总计；缓存创建/读取；缓存提示；音频输入/输出 |
-| `cost_usd` / `cache_savings_usd` | 计费费用，以及缓存读取带来的估算节省 |
+| `cost_usd` / `cache_savings_usd` | 计费费用，以及缓存的净节省（读取节省减去写入溢价） |
 | `fallback_count` | 该请求切换提供商的次数。`0` = 未切换，`>0` = 在某个提供商成功响应之前，有这么多个提供商失败；`NULL` = 该列上线前写入的行（未知）——列表筛选和重试徽标都读它，同样的计数也保留在 `log_metadata` 中 |
 | `log_metadata` | `fallback_attempts`/`fallback_count`/`fallback_providers`、`retry_attempts`/`retry_count`、路由字段、`provider_model_name` |
 | `client_ip`、`user_agent`、`auth_method` | 归属信息，通过受信代理解析计算 |
@@ -144,7 +144,8 @@
 的按模型细分里。全局**使用统计**面板汇总同样这三类行，所以它的费用总额与预算扣减的口径
 一致；请求数和成功率只从 `endpoint` 行统计，因为裁判调用和批次都不是客户端发出的请求。
 只报告平均值，没有百分位数。缓存节省需要模型上有 `cached_read_cost_per_1m` 价格；
-没有该价格时跳过这项指标，并在应用日志中给出警告。
+没有该价格时跳过这项指标，并在应用日志中给出警告。该值是净额——写入溢价会从读取节省
+中扣除——因此负数表示这一轮的缓存让部署花了更多钱。
 
 ## 审计日志
 

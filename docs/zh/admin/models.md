@@ -55,6 +55,7 @@
 | --- | --- |
 | `input_cost_per_1m`、`output_cost_per_1m` | Token |
 | `cached_read_cost_per_1m`、`cached_write_cost_per_1m` | Token（缓存命中/写入） |
+| `cached_write_long_cost_per_1m` | Token（要求较长最短缓存存活时间的写入，例如 OpenAI 的 12 小时写入） |
 | `reasoning_cost_per_1m` | 推理/思考 Token |
 | `audio_input_cost_per_1m`、`audio_output_cost_per_1m` | Token |
 | `image_input_cost_per_1m` | Token |
@@ -90,7 +91,15 @@
 - 推理 Token 已经计入 `output_tokens`；设置了 `reasoning_cost_per_1m` 时会把它们
   单独拆出并按该费率收费，否则按输出费率计费。
 - 缓存 Token 会从基础输入费率改按缓存读/写费率计价，差额记为
-  `cache_savings_usd`。没有基础输入费率时，缓存 Token 直接按缓存费率收费。
+  `cache_savings_usd`。这个数字是缓存对账单的**净**影响——读取省下的减去写入比未缓存
+  输入贵出的部分——因此某一轮写入多于读取时会记成负数。没有基础输入费率时，缓存
+  Token 直接按缓存费率收费。
+- 缓存写入按缓存存活时间拆分。允许请求要求更长缓存存活时间的上游会对写入收更高
+  的价：OpenAI 默认 30 分钟存活时间按输入费率的 1.25 倍计费，12 小时的按 2.5 倍。
+  `cached_write_cost_per_1m` 对应默认存活时间的写入，`cached_write_long_cost_per_1m`
+  对应 12 小时那部分；不设置长时费率时，所有写入 Token 都按默认费率计费。拆分来自
+  上游自己上报的 `cache_write_tokens_details.ttl_12h_tokens`，并以同样的键回传给
+  客户端。
 - 音频/图像 Token 在有专属费率时会从 prompt/completion Token 中拆出，因此不会被
   重复计费。
 - 提供商上报的成本优先于 `openrouter` 和 `nanogpt`：用它们自己的数字替换计算出的

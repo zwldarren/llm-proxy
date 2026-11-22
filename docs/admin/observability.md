@@ -19,7 +19,7 @@ the routing decision.
 | `ttft_ms` | Time to first token (streaming) |
 | `response_time_ms` | Total duration |
 | Token counts | Prompt, completion, total; cache creation/read; cached prompt; audio in/out |
-| `cost_usd` / `cache_savings_usd` | Billed cost and the estimated saving from cache reads |
+| `cost_usd` / `cache_savings_usd` | Billed cost and the cache's net saving (reads saved minus write premiums) |
 | `fallback_count` | Provider switches this request needed. `0` = none, `>0` = that many providers failed before one served the request, `NULL` = row written before the column existed (unknown) — the list filter and the retries badge read it; the same count stays in `log_metadata` |
 | `log_metadata` | `fallback_attempts`/`fallback_count`/`fallback_providers`, `retry_attempts`/`retry_count`, routing fields, `provider_model_name` |
 | `client_ip`, `user_agent`, `auth_method` | Attribution, computed through trusted-proxy resolution |
@@ -179,7 +179,8 @@ rate are counted from `endpoint` rows only, because neither a judge call nor a b
 is a request the client made.
 Averages are the only latency/throughput statistics reported — no percentiles. Cache
 savings require a `cached_read_cost_per_1m` price on the model; without it the metric
-is skipped with a warning.
+is skipped with a warning. The value is net — write premiums are subtracted from read
+savings — so a negative figure means the cache cost the deployment money that turn.
 
 ## Audit Logs
 

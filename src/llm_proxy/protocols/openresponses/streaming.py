@@ -85,7 +85,9 @@ def _web_search_error_fields(results: list[dict[str, Any] | str]) -> tuple[str, 
 #: state. Every other key a provider reports is carried verbatim, because
 #: ``serializer._build_usage`` hands the provider's whole details block to the
 #: non-streaming client body and ``build_usage_payload`` merges it as-is.
-_CANONICAL_INPUT_DETAILS: frozenset[str] = frozenset({"cached_tokens", "cache_write_tokens"})
+_CANONICAL_INPUT_DETAILS: frozenset[str] = frozenset(
+    {"cached_tokens", "cache_write_tokens", "cache_write_tokens_details"}
+)
 _CANONICAL_OUTPUT_DETAILS: frozenset[str] = frozenset({"reasoning_tokens"})
 
 
@@ -137,6 +139,10 @@ class OpenResponsesStreamingState:
     output_tokens: int = 0
     cached_tokens: int = 0
     cache_write_tokens: int = 0
+    # The long-lifetime slice of ``cache_write_tokens`` (OpenAI's
+    # ``cache_write_tokens_details.ttl_12h_tokens``), emitted under the details
+    # block the non-streaming body uses so both paths report the same split.
+    cache_write_long_tokens: int = 0
     # Provider detail keys with no canonical scalar (the audio/image/text/video
     # token splits, the prediction-token counters). Merged into the snapshot's
     # ``input_tokens_details`` / ``output_tokens_details`` so both paths report
@@ -917,6 +923,12 @@ class OpenResponsesStreamingTransformer(PendingTerminalState, StreamingTransform
             cache_write = usage.get("cache_creation_input_tokens")
         if cache_write is not None:
             self.state.cache_write_tokens = cache_write or 0
+        write_details = ptd.get("cache_write_tokens_details")
+        write_long = None
+        if isinstance(write_details, dict):
+            write_long = write_details.get("ttl_12h_tokens")
+        if write_long is not None:
+            self.state.cache_write_long_tokens = write_long or 0
         # Detail facts with no canonical scalar (audio/image/text/video splits)
         # are emitted by the non-streaming body, so they must reach the snapshot.
         self.state.input_details.update(_extra_details(ptd, _CANONICAL_INPUT_DETAILS))

@@ -124,8 +124,25 @@ def _prompt_details(raw: Any) -> PromptTokensDetails | None:
         image_tokens=_int(details.get("image_tokens")),
         text_tokens=_int(details.get("text_tokens")),
         cache_write_tokens=_int(details.get("cache_write_tokens")),
+        cache_write_long_tokens=_long_cache_writes(details.get("cache_write_tokens_details")),
         video_tokens=_int(details.get("video_tokens")),
     )
+
+
+def _long_cache_writes(raw: Any) -> int | None:
+    """The long-lifetime part of a cache write, from the split upstreams publish.
+
+    OpenAI reports ``input_tokens_details.cache_write_tokens_details`` as
+    ``{ttl_30m_tokens, ttl_12h_tokens}``, non-overlapping, summing to
+    ``cache_write_tokens``. Only the 12-hour side is priced apart from the rest
+    of the write, so only it is kept — the short side needs no field to be read
+    as "the remaining writes". A block without the 12-hour count states no
+    split at all (the pre-lifetime shape), hence ``None`` rather than zero.
+    """
+    block = _as_dict(raw)
+    if block is None:
+        return None
+    return _int(block.get("ttl_12h_tokens"))
 
 
 def _completion_details(raw: Any) -> CompletionTokensDetails | None:
@@ -168,6 +185,8 @@ def _lift_cache_facts(
     if cache_write is not None and prompt_details is not None:
         prompt_details.cache_write_tokens = None
 
+    prompt_details = _normalize_long_cache_writes(prompt_details, cache_write)
+
     # A block whose only facts were the lifted ones says nothing: an all-``None``
     # details object is not ``None`` to a caller testing truthiness, so leaving
     # it behind would hand downstream code an empty nested block to emit.
@@ -175,6 +194,34 @@ def _lift_cache_facts(
         prompt_details = None
 
     return cache_read, cache_write, prompt_details
+
+
+def _normalize_long_cache_writes(
+    prompt_details: PromptTokensDetails | None,
+    cache_write: int | None,
+) -> PromptTokensDetails | None:
+    """Normalize the long-lifetime part of a cache write against its total.
+
+    The long-lifetime part is NOT a flat fact of its own: it is a subset of
+    ``cache_creation_input_tokens`` priced at a different rate, which is what the
+    nested details block is for. Keeping it there leaves the flat cache-write
+    total as one number while clients still read the upstream's own
+    ``prompt_tokens_details.cache_write_tokens_details`` split.
+
+    A long count without a write total is self-contradicting wire data; it is
+    dropped rather than priced against a write the record does not have, and a
+    count larger than the write it splits is clamped to it so a bill can never
+    charge more long-lived tokens than were written at all.
+    """
+    if prompt_details is None or prompt_details.cache_write_long_tokens is None:
+        return prompt_details
+    if not cache_write:
+        prompt_details.cache_write_long_tokens = None
+        return prompt_details
+    prompt_details.cache_write_long_tokens = min(
+        prompt_details.cache_write_long_tokens, cache_write
+    )
+    return prompt_details
 
 
 def _lift_reasoning(

@@ -243,7 +243,9 @@ class TestCalculateCacheCost:
         # Premium = (12.5 - 10.0) * 200 / 1M
         expected_premium = (200 / 1_000_000) * (12.5 - 10.0)
         assert abs(adjustment - expected_premium) < 0.0001
-        assert savings == 0.0
+        # A write dearer than the tokens it replaces is a cache COST, so the net
+        # figure is the negated premium rather than zero.
+        assert abs(savings + expected_premium) < 0.0001
 
     def test_cached_prompt_tokens_openai(self):
         """Test OpenAI cached_prompt_tokens with configured cost."""
@@ -442,7 +444,9 @@ class TestZeroCostPreservation:
         )
 
         assert adjustment == -(200 / 1_000_000) * 10.0
-        assert savings == 0.0
+        # Charging nothing for the write is a saving of exactly what the tokens
+        # would have cost at the input rate.
+        assert savings == (200 / 1_000_000) * 10.0
 
     def test_cache_creation_anthropic_typical_pricing(self):
         """Anthropic-typical cache creation pricing (1.25x input): adjustment adds the premium."""
@@ -461,7 +465,8 @@ class TestZeroCostPreservation:
 
         expected_premium = (200 / 1_000_000) * 0.75
         assert abs(adjustment - expected_premium) < 0.0001
-        assert savings == 0.0
+        # 1.25x input is a premium, so the cache cost the bill money here.
+        assert abs(savings + expected_premium) < 0.0001
 
     def test_cache_cost_without_input_rate(self):
         """Cache tokens charged at cache rate directly when no base input rate."""

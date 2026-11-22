@@ -61,6 +61,11 @@ const COST_FIELDS: CostField[] = [
     labelKey: "models.cachedWriteCost",
     dimKey: "models.dimCached",
   },
+  {
+    key: "cached_write_long_cost_per_1m",
+    labelKey: "models.cachedWriteLongCost",
+    dimKey: "models.dimCached",
+  },
   { key: "reasoning_cost_per_1m", labelKey: "models.reasoningCost" },
   {
     key: "audio_input_cost_per_1m",

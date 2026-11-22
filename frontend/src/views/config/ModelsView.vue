@@ -946,6 +946,29 @@ const confirmDelete = async () => {
                   </div>
                 </div>
                 <div class="grid gap-2">
+                  <Label for="cachedWriteLongCost">
+                    {{ t("models.costDimCachedWriteLong") }}
+                    <span class="ml-1 font-normal text-muted-foreground"
+                      >· {{ t("models.perMillionTokens") }}</span
+                    >
+                  </Label>
+                  <div class="relative">
+                    <div
+                      class="absolute inset-y-0 left-0 z-10 flex items-center pl-3 pointer-events-none"
+                    >
+                      <span class="text-muted-foreground sm:text-sm">$</span>
+                    </div>
+
+                    <NumberInput
+                      id="cachedWriteLongCost"
+                      v-model.number="newModel.cached_write_long_cost_per_1m"
+                      step="0.01"
+                      placeholder="0.0"
+                      class="pl-7"
+                    />
+                  </div>
+                </div>
+                <div class="grid gap-2">
                   <Label for="audioInputCost">
                     {{ t("models.costDimAudioInput") }}
                     <span class="ml-1 font-normal text-muted-foreground"
@@ -1586,6 +1609,20 @@ const confirmDelete = async () => {
                 </Label>
                 <NumberInput
                   v-model.number="editingProviderData.cached_write_cost_per_1m"
+                  step="0.01"
+                  placeholder="0.00"
+                  class="h-9"
+                />
+              </div>
+              <div class="space-y-1">
+                <Label class="text-xs">
+                  {{ t("models.costDimCachedWriteLong") }}
+                  <span class="ml-1 font-normal text-muted-foreground"
+                    >· {{ t("models.perMillionTokens") }}</span
+                  >
+                </Label>
+                <NumberInput
+                  v-model.number="editingProviderData.cached_write_long_cost_per_1m"
                   step="0.01"
                   placeholder="0.00"
                   class="h-9"

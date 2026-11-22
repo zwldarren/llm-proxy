@@ -87,6 +87,14 @@ class PromptTokensDetails:
     image_tokens: int | None = None
     text_tokens: int | None = None
     cache_write_tokens: int | None = None
+    # How much of ``cache_write_tokens`` was written with a long cache lifetime
+    # (OpenAI's ``cache_write_tokens_details.ttl_12h_tokens``). It is the one
+    # part of a cache write priced differently from the rest — a 12-hour write
+    # costs 2.5x the input rate against 1.25x for the default 30 minutes — so it
+    # is the only split the record keeps. Absent means the write is entirely
+    # short-lived, which is the pre-lifetime behaviour of every provider that
+    # reports no split at all.
+    cache_write_long_tokens: int | None = None
     video_tokens: int | None = None
 
 
@@ -101,7 +109,10 @@ class Usage:
       ``cached_content_tokens`` alias; the OpenAI-dialect expression
       ``prompt_tokens_details.cached_tokens`` is tolerated for OpenAI-family
       wire compatibility but must not coexist with the flat field);
-    - cache write → ``cache_creation_input_tokens``;
+    - cache write → ``cache_creation_input_tokens``, with
+      ``prompt_tokens_details.cache_write_long_tokens`` holding the part of it
+      written with a long (12-hour) cache lifetime, which upstreams price
+      higher than a default-lifetime write;
     - thinking    → ``reasoning_tokens``.
 
     Downstream consumers (EventContext, billing) rely on this single

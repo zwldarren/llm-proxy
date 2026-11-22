@@ -201,6 +201,16 @@ class OpenAIFormattingMixin:
             cache_write_tokens = prompt_details.cache_write_tokens if prompt_details else None
             if cache_write_tokens is None:
                 cache_write_tokens = response.usage.cache_creation_input_tokens
+            # The long-lifetime slice of that write, the only part of a cache
+            # write upstreams price apart from the rest (OpenAI bills a 12-hour
+            # write above a 30-minute one). Nested for the same reason: it is a
+            # subset of the write, not another write.
+            cache_write_long_tokens = (
+                prompt_details.cache_write_long_tokens if prompt_details else None
+            )
+            cache_write_details = (
+                {"ttl_12h_tokens": cache_write_long_tokens} if cache_write_long_tokens else None
+            )
             # Fabricate a details object only when there is something to report:
             # a provider-sent object, or observed cache activity. A reported zero
             # stays in the canonical record without an empty dialect object.
@@ -211,6 +221,7 @@ class OpenAIFormattingMixin:
                         ("audio_tokens", prompt_details.audio_tokens if prompt_details else None),
                         ("cached_tokens", cached_tokens),
                         ("cache_write_tokens", cache_write_tokens),
+                        ("cache_write_tokens_details", cache_write_details),
                     ]
                     if v is not None
                 }

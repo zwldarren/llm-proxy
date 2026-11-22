@@ -37,6 +37,7 @@ _RATE_FIELDS = (
     "output_cost_per_1m",
     "cached_read_cost_per_1m",
     "cached_write_cost_per_1m",
+    "cached_write_long_cost_per_1m",
     "reasoning_cost_per_1m",
     "audio_input_cost_per_1m",
     "audio_output_cost_per_1m",
@@ -79,6 +80,7 @@ def _parse_cost_tiers(cost: dict[str, Any]) -> list[PricingTierOption]:
                 output_cost_per_1m=coerce_float(raw.get("output")),
                 cached_read_cost_per_1m=coerce_float(raw.get("cache_read")),
                 cached_write_cost_per_1m=coerce_float(raw.get("cache_write")),
+                cached_write_long_cost_per_1m=coerce_float(raw.get("cache_write_12h")),
                 reasoning_cost_per_1m=coerce_float(raw.get("reasoning")),
                 audio_input_cost_per_1m=coerce_float(raw.get("input_audio")),
                 audio_output_cost_per_1m=coerce_float(raw.get("output_audio")),
@@ -116,6 +118,7 @@ def _parse_service_tier_pricing(model_info: dict[str, Any]) -> dict[str, Service
             output_cost_per_1m=coerce_float(cost.get("output")),
             cached_read_cost_per_1m=coerce_float(cost.get("cache_read")),
             cached_write_cost_per_1m=coerce_float(cost.get("cache_write")),
+            cached_write_long_cost_per_1m=coerce_float(cost.get("cache_write_12h")),
             reasoning_cost_per_1m=coerce_float(cost.get("reasoning")),
             audio_input_cost_per_1m=coerce_float(cost.get("input_audio")),
             audio_output_cost_per_1m=coerce_float(cost.get("output_audio")),
@@ -173,6 +176,7 @@ async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPri
             output_cost = cost.get("output")
             cache_read = cost.get("cache_read")
             cache_write = cost.get("cache_write")
+            cache_write_long = cost.get("cache_write_12h")
             reasoning = cost.get("reasoning")
             input_audio = cost.get("input_audio")
             output_audio = cost.get("output_audio")
@@ -181,6 +185,7 @@ async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPri
             output_cost_f = coerce_float(output_cost)
             cache_read_f = coerce_float(cache_read)
             cache_write_f = coerce_float(cache_write)
+            cache_write_long_f = coerce_float(cache_write_long)
             reasoning_f = coerce_float(reasoning)
             input_audio_f = coerce_float(input_audio)
             output_audio_f = coerce_float(output_audio)
@@ -195,6 +200,7 @@ async def _fetch_models_dev_pricing(request: Request) -> dict[str, list[ModelPri
                 output_cost_per_1m=output_cost_f,
                 cached_read_cost_per_1m=cache_read_f,
                 cached_write_cost_per_1m=cache_write_f,
+                cached_write_long_cost_per_1m=cache_write_long_f,
                 reasoning_cost_per_1m=reasoning_f,
                 audio_input_cost_per_1m=input_audio_f,
                 audio_output_cost_per_1m=output_audio_f,
@@ -319,6 +325,7 @@ async def sync_model_pricing(
             old_output_cost = mapping.output_cost_per_1m
             old_cached_read = mapping.cached_read_cost_per_1m
             old_cached_write = mapping.cached_write_cost_per_1m
+            old_cached_write_long = mapping.cached_write_long_cost_per_1m
             old_audio_input = mapping.audio_input_cost_per_1m
             old_audio_output = mapping.audio_output_cost_per_1m
             old_reasoning = mapping.reasoning_cost_per_1m
@@ -330,6 +337,7 @@ async def sync_model_pricing(
                 or old_output_cost is not None
                 or old_cached_read is not None
                 or old_cached_write is not None
+                or old_cached_write_long is not None
                 or old_audio_input is not None
                 or old_audio_output is not None
                 or old_reasoning is not None
@@ -368,6 +376,7 @@ async def sync_model_pricing(
                     output_cost_per_1m=opt.output_cost_per_1m,
                     cached_read_cost_per_1m=opt.cached_read_cost_per_1m,
                     cached_write_cost_per_1m=opt.cached_write_cost_per_1m,
+                    cached_write_long_cost_per_1m=opt.cached_write_long_cost_per_1m,
                     reasoning_cost_per_1m=opt.reasoning_cost_per_1m,
                     audio_input_cost_per_1m=opt.audio_input_cost_per_1m,
                     audio_output_cost_per_1m=opt.audio_output_cost_per_1m,
@@ -403,6 +412,7 @@ async def sync_model_pricing(
                 or old_output_cost != found_pricing.output_cost_per_1m
                 or old_cached_read != found_pricing.cached_read_cost_per_1m
                 or old_cached_write != found_pricing.cached_write_cost_per_1m
+                or old_cached_write_long != found_pricing.cached_write_long_cost_per_1m
                 or old_audio_input != found_pricing.audio_input_cost_per_1m
                 or old_audio_output != found_pricing.audio_output_cost_per_1m
                 or old_reasoning != found_pricing.reasoning_cost_per_1m
@@ -427,6 +437,8 @@ async def sync_model_pricing(
                         new_cached_read_cost=found_pricing.cached_read_cost_per_1m,
                         old_cached_write_cost=old_cached_write,
                         new_cached_write_cost=found_pricing.cached_write_cost_per_1m,
+                        old_cached_write_long_cost=old_cached_write_long,
+                        new_cached_write_long_cost=(found_pricing.cached_write_long_cost_per_1m),
                         old_audio_input_cost=old_audio_input,
                         new_audio_input_cost=found_pricing.audio_input_cost_per_1m,
                         old_audio_output_cost=old_audio_output,
@@ -453,6 +465,7 @@ async def sync_model_pricing(
                     output_cost_per_1m=found_pricing.output_cost_per_1m,
                     cached_read_cost_per_1m=found_pricing.cached_read_cost_per_1m,
                     cached_write_cost_per_1m=found_pricing.cached_write_cost_per_1m,
+                    cached_write_long_cost_per_1m=found_pricing.cached_write_long_cost_per_1m,
                     audio_input_cost_per_1m=found_pricing.audio_input_cost_per_1m,
                     audio_output_cost_per_1m=found_pricing.audio_output_cost_per_1m,
                     reasoning_cost_per_1m=found_pricing.reasoning_cost_per_1m,
@@ -479,6 +492,8 @@ async def sync_model_pricing(
                     new_cached_read_cost=found_pricing.cached_read_cost_per_1m,
                     old_cached_write_cost=old_cached_write,
                     new_cached_write_cost=found_pricing.cached_write_cost_per_1m,
+                    old_cached_write_long_cost=old_cached_write_long,
+                    new_cached_write_long_cost=found_pricing.cached_write_long_cost_per_1m,
                     old_audio_input_cost=old_audio_input,
                     new_audio_input_cost=found_pricing.audio_input_cost_per_1m,
                     old_audio_output_cost=old_audio_output,

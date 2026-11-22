@@ -341,6 +341,7 @@ class TestSyncModelPricingEndpoint:
         mapping.output_cost_per_1m = output_cost
         mapping.cached_read_cost_per_1m = None
         mapping.cached_write_cost_per_1m = None
+        mapping.cached_write_long_cost_per_1m = None
         mapping.audio_input_cost_per_1m = None
         mapping.audio_output_cost_per_1m = None
         mapping.reasoning_cost_per_1m = None
@@ -426,6 +427,7 @@ class TestSyncModelPricingEndpoint:
             output_cost_per_1m=10.0,
             cached_read_cost_per_1m=None,
             cached_write_cost_per_1m=None,
+            cached_write_long_cost_per_1m=None,
             audio_input_cost_per_1m=None,
             audio_output_cost_per_1m=None,
             reasoning_cost_per_1m=None,

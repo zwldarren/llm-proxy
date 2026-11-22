@@ -52,6 +52,10 @@ class TokenUsage:
     cache_creation_input_tokens: int = 0  # Anthropic: tokens used to create cache
     cache_read_input_tokens: int = 0  # Anthropic/Gemini: tokens read from cache
     cached_prompt_tokens: int = 0  # OpenAI: cached_tokens from prompt_tokens_details
+    # Part of ``cache_creation_input_tokens`` written with a long cache lifetime
+    # (OpenAI ``cache_write_tokens_details.ttl_12h_tokens``), which upstreams
+    # price above a default-lifetime write.
+    cache_write_long_tokens: int = 0
     # Audio token fields
     audio_input_tokens: int = 0  # OpenAI: audio tokens in prompt
     audio_output_tokens: int = 0  # OpenAI: audio tokens in completion
@@ -120,6 +124,7 @@ def token_usage_from(
         prompt_details = usage.prompt_tokens_details
         if prompt_details is not None:
             result.cached_prompt_tokens = prompt_details.cached_tokens or 0
+            result.cache_write_long_tokens = prompt_details.cache_write_long_tokens or 0
             result.audio_input_tokens = prompt_details.audio_tokens or 0
             result.image_input_tokens = prompt_details.image_tokens or 0
             # The nested expression of the cache-write fact is a fallback for the
@@ -137,6 +142,14 @@ def token_usage_from(
 
     if result.cache_read_input_tokens and result.cached_prompt_tokens:
         result.cached_prompt_tokens = 0
+
+    # A long-lifetime write is a slice of the write total, so a record that lost
+    # the total (a detail-only wire shape) or reports a slice larger than it is
+    # read as "all writes are long" rather than billing tokens never written.
+    if result.cache_write_long_tokens:
+        result.cache_write_long_tokens = min(
+            result.cache_write_long_tokens, result.cache_creation_input_tokens
+        )
 
     if dimensions is not None:
         result.images_generated = dimensions.images_generated or 0

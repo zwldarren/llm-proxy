@@ -25,6 +25,7 @@ export const TIER_RATE_KEYS: readonly TierRateKey[] = [
   "output_cost_per_1m",
   "cached_read_cost_per_1m",
   "cached_write_cost_per_1m",
+  "cached_write_long_cost_per_1m",
   "reasoning_cost_per_1m",
   "audio_input_cost_per_1m",
   "audio_output_cost_per_1m",
@@ -47,6 +48,7 @@ export const PRIMARY_RATE_FIELDS: readonly RateField[] = [
 
 /** The remaining dimensions, behind the editors' "more dimensions" disclosure. */
 export const EXTRA_RATE_FIELDS: readonly RateField[] = [
+  { key: "cached_write_long_cost_per_1m", labelKey: "models.costDimCachedWriteLong" },
   { key: "reasoning_cost_per_1m", labelKey: "models.costDimReasoning" },
   { key: "audio_input_cost_per_1m", labelKey: "models.costDimAudioInput" },
   { key: "audio_output_cost_per_1m", labelKey: "models.costDimAudioOutput" },

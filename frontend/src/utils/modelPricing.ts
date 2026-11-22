@@ -14,6 +14,7 @@ export type ModelCostKey =
   | "output_cost_per_1m"
   | "cached_read_cost_per_1m"
   | "cached_write_cost_per_1m"
+  | "cached_write_long_cost_per_1m"
   | "reasoning_cost_per_1m"
   | "audio_input_cost_per_1m"
   | "audio_output_cost_per_1m"
@@ -28,6 +29,7 @@ export const MODEL_COST_KEYS: readonly ModelCostKey[] = [
   "output_cost_per_1m",
   "cached_read_cost_per_1m",
   "cached_write_cost_per_1m",
+  "cached_write_long_cost_per_1m",
   "reasoning_cost_per_1m",
   "audio_input_cost_per_1m",
   "audio_output_cost_per_1m",

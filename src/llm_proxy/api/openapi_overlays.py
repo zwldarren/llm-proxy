@@ -431,6 +431,9 @@ COMPONENTS: frozendict[str, Any] = frozendict(
                         "input_tokens_details": _passthrough(
                             {
                                 "cache_write_tokens": _int(),
+                                "cache_write_tokens_details": _passthrough(
+                                    {"ttl_12h_tokens": _int()}
+                                ),
                                 "cached_tokens": _int(),
                             }
                         ),

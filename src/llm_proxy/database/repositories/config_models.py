@@ -83,6 +83,7 @@ class ModelRepository(BaseRepository):
                     output_cost_per_1m=prov_config.get("output_cost_per_1m"),
                     cached_read_cost_per_1m=prov_config.get("cached_read_cost_per_1m"),
                     cached_write_cost_per_1m=prov_config.get("cached_write_cost_per_1m"),
+                    cached_write_long_cost_per_1m=prov_config.get("cached_write_long_cost_per_1m"),
                     audio_input_cost_per_1m=prov_config.get("audio_input_cost_per_1m"),
                     audio_output_cost_per_1m=prov_config.get("audio_output_cost_per_1m"),
                     image_input_cost_per_1m=prov_config.get("image_input_cost_per_1m"),
@@ -257,6 +258,7 @@ class ModelRepository(BaseRepository):
         output_cost_per_1m: float | None = None,
         cached_read_cost_per_1m: float | None = None,
         cached_write_cost_per_1m: float | None = None,
+        cached_write_long_cost_per_1m: float | None = None,
         audio_input_cost_per_1m: float | None = None,
         audio_output_cost_per_1m: float | None = None,
         reasoning_cost_per_1m: float | None = None,
@@ -274,6 +276,8 @@ class ModelRepository(BaseRepository):
                 (only updated when not None)
             cached_write_cost_per_1m: New cached write cost per 1M tokens
                 (only updated when not None)
+            cached_write_long_cost_per_1m: New cached write cost per 1M tokens for
+                long-lifetime writes (only updated when not None)
             audio_input_cost_per_1m: New audio input cost per 1M tokens
                 (only updated when not None)
             audio_output_cost_per_1m: New audio output cost per 1M tokens
@@ -308,6 +312,8 @@ class ModelRepository(BaseRepository):
             mapping.cached_read_cost_per_1m = cached_read_cost_per_1m
         if cached_write_cost_per_1m is not None:
             mapping.cached_write_cost_per_1m = cached_write_cost_per_1m
+        if cached_write_long_cost_per_1m is not None:
+            mapping.cached_write_long_cost_per_1m = cached_write_long_cost_per_1m
         if audio_input_cost_per_1m is not None:
             mapping.audio_input_cost_per_1m = audio_input_cost_per_1m
         if audio_output_cost_per_1m is not None:
@@ -329,6 +335,7 @@ class ModelRepository(BaseRepository):
             "output_cost_per_1m",
             "cached_read_cost_per_1m",
             "cached_write_cost_per_1m",
+            "cached_write_long_cost_per_1m",
             "audio_input_cost_per_1m",
             "audio_output_cost_per_1m",
             "image_input_cost_per_1m",

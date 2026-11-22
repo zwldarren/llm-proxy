@@ -759,6 +759,13 @@ class InputTokensDetails(BaseModel):
     cache_write_tokens: int | None = Field(
         None, description="Number of tokens written to the prompt cache"
     )
+    cache_write_tokens_details: dict[str, int] | None = Field(
+        None,
+        description=(
+            "Split of the cache writes by cache lifetime; ``ttl_12h_tokens`` is the "
+            "long-lifetime part, which upstreams price above a default write"
+        ),
+    )
 
 
 class OutputTokensDetails(BaseModel):
