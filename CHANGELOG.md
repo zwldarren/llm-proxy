@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.1](https://github.com/zwldarren/llm-proxy/compare/v0.6.0...v0.6.1) (2026-11-23)
+
+
+### Features
+
+* **billing:** price cache writes by cache lifetime ([ab5b2e4](https://github.com/zwldarren/llm-proxy/commit/ab5b2e41e2771c3c859c2fdee72222aed3643c69))
+* **budget:** check the budget on spending requests, not reads ([be10112](https://github.com/zwldarren/llm-proxy/commit/be101121fb51fce5dccb85ca926ef9261b6be358))
+* **cors:** reflect the headers a preflight asks for ([e4fd469](https://github.com/zwldarren/llm-proxy/commit/e4fd469986a860386a05d9c93a3aca81af3afa64))
+* **frontend:** give a typed 24-hour clock a field of its own ([cf92a56](https://github.com/zwldarren/llm-proxy/commit/cf92a56d089959e60ec32cc205326383cfdab92f))
+* **frontend:** handled linked identities during OIDC provider removal ([d114e39](https://github.com/zwldarren/llm-proxy/commit/d114e395023c5c166c0ae38a81b262a2e8273ca5))
+* **frontend:** resolve brand icons from the full Lobe catalog ([451fc77](https://github.com/zwldarren/llm-proxy/commit/451fc7764222b78d9fd97478c0801aeaaec7f6b7))
+* **frontend:** state a peak band once, not once per clock range ([993c0e8](https://github.com/zwldarren/llm-proxy/commit/993c0e82b2b8098f2142af3d5c04871be30b6edc))
+* **thinking:** passed thinking parameters through verbatim ([b464d8b](https://github.com/zwldarren/llm-proxy/commit/b464d8b07b31845b757c35950b33850f58a5c660))
+
+
+### Bug Fixes
+
+* **frontend:** seed the model form with its routing profile cleared ([0dcf147](https://github.com/zwldarren/llm-proxy/commit/0dcf14767e8ddc0cf4e7de52ec1e736bacef3a04))
+* **frontend:** stack a confirm above the surface it guards ([f9e04d5](https://github.com/zwldarren/llm-proxy/commit/f9e04d5d3721218d2c69975fab1671769b075ead))
+* **openresponses:** speak the 2026-11 Responses API parity it claims ([99300f6](https://github.com/zwldarren/llm-proxy/commit/99300f67c6ae31b6c4f2a061a92ce6af41fc8ed3))
+
+
+### Documentation
+
+* **design:** re-derive DESIGN.md from the shipped console ([bd23226](https://github.com/zwldarren/llm-proxy/commit/bd23226034ae648f179657bcaa550660840a3d18))
+
 ## [0.6.0](https://github.com/zwldarren/llm-proxy/compare/v0.5.5...v0.6.0) (2026-11-12)
 
 
