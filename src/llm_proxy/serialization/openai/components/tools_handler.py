@@ -16,6 +16,8 @@ from llm_proxy.models.tools import (
     ToolChoiceAllowedTools,
     ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
+    ToolChoiceNamed,
     ToolDefinition,
     custom_tool_bridge_description,
 )
@@ -163,8 +165,11 @@ class OpenAIToolsHandler:
         """Convert internal tool_choice to OpenAI format."""
         match tool_choice:
             case ToolChoice():
-                return tool_choice.mode
-            case ToolChoiceFunction():
+                # Anthropic uses "any" where OpenAI uses "required".
+                return "required" if tool_choice.mode == "any" else tool_choice.mode
+            case ToolChoiceFunction() | ToolChoiceNamed():
+                if target_endpoint == "responses":
+                    return {"type": "function", "name": tool_choice.name}
                 return {"type": "function", "function": {"name": tool_choice.name}}
             case ToolChoiceCustom():
                 if target_endpoint == "responses":
@@ -172,6 +177,12 @@ class OpenAIToolsHandler:
                 # Custom tool is converted to a function tool for Chat Completions.
                 # Force the model to call this specific tool by name.
                 return {"type": "function", "function": {"name": tool_choice.name}}
+            case ToolChoiceHosted():
+                # Chat Completions has no hosted-tool choice, so it degrades to
+                # "auto"; the Responses wire gets the client's object back.
+                if target_endpoint == "responses":
+                    return tool_choice.to_wire_dict()
+                return "auto"
             case ToolChoiceAllowedTools():
                 if target_endpoint == "responses":
                     return {
@@ -182,7 +193,10 @@ class OpenAIToolsHandler:
                 # Chat Completions has no allowed_tools concept; the tool set is
                 # filtered to the allowed subset by the request builder, so the
                 # selection mode alone is the correct tool_choice here.
-                return tool_choice.allowed_tools.mode
+                mode = tool_choice.allowed_tools.mode
+                return "required" if mode == "any" else mode
+            case str():
+                return "required" if tool_choice == "any" else tool_choice
             case dict():
                 return self._build_tool_choice_from_dict(tool_choice)
             case _:
@@ -231,6 +245,8 @@ class OpenAIToolsHandler:
                 func = tc.get("function")
                 if func and isinstance(func, dict) and func.get("name"):
                     return {"type": "function", "function": {"name": func["name"]}}
+                if isinstance(tc.get("name"), str) and tc["name"]:
+                    return {"type": "function", "function": {"name": tc["name"]}}
             case "allowed_tools":
                 return {
                     "type": "allowed_tools",

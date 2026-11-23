@@ -286,11 +286,33 @@ class WebSearchStreamProcessor:
             messages=new_messages,
         )
 
+        # Once proxy-side web search has executed and results are injected,
+        # relax a tool_choice that forced web_search back to "auto" so the
+        # continuation turn can answer from the results instead of looping.
+        continuation_tool_choice = original_request.tool_choice
+        if continuation_tool_choice is not None:
+            from llm_proxy.models.tools.core import (
+                ToolChoice,
+                ToolChoiceFunction,
+                ToolChoiceHosted,
+                ToolChoiceNamed,
+                is_web_search_tool_type,
+            )
+
+            if (
+                isinstance(continuation_tool_choice, (ToolChoiceFunction, ToolChoiceNamed))
+                and continuation_tool_choice.name == "web_search"
+            ) or (
+                isinstance(continuation_tool_choice, ToolChoiceHosted)
+                and is_web_search_tool_type(continuation_tool_choice.type)
+            ):
+                continuation_tool_choice = ToolChoice(mode="auto")
+
         return InternalRequest(
             model=original_request.model,
             conversation=new_conversation,
             tools=original_request.tools,
-            tool_choice=original_request.tool_choice,
+            tool_choice=continuation_tool_choice,
             params=original_request.params,
             stream=stream,
             stream_options=original_request.stream_options,

@@ -93,6 +93,10 @@ class RequestContext:
     session_id: str | None = None
     user_id: str | None = None
     response_store: Any = None
+    # True when an outer orchestrator (background OpenResponses runner) owns
+    # response persistence under its pre-allocated response id, so
+    # RequestExecutionStage must not write a second orphaned entry.
+    skip_response_store: bool = False
     web_search_tool_config: WebSearchToolConfig | None = None
     proxy_web_search_active: bool = False
     event_context: EventContext | None = None

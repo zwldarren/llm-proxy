@@ -582,7 +582,7 @@ def _parse_tool_choice(choice: Any) -> ToolChoiceSpec | None:
     if not isinstance(choice, dict):
         model_dump = getattr(choice, "model_dump", None)
         if callable(model_dump):
-            choice = model_dump()
+            choice = model_dump(exclude_none=True)
         else:
             return None
     if isinstance(choice, dict):
@@ -590,14 +590,19 @@ def _parse_tool_choice(choice: Any) -> ToolChoiceSpec | None:
         if tc_type == "function":
             # Accept both the Responses shape ({type, name}) and the chat
             # completions shape ({type, function: {name}}).
-            name = choice.get("name") or choice.get("function", {}).get("name", "")
-            return ToolChoiceFunction(name=name)
+            name = choice.get("name") or (
+                choice.get("function", {}).get("name", "")
+                if isinstance(choice.get("function"), dict)
+                else ""
+            )
+            return ToolChoiceFunction(name=name) if isinstance(name, str) and name else None
         if tc_type == "custom":
             name = choice.get("name", "")
-            if name:
+            if isinstance(name, str) and name:
                 from llm_proxy.models.tools import ToolChoiceCustom
 
                 return ToolChoiceCustom(name=name)
+            return None
         if tc_type == "allowed_tools":
             mode = choice.get("mode", "auto")
             tools = choice.get("tools", []) or []
@@ -605,16 +610,43 @@ def _parse_tool_choice(choice: Any) -> ToolChoiceSpec | None:
                 return ToolChoice(mode=mode)
             if tools and len(tools) == 1:
                 single = tools[0]
+                single_type = (
+                    single.get("type")
+                    if isinstance(single, dict)
+                    else getattr(single, "type", None)
+                )
                 single_name = (
                     single.get("name", "")
                     if isinstance(single, dict)
                     else getattr(single, "name", "")
                 )
-                return ToolChoiceFunction(name=single_name)
+                # Only collapse to a named function choice when the lone entry
+                # is actually a named function tool; hosted-tool entries carry
+                # no ``name`` and must stay inside ToolChoiceAllowedTools.
+                if (
+                    single_type in (None, "function")
+                    and isinstance(single_name, str)
+                    and single_name
+                ):
+                    return ToolChoiceFunction(name=single_name)
             from llm_proxy.models.tools import AllowedToolsConfig, ToolChoiceAllowedTools
 
             return ToolChoiceAllowedTools(
                 allowed_tools=AllowedToolsConfig(mode=mode or "auto", tools=tools)
+            )
+        if isinstance(tc_type, str) and tc_type:
+            # Every other object form (hosted tools, mcp, shell, apply_patch,
+            # future types) is kept as-is; see ``ToolChoiceHosted``.
+            from llm_proxy.models.tools import ToolChoiceHosted
+
+            name = choice.get("name")
+            params = {
+                k: v for k, v in choice.items() if k not in ("type", "name") and v is not None
+            }
+            return ToolChoiceHosted(
+                type=tc_type,
+                name=name if isinstance(name, str) else None,
+                params=params,
             )
     return None
 

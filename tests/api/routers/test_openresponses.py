@@ -149,6 +149,49 @@ class TestGetResponseOutputItems:
         assert resp.status_code == 200, resp.text
         assert resp.json()["output"][0]["type"] == item["type"]
 
+    @pytest.mark.parametrize(
+        ("tools", "tool_choice"),
+        [
+            (["web_search"], {"type": "web_search_preview"}),
+            (["mcp"], {"type": "mcp", "server_label": "github"}),
+            (["shell"], {"type": "shell"}),
+        ],
+        ids=["web-search", "mcp", "shell"],
+    )
+    def test_get_response_with_hosted_tools_and_choice(
+        self, client, mock_redis, tools, tool_choice
+    ):
+        """Regression: the response echo carries raw hosted tool dicts while the
+        model declared ``tools`` as ``list[FunctionToolParam]`` and
+        ``tool_choice`` as the closed (auto/none/required, function,
+        allowed_tools) union — so GET 500'd on any stored response that used a
+        hosted tool."""
+        import orjson
+
+        declared = {
+            "web_search": {"type": "web_search_preview", "search_context_size": "medium"},
+            "mcp": {"type": "mcp", "server_label": "github", "server_url": "https://mcp.test"},
+            "shell": {"type": "shell", "environment": {}},
+        }
+        stored = {
+            "id": "resp_test",
+            "object": "response",
+            "created_at": 1700000000,
+            "status": "completed",
+            "model": "gpt-6.2-astra",
+            "output": [],
+            "tools": [declared[name] for name in tools],
+            "tool_choice": tool_choice,
+        }
+        mock_redis.get = AsyncMock(return_value=orjson.dumps(stored))
+        resp = client.get("/v1/responses/resp_test")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["tool_choice"]["type"] == tool_choice["type"]
+        assert [tool["type"] for tool in body["tools"]] == [
+            declared[name]["type"] for name in tools
+        ]
+
     def test_get_response_strips_stored_input(self, client, mock_redis):
         """GET must not leak the internal materialized ``input`` to clients.
 
@@ -442,7 +485,11 @@ class TestBackgroundMode:
             protocol_module.create_protocol_router(get_protocol("openresponses"))
         )
 
+        captured: dict = {}
+
         async def fake_process(protocol_request=None, req=None, context=None):
+            captured["request"] = protocol_request
+            captured["context"] = context
             # Keep the response in_progress long enough for the test to observe
             # the pollable placeholder state.
             import asyncio
@@ -483,9 +530,17 @@ class TestBackgroundMode:
 
         response = client.post(
             "/v1/responses",
-            json={"model": "gpt-5.2", "input": "hi", "background": True},
+            json={
+                "model": "gpt-5.2",
+                "input": "hi",
+                "background": True,
+                "background_options": {"completion_window": "2h"},
+            },
         )
         response_id = response.json()["id"]
+        assert captured["request"].background is None
+        assert captured["request"].background_options is None
+        assert captured["context"].skip_response_store is True
 
         # The in_progress placeholder is persisted synchronously, so the id is
         # pollable (and returns in_progress) before the task has completed.
@@ -517,6 +572,172 @@ class TestBackgroundMode:
         stored_bodies = [orjson.loads(v) for v in fake_redis.data.values()]
         completed = next(b for b in stored_bodies if b.get("status") == "completed")
         assert completed["input"] == [{"type": "message", "role": "user", "content": "hi"}]
+
+    def test_background_cancel_aborts_in_flight_task_and_stays_cancelled(self, client, monkeypatch):
+        """Cancelling an in-flight background response keeps status=cancelled."""
+        from fastapi.responses import JSONResponse
+
+        from llm_proxy.api.routers import protocol as protocol_module
+        from llm_proxy.api.routers.openresponses import get_response_store_required
+        from llm_proxy.protocols.openresponses.store import ResponseStore
+        from llm_proxy.protocols.registry import get_protocol
+
+        client.app.include_router(
+            protocol_module.create_protocol_router(get_protocol("openresponses"))
+        )
+
+        async def fake_process(protocol_request=None, req=None, context=None):
+            import asyncio
+
+            await asyncio.sleep(1)
+            return JSONResponse(
+                content={
+                    "id": "resp_inner",
+                    "object": "response",
+                    "status": "completed",
+                    "model": "gpt-5.2",
+                    "output": [],
+                }
+            )
+
+        processor = MagicMock()
+        processor.process = fake_process
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
+
+        async def fake_build_context(request, req, protocol_name=None):
+            return MagicMock()
+
+        monkeypatch.setattr(protocol_module, "build_request_context", fake_build_context)
+
+        fake_redis = _FakeRedis()
+        client.app.state.redis_client = MagicMock(client=fake_redis)
+        client.app.dependency_overrides[get_response_store_required] = lambda: ResponseStore(
+            redis_client=fake_redis
+        )
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": "gpt-5.2", "input": "hi", "background": True},
+        )
+        response_id = response.json()["id"]
+
+        cancel_resp = client.post(f"/v1/responses/{response_id}/cancel")
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["status"] == "cancelled"
+
+        # Wait until the background task finishes/cancels; status must remain cancelled.
+        for task in list(runtime_services(client.app).background_tasks()):
+            with pytest.raises(asyncio.CancelledError):
+                asyncio.run(task)
+
+        poll = client.get(f"/v1/responses/{response_id}")
+        assert poll.status_code == 200
+        assert poll.json()["status"] == "cancelled"
+
+    def test_background_delete_aborts_in_flight_task_and_does_not_resurrect(
+        self, client, monkeypatch
+    ):
+        """Deleting an in-flight background response cancels it and keeps it deleted."""
+        from fastapi.responses import JSONResponse
+
+        from llm_proxy.api.routers import protocol as protocol_module
+        from llm_proxy.api.routers.openresponses import get_response_store_required
+        from llm_proxy.protocols.openresponses.store import ResponseStore
+        from llm_proxy.protocols.registry import get_protocol
+
+        client.app.include_router(
+            protocol_module.create_protocol_router(get_protocol("openresponses"))
+        )
+
+        async def fake_process(protocol_request=None, req=None, context=None):
+            await asyncio.sleep(1)
+            return JSONResponse(
+                content={
+                    "id": "resp_inner",
+                    "object": "response",
+                    "status": "completed",
+                    "model": "gpt-5.2",
+                    "output": [],
+                }
+            )
+
+        processor = MagicMock()
+        processor.process = fake_process
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
+
+        async def fake_build_context(request, req, protocol_name=None):
+            return MagicMock()
+
+        monkeypatch.setattr(protocol_module, "build_request_context", fake_build_context)
+
+        fake_redis = _FakeRedis()
+        client.app.state.redis_client = MagicMock(client=fake_redis)
+        client.app.dependency_overrides[get_response_store_required] = lambda: ResponseStore(
+            redis_client=fake_redis
+        )
+
+        response = client.post(
+            "/v1/responses",
+            json={"model": "gpt-5.2", "input": "hi", "background": True},
+        )
+        response_id = response.json()["id"]
+
+        delete_resp = client.delete(f"/v1/responses/{response_id}")
+        assert delete_resp.status_code == 200
+        assert delete_resp.json()["deleted"] is True
+
+        for task in list(runtime_services(client.app).background_tasks()):
+            with pytest.raises(asyncio.CancelledError):
+                asyncio.run(task)
+
+        poll = client.get(f"/v1/responses/{response_id}")
+        assert poll.status_code == 404
+
+    def test_foreground_request_strips_background_options(self, client, monkeypatch):
+        """Foreground requests never forward ``background_options`` to the processor."""
+        from fastapi.responses import JSONResponse
+
+        from llm_proxy.api.routers import protocol as protocol_module
+        from llm_proxy.protocols.registry import get_protocol
+
+        client.app.include_router(
+            protocol_module.create_protocol_router(get_protocol("openresponses"))
+        )
+
+        captured: dict = {}
+
+        async def fake_process(protocol_request=None, req=None, context=None):
+            captured["request"] = protocol_request
+            return JSONResponse(
+                content={
+                    "id": "resp_fg",
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "completed",
+                    "model": "gpt-5.2",
+                    "output": [],
+                }
+            )
+
+        processor = MagicMock()
+        processor.process = fake_process
+        runtime_services(client.app).install_protocol_processor("openresponses", processor)
+
+        async def fake_build_context(request, req, protocol_name=None):
+            return MagicMock()
+
+        monkeypatch.setattr(protocol_module, "build_request_context", fake_build_context)
+
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": "gpt-5.2",
+                "input": "hi",
+                "background_options": {"completion_window": "2h"},
+            },
+        )
+        assert resp.status_code == 200
+        assert captured["request"].background_options is None
 
 
 class TestCompactionEndpointHTTP:

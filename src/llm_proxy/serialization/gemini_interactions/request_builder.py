@@ -39,6 +39,7 @@ from llm_proxy.models.tools import (
     ToolChoiceAllowedTools,
     ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
     ToolChoiceNamed,
     ToolDefinition,
     WebSearchTool,
@@ -198,11 +199,12 @@ class GeminiInteractionsRequestBuilderMixin:
             if tools:
                 body["tools"] = tools
 
-        tool_choice = self._build_tool_choice(request)
-        if tool_choice is not None:
-            gen_config = dict(body.get("generation_config") or {})
-            gen_config["tool_choice"] = tool_choice
-            body["generation_config"] = gen_config
+        if body.get("tools"):
+            tool_choice = self._build_tool_choice(request)
+            if tool_choice is not None:
+                gen_config = dict(body.get("generation_config") or {})
+                gen_config["tool_choice"] = tool_choice
+                body["generation_config"] = gen_config
 
         # Stateless by default (privacy-friendly); extra may override.
         body["store"] = bool(request.extra.get("store", False))
@@ -494,7 +496,7 @@ class GeminiInteractionsRequestBuilderMixin:
             if tool_choice.name:
                 allowed_names = [tool_choice.name]
         elif isinstance(tool_choice, ToolChoiceAllowedTools):
-            mode_map = {"auto": "auto", "required": "any"}
+            mode_map = {"auto": "auto", "required": "any", "none": "none"}
             mode = mode_map.get(tool_choice.allowed_tools.mode, "auto")
             tool_names = [
                 t["name"]
@@ -503,7 +505,10 @@ class GeminiInteractionsRequestBuilderMixin:
             ]
             if tool_names:
                 allowed_names = tool_names
+        elif isinstance(tool_choice, ToolChoiceHosted):
+            # No Gemini equivalent for forcing an OpenAI hosted tool by type.
+            mode = "auto"
 
-        if allowed_names:
+        if allowed_names and mode != "none":
             return {"allowed_tools": {"mode": mode, "tools": allowed_names}}
         return mode

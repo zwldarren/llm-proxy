@@ -387,7 +387,11 @@ class RequestExecutionStage(PipelineStage):
                     # itself under the pollable id it returns up front; storing
                     # here too would create an orphaned entry under a different,
                     # unreachable id.
-                    if response_data.get("store") and not response_data.get("background"):
+                    if (
+                        not getattr(context, "skip_response_store", False)
+                        and response_data.get("store")
+                        and not response_data.get("background")
+                    ):
                         response_id = response_data.get("id")
                         api_key_name = state.event_context.api_key_name
                         if response_id and api_key_name:

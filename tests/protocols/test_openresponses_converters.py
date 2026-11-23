@@ -555,9 +555,23 @@ class TestParseToolChoice:
         assert result.allowed_tools.mode == "specific"
         assert len(result.allowed_tools.tools) == 2
 
-    def test_dict_unknown_type_returns_none(self):
+    def test_dict_hosted_tool_type_becomes_hosted_choice(self):
+        from llm_proxy.models.tools import ToolChoiceHosted
+
+        result = _parse_tool_choice({"type": "web_search_preview"})
+        assert isinstance(result, ToolChoiceHosted)
+        assert result.type == "web_search_preview"
+
+    def test_dict_unknown_type_is_kept_verbatim(self):
+        # An object form whose type the proxy does not model is a later API
+        # revision, not a client error: keep the client's spelling so a native
+        # Responses upstream receives it, and let provider serializers degrade
+        # it to ``auto``.
+        from llm_proxy.models.tools import ToolChoiceHosted
+
         result = _parse_tool_choice({"type": "unknown"})
-        assert result is None
+        assert isinstance(result, ToolChoiceHosted)
+        assert result.type == "unknown"
 
 
 class TestConvertUsage:

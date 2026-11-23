@@ -49,9 +49,20 @@ def replay_stored_response(
     prev_messages: list[Message] = []
     prev_system: list[SystemMessage] = []
 
+    # A live turn's ``instructions`` replaces the stored turn's instead of
+    # stacking with it, so inherit the stored value only when the live turn has
+    # none, and skip it if an identical system message is already present.
+    # Duplicate system messages would break prompt-cache prefix matching.
+    client_supplied_instructions = bool(
+        request is not None
+        and isinstance(getattr(request, "_raw_protocol_data", None), dict)
+        and request._raw_protocol_data.get("instructions")
+    )
     prev_instructions = stored.get("instructions")
-    if prev_instructions:
-        prev_system.append(SystemMessage.from_text(role="system", text=prev_instructions))
+    if prev_instructions and not client_supplied_instructions:
+        existing_texts = {m.text_content for m in conversation.system_messages}
+        if prev_instructions not in existing_texts:
+            prev_system.append(SystemMessage.from_text(role="system", text=prev_instructions))
 
     pending_blocks: list = []
     pending_ws: list = []
@@ -97,7 +108,21 @@ def replay_stored_response(
         discovered.attach_to(request)
 
     if prev_system:
-        conversation.system_messages = [*prev_system, *conversation.system_messages]
+        # Deduplicate replayed system messages against the live turn's system
+        # messages (and within prev_system itself) so multi-turn chains where an
+        # intermediate turn inherited instructions into stored ``input`` do not
+        # stack duplicate system messages when a later turn re-sends them.
+        existing_texts = {m.text_content for m in conversation.system_messages}
+        deduped_prev: list[SystemMessage] = []
+        seen_prev: set[str] = set()
+        for sys_msg in prev_system:
+            text = sys_msg.text_content
+            if text in existing_texts or text in seen_prev:
+                continue
+            seen_prev.add(text)
+            deduped_prev.append(sys_msg)
+        if deduped_prev:
+            conversation.system_messages = [*deduped_prev, *conversation.system_messages]
     # Prepend previous messages before current messages
     conversation.messages = prev_messages + conversation.messages
 

@@ -53,6 +53,7 @@ from llm_proxy.models.tools import (
     ToolChoiceAllowedTools,
     ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
     ToolChoiceNamed,
     ToolSearchTool,
     UserLocation,
@@ -123,6 +124,7 @@ _NON_ANTHROPIC_EXTRA_KEYS: frozenset[str] = frozenset(
         "truncation",
         "include",
         "background",
+        "background_options",
         "max_tool_calls",
         "disable_parallel_tool_use",
         "parallel_tool_calls",
@@ -556,9 +558,15 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                 tools = [t for t in tools if getattr(t, "name", None) in allowed_names]
 
         if tools:
-            body["tools"] = self._build_tools(tools)
-        if request.tool_choice:
-            body["tool_choice"] = self._build_tool_choice(request.tool_choice)
+            built_tools = self._build_tools(tools)
+            if built_tools:
+                body["tools"] = built_tools
+        # Anthropic rejects ``tool_choice`` when ``tools`` is absent (or when
+        # ``tool_choice`` is null).
+        if request.tool_choice and body.get("tools"):
+            built_tool_choice = self._build_tool_choice(request.tool_choice)
+            if built_tool_choice is not None:
+                body["tool_choice"] = built_tool_choice
 
         # OpenAI ``parallel_tool_calls: false`` and the Anthropic protocol's
         # ``disable_parallel_tool_use`` flag must both end up inside
@@ -579,7 +587,7 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
                 and request.params.openai.parallel_tool_calls is False
             )
         )
-        if disable_parallel and tools:
+        if disable_parallel and body.get("tools"):
             tool_choice = body.get("tool_choice")
             if isinstance(tool_choice, dict):
                 tool_choice["disable_parallel_tool_use"] = True
@@ -946,6 +954,11 @@ class AnthropicProviderSerializer(AnthropicContentMixin, ProviderSerializer):
             # Custom tools are bridged to plain function tools for Anthropic
             # (see _build_tools), so forcing one maps to a named tool choice.
             return {"type": "tool", "name": tool_choice.name}
+
+        if isinstance(tool_choice, ToolChoiceHosted):
+            # Anthropic has no equivalent of forcing an OpenAI hosted tool by
+            # type; degrade to auto and let the (filtered) tool list decide.
+            return {"type": "auto"}
 
         if isinstance(tool_choice, ToolChoiceAllowedTools):
             # The tool set was already filtered to the allowed subset by the

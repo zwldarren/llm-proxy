@@ -41,6 +41,7 @@ from llm_proxy.models.tools import (
     ToolChoiceAllowedTools,
     ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
     ToolChoiceNamed,
 )
 from llm_proxy.models.tools.openai_builtin import (
@@ -259,7 +260,12 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
 
         if request.extra:
             for k, v in request.extra.items():
-                if v is not None and k not in ("reasoning", "responses_tools"):
+                if v is not None and k not in (
+                    "reasoning",
+                    "responses_tools",
+                    "responses_raw_fields",
+                    "background_options",
+                ):
                     body[k] = v
 
         # Merge raw request fields the Responses schema does not model
@@ -762,7 +768,9 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
 
     def _build_tool_choice(self, tool_choice: Any) -> Any:
         if isinstance(tool_choice, ToolChoice):
-            return tool_choice.mode
+            # Anthropic spells "must call some tool" as ``any``; OpenAI spells
+            # it ``required``.
+            return "required" if tool_choice.mode == "any" else tool_choice.mode
         if isinstance(tool_choice, (ToolChoiceFunction, ToolChoiceNamed)):
             return {"type": "function", "name": tool_choice.name}
         if isinstance(tool_choice, ToolChoiceAllowedTools):
@@ -775,7 +783,11 @@ class OpenAIResponsesProviderSerializer(ProviderSerializer):
             }
         if isinstance(tool_choice, ToolChoiceCustom):
             return {"type": "custom", "name": tool_choice.name}
-        if isinstance(tool_choice, (str, dict)):
+        if isinstance(tool_choice, ToolChoiceHosted):
+            return tool_choice.to_wire_dict()
+        if isinstance(tool_choice, str):
+            return "required" if tool_choice == "any" else tool_choice
+        if isinstance(tool_choice, dict):
             return tool_choice
         return tool_choice
 

@@ -229,6 +229,20 @@ class RuntimeServices:
             self._state.background_tasks = tasks
         return tasks
 
+    def background_response_tasks(self) -> dict[tuple[str, str], asyncio.Task[Any]]:
+        """In-flight background OpenResponses tasks keyed by ``(api_key_name, response_id)``.
+
+        Lets ``POST /v1/responses/{id}/cancel`` abort the live upstream task in
+        this worker in addition to marking the stored Redis record ``cancelled``.
+        """
+        tasks: dict[tuple[str, str], asyncio.Task[Any]] | None = self._read(
+            "background_response_tasks"
+        )
+        if tasks is None:
+            tasks = {}
+            self._state.background_response_tasks = tasks
+        return tasks
+
     def url_validation_executor(self) -> ThreadPoolExecutor | None:
         """The bounded pool for blocking URL/DNS validation, or ``None``.
 

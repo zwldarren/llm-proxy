@@ -238,6 +238,10 @@ def prepare_native_body(
     # plan_conversion returned NATIVE_PASSTHROUGH for the request side.
     request.conversion_tier = ConversionTier.NATIVE_PASSTHROUGH
     body = {k: v for k, v in raw.items() if v is not None}
+    # The proxy owns Responses background mode (ADR-0067), so HTTP-only
+    # ``background_options`` must never be forwarded verbatim upstream.
+    if request.protocol_name == "openresponses":
+        body.pop("background_options", None)
     body["model"] = request.model
     if stream is not None:
         body["stream"] = stream

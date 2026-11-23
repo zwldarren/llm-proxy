@@ -323,6 +323,7 @@ async def get_response(
 @router.delete("/v1/responses/{response_id}")
 async def delete_response(
     response_id: str,
+    request: Request,
     response_store: ResponseStoreRequiredDep,
     api_key_name: ApiKeyNameDep,
 ) -> dict:
@@ -341,6 +342,11 @@ async def delete_response(
         # OpenAI parity: deleting an unknown/expired response id is a 404,
         # not a 200 with deleted=false.
         raise _response_not_found(response_id)
+    in_flight = (
+        runtime_services(request).background_response_tasks().pop((api_key_name, response_id), None)
+    )
+    if in_flight is not None and not in_flight.done():
+        in_flight.cancel()
     return {
         "id": response_id,
         "deleted": True,
@@ -351,6 +357,7 @@ async def delete_response(
 @router.post("/v1/responses/{response_id}/cancel")
 async def cancel_response(
     response_id: str,
+    request: Request,
     response_store: ResponseStoreRequiredDep,
     api_key_name: ApiKeyNameDep,
 ) -> dict:
@@ -359,10 +366,9 @@ async def cancel_response(
     Per the spec, only responses created with ``background=true`` whose status
     is still queued/in_progress can be cancelled, and cancelling an
     already-cancelled response is idempotent (the stored response object is
-    returned). The proxy executes requests synchronously, so a stored response
-    is normally already terminal by the time a cancel call arrives — the
-    endpoint therefore surfaces the spec-shaped 409 conflict instead of
-    pretending to cancel.
+    returned). When the background task is running in this worker, it is also
+    cancelled in-flight so it stops generating and cannot overwrite the
+    ``cancelled`` record on completion.
     """
     stored = await response_store.retrieve(api_key_name, response_id)
     if stored is None:
@@ -376,6 +382,13 @@ async def cancel_response(
         # Spec: only responses created with background=true can be cancelled.
         stored["status"] = "cancelled"
         await response_store.store(api_key_name, response_id, stored)
+        in_flight = (
+            runtime_services(request)
+            .background_response_tasks()
+            .pop((api_key_name, response_id), None)
+        )
+        if in_flight is not None and not in_flight.done():
+            in_flight.cancel()
         return _stripped_response(stored)
     raise ConflictError(
         message=f"Cannot cancel a response with status '{status}'. "
@@ -667,8 +680,12 @@ async def _ws_handle_response_create(
         return
 
     # HTTP/SSE transport-specific fields MUST NOT be sent on WebSocket requests.
+    # ``background_options`` is HTTP-background-only too (and is rejected upstream
+    # unless ``background`` is set), so it is dropped with the rest.
     body = {
-        k: v for k, v in msg.items() if k not in ("type", "stream", "stream_options", "background")
+        k: v
+        for k, v in msg.items()
+        if k not in ("type", "stream", "stream_options", "background", "background_options")
     }
     body["stream"] = True
 

@@ -23,6 +23,7 @@ from llm_proxy.models.tools import (
     ToolChoiceAllowedTools,
     ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
     ToolChoiceNamed,
     ToolDefinition,
     WebSearchTool,
@@ -179,11 +180,15 @@ class GeminiRequestBuilderMixin:
         if tool_entries:
             body["tools"] = tool_entries
 
-        tool_config = self._build_tool_config(
-            request,
-            model=model,
-            has_builtin_tools=self._has_builtin_tools(tool_entries),
-            model_family_overrides=context.model_family_overrides,
+        tool_config = (
+            self._build_tool_config(
+                request,
+                model=model,
+                has_builtin_tools=self._has_builtin_tools(tool_entries),
+                model_family_overrides=context.model_family_overrides,
+            )
+            if tool_entries
+            else None
         )
         if tool_config:
             body["toolConfig"] = tool_config
@@ -215,6 +220,7 @@ class GeminiRequestBuilderMixin:
                     "reasoning",
                     "previous_response_id",
                     "background",
+                    "background_options",
                     "max_tool_calls",
                     "truncation",
                     "include",
@@ -687,7 +693,7 @@ class GeminiRequestBuilderMixin:
                 if tool_choice.name:
                     allowed_names = [tool_choice.name]
             elif isinstance(tool_choice, ToolChoiceAllowedTools):
-                mode_map = {"auto": "AUTO", "required": "ANY"}
+                mode_map = {"auto": "AUTO", "required": "ANY", "none": "NONE"}
                 mode = mode_map.get(tool_choice.allowed_tools.mode, "AUTO")
                 tool_names = [
                     t["name"]
@@ -696,11 +702,18 @@ class GeminiRequestBuilderMixin:
                 ]
                 if tool_names:
                     allowed_names = tool_names
+            elif isinstance(tool_choice, ToolChoiceHosted):
+                # Gemini cannot force an OpenAI hosted tool; let the model choose.
+                mode = "AUTO"
 
-            if not (include_server_side and mode == "AUTO" and not allowed_names):
+            # Gemini's FunctionCallingConfig only permits ``allowedFunctionNames``
+            # when ``mode`` is ``ANY`` (or ``VALIDATED``); sending it with
+            # ``AUTO`` or ``NONE`` triggers HTTP 400.
+            effective_allowed = allowed_names if mode == "ANY" else None
+            if not (include_server_side and mode == "AUTO" and not effective_allowed):
                 function_calling: dict[str, Any] = {"mode": mode}
-                if allowed_names:
-                    function_calling["allowedFunctionNames"] = allowed_names
+                if effective_allowed:
+                    function_calling["allowedFunctionNames"] = effective_allowed
                 config["functionCallingConfig"] = function_calling
 
         if include_server_side:

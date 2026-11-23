@@ -12,7 +12,7 @@ aside: false
 | 方面 | 行为 |
 | --- | --- |
 | 工具类型 | `function`、`custom`（语法/格式），以及内置的 `web_search`/`web_search_preview` 定义 |
-| `tool_choice` | `auto` / `none` / `required`，或 `{"type":"function","name":…}`；Responses 风格的 `allowed_tools` 会折算成对应模式并过滤工具列表 |
+| `tool_choice` | `auto` / `none` / `required`，或 `{"type":"function","name":…}`；Responses 风格的 `allowed_tools` 会折算成对应模式并过滤工具列表；还接受带类型对象的写法：托管工具（`{"type":"web_search_preview"}`、`file_search`、`code_interpreter`、`image_generation`、computer use）、`mcp`、`custom`、`shell`、`apply_patch`。上游原生支持 Responses 协议时原样转发，其它上游没有对应的托管工具，降级为 `auto` |
 | 并行调用 | 支持；`parallel_tool_calls: false` 关闭并行工具调用 |
 | 未知工具类型 | 校验阶段接受，构建上游请求时丢弃 |
 | 结果回传 | 照常发送 `tool` 消息（Chat）/ `tool_result` 块（Anthropic）/ `function_call_output` 条目（Responses） |
@@ -55,6 +55,21 @@ aside: false
 `reasoning_content`，或 OpenRouter/NanoGPT 的 `reasoning` 写法（两者同时出现时以
 `reasoning_content` 为准），以及 `reasoning_signature`、`reasoning_is_redacted`、
 `encrypted_content` 和 `reasoning_segments`。
+
+### Prompt 前缀稳定性
+
+从 GPT-6.2 起，对话中途改动前缀时，Responses API 会丢弃推理条目。改动更早的 developer
+消息或工具调用、降级模型、更换终端用户，都算改动前缀。另外，匹配前缀时顶层 `instructions`
+排在 `input` 之后。因此可复用的指令应写成 `input` 里第一条 `developer` 消息，顶层
+`instructions` 只留给仅对本次请求生效的说明。
+
+续接时代理的行为：
+
+- 上游原生支持 Responses 协议时，代理原样转发客户端的请求体。代理手上没有可重放的已存副本时，
+  `previous_response_id` 也一并转发。
+- 代理重放已存响应时，依次发出上一轮输入、上一轮输出（含推理条目）和新的一轮。`instructions`
+  作为 `input` 的第一条发出，而不是顶层字段。前缀保持不变，但原响应里的条目 id 不保留。
+- 改写更早的一轮仍然算改动前缀。回退或重写历史后，模型会丢失先前的推理，token 用量随之增加。
 
 ::: warning 混合提供商的推理负载
 `encrypted_content` 一字段多用：代理为回传而桥接 Anthropic 思考签名时，装的是签名；

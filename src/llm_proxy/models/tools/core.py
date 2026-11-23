@@ -111,6 +111,30 @@ class ToolChoiceCustom:
 
 
 @dataclass
+class ToolChoiceHosted:
+    """Tool choice naming a provider-run (hosted) tool, or any typed object form.
+
+    Covers ``{"type": "web_search_preview"}``, ``file_search``,
+    ``code_interpreter``, ``image_generation``, computer use, ``mcp`` (with
+    ``server_label``), ``shell``, ``apply_patch`` and any type the API adds
+    later. Variant-specific keys are kept in ``params`` so a native Responses
+    upstream receives the client's object unchanged; other providers have no
+    equivalent hosted tools and degrade the choice to ``auto``.
+    """
+
+    type: str
+    name: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+
+    def to_wire_dict(self) -> dict[str, Any]:
+        """Reconstruct the client's Responses-wire tool_choice dict."""
+        result: dict[str, Any] = {"type": self.type, **self.params}
+        if self.name is not None:
+            result["name"] = self.name
+        return result
+
+
+@dataclass
 class AllowedToolsConfig:
     """Configuration for allowed tools constraint."""
 
@@ -131,6 +155,7 @@ ToolChoiceSpec = (
     ToolChoice
     | ToolChoiceFunction
     | ToolChoiceCustom
+    | ToolChoiceHosted
     | ToolChoiceAllowedTools
     | ToolChoiceNamed
     | str

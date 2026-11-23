@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 #: Spec ServiceTier values (shared by request params, response echo and the
 #: compact endpoint so all three accept the same tier set).
@@ -654,18 +654,56 @@ ToolParam = (
 )
 
 
+_MODELLED_TOOL_CHOICE_TYPES: frozenset[str] = frozenset({"function", "allowed_tools"})
+
+
 class FunctionToolChoice(BaseModel):
     """Specific function tool choice."""
 
     type: Literal["function"] = "function"
-    name: str = Field(..., description="Function name to call")
+    name: str = Field(..., min_length=1, description="Function name to call")
+
+
+class TypedToolChoice(BaseModel):
+    """Object-form tool choice keyed by a ``type`` discriminator.
+
+    Covers the hosted-tool choices (``{"type": "web_search_preview"}``,
+    ``file_search``, ``code_interpreter``, ``image_generation``, computer use)
+    and the remaining object shapes (``mcp``, ``custom``, ``shell``,
+    ``apply_patch``). One open object rather than a closed union: the variants
+    differ only by discriminator and fields the proxy never reads, so a type
+    the API adds later is accepted without a proxy change (ADR-0067).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str = Field(
+        ..., min_length=1, description="Hosted-tool or typed tool-choice discriminator"
+    )
+    name: str | None = Field(None, description="Tool name, when the variant carries one")
+
+    @field_validator("type")
+    @classmethod
+    def _reject_modelled_types(cls, v: str) -> str:
+        if v in _MODELLED_TOOL_CHOICE_TYPES:
+            raise ValueError(
+                f"tool_choice type {v!r} must satisfy its dedicated schema "
+                "(missing or invalid fields)"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _validate_custom_requires_name(self) -> TypedToolChoice:
+        if self.type == "custom" and (not isinstance(self.name, str) or not self.name):
+            raise ValueError("tool_choice type 'custom' requires a non-empty 'name'")
+        return self
 
 
 class AllowedToolChoice(BaseModel):
     """Allowed tools configuration."""
 
     type: Literal["allowed_tools"] = "allowed_tools"
-    tools: list[FunctionToolChoice] = Field(..., description="Allowed tools")
+    tools: list[FunctionToolChoice | TypedToolChoice] = Field(..., description="Allowed tools")
     # Optional per the request-side spec (AllowedToolsParam requires only
     # type + tools; mode defaults to "auto" server-side).
     mode: Literal["auto", "required", "none"] | None = Field(
@@ -673,7 +711,9 @@ class AllowedToolChoice(BaseModel):
     )
 
 
-ToolChoiceParam = Literal["auto", "required", "none"] | FunctionToolChoice | AllowedToolChoice
+ToolChoiceParam = (
+    Literal["auto", "required", "none"] | AllowedToolChoice | FunctionToolChoice | TypedToolChoice
+)
 
 
 # =============================================================================
@@ -798,6 +838,25 @@ class Error(BaseModel):
 # =============================================================================
 
 
+class BackgroundOptionsParam(BaseModel):
+    """Options for background execution on HTTP requests.
+
+    Mirrors OpenAI's ``background_options``: the ``2h`` / ``8h`` completion
+    windows select discounted background execution upstream (they require
+    ``background: true`` and a non-streaming request) and ``continuation_id``
+    lets a client group related jobs.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    completion_window: Literal["soonest", "2h", "8h"] | None = Field(
+        None, description="Completion window for background execution"
+    )
+    continuation_id: str | None = Field(
+        None, description="Opaque client identifier used to prioritize related background requests"
+    )
+
+
 class ResponsesRequest(BaseModel):
     """Request model for OpenResponses API (/v1/responses)."""
 
@@ -824,6 +883,16 @@ class ResponsesRequest(BaseModel):
         description=(
             "Prompt template reference (id, version, variables). Forwarded verbatim "
             "to native Responses providers; dropped for Chat Completions providers."
+        ),
+    )
+    background_options: BackgroundOptionsParam | None = Field(
+        None,
+        description=(
+            "Options for background execution (completion_window, continuation_id). "
+            "The proxy runs background requests itself, so completion_window is "
+            "accepted and not honored: OpenAI's 2h/8h discounted windows require the "
+            "upstream to hold the job, and the proxy's own background mode returns as "
+            "soon as the model answers."
         ),
     )
     include: list[str] | None = Field(
@@ -894,7 +963,7 @@ class ResponsesResponse(BaseModel):
     incomplete_details: IncompleteDetails | None = Field(None, description="Incomplete details")
     output: list[ItemField] = Field(default_factory=list, description="Output items")
     error: Error | None = Field(None, description="Error if failed")
-    tools: list[FunctionToolParam] | None = Field(None, description="Tools used")
+    tools: list[ToolParam] | None = Field(None, description="Tools used")
     tool_choice: ToolChoiceParam | None = Field(None, description="Tool choice used")
     truncation: Literal["auto", "disabled"] | None = Field(None, description="Truncation mode")
     parallel_tool_calls: bool | None = Field(None, description="Parallel tool calls allowed")
@@ -934,7 +1003,7 @@ class InputTokensRequest(BaseModel):
     input: str | list[Any] = Field(..., description="Input text or array of items")
     instructions: str | None = Field(None, description="System instructions")
     tools: list[dict[str, Any]] | None = Field(None, description="Tool list")
-    tool_choice: str | None = Field(None, description="Tool selection strategy")
+    tool_choice: ToolChoiceParam | None = Field(None, description="Tool selection strategy")
     text: dict[str, Any] | None = Field(None, description="Output format control")
     reasoning: dict[str, Any] | None = Field(None, description="Reasoning control")
 
@@ -992,6 +1061,7 @@ __all__ = [
     "FunctionToolParam",
     "FunctionToolChoice",
     "AllowedToolChoice",
+    "TypedToolChoice",
     "ToolChoiceParam",
     "ReasoningParam",
     "TextResponseFormat",
@@ -1009,6 +1079,7 @@ __all__ = [
     "LogprobsContent",
     "Logprobs",
     "Error",
+    "BackgroundOptionsParam",
     "ResponsesRequest",
     "ResponsesResponse",
     "InputTokensRequest",

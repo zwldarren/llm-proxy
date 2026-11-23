@@ -70,6 +70,7 @@ OLLAMA_RESPONSES_ONLY_KEYS: frozenset[str] = frozenset(
         "reasoning",
         "truncation",
         "background",
+        "background_options",
         "max_tool_calls",
         "responses_tools",
         "text",

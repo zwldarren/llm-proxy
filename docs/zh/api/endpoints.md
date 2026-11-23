@@ -14,7 +14,7 @@ aside: false
 | 方法 | 路径 | 鉴权 | 协议 | 说明 |
 | --- | --- | --- | --- | --- |
 | POST | `/v1/chat/completions` | X | OpenAI | Chat Completions |
-| POST | `/v1/responses` | X | Responses | JSON 或 SSE；`background: true` 需要 Redis |
+| POST | `/v1/responses` | X | Responses | JSON 或 SSE；`background: true` 需要 Redis。接受 `background_options`，但其中的 `completion_window` 不生效：后台请求由代理自己执行，上游 2 小时/8 小时的折扣窗口不适用 |
 | POST | `/v1/responses/compact` | X | Responses | 优先原生透传，回退到本地无损打包 |
 | POST | `/v1/responses/input_tokens` | X | Responses | 不调用模型即可估算 prompt 大小；上游支持时用上游的原生计数，否则用本地 o200k_base 估算 |
 | GET | `/v1/responses/{response_id}` | X | Responses | 读取已存储的响应（TTL 24 小时） |

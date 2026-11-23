@@ -13,7 +13,7 @@ Anthropic upstream and vice versa.
 | Aspect | Behavior |
 | --- | --- |
 | Tool types | `function`, `custom` (grammar/format), and built-in `web_search`/`web_search_preview` definitions |
-| `tool_choice` | `auto` / `none` / `required`, `{"type":"function","name":…}`; Responses-style `allowed_tools` collapses to its mode and filters the tool list |
+| `tool_choice` | `auto` / `none` / `required`, `{"type":"function","name":…}`, Responses-style `allowed_tools` (collapses to its mode and filters the tool list), and the typed object forms: hosted tools (`{"type":"web_search_preview"}`, `file_search`, `code_interpreter`, `image_generation`, computer use), `mcp`, `custom`, `shell`, `apply_patch`. A native Responses upstream receives the choice unchanged; other providers have no equivalent hosted tools, so the choice becomes `auto` |
 | Parallel calls | Supported; `parallel_tool_calls: false` disables parallel tool use |
 | Unknown tool types | Accepted during validation, dropped when building the upstream request |
 | Results | Send `tool` messages (Chat) / `tool_result` blocks (Anthropic) / `function_call_output` items (Responses) as usual |
@@ -57,6 +57,26 @@ input the proxy reads `reasoning_content` or the OpenRouter/NanoGPT `reasoning`
 spelling (`reasoning_content` wins when both are present), plus
 `reasoning_signature`, `reasoning_is_redacted`, `encrypted_content`, and
 `reasoning_segments`.
+
+### Prompt-prefix stability
+
+Starting with GPT-6.2, the Responses API drops reasoning items when the prefix of a
+conversation changes mid-conversation: an earlier developer message or tool call is
+edited, the model is downgraded, or the end user changes. It also places top-level
+`instructions` after `input` for prefix matching. Put reusable instructions in a
+`developer` message as the first item of `input`, and keep top-level `instructions`
+for guidance that applies to this request only.
+
+What the proxy does with a continuation:
+
+- A native Responses upstream receives the client's body unchanged. That includes
+  `previous_response_id` when the proxy has no stored copy to replay.
+- When the proxy replays a stored response, it sends the prior input, then the prior
+  output (reasoning items included), then the new turn, in that order. `instructions`
+  is sent as the first item of `input`, not as a top-level field. The prefix is kept;
+  item ids from the original response are not.
+- Editing an earlier turn still counts as a prefix edit. If you rewind or rewrite
+  history, the model loses its earlier reasoning and token usage goes up.
 
 ::: warning Mixed-provider reasoning payloads
 `encrypted_content` is overloaded: it carries an Anthropic thinking signature

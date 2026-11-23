@@ -34,9 +34,13 @@ from llm_proxy.models import (
 )
 from llm_proxy.models.tools import (
     DEPRECATED_HOSTED_TOOL_TYPES,
+    AllowedToolsConfig,
     HostedTool,
     ToolChoice,
+    ToolChoiceAllowedTools,
+    ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
     ToolDefinition,
     is_provider_hosted_tool_type,
 )
@@ -612,14 +616,60 @@ class OpenAIParsingMixin:
         return result if result else None
 
     def _parse_tool_choice(self, tool_choice: Any | None) -> Any:
-        """Parse tool_choice from request."""
+        """Parse tool_choice from request into internal ToolChoiceSpec models."""
         match tool_choice:
             case None:
                 return None
             case str() as mode:
                 return ToolChoice(mode=mode)
-            case {"type": "function", "function": {"name": str(name)}}:
+            case {"type": "function", "function": {"name": str(name)}} if name:
                 return ToolChoiceFunction(name=name)
+            case {"type": "function", "name": str(name)} if name:
+                return ToolChoiceFunction(name=name)
+            case {"type": "custom", "custom": {"name": str(name)}} if name:
+                return ToolChoiceCustom(name=name)
+            case {"type": "custom", "name": str(name)} if name:
+                return ToolChoiceCustom(name=name)
+            case {"type": "allowed_tools"} as tc:
+                inner = tc.get("allowed_tools")
+                source = inner if isinstance(inner, dict) else tc
+                mode = source.get("mode") or "auto"
+                raw_tools = source.get("tools") or []
+                normalized_tools: list[dict[str, Any]] = []
+                for entry in raw_tools:
+                    if not isinstance(entry, dict):
+                        continue
+                    if (
+                        entry.get("type") == "function"
+                        and isinstance(entry.get("function"), dict)
+                        and isinstance(entry["function"].get("name"), str)
+                    ):
+                        normalized_tools.append(
+                            {"type": "function", "name": entry["function"]["name"]}
+                        )
+                    elif (
+                        entry.get("type") == "custom"
+                        and isinstance(entry.get("custom"), dict)
+                        and isinstance(entry["custom"].get("name"), str)
+                    ):
+                        normalized_tools.append({"type": "custom", "name": entry["custom"]["name"]})
+                    else:
+                        normalized_tools.append(dict(entry))
+                if mode in ("auto", "none", "required") and not normalized_tools:
+                    return ToolChoice(mode=mode)
+                return ToolChoiceAllowedTools(
+                    allowed_tools=AllowedToolsConfig(mode=mode, tools=normalized_tools)
+                )
+            case {"type": str(tc_type)} as tc if tc_type:
+                name = tc.get("name")
+                params = {
+                    k: v for k, v in tc.items() if k not in ("type", "name") and v is not None
+                }
+                return ToolChoiceHosted(
+                    type=tc_type,
+                    name=name if isinstance(name, str) else None,
+                    params=params,
+                )
             case _:
                 return tool_choice
 

@@ -128,17 +128,29 @@ def _create_endpoint_fn(
                 request, fastapi_request, protocol_name=protocol_name
             )
 
-        process_coro = processor.process(
-            protocol_request=request, req=fastapi_request, context=context
-        )
-
         # OpenResponses ``background`` mode: return immediately with an
         # in_progress response and run the request as a background task, then
         # persist the result so GET /v1/responses/{id} can retrieve it.
         if protocol_name == "openresponses" and getattr(request, "background", False):
+            process_coro = processor.process(
+                protocol_request=request, req=fastapi_request, context=context
+            )
             return await _run_background_openresponses(
                 request, fastapi_request, context, process_coro
             )
+
+        # The proxy owns background mode (ADR-0067); ``background_options`` is
+        # only valid alongside an upstream background job and is rejected when
+        # ``background`` is false/omitted, so drop it before processing.
+        if (
+            protocol_name == "openresponses"
+            and getattr(request, "background_options", None) is not None
+        ):
+            request.background_options = None
+
+        process_coro = processor.process(
+            protocol_request=request, req=fastapi_request, context=context
+        )
 
         # CDN proxies (e.g. Cloudflare) abort requests that stay silent for
         # ~100s. Slow non-streaming requests (long-reasoning models) opt
@@ -189,6 +201,18 @@ async def _run_background_openresponses(
         request.store = True
     if hasattr(request, "stream"):
         request.stream = False
+    # The proxy runs background mode itself, so the upstream call must be
+    # synchronous: a forwarded ``background`` makes a native upstream answer
+    # ``queued`` and the stored body never becomes terminal. Clear both fields
+    # to ``None`` so ``model_dump(exclude_none=True)`` omits them completely,
+    # and tell RequestExecutionStage not to persist a duplicate orphaned copy
+    # under the inner response id (ADR-0067).
+    if hasattr(request, "background"):
+        request.background = None
+    if hasattr(request, "background_options"):
+        request.background_options = None
+    if context is not None:
+        context.skip_response_store = True
 
     redis_client = runtime_services(fastapi_request).redis_client()
     api_key_name = get_request_identity(fastapi_request).api_key_name
@@ -223,9 +247,11 @@ async def _run_background_openresponses(
 
     # Persist the in_progress placeholder immediately so polling
     # GET /v1/responses/{id} succeeds while the request is still running.
+    placeholder_stored = False
     if store is not None and api_key_name:
         try:
             await store.store(api_key_name, response_id, in_progress_body)
+            placeholder_stored = True
         except Exception:  # noqa: BLE001 - storage failure must not fail the request
             logger.error(f"Failed to store in_progress response {response_id}", exc_info=True)
 
@@ -233,6 +259,10 @@ async def _run_background_openresponses(
         try:
             response = await process_coro
             body = orjson.loads(response.body)
+        except asyncio.CancelledError:
+            # Cancelled in-flight by POST /v1/responses/{id}/cancel; the cancel
+            # endpoint already wrote the terminal ``cancelled`` body to Redis.
+            return
         except Exception as exc:  # noqa: BLE001 - persist failures too
             logger.error(f"Background response {response_id} failed: {exc}")
             body = None
@@ -272,7 +302,7 @@ async def _run_background_openresponses(
         body["store"] = True
         body["background"] = True
         body["created_at"] = created_at
-        if body.get("status") == "in_progress":
+        if body.get("status") in ("queued", "in_progress"):
             body["status"] = "completed"
             body["completed_at"] = int(time.time())
         # Stored responses must carry the input so follow-up continuations can
@@ -282,6 +312,15 @@ async def _run_background_openresponses(
             body["input"] = input_items
         if store is not None and api_key_name:
             try:
+                # Guard against races where cancel_response marked the response
+                # cancelled or delete_response removed it while the upstream
+                # call was finishing: never overwrite a cancelled record or
+                # resurrect a deleted one.
+                current = await store.retrieve(api_key_name, response_id)
+                if (placeholder_stored and current is None) or (
+                    isinstance(current, dict) and current.get("status") == "cancelled"
+                ):
+                    return
                 await store.store(api_key_name, response_id, body)
             except Exception:  # noqa: BLE001 - storage failure must not crash the task
                 logger.error(f"Failed to store background response {response_id}", exc_info=True)
@@ -291,9 +330,15 @@ async def _run_background_openresponses(
     # references, so an unreferenced task may be garbage collected mid-run) and
     # retrieve its result so unexpected failures are logged instead of surfacing
     # as "Task exception was never retrieved".
-    background_tasks = runtime_services(fastapi_request).background_tasks()
+    services = runtime_services(fastapi_request)
+    background_tasks = services.background_tasks()
     background_tasks.add(task)
     task.add_done_callback(background_tasks.discard)
+    if api_key_name:
+        response_tasks = services.background_response_tasks()
+        task_key = (api_key_name, response_id)
+        response_tasks[task_key] = task
+        task.add_done_callback(lambda _: response_tasks.pop(task_key, None))
     task.add_done_callback(_log_background_task_failure)
 
     return JSONResponse(status_code=200, content=in_progress_body)

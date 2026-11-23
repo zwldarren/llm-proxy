@@ -185,9 +185,35 @@ class TestChatRequest:
     def test_a_named_tool_choice_collapses_onto_required(self):
         # v2 has no "call this exact tool" mode; requiring some tool is the
         # closest documented behaviour.
-        body = _build(_chat_request(tool_choice=ToolChoiceFunction(name="get_weather")))
+        tool = FunctionTool(name="get_weather", parameters={"type": "object"})
+        body = _build(
+            _chat_request(tools=[tool], tool_choice=ToolChoiceFunction(name="get_weather"))
+        )
 
         assert body["tool_choice"] == "REQUIRED"
+
+    def test_hosted_tool_choice_degrades_to_omitted(self):
+        from llm_proxy.models import ToolChoiceHosted
+
+        tool = FunctionTool(name="get_weather", parameters={"type": "object"})
+        body = _build(
+            _chat_request(tools=[tool], tool_choice=ToolChoiceHosted(type="web_search_preview"))
+        )
+
+        assert "tool_choice" not in body
+
+    def test_tool_choice_omitted_when_no_tools_survive(self):
+        from llm_proxy.models.tools.openai_builtin import WebSearchTool
+
+        body = _build(
+            _chat_request(
+                tools=[WebSearchTool(name="web_search", type="web_search_preview")],
+                tool_choice=ToolChoice(mode="required"),
+            )
+        )
+
+        assert "tools" not in body
+        assert "tool_choice" not in body
 
     def test_custom_tools_bridge_to_a_single_content_parameter(self):
         body = _build(

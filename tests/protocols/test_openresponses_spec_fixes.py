@@ -1409,3 +1409,759 @@ class TestStreamingErrorSanitization:
         events = _parse_sse_events(frames[0])
         message = events[1][1]["response"]["error"]["message"]
         assert message == "model is required"
+
+
+class TestHostedToolChoice:
+    """Object-form ``tool_choice`` (hosted / typed tools) is accepted and degraded.
+
+    OpenAI accepts ``{"type": "web_search_preview"}`` and five sibling
+    discriminators. A closed union rejected every one of them with a 422 before
+    the request reached any upstream; the choice is now kept verbatim for a
+    native Responses upstream and degraded to ``auto`` everywhere else.
+    """
+
+    @pytest.mark.parametrize(
+        "choice",
+        [
+            {"type": "web_search_preview"},
+            {"type": "file_search"},
+            {"type": "code_interpreter"},
+            {"type": "image_generation"},
+            {"type": "computer_use_preview"},
+            {"type": "mcp", "server_label": "github"},
+            {"type": "shell"},
+            {"type": "apply_patch"},
+            # A discriminator from a later API revision than this proxy knows
+            # must not be a client error.
+            {"type": "brand_new_hosted_tool"},
+        ],
+    )
+    def test_request_accepts_typed_tool_choice(self, choice):
+        request = ResponsesRequest.model_validate(
+            {"model": "m", "input": "hi", "tool_choice": choice}
+        )
+        assert request.tool_choice.type == choice["type"]
+
+    def test_typed_choice_parses_to_hosted_spec(self):
+        from llm_proxy.models.tools import ToolChoiceHosted
+
+        request = ResponsesRequest.model_validate(
+            {"model": "m", "input": "hi", "tool_choice": {"type": "web_search_preview"}}
+        )
+        parsed = OpenResponsesProtocolSerializer().parse_request(
+            request.model_dump(exclude_none=True)
+        )
+        assert isinstance(parsed.tool_choice, ToolChoiceHosted)
+        assert parsed.tool_choice.type == "web_search_preview"
+
+    def test_allowed_tools_still_parses_as_allowed_tools(self):
+        from llm_proxy.protocols.openresponses.schemas import AllowedToolChoice
+
+        request = ResponsesRequest.model_validate(
+            {
+                "model": "m",
+                "input": "hi",
+                "tool_choice": {
+                    "type": "allowed_tools",
+                    "mode": "required",
+                    "tools": [
+                        {"type": "function", "name": "a"},
+                        {"type": "function", "name": "b"},
+                    ],
+                },
+            }
+        )
+        # Widening the union must not swallow the modelled variants.
+        assert isinstance(request.tool_choice, AllowedToolChoice)
+
+    def test_chat_completions_degrades_to_auto(self):
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.components.request_builder import (
+            OpenAIRequestBuilder,
+        )
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "m",
+                "input": "hi",
+                "tools": [{"type": "web_search_preview"}],
+                "tool_choice": {"type": "web_search_preview"},
+            }
+        )
+        context = BuildContext(
+            stream=False,
+            model="m",
+            provider_name="chat-compatible",
+            target_endpoint="chat_completions",
+        )
+        body = OpenAIRequestBuilder().build(internal, context)
+        assert body["tool_choice"] == "auto"
+
+    def test_anthropic_degrades_to_auto(self):
+        from llm_proxy.serialization.anthropic.serializer import AnthropicProviderSerializer
+        from llm_proxy.serialization.context import BuildContext
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "claude-sonnet-4-5",
+                "input": "hi",
+                "tools": [{"type": "web_search_preview"}],
+                "tool_choice": {"type": "web_search_preview"},
+            }
+        )
+        context = BuildContext(
+            stream=False,
+            model="claude-sonnet-4-5",
+            provider_name="anthropic",
+            target_endpoint="messages",
+        )
+        body = AnthropicProviderSerializer().build_provider_request(internal, context)
+        assert body["tool_choice"] == {"type": "auto"}
+
+    def test_rebuilt_responses_preserves_hosted_tool_choice_and_extra_fields(self):
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        choice = {"type": "mcp", "server_label": "github", "name": "search_issues"}
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "gpt-6.2-astra",
+                "input": "hi",
+                "tools": [
+                    {"type": "mcp", "server_label": "github", "server_url": "https://x.test"}
+                ],
+                "tool_choice": choice,
+            }
+        )
+        context = BuildContext(
+            stream=False,
+            model="gpt-6.2-astra",
+            provider_name="openai",
+            target_endpoint="responses",
+        )
+        body = OpenAIResponsesProviderSerializer().build_provider_request(internal, context)
+        assert body["tool_choice"] == choice
+
+
+class TestBackgroundOptions:
+    """``background_options`` is modelled, and not sent to the upstream call."""
+
+    def test_request_accepts_completion_window(self):
+        request = ResponsesRequest.model_validate(
+            {
+                "model": "m",
+                "input": "hi",
+                "background": True,
+                "background_options": {"completion_window": "2h", "continuation_id": "job-1"},
+            }
+        )
+        assert request.background_options.completion_window == "2h"
+        assert request.background_options.continuation_id == "job-1"
+
+    def test_defaults_to_none(self):
+        request = ResponsesRequest.model_validate({"model": "m", "input": "hi"})
+        assert request.background_options is None
+
+    def test_rejects_unknown_window(self):
+        with pytest.raises(ValidationError):
+            ResponsesRequest.model_validate(
+                {
+                    "model": "m",
+                    "input": "hi",
+                    "background": True,
+                    "background_options": {"completion_window": "48h"},
+                }
+            )
+
+
+class TestPrefixStability:
+    """The rebuilt continuation keeps the prior turn a literal prefix.
+
+    GPT-6.2 drops reasoning items when a conversation's prefix is edited, and
+    moves top-level ``instructions`` *after* ``input`` in prefix matching. The
+    proxy's ``previous_response_id`` materialization must therefore re-emit the
+    stored turn in order (input, then output, then the new turn) instead of
+    reordering or dropping items, and must carry ``instructions`` as an input
+    item rather than a top-level field.
+    """
+
+    def _rebuilt_body(self) -> dict:
+        from llm_proxy.protocols.openresponses.replay import replay_stored_response
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        stored = {
+            "id": "resp_1",
+            "instructions": "You are terse.",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "id": "msg_u",
+                    "content": [{"type": "input_text", "text": "first"}],
+                }
+            ],
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "thought"}],
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "get_x",
+                    "arguments": "{}",
+                },
+            ],
+        }
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "gpt-6.2-astra",
+                "input": [{"type": "function_call_output", "call_id": "call_1", "output": "42"}],
+            }
+        )
+        # The previous turn is prepended in front of the live one, exactly as
+        # PreviousResponseResolutionStage does it.
+        replay_stored_response(stored, internal.conversation, None, None)
+        context = BuildContext(
+            stream=False,
+            model="gpt-6.2-astra",
+            provider_name="openai",
+            target_endpoint="responses",
+        )
+        return OpenAIResponsesProviderSerializer().build_provider_request(internal, context)
+
+    def test_instructions_travel_inside_input(self):
+        body = self._rebuilt_body()
+        assert "instructions" not in body
+        assert body["input"][0]["content"] == "You are terse."
+
+    def test_prior_turn_is_an_unchanged_prefix(self):
+        items = self._rebuilt_body()["input"]
+        shape = [
+            item["type"] + (":" + item.get("role", "") if item["type"] == "message" else "")
+            for item in items
+        ]
+        assert shape == [
+            "message:system",  # instructions, first item
+            "message:user",  # prior input, verbatim
+            "reasoning",  # prior turn's reasoning stays in place
+            "function_call",
+            "function_call_output",  # the new turn, appended after the prefix
+        ]
+
+    def test_repeated_or_overridden_instructions_do_not_stack_on_continuation(self):
+        from llm_proxy.protocols.openresponses.replay import replay_stored_response
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        stored = {
+            "id": "resp_1",
+            "instructions": "You are terse.",
+            "input": [{"type": "message", "role": "user", "content": "first"}],
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "ok"}],
+                }
+            ],
+        }
+        # Case 1: client re-sends identical instructions on the continuation turn.
+        raw_same = {
+            "model": "gpt-6.2-astra",
+            "instructions": "You are terse.",
+            "input": "second",
+        }
+        internal_same = OpenResponsesProtocolSerializer().parse_request(raw_same)
+        internal_same._raw_protocol_data = raw_same
+        replay_stored_response(stored, internal_same.conversation, None, internal_same)
+        context = BuildContext(
+            stream=False,
+            model="gpt-6.2-astra",
+            provider_name="openai",
+            target_endpoint="responses",
+        )
+        body_same = OpenAIResponsesProviderSerializer().build_provider_request(
+            internal_same, context
+        )
+        system_items_same = [
+            i
+            for i in body_same["input"]
+            if i.get("type") == "message" and i.get("role") == "system"
+        ]
+        assert len(system_items_same) == 1
+        assert system_items_same[0]["content"] == "You are terse."
+
+        # Case 2: client overrides instructions on the continuation turn.
+        raw_new = {
+            "model": "gpt-6.2-astra",
+            "instructions": "You are verbose.",
+            "input": "second",
+        }
+        internal_new = OpenResponsesProtocolSerializer().parse_request(raw_new)
+        internal_new._raw_protocol_data = raw_new
+        replay_stored_response(stored, internal_new.conversation, None, internal_new)
+        body_new = OpenAIResponsesProviderSerializer().build_provider_request(internal_new, context)
+        system_items_new = [
+            i for i in body_new["input"] if i.get("type") == "message" and i.get("role") == "system"
+        ]
+        assert len(system_items_new) == 1
+        assert system_items_new[0]["content"] == "You are verbose."
+
+    def test_three_turn_continuation_does_not_stack_repeated_instructions(self):
+        from llm_proxy.protocols.openresponses.replay import replay_stored_response
+        from llm_proxy.protocols.openresponses.serializer import conversation_to_input_items
+
+        serializer = OpenResponsesProtocolSerializer()
+        stored_turn_1 = {
+            "id": "resp_1",
+            "instructions": "You are terse.",
+            "input": [{"type": "message", "role": "user", "content": "turn 1"}],
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "a1"}],
+                }
+            ],
+        }
+        # Turn 2 omits instructions (inherits from stored turn 1, materialized into input).
+        raw_turn_2 = {"model": "gpt-6.2-astra", "input": "turn 2"}
+        req_2 = serializer.parse_request(raw_turn_2)
+        req_2._raw_protocol_data = raw_turn_2
+        replay_stored_response(stored_turn_1, req_2.conversation, None, req_2)
+        stored_turn_2 = {
+            "id": "resp_2",
+            "instructions": None,
+            "input": conversation_to_input_items(req_2.conversation, exclude_system_text=None),
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "a2"}],
+                }
+            ],
+        }
+        # Turn 3 re-sends the same instructions: must not duplicate the system message.
+        raw_turn_3 = {"model": "gpt-6.2-astra", "instructions": "You are terse.", "input": "turn 3"}
+        req_3 = serializer.parse_request(raw_turn_3)
+        req_3._raw_protocol_data = raw_turn_3
+        replay_stored_response(stored_turn_2, req_3.conversation, None, req_3)
+        assert [m.text_content for m in req_3.conversation.system_messages] == ["You are terse."]
+
+
+class TestCrossProtocolAndProviderCompatibility:
+    """Regression coverage for cross-protocol and cross-provider translation."""
+
+    @pytest.mark.parametrize(
+        "malformed",
+        [
+            {"type": "function"},
+            {"type": "function", "name": ""},
+            {"type": "custom"},
+            {"type": "custom", "name": ""},
+            {"type": "allowed_tools", "mode": "bogus", "tools": []},
+            {"type": "allowed_tools"},
+        ],
+    )
+    def test_typed_tool_choice_does_not_swallow_malformed_modelled_choices(self, malformed):
+        with pytest.raises(ValidationError):
+            ResponsesRequest.model_validate({"model": "m", "input": "hi", "tool_choice": malformed})
+
+    def test_allowed_tools_accepts_hosted_tool_entries_without_corrupting(self):
+        from llm_proxy.models.tools import ToolChoiceAllowedTools
+        from llm_proxy.protocols.openresponses.schemas import AllowedToolChoice
+
+        raw = {
+            "model": "m",
+            "input": "hi",
+            "tools": [{"type": "web_search_preview"}],
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "auto",
+                "tools": [{"type": "web_search_preview"}],
+            },
+        }
+        req_model = ResponsesRequest.model_validate(raw)
+        assert isinstance(req_model.tool_choice, AllowedToolChoice)
+        parsed = OpenResponsesProtocolSerializer().parse_request(raw)
+        assert isinstance(parsed.tool_choice, ToolChoiceAllowedTools)
+        assert parsed.tool_choice.allowed_tools.tools == [{"type": "web_search_preview"}]
+
+    def test_input_tokens_request_accepts_typed_tool_choice(self):
+        from llm_proxy.protocols.openresponses.schemas import InputTokensRequest
+
+        req = InputTokensRequest.model_validate(
+            {
+                "model": "m",
+                "input": "hi",
+                "tool_choice": {"type": "web_search_preview"},
+            }
+        )
+        assert req.tool_choice.type == "web_search_preview"
+
+    def test_hosted_only_tools_omit_tool_choice_on_non_responses_providers(self):
+        from llm_proxy.serialization.anthropic.serializer import AnthropicProviderSerializer
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.gemini.serializer import GeminiProviderSerializer
+        from llm_proxy.serialization.gemini_interactions.serializer import (
+            GeminiInteractionsProviderSerializer,
+        )
+        from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "m",
+                "input": "search my files",
+                "tools": [{"type": "file_search", "vector_store_ids": ["vs_1"]}],
+                "tool_choice": {"type": "file_search"},
+            }
+        )
+
+        chat_body = OpenAIRequestBuilder().build(
+            internal,
+            BuildContext(stream=False, model="m", provider_name="openai-compat"),
+        )
+        assert "tools" not in chat_body
+        assert "tool_choice" not in chat_body
+
+        anth_body = AnthropicProviderSerializer().build_provider_request(
+            internal,
+            BuildContext(stream=False, model="claude-sonnet-4-6", provider_name="anthropic"),
+        )
+        assert "tools" not in anth_body
+        assert "tool_choice" not in anth_body
+
+        gemini_body = GeminiProviderSerializer().build_provider_request(
+            internal, BuildContext(stream=False, model="gemini-2.5-pro", provider_name="gemini")
+        )
+        assert "tools" not in gemini_body
+        assert "toolConfig" not in gemini_body
+
+        gi_body = GeminiInteractionsProviderSerializer().build_provider_request(
+            internal, BuildContext(stream=False, model="gemini-2.5-pro", provider_name="gemini")
+        )
+        assert "tools" not in gi_body
+        assert "tool_choice" not in gi_body.get("generation_config", {})
+
+    def test_chat_body_search_dialect_omits_tool_choice_when_tools_list_empty(self):
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "qwen-plus",
+                "input": "search",
+                "tools": [{"type": "web_search_preview"}],
+                "tool_choice": {"type": "web_search_preview"},
+            }
+        )
+        qwen_body = OpenAIRequestBuilder().build(
+            internal,
+            BuildContext(
+                stream=False,
+                model="qwen-plus",
+                provider_name="qwen",
+                provider_type="qwen",
+                target_endpoint="chat_completions",
+            ),
+        )
+        assert qwen_body.get("enable_search") is True
+        assert "tools" not in qwen_body
+        assert "tool_choice" not in qwen_body
+
+    def test_rebuilt_responses_does_not_leak_responses_raw_fields_carrier(self):
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "gpt-6.2-astra",
+                "input": "hi",
+                "context_management": ["auto"],
+            }
+        )
+        body = OpenAIResponsesProviderSerializer().build_provider_request(
+            internal,
+            BuildContext(
+                stream=False,
+                model="gpt-6.2-astra",
+                provider_name="openai",
+                target_endpoint="responses",
+            ),
+        )
+        assert body["context_management"] == ["auto"]
+        assert "responses_raw_fields" not in body
+
+    def test_anthropic_tool_choices_translate_cleanly_to_openai_chat_and_responses(self):
+        import json
+
+        from llm_proxy.protocols.anthropic.serializer import AnthropicProtocolSerializer
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.components.request_builder import OpenAIRequestBuilder
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        anth_proto = AnthropicProtocolSerializer()
+        base_tools = [
+            {
+                "name": "get_weather",
+                "description": "weather",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
+        ctx_chat = BuildContext(
+            stream=False,
+            model="gpt-5",
+            provider_name="openai-compat",
+            target_endpoint="chat_completions",
+        )
+        ctx_resp = BuildContext(
+            stream=False, model="gpt-5", provider_name="openai", target_endpoint="responses"
+        )
+
+        req_named = anth_proto.parse_request(
+            {
+                "model": "m",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": base_tools,
+                "tool_choice": {"type": "tool", "name": "get_weather"},
+            }
+        )
+        chat_named = OpenAIRequestBuilder().build(req_named, ctx_chat)
+        json.dumps(chat_named)
+        assert chat_named["tool_choice"] == {
+            "type": "function",
+            "function": {"name": "get_weather"},
+        }
+        resp_named = OpenAIResponsesProviderSerializer().build_provider_request(req_named, ctx_resp)
+        assert resp_named["tool_choice"] == {"type": "function", "name": "get_weather"}
+
+        req_any = anth_proto.parse_request(
+            {
+                "model": "m",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": base_tools,
+                "tool_choice": {"type": "any"},
+            }
+        )
+        assert OpenAIRequestBuilder().build(req_any, ctx_chat)["tool_choice"] == "required"
+        assert (
+            OpenAIResponsesProviderSerializer().build_provider_request(req_any, ctx_resp)[
+                "tool_choice"
+            ]
+            == "required"
+        )
+
+    def test_chat_completions_allowed_tools_and_custom_translate_to_all_providers(self):
+        from llm_proxy.protocols.openai.serializer import OpenAIProtocolSerializer
+        from llm_proxy.serialization.anthropic.serializer import AnthropicProviderSerializer
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.gemini.serializer import GeminiProviderSerializer
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        oai_proto = OpenAIProtocolSerializer()
+        tools = [
+            {"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}},
+            {"type": "function", "function": {"name": "g", "parameters": {"type": "object"}}},
+        ]
+        req_allowed = oai_proto.parse_request(
+            {
+                "model": "m",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": tools,
+                "tool_choice": {
+                    "type": "allowed_tools",
+                    "allowed_tools": {
+                        "mode": "required",
+                        "tools": [{"type": "function", "function": {"name": "f"}}],
+                    },
+                },
+            }
+        )
+        resp_body = OpenAIResponsesProviderSerializer().build_provider_request(
+            req_allowed,
+            BuildContext(
+                stream=False, model="gpt-5", provider_name="openai", target_endpoint="responses"
+            ),
+        )
+        assert resp_body["tool_choice"] == {
+            "type": "allowed_tools",
+            "mode": "required",
+            "tools": [{"type": "function", "name": "f"}],
+        }
+        anth_body = AnthropicProviderSerializer().build_provider_request(
+            req_allowed,
+            BuildContext(stream=False, model="claude-sonnet-4-6", provider_name="anthropic"),
+        )
+        assert anth_body["tool_choice"] == {"type": "any"}
+        assert [t["name"] for t in anth_body["tools"]] == ["f"]
+
+        gem_body = GeminiProviderSerializer().build_provider_request(
+            req_allowed, BuildContext(stream=False, model="gemini-2.5-pro", provider_name="gemini")
+        )
+        assert gem_body["toolConfig"] == {
+            "functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["f"]}
+        }
+
+        req_custom = oai_proto.parse_request(
+            {
+                "model": "m",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": tools,
+                "tool_choice": {"type": "custom", "custom": {"name": "f"}},
+            }
+        )
+        assert OpenAIResponsesProviderSerializer().build_provider_request(
+            req_custom,
+            BuildContext(
+                stream=False, model="gpt-5", provider_name="openai", target_endpoint="responses"
+            ),
+        )["tool_choice"] == {"type": "custom", "name": "f"}
+        assert AnthropicProviderSerializer().build_provider_request(
+            req_custom,
+            BuildContext(stream=False, model="claude-sonnet-4-6", provider_name="anthropic"),
+        )["tool_choice"] == {"type": "tool", "name": "f"}
+
+    def test_gemini_allowed_tools_none_and_auto_respect_function_calling_rules(self):
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.gemini.serializer import GeminiProviderSerializer
+        from llm_proxy.serialization.gemini_interactions.serializer import (
+            GeminiInteractionsProviderSerializer,
+        )
+
+        tools = [
+            {"type": "function", "name": "f", "parameters": {"type": "object"}},
+            {"type": "function", "name": "g", "parameters": {"type": "object"}},
+        ]
+        ctx = BuildContext(stream=False, model="gemini-2.5-pro", provider_name="gemini")
+
+        req_none = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "m",
+                "input": "hi",
+                "tools": tools,
+                "tool_choice": {
+                    "type": "allowed_tools",
+                    "mode": "none",
+                    "tools": [{"type": "function", "name": "f"}, {"type": "function", "name": "g"}],
+                },
+            }
+        )
+        gem_none = GeminiProviderSerializer().build_provider_request(req_none, ctx)
+        assert gem_none["toolConfig"] == {"functionCallingConfig": {"mode": "NONE"}}
+        gi_none = GeminiInteractionsProviderSerializer().build_provider_request(req_none, ctx)
+        assert gi_none["generation_config"]["tool_choice"] == "none"
+
+        req_auto = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "m",
+                "input": "hi",
+                "tools": tools,
+                "tool_choice": {
+                    "type": "allowed_tools",
+                    "mode": "auto",
+                    "tools": [{"type": "function", "name": "f"}, {"type": "function", "name": "g"}],
+                },
+            }
+        )
+        gem_auto = GeminiProviderSerializer().build_provider_request(req_auto, ctx)
+        assert gem_auto["toolConfig"] == {"functionCallingConfig": {"mode": "AUTO"}}
+
+    @pytest.mark.asyncio
+    async def test_web_search_stage_rewrites_hosted_web_search_tool_choice_and_relaxes_continuation(
+        self,
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from llm_proxy.core.processing.stages.web_search import WebSearchStage
+        from llm_proxy.core.processing.web_search_streaming import WebSearchStreamProcessor
+        from llm_proxy.models.content_blocks import ServerToolUseBlock
+        from llm_proxy.models.tools import FunctionTool, ToolChoice, ToolChoiceFunction
+        from llm_proxy.serialization.context import BuildContext
+        from llm_proxy.serialization.openai.serializer import OpenAIResponsesProviderSerializer
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {
+                "model": "gpt-5",
+                "input": "latest news",
+                "tools": [{"type": "web_search"}],
+                "tool_choice": {"type": "web_search"},
+            }
+        )
+        interceptor = MagicMock()
+        interceptor.has_web_search_tool.return_value = True
+        interceptor.filter_web_search_tools.return_value = []
+        interceptor.convert_web_search_to_function.return_value = FunctionTool(
+            name="web_search",
+            description="Search web",
+            parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+        )
+        interceptor.decode_search_results.return_value = "results"
+
+        state = SimpleNamespace(
+            unified_request=internal,
+            selection=SimpleNamespace(provider_config=SimpleNamespace(native_web_search=False)),
+        )
+        context = SimpleNamespace(
+            web_search_interceptor=interceptor,
+            web_search_tool_config=None,
+            proxy_web_search_active=False,
+        )
+        await WebSearchStage().process(state, context)  # type: ignore[arg-type]
+
+        assert isinstance(internal.tool_choice, ToolChoiceFunction)
+        assert internal.tool_choice.name == "web_search"
+        rebuilt = OpenAIResponsesProviderSerializer().build_provider_request(
+            internal,
+            BuildContext(
+                stream=False, model="gpt-5", provider_name="openai", target_endpoint="responses"
+            ),
+        )
+        assert rebuilt["tool_choice"] == {"type": "function", "name": "web_search"}
+
+        # On continuation after executing web_search, forced choice relaxes to auto.
+        exec_result = SimpleNamespace(
+            is_error=False,
+            error_code=None,
+            result_block=SimpleNamespace(is_error=False, content="results"),
+        )
+        continuation = WebSearchStreamProcessor.build_continuation_request(
+            original_request=internal,
+            accumulated_output=[],
+            search_results=[
+                (
+                    ServerToolUseBlock(id="ws_1", name="web_search", input={"query": "q"}),
+                    exec_result,
+                )
+            ],  # type: ignore[list-item]
+            web_search_interceptor=interceptor,
+            stream=False,
+        )
+        assert isinstance(continuation.tool_choice, ToolChoice)
+        assert continuation.tool_choice.mode == "auto"
+
+    def test_prepare_native_body_strips_background_options_for_openresponses(self):
+        from unittest.mock import MagicMock
+
+        from llm_proxy.core.conversion import prepare_native_body
+
+        internal = OpenResponsesProtocolSerializer().parse_request(
+            {"model": "gpt-6.2", "input": "hi"}
+        )
+        internal.metadata.protocol_name = "openresponses"
+        internal._raw_protocol_data = {
+            "model": "gpt-6.2",
+            "input": "hi",
+            "background_options": {"completion_window": "2h"},
+        }
+        adapter = MagicMock()
+        adapter.native_body_hook.side_effect = lambda body: body
+
+        body = prepare_native_body(adapter, internal, stream=False)
+        assert "background_options" not in body

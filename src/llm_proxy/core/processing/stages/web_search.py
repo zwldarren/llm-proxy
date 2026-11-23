@@ -2,6 +2,11 @@
 
 from llm_proxy.core.processing.base import RequestContext
 from llm_proxy.core.processing.stages.base import PipelineStage, PipelineState
+from llm_proxy.models.tools.core import (
+    ToolChoiceFunction,
+    ToolChoiceHosted,
+    is_web_search_tool_type,
+)
 from llm_proxy.models.tools.openai_builtin import (
     WebSearchTool,
     web_search_options_requested,
@@ -81,3 +86,11 @@ class WebSearchStage(PipelineStage):
             state.unified_request.tools = [function_tool]
         else:
             state.unified_request.tools.append(function_tool)
+        # If the client forced the hosted web_search tool via tool_choice,
+        # point that force at the replacement function tool so rebuilt requests
+        # (especially against native Responses upstreams) stay consistent with
+        # the rewritten tool list.
+        if isinstance(state.unified_request.tool_choice, ToolChoiceHosted) and (
+            is_web_search_tool_type(state.unified_request.tool_choice.type)
+        ):
+            state.unified_request.tool_choice = ToolChoiceFunction(name=function_tool.name)

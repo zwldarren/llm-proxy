@@ -36,6 +36,7 @@ from llm_proxy.models import (
     ToolChoiceAllowedTools,
     ToolChoiceCustom,
     ToolChoiceFunction,
+    ToolChoiceHosted,
     ToolChoiceNamed,
 )
 from llm_proxy.models.embedding import EmbeddingData
@@ -214,9 +215,9 @@ class CohereProviderSerializer(
         tools = self._cohere_tools(request)
         if tools:
             body["tools"] = tools
-        tool_choice = self._cohere_tool_choice(request.tool_choice)
-        if tool_choice is not None:
-            body["tool_choice"] = tool_choice
+            tool_choice = self._cohere_tool_choice(request.tool_choice)
+            if tool_choice is not None:
+                body["tool_choice"] = tool_choice
 
     @staticmethod
     def _cohere_tools(request: InternalRequest) -> list[dict[str, Any]]:
@@ -284,6 +285,10 @@ class CohereProviderSerializer(
         elif isinstance(tool_choice, ToolChoiceFunction | ToolChoiceNamed | ToolChoiceCustom):
             logger.debug("Cohere v2 cannot force a specific tool; asking for any tool instead")
             return "REQUIRED"
+        elif isinstance(tool_choice, ToolChoiceHosted):
+            # Cohere has no equivalent of forcing an OpenAI hosted tool; degrade
+            # to auto (expressed on Cohere v2 by omitting ``tool_choice``).
+            return None
         else:
             return None
         match mode:

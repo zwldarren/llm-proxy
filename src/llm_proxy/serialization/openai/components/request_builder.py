@@ -39,6 +39,7 @@ _RESPONSES_ONLY_EXTRA_KEYS = frozenset(
     {
         "previous_response_id",
         "background",
+        "background_options",
         "context_management",
         "conversation",
         "prompt",
@@ -238,7 +239,10 @@ class OpenAIRequestBuilder:
             built = [*(built or []), *native_entries]
             if built:
                 body["tools"] = built
-        if request.tool_choice:
+        # Chat Completions rejects ``tool_choice`` when ``tools`` is absent
+        # (e.g. when every declared tool was a Responses-only hosted tool that
+        # got dropped or folded into a provider body flag).
+        if request.tool_choice and body.get("tools"):
             body["tool_choice"] = handler.build_tool_choice(
                 request.tool_choice, target_endpoint=context.target_endpoint
             )

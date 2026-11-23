@@ -2981,7 +2981,14 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/FunctionToolChoice"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FunctionToolChoice"
+                },
+                {
+                  "$ref": "#/components/schemas/TypedToolChoice"
+                }
+              ]
             },
             "type": "array",
             "title": "Tools",
@@ -3283,6 +3290,43 @@
         ],
         "title": "AssistantMessageItemParam",
         "description": "Assistant message item for request."
+      },
+      "BackgroundOptionsParam": {
+        "properties": {
+          "completion_window": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "soonest",
+                  "2h",
+                  "8h"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Window",
+            "description": "Completion window for background execution"
+          },
+          "continuation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuation Id",
+            "description": "Opaque client identifier used to prioritize related background requests"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "BackgroundOptionsParam",
+        "description": "Options for background execution on HTTP requests.\n\nMirrors OpenAI's ``background_options``: the ``2h`` / ``8h`` completion\nwindows select discounted background execution upstream (they require\n``background: true`` and a non-streaming request) and ``continuation_id``\nlets a client group related jobs."
       },
       "BatchCreateRequest": {
         "properties": {
@@ -6798,6 +6842,7 @@
           },
           "name": {
             "type": "string",
+            "minLength": 1,
             "title": "Name",
             "description": "Function name to call"
           }
@@ -7962,7 +8007,21 @@
           "tool_choice": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "required",
+                  "none"
+                ]
+              },
+              {
+                "$ref": "#/components/schemas/AllowedToolChoice"
+              },
+              {
+                "$ref": "#/components/schemas/FunctionToolChoice"
+              },
+              {
+                "$ref": "#/components/schemas/TypedToolChoice"
               },
               {
                 "type": "null"
@@ -9542,6 +9601,17 @@
             "title": "Prompt",
             "description": "Prompt template reference (id, version, variables). Forwarded verbatim to native Responses providers; dropped for Chat Completions providers."
           },
+          "background_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackgroundOptionsParam"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Options for background execution (completion_window, continuation_id). The proxy runs background requests itself, so completion_window is accepted and not honored: OpenAI's 2h/8h discounted windows require the upstream to hold the job, and the proxy's own background mode returns as soon as the model answers."
+          },
           "include": {
             "anyOf": [
               {
@@ -9600,10 +9670,13 @@
                 ]
               },
               {
+                "$ref": "#/components/schemas/AllowedToolChoice"
+              },
+              {
                 "$ref": "#/components/schemas/FunctionToolChoice"
               },
               {
-                "$ref": "#/components/schemas/AllowedToolChoice"
+                "$ref": "#/components/schemas/TypedToolChoice"
               },
               {
                 "type": "null"
@@ -9983,7 +10056,24 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/FunctionToolParam"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/FunctionToolParam"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WebSearchToolParam"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CodeInterpreterToolParam"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FileSearchToolParam"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  ]
                 },
                 "type": "array"
               },
@@ -10005,10 +10095,13 @@
                 ]
               },
               {
+                "$ref": "#/components/schemas/AllowedToolChoice"
+              },
+              {
                 "$ref": "#/components/schemas/FunctionToolChoice"
               },
               {
-                "$ref": "#/components/schemas/AllowedToolChoice"
+                "$ref": "#/components/schemas/TypedToolChoice"
               },
               {
                 "type": "null"
@@ -11082,6 +11175,35 @@
         "required": [
           "text"
         ]
+      },
+      "TypedToolChoice": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Type",
+            "description": "Hosted-tool or typed tool-choice discriminator"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Tool name, when the variant carries one"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "TypedToolChoice",
+        "description": "Object-form tool choice keyed by a ``type`` discriminator.\n\nCovers the hosted-tool choices (``{\"type\": \"web_search_preview\"}``,\n``file_search``, ``code_interpreter``, ``image_generation``, computer use)\nand the remaining object shapes (``mcp``, ``custom``, ``shell``,\n``apply_patch``). One open object rather than a closed union: the variants\ndiffer only by discriminator and fields the proxy never reads, so a type\nthe API adds later is accepted without a proxy change (ADR-0067)."
       },
       "UrlCitation": {
         "properties": {
