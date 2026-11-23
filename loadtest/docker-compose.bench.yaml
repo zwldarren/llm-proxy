@@ -26,7 +26,10 @@ services:
     command: ["sh", "-c", "exec /app/.venv/bin/llm-proxy --workers $${LOADTEST_WORKERS:-8}"]
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    # Pinned to the current LTS line (1.108, latest patch 1.108.15, released
+    # 2026-11-21). Do not use `main-stable`: it is a moving tag, so a rerun of
+    # this benchmark would silently measure a different build.
+    image: ghcr.io/berriai/litellm:v1.108.15-lts
     cpus: 8.0
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "8"]
     ports:

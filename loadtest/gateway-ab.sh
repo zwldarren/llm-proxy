@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Head-to-head gateway benchmark driver: llm-proxy vs LiteLLM (v1.101.0).
+# Head-to-head gateway benchmark driver: llm-proxy vs LiteLLM (latest LTS).
+# The LiteLLM image is pinned in loadtest/docker-compose.bench.yaml; the
+# version actually measured is written to $OUT/SWEEP.log at init.
 #
 #   uv run loadtest/gateway-ab.sh
 #
@@ -108,6 +110,7 @@ run_locust() {  # tag url scen key users [duration]
 
 log "=== gateway A/B sweep: mix=$MIX levels='$LEVELS' dur=$DUR ramp=$RAMP reps=$REPS ==="
 log "scenarios: $SCEN"
+log "llm-proxy commit: $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
 
 # --- one-time init: (re)create both gateways so every worker loads the seeded
 # topology, and so the image is the freshly built working tree.
@@ -116,11 +119,15 @@ compose up -d --force-recreate llm-proxy >/dev/null 2>&1
 wait_http "$PROXY_URL/api/health" 240 || exit 1
 log "init: llm-proxy healthy"
 
-log "init: recreating litellm (v1.101.0, 8 workers) ..."
+log "init: recreating litellm (8 workers) ..."
 compose up -d --force-recreate litellm >/dev/null 2>&1
 t0=$(date +%s)
 wait_http "$LITELLM_URL/health/liveliness" 300 || exit 1
 log "init: litellm healthy after $(( $(date +%s) - t0 ))s"
+log "litellm image: $(compose ps --format '{{.Image}}' litellm | head -1)"
+LITELLM_IMAGE=$(compose ps --format '{{.Image}}' litellm | head -1)
+log "litellm image digest: $(docker image inspect --format '{{index .RepoDigests 0}}' "$LITELLM_IMAGE" 2>/dev/null)"
+log "litellm workers: $(docker exec "$(compose ps -q litellm)" sh -c 'ps -eo args | grep -c "[m]ultiprocessing.spawn"' 2>/dev/null) (plus supervisor)"
 
 # --- warmup: prime connection pools / JIT without recording results.
 log "warmup: llm-proxy 60 users 20s"
