@@ -5,6 +5,7 @@ import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -17,6 +18,8 @@ logger = get_logger(__name__)
 
 _engine = None
 _async_session_factory = None
+_writer_engine = None
+_writer_session_factory = None
 _db_initialized = False
 _migrations_run = False
 
@@ -40,6 +43,17 @@ def _get_worker_count() -> int:
         return 1
 
 
+def _calculate_writer_pool_size() -> int:
+    """Per-worker connection count reserved for the background writers.
+
+    Log and usage writers have their own engine so a full batch cannot starve
+    request-path reads. Their pool is part of the same global connection
+    budget; the request pool gets what is left.
+    """
+    budget_per_worker = _DB_CONNECTION_BUDGET // (2 * _get_worker_count())
+    return max(1, min(3, budget_per_worker // 2))
+
+
 def _calculate_pool_size() -> int:
     """Calculate the per-worker database pool size.
 
@@ -48,10 +62,10 @@ def _calculate_pool_size() -> int:
     * CPU-derived — ``(cpu_cores * 2 + 1) / workers``: scales concurrency
       with the machine, but because every worker builds its own pool the
       *total* grows with the CPU count.
-    * Budget-derived — ``_DB_CONNECTION_BUDGET / (2 * workers)`` (overflow
-      defaults to the pool size, hence the factor of two): caps the total
-      connection count regardless of host size, so a many-core host cannot
-      overrun PostgreSQL's ``max_connections``.
+    * Budget-derived — ``_DB_CONNECTION_BUDGET / (2 * workers)`` minus the
+      writer pool (overflow doubles each pool): caps the total connection
+      count regardless of host size, so a many-core host cannot overrun
+      PostgreSQL's ``max_connections``.
 
     Returns:
         Recommended per-worker pool size (never below 1).
@@ -63,48 +77,56 @@ def _calculate_pool_size() -> int:
         cpu_count = 4
     workers = _get_worker_count()
     cpu_pool = max(3, (cpu_count * 2 + 1) // workers)
-    budget_pool = max(1, _DB_CONNECTION_BUDGET // (2 * workers))
+    budget_pool = max(1, _DB_CONNECTION_BUDGET // (2 * workers) - _calculate_writer_pool_size())
     return min(cpu_pool, budget_pool)
 
 
+def _build_engine_kwargs(
+    *, pool_size: int | None = None, max_overflow: int | None = None
+) -> dict[str, Any]:
+    """Engine options shared by the request and background-writer engines."""
+    engine_kwargs: dict[str, Any] = {"echo": False, "future": True}
+    if is_sqlite():
+        return engine_kwargs
+
+    settings = get_settings().db
+    calculated = _calculate_pool_size()
+    resolved_pool = (
+        pool_size
+        if pool_size is not None
+        else (settings.pool_size if settings.pool_size is not None else calculated)
+    )
+    resolved_overflow = (
+        max_overflow
+        if max_overflow is not None
+        else (settings.max_overflow if settings.max_overflow is not None else resolved_pool)
+    )
+    engine_kwargs.update(
+        pool_size=resolved_pool,
+        max_overflow=resolved_overflow,
+        pool_pre_ping=True,
+        pool_recycle=settings.pool_recycle_seconds,
+        pool_timeout=settings.pool_timeout_seconds,
+    )
+    return engine_kwargs
+
+
 def get_engine():
-    """Get or create the async engine."""
+    """Get or create the async engine used by request-path sessions."""
     global _engine
     if _engine is None:
-        db_url = get_db_url()
-        engine_kwargs = {
-            "echo": False,
-            "future": True,
-        }
+        engine_kwargs = _build_engine_kwargs()
         if not is_sqlite():
-            settings = get_settings().db
-            # Apply settings with fallbacks to calculated defaults when None
-            calculated_pool_size = _calculate_pool_size()
-            pool_size = (
-                settings.pool_size if settings.pool_size is not None else calculated_pool_size
-            )
-            max_overflow = settings.max_overflow if settings.max_overflow is not None else pool_size
-            # Pydantic already enforces ge constraints on these fields
-            pool_recycle = settings.pool_recycle_seconds
-            pool_timeout = settings.pool_timeout_seconds
-
-            engine_kwargs = {
-                **engine_kwargs,
-                "pool_size": pool_size,
-                "max_overflow": max_overflow,
-                "pool_pre_ping": True,
-                "pool_recycle": pool_recycle,
-                "pool_timeout": pool_timeout,
-            }
-
             logger.info(
-                f"Database connection pool configured: "
-                f"pool_size={pool_size}, max_overflow={max_overflow}, "
-                f"pool_recycle={pool_recycle}s, pool_timeout={pool_timeout}s "
+                "Database connection pool configured: "
+                f"pool_size={engine_kwargs['pool_size']}, "
+                f"max_overflow={engine_kwargs['max_overflow']}, "
+                f"pool_recycle={engine_kwargs['pool_recycle']}s, "
+                f"pool_timeout={engine_kwargs['pool_timeout']}s "
                 f"(workers={_get_worker_count()})"
             )
 
-        _engine = create_async_engine(db_url, **engine_kwargs)
+        _engine = create_async_engine(get_db_url(), **engine_kwargs)
         if is_sqlite():
             from sqlalchemy import event
 
@@ -125,6 +147,25 @@ def get_engine():
     return _engine
 
 
+def get_writer_engine():
+    """Engine for the background log/usage writers.
+
+    The writers batch rows asynchronously, but each batch still holds a pool
+    connection while SQLAlchemy builds and sends the INSERT. Sharing the
+    request pool let a busy writer starve request-path reads at saturation.
+    SQLite keeps one engine (its connection is a single file handle anyway).
+    """
+    global _writer_engine
+    if is_sqlite():
+        return get_engine()
+    if _writer_engine is None:
+        pool_size = _calculate_writer_pool_size()
+        _writer_engine = create_async_engine(
+            get_db_url(), **_build_engine_kwargs(pool_size=pool_size, max_overflow=pool_size)
+        )
+    return _writer_engine
+
+
 def get_session_factory():
     """Get or create the async session factory."""
     global _async_session_factory
@@ -137,9 +178,23 @@ def get_session_factory():
     return _async_session_factory
 
 
-async def _session_generator() -> AsyncIterator[AsyncSession]:
+def get_writer_session_factory():
+    """Get or create the session factory for background writers."""
+    global _writer_session_factory
+    if _writer_session_factory is None:
+        _writer_session_factory = async_sessionmaker(
+            get_writer_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+    return _writer_session_factory
+
+
+async def _session_generator(
+    factory_getter: Any = get_session_factory,
+) -> AsyncIterator[AsyncSession]:
     """Common session generator logic."""
-    factory = get_session_factory()
+    factory = factory_getter()
     session = factory()
     try:
         yield session
@@ -181,6 +236,16 @@ async def get_async_session() -> AsyncIterator[AsyncSession]:
             or rolls back on exception.
     """
     async for session in _session_generator():
+        yield session
+
+
+@asynccontextmanager
+async def get_writer_session_context() -> AsyncGenerator[AsyncSession]:
+    """Session context for background writers, with its own connection pool.
+
+    Uses the same commit/rollback/close semantics as the request-path context.
+    """
+    async for session in _session_generator(get_writer_session_factory):
         yield session
 
 
@@ -341,9 +406,13 @@ def _restrict_sqlite_permissions() -> None:
 
 async def close_db() -> None:
     """Close the database connection."""
-    global _engine, _async_session_factory, _db_initialized
+    global _engine, _async_session_factory, _writer_engine, _writer_session_factory, _db_initialized
     if _engine is not None:
         await _engine.dispose()
         _engine = None
         _async_session_factory = None
         _db_initialized = False
+    if _writer_engine is not None:
+        await _writer_engine.dispose()
+        _writer_engine = None
+        _writer_session_factory = None

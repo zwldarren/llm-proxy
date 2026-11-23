@@ -81,6 +81,8 @@ def reset_proxy_globals() -> None:
     conn_mod._migrations_run = False
     conn_mod._engine = None
     conn_mod._async_session_factory = None
+    conn_mod._writer_engine = None
+    conn_mod._writer_session_factory = None
     os.environ["JWT_SECRET"] = "test-secret-key-for-testing-purposes-32chars"
 
     # DB-derived process-global caches hold rows from the previous test

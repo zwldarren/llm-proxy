@@ -24,7 +24,7 @@ from llm_proxy.config.settings import (
 )
 from llm_proxy.config.types.logging_config import DEFAULT_RETENTION_DAYS, LoggingConfig
 from llm_proxy.database import RequestLog, get_async_session_context
-from llm_proxy.database.connection import reclaim_sqlite_space
+from llm_proxy.database.connection import get_writer_session_context, reclaim_sqlite_space
 from llm_proxy.database.repositories import LogRepository, UsageRepository
 from llm_proxy.observability.logger import get_logger
 from llm_proxy.observability.observation.policy import cap_payload
@@ -390,7 +390,7 @@ class _BackgroundLogWriter(_BackgroundBatchWriter["RequestLogCreate"]):
         audit_data = [data for data in batch if data.log_type == LogType.AUDIT]
         other_data = [data for data in batch if data.log_type != LogType.AUDIT]
 
-        async with get_async_session_context() as session:
+        async with get_writer_session_context() as session:
             repo = LogRepository(session)
 
             if other_data:
@@ -469,7 +469,7 @@ class _BackgroundAuditLogWriter(_BackgroundLogWriter):
         if not batch:
             return
         config = self._effective_config()
-        async with get_async_session_context() as session:
+        async with get_writer_session_context() as session:
             repo = LogRepository(session)
             for data in batch:
                 audit_log = _request_log_from_create(data, config=config)
@@ -924,7 +924,7 @@ class _BackgroundUsageWriter(_BackgroundBatchWriter["UsageRecordCreate"]):
             for data in batch
         ]
 
-        async with get_async_session_context() as session:
+        async with get_writer_session_context() as session:
             repo = UsageRepository(session)
             await repo.create_usage_bulk(values)
 
