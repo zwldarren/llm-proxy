@@ -17,6 +17,7 @@ LLM Proxy sits between your application and the model providers you pay for. Poi
 
 - [How it works](#how-it-works)
 - [Why LLM Proxy](#why-llm-proxy)
+- [Performance](#performance)
 - [What it supports](#what-it-supports)
 - [Quick start](#quick-start)
 - [Use it from code](#use-it-from-code)
@@ -50,6 +51,20 @@ The proxy parses each client request into an internal request model. A protocol 
 - Providers, models, pricing, keys, MCP servers, tracing, and policy are edited in the console and reloaded on change.
 
 If you want an in-process library rather than a gateway, or a managed service where you never run infrastructure, this project is not the right fit.
+
+## Performance
+
+Gateway overhead, measured on 2026-11-24 against LiteLLM 1.108.15 (LTS). Each gateway ran alone with 8 CPUs, 8 workers and the same Postgres, Redis and zero-latency fake upstream. Locust drove the same OpenAI Chat Completions mix (non-stream and stream) for 60 s per level, two runs per level.
+
+| Concurrent users | LLM Proxy | LiteLLM 1.108.15 LTS |
+| --- | --- | --- |
+| 400 | 527 req/s, p50 5.8 ms | 303 req/s, p50 360 ms |
+| 800 | 1029 req/s, p50 18.2 ms | 313 req/s, p50 1100 ms |
+| 1200 | 1251 req/s, p50 159 ms | 295 req/s, p50 1475 ms |
+
+LLM Proxy used 3.3–3.8 ms of CPU per request and 1.2 GiB of memory; LiteLLM used 24.6–27.2 ms and 5.0–5.6 GiB. Neither gateway failed a request in the 18 runs. Up to about 800 concurrent users the proxy stays within 3% of the upstream itself; at 1200 it serves 80%. A zero-latency upstream isolates gateway cost; real provider latency dominates end-to-end time and shrinks the relative gap.
+
+[Method, percentiles and reproduction steps](https://zwldarren.github.io/llm-proxy/guides/performance.html) · [Load-test harness](loadtest/README.md)
 
 ## What it supports
 
@@ -175,7 +190,7 @@ See [Reverse proxy & TLS](https://zwldarren.github.io/llm-proxy/deployment/rever
 | [Deployment](https://zwldarren.github.io/llm-proxy/deployment/docker.html) | Docker Compose, PostgreSQL & Redis, reverse proxy, upgrades, troubleshooting |
 | [Admin console](https://zwldarren.github.io/llm-proxy/admin/overview.html) | Providers, models & pricing, API keys, users, MCP, every server setting |
 | [API reference](https://zwldarren.github.io/llm-proxy/api/) | Auth, endpoints, streaming, tools & web search, OpenAPI, errors |
-| [Guides](https://zwldarren.github.io/llm-proxy/guides/cost-control.html) | Cost control, monitoring & alerting, security hardening |
+| [Guides](https://zwldarren.github.io/llm-proxy/guides/cost-control.html) | Cost control, monitoring & alerting, security hardening, performance benchmarks |
 | [Reference](https://zwldarren.github.io/llm-proxy/reference/environment.html) | Environment variables, FAQ |
 
 Release history: [CHANGELOG.md](CHANGELOG.md).

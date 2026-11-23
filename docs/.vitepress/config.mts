@@ -107,6 +107,7 @@ const guides = [
   { text: 'Cost Control', link: '/guides/cost-control' },
   { text: 'Monitoring & Alerting', link: '/guides/monitoring' },
   { text: 'Security Hardening', link: '/guides/security' },
+  { text: 'Performance & Benchmarks', link: '/guides/performance' },
 ]
 const reference = [
   { text: 'Environment Variables', link: '/reference/environment' },
@@ -219,6 +220,7 @@ const zhGuides = [
   { text: '成本控制', link: '/zh/guides/cost-control' },
   { text: '监控与告警', link: '/zh/guides/monitoring' },
   { text: '安全加固', link: '/zh/guides/security' },
+  { text: '性能与基准测试', link: '/zh/guides/performance' },
 ]
 
 const zhReference = [
