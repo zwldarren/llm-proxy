@@ -151,11 +151,13 @@ class UnifiedProcessor:
         context: RequestContext,
     ) -> EventContext:
         """Create EventContext with sampling decision and request metadata."""
-        config_manager = context.config_manager
-        if config_manager is not None:
-            logging_config = (await config_manager.get_config()).server_params.logging
-        else:
-            logging_config = load_logging_config()
+        logging_config = context.logging_config
+        if logging_config is None:
+            config_manager = context.config_manager
+            if config_manager is not None:
+                logging_config = (await config_manager.get_config()).server_params.logging
+            else:
+                logging_config = load_logging_config()
 
         sampling = make_sampling_decision(
             config=logging_config,
@@ -270,7 +272,11 @@ class UnifiedProcessor:
         # ``uuid4().hex`` (no dashes) is a valid OTel/Langfuse trace id, so a
         # generated id can be handed to the Langfuse SDK as ``trace_context`` —
         # keeping the request log's trace id and the Langfuse trace id identical.
-        trace_id = context.trace_id or uuid.uuid4().hex
+        # The logging middleware already minted a 32-hex request id. Reuse it
+        # as the trace id so both ids name one turn and skip a second uuid4.
+        # WebSocket turns carry a prefixed id, which is not a valid trace id.
+        request_id = facts_for(req).request_id
+        trace_id = context.trace_id or (request_id if len(request_id) == 32 else uuid.uuid4().hex)
 
         event_context = await self._create_event_context(
             request=req,

@@ -339,6 +339,7 @@ async def _build_request_context(
         verbose_routing_logs=getattr(
             getattr(config.server_params, "logging", None), "verbose_routing_logs", False
         ),
+        logging_config=config.server_params.logging,
     )
 
     # Set routing decision fields if virtual model was resolved

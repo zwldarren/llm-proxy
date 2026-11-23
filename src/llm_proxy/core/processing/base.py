@@ -104,6 +104,9 @@ class RequestContext:
     client_ip: str | None = None
     protocol_name: str | None = None
     should_log_input_output: bool = True
+    # Logging snapshot already read while building the context; the pipeline
+    # reuses it instead of fetching the configuration a third time.
+    logging_config: Any = None
     routing_decision: Any = None
     requested_model: str | None = None
     verbose_routing_logs: bool = False

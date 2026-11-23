@@ -574,3 +574,42 @@ async def test_provider_selection_stage_omits_routing_scorecards_when_verbose_di
     assert "signal_votes" not in routing_meta
     assert routing_meta["requested_model"] == "auto"
     assert routing_meta["resolved_model"] == "bal/mid"
+
+
+class _StopBeforeStages(Exception):
+    """Sentinel used to inspect the pipeline inputs without running stages."""
+
+
+@pytest.mark.asyncio
+async def test_pipeline_reuses_request_id_as_default_trace_id(monkeypatch):
+    from llm_proxy.core.processing.unified import UnifiedProcessor
+
+    captured: dict[str, str] = {}
+
+    async def fake_create_event_context(**kwargs):
+        captured["trace_id"] = kwargs["trace_id"]
+        raise _StopBeforeStages
+
+    processor = UnifiedProcessor(protocol_endpoint=openai_protocol)
+    monkeypatch.setattr(processor, "_create_event_context", fake_create_event_context)
+
+    req = _build_mock_request()
+    facts_for(req).request_id = "0123456789abcdef0123456789abcdef"
+    context = RequestContext(
+        orchestrator=MagicMock(),
+        services=ServiceDependencies(
+            adapter_factory=MagicMock(),
+            config_manager=MagicMock(),
+        ),
+    )
+
+    with pytest.raises(_StopBeforeStages):
+        await processor._run_pipeline(
+            strategy=MagicMock(),
+            unified_request=_build_unified_request(),
+            raw_request_data={},
+            req=req,
+            context=context,
+        )
+
+    assert captured["trace_id"] == facts_for(req).request_id

@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import uuid
 from contextlib import AsyncExitStack
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -72,6 +73,16 @@ def stream_response_id(protocol_name: str | None) -> str:
     """Mint the proxy's own stream id in the client protocol's id dialect."""
     prefix = _STREAM_ID_PREFIX.get(protocol_name or "", _DEFAULT_STREAM_ID_PREFIX)
     return f"{prefix}{uuid.uuid4().hex[:29]}"
+
+
+@lru_cache(maxsize=64)
+def _transformer_init_params(transformer_cls: type[Any]) -> frozenset[str]:
+    """Constructor parameters of a streaming transformer class.
+
+    ``inspect.signature`` walks annotations and defaults on every call, which
+    is measurable at saturation; transformer classes are fixed after import.
+    """
+    return frozenset(inspect.signature(transformer_cls.__init__).parameters)
 
 
 # ------------------------------------------------------------------
@@ -212,15 +223,13 @@ class StreamingProcessor:
                     "model": model,
                     "request_id": response_id,
                 }
-                if include_obfuscation is not None:
-                    sig = inspect.signature(transformer_cls.__init__)
-                    if "include_obfuscation" in sig.parameters:
-                        transformer_kwargs["include_obfuscation"] = include_obfuscation
+                init_params = _transformer_init_params(transformer_cls)
+                if include_obfuscation is not None and "include_obfuscation" in init_params:
+                    transformer_kwargs["include_obfuscation"] = include_obfuscation
 
                 # Pass web_search interceptor presence so the streaming transformer
                 # knows whether to intercept (server-side) or emit to client.
-                sig = inspect.signature(transformer_cls.__init__)
-                if "intercept_web_search" in sig.parameters:
+                if "intercept_web_search" in init_params:
                     transformer_kwargs["intercept_web_search"] = proxy_web_search_active
 
                 # The Anthropic wire reports the prompt count in its FIRST event
@@ -230,11 +239,7 @@ class StreamingProcessor:
                 # not render the wire and the count would be paid for nothing. The
                 # estimate is a tokenizer pass, so it runs off the event loop.
                 estimator = self.protocol_endpoint.estimate_input_tokens
-                if (
-                    estimator is not None
-                    and not native
-                    and "estimated_input_tokens" in sig.parameters
-                ):
+                if estimator is not None and not native and "estimated_input_tokens" in init_params:
                     transformer_kwargs["estimated_input_tokens"] = await asyncio.to_thread(
                         estimator, raw_request_data
                     )

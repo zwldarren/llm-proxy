@@ -10,6 +10,7 @@ See ADR-0044.
 
 import re
 import socket
+from functools import lru_cache
 from typing import Any
 
 from llm_proxy.observability.logger import get_logger
@@ -45,6 +46,7 @@ _RESOURCE_PATH_PREFIXES: list[str] = [
 ]
 
 
+@lru_cache(maxsize=1024)
 def determine_event_type(path: str) -> str:
     """Determine the audit event type from request path."""
     if path.startswith("/api/"):
@@ -62,18 +64,23 @@ def determine_event_type(path: str) -> str:
     return EventType.SYSTEM_EVENT
 
 
-def determine_action_category(method: str) -> str:
-    """Determine action category from HTTP method."""
-    mapping: dict[str, str] = {
+_ACTION_CATEGORIES: frozendict[str, str] = frozendict(
+    {
         "GET": ActionCategory.READ,
         "POST": ActionCategory.CREATE,
         "PUT": ActionCategory.UPDATE,
         "PATCH": ActionCategory.UPDATE,
         "DELETE": ActionCategory.DELETE,
     }
-    return mapping.get(method, ActionCategory.EXECUTE)
+)
 
 
+def determine_action_category(method: str) -> str:
+    """Determine action category from HTTP method."""
+    return _ACTION_CATEGORIES.get(method, ActionCategory.EXECUTE)
+
+
+@lru_cache(maxsize=1024)
 def determine_resource_type(path: str) -> str | None:
     """Determine resource type from request path."""
     if "/models" in path:
