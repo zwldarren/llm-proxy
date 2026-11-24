@@ -594,15 +594,16 @@ export default {
     oauthExpiresAt: "Access token expires",
     oauthSignIn: "Sign in with ChatGPT",
     oauthReauthorize: "Re-authorize",
-    oauthRefresh: "Refresh token",
+    oauthRefresh: "Refresh access token",
     oauthDisconnect: "Disconnect",
     oauthOptions: "OAuth options",
     oauthRedirectUri: "Redirect URI",
     oauthRedirectUriHelp:
-      "Localhost deployments complete automatically via callback. Remote servers can use http://127.0.0.1:1455/auth/callback and paste the redirected URL below.",
+      "Localhost deployments complete automatically via callback. Remote servers can use {uri} and paste the redirected URL below.",
     oauthStaticClientId: "Client ID (optional, leave blank for dynamic registration)",
     oauthClientSecret: "Client secret (optional)",
     oauthPendingHint: "Finish sign-in in the opened tab, or paste the final callback URL below:",
+    oauthPopupBlocked: "The sign-in tab was blocked by the browser",
     oauthOpenLink: "Open link",
     oauthCallbackPaste: "Callback URL",
     oauthCompleteManual: "Complete",
@@ -611,6 +612,7 @@ export default {
     oauthRefreshSuccess: "ChatGPT OAuth token refreshed.",
     oauthRefreshFailed: "Failed to refresh ChatGPT OAuth token.",
     oauthDisconnectSuccess: "ChatGPT OAuth credentials disconnected.",
+    oauthDisconnectFailed: "Failed to disconnect ChatGPT OAuth credentials.",
   },
 
   // Model Plaza (public catalog, visible to all users)

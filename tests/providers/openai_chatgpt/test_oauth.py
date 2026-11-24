@@ -218,6 +218,16 @@ class TestTokenExchangeAndClaims:
             extract_id_token_claims(token, expected_nonce="wrong")
         assert exc_info.value.code == "oauth_nonce_mismatch"
 
+        # The claim is required whenever the request carried a nonce: signature,
+        # audience and expiry verification are disabled on purpose, so the nonce
+        # is the only thing binding this token to the transaction.
+        token_without_nonce = jwt.encode(
+            {"sub": "user_1"}, "test-hmac-secret-at-least-32-bytes", algorithm="HS256"
+        )
+        with pytest.raises(ValidationError) as missing_nonce:
+            extract_id_token_claims(token_without_nonce, expected_nonce="n1")
+        assert missing_nonce.value.code == "oauth_nonce_mismatch"
+
         assert extract_id_token_claims(None) == {"sub": None, "email": None, "name": None}
 
 
@@ -255,3 +265,26 @@ class TestPendingOAuthStore:
         )
         await store.put(expired_tx)
         assert await store.pop("state-expired") is None
+
+    @pytest.mark.asyncio
+    async def test_redis_pop_discards_unreadable_entries(self):
+        """A corrupt or version-skewed entry reads as an unknown state, not a crash.
+
+        `pop` runs on the unauthenticated callback route outside its try block,
+        so a deserialization error there would surface as a raw 500 instead of
+        the designed error page.
+        """
+
+        class _FakeRedis:
+            def __init__(self, value: bytes) -> None:
+                self._value = value
+
+            async def getdel(self, _key: str) -> bytes:
+                return self._value
+
+        store = PendingOAuthStore()
+        assert await store.pop("state-corrupt", redis_client=_FakeRedis(b"not-json")) is None
+        assert (
+            await store.pop("state-skewed", redis_client=_FakeRedis(b'{"unknown_field": 1}'))
+            is None
+        )

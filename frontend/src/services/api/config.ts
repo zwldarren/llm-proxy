@@ -72,9 +72,7 @@ export const configApi = {
       {}
     ),
   disconnectProviderOAuth: (name: string) =>
-    http.delete<{ message: string }>(
-      `${BASE_URL}/providers/${encodeURIComponent(name)}/oauth`
-    ),
+    http.delete<{ message: string }>(`${BASE_URL}/providers/${encodeURIComponent(name)}/oauth`),
 
   // Models
   getModels: () => http.get<ModelRead[]>(`${BASE_URL}/models`),

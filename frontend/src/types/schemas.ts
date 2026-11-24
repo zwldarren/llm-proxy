@@ -585,7 +585,6 @@ export interface ProviderOAuthStartRequest {
   redirect_uri?: string | null;
   client_id?: string | null;
   client_secret?: string | null;
-  force_new_registration?: boolean;
 }
 
 export interface ProviderOAuthStartResponse {
@@ -596,10 +595,10 @@ export interface ProviderOAuthStartResponse {
 }
 
 export interface ProviderOAuthCompleteRequest {
+  // The console completes from the pasted redirect. The endpoint also accepts a
+  // bare `code` + `state` pair; nothing in the UI sends those, so the type does
+  // not carry them until something needs to.
   callback_url?: string | null;
-  code?: string | null;
-  state?: string | null;
-  client_id?: string | null;
 }
 
 export interface ProviderRead extends ProviderBase {

@@ -43,6 +43,14 @@ Two attributes are deliberately *not* owned here:
   which owns the rebuild-on-config-change invariant (and its
   "never built in this worker" sentinel). This module owns the read and the
   install; the snapshot the runtime pairs with it stays module-owned.
+
+A few singletons are also read directly rather than through this view, because
+an adapter calls them from the request path with no ``Request`` in hand:
+``get_user_tracing_manager()`` (:mod:`llm_proxy.observability.user_tracing`) and
+``get_oauth_token_manager()`` take the shared Redis client through a
+``set_redis_client`` hook that the lifespan calls, and
+``get_pending_oauth_store()`` receives it per operation. None of them holds
+shutdown work, so no central teardown is missing.
 """
 
 import asyncio

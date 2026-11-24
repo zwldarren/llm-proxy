@@ -46,6 +46,17 @@ class OpenAIChatGPTOAuthManager:
         self._cache: dict[str, _CachedToken] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._lock_loop: asyncio.AbstractEventLoop | None = None
+        self._redis_client: Any = None
+
+    def set_redis_client(self, redis_client: Any) -> None:
+        """Give the manager a shared Redis client (installed by the lifespan).
+
+        The refresh lock has to reach the request path, where the adapter calls
+        :meth:`get_access_token` without request services at hand; without a
+        client here, expiry-driven refreshes on the hot path are serialized only
+        per process and every worker can race the same rotation.
+        """
+        self._redis_client = redis_client
 
     def _get_lock(self, provider_name: str) -> asyncio.Lock:
         try:
@@ -78,6 +89,7 @@ class OpenAIChatGPTOAuthManager:
         redis_client: Any = None,
     ) -> str:
         """Return a valid OAuth access token for ``provider_name``, refreshing if needed."""
+        redis_client = redis_client if redis_client is not None else self._redis_client
         if not force_refresh:
             cached = self._cache.get(provider_name)
             if (
@@ -153,6 +165,16 @@ class OpenAIChatGPTOAuthManager:
                         provider_name=provider_name,
                     )
 
+                # The values this attempt decides on. The poll below commits (to
+                # open a fresh transaction) which expires the ORM instance, so
+                # read them once as plain strings while they are still loaded.
+                baseline_token = cred.access_token
+                baseline_scope = cred.scope
+                refresh_token_value = cred.refresh_token
+                client_id_value = cred.client_id
+                client_secret_value = cred.client_secret
+                provider_id_value = cred.provider_id
+
                 # Coordinate across peer workers when Redis is enabled so rotated
                 # refresh tokens do not race each other.
                 redis_lock_key = f"{_REDIS_REFRESH_LOCK_PREFIX}{provider_name}"
@@ -166,15 +188,18 @@ class OpenAIChatGPTOAuthManager:
                         ex=_REDIS_REFRESH_LOCK_TTL_SECONDS,
                     )
                     if not acquired:
-                        # Another worker is refreshing; wait briefly and re-read DB.
+                        # Another worker is refreshing; wait briefly and re-read
+                        # the row it is about to commit.
                         for _ in range(10):
                             await asyncio.sleep(0.15)
+                            # Close the read transaction so the next SELECT opens
+                            # a fresh one and can see the peer's commit.
+                            await session.commit()
                             refreshed_row = await repo.get_by_provider_name(
                                 provider_name, decrypt=True
                             )
-                            if (
-                                refreshed_row is not None
-                                and refreshed_row.access_token != cred.access_token
+                            if refreshed_row is not None and (
+                                refreshed_row.access_token != baseline_token
                             ):
                                 r_exp = _ensure_utc(refreshed_row.expires_at)
                                 if has_plan_usage_scope(refreshed_row.scope) and self._is_fresh(
@@ -186,16 +211,51 @@ class OpenAIChatGPTOAuthManager:
                                         scope=refreshed_row.scope,
                                     )
                                     return refreshed_row.access_token
+                        # Nobody committed a usable token in time. Re-read once so
+                        # the attempt below uses the newest refresh token rather
+                        # than one a peer may already have consumed.
+                        latest = await repo.get_by_provider_name(provider_name, decrypt=True)
+                        if latest is not None and latest.refresh_token:
+                            refresh_token_value = latest.refresh_token
+                            client_id_value = latest.client_id
+                            client_secret_value = latest.client_secret
                         redis_lock_token = None
 
                 try:
                     payload = await refresh_access_token(
-                        refresh_token=cred.refresh_token,
-                        client_id=cred.client_id,
-                        client_secret=cred.client_secret,
+                        refresh_token=refresh_token_value,
+                        client_id=client_id_value,
+                        client_secret=client_secret_value,
                         http_client=http_client,
                     )
+                    new_expires_at = (
+                        datetime.fromtimestamp(time.time() + payload.expires_in, tz=UTC)
+                        if payload.expires_in is not None
+                        else None
+                    )
+                    new_scope = payload.scope or baseline_scope
+                    # Persist before the lock is released below: a waiter that
+                    # finds the lock free reads the rotated refresh token only
+                    # if it is already committed, and otherwise retries with the
+                    # one this exchange just invalidated.
+                    await repo.update_tokens(
+                        provider_id_value,
+                        access_token=payload.access_token,
+                        refresh_token=payload.refresh_token,
+                        scope=new_scope,
+                        expires_at=new_expires_at,
+                        token_type=payload.token_type,
+                    )
+                    await session.commit()
+
+                    self._cache[provider_name] = _CachedToken(
+                        access_token=payload.access_token,
+                        expires_at=new_expires_at,
+                        scope=new_scope,
+                    )
+                    return payload.access_token
                 except Exception as exc:
+                    await session.rollback()
                     self._cache.pop(provider_name, None)
                     logger.warning(f"ChatGPT OAuth refresh failed for '{provider_name}': {exc}")
                     raise ProviderError(
@@ -216,31 +276,12 @@ class OpenAIChatGPTOAuthManager:
                                 current_holder = current_holder.decode("utf-8")
                             if current_holder == redis_lock_token:
                                 await redis_client.delete(redis_lock_key)
-                        except Exception:
-                            pass
-
-                new_expires_at = (
-                    datetime.fromtimestamp(time.time() + payload.expires_in, tz=UTC)
-                    if payload.expires_in is not None
-                    else None
-                )
-                new_scope = payload.scope or cred.scope
-                await repo.update_tokens(
-                    cred.provider_id,
-                    access_token=payload.access_token,
-                    refresh_token=payload.refresh_token,
-                    scope=new_scope,
-                    expires_at=new_expires_at,
-                    token_type=payload.token_type,
-                )
-                await session.commit()
-
-                self._cache[provider_name] = _CachedToken(
-                    access_token=payload.access_token,
-                    expires_at=new_expires_at,
-                    scope=new_scope,
-                )
-                return payload.access_token
+                        except Exception as exc:
+                            # Best effort: a lock left behind blocks every refresh
+                            # for its TTL, so at least leave a trace.
+                            logger.debug(
+                                f"Failed to release OAuth refresh lock for '{provider_name}': {exc}"
+                            )
 
     def invalidate(self, provider_name: str) -> None:
         """Evict any cached token for ``provider_name``."""

@@ -25,3 +25,21 @@ export function safeImageUrl(url: string | null | undefined): string | undefined
   }
   return undefined;
 }
+
+/**
+ * URL guard for outbound navigation: anchor `href` and `window.open`.
+ *
+ * API-supplied links (an authorization URL, a documentation link) become
+ * navigable targets, so only absolute `http(s)` URLs are returned — anything
+ * else, notably `javascript:` and `data:`, is dropped.
+ */
+export function safeHttpUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : undefined;
+  } catch {
+    // Not an absolute URL, so not something we will navigate to.
+    return undefined;
+  }
+}

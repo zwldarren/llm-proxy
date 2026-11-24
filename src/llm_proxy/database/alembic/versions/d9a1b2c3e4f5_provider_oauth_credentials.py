@@ -39,8 +39,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["provider_id"], ["providers.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("provider_id"),
     )
+    # The unique index below already enforces one row per provider; a separate
+    # UniqueConstraint on the same column would build a second unique index.
     op.create_index(
         "ix_provider_oauth_credentials_provider_id",
         "provider_oauth_credentials",

@@ -576,15 +576,16 @@ export default {
     oauthExpiresAt: "访问令牌过期时间",
     oauthSignIn: "使用 ChatGPT 登录",
     oauthReauthorize: "重新授权",
-    oauthRefresh: "刷新令牌",
+    oauthRefresh: "刷新访问令牌",
     oauthDisconnect: "断开连接",
     oauthOptions: "OAuth 选项",
     oauthRedirectUri: "回调地址 (Redirect URI)",
     oauthRedirectUriHelp:
-      "本地部署可通过回调地址自动完成登录；远程服务器可使用 http://127.0.0.1:1455/auth/callback 并在下方粘贴跳转后的回调 URL。",
+      "本地部署可通过回调地址自动完成登录；远程服务器可使用 {uri} 并在下方粘贴跳转后的回调 URL。",
     oauthStaticClientId: "Client ID（可选，留空则使用动态客户端注册）",
     oauthClientSecret: "Client Secret（可选）",
     oauthPendingHint: "请在新打开的页面中完成登录，或将最终回调 URL 粘贴到下方：",
+    oauthPopupBlocked: "浏览器拦截了登录窗口",
     oauthOpenLink: "打开授权链接",
     oauthCallbackPaste: "回调 URL",
     oauthCompleteManual: "完成连接",
@@ -593,6 +594,7 @@ export default {
     oauthRefreshSuccess: "ChatGPT OAuth 令牌已刷新。",
     oauthRefreshFailed: "刷新 ChatGPT OAuth 令牌失败。",
     oauthDisconnectSuccess: "已断开 ChatGPT OAuth 凭据。",
+    oauthDisconnectFailed: "断开 ChatGPT OAuth 凭据失败。",
   },
 
   // Model plaza (public catalog, visible to all users)

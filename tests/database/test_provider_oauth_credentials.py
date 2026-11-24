@@ -132,3 +132,90 @@ async def test_provider_oauth_credentials_migration_and_encryption(tmp_path, mon
             assert loaded.refresh_token == "rt_plain_2"
     finally:
         init_encryption(None)
+
+
+@pytest.mark.asyncio
+async def test_reread_freshness_and_optional_column_preservation(tmp_path, monkeypatch):
+    """A re-read must see peer changes, and omitted optionals must survive."""
+    from llm_proxy.security.encryption import init_encryption
+
+    init_encryption("0123456789abcdef0123456789abcdef")
+    try:
+        await _init_temp_db(tmp_path, monkeypatch)
+
+        from llm_proxy.database.connection import get_async_session_context
+        from llm_proxy.database.repositories.config_providers import ProviderRepository
+        from llm_proxy.database.repositories.provider_oauth import (
+            ProviderOAuthCredentialRepository,
+        )
+
+        async with get_async_session_context() as session:
+            provider = await ProviderRepository(session).create_provider(
+                name="chatgpt-reread",
+                type="openai-chatgpt",
+                api_key="",
+            )
+            provider_id = provider.id
+            repo = ProviderOAuthCredentialRepository(session)
+            await repo.upsert_for_provider(
+                provider_id,
+                client_id="oaiapp_dyn_1",
+                client_secret="sec_123",
+                ext_agent_host_id="urn:uuid:host-1",
+                access_token="at_plain_1",
+                refresh_token="rt_plain_1",
+                scope="openid chatgpt.tokens.use.direct",
+                expires_at=None,
+            )
+            await session.commit()
+
+            cred = await repo.get_by_provider_name("chatgpt-reread", decrypt=True)
+            assert cred is not None
+
+            # A change committed by a peer worker must reach a re-read on a
+            # session that already holds the row: the refresh coordination
+            # compares the re-read against the token it loaded to notice the
+            # rotation.
+            await session.execute(
+                text(
+                    "UPDATE provider_oauth_credentials SET scope = 'openid' "
+                    "WHERE provider_id = :pid"
+                ),
+                {"pid": provider_id},
+            )
+            reread = await repo.get_by_provider_name("chatgpt-reread", decrypt=True)
+            assert reread is cred
+            assert reread.scope == "openid"
+            await session.rollback()
+
+            # Re-authorizing without a client secret or host id keeps both: they
+            # belong to the stored client registration. The returned row carries
+            # plaintext secrets, like every other read.
+            kept = await repo.upsert_for_provider(
+                provider_id,
+                client_id="oaiapp_dyn_1",
+                access_token="at_plain_2",
+                refresh_token="rt_plain_2",
+                scope="openid chatgpt.tokens.use.direct",
+                expires_at=None,
+            )
+            assert kept.access_token == "at_plain_2"
+            assert kept.client_secret == "sec_123"
+            assert kept.ext_agent_host_id == "urn:uuid:host-1"
+            await session.commit()
+
+        async with get_async_session_context() as session:
+            rotated = await ProviderOAuthCredentialRepository(session).update_tokens(
+                provider_id,
+                access_token="at_plain_3",
+                refresh_token="rt_plain_3",
+                scope="openid chatgpt.tokens.use.direct",
+                expires_at=None,
+            )
+            assert rotated is not None
+            assert rotated.access_token == "at_plain_3"
+            assert rotated.refresh_token == "rt_plain_3"
+            assert rotated.client_secret == "sec_123"
+            await session.commit()
+    finally:
+        init_encryption(None)

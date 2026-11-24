@@ -35,7 +35,6 @@ from llm_proxy.core.request_facts import get_request_identity
 from llm_proxy.http.client import validate_server_url
 from llm_proxy.observability.log_intake import record_key_reveal
 from llm_proxy.observability.logger import get_logger
-from llm_proxy.providers.openai_chatgpt.oauth import has_plan_usage_scope
 from llm_proxy.providers.openai_chatgpt.token_manager import get_oauth_token_manager
 
 logger = get_logger(__name__)
@@ -54,21 +53,7 @@ def _extract_oauth_status(provider: Any) -> ProviderOAuthStatusRead | None:
         state = sa_inspect(provider)
         if "oauth_credential" in state.unloaded:
             return ProviderOAuthStatusRead(connected=False)
-    cred = getattr(provider, "oauth_credential", None)
-    if cred is None:
-        return ProviderOAuthStatusRead(connected=False)
-    scope = getattr(cred, "scope", "") or ""
-    return ProviderOAuthStatusRead(
-        connected=bool(getattr(cred, "access_token", None)),
-        has_plan_usage_scope=has_plan_usage_scope(scope),
-        account_email=getattr(cred, "account_email", None),
-        account_name=getattr(cred, "account_name", None),
-        account_sub=getattr(cred, "account_sub", None),
-        client_id=getattr(cred, "client_id", None),
-        expires_at=getattr(cred, "expires_at", None),
-        has_refresh_token=bool(getattr(cred, "refresh_token", None)),
-        updated_at=getattr(cred, "updated_at", None),
-    )
+    return ProviderOAuthStatusRead.from_credential(getattr(provider, "oauth_credential", None))
 
 
 def provider_record_to_read(provider) -> ProviderRead:

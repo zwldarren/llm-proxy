@@ -24,6 +24,28 @@ class _FakeCred:
     expires_at: datetime | None = None
 
 
+class _FakeRedis:
+    """Minimal async Redis surface the refresh lock uses."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+        self.deleted: list[str] = []
+
+    async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None):
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def get(self, key: str):
+        return self.store.get(key)
+
+    async def delete(self, key: str):
+        self.deleted.append(key)
+        self.store.pop(key, None)
+        return 1
+
+
 class _FakeRepo:
     def __init__(self, cred: _FakeCred | None):
         self.cred = cred
@@ -157,3 +179,41 @@ class TestOpenAIChatGPTOAuthManager:
             await manager.get_access_token("bad-scope")
         assert exc_info2.value.status_code == 401
         assert exc_info2.value.code == "oauth_scope_missing"
+
+    @pytest.mark.asyncio
+    async def test_installed_redis_client_guards_request_path_refreshes(self):
+        """An adapter passes no client; the lifespan-installed one must be used.
+
+        Without it, expiry-driven refreshes (the only kind the request path does)
+        are serialized per process, so two workers rotate one refresh token at
+        once and the loser gets `invalid_grant`.
+        """
+        cred = _FakeCred(expires_at=datetime.now(UTC) + timedelta(seconds=30))
+        repo = _FakeRepo(cred)
+        manager = OpenAIChatGPTOAuthManager()
+        fake_redis = _FakeRedis()
+        manager.set_redis_client(fake_redis)
+
+        async def _fake_refresh(**_kwargs):
+            return OAuthTokenPayload(
+                access_token="at_rotated",
+                refresh_token="rt_rotated",
+                id_token=None,
+                token_type="Bearer",
+                scope="openid offline_access chatgpt.tokens.use.direct",
+                expires_in=3600,
+            )
+
+        ctx_p, repo_p = _patch_db(repo)
+        with (
+            ctx_p,
+            repo_p,
+            patch(
+                "llm_proxy.providers.openai_chatgpt.token_manager.refresh_access_token",
+                side_effect=_fake_refresh,
+            ),
+        ):
+            assert await manager.get_access_token("my-chatgpt") == "at_rotated"
+
+        assert "llm_proxy:provider_oauth_refresh:my-chatgpt" in fake_redis.deleted
+        assert fake_redis.store == {}

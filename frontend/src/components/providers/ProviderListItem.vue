@@ -3,6 +3,7 @@ import { Edit, Globe, Trash2 } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import BrandMark from "@/components/common/BrandMark.vue";
+import ProviderOAuthBadge from "@/components/providers/ProviderOAuthBadge.vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useProviderTypes } from "@/composables/useProviderTypes";
@@ -69,17 +70,7 @@ const icon = computed(() => providerMark(props.provider));
           >
             {{ t("providers.interactionsBadge") }}
           </Badge>
-          <Badge
-            v-if="provider.type === 'openai-chatgpt'"
-            variant="outline"
-            class="text-[11px] font-medium px-1.5 py-0 text-muted-foreground shrink-0"
-          >
-            {{
-              provider.oauth_status?.connected
-                ? t("providers.oauthConnected")
-                : t("providers.oauthSignInRequired")
-            }}
-          </Badge>
+          <ProviderOAuthBadge :provider="provider" />
           <Badge
             v-if="!isEnabled"
             variant="outline"

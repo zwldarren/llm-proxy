@@ -216,6 +216,14 @@ async def startup_redis(app: FastAPI, config_manager: DatabaseConfigManager) -> 
     redis_client = services.redis_client()
     get_user_tracing_manager().set_redis_client(redis_client)
 
+    # Same for the ChatGPT OAuth token manager: its refresh lock has to cover the
+    # request path, where an adapter calls it without request services at hand.
+    # Without a client here two workers can rotate one refresh token at every
+    # access-token expiry.
+    from llm_proxy.providers.openai_chatgpt.token_manager import get_oauth_token_manager
+
+    get_oauth_token_manager().set_redis_client(redis_client)
+
 
 async def startup_derived_caches(config_manager: DatabaseConfigManager) -> None:
     """Register reload listeners for caches derived from non-ProxyConfig tables.

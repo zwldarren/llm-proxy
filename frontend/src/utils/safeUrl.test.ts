@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeImageUrl } from "./safeUrl";
+import { safeHttpUrl, safeImageUrl } from "./safeUrl";
 
 describe("safeImageUrl", () => {
   it("keeps ordinary image URLs", () => {
@@ -27,5 +27,31 @@ describe("safeImageUrl", () => {
   it("handles protocol-relative and mixed-case http URLs", () => {
     expect(safeImageUrl("//cdn.example/a.png")).toBe("//cdn.example/a.png");
     expect(safeImageUrl("HTTPS://cdn.example/a.png")).toBe("HTTPS://cdn.example/a.png");
+  });
+});
+
+describe("safeHttpUrl", () => {
+  it("keeps absolute http(s) navigation targets", () => {
+    expect(safeHttpUrl("https://auth.openai.com/oauth?state=1")).toBe(
+      "https://auth.openai.com/oauth?state=1"
+    );
+    expect(safeHttpUrl("http://127.0.0.1:9911/callback?code=1")).toBe(
+      "http://127.0.0.1:9911/callback?code=1"
+    );
+  });
+
+  it("drops every other scheme, including script-bearing ones", () => {
+    expect(safeHttpUrl("javascript:alert(1)")).toBeUndefined();
+    expect(safeHttpUrl("java\nscript:alert(1)")).toBeUndefined();
+    expect(safeHttpUrl("data:text/html,<script>alert(1)</script>")).toBeUndefined();
+    expect(safeHttpUrl("blob:https://app.example/123")).toBeUndefined();
+    expect(safeHttpUrl("file:///etc/passwd")).toBeUndefined();
+  });
+
+  it("drops values that are not absolute URLs", () => {
+    expect(safeHttpUrl("/relative/path")).toBeUndefined();
+    expect(safeHttpUrl(null)).toBeUndefined();
+    expect(safeHttpUrl(undefined)).toBeUndefined();
+    expect(safeHttpUrl("")).toBeUndefined();
   });
 });

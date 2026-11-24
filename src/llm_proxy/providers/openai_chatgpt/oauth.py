@@ -27,12 +27,16 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx2
 import jwt
 import orjson
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm_proxy.core.exceptions import ValidationError
 from llm_proxy.database.repositories.config_server import ServerConfigRepository
+from llm_proxy.observability.logger import get_logger
 from llm_proxy.security.base64url import b64url_encode
 from llm_proxy.security.encryption import decrypt_api_key, encrypt_api_key
+
+logger = get_logger(__name__)
 
 OPENAI_OAUTH_ISSUER = "https://auth.openai.com"
 OPENAI_AUTHORIZE_URL = "https://auth.openai.com/api/accounts/authorize"
@@ -188,8 +192,9 @@ def extract_id_token_claims(
 ) -> dict[str, str | None]:
     """Decode display claims (``sub``, ``email``, ``name``) from an OpenAI ID token.
 
-    Tokens arrive directly over TLS from OpenAI's token endpoint; signature
-    verification is skipped here while ``nonce`` binding is enforced when present.
+    ``nonce`` is required whenever the caller sent one: with signature
+    verification deliberately skipped, it is the only binding of the ID token
+    to the transaction that requested it.
     """
     empty: dict[str, str | None] = {"sub": None, "email": None, "name": None}
     if not id_token:
@@ -208,8 +213,11 @@ def extract_id_token_claims(
     if not isinstance(claims, dict):
         return empty
     if expected_nonce is not None:
+        # OIDC Core requires the claim to be present and to match when the
+        # authentication request carried a nonce; a token that omits it is not
+        # proof of anything.
         token_nonce = claims.get("nonce")
-        if token_nonce is not None and token_nonce != expected_nonce:
+        if token_nonce != expected_nonce:
             raise ValidationError("OIDC nonce mismatch in ID token.", code="oauth_nonce_mismatch")
     return {
         "sub": str(claims["sub"]) if claims.get("sub") is not None else None,
@@ -377,7 +385,10 @@ class PendingOAuthStore:
         """Store a pending transaction under ``tx.state``."""
         if redis_client is not None:
             raw = orjson.dumps(asdict(tx)).decode("utf-8")
-            encrypted = encrypt_api_key(raw) or raw
+            # Non-empty input either returns a non-empty string or raises
+            # (encryption disabled keeps it verbatim); a fallback to plaintext
+            # here would write the PKCE verifier and client secret in the clear.
+            encrypted = encrypt_api_key(raw)
             await redis_client.set(
                 f"{_PENDING_REDIS_PREFIX}{tx.state}",
                 encrypted,
@@ -408,11 +419,18 @@ class PendingOAuthStore:
                 return None
             if isinstance(raw_val, bytes):
                 raw_val = raw_val.decode("utf-8")
-            decrypted = decrypt_api_key(str(raw_val))
-            if not decrypted:
+            try:
+                decrypted = decrypt_api_key(str(raw_val))
+                if not decrypted:
+                    return None
+                data = orjson.loads(decrypted)
+                tx = PendingOAuthTransaction(**data)
+            except Exception as exc:
+                # A rotated encryption key, a corrupt value or a deploy that
+                # changed the transaction shape must behave like an unknown
+                # state, not raise into the unauthenticated callback page.
+                logger.warning(f"Discarding unreadable pending OAuth transaction: {exc}")
                 return None
-            data = orjson.loads(decrypted)
-            tx = PendingOAuthTransaction(**data)
             if time.time() - tx.created_at > self._ttl_seconds:
                 return None
             return tx
@@ -445,14 +463,23 @@ async def get_or_create_host_id(session: AsyncSession) -> str:
         return existing.value.strip()
 
     host_id = f"urn:uuid:{uuid.uuid4()}"
-    await repo.set_server_config(
-        key=HOST_ID_CONFIG_KEY,
-        value=host_id,
-        description=(
-            "Persistent installation identifier for OpenAI ChatGPT OAuth "
-            "dynamic client registration"
-        ),
-    )
+    try:
+        async with session.begin_nested():
+            await repo.set_server_config(
+                key=HOST_ID_CONFIG_KEY,
+                value=host_id,
+                description=(
+                    "Persistent installation identifier for OpenAI ChatGPT OAuth "
+                    "dynamic client registration"
+                ),
+            )
+    except IntegrityError:
+        # Two first-time sign-ins can race the get-then-insert; the unique key
+        # decides the winner and the loser adopts the persisted id.
+        existing = await repo.get_server_config(HOST_ID_CONFIG_KEY)
+        if existing is not None and isinstance(existing.value, str) and existing.value.strip():
+            return existing.value.strip()
+        raise
     return host_id
 
 

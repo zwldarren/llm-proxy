@@ -22,6 +22,7 @@ from llm_proxy.api.schemas.providers import (
 from llm_proxy.core.exceptions import NotFoundError, ValidationError
 from llm_proxy.database.repositories.provider_oauth import ProviderOAuthCredentialRepository
 from llm_proxy.http.client import ProviderHTTPClientManager
+from llm_proxy.observability.logger import get_logger
 from llm_proxy.providers.openai_chatgpt.oauth import (
     DEFAULT_LOOPBACK_CALLBACK_URI,
     DYNAMIC_AGENT_CLIENT_ID,
@@ -33,12 +34,13 @@ from llm_proxy.providers.openai_chatgpt.oauth import (
     generate_pkce_pair,
     get_or_create_host_id,
     get_pending_oauth_store,
-    has_plan_usage_scope,
     parse_callback_url,
     validate_oauth_redirect_uri,
 )
 from llm_proxy.providers.openai_chatgpt.token_manager import get_oauth_token_manager
 from llm_proxy.services import runtime_services
+
+logger = get_logger(__name__)
 
 public_router = APIRouter(prefix="/providers/oauth", tags=["configuration"])
 router = APIRouter(
@@ -48,23 +50,6 @@ router = APIRouter(
 )
 
 _OAUTH_PROVIDER_TYPE = "openai-chatgpt"
-
-
-def _credential_to_status(cred: Any) -> ProviderOAuthStatusRead:
-    if cred is None:
-        return ProviderOAuthStatusRead(connected=False)
-    scope = getattr(cred, "scope", "") or ""
-    return ProviderOAuthStatusRead(
-        connected=bool(getattr(cred, "access_token", None)),
-        has_plan_usage_scope=has_plan_usage_scope(scope),
-        account_email=getattr(cred, "account_email", None),
-        account_name=getattr(cred, "account_name", None),
-        account_sub=getattr(cred, "account_sub", None),
-        client_id=getattr(cred, "client_id", None),
-        expires_at=getattr(cred, "expires_at", None),
-        has_refresh_token=bool(getattr(cred, "refresh_token", None)),
-        updated_at=getattr(cred, "updated_at", None),
-    )
 
 
 async def _optional_http_client(request: Request) -> Any:
@@ -164,7 +149,7 @@ async def _finalize_oauth_transaction(
     )
     await commit_and_reload(session, request)
     get_oauth_token_manager().invalidate(tx.provider_name)
-    return _credential_to_status(record)
+    return ProviderOAuthStatusRead.from_credential(record)
 
 
 def _render_callback_html(*, ok: bool, title: str, message: str, provider_name: str | None) -> str:
@@ -321,7 +306,8 @@ async def oauth_callback(
             code=code,
             callback_client_id=client_id,
         )
-    except Exception as exc:
+    except (ValidationError, NotFoundError) as exc:
+        # Expected, user-actionable failures: safe to render verbatim.
         return HTMLResponse(
             _render_callback_html(
                 ok=False,
@@ -330,6 +316,23 @@ async def oauth_callback(
                 provider_name=tx.provider_name,
             ),
             status_code=400,
+        )
+    except Exception:
+        # Transport, database and programming errors carry internals, and this
+        # page is reachable unauthenticated by whoever holds the state URL: log
+        # the detail, show a generic message.
+        logger.error(f"Provider OAuth callback failed for '{tx.provider_name}'", exc_info=True)
+        return HTMLResponse(
+            _render_callback_html(
+                ok=False,
+                title="ChatGPT OAuth connection failed",
+                message=(
+                    "The token exchange with OpenAI did not complete. "
+                    "Check the server logs and try signing in again."
+                ),
+                provider_name=tx.provider_name,
+            ),
+            status_code=502,
         )
 
     account_label = status.account_email or status.account_name or tx.provider_name
@@ -355,7 +358,7 @@ async def get_provider_oauth_status(
     provider = await _require_oauth_provider(session, name)
     cred_repo = ProviderOAuthCredentialRepository(session)
     cred = await cred_repo.get_by_provider_id(provider.id, decrypt=False)
-    return _credential_to_status(cred)
+    return ProviderOAuthStatusRead.from_credential(cred)
 
 
 @router.post("/start", response_model=ProviderOAuthStartResponse)
@@ -384,11 +387,18 @@ async def start_provider_oauth(
     else:
         client_id = DYNAMIC_AGENT_CLIENT_ID
 
-    client_secret = (
-        payload.client_secret.strip()
-        if payload.client_secret
-        else (existing.client_secret if existing and not payload.force_new_registration else None)
-    )
+    if payload.client_secret:
+        client_secret = payload.client_secret.strip()
+    elif (
+        existing is not None
+        and client_id == existing.client_id
+        and not payload.force_new_registration
+    ):
+        # A stored secret belongs to the stored client registration; pairing it
+        # with a different client_id makes the exchange fail with invalid_client.
+        client_secret = existing.client_secret
+    else:
+        client_secret = None
 
     ext_agent_host_id: str | None = None
     if client_id == DYNAMIC_AGENT_CLIENT_ID or (
@@ -510,10 +520,11 @@ async def refresh_provider_oauth(
         redis_client=_optional_redis_client(request),
     )
 
-    if hasattr(session, "expire_all"):
-        session.expire_all()
+    # The token manager rotates tokens in a session of its own and commits
+    # there; drop anything this session already holds so the re-read is real.
+    session.expire_all()
     refreshed = await cred_repo.get_by_provider_id(provider.id, decrypt=False)
-    return _credential_to_status(refreshed)
+    return ProviderOAuthStatusRead.from_credential(refreshed)
 
 
 @router.delete("")

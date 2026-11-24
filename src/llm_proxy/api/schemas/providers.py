@@ -148,6 +148,33 @@ class ProviderOAuthStatusRead(BaseModel):
     has_refresh_token: bool = False
     updated_at: datetime | None = None
 
+    @classmethod
+    def from_credential(cls, cred: Any) -> ProviderOAuthStatusRead:
+        """Project a credential row onto the non-secret status shape.
+
+        The one builder for both the OAuth routes and the provider read models:
+        a new status field wired into only one of them would silently diverge.
+        """
+        # Imported inside the method so this schema carries no module-scope import
+        # of a provider implementation (and no cost to load its SDK stack) for a
+        # one-line scope check.
+        from llm_proxy.providers.openai_chatgpt.oauth import has_plan_usage_scope
+
+        if cred is None:
+            return cls(connected=False)
+        scope = getattr(cred, "scope", "") or ""
+        return cls(
+            connected=bool(getattr(cred, "access_token", None)),
+            has_plan_usage_scope=has_plan_usage_scope(scope),
+            account_email=getattr(cred, "account_email", None),
+            account_name=getattr(cred, "account_name", None),
+            account_sub=getattr(cred, "account_sub", None),
+            client_id=getattr(cred, "client_id", None),
+            expires_at=getattr(cred, "expires_at", None),
+            has_refresh_token=bool(getattr(cred, "refresh_token", None)),
+            updated_at=getattr(cred, "updated_at", None),
+        )
+
 
 class ProviderOAuthStartRequest(BaseModel):
     """Request to begin Sign in with ChatGPT OAuth for a provider."""
