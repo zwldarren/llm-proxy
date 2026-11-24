@@ -17,6 +17,7 @@ from llm_proxy.database.repositories.log_repository import (
 )
 from llm_proxy.database.repositories.oauth_identities import OAuthIdentityRepository
 from llm_proxy.database.repositories.passkeys import PasskeyRepository
+from llm_proxy.database.repositories.provider_oauth import ProviderOAuthCredentialRepository
 from llm_proxy.database.repositories.two_factor import TotpRepository
 from llm_proxy.database.repositories.usage_repository import UsageRepository
 from llm_proxy.database.repositories.user_sessions import UserSessionRepository
@@ -34,6 +35,7 @@ __all__ = [
     "ModelRepository",
     "OAuthIdentityRepository",
     "PasskeyRepository",
+    "ProviderOAuthCredentialRepository",
     "ServerConfigRepository",
     "UsageRepository",
     "TotpRepository",

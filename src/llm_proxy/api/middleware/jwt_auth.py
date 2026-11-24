@@ -36,6 +36,9 @@ PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # on the confirm step.
         "/api/auth/password/forgot",
         "/api/auth/password/reset",
+        # Provider OAuth popup callback: authenticated by a single-use,
+        # admin-minted 256-bit state token rather than a console JWT.
+        "/api/config/providers/oauth/callback",
     }
 )
 

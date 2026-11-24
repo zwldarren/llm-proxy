@@ -164,6 +164,7 @@ class TestPublicApiPaths:
                     "/api/auth/email/verify",
                     "/api/auth/password/forgot",
                     "/api/auth/password/reset",
+                    "/api/config/providers/oauth/callback",
                 }
             )
             == PUBLIC_API_PATHS

@@ -923,6 +923,7 @@ class TestDeclarationPartition:
         assert declared == {
             "anthropic",
             "openai",
+            "openai-chatgpt",
             "deepseek",
             "minimax",
             "moonshot",

@@ -18,6 +18,12 @@ from llm_proxy.api.routers.config.pricing import router as pricing_router
 from llm_proxy.api.routers.config.provider_models import (
     router as provider_models_router,
 )
+from llm_proxy.api.routers.config.provider_oauth import (
+    public_router as provider_oauth_public_router,
+)
+from llm_proxy.api.routers.config.provider_oauth import (
+    router as provider_oauth_router,
+)
 from llm_proxy.api.routers.config.providers import (
     router as providers_router,
 )
@@ -30,8 +36,11 @@ router = APIRouter(
 )
 
 # Include sub-routers — more specific routes MUST be registered before greedy ones
-# (provider_models_router uses /providers/{name}/models which must match
+# (provider_models_router uses /providers/{name}/models and provider_oauth routers
+# use /providers/oauth/callback + /providers/{name}/oauth/* which must match
 # before providers_router's /providers/{name:path} catch-all)
+router.include_router(provider_oauth_public_router)
+router.include_router(provider_oauth_router)
 router.include_router(provider_models_router)
 router.include_router(providers_router)
 router.include_router(models_router)

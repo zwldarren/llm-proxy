@@ -235,6 +235,17 @@ onMounted(() => {
                   >
                     {{ t("providers.interactionsBadge") }}
                   </Badge>
+                  <Badge
+                    v-if="provider.type === 'openai-chatgpt'"
+                    variant="outline"
+                    class="text-[11px] font-medium text-muted-foreground"
+                  >
+                    {{
+                      provider.oauth_status?.connected
+                        ? t("providers.oauthConnected")
+                        : t("providers.oauthSignInRequired")
+                    }}
+                  </Badge>
                 </div>
               </TableCell>
               <TableCell class="max-w-[280px] overflow-hidden">

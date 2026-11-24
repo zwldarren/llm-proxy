@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Plus, Server, Trash2 } from "@lucide/vue";
-import { computed, ref, watch } from "vue";
+import { ExternalLink, KeyRound, Plus, RefreshCw, Server, Trash2, Unlink } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useForm } from "vee-validate";
 import { toast } from "vue-sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +22,13 @@ import BrandMark from "@/components/common/BrandMark.vue";
 import { useProviderTypes } from "@/composables/useProviderTypes";
 import { configApi } from "@/services/api/config";
 import { providerFormSchema, type ProviderFormValues } from "@/schemas/providerForm";
-import type { AppAttribution, ProviderCreate, ProviderRead, ProviderUpdate } from "@/types/schemas";
+import type {
+  AppAttribution,
+  ProviderCreate,
+  ProviderOAuthStatus,
+  ProviderRead,
+  ProviderUpdate,
+} from "@/types/schemas";
 
 const props = defineProps<{
   open: boolean;
@@ -37,8 +44,163 @@ const { t } = useI18n();
 const { typeOptions, providerMark, ensureLoaded } = useProviderTypes();
 
 const isLoading = ref(false);
-const isEditing = computed(() => !!props.provider);
+const savedProvider = ref<ProviderRead | null>(null);
+const activeProvider = computed(() => props.provider ?? savedProvider.value);
+const isEditing = computed(() => !!activeProvider.value);
 const apiKeyEditing = ref(false);
+
+const oauthStatus = ref<ProviderOAuthStatus | null>(null);
+const oauthLoading = ref(false);
+const showOAuthOptions = ref(false);
+const oauthRedirectUri = ref("");
+const oauthClientId = ref("");
+const oauthClientSecret = ref("");
+const pendingAuthUrl = ref("");
+const callbackUrlInput = ref("");
+
+function defaultOAuthRedirectUri(): string {
+  if (typeof window === "undefined") return "http://127.0.0.1:1455/auth/callback";
+  const host = window.location.hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") {
+    return `${window.location.origin}/api/config/providers/oauth/callback`;
+  }
+  return "http://127.0.0.1:1455/auth/callback";
+}
+
+function resetOAuthState(provider: ProviderRead | null) {
+  oauthStatus.value = provider?.oauth_status ?? null;
+  oauthLoading.value = false;
+  showOAuthOptions.value = false;
+  oauthRedirectUri.value = defaultOAuthRedirectUri();
+  oauthClientId.value = "";
+  oauthClientSecret.value = "";
+  pendingAuthUrl.value = "";
+  callbackUrlInput.value = "";
+}
+
+async function loadOAuthStatus(providerName: string) {
+  try {
+    oauthStatus.value = await configApi.getProviderOAuthStatus(providerName);
+  } catch {
+    // Keep existing status on transient fetch failures.
+  }
+}
+
+function onOAuthPopupMessage(event: MessageEvent) {
+  if (typeof window === "undefined" || event.origin !== window.location.origin) return;
+  const data = event.data as
+    | { type?: string; status?: string; provider?: string; message?: string }
+    | undefined;
+  if (!data || data.type !== "llm-proxy-provider-oauth") return;
+  const currentName = activeProvider.value?.name;
+  if (data.provider && currentName && data.provider !== currentName) return;
+
+  if (data.status === "success" && currentName) {
+    pendingAuthUrl.value = "";
+    callbackUrlInput.value = "";
+    void loadOAuthStatus(currentName);
+    toast.success(t("common.success"), { description: t("providers.oauthConnectSuccess") });
+    emit("saved");
+  } else if (data.status === "error") {
+    toast.error(t("common.error"), {
+      description: data.message || t("providers.oauthConnectFailed"),
+    });
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("message", onOAuthPopupMessage);
+}
+
+onBeforeUnmount(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("message", onOAuthPopupMessage);
+  }
+});
+
+async function startOAuthFlow(forceNewRegistration = false) {
+  const providerName = activeProvider.value?.name;
+  if (!providerName) return;
+  oauthLoading.value = true;
+  try {
+    const res = await configApi.startProviderOAuth(providerName, {
+      redirect_uri: oauthRedirectUri.value.trim() || undefined,
+      client_id: oauthClientId.value.trim() || undefined,
+      client_secret: oauthClientSecret.value.trim() || undefined,
+      force_new_registration: forceNewRegistration,
+    });
+    pendingAuthUrl.value = res.authorization_url;
+    oauthRedirectUri.value = res.redirect_uri;
+    if (typeof window !== "undefined") {
+      window.open(res.authorization_url, "_blank", "width=560,height=720");
+    }
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : t("providers.oauthConnectFailed");
+    toast.error(t("common.error"), { description: errorMessage });
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
+async function completeOAuthManually() {
+  const providerName = activeProvider.value?.name;
+  const callbackUrl = callbackUrlInput.value.trim();
+  if (!providerName || !callbackUrl) return;
+  oauthLoading.value = true;
+  try {
+    oauthStatus.value = await configApi.completeProviderOAuth(providerName, {
+      callback_url: callbackUrl,
+    });
+    pendingAuthUrl.value = "";
+    callbackUrlInput.value = "";
+    toast.success(t("common.success"), { description: t("providers.oauthConnectSuccess") });
+    emit("saved");
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : t("providers.oauthConnectFailed");
+    toast.error(t("common.error"), { description: errorMessage });
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
+async function refreshOAuthTokens() {
+  const providerName = activeProvider.value?.name;
+  if (!providerName) return;
+  oauthLoading.value = true;
+  try {
+    oauthStatus.value = await configApi.refreshProviderOAuth(providerName);
+    toast.success(t("common.success"), { description: t("providers.oauthRefreshSuccess") });
+    emit("saved");
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : t("providers.oauthRefreshFailed");
+    toast.error(t("common.error"), { description: errorMessage });
+  } finally {
+    oauthLoading.value = false;
+  }
+}
+
+async function disconnectOAuth() {
+  const providerName = activeProvider.value?.name;
+  if (!providerName) return;
+  oauthLoading.value = true;
+  try {
+    await configApi.disconnectProviderOAuth(providerName);
+    oauthStatus.value = {
+      connected: false,
+      has_plan_usage_scope: false,
+      has_refresh_token: false,
+    };
+    pendingAuthUrl.value = "";
+    callbackUrlInput.value = "";
+    toast.success(t("common.success"), { description: t("providers.oauthDisconnectSuccess") });
+    emit("saved");
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : t("errors.unknown");
+    toast.error(t("common.error"), { description: errorMessage });
+  } finally {
+    oauthLoading.value = false;
+  }
+}
 
 /**
  * Form-level validator that wraps the Zod v4 schema.
@@ -102,7 +264,7 @@ const geminiInteractions = ref(false);
  */
 const providerTypes = computed(() => {
   const options = [...typeOptions.value];
-  const current = props.provider?.type;
+  const current = activeProvider.value?.type;
   if (current && !options.some((o) => o.value === current)) {
     options.push({ label: current, value: current });
   }
@@ -248,17 +410,27 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
+      savedProvider.value = null;
       resetForm(); // Reset validation state
       populateForm(props.provider ?? null);
+      resetOAuthState(props.provider ?? null);
+      if (props.provider && props.provider.type === "openai-chatgpt") {
+        void loadOAuthStatus(props.provider.name);
+      }
       // Warm the provider-type catalog so the type selector is populated
       // (cached after the first fetch; failure surfaces an empty selector
       // rather than stale data).
       void ensureLoaded();
+    } else {
+      savedProvider.value = null;
+      resetOAuthState(null);
     }
   }
 );
 
 const close = () => {
+  savedProvider.value = null;
+  resetOAuthState(null);
   resetForm();
   emit("update:open", false);
 };
@@ -288,10 +460,10 @@ function buildEndpointBaseUrls(): Record<string, string> {
  */
 function buildProviderMetadata(values: ProviderFormValues): Record<string, unknown> {
   const metadata: Record<string, unknown> = {
-    ...(props.provider?.provider_metadata || {}),
+    ...(activeProvider.value?.provider_metadata || {}),
   };
-  if (props.provider?.parameter_overrides) {
-    metadata.parameter_overrides = props.provider.parameter_overrides;
+  if (activeProvider.value?.parameter_overrides) {
+    metadata.parameter_overrides = activeProvider.value.parameter_overrides;
   }
   const endpointUrls = buildEndpointBaseUrls();
   if (Object.keys(endpointUrls).length > 0) {
@@ -344,7 +516,7 @@ const onSubmit = handleSubmit(async (values) => {
       providerData.provider_metadata = buildProviderMetadata(values);
     }
 
-    if (isEditing.value && props.provider) {
+    if (isEditing.value && activeProvider.value) {
       const updateData: ProviderUpdate = {
         type: providerData.type,
         base_url: providerData.base_url,
@@ -360,16 +532,27 @@ const onSubmit = handleSubmit(async (values) => {
       if (providerData.api_key) {
         updateData.api_key = providerData.api_key;
       }
-      await configApi.updateProvider(props.provider.name, updateData);
+      await configApi.updateProvider(activeProvider.value.name, updateData);
+      toast.success(t("common.success"), {
+        description: t("providers.updateSuccess"),
+      });
+      emit("saved");
+      close();
     } else {
-      await configApi.createProvider(providerData);
+      const created = await configApi.createProvider(providerData);
+      toast.success(t("common.success"), {
+        description: t("providers.createSuccess"),
+      });
+      emit("saved");
+      if (values.type === "openai-chatgpt") {
+        // Keep the sheet open after creation so the operator can complete ChatGPT OAuth immediately.
+        savedProvider.value = created;
+        resetOAuthState(created);
+        void loadOAuthStatus(created.name);
+      } else {
+        close();
+      }
     }
-
-    toast.success(t("common.success"), {
-      description: isEditing.value ? t("providers.updateSuccess") : t("providers.createSuccess"),
-    });
-    emit("saved");
-    close();
   } catch (e: unknown) {
     const errorMessage = e instanceof Error ? e.message : t("errors.unknown");
     toast.error(t("common.error"), { description: errorMessage });
@@ -461,7 +644,169 @@ const onSubmit = handleSubmit(async (values) => {
                   {{ errors.type }}
                 </p>
               </div>
-              <div class="grid gap-2">
+              <div v-if="type === 'openai-chatgpt'" class="grid gap-3 rounded-lg border border-border/60 p-3.5 bg-muted/20">
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <Label class="flex items-center gap-1.5">
+                      <KeyRound class="w-3.5 h-3.5" />
+                      {{ t("providers.oauthTitle") }}
+                    </Label>
+                    <p class="text-[11px] text-muted-foreground mt-0.5">
+                      {{ t("providers.oauthDescription") }}
+                    </p>
+                  </div>
+                  <Badge
+                    v-if="isEditing"
+                    :variant="oauthStatus?.connected ? 'secondary' : 'outline'"
+                    class="text-[11px] shrink-0"
+                  >
+                    {{ oauthStatus?.connected ? t("providers.oauthConnected") : t("providers.oauthNotConnected") }}
+                  </Badge>
+                </div>
+
+                <p v-if="!isEditing" class="text-xs text-muted-foreground">
+                  {{ t("providers.oauthSaveFirst") }}
+                </p>
+
+                <template v-else>
+                  <div
+                    v-if="oauthStatus?.connected"
+                    class="space-y-1.5 rounded-md border border-border/50 bg-background/60 p-2.5 text-xs"
+                  >
+                    <div v-if="oauthStatus.account_email || oauthStatus.account_name" class="flex items-center justify-between gap-2">
+                      <span class="text-muted-foreground">{{ t("providers.oauthAccount") }}</span>
+                      <span class="font-mono truncate">{{ oauthStatus.account_email || oauthStatus.account_name }}</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-muted-foreground">{{ t("providers.oauthPlanScope") }}</span>
+                      <Badge variant="outline" class="font-mono text-[10px]">
+                        {{ oauthStatus.has_plan_usage_scope ? "chatgpt.tokens.use.direct" : t("providers.oauthScopeMissing") }}
+                      </Badge>
+                    </div>
+                    <div v-if="oauthStatus.client_id" class="flex items-center justify-between gap-2">
+                      <span class="text-muted-foreground">{{ t("providers.oauthClientId") }}</span>
+                      <span class="font-mono text-[11px] truncate max-w-[220px]">{{ oauthStatus.client_id }}</span>
+                    </div>
+                    <div v-if="oauthStatus.expires_at" class="flex items-center justify-between gap-2">
+                      <span class="text-muted-foreground">{{ t("providers.oauthExpiresAt") }}</span>
+                      <span class="font-mono text-[11px]">{{ new Date(oauthStatus.expires_at).toLocaleString() }}</span>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      :disabled="oauthLoading"
+                      @click="startOAuthFlow(false)"
+                    >
+                      <ExternalLink class="w-3.5 h-3.5" />
+                      {{ oauthStatus?.connected ? t("providers.oauthReauthorize") : t("providers.oauthSignIn") }}
+                    </Button>
+                    <Button
+                      v-if="oauthStatus?.connected && oauthStatus?.has_refresh_token"
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      :disabled="oauthLoading"
+                      @click="refreshOAuthTokens"
+                    >
+                      <RefreshCw class="w-3.5 h-3.5" />
+                      {{ t("providers.oauthRefresh") }}
+                    </Button>
+                    <Button
+                      v-if="oauthStatus?.connected"
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      class="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      :disabled="oauthLoading"
+                      @click="disconnectOAuth"
+                    >
+                      <Unlink class="w-3.5 h-3.5" />
+                      {{ t("providers.oauthDisconnect") }}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      class="ml-auto text-xs"
+                      @click="showOAuthOptions = !showOAuthOptions"
+                    >
+                      {{ t("providers.oauthOptions") }}
+                    </Button>
+                  </div>
+
+                  <div v-if="showOAuthOptions" class="space-y-2.5 pt-2 border-t border-border/50">
+                    <div class="grid gap-1">
+                      <Label for="oauth-redirect-uri" class="text-xs">{{ t("providers.oauthRedirectUri") }}</Label>
+                      <Input
+                        id="oauth-redirect-uri"
+                        v-model="oauthRedirectUri"
+                        type="url"
+                        class="h-8 text-xs font-mono"
+                      />
+                      <p class="text-[11px] text-muted-foreground">
+                        {{ t("providers.oauthRedirectUriHelp") }}
+                      </p>
+                    </div>
+                    <div class="grid gap-1">
+                      <Label for="oauth-client-id" class="text-xs">{{ t("providers.oauthStaticClientId") }}</Label>
+                      <Input
+                        id="oauth-client-id"
+                        v-model="oauthClientId"
+                        placeholder="dynamic_agent_client"
+                        class="h-8 text-xs font-mono"
+                      />
+                    </div>
+                    <div class="grid gap-1">
+                      <Label for="oauth-client-secret" class="text-xs">{{ t("providers.oauthClientSecret") }}</Label>
+                      <Input
+                        id="oauth-client-secret"
+                        v-model="oauthClientSecret"
+                        type="password"
+                        class="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div v-if="pendingAuthUrl" class="space-y-2 pt-2 border-t border-border/50">
+                    <div class="flex items-center justify-between gap-2 text-xs">
+                      <span class="text-muted-foreground">{{ t("providers.oauthPendingHint") }}</span>
+                      <a
+                        :href="pendingAuthUrl"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="inline-flex items-center gap-1 font-medium underline underline-offset-4"
+                      >
+                        {{ t("providers.oauthOpenLink") }}
+                        <ExternalLink class="w-3 h-3" />
+                      </a>
+                    </div>
+                    <div class="grid gap-1.5">
+                      <Label for="oauth-callback-url" class="text-xs">{{ t("providers.oauthCallbackPaste") }}</Label>
+                      <div class="flex items-center gap-2">
+                        <Input
+                          id="oauth-callback-url"
+                          v-model="callbackUrlInput"
+                          placeholder="http://127.0.0.1:1455/auth/callback?code=..."
+                          class="flex-1 h-8 text-xs font-mono"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          :disabled="oauthLoading || !callbackUrlInput.trim()"
+                          @click="completeOAuthManually"
+                        >
+                          {{ t("providers.oauthCompleteManual") }}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div v-else class="grid gap-2">
                 <Label for="apikey">{{ t("providers.apiKey") }}</Label>
                 <div v-if="isEditing && !apiKeyEditing" class="flex items-center gap-2">
                   <!-- The backend masks the key as `sk-...abcd` on purpose: the
@@ -469,7 +814,7 @@ const onSubmit = handleSubmit(async (values) => {
                        from another. A password field hid exactly that. -->
                   <Input
                     id="apikey"
-                    :value="provider?.masked_api_key || t('providers.apiKeyUnknown')"
+                    :value="activeProvider?.masked_api_key || t('providers.apiKeyUnknown')"
                     type="text"
                     readonly
                     class="flex-1 bg-muted/50 font-mono"

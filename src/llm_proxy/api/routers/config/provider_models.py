@@ -23,8 +23,9 @@ router = APIRouter(
 )
 
 # Providers that don't require an API key for listing models.
-# vLLM and SGLang serve /v1/models unauthenticated unless started with --api-key.
-_NO_AUTH_PROVIDERS: frozenset[str] = frozenset({"ollama", "vllm", "sglang"})
+# vLLM and SGLang serve /v1/models unauthenticated unless started with --api-key;
+# openai-chatgpt authenticates with stored OAuth credentials instead of api_key.
+_NO_AUTH_PROVIDERS: frozenset[str] = frozenset({"ollama", "vllm", "sglang", "openai-chatgpt"})
 
 
 @router.get("", response_model=ProviderModelsResponse)
@@ -60,6 +61,7 @@ async def list_provider_models(
         try:
             adapter = get_adapter(
                 provider_type,
+                provider_name=name,
                 api_key=api_key,
                 base_url=base_url,
                 http_client=http_client,

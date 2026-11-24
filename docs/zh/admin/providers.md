@@ -36,6 +36,7 @@
 | 类型 | 上游协议 | 默认 Base URL |
 | --- | --- | --- |
 | `openai` | Chat Completions + Responses | `https://api.openai.com/v1` |
+| `openai-chatgpt` | OpenAI Responses（OAuth，ChatGPT 套餐额度） | `https://api.openai.com/v1` |
 | `anthropic` | Anthropic Messages（`x-api-key`、`anthropic-version: 2023-06-01`） | `https://api.anthropic.com` |
 | `openai-compatible` | Chat Completions（通用；**必须提供 base URL**） | — |
 | `gemini` | Google `generateContent`（`x-goog-api-key`） | `https://generativelanguage.googleapis.com/v1beta` |
@@ -68,6 +69,16 @@
 
 成本上报：`openrouter` 和 `nanogpt` 会返回自己的成本数字，代理直接记录这些数字，而不是
 按 Token 价格自行计算。
+
+### OpenAI (ChatGPT OAuth)（`openai-chatgpt`）
+
+使用 `openai-chatgpt` 提供商类型可以通过 OpenAI 官方的 **Sign in with ChatGPT** OAuth 2.0 / OIDC 流程（`chatgpt.tokens.use.direct` 权限）完成登录，直接消耗符合条件的 ChatGPT 套餐额度（Plus、Pro 或 Business），无需填写平台 API 密钥。
+
+- **动态客户端注册**：默认情况下，首次登录会使用 `client_id=dynamic_agent_client` 配合持久化的实例标识 `ext_agent_host_id`（`urn:uuid:...`）发起动态注册，并将 OpenAI 签发的 `client_id` 持久化保存，用于后续令牌刷新和重新授权。你也可以在 **OAuth 选项** 中手动填入静态 `client_id`（及可选 `client_secret`）。
+- **本地与远程回调**：在 `localhost` / `127.0.0.1` 上访问控制台时，弹窗会通过回调端点（`GET /api/config/providers/oauth/callback`）自动完成授权。在远程服务器上部署时，可将回调地址设为本地回环地址（例如 `http://127.0.0.1:1455/auth/callback`），再把浏览器跳转后的完整 URL 粘贴回对话框的 **回调 URL** 输入框中完成连接。
+- **套餐直连接口要求**：上游请求统一发送到 `POST /v1/responses`，使用 `Authorization: Bearer <access_token>` 认证，并按 OpenAI 官方要求强制携带 `stream: true` 与 `store: false`。客户端的非流式请求会在代理内部聚合上游 SSE 流后返回完整 JSON 响应。
+- **令牌生命周期**：访问令牌（约 1 小时）与轮换刷新令牌（约 30 天）在落盘时均使用 Fernet 加密存储，并在临近过期或上游返回 `401` 时自动完成刷新。
+- **模型列表**：拉取模型时会携带 OAuth 访问令牌请求 `GET /v1/models`，返回当前已登录账号可见的模型目录。
 
 ### OpenCode（`opencode-zen` / `opencode-go`）
 

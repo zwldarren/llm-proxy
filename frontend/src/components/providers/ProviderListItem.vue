@@ -70,6 +70,17 @@ const icon = computed(() => providerMark(props.provider));
             {{ t("providers.interactionsBadge") }}
           </Badge>
           <Badge
+            v-if="provider.type === 'openai-chatgpt'"
+            variant="outline"
+            class="text-[11px] font-medium px-1.5 py-0 text-muted-foreground shrink-0"
+          >
+            {{
+              provider.oauth_status?.connected
+                ? t("providers.oauthConnected")
+                : t("providers.oauthSignInRequired")
+            }}
+          </Badge>
+          <Badge
             v-if="!isEnabled"
             variant="outline"
             class="text-[11px] font-medium px-1.5 py-0 text-muted-foreground shrink-0"

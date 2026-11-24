@@ -52,9 +52,56 @@ class ProviderRecord(Base):
     model_provider_mappings: Mapped[list[ModelProviderRecord]] = relationship(
         "ModelProviderRecord", back_populates="provider", cascade="all, delete-orphan"
     )
+    oauth_credential: Mapped[ProviderOAuthCredentialRecord | None] = relationship(
+        "ProviderOAuthCredentialRecord",
+        back_populates="provider",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<ProviderRecord(id={self.id}, name='{self.name}', type='{self.type}')>"
+
+
+class ProviderOAuthCredentialRecord(Base):
+    """Encrypted OAuth credentials bound to an OAuth-backed provider (e.g. ``openai-chatgpt``)."""
+
+    __tablename__ = "provider_oauth_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    provider_id: Mapped[int] = mapped_column(
+        ForeignKey("providers.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ext_agent_host_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_type: Mapped[str] = mapped_column(String(50), default="Bearer", nullable=False)
+    scope: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    account_sub: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    account_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    provider: Mapped[ProviderRecord] = relationship(
+        "ProviderRecord", back_populates="oauth_credential"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProviderOAuthCredentialRecord(id={self.id}, provider_id={self.provider_id}, "
+            f"client_id='{self.client_id}')>"
+        )
 
 
 class ModelProviderRecord(Base):

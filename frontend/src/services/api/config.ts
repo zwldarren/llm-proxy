@@ -18,6 +18,10 @@ import type {
   McpServerUpdate,
   ProviderCreate,
   ProviderModelsResponse,
+  ProviderOAuthCompleteRequest,
+  ProviderOAuthStartRequest,
+  ProviderOAuthStartResponse,
+  ProviderOAuthStatus,
   ProviderRead,
   ProviderSelectionConfig,
   ProviderTypeInfo,
@@ -50,6 +54,27 @@ export const configApi = {
     http.delete<{ message: string }>(`${BASE_URL}/providers/${encodeURIComponent(name)}`),
   getProviderModels: (name: string) =>
     http.get<ProviderModelsResponse>(`${BASE_URL}/providers/${encodeURIComponent(name)}/models`),
+  getProviderOAuthStatus: (name: string) =>
+    http.get<ProviderOAuthStatus>(`${BASE_URL}/providers/${encodeURIComponent(name)}/oauth/status`),
+  startProviderOAuth: (name: string, data?: ProviderOAuthStartRequest) =>
+    http.post<ProviderOAuthStartResponse>(
+      `${BASE_URL}/providers/${encodeURIComponent(name)}/oauth/start`,
+      data ?? {}
+    ),
+  completeProviderOAuth: (name: string, data: ProviderOAuthCompleteRequest) =>
+    http.post<ProviderOAuthStatus>(
+      `${BASE_URL}/providers/${encodeURIComponent(name)}/oauth/complete`,
+      data
+    ),
+  refreshProviderOAuth: (name: string) =>
+    http.post<ProviderOAuthStatus>(
+      `${BASE_URL}/providers/${encodeURIComponent(name)}/oauth/refresh`,
+      {}
+    ),
+  disconnectProviderOAuth: (name: string) =>
+    http.delete<{ message: string }>(
+      `${BASE_URL}/providers/${encodeURIComponent(name)}/oauth`
+    ),
 
   // Models
   getModels: () => http.get<ModelRead[]>(`${BASE_URL}/models`),

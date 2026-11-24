@@ -38,6 +38,7 @@ variable makes stored keys undecryptable.
 | Type | Upstream wire protocol | Default base URL |
 | --- | --- | --- |
 | `openai` | Chat Completions + Responses | `https://api.openai.com/v1` |
+| `openai-chatgpt` | OpenAI Responses (OAuth, ChatGPT plan) | `https://api.openai.com/v1` |
 | `anthropic` | Anthropic Messages (`x-api-key`, `anthropic-version: 2023-06-01`) | `https://api.anthropic.com` |
 | `openai-compatible` | Chat Completions (generic; **base URL required**) | — |
 | `gemini` | Google `generateContent` (`x-goog-api-key`) | `https://generativelanguage.googleapis.com/v1beta` |
@@ -71,6 +72,16 @@ provider metadata `native_passthrough: true`.
 
 Cost reporting: `openrouter` and `nanogpt` return their own cost figures, which the
 proxy records instead of computing them from token prices.
+
+### OpenAI (ChatGPT OAuth) (`openai-chatgpt`)
+
+Use the `openai-chatgpt` provider type to authenticate via OpenAI's official **Sign in with ChatGPT** OAuth 2.0 / OIDC flow (`chatgpt.tokens.use.direct`) and consume an eligible ChatGPT subscription (Plus, Pro, or Business) instead of a platform API key.
+
+- **Dynamic client registration**: By default, the first sign-in initiates OpenAI's dynamic registration flow (`client_id=dynamic_agent_client`) with a persistent installation `ext_agent_host_id` (`urn:uuid:...`) and stores the issued `client_id` per provider for future refreshes and re-authorizations. You can optionally supply a static `client_id` (and `client_secret`) under **OAuth options**.
+- **Localhost vs remote callback**: When accessing the console from `localhost` / `127.0.0.1`, the callback URL (`GET /api/config/providers/oauth/callback`) completes the sign-in automatically in the popup window. On remote servers, use a loopback redirect URI such as `http://127.0.0.1:1455/auth/callback` and paste the final redirected URL into the **Callback URL** field in the provider dialog.
+- **Direct plan-usage requirements**: Upstream requests target `POST /v1/responses` with `Authorization: Bearer <access_token>` and always set `stream: true` and `store: false` as required by OpenAI's direct plan-usage endpoint. Non-streaming proxy requests aggregate the upstream SSE stream back into a JSON response.
+- **Token lifecycle**: Access tokens (~1 hour) and rotated refresh tokens (~30 days) are encrypted at rest with Fernet and refreshed automatically before expiry or upon a `401` response.
+- **Model listing**: Fetching models queries `GET /v1/models` with the OAuth access token and returns the models visible to the signed-in account.
 
 ### OpenCode (`opencode-zen` / `opencode-go`)
 

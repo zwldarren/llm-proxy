@@ -4,6 +4,7 @@ Serves the admin provider config (``api/routers/config/providers.py``) and the
 provider model listing (``api/routers/config/provider_models.py``).
 """
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
@@ -134,6 +135,47 @@ def mask_api_key(value: str | None) -> str:
     return "***"
 
 
+class ProviderOAuthStatusRead(BaseModel):
+    """Non-secret OAuth connection status for OAuth-backed providers."""
+
+    connected: bool
+    has_plan_usage_scope: bool = False
+    account_email: str | None = None
+    account_name: str | None = None
+    account_sub: str | None = None
+    client_id: str | None = None
+    expires_at: datetime | None = None
+    has_refresh_token: bool = False
+    updated_at: datetime | None = None
+
+
+class ProviderOAuthStartRequest(BaseModel):
+    """Request to begin Sign in with ChatGPT OAuth for a provider."""
+
+    redirect_uri: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    force_new_registration: bool = False
+
+
+class ProviderOAuthStartResponse(BaseModel):
+    """Authorization URL and transaction metadata for Sign in with ChatGPT."""
+
+    authorization_url: str
+    state: str
+    redirect_uri: str
+    expires_in: int
+
+
+class ProviderOAuthCompleteRequest(BaseModel):
+    """Manual OAuth completion payload (full callback URL or extracted code + state)."""
+
+    callback_url: str | None = None
+    code: str | None = None
+    state: str | None = None
+    client_id: str | None = None
+
+
 class ProviderRead(ProviderBase):
     """Schema for reading provider configuration (sanitized).
 
@@ -145,6 +187,7 @@ class ProviderRead(ProviderBase):
 
     id: int
     api_key: str = Field(default="", exclude=True)  # Never serialized
+    oauth_status: ProviderOAuthStatusRead | None = None
 
     @computed_field
     @property

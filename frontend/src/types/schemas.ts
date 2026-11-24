@@ -569,9 +569,43 @@ export interface ProviderUpdate {
   icon_url?: string | null;
 }
 
+export interface ProviderOAuthStatus {
+  connected: boolean;
+  has_plan_usage_scope: boolean;
+  account_email?: string | null;
+  account_name?: string | null;
+  account_sub?: string | null;
+  client_id?: string | null;
+  expires_at?: string | null;
+  has_refresh_token: boolean;
+  updated_at?: string | null;
+}
+
+export interface ProviderOAuthStartRequest {
+  redirect_uri?: string | null;
+  client_id?: string | null;
+  client_secret?: string | null;
+  force_new_registration?: boolean;
+}
+
+export interface ProviderOAuthStartResponse {
+  authorization_url: string;
+  state: string;
+  redirect_uri: string;
+  expires_in: number;
+}
+
+export interface ProviderOAuthCompleteRequest {
+  callback_url?: string | null;
+  code?: string | null;
+  state?: string | null;
+  client_id?: string | null;
+}
+
 export interface ProviderRead extends ProviderBase {
   id: number;
   masked_api_key?: string;
+  oauth_status?: ProviderOAuthStatus | null;
 }
 
 /**

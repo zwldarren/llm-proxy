@@ -106,7 +106,11 @@ class ProviderRepository(BaseRepository):
             name: The provider name to look up.
             decrypt: If True, decrypt the API key before returning.
         """
-        stmt = select(ProviderRecord).where(ProviderRecord.name == name)
+        stmt = (
+            select(ProviderRecord)
+            .options(selectinload(ProviderRecord.oauth_credential))
+            .where(ProviderRecord.name == name)
+        )
         result = await self.session.execute(stmt)
         provider = result.scalar_one_or_none()
         if provider and decrypt:
@@ -124,7 +128,10 @@ class ProviderRepository(BaseRepository):
         """
         stmt = (
             select(ProviderRecord)
-            .options(selectinload(ProviderRecord.model_provider_mappings))
+            .options(
+                selectinload(ProviderRecord.model_provider_mappings),
+                selectinload(ProviderRecord.oauth_credential),
+            )
             .where(ProviderRecord.name == name)
         )
         result = await self.session.execute(stmt)
@@ -139,7 +146,11 @@ class ProviderRepository(BaseRepository):
         Args:
             decrypt: If True, decrypt API keys before returning.
         """
-        stmt = select(ProviderRecord).order_by(ProviderRecord.name)
+        stmt = (
+            select(ProviderRecord)
+            .options(selectinload(ProviderRecord.oauth_credential))
+            .order_by(ProviderRecord.name)
+        )
         result = await self.session.execute(stmt)
         providers = list(result.scalars().all())
         if decrypt and providers:
@@ -164,7 +175,11 @@ class ProviderRepository(BaseRepository):
         if not names:
             return {}
 
-        stmt = select(ProviderRecord).where(ProviderRecord.name.in_(names))
+        stmt = (
+            select(ProviderRecord)
+            .options(selectinload(ProviderRecord.oauth_credential))
+            .where(ProviderRecord.name.in_(names))
+        )
         result = await self.session.execute(stmt)
         providers = list(result.scalars().all())
 
