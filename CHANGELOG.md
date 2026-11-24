@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.2](https://github.com/zwldarren/llm-proxy/compare/v0.6.1...v0.6.2) (2026-11-24)
+
+
+### Features
+
+* **providers:** added the openai-chatgpt OAuth provider end to end ([1d35ecf](https://github.com/zwldarren/llm-proxy/commit/1d35ecfb17c643a6e92e4fe0ae5c7841dd805823))
+
+
+### Bug Fixes
+
+* **providers:** harden the openai-chatgpt OAuth flow ([bc11459](https://github.com/zwldarren/llm-proxy/commit/bc11459ba4fb0cef89b32d48fc0c3d0bae22a786))
+
+
+### Performance Improvements
+
+* **database:** give background writers their own connection pool ([562e410](https://github.com/zwldarren/llm-proxy/commit/562e410a40886d2e6ac62d7ab969ad3a7e946a34))
+* **processing:** reuse per-request lookups on the saturation path ([4217a6f](https://github.com/zwldarren/llm-proxy/commit/4217a6f53e1e4f2668be4fe7e1c92f2fe4614848))
+
+
+### Documentation
+
+* publish the gateway benchmark and link it from the README ([e35161b](https://github.com/zwldarren/llm-proxy/commit/e35161b961e8f27f5d646490d8297434194b6407))
+
 ## [0.6.1](https://github.com/zwldarren/llm-proxy/compare/v0.6.0...v0.6.1) (2026-11-23)
 
 
